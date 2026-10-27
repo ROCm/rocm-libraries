@@ -1622,9 +1622,174 @@ static void testing_sptrsm_csr_extra2(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(status, rocsparse_status_invalid_handle);
 }
 
+// SpSV analysis on the matrix, then SpTRSM with rocsparse_analysis_policy_reuse, which must
+// also reuse its zero pivot.
+static void sptrsm_csr_reuse_spsv(int64_t                     nrhs,
+                                  rocsparse_diag_type         diag,
+                                  const std::vector<int32_t>& ptr,
+                                  const std::vector<int32_t>& ind,
+                                  const std::vector<float>&   val)
+{
+    host_csr_matrix<float> hA(
+        ptr.size() - 1, ptr.size() - 1, val.size(), rocsparse_index_base_zero);
+    std::copy(ptr.begin(), ptr.end(), hA.ptr.data());
+    std::copy(ind.begin(), ind.end(), hA.ind.data());
+    std::copy(val.begin(), val.end(), hA.val.data());
+
+    const rocsparse_operation trans = rocsparse_operation_none;
+    const rocsparse_fill_mode uplo  = rocsparse_fill_mode_lower;
+    const rocsparse_datatype  ttype = rocsparse_datatype_f32_r;
+    const int64_t             m     = hA.m;
+    float                     alpha = 1.0f;
+
+    host_dense_matrix<float> hB(m, nrhs);
+    for(int64_t j = 0; j < nrhs; ++j)
+    {
+        for(int64_t i = 0; i < m; ++i)
+        {
+            hB[hB.ld * j + i] = static_cast<float>(i + 1 + j);
+        }
+    }
+
+    rocsparse_local_handle     handle;
+    device_csr_matrix<float>   dA(hA);
+    device_dense_matrix<float> dB(hB), dC(hB);
+    device_dense_vector<float> dx(m), dy(m);
+    rocsparse_local_spmat      A(dA);
+    rocsparse_local_dnmat      B(dB);
+    rocsparse_local_dnmat      C(dC);
+    rocsparse_local_dnvec      x(m, dx, ttype);
+    rocsparse_local_dnvec      y(m, dy, ttype);
+
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
+
+    {
+        size_t buffer_size;
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsv(handle,
+                                             trans,
+                                             &alpha,
+                                             A,
+                                             x,
+                                             y,
+                                             ttype,
+                                             rocsparse_spsv_alg_default,
+                                             rocsparse_spsv_stage_buffer_size,
+                                             &buffer_size,
+                                             nullptr));
+        void* buffer;
+        CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spsv(handle,
+                                             trans,
+                                             &alpha,
+                                             A,
+                                             x,
+                                             y,
+                                             ttype,
+                                             rocsparse_spsv_alg_default,
+                                             rocsparse_spsv_stage_preprocess,
+                                             nullptr,
+                                             buffer));
+        CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    }
+
+    rocsparse_local_sptrsm sptrsm_descr(handle,
+                                        trans,
+                                        trans,
+                                        rocsparse_sptrsm_alg_default,
+                                        ttype,
+                                        ttype,
+                                        rocsparse_analysis_policy_reuse);
+
+    const float* p_alpha = &alpha;
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+                                                     sptrsm_descr,
+                                                     rocsparse_sptrsm_input_scalar_alpha,
+                                                     p_alpha,
+                                                     sizeof(p_alpha),
+                                                     nullptr));
+
+    for(auto stage : {rocsparse_sptrsm_stage_analysis, rocsparse_sptrsm_stage_compute})
+    {
+        size_t buffer_size;
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_buffer_size(
+            handle, sptrsm_descr, A, B, C, stage, &buffer_size, nullptr));
+        void* buffer;
+        CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_sptrsm(handle, sptrsm_descr, A, B, C, stage, buffer_size, buffer, nullptr));
+        CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    }
+
+    int32_t analysis_pivot = -1;
+    int32_t solve_pivot    = -1;
+    host_csrsm<int32_t, int32_t, float>(m,
+                                        nrhs,
+                                        hA.nnz,
+                                        trans,
+                                        trans,
+                                        alpha,
+                                        hA.ptr,
+                                        hA.ind,
+                                        hA.val,
+                                        hB,
+                                        hB.ld,
+                                        rocsparse_order_column,
+                                        diag,
+                                        uplo,
+                                        hA.base,
+                                        &analysis_pivot,
+                                        &solve_pivot);
+    const int64_t expected_pivot = (analysis_pivot == -1) ? solve_pivot : analysis_pivot;
+
+    int64_t pivot;
+    EXPECT_ROCSPARSE_STATUS(rocsparse_sptrsm_get_output(handle,
+                                                        sptrsm_descr,
+                                                        rocsparse_sptrsm_output_zero_pivot_position,
+                                                        &pivot,
+                                                        sizeof(pivot),
+                                                        nullptr),
+                            (expected_pivot != -1) ? rocsparse_status_zero_pivot
+                                                   : rocsparse_status_success);
+    unit_check_scalar<int64_t>(expected_pivot, pivot);
+
+    if(expected_pivot == -1)
+    {
+        hB.near_check(dC);
+    }
+}
+
+static void testing_sptrsm_csr_extra3(const Arguments& arg)
+{
+    // [ 2          ]
+    // [ 1  4       ]
+    // [    1  3    ]
+    // [ 1     2  5 ]
+    const std::vector<int32_t> ptr{0, 1, 3, 5, 8};
+    const std::vector<int32_t> ind{0, 0, 1, 1, 2, 0, 2, 3};
+    const std::vector<float>   val{2, 1, 4, 1, 3, 1, 2, 5};
+
+    // Same matrix without the diagonal entry of row 2.
+    const std::vector<int32_t> ptr_pivot{0, 1, 3, 4, 7};
+    const std::vector<int32_t> ind_pivot{0, 0, 1, 1, 0, 2, 3};
+    const std::vector<float>   val_pivot{2, 1, 4, 1, 1, 2, 5};
+
+    for(int64_t nrhs : {1, 3})
+    {
+        for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+        {
+            sptrsm_csr_reuse_spsv(nrhs, diag, ptr, ind, val);
+            sptrsm_csr_reuse_spsv(nrhs, diag, ptr_pivot, ind_pivot, val_pivot);
+        }
+    }
+}
+
 void testing_sptrsm_csr_extra(const Arguments& arg)
 {
     testing_sptrsm_csr_extra0(arg);
     testing_sptrsm_csr_extra1(arg);
     testing_sptrsm_csr_extra2(arg);
+    testing_sptrsm_csr_extra3(arg);
 }

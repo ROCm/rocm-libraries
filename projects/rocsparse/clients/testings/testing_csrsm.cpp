@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -486,4 +486,242 @@ INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);
 INSTANTIATE(rocsparse_double_complex);
-void testing_csrsm_extra(const Arguments& arg) {}
+enum class csrsm_reuse_source
+{
+    csrsv,
+    csrilu0,
+    csric0
+};
+
+// Analysis of another routine on the same mat_info, then csrsm with
+// rocsparse_analysis_policy_reuse, which must also reuse its zero pivot.
+template <typename T>
+static void testing_csrsm_reuse(csrsm_reuse_source          source,
+                                rocsparse_int               nrhs,
+                                rocsparse_diag_type         diag,
+                                host_vector<rocsparse_int>& hcsr_row_ptr,
+                                host_vector<rocsparse_int>& hcsr_col_ind,
+                                host_vector<T>&             hcsr_val)
+{
+    rocsparse_local_handle    handle;
+    rocsparse_local_mat_descr descr;
+    rocsparse_local_mat_info  info;
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_diag_type(descr, diag));
+
+    const rocsparse_operation    trans = rocsparse_operation_none;
+    const rocsparse_solve_policy spol  = rocsparse_solve_policy_auto;
+    const rocsparse_int          M     = hcsr_row_ptr.size() - 1;
+    const rocsparse_int          nnz   = hcsr_val.size();
+    const T                      alpha = static_cast<T>(1);
+
+    host_dense_matrix<T> hB(M, nrhs);
+    for(rocsparse_int j = 0; j < nrhs; ++j)
+    {
+        for(rocsparse_int i = 0; i < M; ++i)
+        {
+            hB[i + hB.ld * j] = static_cast<T>(i + 1 + j);
+        }
+    }
+
+    device_vector<rocsparse_int> dcsr_row_ptr(hcsr_row_ptr);
+    device_vector<rocsparse_int> dcsr_col_ind(hcsr_col_ind);
+    device_vector<T>             dcsr_val(hcsr_val);
+    device_dense_matrix<T>       dB(hB);
+
+    size_t buffer_size = 0;
+    size_t size;
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_buffer_size<T>(
+        handle, trans, M, nnz, descr, dcsr_val, dcsr_row_ptr, dcsr_col_ind, info, &size));
+    buffer_size = std::max(buffer_size, size);
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrilu0_buffer_size<T>(
+        handle, M, nnz, descr, dcsr_val, dcsr_row_ptr, dcsr_col_ind, info, &size));
+    buffer_size = std::max(buffer_size, size);
+    CHECK_ROCSPARSE_ERROR(rocsparse_csric0_buffer_size<T>(
+        handle, M, nnz, descr, dcsr_val, dcsr_row_ptr, dcsr_col_ind, info, &size));
+    buffer_size = std::max(buffer_size, size);
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_buffer_size<T>(handle,
+                                                         trans,
+                                                         trans,
+                                                         M,
+                                                         nrhs,
+                                                         nnz,
+                                                         &alpha,
+                                                         descr,
+                                                         dcsr_val,
+                                                         dcsr_row_ptr,
+                                                         dcsr_col_ind,
+                                                         dB,
+                                                         dB.ld,
+                                                         info,
+                                                         spol,
+                                                         &size));
+    buffer_size = std::max(buffer_size, size);
+
+    void* dbuffer;
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+    switch(source)
+    {
+    case csrsm_reuse_source::csrsv:
+    {
+        CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_analysis<T>(handle,
+                                                          trans,
+                                                          M,
+                                                          nnz,
+                                                          descr,
+                                                          dcsr_val,
+                                                          dcsr_row_ptr,
+                                                          dcsr_col_ind,
+                                                          info,
+                                                          rocsparse_analysis_policy_force,
+                                                          spol,
+                                                          dbuffer));
+        break;
+    }
+    case csrsm_reuse_source::csrilu0:
+    {
+        CHECK_ROCSPARSE_ERROR(rocsparse_csrilu0_analysis<T>(handle,
+                                                            M,
+                                                            nnz,
+                                                            descr,
+                                                            dcsr_val,
+                                                            dcsr_row_ptr,
+                                                            dcsr_col_ind,
+                                                            info,
+                                                            rocsparse_analysis_policy_force,
+                                                            spol,
+                                                            dbuffer));
+        break;
+    }
+    case csrsm_reuse_source::csric0:
+    {
+        CHECK_ROCSPARSE_ERROR(rocsparse_csric0_analysis<T>(handle,
+                                                           M,
+                                                           nnz,
+                                                           descr,
+                                                           dcsr_val,
+                                                           dcsr_row_ptr,
+                                                           dcsr_col_ind,
+                                                           info,
+                                                           rocsparse_analysis_policy_force,
+                                                           spol,
+                                                           dbuffer));
+        break;
+    }
+    }
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_analysis<T>(handle,
+                                                      trans,
+                                                      trans,
+                                                      M,
+                                                      nrhs,
+                                                      nnz,
+                                                      &alpha,
+                                                      descr,
+                                                      dcsr_val,
+                                                      dcsr_row_ptr,
+                                                      dcsr_col_ind,
+                                                      dB,
+                                                      dB.ld,
+                                                      info,
+                                                      rocsparse_analysis_policy_reuse,
+                                                      spol,
+                                                      dbuffer));
+
+    host_scalar<rocsparse_int> analysis_pivot;
+    EXPECT_ROCSPARSE_STATUS(rocsparse_csrsm_zero_pivot(handle, info, analysis_pivot),
+                            (*analysis_pivot != -1) ? rocsparse_status_zero_pivot
+                                                    : rocsparse_status_success);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_csrsm_solve<T>(handle,
+                                                   trans,
+                                                   trans,
+                                                   M,
+                                                   nrhs,
+                                                   nnz,
+                                                   &alpha,
+                                                   descr,
+                                                   dcsr_val,
+                                                   dcsr_row_ptr,
+                                                   dcsr_col_ind,
+                                                   dB,
+                                                   dB.ld,
+                                                   info,
+                                                   spol,
+                                                   dbuffer));
+
+    host_scalar<rocsparse_int> solve_pivot;
+    EXPECT_ROCSPARSE_STATUS(rocsparse_csrsm_zero_pivot(handle, info, solve_pivot),
+                            (*solve_pivot != -1) ? rocsparse_status_zero_pivot
+                                                 : rocsparse_status_success);
+
+    host_scalar<rocsparse_int> h_analysis_pivot;
+    host_scalar<rocsparse_int> h_solve_pivot;
+    host_csrsm<rocsparse_int, rocsparse_int, T>(M,
+                                                nrhs,
+                                                nnz,
+                                                trans,
+                                                trans,
+                                                alpha,
+                                                hcsr_row_ptr,
+                                                hcsr_col_ind,
+                                                hcsr_val,
+                                                hB,
+                                                hB.ld,
+                                                rocsparse_order_column,
+                                                diag,
+                                                rocsparse_fill_mode_lower,
+                                                rocsparse_index_base_zero,
+                                                h_analysis_pivot,
+                                                h_solve_pivot);
+
+    h_analysis_pivot.unit_check(analysis_pivot);
+    h_solve_pivot.unit_check(solve_pivot);
+    if(*h_analysis_pivot == -1 && *h_solve_pivot == -1)
+    {
+        hB.near_check(dB);
+    }
+
+    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+}
+
+template <typename T>
+static void testing_csrsm_extra_template(const Arguments& arg)
+{
+    // [ 2          ]
+    // [ 1  4       ]
+    // [    1  3    ]
+    // [ 1     2  5 ]
+    host_vector<rocsparse_int> hcsr_row_ptr{0, 1, 3, 5, 8};
+    host_vector<rocsparse_int> hcsr_col_ind{0, 0, 1, 1, 2, 0, 2, 3};
+    host_vector<T>             hcsr_val{2, 1, 4, 1, 3, 1, 2, 5};
+
+    // Same matrix without the diagonal entry of row 2.
+    host_vector<rocsparse_int> hcsr_row_ptr_pivot{0, 1, 3, 4, 7};
+    host_vector<rocsparse_int> hcsr_col_ind_pivot{0, 0, 1, 1, 0, 2, 3};
+    host_vector<T>             hcsr_val_pivot{2, 1, 4, 1, 1, 2, 5};
+
+    for(auto source :
+        {csrsm_reuse_source::csrsv, csrsm_reuse_source::csrilu0, csrsm_reuse_source::csric0})
+    {
+        for(rocsparse_int nrhs : {1, 3})
+        {
+            for(auto diag : {rocsparse_diag_type_unit, rocsparse_diag_type_non_unit})
+            {
+                testing_csrsm_reuse<T>(source, nrhs, diag, hcsr_row_ptr, hcsr_col_ind, hcsr_val);
+                testing_csrsm_reuse<T>(
+                    source, nrhs, diag, hcsr_row_ptr_pivot, hcsr_col_ind_pivot, hcsr_val_pivot);
+            }
+        }
+    }
+}
+
+void testing_csrsm_extra(const Arguments& arg)
+{
+    testing_csrsm_extra_template<float>(arg);
+    testing_csrsm_extra_template<double>(arg);
+    testing_csrsm_extra_template<rocsparse_float_complex>(arg);
+    testing_csrsm_extra_template<rocsparse_double_complex>(arg);
+}
