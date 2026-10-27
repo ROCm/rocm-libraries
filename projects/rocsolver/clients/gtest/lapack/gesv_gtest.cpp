@@ -160,12 +160,11 @@ protected:
 };
 
 int constexpr BCOUNT = 64 * 1024 + 1;
-int constexpr BCOUNT_SMALL = 3;
 
 class GESV_LARGE_BATCH : public GESV_BASE<BCOUNT>
 {
 };
-class GESV : public GESV_BASE<BCOUNT_SMALL>
+class GESV : public GESV_BASE<>
 {
 };
 

@@ -141,13 +141,12 @@ protected:
 
 // large batch
 int constexpr BCOUNT = 64 * 1024 + 1;
-int constexpr BCOUNT_SMALL = 3;
 
 class POSV_LARGE_BATCH : public POSV_BASE<BCOUNT>
 {
 };
 
-class POSV : public POSV_BASE<BCOUNT_SMALL>
+class POSV : public POSV_BASE<>
 {
 };
 

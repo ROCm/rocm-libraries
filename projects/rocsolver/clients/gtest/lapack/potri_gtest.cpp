@@ -115,9 +115,8 @@ protected:
 };
 
 int constexpr BCOUNT = 64 * 1024 + 1;
-int constexpr BCOUNT_SMALL = 3;
 
-class POTRI : public POTRI_BASE<BCOUNT_SMALL>
+class POTRI : public POTRI_BASE<>
 {
 };
 
