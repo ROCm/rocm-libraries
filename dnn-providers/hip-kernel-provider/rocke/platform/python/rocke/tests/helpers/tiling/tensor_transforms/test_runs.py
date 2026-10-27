@@ -258,8 +258,8 @@ def test_the_conv_k_vector_is_accepted_at_a_multiple_of_its_width_and_refused_on
         "vector along input 1 ('k') of width 8 is not contiguous at coordinate 'k' (it may "
         "start at 1 mod 8, so the unmerge into ('y', 'x', 'c') can split the vector) -- use a "
         "narrower vector, or start it at a multiple of 8 (the walk reads that fact from how the "
-        "coordinate was computed; a runtime value the IR cannot show it for is stated with "
-        "runtime_value(..., multiple_of=...))",
+        "coordinate was computed; for a value the IR cannot show it for, state multiple_of on "
+        "its b.param declaration or check it with b.gpu_checked_value(v, multiple_of=...))",
     ):
         emit_accesses(
             b, graph, tensor, [(conv.m, shifted)], vector_axis=1, vector_width=WIDTH

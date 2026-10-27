@@ -66,7 +66,6 @@ modules, not re-exported by the door, so no author imports it.
 | `Node`, `Edge`, `TransformType`, `InputsDecl`, `OutputsDecl`, `EmbedParams` ... `BroadcastParams` | The values the builders return and a graph is read back with. | door |
 | `emit_accesses` | The entry: emit, over one shared table, each access's split address and its validity (per element, or for a whole vector with its valid span), every failing side included. | door |
 | `Access`, `ElementAddress`, `UniformTerm` | The frozen results `emit_accesses` returns (read, never built by authors). | door |
-| `RuntimeValue` | A runtime integer with its stated range and multiple-of fact, passed on as a length; read-only. | door |
 | `value_ranges` | The range every coordinate can take for given input ranges, in pure Python. | toolbox |
 | `required_checks` -> `BoundCheck`, `CheckReason` | Which side of which coordinate can leave its domain or its tensor bound and so needs a run-time check. The one decision home; it does not decide HOW a side is enforced. | toolbox |
 | `graph_injective` | Whether distinct in-domain inputs always reach distinct outputs (store safety). | toolbox |
@@ -76,11 +75,11 @@ modules, not re-exported by the door, so no author imports it.
 | `emit_access_validity` | Each access's validity alone. | toolbox |
 | `emit_bound_check` | The one predicate: `lo <= value < hi` for one plain value, its per-wave side folded on the scalar unit. | toolbox |
 | `emit_accesses_except_buffer_checked` | `emit_accesses` leaving out of `valid` the sides the buffer hardware checks. | internal (sibling surface, see 6) |
-| IR range walk (`walk.py`: `split_coordinate`, `value_facts`, `runtime_value_of`, `leaf_varying_within_workgroup`) | Turn a plain IR value into a split coordinate and derive each part's range and multiple-of fact; rebuild the `RuntimeValue` a range marker states; find a leaf that can differ between the waves of a workgroup. Reads IR, emits nothing. | internal |
-| `Interval`, `Congruence`, `AffineCoord`, `UniformPart`, `AxisBound`, `CheckSide`, `Side`, `VectorRun`, `identity_graph`, the run queries | The machinery (section 12). | internal |
+| IR range walk (`walk.py`: `split_coordinate`, `value_facts`, `leaf_varying_within_workgroup`) | Turn a plain IR value into a split coordinate and derive each part's range and multiple-of fact (reading stated facts through `stated_facts_of`); find a leaf that can differ between the waves of a workgroup. Reads IR, emits nothing. | internal |
+| `Interval`, `Congruence`, `_RuntimeEnd`, `AffineCoord`, `UniformPart`, `AxisBound`, `CheckSide`, `Side`, `VectorRun`, `identity_graph`, the run queries | The machinery (section 12). | internal |
 
 Package files: `__init__.py` (the door), `graph.py`, `ranges.py` (a leaf module: it also holds
-`RuntimeValue`, `value_ranges`, `required_checks`, `graph_injective`), `walk.py`, `address.py`, `emit.py`
+`value_ranges`, `required_checks`, `graph_injective`), `walk.py`, `address.py`, `emit.py`
 (builder first, IR side effects), `runs.py`.
 
 **A public value carries only public types.** Every field of a door or toolbox value is an int, a coordinate
@@ -160,18 +159,12 @@ states nothing the IR already shows.
 
 ## 5. Author-facing data
 
-```python
-RuntimeValue           # door, read-only
-    .value             # the i32 IR value, for arithmetic: b.add(K.value, ...)
-    str(rv)            # its stated facts in plain words, by its IR value's name:
-                       #   "%range1: 0 <= value <= 65536, a multiple of 8"
-```
-
-A runtime integer with its stated range (its *envelope*) and multiple-of fact. It is received from the tiling
-layer and passed on as a length (or a range end); authors never build one. Its `value` is always the result of a
-range marker (`arith.assume_range`, which emits no instruction) whose stated attributes are these facts, so any
-arithmetic an author writes on `.value` walks back to the same facts (section 8, "Runtime ends"). Two
-`RuntimeValue`s over the same IR value that state different facts are an error wherever they meet.
+**Runtime lengths are plain `Value`s.** A runtime length (or range end) is the i32 `Value` itself: a kernel
+parameter declared with its facts (`b.param("K", I32, ge=0, le=65536, multiple_of=8)`, which the host checks
+before every launch), or a Value `b.gpu_checked_value` returned (facts the GPU checks). Its numbers are read
+through `rocke.core.facts.stated_facts_of`, the one home of a stated fact; nothing restates them, so no two
+copies can disagree. A `Value` with no stated facts is still a valid end: it proves by identity (section 7) and
+gives no number.
 
 ```python
 Access(address: ElementAddress, valid: Value | None, valid_span: tuple[Value, Value] | None)
@@ -179,7 +172,7 @@ ElementAddress(uniform: tuple[UniformTerm, ...], lane: Value | None, lane_range:
                const: int, elem_bits: int,
                uniform_delta: Value | None, uniform_delta_range: tuple[End, End] | None)
 UniformTerm(value: Value, range: tuple[End, End], inputs: frozenset[int])
-End = int | RuntimeValue | None      # a range end; None = unbounded on that side
+End = int | Value | None      # a range end; None = unbounded on that side
 ```
 
 - `Access.valid`: the i1 "every element of the access is inside the tensor and every domain"; `None` =
@@ -197,7 +190,7 @@ End = int | RuntimeValue | None      # a range end; None = unbounded on that sid
   so a term's roots are exactly the per-wave values the caller passed in.
 
 ```python
-BoundCheck(coordinate: str, lo: int | RuntimeValue | None, hi: int | RuntimeValue | None,
+BoundCheck(coordinate: str, lo: int | Value | None, hi: int | Value | None,
            reasons: tuple[CheckReason, ...])                     # toolbox
 CheckReason = Enum(INPUT_DOMAIN, READ_DOMAIN, TENSOR_BOUND)      # toolbox
 ```
@@ -246,7 +239,7 @@ def emit_bound_check(b, value: Value | int, lo: End, hi: End) -> Value | None
 ```
 
 - `tensor` is a `TensorDesc`; the entries read only its `lengths`, `strides` and `dtype`. A length is an int, or
-  a `RuntimeValue` for a runtime-length axis. Strides are non-negative ints.
+  a `Value` for a runtime-length axis. Strides are non-negative ints.
 - `input_ranges` gives every input a range, positionally: `(None, None)` means "not known" and is always
   checked. There is no "trusted" default: being in domain is stated (`(0, n)`) or derived by the walk.
 - `emit_coords` returns each coordinate as its parts summed, `(uniform + lane) + const`: i32, or i64 when its
@@ -280,13 +273,15 @@ A coordinate needs a run-time check exactly when its value range can leave one o
   coordinate's range is narrowed by its own domains, in order, before the steps that read it compute theirs.
 - **The bounds come from the tensor.** The toolbox and the entries build `[0, length)` per tensor axis from
   `tensor.lengths`; there is no `bounds` parameter, so no wider bound can be given. A narrower region is a
-  different tensor description. To test one value against arbitrary ends (ints or `RuntimeValue`s, either side,
-  an empty or inverted range included), call `emit_bound_check`, the one predicate.
-- **`RuntimeValue` ends prove relations to a runtime bound by IDENTITY.** An upper side bounded by a runtime
-  length `L` is proven only by a computed upper end over the same IR value object with a shift `<= 0` (`L`
-  itself, or `L` shifted down); the lower side mirrors it. An int bound is proven numerically (a runtime end
-  counts with its envelope's extreme value). Identity works because a length has one home (the tensor's): no
-  restated copy exists to break the proof.
+  different tensor description. To test one value against arbitrary ends (ints or `Value`s, either side, an
+  empty or inverted range included), call `emit_bound_check`, the one predicate.
+- **Runtime ends prove relations to a runtime bound by IDENTITY.** An upper side bounded by a runtime length `L`
+  is proven only by a computed upper end over the same IR value object with a shift `<= 0` (`L` itself, or `L`
+  shifted down); the lower side mirrors it. An int bound is proven numerically (a runtime end counts with its
+  value's stated extreme value). Identity works because a length has one home (the tensor's) and its facts one
+  home (its declaration or its marker): no restated copy exists to break the proof.
+- `value_ranges` shows a runtime end as its `Value`; an end shifted from one by a constant (`x + 1` for `x` in
+  `[0, T)`) is shown as the number the value's stated facts give, because the shifted form is internal.
 - When two failing ends meet on one side of one coordinate, the tighter is kept, so one compare enforces both;
   when which is tighter cannot be known at build time, it is an error (section 13).
 - `graph_injective` is conservative: `True` only when every input can be recovered from the outputs through
@@ -354,13 +349,16 @@ loop proves `k + TK <= K` exactly as a runtime one does. A loop that never runs 
 empty range (every range operation needs a non-empty one). A stop `L + c` over a runtime length `L` gives the
 counter the end `L` shifted by `c`, so `for k in [0, K - TK + 1) step TK` proves `k + TK <= K` by identity.
 
-**Runtime ends: how the walk rebuilds a `RuntimeValue` from a bare value.** An *envelope marker* is a range
-marker with two int ends. `runtime_value_of(v)`, for `v` the result of one, returns the `RuntimeValue` with the
-marker's STATED facts -- exactly what its producer returned -- and `None` for any other value. It is never built
-from what the walk derives (the stated envelope contains the derived range, so the rebuilt end is looser, never
-wrong, and shares the IR value an identity proof keys on). A runtime stop is a stop that, once exact constants
-added or subtracted are removed, is an envelope-marker result `v`: its end is `runtime_value_of(v)` shifted by
-the removed constants. A marker's runtime upper end (a second operand) is rebuilt the same way.
+**Stated facts and runtime ends.** The walk reads stated facts only through `stated_facts_of`: a kernel
+parameter gets the range and multiple-of fact its declaration states (none, when it states none), and a range
+marker narrows its operand by the facts it states, a `Value` bound resolved through that Value's own stated facts.
+A *runtime end* is an end over a value with stated facts -- a kernel parameter or a marker result -- kept as the
+internal `_RuntimeEnd(value, plus)`: it holds no facts and reads its numbers from `stated_facts_of(value)`, never
+from what the walk derives (the stated range contains the derived one, so the end is looser, never wrong, and
+shares the IR value an identity proof keys on). A runtime stop is a stop that, once exact constants added or
+subtracted are removed, is such a value `v`: its end is `v` shifted by the removed constants. A marker's `Value`
+upper end is the runtime end over that operand, shifted by the marker's `lt_plus`; a marker whose upper end is a
+value with no stated facts is an error.
 
 **The workgroup size is read once and never silently changed.** The first walk that reaches `gpu.thread_id`
 requires the kernel to state its workgroup size explicitly, either as `b.kernel.attrs["workgroup_size"]` (the exact
@@ -452,8 +450,8 @@ constant, and finished per access in i32, so no subtraction can wrap whatever th
 below `2^31` (its own error).
 
 **The single compare.** A lone i32 per-wave value `u` with no constant and no per-lane part, checked against
-`[0, hi)` (or with no lower end when `u` is proven `>= 0`), `hi` an int in `[1, 2^31)` or an unshifted
-`RuntimeValue` whose stated envelope lies in `[0, 2^31)`, is the one
+`[0, hi)` (or with no lower end when `u` is proven `>= 0`), `hi` an int in `[1, 2^31)` or a runtime length
+whose stated range lies in `[0, 2^31)`, is the one
 compare `u u< hi`, whatever `u`'s range: a negative `u` reads as `>= 2^31` unsigned. It answers the same predicate
 as the fold (tests pin that the two agree) at the cost of one i32 compare.
 
@@ -477,7 +475,7 @@ per-wave part and the per-lane part):
   element's, else an error naming the coordinate and why;
 - **uniform validity**: every check has one answer for the whole vector -- a coordinate that does not move, or
   moves by 1 from a start whose distance to every checked end is a multiple of `w` (an int end, or a
-  `RuntimeValue` end whose stated multiple-of fact is a multiple of `w`);
+  runtime length whose stated multiple-of fact is a multiple of `w`);
 - **monotone**: every checked coordinate moves by a constant step -- else an error naming the coordinate.
 
 How steps pass through the kinds: `embed` / `merge` weight and add the read steps; `offset` / `slice_window`
@@ -500,20 +498,22 @@ first-and-last path.
 
 None of these is on the door; they are listed so the glass box stays open.
 
-- `Interval(lo, hi)` -- the half-open range of one value; each end an int, a `RuntimeValue` or `None`
+- `Interval(lo, hi)` -- the half-open range of one value; each end an int, a runtime end or `None`
   (unbounded); int ends need `lo < hi`. `UNBOUNDED = Interval(None, None)`. Its pure methods are the one home of
   range arithmetic: `plus`, `shifted`, `scaled`, `floor_div`, `floor_mod` (Python floor semantics), `minimum` /
   `maximum` (symmetric in their operands), `overlaps`, `intersect` (a value known to lie in both; on the upper
-  side a `RuntimeValue` end is kept over an int so it can still prove a runtime bound; raises when the two cannot
+  side a runtime end is kept over an int so it can still prove a runtime bound; raises when the two cannot
   both hold), `snapped(congruence)`, `within(lo, hi)`, and `from_pair` / `as_pair`, the only conversions to and
   from the public pair form.
 - `Congruence(modulus, residue)` -- `value == residue (mod modulus)`, a multiple-of fact; `plus`, `shifted`,
   `scaled`, `floor_div`, `floor_mod`, `join` (the residue two values share, for min / max). A constant is an int,
   never a `Congruence`.
-- `RuntimeValue._shifted(k)` -- the only way to write an end relative to a length (the length's envelope and
-  residue are stated once, by its producer).
-- `AxisBound.of(lo, hi)` -- one tensor axis's valid extent; a `RuntimeValue` end must be unshifted (a bound is a
-  length).
+- `_RuntimeEnd(value, plus)` -- an end `value + plus` relative to a runtime integer, compared by identity (the
+  same IR value object and the same `plus`); `shifted(k)` moves it. It holds no facts: `envelope` and
+  `congruence` read `stated_facts_of(value)`. A `Value` given as an `Interval` end becomes `_RuntimeEnd(value)`;
+  `as_pair` turns it back (section 7).
+- `AxisBound.of(lo, hi)` -- one tensor axis's valid extent; each end an int or a `Value` (a bound is a length,
+  never a shifted end).
 - `AffineCoord(const, uniform, lane, lane_range, lane_congruence)` with `UniformPart(value, range, congruence)`
   -- one coordinate split into a constant, wave-uniform parts and one per-lane part, each with an explicit range
   (`UNBOUNDED` when unknown). Built by the walk (`split_coordinate`), by `of_int`, or by tiling-layer code that
@@ -572,14 +572,13 @@ None of these is on the door; they are listed so the glass box stays open.
 | toolbox | `input_ranges has {n} entries but the graph has {m} inputs {names} -- give one (lo, hi) pair per input, in inputs(...) order; use (None, None) when a range is not known` |
 | toolbox | `bound of axis {axis} is empty: [{lo}, {hi}) -- an always-empty window cannot be read` |
 | toolbox | `coordinate '{name}' must be checked against both {a} and {b} on its {lower or upper} side, and which of the two is tighter is not known at build time -- one check holds one end per side; bound the coordinate by one of them (an input over a runtime-length axis is declared inputs(name=None))` |
-| any | `two RuntimeValues over the same value {value} state different facts (envelope {e1} vs {e2}, congruence {c1} vs {c2}) -- write ends relative to a length as length.shifted(k), never restate its envelope` |
 | range | `Interval [{lo}, {hi}) is empty -- int ends need lo < hi; an empty range states no fact (to ask whether two ranges meet, use Interval.overlaps)` |
 | range | `Interval.intersect: {a} and {b} have no value in common -- the two ranges state contradictory facts; check where each was derived` (also when a range marker's stated range contradicts what the IR proves) |
 | range | `Interval [{lo}, {hi}) has no value congruent to {r} mod {m} -- the stated range and congruence contradict each other` |
 | internal | `{Interval or Congruence}.{floor_div or floor_mod} needs a divisor >= 1, got {k}` |
 | internal | `Congruence modulus must be >= 1, got {m}` |
 | internal | `Congruence.scaled(0): the product is the constant 0 -- fold it as the int 0 instead of a congruence` |
-| internal | `AxisBound end {end} is RuntimeValue(..., plus={p}) -- a bound is a length (plus 0); an end relative to a length belongs in an Interval: length.shifted(k)` |
+| internal | `AxisBound end {end} is a length shifted by {p} -- a bound is a length; an end relative to a length belongs in an Interval` |
 | internal | `bounds has {n} entries but the tensor has rank {r} -- give one AxisBound per tensor axis` |
 | internal | `AffineCoord {uniform or lane} part has no range -- every part needs an explicit Interval (UNBOUNDED if unknown)` |
 | internal | `AffineCoord + AffineCoord: both operands have a lane part ({a}, {b}) -- a coordinate has one lane part; add the per-lane values first and split the sum with the walk` |
@@ -599,7 +598,7 @@ None of these is on the door; they are listed so the glass box stays open.
 | walk (`TypeError`) | `IR range walk: {v} has type {t} -- a coordinate is an i32 value` |
 | walk | `IR range walk: {v} depends on gpu.thread_id but the kernel states no workgroup size -- set b.kernel.attrs["workgroup_size"] to the launch block size right after creating the builder` |
 | walk | `IR range walk: the workgroup size is now {new} but thread-id ranges were already derived with {old} -- set it once, before positioning windows from thread ids` |
-| walk (internal) | `IR range walk: the marker on {v} states an end over {h}, which is not a runtime value's marker result -- a runtime end is the .value of a RuntimeValue (from runtime_value)` |
+| walk (internal) | `IR range walk: the marker on {v} states an end over {h}, which has no stated facts -- a runtime end is a kernel parameter or a Value gpu_checked_value returned` |
 
 **Emitting** (`emit.py`)
 
@@ -611,12 +610,12 @@ None of these is on the door; they are listed so the glass box stays open.
 | entry | `vector_width must be >= 1, got {w}` |
 | entry | `vector_width {w} needs vector_axis -- give the index, in inputs(...) order, of the input the vector runs along` |
 | entry | `vector_axis {a} is not an input index -- the graph has {m} inputs {names}` |
-| entry | `vector along input {axis} ('{name}') of width {w} is not contiguous at coordinate '{coord}' ({reason}) -- use a narrower vector, or start it at a multiple of {w} (the walk reads that fact from how the coordinate was computed; a runtime value the IR cannot show it for is stated with runtime_value(..., multiple_of=...))` |
+| entry | `vector along input {axis} ('{name}') of width {w} is not contiguous at coordinate '{coord}' ({reason}) -- use a narrower vector, or start it at a multiple of {w} (the walk reads that fact from how the coordinate was computed; for a value the IR cannot show it for, state multiple_of on its b.param declaration or check it with b.gpu_checked_value(v, multiple_of=...))` |
 | entry | `vector along input {axis} ('{name}') is not monotone at checked coordinate '{coord}' -- its validity cannot be decided from the first and last element; emit per element (vector_width=1)` |
-| emit | `unmerge of '{read}' needs its dividend in [0, 2^31) for magic division, but its range is {range} -- bound the origin with exit_if_tile_outside(b, origin, length), or state a trusted range with runtime_value(b, v, at_most=...)` |
+| emit | `unmerge of '{read}' needs its dividend in [0, 2^31) for magic division, but its range is {range} -- bound the origin with exit_if_tile_outside(b, origin, length), or state its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the GPU (b.gpu_checked_value(v, ge=0, le=...))` |
 | emit | `lane part of '{name}' has range {range}, outside 32 bits -- per-lane offsets must fit i32; move the large part into the uniform coordinate` |
 | check (`TypeError`) | `emit_bound_check takes a plain i32 IR value or an int, got {type}` |
-| check (`TypeError`) | `bound check of '{name}': an end is an int, a RuntimeValue or None, got {type}` |
+| check (`TypeError`) | `bound check of '{name}': an end is an int, a Value or None, got {type}` |
 | check | `emit_bound_check of '{name}' got lo=None and hi=None -- that checks nothing; pass the end(s) to check, or emit no check` |
 | check | `bound of '{name}' is empty: [{lo}, {hi}) -- an always-empty window cannot be read` |
 | check | `bound check of '{name}' needs lane range + constant spread below 2^31, got {lane_hi} + {span} -- narrow the lane range or split the accesses into separate calls` |

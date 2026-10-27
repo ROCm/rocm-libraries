@@ -92,7 +92,6 @@ from .ranges import (
     Congruence,
     End,
     Interval,
-    RuntimeValue,
     Side,
     UniformPart,
     VectorRun,
@@ -100,7 +99,10 @@ from .ranges import (
     _lo_proven,
     _numeric_hi,
     _numeric_lo,
+    _require_i32_end,
     _required_checks,
+    _RuntimeEnd,
+    _stated_interval,
 )
 from .runs import _check_uniform, _contiguity_blocker, _first_non_monotone, _run_steps
 from .walk import split_coordinate
@@ -261,7 +263,8 @@ def emit_bound_check(
     b: IRBuilder, value: Value | int, lo: End, hi: End
 ) -> Value | None:
     """The i1 ``lo <= value < hi`` for one plain i32 value (or int), each end an int, a
-    ``RuntimeValue`` or ``None`` (that side unchecked).
+    ``Value`` (a runtime length, its numbers read from its stated facts) or ``None`` (that side
+    unchecked).
 
     The value is split by the IR range walk; its per-wave side is folded on per-wave values and
     one unsigned compare decides. A side the value's walked range already proves emits nothing,
@@ -976,8 +979,9 @@ def _xor_values(table: _CallTable, x: Value | int, y: Value | int) -> Value:
 def _dividend_error(read: str, r: Interval) -> ValueError:
     return ValueError(
         f"unmerge of '{read}' needs its dividend in [0, 2^31) for magic division, but its range "
-        f"is {r} -- bound the origin with exit_if_tile_outside(b, origin, length), or state a "
-        "trusted range with runtime_value(b, v, at_most=...)"
+        f"is {r} -- bound the origin with exit_if_tile_outside(b, origin, length), or state its "
+        "range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the GPU "
+        "(b.gpu_checked_value(v, ge=0, le=...))"
     )
 
 
@@ -1200,10 +1204,14 @@ _WideGroups = dict[tuple, tuple[int, int, int]]
 def _require_ends(name: str, lo: End, hi: End) -> None:
     for end in (lo, hi):
         is_int = isinstance(end, int) and not isinstance(end, bool)
-        if end is not None and not is_int and not isinstance(end, RuntimeValue):
+        if end is not None and not is_int and not isinstance(end, Value):
             raise TypeError(
-                f"bound check of '{name}': an end is an int, a RuntimeValue or None, got "
+                f"bound check of '{name}': an end is an int, an i32 Value or None, got "
                 f"{_type_text(end)}"
+            )
+        if isinstance(end, Value):
+            _require_i32_end(
+                end, f"bound check of '{name}': an end is an int, an i32 Value or None"
             )
     if lo is None and hi is None:
         raise ValueError(
@@ -1262,7 +1270,7 @@ def _check_value(
     """``lo <= coord < hi`` for every lane: the single compare when it applies, else the fold."""
     u = _single_compare(coord, lo, hi)
     if u is not None:
-        end = hi.value if isinstance(hi, RuntimeValue) else table.const(hi)
+        end = hi if isinstance(hi, Value) else table.const(hi)
         return table.below(u, end)
     return _fold_check(table, coord, lo, hi, name, _lane_extent(coord), groups)
 
@@ -1270,7 +1278,7 @@ def _check_value(
 def _single_compare(coord: _TableCoord, lo: End, hi: End) -> Value | None:
     """``u`` when the check is ``u u< hi``: one i32 per-wave part ``u``, no constant, no
     per-lane part, a lower end of 0 (the int 0, or no lower end because ``u``'s range starts at
-    0 or above) and an end ``hi`` (an int, or a runtime length with no offset) for which
+    0 or above) and an end ``hi`` (an int, or a runtime length stated on both sides) for which
     ``one_unsigned_compare_checks`` holds."""
     parts = [part for term in coord.terms for part in term.parts]
     if coord.lane is not None or coord.const != 0 or len(parts) != 1:
@@ -1281,9 +1289,9 @@ def _single_compare(coord: _TableCoord, lo: End, hi: End) -> Value | None:
     lower_proven = lo is None and least is not None and least >= 0
     if u.type != I32 or not (lower_is_zero or lower_proven):
         return None
-    if isinstance(hi, RuntimeValue):
-        envelope = hi._envelope
-        if hi._plus != 0 or envelope.lo is None or envelope.hi is None:
+    if isinstance(hi, Value):
+        envelope = _stated_interval(hi)
+        if envelope.lo is None or envelope.hi is None:
             return None
         least, most = envelope.lo, envelope.hi - 1
     elif hi is None:
@@ -1331,7 +1339,7 @@ def _folded_ends(
 def _folded_end(
     table: _CallTable,
     coord: _TableCoord,
-    end: int | RuntimeValue,
+    end: int | Value,
     side: str,
     extent: int,
     name: str,
@@ -1350,7 +1358,7 @@ def _folded_end(
             d = _minus(table, _exact(end - k), (u_value, _numeric(u_range)))
         else:
             d = _plus_const(
-                table, _runtime_minus(table, end, u_value, u_range, I32), end._plus - k
+                table, _runtime_minus(table, end, u_value, u_range, I32), -k
             )
         return _clamp(table, d, 0, extent)
     # The wide fold: one i64 pre-clamp per distinct (per-wave side, end) over the call, measured
@@ -1363,9 +1371,7 @@ def _folded_end(
     if isinstance(end, int):
         x = _minus(table, _exact(end - cmin), (u64, _numeric(u_range)))
     else:
-        x = _plus_const(
-            table, _runtime_minus(table, end, u64, u_range, I64), end._plus - cmin
-        )
+        x = _plus_const(table, _runtime_minus(table, end, u64, u_range, I64), -cmin)
     d_value, d_range = _clamp(table, x, 0, widest + span)
     if isinstance(d_value, Value):
         d_value = table.low_word(d_value)
@@ -1374,33 +1380,33 @@ def _folded_end(
 
 def _runtime_minus(
     table: _CallTable,
-    end: RuntimeValue,
+    end: Value,
     u: Value | None,
     u_range: Interval | None,
     ty: Type,
 ) -> _Scalar:
-    """``end.value - u`` as ``ty`` (``end.value`` itself when there is no ``u``)."""
-    value = table.as_type(end.value, ty)
+    """``end - u`` as ``ty`` (``end`` itself when there is no ``u``)."""
+    value = table.as_type(end, ty)
     if u is None:
-        return value, _numeric(end._envelope)
+        return value, _stated_interval(end)
     return table.sub(value, u), _runtime_difference(end, u_range)
 
 
-def _runtime_difference(end: RuntimeValue, u_range: Interval | None) -> Interval:
-    """The range of ``end.value - u`` for ``u`` in ``u_range``. A ``u`` end over the same
-    runtime value bounds the difference by identity (``u < M + p`` gives ``M - u > -p``);
-    any other end counts with its envelope's extreme value."""
-    envelope = end._envelope
+def _runtime_difference(end: Value, u_range: Interval | None) -> Interval:
+    """The range of ``end - u`` for ``u`` in ``u_range``. A ``u`` end over the same runtime
+    value bounds the difference by identity (``u < M + p`` gives ``M - u > -p``); any other end
+    counts with its stated extreme value."""
+    envelope = _stated_interval(end)
     if u_range is None:
-        return _numeric(envelope)
+        return envelope
     u_lo, u_hi = u_range.lo, u_range.hi
-    if isinstance(u_hi, RuntimeValue) and u_hi.value is end.value:
-        lo = 1 - u_hi._plus
+    if isinstance(u_hi, _RuntimeEnd) and u_hi.value is end:
+        lo = 1 - u_hi.plus
     else:
         most = _numeric_hi(u_hi)
         lo = None if envelope.lo is None or most is None else envelope.lo - most + 1
-    if isinstance(u_lo, RuntimeValue) and u_lo.value is end.value:
-        hi = 1 - u_lo._plus
+    if isinstance(u_lo, _RuntimeEnd) and u_lo.value is end:
+        hi = 1 - u_lo.plus
     else:
         least = _numeric_lo(u_lo)
         hi = None if envelope.hi is None or least is None else envelope.hi - least
@@ -1410,7 +1416,7 @@ def _runtime_difference(end: RuntimeValue, u_range: Interval | None) -> Interval
 
 
 def _fold_fits_i32(
-    u_type: Type | None, u_range: Interval | None, end: int | RuntimeValue, k: int
+    u_type: Type | None, u_range: Interval | None, end: int | Value, k: int
 ) -> bool:
     """Every value the i32 fold of ``end - (u + k)`` computes is proven inside i32 (``u``: the
     per-wave side, of ``u_type`` with ``u_range``; ``None`` when there is none)."""
@@ -1422,9 +1428,7 @@ def _fold_fits_i32(
         return _fits_i32(start) and _fits_i32(start.plus(u.scaled(-1)))
     t = _runtime_difference(end, u_range)
     return (
-        _fits_i32(_numeric(end._envelope))
-        and _fits_i32(t)
-        and _fits_i32(t.shifted(end._plus - k))
+        _fits_i32(_stated_interval(end)) and _fits_i32(t) and _fits_i32(t.shifted(-k))
     )
 
 
@@ -1437,10 +1441,10 @@ def _require_spread(name: str, lane_hi: int, span: int) -> None:
         )
 
 
-def _group_key(coord: _TableCoord, side: str, end: int | RuntimeValue) -> tuple:
+def _group_key(coord: _TableCoord, side: str, end: int | Value) -> tuple:
     parts = tuple(id(part.value) for term in coord.terms for part in term.parts)
-    if isinstance(end, RuntimeValue):
-        return parts, side, "runtime", id(end.value), end._plus
+    if isinstance(end, Value):
+        return parts, side, "runtime", id(end)
     return parts, side, "int", end
 
 
@@ -1605,8 +1609,8 @@ def _vector_text(
         f"vector along input {axis} ('{tuple(graph.inputs)[axis]}') of width {width} is not "
         f"contiguous at coordinate '{coordinate}' ({reason}) -- use a narrower vector, or start "
         f"it at a multiple of {width} (the walk reads that fact from how the coordinate was "
-        "computed; a runtime value the IR cannot show it for is stated with "
-        "runtime_value(..., multiple_of=...))"
+        "computed; for a value the IR cannot show it for, state multiple_of on its b.param "
+        "declaration or check it with b.gpu_checked_value(v, multiple_of=...))"
     )
 
 

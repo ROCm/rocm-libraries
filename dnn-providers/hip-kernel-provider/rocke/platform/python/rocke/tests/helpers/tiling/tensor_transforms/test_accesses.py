@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
+import re
 from pathlib import Path
 
 from rocke.core.ir import F16, F32, I32, I64, IRBuilder, Value
@@ -273,9 +274,9 @@ def test_vector_axis_is_a_graph_input_index_not_a_tile_axis_index():
         ValueError,
         "vector along input 1 ('axis1') of width 8 is not contiguous at coordinate 'axis1' "
         "(its elements are 64 apart in memory) -- use a narrower vector, or start it at a "
-        "multiple of 8 (the walk reads that fact from how the coordinate was computed; a "
-        "runtime value the IR cannot show it for is stated with "
-        "runtime_value(..., multiple_of=...))",
+        "multiple of 8 (the walk reads that fact from how the coordinate was computed; for a "
+        "value the IR cannot show it for, state multiple_of on its b.param declaration or "
+        "check it with b.gpu_checked_value(v, multiple_of=...))",
     ):
         emit_accesses(b, graph, tensor, [access], vector_axis=1, vector_width=8)
 
@@ -311,7 +312,6 @@ def test_the_package_door_exports_the_access_entry_and_no_internal_value():
     assert {
         "emit_accesses",
         "Access",
-        "RuntimeValue",
         "BoundCheck",
         "CheckReason",
     } <= exported
@@ -379,6 +379,30 @@ def test_the_range_marker_is_stated_only_by_its_checked_callers():
                 continue
             unchecked.extend(_unchecked_marker_calls(path))
     assert not unchecked, unchecked
+
+
+# A runtime length is a plain Value whose facts are read through stated_facts_of; the wrapper
+# class that once carried a copy of them, and its constructor, are gone. Their names are split
+# here so this file does not match itself.
+_REMOVED_NAMES = re.compile(
+    r"\b(" + "Runtime" + r"Values?|" + "runtime_" + r"value(_of)?)\b"
+)
+
+
+def test_the_removed_runtime_length_wrapper_is_named_nowhere():
+    roots = [ROCKE_DIR, ROCKE_DIR.parents[1] / "dsl_docs"]
+    named = []
+    for root in roots:
+        for path in sorted(root.rglob("*")):
+            if (
+                path.suffix not in (".py", ".md")
+                or "tmp" in path.relative_to(root).parts
+            ):
+                continue
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                if _REMOVED_NAMES.search(line):
+                    named.append(f"{path}:{lineno}")
+    assert not named, named
 
 
 def test_emit_accesses_emits_the_shared_coordinate_chain_once():
@@ -461,8 +485,9 @@ def test_an_unguarded_origin_is_refused_and_a_guarded_one_is_accepted():
     with raises(
         ValueError,
         "unmerge of 'm' needs its dividend in [0, 2^31) for magic division, but its range is "
-        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state a "
-        "trusted range with runtime_value(b, v, at_most=...)",
+        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state "
+        "its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the "
+        "GPU (b.gpu_checked_value(v, ge=0, le=...))",
     ):
         emit_accesses(b, graph, tensor, [(m, 0)])
     b = builder()
