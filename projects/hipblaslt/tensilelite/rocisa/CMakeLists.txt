@@ -158,13 +158,10 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        # Both steppings need the bindings, and they are separate entries in
-        # GPU_TARGETS, so a strict-only build matches neither if only one is named.
-        if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-            set(STINKYTOFU_BUILD_PYTHON ON)
-        else()
-            set(STINKYTOFU_BUILD_PYTHON OFF)
-        endif()
+        # gfx1250 codegen imports this module. TheRock publishes one generic
+        # artifact shared by every GPU family, so a gfx942-only build that
+        # skips it removes the module from the tree FFM actually runs.
+        set(STINKYTOFU_BUILD_PYTHON ON)
         add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         set(_stinkytofu_from_subdirectory TRUE)
     else()
@@ -172,11 +169,8 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-                set(STINKYTOFU_BUILD_PYTHON ON)
-            else()
-                set(STINKYTOFU_BUILD_PYTHON OFF)
-            endif()
+            # See the standalone branch: every family build has to ship the module.
+            set(STINKYTOFU_BUILD_PYTHON ON)
             add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         endblock()
         set(_stinkytofu_from_subdirectory TRUE)
@@ -391,9 +385,9 @@ block()
         # from this install layout. Without these rules import stinkytofu fails
         # there, rocisa/__init__.py silently falls back to native, and the
         # per-ISA guard in TensileCreateLibrary/Run.py refuses to emit gfx1250
-        # kernels. The stinkytofu_python target (hence this block) exists only
-        # for gfx1250 builds (STINKYTOFU_BUILD_PYTHON), which is exactly when the
-        # stinkytofu backend is needed.
+        # kernels. STINKYTOFU_BUILD_PYTHON is on for every GPU family, because
+        # TheRock's generic artifact is shared and a family that skips the
+        # module removes it for the gfx1250 FFM run.
         if(TARGET stinkytofu_python)
             set(_stinkytofu_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/stinkytofu")
             set(_adaptor_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa_stinkytofu_adaptor")
