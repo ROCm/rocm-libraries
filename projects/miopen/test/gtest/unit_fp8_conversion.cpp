@@ -99,8 +99,9 @@ void TestConversions(const Fp8Format& format, bool force_software_fallback, Fp8T
                      GetKernelSource())(
         input_dev.get(), fp8_dev.get(), bfp8_dev.get(), fp8_out_dev.get(), bfp8_out_dev.get());
 
-    const auto encoded = fp8_type == Fp8Type::Fp8 ? handle.Read<unsigned char>(fp8_dev, value_count)
-                                                : handle.Read<unsigned char>(bfp8_dev, value_count);
+    const auto encoded = fp8_type == Fp8Type::Fp8
+                             ? handle.Read<unsigned char>(fp8_dev, value_count)
+                             : handle.Read<unsigned char>(bfp8_dev, value_count);
 
     const auto output = fp8_type == Fp8Type::Fp8 ? handle.Read<float>(fp8_out_dev, value_count)
                                                  : handle.Read<float>(bfp8_out_dev, value_count);
