@@ -8,6 +8,7 @@
 #include "stage_timers.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -19,18 +20,20 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
+
 // Selection-time options, on by default (README.md, Building and testing),
 // each off when defined to 0: TW_LEVER_PREFETCH, and TW_LEVER_MEMO, whose
 // plan check TW_LEVER_MEMO_CHECK is on wherever assertions are unless it is
 // defined to 0 (model_impl.hpp sets their defaults).
-#if TW_LEVER_MEMO
-#include <atomic>
-#endif
 
 namespace tilewright {
 namespace detail {
@@ -38,6 +41,97 @@ namespace detail {
 bool valid_hardware(const Hardware& h) noexcept {
   return h.N_CU != 0 && h.lds_capacity != 0 && h.L2_capacity != 0;
 }
+
+// A read-only array: the elements of a vector, or their copy in a HotArena.
+template <class T>
+struct Span {
+  using value_type  = T;
+  const T* ptr      = nullptr;
+  std::size_t count = 0;
+
+  Span() = default;
+  template <class A>
+  explicit Span(const std::vector<T, A>& v) : ptr(v.data()), count(v.size()) {}
+  const T* data() const { return ptr; }
+  std::size_t size() const { return count; }
+  bool empty() const { return count == 0; }
+  const T* begin() const { return ptr; }
+  const T* end() const { return ptr + count; }
+  const T& operator[](std::size_t i) const { return ptr[i]; }
+};
+
+// The arrays of a BlockMatrix (the one of its type holds its values).
+struct BlockSpan {
+  BlockWeights::Type type = BlockWeights::Type::F32;
+  float scale             = 1.0f;
+  Span<float> f32;
+  Span<std::uint16_t> bf16;
+  Span<std::int8_t> int8;
+
+  BlockSpan() = default;
+  explicit BlockSpan(const BlockMatrix& m)
+      : type(m.type), scale(m.scale), f32(m.f32), bf16(m.bf16), int8(m.int8) {}
+  BlockWeights view() const {
+    const void* data = type == BlockWeights::Type::F32    ? static_cast<const void*>(f32.data())
+                       : type == BlockWeights::Type::Bf16 ? static_cast<const void*>(bf16.data())
+                                                          : static_cast<const void*>(int8.data());
+    return {type, data, scale};
+  }
+};
+
+// What rankings read of a cell's CellWeights: the query tower, the
+// interaction MLP and their scalars.
+struct WeightsView {
+  Span<float> q_mean, q_scale, q_lo, q_hi;
+  BlockSpan q_w0, q_w2, q_w4;
+  Span<float> q_b0, q_b2, q_b4;
+  Span<float> x_mean, x_scale, x_lo, x_hi, x_w0, x_b0, x_w2;
+  float x_b2        = 0.0f;
+  float temperature = 1.0f;
+
+  WeightsView() = default;
+  explicit WeightsView(const CellWeights& w)
+      : q_mean(w.q_mean)
+      , q_scale(w.q_scale)
+      , q_lo(w.q_lo)
+      , q_hi(w.q_hi)
+      , q_w0(w.q_w0)
+      , q_w2(w.q_w2)
+      , q_w4(w.q_w4)
+      , q_b0(w.q_b0)
+      , q_b2(w.q_b2)
+      , q_b4(w.q_b4)
+      , x_mean(w.x_mean)
+      , x_scale(w.x_scale)
+      , x_lo(w.x_lo)
+      , x_hi(w.x_hi)
+      , x_w0(w.x_w0)
+      , x_b0(w.x_b0)
+      , x_w2(w.x_w2)
+      , x_b2(w.x_b2)
+      , temperature(w.temperature) {}
+};
+
+// What rankings read of a PoolKeys' arrays.
+struct PoolView {
+  Span<std::size_t> first, member_begin, members, key_of;
+  Span<KernelShape> shape;
+  Span<std::int64_t> attribute_values;
+  std::size_t attribute_count = 0;
+
+  PoolView() = default;
+  explicit PoolView(const PoolKeys& k)
+      : first(k.first)
+      , member_begin(k.member_begin)
+      , members(k.members)
+      , key_of(k.key_of)
+      , shape(k.shape)
+      , attribute_values(k.attribute_values)
+      , attribute_count(k.attribute_count) {}
+  const std::int64_t* attributes(std::size_t key) const {
+    return attribute_values.data() + key * attribute_count;
+  }
+};
 
 namespace {
 
@@ -219,7 +313,8 @@ inline void prefetch_vector(const V& v) {
   prefetch_bytes(v.data(), v.size() * sizeof(typename V::value_type));
 }
 
-inline void prefetch_blocks(const BlockMatrix& m) {
+template <class B>
+inline void prefetch_blocks(const B& m) {
   prefetch_vector(m.f32);
   prefetch_vector(m.bf16);
   prefetch_vector(m.int8);
@@ -249,11 +344,12 @@ bool finite(double v) {
 // NaN stays NaN.
 inline float clamp_to(float v, float lo, float hi) { return std::min(std::max(v, lo), hi); }
 
+template <class V>
 void whiten(const float* f,
-            const std::vector<float>& mean,
-            const std::vector<float>& scale,
-            const std::vector<float>& lo,
-            const std::vector<float>& hi,
+            const V& mean,
+            const V& scale,
+            const V& lo,
+            const V& hi,
             std::size_t n,
             float* out) {
   if (lo.empty()) {
@@ -273,7 +369,7 @@ void whiten_item(const float* f, const CellWeights& w, std::size_t n, float* out
 
 void query_embedding(const Kernels& k,
                      const Cell& cell,
-                     const CellWeights& w,
+                     const WeightsView& w,
                      const float* q_feat,
                      std::size_t q_dim,
                      float* norm,
@@ -497,15 +593,48 @@ inline std::size_t cache_bytes(const CellCache& c) noexcept {
          (c.whitelist_emb.size() + c.other_emb.size() + c.kept_emb.size()) * sizeof(float);
 }
 
-// The item embedding of `key`, or of its view in `row` when outside the
-// whitelist.
-inline const float* cached_embedding(const CellCache& c,
+// What rankings read of a CellCache's whitelist.
+struct WhitelistView {
+  Span<std::size_t> keys;
+  Span<std::uint32_t> slot;
+  Span<float> emb;
+
+  WhitelistView() = default;
+  explicit WhitelistView(const CellCache& c)
+      : keys(c.whitelist_keys), slot(c.slot), emb(c.whitelist_emb) {}
+};
+
+struct HotCell {
+  WhitelistView whitelist;
+  WeightsView weights;
+};
+
+// What whitelist-tier rankings read of a prepared CandidateSet, copied by
+// CandidateSet::prepare() into one block of allocate_huge_pages in the order
+// a ranking reads it: this header, a HotCell per model cell, the pool's
+// arrays and its kernel part (inter_kernel, written once the kernel part is
+// built), then per cell its whitelist keys and slots, its tensors and its
+// whitelist embeddings. Bitwise copies that never change; the vectors they
+// copy stay the owners for every other use. The block lives as long as the
+// CandidateSet, outside the cache limit.
+struct HotArena {
+  const PoolKeys* keys = nullptr;  // what `pool` copies
+  PoolView pool;
+  const HotCell* cells          = nullptr;
+  float* inter_kernel           = nullptr;
+  std::size_t inter_kernel_size = 0;
+};
+
+// The item embedding of `key` (its row of `wl`, the whitelist of `c`), or of
+// its view in `row` when outside the whitelist.
+inline const float* cached_embedding(const WhitelistView& wl,
+                                     const CellCache& c,
                                      const PoolKeys& keys,
                                      std::size_t key,
                                      std::size_t embed_dim,
                                      float* row) {
-  const std::uint32_t s = c.slot[key];
-  if (s != kNoSlot) return &c.whitelist_emb[s * embed_dim];
+  const std::uint32_t s = wl.slot[key];
+  if (s != kNoSlot) return &wl.emb[s * embed_dim];
   const std::size_t v = keys.view(key);
   const float* at     = &c.other_emb[(v / 16 * embed_dim) * 16 + v % 16];
   for (std::size_t j = 0; j < embed_dim; ++j) row[j] = at[j * 16];
@@ -524,6 +653,8 @@ class CellCacheSource {
   // the data types of `p` and the device `hw`, or nullptr when they are not
   // the ones the pool's values were computed for.
   virtual const float* inter_kernel(const Problem& p, const HwView& hw) const = 0;
+  // The source's HotArena, once published (release) by CandidateSet::prepare().
+  mutable std::atomic<const HotArena*> hot_arena{nullptr};
 #if TW_LEVER_MEMO
   // Distinct for every source of the process, so that a ranking remembered
   // for one never answers for another built at the same address.
@@ -539,27 +670,75 @@ class CellCacheSource {
 
 namespace {
 
-// The batched kernels load whole rows of kBatch floats; a row that straddles
-// cache lines costs a split load per weight.
-template <class T>
-struct CacheLineAllocator {
-  using value_type = T;
+// The scratch arrays of one thread (Scratch), carved at 64-byte boundaries (the
+// batched kernels load whole rows of kBatch floats; a row that straddles cache
+// lines costs a split load per weight) from one block of allocate_huge_pages
+// that the thread's first ranking takes; what does not fit, or every array of
+// a thread that cannot have the block, comes from the heap. A carving goes
+// back to the block only when it is the last.
+class ScratchBlock {
+ public:
+  static constexpr std::size_t kBytes = std::size_t{1} << 21;
+
+  ScratchBlock()                               = default;
+  ScratchBlock(const ScratchBlock&)            = delete;
+  ScratchBlock& operator=(const ScratchBlock&) = delete;
+  ~ScratchBlock() { free_huge_pages(base_, kBytes); }
+
+  void* allocate(std::size_t bytes) {
+    if (!tried_) {
+      tried_ = true;
+      try {
+        base_ = static_cast<char*>(allocate_huge_pages(kBytes));
+      } catch (const std::bad_alloc&) { base_ = nullptr; }
+    }
+    const std::size_t at = (used_ + 63) & ~std::size_t{63};
+    if (base_ != nullptr && at <= kBytes && bytes <= kBytes - at) {
+      used_ = at + bytes;
+      return base_ + at;
+    }
+    return ::operator new(bytes, kLine);
+  }
+
+  void deallocate(void* p, std::size_t bytes) noexcept {
+    const std::uintptr_t at   = reinterpret_cast<std::uintptr_t>(p);
+    const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(base_);
+    if (base_ == nullptr || at < base || at - base >= kBytes) return ::operator delete(p, kLine);
+    if (at - base + bytes == used_) used_ = at - base;
+  }
+
+ private:
   static constexpr std::align_val_t kLine{64};
-  CacheLineAllocator() = default;
+  char* base_       = nullptr;
+  std::size_t used_ = 0;
+  bool tried_       = false;
+};
+
+ScratchBlock& scratch_block() {
+  thread_local ScratchBlock block;
+  return block;
+}
+
+template <class T>
+struct ScratchAllocator {
+  using value_type   = T;
+  ScratchAllocator() = default;
   template <class U>
-  CacheLineAllocator(const CacheLineAllocator<U>&) noexcept {}
-  T* allocate(std::size_t n) { return static_cast<T*>(::operator new(n * sizeof(T), kLine)); }
-  void deallocate(T* p, std::size_t) noexcept { ::operator delete(p, kLine); }
+  ScratchAllocator(const ScratchAllocator<U>&) noexcept {}
+  T* allocate(std::size_t n) { return static_cast<T*>(scratch_block().allocate(n * sizeof(T))); }
+  void deallocate(T* p, std::size_t n) noexcept { scratch_block().deallocate(p, n * sizeof(T)); }
   template <class U>
-  bool operator==(const CacheLineAllocator<U>&) const noexcept {
+  bool operator==(const ScratchAllocator<U>&) const noexcept {
     return true;
   }
   template <class U>
-  bool operator!=(const CacheLineAllocator<U>&) const noexcept {
+  bool operator!=(const ScratchAllocator<U>&) const noexcept {
     return false;
   }
 };
-using BatchBuffer = std::vector<float, CacheLineAllocator<float>>;
+template <class T>
+using ScratchVector = std::vector<T, ScratchAllocator<T>>;
+using BatchBuffer   = ScratchVector<float>;
 
 // Working storage of rank_in_cell, kept per thread so that a ranking call
 // does not allocate once the buffers have grown to the pool's size. The
@@ -570,12 +749,12 @@ using BatchBuffer = std::vector<float, CacheLineAllocator<float>>;
 struct Scratch {
   static constexpr std::uint32_t kMaxEpoch = 0x7FFFFFFFu;
   std::uint32_t epoch                      = 0;
-  std::vector<std::uint32_t> feasible, in_tier1, scored, listed;
-  std::vector<std::size_t> tier1, tier2, order, ranked, run, views;
-  std::vector<std::uint32_t> passing;
-  std::vector<float> score, emb, q_feat, i_feat, x_feat, x_problem, norm, q_emb, i_emb, h0, h2;
-  std::vector<LaunchPlan> plans;
-  std::vector<std::uint64_t> ordered, spare;
+  ScratchVector<std::uint32_t> feasible, in_tier1, scored, listed;
+  ScratchVector<std::size_t> tier1, tier2, order, ranked, run, views;
+  ScratchVector<std::uint32_t> passing;
+  ScratchVector<float> score, emb, q_feat, i_feat, x_feat, x_problem, norm, q_emb, i_emb, h0, h2;
+  ScratchVector<LaunchPlan> plans;
+  ScratchVector<std::uint64_t> ordered, spare;
   BatchBuffer x_batch, h_batch;
 #if TW_LEVER_MEMO
   // The thread's last ranking whose scored tier was a cell whitelist alone:
@@ -607,6 +786,10 @@ struct Scratch {
   } memo;
 #endif
 
+  // The thread's ScratchBlock is made before the scratch, so it outlives the
+  // arrays at thread exit.
+  Scratch() { scratch_block(); }
+
   // The epoch of a new call over `nk` keys.
   std::uint32_t next_epoch(std::size_t nk) {
     if (feasible.size() < nk) {
@@ -615,7 +798,7 @@ struct Scratch {
       scored.resize(nk, 0);
     }
     if (epoch >= kMaxEpoch) {
-      for (std::vector<std::uint32_t>* v : {&feasible, &in_tier1, &scored, &listed})
+      for (ScratchVector<std::uint32_t>* v : {&feasible, &in_tier1, &scored, &listed})
         std::fill(v->begin(), v->end(), 0u);
       epoch = 0;
     }
@@ -682,17 +865,17 @@ void replay_memo(Scratch& s,
                  const Cell& cell,
                  const Problem& problem,
                  const std::vector<Config>& configs,
-                 const PoolKeys& keys,
+                 const PoolView& keys,
                  const Output& out) {
   const std::size_t n            = configs.size();
   const std::size_t nk           = keys.first.size();
   const std::uint32_t remembered = s.memo.epoch;
   const std::uint32_t epoch      = s.next_epoch(nk);
   ++s.memo.counts.replays;
-  std::vector<float>& score        = s.score;
-  std::vector<std::size_t>& order  = s.order;
-  std::vector<std::size_t>& ranked = s.ranked;
-  std::vector<std::size_t>& run    = s.run;
+  ScratchVector<float>& score        = s.score;
+  ScratchVector<std::size_t>& order  = s.order;
+  ScratchVector<std::size_t>& ranked = s.ranked;
+  ScratchVector<std::size_t>& run    = s.run;
   order.clear();
   order.reserve(s.memo.tier1_configs);
   ranked.clear();
@@ -774,6 +957,13 @@ void rank_in_cell(const Model& model,
                   const CellCacheSource* source,
                   const LaunchModel* launch,
                   const Output& out) {
+  // The pool's arrays and, below, the cell's whitelist and tensors as copied
+  // into the source's HotArena once its prepare() has made one, else in place.
+  const HotArena* arena =
+      source != nullptr ? source->hot_arena.load(std::memory_order_acquire) : nullptr;
+  if (arena != nullptr && arena->keys != &keys) arena = nullptr;
+  std::optional<PoolView> own_pool;
+  const PoolView& pool = arena != nullptr ? arena->pool : own_pool.emplace(keys);
 #if TW_LEVER_MEMO
   const LaunchModel* const pool_launch = launch;
   {
@@ -791,7 +981,7 @@ void rank_in_cell(const Model& model,
       hit = false;
     }
 #endif
-    if (hit) return replay_memo(sm, model.cells[cell_index], problem, configs, keys, out);
+    if (hit) return replay_memo(sm, model.cells[cell_index], problem, configs, pool, out);
   }
 #endif
   const std::size_t n                              = configs.size();
@@ -800,14 +990,19 @@ void rank_in_cell(const Model& model,
   const std::size_t i_dim                          = model.item_dim;
   const Cell& cell                                 = model.cells[cell_index];
   const std::shared_ptr<const CellWeights> weights = model.weights(cell_index);
-  const CellWeights& w                             = *weights;
   std::shared_ptr<const CellCache> held =
-      source != nullptr ? source->cache(cell_index, w, false) : nullptr;
-  const CellCache* cache = held.get();
-  const Kernels& k       = kernels();
-  Scratch& s             = scratch();
-  const auto size_of     = [&](std::size_t key) {
-    return keys.member_begin[key + 1] - keys.member_begin[key];
+      source != nullptr ? source->cache(cell_index, *weights, false) : nullptr;
+  const CellCache* cache   = held.get();
+  const HotCell* const hot = arena != nullptr ? &arena->cells[cell_index] : nullptr;
+  std::optional<WeightsView> own_weights;
+  const WeightsView& w = hot != nullptr ? hot->weights : own_weights.emplace(*weights);
+  WhitelistView wl     = hot != nullptr     ? hot->whitelist
+                         : cache != nullptr ? WhitelistView(*cache)
+                                            : WhitelistView();
+  const Kernels& k     = kernels();
+  Scratch& s           = scratch();
+  const auto size_of   = [&](std::size_t key) {
+    return pool.member_begin[key + 1] - pool.member_begin[key];
   };
 
   const std::uint32_t epoch = s.next_epoch(nk);
@@ -817,14 +1012,14 @@ void rank_in_cell(const Model& model,
   // tensors in order: all are asked for here, before the first is needed.
   // The scoring's tensors are asked for during the query tower (below).
   if (cache != nullptr && has_whitelist(model, cell)) {
-    for (const std::size_t key : cache->whitelist_keys) {
+    for (const std::size_t key : wl.keys) {
       prefetch(&s.feasible[key]);
       prefetch(&s.in_tier1[key]);
       prefetch(&s.scored[key]);
       if (key < s.score.size()) prefetch(&s.score[key]);
-      prefetch_object(&keys.shape[key], sizeof(KernelShape));
-      prefetch(&cache->slot[key]);
-      prefetch(&keys.first[key]);
+      prefetch_object(&pool.shape[key], sizeof(KernelShape));
+      prefetch(&wl.slot[key]);
+      prefetch(&pool.first[key]);
     }
     prefetch_vector(w.q_mean);
     prefetch_vector(w.q_scale);
@@ -841,13 +1036,13 @@ void rank_in_cell(const Model& model,
   const Feasibility rules(problem, hardware, keys.nt_a, keys.nt_b, model.soft_rules);
   const auto feasible = [&](std::size_t key) {
     std::uint32_t& f = s.feasible[key];
-    if (f < 2 * epoch) f = 2 * epoch + (rules(keys.shape[key]) ? 1 : 0);
+    if (f < 2 * epoch) f = 2 * epoch + (rules(pool.shape[key]) ? 1 : 0);
     return f == 2 * epoch + 1;
   };
   TILEWRIGHT_STAGE_LAP(Setup);
 
-  const bool have_whitelist       = has_whitelist(model, cell);
-  std::vector<std::size_t>& tier1 = s.tier1;
+  const bool have_whitelist         = has_whitelist(model, cell);
+  ScratchVector<std::size_t>& tier1 = s.tier1;
   tier1.clear();
   std::size_t tier1_configs = 0;
   const auto add_tier1      = [&](std::size_t key) {
@@ -864,7 +1059,7 @@ void rank_in_cell(const Model& model,
   };
   if (have_whitelist) {
     if (cache != nullptr) {
-      for (std::size_t key : cache->whitelist_keys)
+      for (std::size_t key : wl.keys)
         if (feasible(key)) add_tier1(key);
     } else {
       for (std::size_t key = 0; key < nk; ++key)
@@ -880,10 +1075,10 @@ void rank_in_cell(const Model& model,
   // kind, the non-temporal rule alone decides its keys.
   const bool plain_tile  = pruned && rules.all_but_non_temporal_pass(cache->plain_bounds);
   const bool hinted_tile = hinted && rules.all_but_non_temporal_pass(cache->hinted_bounds);
-  std::vector<std::uint32_t>& passing = s.passing;
-  std::size_t n_passing               = 0;
-  bool listed_passing                 = false;
-  const auto plain_and_kept           = [&]() -> const std::vector<std::uint32_t>& {
+  ScratchVector<std::uint32_t>& passing = s.passing;
+  std::size_t n_passing                 = 0;
+  bool listed_passing                   = false;
+  const auto plain_and_kept             = [&]() -> const std::vector<std::uint32_t>& {
     return cache->kept_hinted.empty() ? cache->plain : cache->plain_and_kept;
   };
   // Lists in `passing` the feasible keys of a pruned cell, ascending.
@@ -995,7 +1190,7 @@ void rank_in_cell(const Model& model,
   }
   if (tier1.empty()) return write_unscored(n, out);
 
-  std::vector<std::size_t>& tier2 = s.tier2;
+  ScratchVector<std::size_t>& tier2 = s.tier2;
   tier2.clear();
   if (tier1_is_whitelist && min_scored > tier1_configs)
     each_feasible([&](std::size_t key) {
@@ -1003,22 +1198,23 @@ void rank_in_cell(const Model& model,
     });
   TILEWRIGHT_STAGE_LAP(Feasibility);
   if (cache != nullptr && (!tier1_is_whitelist || !tier2.empty())) {
-    held  = source->cache(cell_index, w, true);
+    held  = source->cache(cell_index, *weights, true);
     cache = held.get();
+    if (hot == nullptr) wl = WhitelistView(*cache);
   }
 
-  const HwView hw               = hw_view(model, hardware, context);
-  const float* x_kernel         = source != nullptr ? source->inter_kernel(problem, hw) : nullptr;
-  const std::size_t e           = cell.embed_dim;
-  std::vector<float>& q_feat    = s.q_feat;
-  std::vector<float>& i_feat    = s.i_feat;
-  std::vector<float>& x_feat    = s.x_feat;
-  std::vector<float>& norm      = s.norm;
-  std::vector<float>& q_emb     = s.q_emb;
-  std::vector<float>& i_emb     = s.i_emb;
-  std::vector<float>& h0        = s.h0;
-  std::vector<float>& h2        = s.h2;
-  std::vector<float>& x_problem = s.x_problem;
+  const HwView hw                 = hw_view(model, hardware, context);
+  const float* x_kernel           = source != nullptr ? source->inter_kernel(problem, hw) : nullptr;
+  const std::size_t e             = cell.embed_dim;
+  ScratchVector<float>& q_feat    = s.q_feat;
+  ScratchVector<float>& i_feat    = s.i_feat;
+  ScratchVector<float>& x_feat    = s.x_feat;
+  ScratchVector<float>& norm      = s.norm;
+  ScratchVector<float>& q_emb     = s.q_emb;
+  ScratchVector<float>& i_emb     = s.i_emb;
+  ScratchVector<float>& h0        = s.h0;
+  ScratchVector<float>& h2        = s.h2;
+  ScratchVector<float>& x_problem = s.x_problem;
   q_feat.resize(cat.query_dim);
   i_feat.resize(i_dim);
   x_feat.resize(cat.inter_dim);
@@ -1035,10 +1231,10 @@ void rank_in_cell(const Model& model,
   // first-config indices locate, during the query tower.
   if (tier1_is_whitelist) {
     for (const std::size_t key : tier1) {
-      prefetch_object(&configs[keys.first[key]], sizeof(Config));
+      prefetch_object(&configs[pool.first[key]], sizeof(Config));
       // The line of its index, which locates its launch record (a Config
       // may span three lines).
-      if (prefetch_launch) prefetch(&configs[keys.first[key]].index);
+      if (prefetch_launch) prefetch(&configs[pool.first[key]].index);
       if (x_kernel != nullptr)
         prefetch_object(x_kernel + key * cat.inter_kernel_dim,
                         cat.inter_kernel_dim * sizeof(float));
@@ -1051,7 +1247,7 @@ void rank_in_cell(const Model& model,
     prefetch_vector(w.x_w0);
     prefetch_vector(w.x_b0);
     prefetch_vector(w.x_w2);
-    if (cache != nullptr) prefetch_vector(cache->whitelist_emb);
+    if (cache != nullptr) prefetch_vector(wl.emb);
     prefetch_vector(s.x_batch);
     prefetch_vector(s.h_batch);
   }
@@ -1068,7 +1264,7 @@ void rank_in_cell(const Model& model,
   // features' time to arrive: the records arrive during the query embedding,
   // before rank_tier plans the tier.
   if (prefetch_launch)
-    for (const std::size_t key : tier1) launch->prefetch(configs[keys.first[key]]);
+    for (const std::size_t key : tier1) launch->prefetch(configs[pool.first[key]]);
 #endif
   query_embedding(
       k, cell, w, q_feat.data(), cat.query_dim, norm.data(), h0.data(), h2.data(), q_emb.data());
@@ -1084,9 +1280,9 @@ void rank_in_cell(const Model& model,
   // candidates are ascending; so is what is kept. Returns the configs kept;
   // sets `scored` when s.emb holds the embedding term of every candidate
   // kept, or -inf where it is not finite.
-  std::vector<float>& emb = s.emb;
-  bool scored             = false;
-  const auto cascade_by   = [&](std::vector<std::size_t>& candidates,
+  ScratchVector<float>& emb = s.emb;
+  bool scored               = false;
+  const auto cascade_by     = [&](ScratchVector<std::size_t>& candidates,
                               std::size_t tier_configs,
                               std::size_t before,
                               const auto& configs_of,
@@ -1161,7 +1357,8 @@ void rank_in_cell(const Model& model,
       for (std::size_t c : candidates) {
         const std::size_t key = item_key(c);
         cat.item(model, configs[keys.first[key]], keys.attributes(key), i_feat.data());
-        item_embedding(k, cell, w, i_feat.data(), i_dim, norm.data(), h0.data(), i_emb.data());
+        item_embedding(
+            k, cell, *weights, i_feat.data(), i_dim, norm.data(), h0.data(), i_emb.data());
         const float v = k.dot(q_emb.data(), i_emb.data(), e) / w.temperature;
         emb[c]        = finite(v) ? v : -std::numeric_limits<float>::infinity();
       }
@@ -1170,7 +1367,7 @@ void rank_in_cell(const Model& model,
     // Every candidate has a config, so the best `width` hold at least `width`
     // configs.
     if (before + width >= min_scored && nk <= 0xFFFFFFFFull) {
-      std::vector<std::uint64_t>& ordered = s.ordered;
+      ScratchVector<std::uint64_t>& ordered = s.ordered;
       ordered.resize(candidates.size());
       for (std::size_t i = 0; i < candidates.size(); ++i)
         ordered[i] = order_key(emb[candidates[i]], candidates[i]);
@@ -1206,12 +1403,12 @@ void rank_in_cell(const Model& model,
   // tier) and a kept view brings all its feasible keys.
   const bool split = keys.views() != nk;
   const auto split_cascade =
-      [&](std::vector<std::size_t>& tier, std::size_t tier_configs, std::size_t before) {
+      [&](ScratchVector<std::size_t>& tier, std::size_t tier_configs, std::size_t before) {
         const std::size_t width = model.cascade_keys;
         if (width == 0 || tier.size() <= width || before + tier_configs <= min_scored)
           return tier_configs;
         if (s.listed.size() < nk) s.listed.resize(nk, 0);
-        std::vector<std::size_t>& views = s.views;
+        ScratchVector<std::size_t>& views = s.views;
         views.clear();
         for (std::size_t key : tier) {
           std::uint32_t& mark = s.listed[keys.view_of[key]];
@@ -1253,11 +1450,11 @@ void rank_in_cell(const Model& model,
   }
 
   // Read only for keys scored by this call.
-  std::vector<float>& score = s.score;
+  ScratchVector<float>& score = s.score;
   if (score.size() < nk) score.resize(nk);
-  std::vector<std::size_t>& order  = s.order;
-  std::vector<std::size_t>& ranked = s.ranked;
-  std::vector<std::size_t>& run    = s.run;
+  ScratchVector<std::size_t>& order  = s.order;
+  ScratchVector<std::size_t>& ranked = s.ranked;
+  ScratchVector<std::size_t>& run    = s.run;
   order.clear();
   order.reserve(tier1_configs);
   // Interaction scores of up to kBatch keys at a time: column c of x_batch
@@ -1272,20 +1469,20 @@ void rank_in_cell(const Model& model,
   // At most one tier went through the cascade. A non-finite embedding term
   // makes the total non-finite either way, so the cascade's -inf stands for
   // it.
-  const auto rank_tier = [&](const std::vector<std::size_t>& tier, bool reuse) {
+  const auto rank_tier = [&](const ScratchVector<std::size_t>& tier, bool reuse) {
     ranked.clear();
     // The keys' scattered data is requested at once rather than as each key
     // is scored, and their plans asked for before any is scored.
     for (const std::size_t key : tier) {
-      prefetch(&keys.first[key]);
+      prefetch(&pool.first[key]);
       if (x_kernel != nullptr) prefetch(x_kernel + key * cat.inter_kernel_dim);
     }
-    for (const std::size_t key : tier) prefetch(&configs[keys.first[key]]);
-    std::vector<LaunchPlan>& plans = s.plans;
+    for (const std::size_t key : tier) prefetch(&configs[pool.first[key]]);
+    ScratchVector<LaunchPlan>& plans = s.plans;
     plans.assign(tier.size(), LaunchPlan{});
     if (launch != nullptr)
       for (std::size_t i = 0; i < tier.size(); ++i)
-        plans[i] = launch->plan(configs[keys.first[tier[i]]], problem, context);
+        plans[i] = launch->plan(configs[pool.first[tier[i]]], problem, context);
     TILEWRIGHT_STAGE_LAP(Launch);
     float emb_score[kBatch], inter[kBatch];
     for (std::size_t b0 = 0; b0 < tier.size(); b0 += kBatch) {
@@ -1293,17 +1490,18 @@ void rank_in_cell(const Model& model,
       const bool batched   = nc >= kMinBatch;
       for (std::size_t c = 0; c < nc; ++c) {
         const std::size_t key = tier[b0 + c];
-        const Config& cfg     = configs[keys.first[key]];
-        const std::int64_t* a = keys.attributes(key);
+        const Config& cfg     = configs[pool.first[key]];
+        const std::int64_t* a = pool.attributes(key);
         if (reuse) {
           emb_score[c] = emb[keys.view(key)];
         } else {
           const float* ie = nullptr;
           if (cache != nullptr) {
-            ie = cached_embedding(*cache, keys, key, e, i_emb.data());
+            ie = cached_embedding(wl, *cache, keys, key, e, i_emb.data());
           } else {
             cat.item(model, cfg, a, i_feat.data());
-            item_embedding(k, cell, w, i_feat.data(), i_dim, norm.data(), h0.data(), i_emb.data());
+            item_embedding(
+                k, cell, *weights, i_feat.data(), i_dim, norm.data(), h0.data(), i_emb.data());
             ie = i_emb.data();
           }
           emb_score[c] = k.dot(q_emb.data(), ie, e) / w.temperature;
@@ -1391,14 +1589,14 @@ void rank_in_cell(const Model& model,
         const std::size_t key = ranked[i];
         order.insert(
             order.end(),
-            keys.members.begin() + static_cast<std::ptrdiff_t>(keys.member_begin[key]),
-            keys.members.begin() + static_cast<std::ptrdiff_t>(keys.member_begin[key + 1]));
+            pool.members.begin() + static_cast<std::ptrdiff_t>(pool.member_begin[key]),
+            pool.members.begin() + static_cast<std::ptrdiff_t>(pool.member_begin[key + 1]));
       } else {
         run.clear();
         for (std::size_t r = i; r < j; ++r)
-          for (std::size_t m = keys.member_begin[ranked[r]]; m < keys.member_begin[ranked[r] + 1];
+          for (std::size_t m = pool.member_begin[ranked[r]]; m < pool.member_begin[ranked[r] + 1];
                ++m)
-            run.push_back(keys.members[m]);
+            run.push_back(pool.members[m]);
         if (j > i + 1) std::sort(run.begin(), run.end());
         if (prior != nullptr)
           std::stable_sort(run.begin(), run.end(), [&](std::size_t a, std::size_t b) {
@@ -1434,14 +1632,14 @@ void rank_in_cell(const Model& model,
 
   if (env_knobs().pick_log && !order.empty())
     log_pick(
-        problem, cell, configs[order.front()], score[keys.key_of[order.front()]], order.front(), n);
+        problem, cell, configs[order.front()], score[pool.key_of[order.front()]], order.front(), n);
 
   std::vector<Result>& results = out.results;
   results.clear();
   if (!out.unscored) {
     results.reserve(order.size());
     for (std::size_t ci : order)
-      results.push_back(Result{ci, static_cast<double>(score[keys.key_of[ci]]), true});
+      results.push_back(Result{ci, static_cast<double>(score[pool.key_of[ci]]), true});
     TILEWRIGHT_STAGE_END(Results);
     return;
   }
@@ -1449,9 +1647,9 @@ void rank_in_cell(const Model& model,
   results.resize(n);
   std::size_t pos = 0;
   for (std::size_t ci : order)
-    results[pos++] = Result{ci, static_cast<double>(score[keys.key_of[ci]]), true};
+    results[pos++] = Result{ci, static_cast<double>(score[pool.key_of[ci]]), true};
   for (std::size_t j = 0; j < n; ++j)
-    if (s.scored[keys.key_of[j]] != epoch) results[pos++] = Result{j, 0.0, false};
+    if (s.scored[pool.key_of[j]] != epoch) results[pos++] = Result{j, 0.0, false};
   TILEWRIGHT_STAGE_END(Results);
 }
 
@@ -1539,7 +1737,7 @@ std::vector<Result> rank_all(const Model& model,
 
 void set_rank_epoch(std::uint32_t epoch) noexcept {
   Scratch& s = scratch();
-  for (std::vector<std::uint32_t>* v : {&s.feasible, &s.in_tier1, &s.scored, &s.listed})
+  for (ScratchVector<std::uint32_t>* v : {&s.feasible, &s.in_tier1, &s.scored, &s.listed})
     std::fill(v->begin(), v->end(), 0u);
   s.epoch = std::min(epoch, Scratch::kMaxEpoch);
 #if TW_LEVER_MEMO
@@ -1730,6 +1928,74 @@ std::vector<Result> rank_keys(const Model& model,
 
 }  // namespace detail
 
+#if defined(__linux__)
+namespace {
+
+constexpr std::size_t kHugePage = std::size_t{1} << 21;
+
+#if defined(MADV_COLLAPSE)
+constexpr int kMadvCollapse = MADV_COLLAPSE;
+#else
+constexpr int kMadvCollapse = 25;  // Linux 6.1 and later
+#endif
+
+// Whole huge pages for `bytes`, at least one.
+std::size_t huge_length(std::size_t bytes) {
+  return bytes <= kHugePage ? kHugePage : (bytes + kHugePage - 1) / kHugePage * kHugePage;
+}
+
+// Whether the system has transparent huge pages off ("never").
+bool huge_pages_off() {
+  static const bool off = [] {
+    std::FILE* f = std::fopen("/sys/kernel/mm/transparent_hugepage/enabled", "r");
+    if (f == nullptr) return false;
+    char line[128]  = {};
+    const bool read = std::fgets(line, sizeof line, f) != nullptr;
+    std::fclose(f);
+    return read && std::strstr(line, "[never]") != nullptr;
+  }();
+  return off;
+}
+
+}  // namespace
+#endif
+
+void* allocate_huge_pages(std::size_t bytes) {
+#if defined(__linux__)
+  if (bytes > std::numeric_limits<std::size_t>::max() - 2 * kHugePage) throw std::bad_alloc();
+  const std::size_t length = huge_length(bytes);
+  void* const raw =
+      mmap(nullptr, length + kHugePage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (raw == MAP_FAILED) throw std::bad_alloc();
+  // Its huge-page-aligned part.
+  const std::uintptr_t start = reinterpret_cast<std::uintptr_t>(raw);
+  const std::uintptr_t at    = (start + kHugePage - 1) & ~std::uintptr_t{kHugePage - 1};
+  if (at != start) munmap(raw, at - start);
+  munmap(reinterpret_cast<void*>(at + length), start + kHugePage - at);
+  char* const p = reinterpret_cast<char*>(at);
+  if (!huge_pages_off()) {
+    // A huge page at the first touch of each, else a collapse of the small
+    // pages that touch made (MADV_COLLAPSE fails harmlessly before Linux 6.1).
+    madvise(p, length, MADV_HUGEPAGE);
+    for (std::size_t o = 0; o < length; o += kHugePage) static_cast<volatile char*>(p)[o] = 0;
+    madvise(p, length, kMadvCollapse);
+  }
+  return p;
+#else
+  return ::operator new(bytes == 0 ? 1 : bytes, std::align_val_t{64});
+#endif
+}
+
+void free_huge_pages(void* p, std::size_t bytes) noexcept {
+  if (p == nullptr) return;
+#if defined(__linux__)
+  munmap(p, huge_length(bytes));
+#else
+  (void)bytes;
+  ::operator delete(p, std::align_val_t{64});
+#endif
+}
+
 struct CandidateSet::Impl final : detail::CellCacheSource {
   // The cache of one cell, counted against the cache limit while present.
   struct Slot final : detail::CacheEntry {
@@ -1760,6 +2026,8 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
     DataType a = DataType::None, b = DataType::None, mi = DataType::None;
     double lds = 0.0;
     std::vector<float> values;
+    bool built = false;                       // under hot_mutex
+    std::atomic<const float*> copy{nullptr};  // of `values`, in the HotArena
   };
 
   ModelPtr model;
@@ -1774,6 +2042,137 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
   std::unique_ptr<Slot[]> slots;  // one per model cell
   std::vector<detail::CellBounds> bounds;
   mutable KernelPart kernel_part;
+  // The block of the HotArena (hot_arena), which prepare() lays out once;
+  // hot_mutex orders its publication and the kernel part's copy into it.
+  struct HotBlock {
+    void* data        = nullptr;
+    std::size_t bytes = 0;
+    ~HotBlock() { free_huge_pages(data, bytes); }
+  };
+  mutable HotBlock hot_block;
+  mutable std::once_flag hot_once;
+  mutable std::mutex hot_mutex;
+
+  // Lays out a HotArena's pieces one after another at 64-byte boundaries from
+  // `base`, at most `limit` bytes, or with `base` null only counts them (`at`).
+  struct HotLayout {
+    char* base;
+    std::size_t limit;
+    std::size_t at = 0;
+
+    char* place(std::size_t bytes) {
+      at            = (at + 63) & ~std::size_t{63};
+      char* const p = base != nullptr ? base + at : nullptr;
+      at += bytes;
+      if (base != nullptr && at > limit) throw std::length_error("tilewright: arena overflow");
+      return p;
+    }
+    template <class T, class A>
+    detail::Span<T> copy(const std::vector<T, A>& v) {
+      char* const p = place(v.size() * sizeof(T));
+      detail::Span<T> s;
+      if (p != nullptr && !v.empty()) {
+        std::memcpy(p, v.data(), v.size() * sizeof(T));
+        s.ptr   = reinterpret_cast<const T*>(p);
+        s.count = v.size();
+      }
+      return s;
+    }
+    detail::BlockSpan copy(const detail::BlockMatrix& m) {
+      detail::BlockSpan b(m);
+      b.f32  = copy(m.f32);
+      b.bf16 = copy(m.bf16);
+      b.int8 = copy(m.int8);
+      return b;
+    }
+    // In the order a ranking reads them.
+    detail::WeightsView copy(const detail::CellWeights& w) {
+      detail::WeightsView v(w);
+      v.q_mean  = copy(w.q_mean);
+      v.q_scale = copy(w.q_scale);
+      v.q_lo    = copy(w.q_lo);
+      v.q_hi    = copy(w.q_hi);
+      v.q_w0    = copy(w.q_w0);
+      v.q_b0    = copy(w.q_b0);
+      v.q_w2    = copy(w.q_w2);
+      v.q_b2    = copy(w.q_b2);
+      v.q_w4    = copy(w.q_w4);
+      v.q_b4    = copy(w.q_b4);
+      v.x_mean  = copy(w.x_mean);
+      v.x_scale = copy(w.x_scale);
+      v.x_lo    = copy(w.x_lo);
+      v.x_hi    = copy(w.x_hi);
+      v.x_w0    = copy(w.x_w0);
+      v.x_b0    = copy(w.x_b0);
+      v.x_w2    = copy(w.x_w2);
+      return v;
+    }
+  };
+
+  // The HotArena's layout (detail::HotArena) from `base`, or its bytes with
+  // `base` null; returns its bytes and, with `base`, sets *made.
+  std::size_t lay_out_hot(char* base, std::size_t limit, const detail::HotArena** made) const {
+    const std::size_t nc = model->cells.size();
+    HotLayout l{base, limit};
+    char* const header = l.place(sizeof(detail::HotArena));
+    char* const cells  = l.place(nc * sizeof(detail::HotCell));
+    detail::HotArena arena;
+    arena.keys                  = &keys;
+    arena.pool.first            = l.copy(keys.first);
+    arena.pool.shape            = l.copy(keys.shape);
+    arena.pool.member_begin     = l.copy(keys.member_begin);
+    arena.pool.members          = l.copy(keys.members);
+    arena.pool.key_of           = l.copy(keys.key_of);
+    arena.pool.attribute_values = l.copy(keys.attribute_values);
+    arena.pool.attribute_count  = keys.attribute_count;
+    arena.inter_kernel_size     = keys.first.size() * model->catalog->inter_kernel_dim;
+    arena.inter_kernel = reinterpret_cast<float*>(l.place(arena.inter_kernel_size * sizeof(float)));
+    for (std::size_t c = 0; c < nc; ++c) {
+      const std::shared_ptr<const detail::CellWeights> w = model->weights(c);
+      const std::shared_ptr<const detail::CellCache> cc  = cache(c, *w, false);
+      detail::HotCell h;
+      h.whitelist.keys = l.copy(cc->whitelist_keys);
+      h.whitelist.slot = l.copy(cc->slot);
+      h.weights        = l.copy(*w);
+      h.whitelist.emb  = l.copy(cc->whitelist_emb);
+      if (base == nullptr) continue;
+      const detail::HotCell* const made_cell =
+          new (cells + c * sizeof(detail::HotCell)) detail::HotCell(h);
+      if (c == 0) arena.cells = made_cell;
+    }
+    if (base != nullptr) *made = new (header) detail::HotArena(arena);
+    return l.at;
+  }
+
+  // With hot_mutex held: the kernel part's copy into the HotArena, once both
+  // exist and the part holds values.
+  void copy_kernel_part() const {
+    const detail::HotArena* const arena = hot_arena.load(std::memory_order_relaxed);
+    KernelPart& part                    = kernel_part;
+    if (arena == nullptr || !part.built || part.values.empty() ||
+        part.values.size() != arena->inter_kernel_size ||
+        part.copy.load(std::memory_order_relaxed) != nullptr)
+      return;
+    std::memcpy(arena->inter_kernel, part.values.data(), part.values.size() * sizeof(float));
+    part.copy.store(arena->inter_kernel, std::memory_order_release);
+  }
+
+  // Lays out and publishes the HotArena once. Without the memory for it,
+  // rankings read the vectors themselves.
+  void build_hot() const {
+    std::call_once(hot_once, [&] {
+      try {
+        const std::size_t bytes      = lay_out_hot(nullptr, 0, nullptr);
+        hot_block.data               = allocate_huge_pages(bytes);
+        hot_block.bytes              = bytes;
+        const detail::HotArena* made = nullptr;
+        if (lay_out_hot(static_cast<char*>(hot_block.data), bytes, &made) != bytes) return;
+        std::lock_guard<std::mutex> lock(hot_mutex);
+        hot_arena.store(made, std::memory_order_release);
+        copy_kernel_part();
+      } catch (const std::exception&) {}
+    });
+  }
 
   void embed(const detail::Cell& cell,
              const detail::CellWeights& w,
@@ -1975,10 +2374,14 @@ struct CandidateSet::Impl final : detail::CellCacheSource {
       part.values.resize(keys.first.size() * d);
       for (std::size_t key = 0; key < keys.first.size(); ++key)
         cat.inter_kernel(*model, p, configs[keys.first[key]], hw, &part.values[key * d]);
+      std::lock_guard<std::mutex> lock(hot_mutex);
+      part.built = true;
+      copy_kernel_part();
     });
     if (p.a_dtype != part.a || p.b_dtype != part.b || p.mi_dtype != part.mi || hw.LDS != part.lds)
       return nullptr;
-    return part.values.data();
+    const float* const copied = part.copy.load(std::memory_order_acquire);
+    return copied != nullptr ? copied : part.values.data();
   }
 };
 
@@ -2091,6 +2494,7 @@ void CandidateSet::prepare(const std::vector<int>& cells) const {
 void CandidateSet::prepare() const {
   for (std::size_t cell = 0; cell < impl_->model->cells.size(); ++cell)
     impl_->prepare_cell(static_cast<int>(cell));
+  impl_->build_hot();
 }
 
 void CandidateSet::prepare(const Problem& problem, const Hardware& hardware) const {

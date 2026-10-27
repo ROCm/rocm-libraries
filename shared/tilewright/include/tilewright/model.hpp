@@ -182,6 +182,15 @@ std::size_t cache_limit() noexcept;
 // Bytes the cache holds now.
 std::size_t cache_usage() noexcept;
 
+// Zeroed memory for data that a ranking reads on every call, such as what a
+// LaunchModel's plan() reads of each config: at least `bytes`, 64-byte
+// aligned. On Linux it is whole 2 MiB pages at a 2 MiB boundary, backed by
+// transparent huge pages unless the system has them off. Throws
+// std::bad_alloc when the memory cannot be had. free_huge_pages takes it back
+// given the same `bytes`.
+void* allocate_huge_pages(std::size_t bytes);
+void free_huge_pages(void* p, std::size_t bytes) noexcept;
+
 // A caller's fixed pool of candidate kernels, ranked against one model.
 // Per-cell data that depends only on the pool is computed once and reused
 // within the cache limit (set_cache_limit): whitelist membership and the item
@@ -263,7 +272,12 @@ class CandidateSet {
   // total the cells prepared first may be released again.
   void prepare(const std::vector<int>& cells) const;
 
-  // As prepare(cells) with every cell of the model.
+  // As prepare(cells) with every cell of the model, then a copy of what
+  // rankings of a cell's whitelist read (every cell's whitelist and tensors,
+  // the pool's arrays and, once built, the kernel part of the interaction
+  // features) in memory of allocate_huge_pages, which later rankings read.
+  // The copy is held as long as the CandidateSet, outside the cache limit;
+  // without the memory for it, rankings read the data in place.
   void prepare() const;
 
   // As prepare(cells) with the cell `problem` routes to, plus the interaction

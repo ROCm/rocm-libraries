@@ -253,7 +253,10 @@ total, over every model and candidate set of the process, is within the cache
 limit (`set_cache_limit`; 1 GiB unless `TILEWRIGHT_CACHE_MB` sets it). Past it,
 the least recently used of them are released and built again from the packed
 weights when a ranking needs them, so rankings are the same under any limit;
-only their first use after a release takes longer.
+only their first use after a release takes longer. Outside the limit,
+`CandidateSet::prepare()` keeps a copy of what rankings of a cell's whitelist
+read for as long as the candidate set lives, and each thread that ranks keeps
+its scratch arrays in one 2 MiB block, both in memory of `allocate_huge_pages`.
 
 ## Model files (MLREC_v2)
 
@@ -518,6 +521,10 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
 - `set_cache_limit(bytes)`, `cache_limit()` and `cache_usage()` set and report
   the process-wide limit on cached fp32 weights and candidate-set caches (see
   Memory above); a part in use is kept even when it alone exceeds the limit.
+- `allocate_huge_pages(bytes)` and `free_huge_pages(p, bytes)` hand out and
+  take back zeroed memory for data rankings read on every call (TensileLite
+  keeps its launch records there): on Linux whole 2 MiB pages at a 2 MiB
+  boundary, on transparent huge pages unless the system has them off.
 
 `DataType` values are part of the model format (MI-table keys). They follow
 Origami's enumeration, which has an `Int4` entry that Tensile's does not, so

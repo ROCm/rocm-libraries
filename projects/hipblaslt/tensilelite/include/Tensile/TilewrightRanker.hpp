@@ -195,6 +195,44 @@ namespace TensileLite
     }
 
     /**
+     * Storage from tilewright::allocate_huge_pages, on transparent huge pages
+     * where the system has them: for what a ranking reads on every call.
+     */
+    template <typename T>
+    struct HugePageAllocator
+    {
+        using value_type = T;
+
+        HugePageAllocator() = default;
+        template <typename U>
+        HugePageAllocator(HugePageAllocator<U> const&) noexcept
+        {
+        }
+
+        T* allocate(size_t n)
+        {
+            return static_cast<T*>(tilewright::allocate_huge_pages(n * sizeof(T)));
+        }
+
+        void deallocate(T* p, size_t n) noexcept
+        {
+            tilewright::free_huge_pages(p, n * sizeof(T));
+        }
+
+        template <typename U>
+        bool operator==(HugePageAllocator<U> const&) const noexcept
+        {
+            return true;
+        }
+
+        template <typename U>
+        bool operator!=(HugePageAllocator<U> const&) const noexcept
+        {
+            return false;
+        }
+    };
+
+    /**
      * The problem and device of the ranking in progress on this thread. The
      * launch plans that ranking asks for are those of this problem on this
      * device.
@@ -736,8 +774,10 @@ namespace TensileLite
 
         std::string                              m_arch;
         std::vector<std::shared_ptr<MySolution>> m_solutions;
-        std::vector<KernelLaunch>                m_kernels;
-        std::shared_ptr<Hardware const>          m_device;
+        // On huge pages: plan() reads the records of the tier's kernels on
+        // every ranking, scattered over the pool.
+        std::vector<KernelLaunch, HugePageAllocator<KernelLaunch>> m_kernels;
+        std::shared_ptr<Hardware const>                            m_device;
     };
 
     /**
