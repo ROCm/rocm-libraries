@@ -13837,6 +13837,10 @@ class KernelWriterAssembly(KernelWriter):
     else:
       raise Exception(f"unsupport tc %s{tc}")
 
+    # LdsXorSwizzle bases 1..nSwz flip buffers with the same XOR as slot 0: the buffer bit lies
+    # above the chunk and key bits. The immediate-offset swap leaves all of them unchanged.
+    nSwz = self._ldsXorSwzExtraBases(kernel, tc)
+    swapBasesByMask = None
     if self.states.IncLdsBufSwitch:
       # IncLdsBufSwitch case, we do not use xor. Instead, use add and max check for round back
       # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) and the non-DTL TDM TDMPlusLdsBuf path)
@@ -13860,11 +13864,7 @@ class KernelWriterAssembly(KernelWriter):
         src0=sgpr("LDSBufferReadInc"), \
         src1=vgpr("LocalReadAddrOrig%s"%(tc)), \
         comment="LocalReadAddr = Inc + Orig"))
-    # LdsXorSwizzle bases 1..nSwz flip buffers with the same XOR as slot 0: the buffer bit lies
-    # above the chunk and key bits. The immediate-offset swap leaves all of them unchanged.
-    nSwz = self._ldsXorSwzExtraBases(kernel, tc)
-    swapBasesByMask = None
-    if internalPointerSwap or kernel["StoreSwapAddr"]:
+    elif internalPointerSwap or kernel["StoreSwapAddr"]:
       if not kernel["StoreSwapAddr"]:
         tP["localReadSwapByteOffset"] = 0 if tP["localReadSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
         module.addComment1("local read swap internal offset -> %u" % tP["localReadSwapByteOffset"])
