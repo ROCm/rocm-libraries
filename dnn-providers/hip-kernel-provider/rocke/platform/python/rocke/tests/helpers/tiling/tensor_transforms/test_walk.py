@@ -28,14 +28,14 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     AxisBound,
     Congruence,
     Interval,
-    RuntimeValue,
     UniformPart,
+    _numeric_hi,
     _required_checks,
+    _RuntimeEnd,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import (
     WORKGROUP_SIZE_RECORD,
     leaf_varying_within_workgroup,
-    runtime_value_of,
     split_coordinate,
     value_facts,
 )
@@ -66,10 +66,9 @@ def _stated(b: IRBuilder, name: str, **facts) -> Value:
 
 def _runtime_length(
     b: IRBuilder, name: str, at_most: int, *, multiple_of: int = 1
-) -> RuntimeValue:
-    """A runtime length the way its producer states it: an envelope marker, then rebuilt."""
-    marked = _stated(b, name, ge=0, lt=at_most + 1, multiple_of=multiple_of)
-    return runtime_value_of(marked)
+) -> Value:
+    """A runtime length: a kernel parameter declared with its facts."""
+    return b.param(name, I32, ge=0, le=at_most, multiple_of=multiple_of)
 
 
 def _op_count(b: IRBuilder) -> int:
@@ -123,7 +122,7 @@ def _holds(facts: tuple[Interval, Congruence], v: int) -> bool:
 
 
 def test_the_walk_is_internal_and_not_on_the_package_door():
-    for name in ("split_coordinate", "value_facts", "runtime_value_of", "AffineCoord"):
+    for name in ("split_coordinate", "value_facts", "AffineCoord"):
         assert not hasattr(tt, name)
         assert name not in tt.__all__
 
@@ -301,9 +300,9 @@ def test_a_guard_marker_gives_a_multiplied_and_a_shifted_origin_the_same_facts()
     b = _builder()
     m = _runtime_length(b, "M", 1 << 20, multiple_of=128)
     for origin in (b.mul(b.block_id_x(), _c(b, 128)), b.shl(b.block_id_x(), _c(b, 7))):
-        guarded = b._assume_range(origin, ge=0, lt=m.value)
+        guarded = b._assume_range(origin, ge=0, lt=m)
         assert value_facts(b, guarded) == (
-            Interval(0, m._shifted(-127)),
+            Interval(0, _RuntimeEnd(m, -127)),
             Congruence(128, 0),
         )
 
@@ -430,16 +429,16 @@ def test_a_counter_up_to_a_runtime_length_minus_a_tile_proves_the_full_tile_by_i
     b = _builder()
     tk = 32
     ks = _runtime_length(b, "K", 65536, multiple_of=8)
-    with b.scf_for(_c(b, 0), b.add(ks.value, _c(b, 1 - tk)), _c(b, tk)) as k:
+    with b.scf_for(_c(b, 0), b.add(ks, _c(b, 1 - tk)), _c(b, tk)) as k:
         assert value_facts(b, k) == (
-            Interval(0, ks._shifted(-(tk - 1))),
+            Interval(0, _RuntimeEnd(ks, -(tk - 1))),
             Congruence(tk, 0),
         )
-    with b.scf_for(_c(b, 0), ks.value, _c(b, tk)) as k:
+    with b.scf_for(_c(b, 0), ks, _c(b, tk)) as k:
         assert value_facts(b, k) == (Interval(0, ks), Congruence(tk, 0))
-    two_steps = b.sub(b.add(ks.value, _c(b, 1)), _c(b, 8))
+    two_steps = b.sub(b.add(ks, _c(b, 1)), _c(b, 8))
     with b.scf_for(_c(b, 0), two_steps, _c(b, tk)) as k:
-        assert value_facts(b, k)[0] == Interval(0, ks._shifted(-7))
+        assert value_facts(b, k)[0] == Interval(0, _RuntimeEnd(ks, -7))
 
 
 def test_any_other_stop_gives_its_own_upper_end_and_a_non_exact_step_is_unknown():
@@ -449,27 +448,40 @@ def test_any_other_stop_gives_its_own_upper_end_and_a_non_exact_step_is_unknown(
         assert value_facts(b, k) == (Interval(0, 101), Congruence(8, 0))
     with b.scf_for(_c(b, 16), b.smin(p, _c(b, 10)), _c(b, 8)) as k:
         assert value_facts(b, k) == (Interval(16, 17), Congruence(8, 0))  # never runs
-    with b.scf_for(_c(b, 0), p, _c(b, 8)) as k:
+    with b.scf_for(_c(b, 0), b.mul(p, _c(b, 2)), _c(b, 8)) as k:
         assert value_facts(b, k) == (Interval(0, None), Congruence(8, 0))
     with b.scf_for(_c(b, 0), _c(b, 64), b.param("step", I32)) as k:
         assert value_facts(b, k) == UNKNOWN
 
 
-def test_full_tile_proof_end_to_end_needs_no_check():
+@pytest.mark.parametrize("kind", ["parameter", "marker"])
+def test_full_tile_proof_end_to_end_needs_no_check(kind):
     """The counter of a loop over full tiles plus a per-lane offset inside the tile stays below
-    the runtime length: no check, also when the walk rebuilt the length from its marker and the
-    tensor bound holds the producer's object."""
+    the runtime length: no check, whether the length is a kernel parameter declared with its
+    facts or a range marker's result (what gpu_checked_value returns)."""
     b = _builder()
     tk = 16
-    producer_ks = _runtime_length(b, "K", 4096, multiple_of=8)
-    with b.scf_for(_c(b, 0), b.add(producer_ks.value, _c(b, 1 - tk)), _c(b, tk)) as k:
+    if kind == "parameter":
+        ks = _runtime_length(b, "K", 4096, multiple_of=8)
+    else:
+        ks = _stated(b, "K", ge=0, lt=4097, multiple_of=8)
+    with b.scf_for(_c(b, 0), b.add(ks, _c(b, 1 - tk)), _c(b, tk)) as k:
         k_range, _ = value_facts(b, k)
     tile = k_range.plus(Interval(0, tk))
-    graph = identity_graph((producer_ks,))
-    assert _required_checks(graph, (tile,), (AxisBound.of(0, producer_ks),)) == ()
-    rebuilt_ks = runtime_value_of(producer_ks.value)
-    assert rebuilt_ks is not producer_ks and rebuilt_ks == producer_ks
-    assert _required_checks(graph, (tile,), (AxisBound.of(0, rebuilt_ks),)) == ()
+    graph = identity_graph((ks,))
+    assert _required_checks(graph, (tile,), (AxisBound.of(0, ks),)) == ()
+    other = _runtime_length(b, "K_copy", 4096, multiple_of=8)
+    assert _required_checks(graph, (tile,), (AxisBound.of(0, other),)) != ()
+
+
+def test_a_counter_up_to_a_bare_parameter_is_bounded_by_it():
+    """A parameter is a runtime end even with no stated facts: the counter is proven below it
+    by identity, and its numbers stay unknown."""
+    b = _builder()
+    p = b.param("p", I32)
+    with b.scf_for(_c(b, 0), p, _c(b, 8)) as k:
+        assert value_facts(b, k) == (Interval(0, p), Congruence(8, 0))
+        assert _numeric_hi(value_facts(b, k)[0].hi) is None
 
 
 # --- the marker row and runtime ends ----------------------------------------------------------------
@@ -479,9 +491,9 @@ def test_a_marker_narrows_the_derived_facts_and_snaps_to_the_residue():
     b = _builder()
     length = _runtime_length(b, "L", 1 << 20, multiple_of=128)
     origin = b.mul(b.block_id_x(), _c(b, 128))
-    guarded = b._assume_range(origin, ge=0, lt=length.value)
+    guarded = b._assume_range(origin, ge=0, lt=length)
     assert value_facts(b, guarded) == (
-        Interval(0, length._shifted(-127)),
+        Interval(0, _RuntimeEnd(length, -127)),
         Congruence(128, 0),
     )
     stated_residue = _stated(b, "s", ge=0, lt=1000, multiple_of=8, residue=3)
@@ -508,49 +520,52 @@ def test_a_marker_on_a_per_lane_value_keeps_it_per_lane():
     assert split.uniform == () and split.lane is marked
 
 
-def test_runtime_value_of_rebuilds_exactly_what_the_marker_states():
+def test_a_parameter_reads_the_facts_its_declaration_states():
     b = _builder()
-    p = b.param("p", I32)
-    marked = b._assume_range(p, ge=0, lt=4097, multiple_of=8)
-    assert runtime_value_of(marked) == RuntimeValue(
-        marked, 0, Interval(0, 4097), Congruence(8, 0)
-    )
-    residue = b._assume_range(p, ge=0, lt=100, multiple_of=8, residue=3)
-    assert runtime_value_of(residue)._congruence == Congruence(8, 3)
-    assert runtime_value_of(p) is None
-    assert runtime_value_of(b.thread_id_x()) is None
-    assert runtime_value_of(7) is None
-    with_runtime_end = b._assume_range(p, ge=0, lt=marked)
-    assert runtime_value_of(with_runtime_end) is None
+    declared = b.param("p", I32, ge=0, le=4096, multiple_of=8)
+    assert value_facts(b, declared) == (Interval(0, 4097), Congruence(8, 0))
+    assert value_facts(b, b.param("q", I32)) == UNKNOWN
+    baked = b.param("d", I32, eq=128)
+    assert value_facts(b, baked) == (Interval(128, 129), Congruence(128, 0))
+    lower_only = b.param("n", I32, ge=1)
+    assert value_facts(b, lower_only) == (Interval(1, None), Congruence(1, 0))
 
 
-def test_runtime_value_of_takes_the_stated_envelope_not_the_derived_range():
+def test_a_runtime_end_takes_the_stated_facts_not_the_derived_range():
     b = _builder()
     capped = b.smin(b.param("p", I32), _c(b, 100))  # derived [?, 101)
     marked = b._assume_range(capped, ge=0, lt=1001)
     assert value_facts(b, marked)[0] == Interval(0, 101)
-    rebuilt = runtime_value_of(marked)
-    assert rebuilt._envelope == Interval(0, 1001)
-    producer = RuntimeValue(marked, 0, Interval(0, 1001), Congruence(1, 0))
-    # an end of each kind in one call: no two-RuntimeValue error
-    assert Interval(0, rebuilt).intersect(Interval(0, producer)) == Interval(0, rebuilt)
+    assert _RuntimeEnd(marked).envelope == Interval(0, 1001)
+    assert Interval(0, marked).intersect(Interval(0, 2000)) == Interval(0, marked)
 
 
-def test_a_marker_runtime_end_resolves_through_the_length_marker():
+def test_a_marker_runtime_end_resolves_through_the_value_it_names():
     b = _builder()
     ks = _runtime_length(b, "K", 4096)
     origin = b.block_id_x()
-    guarded = b._assume_range(origin, ge=0, lt=ks.value, lt_plus=-3)
-    assert value_facts(b, guarded)[0] == Interval(0, ks._shifted(-3))
-    not_a_length = b.param("n", I32)
-    bad = b._assume_range(origin, ge=0, lt=not_a_length)
+    guarded = b._assume_range(origin, ge=0, lt=ks, lt_plus=-3)
+    assert value_facts(b, guarded)[0] == Interval(0, _RuntimeEnd(ks, -3))
+    start = _stated(b, "s", ge=0, lt=ks)
+    within_start = b._assume_range(origin, ge=0, lt=start)
+    hi = value_facts(b, within_start)[0].hi
+    assert hi == _RuntimeEnd(start) and _numeric_hi(hi) == 4095
+    no_facts = b.add(b.param("n", I32), _c(b, 1))
+    bad = b._assume_range(origin, ge=0, lt=no_facts)
     message = (
-        f"IR range walk: the marker on {origin} states an end over {not_a_length}, which is not "
-        "a runtime value's marker result -- a runtime end is the .value of a RuntimeValue (from "
-        "runtime_value)"
+        f"IR range walk: the marker on {origin} states an end over {no_facts}, which has no "
+        "stated facts -- a runtime end is a kernel parameter or a Value gpu_checked_value "
+        "returned"
     )
     with _raises(ValueError, message):
         value_facts(b, bad)
+
+
+def test_a_marker_with_a_value_lower_end_takes_its_stated_number():
+    b = _builder()
+    floor = b.param("f", I32, ge=16, le=64)
+    marked = b._assume_range(b.block_id_x(), ge=floor, ge_plus=2)
+    assert value_facts(b, marked)[0] == Interval(18, None)
 
 
 # --- the split ------------------------------------------------------------------------------------
@@ -571,7 +586,7 @@ def test_uniform_leaves_are_one_uniform_part():
         split = split_coordinate(b, k)
         assert _parts(split) == (0, [k], None)
         assert (split.uniform[0].range, split.uniform[0].congruence) == (
-            Interval(0, None),
+            Interval(0, p),
             Congruence(16, 0),
         )
 
@@ -806,7 +821,7 @@ def test_a_value_that_is_not_i32_is_refused(make):
 def test_the_walk_emits_nothing_and_answers_the_same_twice():
     b = _builder()
     ks = _runtime_length(b, "K", 4096, multiple_of=8)
-    with b.scf_for(_c(b, 0), b.add(ks.value, _c(b, -15)), _c(b, 16)) as k:
+    with b.scf_for(_c(b, 0), b.add(ks, _c(b, -15)), _c(b, 16)) as k:
         value = b.add(b.add(k, b.div(b.thread_id_x(), _c(b, 4))), _c(b, 2))
     before = _op_count(b)
     facts = value_facts(b, value)

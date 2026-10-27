@@ -962,8 +962,9 @@ def test_an_unguarded_block_origin_into_an_unmerge_raises_the_dividend_message()
     with _raises(
         ValueError,
         "unmerge of 'm' needs its dividend in [0, 2^31) for magic division, but its range is "
-        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state a "
-        "trusted range with runtime_value(b, v, at_most=...)",
+        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state "
+        "its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the "
+        "GPU (b.gpu_checked_value(v, ge=0, le=...))",
     ):
         emit_addresses(b, graph, tensor, [(m, 0)])
     b = _builder()
