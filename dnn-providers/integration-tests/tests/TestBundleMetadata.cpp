@@ -16,7 +16,9 @@
 
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::BundleMetadataError;
+using hipdnn_integration_tests::CasePlacement;
 using hipdnn_integration_tests::CasePurpose;
+using hipdnn_integration_tests::CaseValidator;
 using hipdnn_integration_tests::checkArchCompatibility;
 using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
