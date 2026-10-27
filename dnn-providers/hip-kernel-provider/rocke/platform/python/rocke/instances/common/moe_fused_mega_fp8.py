@@ -96,8 +96,8 @@ __all__ = [
 # AGPR operand staging: route the gate/up/down K=128 fp8 MFMAs through the
 # inline-asm helper (``v_mfma_f32_16x16x128_f8f6f4`` with AGPR srcA/srcB +
 # VGPR acc, the aiter staging layout) instead of the scaled intrinsic. The
-# helper is numerically identical (cbsz/blgp=0 => fp8e4m3, scales pinned to
-# the neutral E8M0 0 => factor 1.0) and verified bit-exact vs the intrinsic
+# helper is numerically identical (cbsz/blgp=0 => fp8e4m3, both scales at
+# literal 0, which selects the unscaled instruction) and verified bit-exact vs the intrinsic
 # (asm_mfma_parity / asm_mfma_fp8frag). Forcing the fp8 A/B fragments to live
 # in the AGPR file across the K-loop is the lever (aiter keeps ~192 AGPR of
 # operand state; the intrinsic path leaves srcA/srcB placement to the register
@@ -1671,7 +1671,7 @@ def build_moe_fused_mega_gemm_fp8(
         )
     atom = spec.gate_up_atom()
     # The hero atom reuses the ``mfma.scale.f32.16x16x128.f8f6f4`` intrinsic with
-    # the in-instruction E8M0 scales pinned to the neutral value (verified
+    # both E8M0 scales at literal 0 (unscaled instruction; verified
     # numerically standalone). Both the gate/up and the down atom are selectable
     # (``gate_up_k`` / ``down_k``), so both are checked.
     _validate_fp8_atom(atom, target, arch)

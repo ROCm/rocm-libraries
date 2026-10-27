@@ -255,6 +255,45 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
+    /* Batched 4x4x4 atoms. No legacy opcode either; Python reaches them as the
+     * tile.mfma_f32_4x4x4_{f16,bf16} handlers, which pass the operands as they are. */
+    if(strcmp(op_id, "mfma_f32_4x4x4_f16") == 0 || strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0)
+    {
+        bool bf16 = strcmp(op_id, "mfma_f32_4x4x4_bf16") == 0;
+        rocke_h_emitf(lw,
+                      "f32x4 %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
+                      bf16 ? "mfma_f32_4x4x4bf16_1k" : "mfma_f32_4x4x4f16",
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
+    if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
+    {
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        rocke_h_emitf(lw,
+                      "f64x1 %s = {__builtin_amdgcn_mfma_f64_4x4x4f64(%s, %s, %s[0], 0, 0, 0)};",
+                      rocke_h_name(lw, op->results[0]),
+                      a_arg,
+                      b_arg,
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
+    {
+        const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_A, rocke_f64());
+        const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_B, rocke_f64());
+        rocke_h_emitf(lw,
+                      "f64x4 %s = __builtin_amdgcn_mfma_f64_16x16x4f64(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
+                      a_arg,
+                      b_arg,
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
     if(rocke_gfx1250_scaled_wmma(op_id))
     {
         return h_emit_gfx1250_scaled_wmma(lw, op);
@@ -748,12 +787,6 @@ static rocke_status_t rocke_h_op_tile_ds_read_tr16_b64(rocke_h_lowerer_t* lw, co
 {
     return h_ds_read_tr16(
         lw, op, "ds_read_tr16_b64", "i16x4_raw", "_llvm_amdgcn_ds_read_tr16_b64", 4, 8);
-}
-
-static rocke_status_t rocke_h_op_tile_ds_read_tr16_b128(rocke_h_lowerer_t* lw, const rocke_op_t* op)
-{
-    return h_ds_read_tr16(
-        lw, op, "ds_read_tr16_b128", "i16x8_raw", "_llvm_amdgcn_ds_read_tr16_b128", 8, 16);
 }
 
 /* tile.ds_read_tr_b8 has NO _op_tile_ds_read_tr_b8 method in lower_hip.py: the
@@ -1413,6 +1446,13 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     {
         return lw->status;
     }
+    {
+        char descriptor_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", descriptor_error);
+        }
+    }
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
 
     iter_meta = rocke_attr_get(&op->attrs, "iter_args");
@@ -1608,7 +1648,6 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mma(void)
         {ROCKE_OP_TILE_PERMLANEX16, rocke_h_op_tile_permlanex16},
         {ROCKE_OP_TILE_BYTE_PERM, rocke_h_op_tile_byte_perm},
         {ROCKE_OP_TILE_DS_READ_TR16_B64, rocke_h_op_tile_ds_read_tr16_b64},
-        {ROCKE_OP_TILE_DS_READ_TR16_B128, rocke_h_op_tile_ds_read_tr16_b128},
         {ROCKE_OP_TILE_DS_READ_TR_B8, rocke_h_op_tile_ds_read_tr_b8},
         /* barriers / scheduling */
         {ROCKE_OP_TILE_SYNC, rocke_h_op_tile_sync},

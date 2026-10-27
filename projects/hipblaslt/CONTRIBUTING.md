@@ -126,7 +126,11 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). When `hipblaslt-test` starts, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is left out before registration. It does not appear in `--gtest_list_tests` output or in the `[ SKIPPED ]` summary. Entries with no `known_bug_platforms` are left out on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). When `hipblaslt-test` starts, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry is left out before registration when the entry applies to the current GPU. It does not appear in `--gtest_list_tests` output or in the `[ SKIPPED ]` summary. There are two flavors:
+  - **All platforms:** an entry with no `known_bug_platforms` is tagged `category: known_bug` by `hipblaslt_gentest.py` when `hipblaslt_gtest.data` is built, and the case is left out on every platform.
+  - **Per-GPU:** an entry with `known_bug_platforms` is left out only when the current GPU `gcnArchName` matches one of the listed architectures. On other GPUs the case registers and runs normally.
+
+  Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
 
 ---

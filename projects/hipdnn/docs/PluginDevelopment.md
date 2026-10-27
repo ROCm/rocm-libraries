@@ -15,6 +15,7 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
+  - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -90,6 +91,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 - **Data SDK Objects**: Plugins use Data SDK objects to deserialize and process graphs
 - **Capability Reporting**: Plugins analyze graphs and report whether they can execute them
 - **Execution Interface**: Plugins provide execution methods for supported operations
+- **Execution Plan Serialization (optional)**: A plugin that lets users save and load built execution plans exports three hooks: `hipdnnEnginePluginSerializeExecutionContext`, `hipdnnEnginePluginDestroySerializedExecutionContext` and `hipdnnEnginePluginCreateExecutionContextFromSerialized` (declared in `hipdnn_plugin_sdk/EnginePluginApi.h`). hipDNN uses them only when all three are exported. See [RFC 0009](./rfcs/0009_CompiledPlanSerialization.md#plugin-api).
 
 ## Engine IDs
 
@@ -432,6 +434,23 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 
 3. **Remove only during major version updates** to maintain backward compatibility.
 
+### Saving Execution Plans from Ingestor Engines
+
+A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
+
+- **Opt in per dispatch handler.** Override `saveLaunchInputs` and `restoreLaunch` in `hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler`. The defaults return no value, which means the handler does not support saving or restoring. In the same handler, override `supportsSaving` to return true.
+- **Save launch inputs under a versioned name.** `saveLaunchInputs` returns the handler's named, typed launch inputs (never computed grid or argument values) with a versioned dispatch name. Register the handler under that versioned name as well as under the dispatch symbol its descriptors use, so a loaded plan finds the handler whose contract gives the values their meaning.
+- **Change the version when the contract changes.** The version identifies the contract between the saved values and the launch. It is not the format version of the saved file. A saved plan can pair an older code object with the current launch. Use a new version when one of these items changes:
+  - The names, types, or meanings of the values.
+  - The kernel arguments that the launch passes: their order, count, kinds, sizes, or meanings.
+  - How the launch calculates the grid, the block, or the dynamic LDS from the values.
+
+  Keep the handler of the old version registered while plans saved with that version must load.
+- **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
+- **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
+- **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must have a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
+- **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
+
 ## Plugin Architecture
 
 ### Directory Structure for Kernel Engine Plugins
@@ -684,7 +703,7 @@ Integration tests validate end-to-end functionality of your plugin. They come in
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#principles).
+Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#methodology).
 
 ## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 

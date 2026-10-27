@@ -845,6 +845,401 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    # Configs 36-39: validator hardening. 36 and 37 are rejected by both
+    # validators; 38 and 39 are accepted and built.
+    if idx == 36:
+        # Rejected: the dgrad builder has no K-unrolled loop (unroll_k used to
+        # be accepted and silently ignored).
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                unroll_k=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 37:
+        # Rejected: 1x2 warps of the 16x16x32 atom on a 256x256 tile hold 512
+        # fp32 accumulators per lane (> 256, the whole register file).
+        p = _cp(N=4, Hi=12, Wi=12, C=384, K=384, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=256,
+                tile_n=256,
+                tile_k=64,
+                warp_m=1,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx950",
+        )
+
+    if idx == 38:
+        # Accepted: compv4 is charged one A and one B tile (the builder never
+        # double-buffers), so a 128x128x64 tile fits gfx942's LDS; a doubled
+        # charge rejected it.
+        p = _cp(N=4, Hi=28, Wi=28, C=128, K=128, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="compv4",
+                epilogue="default",
+            ),
+            "gfx942",
+        )
+
+    if idx == 39:
+        # Accepted: a non-default A row pad (lds_k_pad=0) reaches the kernel
+        # name ("_kp0").
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_pad=0,
+            ),
+            "gfx950",
+        )
+
+    # Configs 40-43: stride 1 builds its single tilde record from the
+    # kernargs (DgradConvSpec.folds_sub_gemm_record), at every dilation, pad,
+    # filter and grouping; configs 0, 4 and 21-24 fold too.
+    if idx == 40:
+        # Stride 1, dilation 2: folded record, tilde epilogue (a_embed = -dH).
+        p = _cp(N=4, Hi=20, Wi=20, C=64, K=64, Y=3, X=3, pH=2, pW=2, dH=2, dW=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                uniform_k_decode=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 41:
+        # Grouped 5x5, pad 0 (Ho < Hi): the AOT shape of an entry --
+        # K-outer, uniform_k_decode, cshuffle, explicit widths.
+        p = _cp(N=2, Hi=24, Wi=20, C=128, K=256, Y=5, X=5, groups=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="compv3",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                uniform_k_decode=True,
+                vector_size_a=8,
+                vector_size_b=8,
+                vector_size_c=8,
+            ),
+            "gfx950",
+        )
+
+    if idx == 42:
+        # Stride 1 split-K: the folded gemm_k_padded rounds dg_K up to
+        # tile_k * split_k in the kernel.
+        p = _cp(N=4, Hi=14, Wi=14, C=64, K=96, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=2,
+            ),
+            "gfx950",
+        )
+
+    if idx == 43:
+        # gfx942, grouped 1x3 filter with pad (0, 1).
+        p = _cp(N=2, Hi=12, Wi=16, C=64, K=128, Y=1, X=3, pH=0, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="mem",
+                epilogue="default",
+            ),
+            "gfx942",
+        )
+
+    # Configs 44-48: the tap-outer K loop (DgradConvSpec.tap_outer_k).
+    # 44-46 build; 47 and 48 are rejected by both validators (the loop has no
+    # fallback for a problem it cannot compute).
+    if idx == 44:
+        # Grouped 3x3: the AOT shape of an entry (K-outer, cshuffle, widths).
+        p = _cp(N=2, Hi=14, Wi=14, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+                vector_size_a=8,
+                vector_size_b=8,
+                vector_size_c=8,
+                tap_outer_k=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 45:
+        # Ungrouped 5x5, pad 2, M-outer, several chunks per tap.
+        p = _cp(N=2, Hi=13, Wi=9, C=64, K=128, Y=5, X=5, pH=2, pW=2)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="compv4",
+                epilogue="default",
+                tap_outer_k=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 46:
+        # gfx942, grouped 1x3 filter with pad (0, 1).
+        p = _cp(N=2, Hi=12, Wi=16, C=64, K=128, Y=1, X=3, pH=0, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="mem",
+                epilogue="default",
+                tap_outer_k=True,
+            ),
+            "gfx942",
+        )
+
+    if idx == 47:
+        # Rejected: kpg = 96 is not a multiple of tile_k = 64.
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=96, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                tap_outer_k=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 48:
+        # Rejected: stride 2 (the tilde slice is not the plain filter tap).
+        p = _cp(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                tap_outer_k=True,
+            ),
+            "gfx950",
+        )
+
+    # Configs 49-50: the XCD-contiguous tile order of grouped stride-1
+    # kernels on gfx950 (DgradConvSpec.xcd_tile_order); 49 emits the remap
+    # (the default), 50 is the launch-order A/B build.
+    if idx in (49, 50):
+        p = _cp(N=1, Hi=8, Wi=8, C=256, K=256, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                xcd_tile_order=(idx == 49),
+            ),
+            "gfx950",
+        )
+
+    # Configs 51-56: the dY halo mode of the tap-outer loop (dy_halo).
+    # 51-54 build; 55 (no tap-outer loop) and 56 (Wo > halo_max_wo) are
+    # rejected by both validators.
+    halo = {
+        51: (
+            _cp(N=2, Hi=10, Wi=14, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=2),
+            {
+                "epilogue": "cshuffle",
+                "lds_k_outer": True,
+                "vector_size_a": 8,
+                "vector_size_b": 8,
+                "vector_size_c": 8,
+                "dy_halo": 2,
+                "halo_max_wo": 16,
+            },
+        ),
+        52: (
+            _cp(N=1, Hi=9, Wi=20, C=64, K=128, Y=5, X=5, pH=2, pW=2),
+            {
+                "tile_m": 128,
+                "warp_m": 4,
+                "warp_n": 1,
+                "lds_k_outer": True,
+                "dy_halo": 1,
+                "dy_halo_setprio": 1,
+                "dy_halo_kouter_pad": 32,
+                "halo_max_wo": 32,
+            },
+        ),
+        53: (
+            _cp(N=2, Hi=8, Wi=8, C=64, K=64, Y=7, X=7, pH=3, pW=3),
+            {
+                "tile_m": 256,
+                "warp_m": 4,
+                "warp_n": 1,
+                "epilogue": "cshuffle",
+                "lds_k_outer": True,
+                "dy_halo": 2,
+                "dy_halo_setprio": 2,
+                "halo_max_wo": 8,
+            },
+        ),
+        54: (
+            _cp(N=1, Hi=6, Wi=19, C=256, K=256, Y=3, X=5, pH=1, pW=2, groups=4),
+            {"dy_halo": 2, "halo_max_wo": 24},
+        ),
+        55: (
+            _cp(N=2, Hi=10, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            {
+                "lds_k_outer": True,
+                "dy_halo": 2,
+                "halo_max_wo": 16,
+                "tap_outer_k": False,
+            },
+        ),
+        56: (
+            _cp(N=2, Hi=10, Wi=40, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            {"lds_k_outer": True, "dy_halo": 2, "halo_max_wo": 32},
+        ),
+    }
+    if idx in halo:
+        p, kw = halo[idx]
+        base = {
+            "problem": p,
+            "tile_m": 64,
+            "tile_n": 64,
+            "tile_k": 64,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_m": 32,
+            "warp_tile_n": 32,
+            "warp_tile_k": 16,
+            "pipeline": "mem",
+            "epilogue": "default",
+            "tap_outer_k": True,
+        }
+        base.update(kw)
+        return DgradConvSpec(**base), "gfx950"
+
     raise SystemExit(f"unknown config index {idx}")
 
 

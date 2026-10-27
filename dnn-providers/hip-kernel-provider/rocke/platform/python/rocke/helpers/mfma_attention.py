@@ -95,8 +95,6 @@ _ATOM_DTYPE_TO_CATALOG = {
     "bf16": "bf16",
     "fp8e4m3": "fp8",
     "bf8e5m2": "bf8",
-    "fp4": "fp4",
-    "fp6": "fp6",
 }
 
 
@@ -545,9 +543,9 @@ def mfma_attention_fwd_inner_body(
     # --- CDNA wave64 (MFMA) path ----------------------------------------------
     # Arch guard: the QK/PV MFMA atom selected above must be in the target's MMA
     # catalog. This is the machine-checkable hook that keeps gfx942 from
-    # selecting a gfx950-only atom (wide f16/bf16 16x16x32 / 32x32x16, or
-    # fp4/mx) -- comgr would otherwise HARD-CRASH with ``LLVM ERROR: Cannot
-    # select intrinsic`` on the missing op. The default arch is gfx950, and
+    # selecting a gfx950-only atom (wide f16/bf16 16x16x32 / 32x32x16) --
+    # comgr would otherwise HARD-CRASH with ``LLVM ERROR: Cannot select
+    # intrinsic`` on the missing op. The default arch is gfx950, and
     # every atom this helper selects today exists on both gfx942 and gfx950, so
     # for the default the selected atom is unchanged. The guard emits no IR, so
     # it cannot perturb the byte-identical CDNA emission.

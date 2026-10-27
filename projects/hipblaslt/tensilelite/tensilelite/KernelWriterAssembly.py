@@ -129,6 +129,19 @@ from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
 
 import os
 
+# The states.overflowedResources codes judgeRegisterBudget reaches, and so the
+# only ones register allocation can overturn: too many vgprs, too many sgprs,
+# the occupancy limit, and SIA2's occupancy floor.  Every other code answers a
+# question about the generated code that no colouring changes.
+#
+# Several can hold at once and the judgement reports the last it reaches, so
+# which one names a given kernel is not a statement about the others: on gfx1250
+# a 256-thread workgroup is allowed exactly MaxVgpr registers, which puts codes
+# 1 and 4 at the same threshold and lets 4 speak for both.  The deferral is
+# indifferent to that, treating every member alike; keep this set in step with
+# the verdicts judgeRegisterBudget assigns (a test asserts it).
+REGISTER_BUDGET_OVERFLOW_CODES = frozenset((1, 2, 4, 6))
+
 @dataclass
 class TailOptParams:
   idx:                 int         = 0
@@ -1099,9 +1112,6 @@ class KernelWriterAssembly(KernelWriter):
       if isPersistent(kernel) and not needPackK16:
         self.states.nonPostLoopSgpr.append("PackKForV2")
         self.states.nonPostLoopSgpr.append("PackKForV3")
-
-    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
-      module.add(self.defineSgpr("RNDSeed", 1))
 
     if kernel["_UseSgprForGRO"]:
       needFirstSgprOffset = kernel["DirectToLdsA"] and kernel["UseInstOffsetForGRO"]
@@ -2335,23 +2345,44 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def checkResources(self, kernel, mkb: KernelBody):
-    # register allocation
-    totalVgprs = self.vgprPool.size()
-    totalAgprs = self.agprPool.size()
-    totalSgprs = self.sgprPool.size()
+    # The LSU verdict is judged first so that it, and anything code generation
+    # already reached, outranks the register budget: judgeRegisterBudget adds a
+    # verdict only when none stands, and only its own verdict may be deferred.
+    if self.states.invalidLSUCode:
+      self.states.overflowedResources = 7
 
+    self.judgeRegisterBudget(kernel, mkb, self.vgprPool.size(), self.agprPool.size(), \
+      self.sgprPool.size())
+
+    self.vgprPool.checkFinalState()
+
+  ##############################################################################
+  # judgeRegisterBudget
+  ##############################################################################
+  def judgeRegisterBudget(self, kernel, mkb: KernelBody, totalVgprs: int, totalAgprs: int, \
+                          totalSgprs: int) -> None:
+    """Record a register count triple and judge the budget it implies.
+
+    Counts, occupancy and the verdicts that follow from them are one function of
+    the triple, so the same judgement serves both the pool estimate
+    checkResources starts from and the counts the emitted descriptor declares.
+
+    A verdict is only raised here, never cleared, and never over one already
+    standing: clearing one is deferRegisterOverflowForAllocation's job.
+    """
     mkb.setGprs(totalVgprs=totalVgprs, totalAgprs=totalAgprs, totalSgprs=totalSgprs)
 
-    if self.vgprPool.size() > self.states.regCaps["MaxVgpr"]:
-      self.states.overflowedResources = 1
-    elif self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
-      self.states.overflowedResources = 2
+    verdict = 0
+    if totalVgprs > self.states.regCaps["MaxVgpr"]:
+      verdict = 1
+    elif totalSgprs > self.states.regCaps["MaxSgpr"]:
+      verdict = 2
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
-    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
-      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], totalVgprs, totalSgprs, \
+      self.getLdsSize(kernel), totalAgprs, self.states.doubleVgpr)
     if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
-      self.states.overflowedResources = 6
+      verdict = 6
 
     if self.states.asmCaps["HasWMMA"]:
       # RDNA: workgroup executes on a WGP (2 CUs, 4 SIMDs)
@@ -2361,15 +2392,56 @@ class KernelWriterAssembly(KernelWriter):
       vgprBudgetPerThread = self.states.regCaps["PhysicalMaxVgprCU"] // kernel["NumThreads"]
     numWorkGroupsPerExecUnit = vgprBudgetPerThread // mkb.getNextFreeVgpr()
     if numWorkGroupsPerExecUnit < 1:
-      self.states.overflowedResources = 4
+      verdict = 4
 
-    if self.states.invalidLSUCode:
-      self.states.overflowedResources = 7
+    if verdict and not self.states.overflowedResources:
+      self.states.overflowedResources = verdict
 
-    self.vgprPool.checkFinalState()
+  ##############################################################################
+  # deferRegisterOverflowForAllocation
+  ##############################################################################
+  def deferRegisterOverflowForAllocation(self, kernel) -> None:
+    """Reopen a register budget verdict, so allocation gets to settle it.
 
+    Only under force apply. checkResources has to judge before the kernel is
+    emitted, so an over-budget pool -- of either class, and the occupancy both
+    of them decide -- is really a proposal; resolveDeferredRegisterOverflow
+    re-judges it against the counts the emitted descriptor declares.
+
+    Both classes qualify whichever one the backend colours: emitAssembly()
+    refreshes the declared VGPR count from the final code whether or not the
+    vector class was lifted, so a VGPR verdict is worth reopening even under an
+    SGPR-only colouring.
+
+    Only judgeRegisterBudget's own verdicts qualify. A verdict code generation
+    reached stands in its place and is never deferred, because no colouring of
+    the registers can answer it.
+    """
+    if self.states.overflowedResources not in REGISTER_BUDGET_OVERFLOW_CODES:
+      return
+    if self.stinkyTofuRegisterAllocationMode(kernel) < 3:
+      return
+    self.states.overflowPendingRA = self.states.overflowedResources
+    self.states.overflowedResources = 0
+
+  ##############################################################################
+  # applyOverflowVerdict
+  ##############################################################################
+  def applyOverflowVerdict(self, kernel, mkb: KernelBody, afterAllocation: bool = False) -> None:
+    """Report the recorded overflow and stub the body out.  No-op when it fits.
+
+    The acting half of checkResources, hoisted to the caller so a deferral can
+    happen in between: reporting "too many sgprs" for a kernel that is about to
+    be handed to allocation would be a lie, and stubbing it would defeat the
+    point.
+
+    afterAllocation:
+        Set by the caller that reports a verdict resolveDeferredRegisterOverflow
+        reached.  The pools no longer describe such a kernel, so the counts come
+        from the kernel body instead and the pool estimate is printed beside
+        them -- which is the one number that says how much allocation moved.
+    """
     if self.states.overflowedResources:
-      mkb.body.add(ValueEndif("overflowed resources"))
       if self.states.overflowedResources == 1:
         msg = "too many vgprs"
       elif self.states.overflowedResources == 2:
@@ -2400,12 +2472,34 @@ class KernelWriterAssembly(KernelWriter):
       else:
         msg = "unknown"
 
+      if afterAllocation:
+        counts = "vgprs=%u, sgprs=%u after register allocation, pool estimate vgprs=%u, sgprs=%u" \
+          % (mkb.getNextFreeVgpr(), mkb.getNextFreeSgpr(), \
+          self.vgprPool.size(), self.sgprPool.size())
+      else:
+        counts = "vgprs=%u, sgprs=%u" % (self.vgprPool.size(), self.sgprPool.size())
+
       if self.debugConfig.printSolutionRejectionReason:
-        printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", vgprs=%u, sgprs=%u" \
-          % (self.states.kernelName, self.states.overflowedResources, msg, \
-          self.vgprPool.size(), self.sgprPool.size()))
-      mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
-      mkb.body.add(ValueIf(value="0"), 1)
+        printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", %s" \
+          % (self.states.kernelName, self.states.overflowedResources, msg, counts))
+      self.applyOverflowStub(mkb)
+
+  ##############################################################################
+  # applyOverflowStub
+  ##############################################################################
+  def applyOverflowStub(self, mkb: KernelBody) -> None:
+    """Replace the kernel body with `s_endpgm`, so a rejected kernel is harmless.
+
+    `ForceGenerateKernel` builds a rejected source anyway, and the real body
+    names registers the chip does not have.
+
+    The `.if 0`/`.endif` pair is safe only because a stubbed body never meets a
+    StinkyTofu pass: one erasing the dead block holding the `.endif` is what once
+    left the assembler an unmatched `.if`.
+    """
+    mkb.body.add(ValueEndif("overflowed resources"))
+    mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
+    mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
   # updateOccupancyFromMaxVgpr
@@ -2448,6 +2542,53 @@ class KernelWriterAssembly(KernelWriter):
     kernel["CUOccupancy"] = self.getOccupancy(
       kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
       self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
+
+  ##############################################################################
+  # resolveDeferredRegisterOverflow
+  ##############################################################################
+  def resolveDeferredRegisterOverflow(self, kernel, mkb, declaredVgprs: int, \
+                                      declaredSgprs: int) -> int:
+    """Judge the register budget again, on the counts the emitted code declares.
+
+    Emitting the kernel rewrites both counts to what the final code uses -- the
+    refresh is part of emitAssembly(), so it happens at every allocation mode and
+    moves a count down or up -- which leaves the pool sizes checkResources judged
+    no longer describing the kernel, and the descriptor the only authority on
+    what the hardware will reserve.  Re-running the one judgement on those counts
+    both settles a deferred verdict and, where nothing was deferred, keeps the
+    recorded counts and CUOccupancy honest.  Returns the standing overflow code,
+    0 to accept.
+
+    A count that rose can therefore reject a kernel the pool estimate admitted.
+    That is the kernel no longer fitting, not a policy of the deferral: nothing
+    useful follows from declaring an occupancy the hardware will not grant.
+
+    Falling back to a pool size is what makes the deferral come out right without
+    a case of its own: a count that could not be read leaves the kernel judged on
+    the same estimate as before, which reinstates exactly the verdict that was
+    deferred.
+
+    declaredVgprs, declaredSgprs:
+        The emitted .amdhsa_next_free_vgpr and .amdhsa_next_free_sgpr, set by
+        emitAssembly() to what the final code uses.
+    """
+    self.states.overflowPendingRA = 0
+
+    totalAgprs = self.agprPool.size()
+    # .amdhsa_next_free_vgpr also covers the AGPRs wherever they share the
+    # register file, and allocation declines to rewrite it there, so with any
+    # AGPR in play the pool is still the only plain VGPR count available.
+    #
+    # No arch reaches this with an AGPR today -- gfx1250 is the only StinkyTofu
+    # backend and its file holds none -- so the test for it drives the method
+    # directly. The guard is here for the first backend on an arch that has
+    # them, where judging the folded count as a plain one would count the AGPRs
+    # twice, in both the cap and the occupancy.
+    totalVgprs = declaredVgprs if declaredVgprs > 0 and not totalAgprs else self.vgprPool.size()
+    totalSgprs = declaredSgprs if declaredSgprs > 0 else self.sgprPool.size()
+
+    self.judgeRegisterBudget(kernel, mkb, totalVgprs, totalAgprs, totalSgprs)
+    return self.states.overflowedResources
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
@@ -2538,6 +2679,11 @@ class KernelWriterAssembly(KernelWriter):
         kernelArgs.add(self.argLoader.loadKernArg(self.states.esmRuntimeFlagSgpr, "KernArgAddress", sgprOffset=hex(sgprOffset), dword=1))
         sgprOffset += 4
         self.argLoader.setOffset(sgprOffset)
+
+    if self.states.rndSeedKernArgOffset >= 0:
+        kernelArgs.add(self.argLoader.loadKernArg(
+            "RNDSeed", "KernArgAddress",
+            sgprOffset=hex(self.states.rndSeedKernArgOffset), dword=1))
 
     # Batch offset arguments for general batched mode are loaded on-demand from
     # their kernarg byte offsets. Those offsets are recorded accurately by
@@ -2822,7 +2968,10 @@ class KernelWriterAssembly(KernelWriter):
             self.sgprPool.checkIn(tmpSgpr)
             break
           self.states.preloadGuard.append(tmpSgpr)
-      
+
+      if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
+        module.add(self.defineSgpr("RNDSeed", 1))
+
       ### temp sgpr for groupedgemm ###
       # can be start from sgpr_preload_end
       sgprNumsOfGemm = self.sgprPool.checkOut(1, tag="defineAndResources_sgprNumsOfGemm", preventOverflow=False)

@@ -229,3 +229,26 @@ types. String tile policies retain whitespace/case normalization. The native
 Python 3D dictionary adapter validates supplied types before C++ casts; its
 partial-dictionary API preserves missing/`None` defaults. The typed C ABI layout
 and valid kernel emission are unchanged.
+
+### Optional LSE with bounded decode
+
+Admitted gfx942/gfx950 Python decode paths accept `emit_lse=True` and a caller-owned
+contiguous FP32 `lse` tensor shaped `[total_q, num_query_heads, 1]`, on the same
+device as Q/O and disjoint from all input/output views. Both default P1 selection
+and explicit T32 paged pairs propagate the requested output. Request, problem and
+reducer must agree; missing or stray buffers and malformed boolean flags reject
+before compilation. LSE remains unsupported with sinks, strided KV, and paths
+that cannot write it.
+
+The reducer arguments are `output_ptr`, `segm_output_ptr`, `segm_max_ptr`,
+`segm_expsum_ptr`, `seq_lens_ptr`, followed by `metadata_status_ptr`, `num_seqs`
+when containment is enabled, and finally `lse_ptr` when LSE is enabled. Kernel
+names and cache identities distinguish both flags. Invalid consumed metadata
+writes NaN to both O and LSE for the affected sequence; valid keyless rows write
+O=0 and natural-log LSE=-inf. Window-excluded pages remain unaudited. An ordered
+valid replay recovers both outputs, and graph ownership retains the LSE buffer.
+
+Native C++ 3D builders accept absent/false LSE only and explicitly reject enabled
+or malformed LSE fields. The dedicated 98-case native paged registry remains
+LSE-off. Strict C++ lowering of Python-authored bounded-LSE IR and representative
+bounded-LSE goldens are separate coverage from native kernel construction.

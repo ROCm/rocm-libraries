@@ -137,7 +137,7 @@ def bounded_reduce_params(b):
 
 
 def reject_failed_sequence(
-    b, status, seq, head, tid, out, dtype, hd, nqh, nkh, segments
+    b, status, seq, head, tid, out, dtype, hd, nqh, nkh, segments, *, lse=None
 ):
     false_ = b.cmp_ne(b.const_i32(0), b.const_i32(0))
     failed = false_
@@ -158,4 +158,8 @@ def reject_failed_sequence(
         for chunk in range(hd // 64):
             dim = b.add(b.const_i32(chunk * 64), tid)
             b.global_store(out, b.add(base_out, dim), nan, align=2)
+        if lse is not None:
+            with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+                row = b.add(b.mul(seq, b.const_i32(nqh)), head)
+                b.global_store(lse, row, b.const_f32(float("nan")), align=4)
         b.ret()

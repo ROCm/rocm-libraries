@@ -148,6 +148,7 @@ def validate_attention_problem_types(problem):
             "fp8_fnuz",
             "use_additive_bias",
             "causal_top_left",
+            "emit_lse",
         ),
         require_attention_bool,
         "problem",
@@ -202,6 +203,8 @@ def validate_attention_3d_spec_types(spec, *, reducer=False, complete=False):
         if spec.num_query_heads * spec.head_size * spec.num_segments * 4 > 0x7FFF0000:
             raise ValueError("bounded decode workspace geometry exceeds i32")
     if reducer:
+        if complete or hasattr(spec, "emit_lse"):
+            require_attention_bool(_field(spec, "emit_lse", label), "emit_lse")
         return
     gfx950 = (
         type(spec).__module__.endswith("gfx950.attention_tiled_3d")

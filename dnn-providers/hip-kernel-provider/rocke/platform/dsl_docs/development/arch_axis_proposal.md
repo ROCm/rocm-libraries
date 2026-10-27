@@ -1,14 +1,14 @@
 # Proposal: give intrinsic resolution an arch axis
 
-**Status:** S1 implemented (`tools/gen_arch_domain.py`, two committed columns,
-gated by `tests/core/test_arch_domain_artifact.py`); S2–S4 still proposed.
-Delivery breakdown: [`arch_axis_epic.md`](arch_axis_epic.md).
-**Non-specialist summary:** [`arch_axis_brief.md`](arch_axis_brief.md) (one page).
+**Status:** S1 implemented (`tools/gen_arch_domain.py`, committed columns,
+structure-tested by `tests/tools/test_arch_domain_artifact.py` and regenerated
+by the `rocke_arch_domain_reproducibility` CTest); S2 is implemented as a
+Python warning/corpus gate but not hard rejection; S3 is implemented; S4's
+in-engine C++ mirror remains proposed.
 **Scope:** `core/lower_llvm.py` + `cpp/core/lower_llvm/` declare resolution.
-**Related:** [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) (the
-wider ROCm/LLVM/gfx problem; this doc is its §4 R1+R2 written out),
-[`f8f6f4_and_decl_validation_plan.md`](f8f6f4_and_decl_validation_plan.md)
-(bug record B1–B11).
+**Related:** [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) covers
+the wider ROCm/LLVM/gfx problem; this document expands its §4 R1+R2. Bug labels
+B1–B11 below are historical identifiers retained for this document's narrative.
 
 > **Provenance.** The hand-run probes quoted in §3 were taken on AMD clang
 > 23.0.0git at `/opt/rocm/lib/llvm/bin/clang`, paired with COMGR package metadata
@@ -27,25 +27,26 @@ wider ROCm/LLVM/gfx problem; this doc is its §4 R1+R2 written out),
 
 ## 1. Summary
 
-rocke resolves an intrinsic `declare` on **one** axis — the LLVM flavor. The
-target architecture is never consulted, even though "does this intrinsic exist
-on this GPU" is an arch question. The result is that using an intrinsic on an
-arch that lacks it is not an error at build time; it is a linker `undefined
-symbol`, a backend `Cannot select` abort, or — worst case — a silently wrong
-kernel.
+rocKE historically resolved an intrinsic `declare` on **one** axis — the LLVM
+flavor — even though "does this intrinsic exist on this GPU" is an architecture
+question. S1–S3 now measure that axis, warn through the Python lowering
+chokepoint and emitted-IR corpus gate, and require callers to provide an
+architecture. A measured negative is not yet a hard build-time rejection, and
+the C++ lowerer does not yet own the same in-engine lookup.
 
-This proposes adding the missing axis in the cheapest form that actually works:
+The staged design is:
 
 - **S1** *(done)* — generate an `arch_domain` table by probing the installed
   toolchain; commit it, gate regeneration as a no-op, exactly like golden. One
   column per flavor, `(key, arch) → status + evidence`; a plain `key → set of
   arches` proved too lossy (§3.2, §4/S1).
-- **S2** — make `_need()` consult it. One chokepoint, every decl key, all call sites
-  unchanged.
-- **S3** — remove the implicit `arch or "gfx950"` fallback that makes a forgotten
-  `arch=` silently succeed.
-- **S4** — mirror S1/S2 into the C++ engine from the same generated source, so
-  byte-identity holds.
+- **S2** *(warning/corpus gate done; hard rejection proposed)* — make `_need()`
+  consult it. One chokepoint, every decl key, all call sites unchanged.
+- **S3** *(done)* — remove the implicit `arch or "gfx950"` fallback that makes a
+  forgotten `arch=` silently succeed.
+- **S4** *(proposed)* — mirror the in-engine S2 lookup into the C++ engine from
+  the same generated source. The corpus gate already checks emitted IR from
+  either implementation; this step gives direct C++ lowering the same verdict.
 
 S1–S4 change **zero emitted IR bytes** and need no golden re-bless.
 
@@ -53,9 +54,11 @@ S1–S4 change **zero emitted IR bytes** and need no golden re-bless.
 
 ## 2. Motivation
 
-### 2.1 The defect, in code
+### 2.1 The original defect, in code (historical)
 
-`core/lower_llvm.py:1398` — `arch` is consumed to pick a backend and then
+The snippets below capture the implementation that motivated this proposal;
+they are not the current source. At that time, `core/lower_llvm.py` consumed
+`arch` to pick a backend and then
 dropped:
 
 ```python
@@ -245,8 +248,12 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 
 `tools/gen_arch_domain.py`, for each decl key × each wired arch, emits a minimal
 module, compiles **and links** it in a **subprocess**, and classifies the
-outcome. Commit the result; `tests/core/test_arch_domain_artifact.py` asserts
-regeneration is a no-op. This is exactly how golden is managed.
+outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
+its structure and the `rocke_arch_domain_reproducibility` CTest asserts
+regeneration is a no-op. The CTest is registered for both developer build trees
+and relocated provider test artifacts; the installed form checks the package
+data CI actually consumes without requiring a source checkout. This is exactly
+how golden is managed.
 
 Shipped schema — per-cell provenance is the point, per
 [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) §3.2, since one host
@@ -308,78 +315,64 @@ than a nightly.
 
 **Why a generated table and not the module-level validity gate.** The existing
 `tools/check_ir_validity.py` only sees intrinsics that some corpus case happens to
-emit — a limitation the f8f6f4 plan §4.8 states explicitly. B9 evaded it for
+emit — the corpus limitation described above. B9 evaded it for
 exactly that reason (`tr128=False`). S1 probes the table, not the corpus, so
 coverage does not depend on corpus luck.
 
-### S2 — Make `_need()` arch-aware, warn-only first
+### S2 — Make `_need()` arch-aware (warning gate implemented)
 
-```python
-def _need(self, key: str) -> None:
-    status = arch_domain_status(key, self._arch, self._flavor)
-    if status is UNAVAILABLE:
-        raise NotImplementedError(
-            f"intrinsic {key!r} is not available on {self._arch} "
-            f"({self._flavor}); see dsl_docs/development/arch_axis_proposal.md"
-        )
-    self._needs_intrin[key] = True
-```
+`_need()` now routes every declaration demand through `_check_arch_domain()`.
+A measured `arch_absent` result emits `ArchDomainWarning`; missing or inconclusive
+data stays silent. `tests/core/test_arch_domain_lane.py` enforces the chokepoint
+by AST walk, and `tools/check_arch_domain.py` applies the same table to the
+representative emitted-IR corpus.
 
-One edit covers all ~151 call sites, because they all already funnel through
-here. It converts link-time `undefined symbol` and backend `report_fatal_error`
-aborts into a build-time error that names the key and the arch.
+The remaining S2 step is promotion from warning to a build-time error that names
+the key, architecture, flavor, and evidence. Promote only once the warning
+allowlist is quiet; some live paths historically survived through LLVM
+upgrades, so an immediate hard error would have broken working builds.
 
-**Land it warn-only.** Some live paths survive today on luck (B8 rides LLVM
-auto-upgrade), so a hard error on day one would break working builds. Promote to
-`raise` only once the warning stream is quiet — the same discipline the plan doc
-prescribes for Tier 3.
+### S3 — Close the implicit `gfx950` default (implemented)
 
-One cleanup is a prerequisite: `lower_llvm.py:2806` assigns
-`self._needs_intrin["global.atomic.fadd.v2f16"] = True` directly, bypassing
-`_need()`. A chokepoint with a bypass is not a chokepoint; route it through
-`_need()` first.
+The old `arch or "gfx950"` fallback turned "caller forgot `arch=`" into "caller
+silently targeted gfx950." `_Lowerer` now requires a non-empty architecture and
+passes it directly to `backend_for`; outer APIs that intentionally default an
+architecture do so explicitly.
 
-### S3 — Close the implicit `gfx950` default
-
-`arch or "gfx950"` (Python `:1398`, C++ `:602`) turns "caller forgot `arch=`"
-into "caller silently targeted gfx950". Without S3, S2 checks the wrong arch and
-the whole exercise is decorative.
-
-Make `arch` required at the `_Lowerer` boundary. Where an outer API must keep a
-default for compatibility, make the default explicit and logged rather than an
-`or` fallback buried in a constructor. Commit `8a901dd99b` already fixed the
-known leaking call sites; this prevents the next ones.
-
-### S4 — Mirror into the C++ engine from the same source
+### S4 — Mirror into the C++ engine from the same source — **DONE**
 
 Byte-identity is the #1 invariant, and it covers behaviour, not just bytes: if
 Python raises on an unavailable key and C++ emits a declare, the engines have
 diverged. So S1's artifact must feed **both**.
 
-Generate the C++ table into `cpp/core/lower_llvm/` from the same record set and
-commit the generated file, rather than hand-transcribing it — hand-transcription
-is what made the Tier 0 declare-parity test necessary
-(`tests/core/test_intrinsic_decl_table_parity.py`). One source, two emitted
-tables, CI checks regeneration is a no-op.
+*As built:* the C++ table is generated **at build time** rather than committed.
+CMake runs `tools/gen_arch_domain_cpp.py`, which reads the columns through
+`rocke.core.arch.domain` itself and emits the negative cells into the build
+tree; `rocke_ll_need` consults them. A committed copy would have needed a no-op
+gate to keep it honest; a build dependency cannot go stale, and regenerating a
+column reaches both engines with no other step. The cost is that configuring
+the C++ build now needs a Python interpreter.
 
-### 4.1 Rollout order
+### 4.1 Rollout status
 
-1. **S3** — close the default. Standalone, mechanical, no new machinery.
-2. **S1** *(done)* — land the generator + artifact + CI no-op check. Nothing
-   consumes it yet, so it cannot break anything. B9 shows up here immediately.
-3. **S2 (warn)** — wire `_need()` to the artifact, warnings only. Route the one
-   bypass through `_need()` first.
-4. **S4** — mirror to C++, re-run byte-identity at every flavor.
-5. **S2 (error)** — promote once the warning stream is quiet.
+1. **S3** *(done)* — close the implicit architecture default.
+2. **S1** *(done)* — land the generator, committed artifact, structure gate,
+   and dedicated reproduction CTest.
+3. **S2 (warn)** *(done)* — wire Python `_need()` and the emitted-IR corpus gate
+   to the artifact; enforce the chokepoint and warning allowlist.
+4. **S4** *(done)* — mirror to C++, re-run byte-identity at every flavor.
+5. **S2 (error)** — promote once the warning stream is quiet. The `error` mode
+   and the per-cell waivers exist in both engines; the default stays `warn`
+   until the judgement that the stream is quiet on real kernels is recorded.
 
 ### 4.2 What does and does not change
 
 | | effect |
 |---|---|
 | emitted IR bytes | **none** — S1–S4 add checks and a data file; no emission path changes |
-| golden | **no re-bless** |
+| golden | **no re-bless** of any shipped kernel. The parity corpus golden moved for its four gfx942 3D/reduce attention cases, because the harness was building the gfx950 kernels for them |
 | byte-identity | must be re-run after S4 (behaviour parity), expected GREEN |
-| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, both the same llvm23 backend fatal on attention 3d on gfx942 |
+| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, attention 3d d128/b64 on gfx942, which overflow gfx942's LDS at every flavor |
 | B9 | fixed as a consequence: S1 flags it `name_absent` on every arch |
 
 ---
@@ -393,7 +386,7 @@ the corpus emits, which is how B9 survived. Complementary, not sufficient.
 cells, when §3.1 shows the cube factorizes and every known case fits the
 factorization.
 
-**Generate declares from LLVM's `.td` files.** Rejected, and the f8f6f4 plan §4
+**Generate declares from LLVM's `.td` files.** Rejected; earlier design analysis
 already rejected it for the right reason: `.td` is not in the install package, so
 it creates a source-tree dependency. S1 differs — it probes the *installed*
 compiler and commits the result, so nothing is needed at build or run time.
@@ -406,8 +399,9 @@ intrinsics reached through a backend method. `_need()` covers all of them, today
 
 ## 6. Open questions
 
-- **Where does `arch` come from for a non-kernel lowering path?** S3 needs an
-  answer for every entry point, not just the kernel builders.
+- **Which outer APIs intentionally default an architecture?** S3 closed the
+  lowerer fallback; compatibility APIs that supply a default must keep that
+  policy explicit and covered rather than reintroducing an implicit fallback.
 - **Forward-declared arches.** `gfx908` has a backend row but no `arch_specs.json`
   metadata. Probe it anyway and record the domain, or exclude it from the
   artifact? Probing is nearly free and the data is useful when it gets wired.
@@ -432,8 +426,10 @@ cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
 python3 -c "from rocke.core import lower_llvm as L; from rocke.runtime import comgr; \
   print(L._resolve_llvm_flavor(), comgr.loaded_compiler_info().describe())"
 
-# one cell, one family, or the whole column -- on this host's flavor only
-python3 tools/gen_arch_domain.py --only ds.read.tr --arch gfx950 --verbose
+# one exploratory cell (partial sweeps require a disposable output), or the
+# whole committed column -- on this host's flavor only
+python3 tools/gen_arch_domain.py --only ds.read.tr --arch gfx950 --verbose \
+  --out <temporary-output-path>
 python3 tools/gen_arch_domain.py --check
 ```
 
@@ -448,11 +444,12 @@ which `-S` would not, and note the `-O0`, without which the optimiser can delete
 the call and the probe reports `ok` for a target that cannot run it (§3.2) — in a
 subprocess, and classify stderr by the §3 taxonomy.
 
-Acceptance for the change itself:
+Acceptance for the change itself, from `platform/` with a configured build:
 
-- `python -m pytest tests/core/test_arch_domain_artifact.py` green (the structure
-  half runs without a toolchain; the regeneration half skips where the flavor has
-  no committed column)
+- `python -m pytest tests/tools/test_arch_domain_artifact.py` green for the
+  source-only structure and generator unit coverage
+- `ctest --test-dir <build> -R '^rocke_arch_domain_reproducibility$' -V` passes,
+  or reports a named skip when this host cannot validate a committed flavor
 - `python tools/check_byte_identity.py` GREEN at each flavor (S4)
 - `python tools/check_ir_validity.py` GREEN, with no *new* failures beyond the 2
   documented `KNOWN_BAD` emission defects

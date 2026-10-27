@@ -33,6 +33,8 @@ def make_candidate():
     def support(req):
         if errors := _request_errors(req):
             return False, "; ".join(errors)
+        if req.emit_lse and req.use_sinks:
+            return False, "LSE is not implemented with sinks"
         if req.kv_layout != "paged":
             return False, "requires paged KV"
         if req.use_softcap and req.softcap == 0:
@@ -125,6 +127,7 @@ def make_candidate():
                     "softcap",
                     "alibi",
                     "qq_bias",
+                    "lse",
                 }
             ),
         ),

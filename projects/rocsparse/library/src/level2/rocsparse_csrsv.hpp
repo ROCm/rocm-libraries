@@ -24,8 +24,6 @@
 
 #pragma once
 
-#pragma once
-
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrsv_info.hpp"
 #include "rocsparse_datatype_utils.hpp"

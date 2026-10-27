@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 from ..common._attention_validation import validate_attention_3d_spec_types
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from kernels.common._attention_kv_loader import (
@@ -55,6 +55,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._lse_store import lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -1416,22 +1417,29 @@ def build_unified_attention_3d_tiled(
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-        # other 3 lanes.
+        # other 3 lanes. m_new is the running max (m_val included), so
+        # alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+        # tile-local max would overflow alpha once a tile scores ~128 log2 units
+        # below an earlier one. Until the row has an unmasked key (or, in
+        # segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+        # instead, so P and alpha are 0, not NaN. A row with neither in the
+        # segment stores m = -inf, which the reduce kernel weights by 0.
         local_max = neg_inf
         for v in masked.values():
             local_max = b.fmax(local_max, v)
-        full_max_raw = _row_reduce(local_max, b.fmax)
-        ok = b.fcmp("ogt", full_max_raw, neg_inf)
-        m_new = b.select(ok, full_max_raw, zero_f)
+        tile_max = _row_reduce(local_max, b.fmax)
+        m_new = b.fmax(m_val, tile_max)
+        ok = b.fcmp("ogt", m_new, neg_inf)
+        m_safe = b.select(ok, m_new, zero_f)
         p_regs = {}
         sum_p = zero_f
         for key, v in masked.items():
-            p = b.exp2_fast(b.fsub(v, m_new))
+            p = b.exp2_fast(b.fsub(v, m_safe))
             p_regs[key] = p
             sum_p = b.fadd(sum_p, p)
         l_local = _row_reduce(sum_p, b.fadd)
 
-        alpha = b.exp2_fast(b.fsub(m_val, m_new))
+        alpha = b.exp2_fast(b.fsub(m_val, m_safe))
         new_l_val = b.fadd(b.fmul(l_val, alpha), l_local)
         if KV_FP8:
             # FP8 sync loader has no in-flight async work.
@@ -1540,6 +1548,8 @@ class UnifiedAttentionReduceTiledSpec:
     waves_per_eu: Optional[int] = None
     metadata_containment: bool = False
 
+    emit_lse: bool = field(default=False, kw_only=True)
+
     def __post_init__(self):
         validate_attention_3d_spec_types(self, reducer=True, complete=True)
         if self.num_segments < 1:
@@ -1552,14 +1562,17 @@ class UnifiedAttentionReduceTiledSpec:
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
-            "rocke_uattn_reduce_tiled",
+        parts = [
             f"d{self.head_size}",
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
-            "bounds_v1" if self.metadata_containment else "",
-        )
+        ]
+        if self.metadata_containment:
+            parts.append("bounds_v1")
+        if self.emit_lse:
+            parts.append("lse")
+        return kernel_name_join("rocke_uattn_reduce_tiled", *parts)
 
 
 def build_unified_attention_reduce_tiled(
@@ -1577,7 +1590,8 @@ def build_unified_attention_reduce_tiled(
     Grid: ``(total_q, num_query_heads, 1)``.  Each CTA reduces over the
     ``NUM_SEGMENTS`` segments for one (token, head):
 
-      1. overall_max = max(segm_max)
+      1. overall_max = max(segm_max) over segments with segm_expsum > 0 (a
+         segment masked for the row stores max=0, sum=0 and is treated as -inf)
       2. overall_expsum = sum(segm_expsum * exp2(segm_max - overall_max))
       3. acc[d] = sum_s segm_output[s,d] * exp2(segm_max[s] - overall_max)
       4. output[d] = acc[d] / overall_expsum  (with 0/0 -> 0)
@@ -1608,9 +1622,20 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
-
     if spec.metadata_containment:
         status, num_seqs = bounded_reduce_params(b)
+
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     q_token = b.block_id_x()
     q_head = b.block_id_y()
@@ -1633,6 +1658,7 @@ def build_unified_attention_reduce_tiled(
             NUM_QH,
             spec.num_kv_heads,
             NUM_SEG,
+            lse=lse,
         )
 
     neg_inf = b.const_f32(float("-inf"))
@@ -1703,6 +1729,11 @@ def build_unified_attention_reduce_tiled(
         if in_rng is not None:
             ms = b.select(in_rng, ms, neg_inf)
             ls = b.select(in_rng, ls, zero_f)
+        # A segment whose tiles were all masked for this row stores max=0 with
+        # sum=0. Its max carries no mass, so it must not set overall_max (it
+        # would underflow every real segment's factor) nor get a factor here:
+        # treat it as -inf in both passes.
+        ms = b.select(b.fcmp("ogt", ls, zero_f), ms, neg_inf)
         seg_idx_of.append((sv, in_rng, sv_safe))
         seg_max_cache.append(ms)
         seg_l_cache.append(ls)
@@ -1765,6 +1796,22 @@ def build_unified_attention_reduce_tiled(
         scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
         out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
         b.global_store(out, out_idx, scalar_out, align=2)
+
+    if spec.emit_lse:
+        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
+        # lane writes. overall_max is in log2 units (segm_max carries
+        # scale*log2e); lse_store converts to natural log and writes -inf for a
+        # row with no mass (every segment empty), whose O is already 0.
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
+            lse_store(
+                b,
+                lse,
+                lse_index,
+                overall_max,
+                overall_expsum,
+                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+            )
 
     return b.kernel
 

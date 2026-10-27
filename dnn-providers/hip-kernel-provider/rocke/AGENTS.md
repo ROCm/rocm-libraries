@@ -29,8 +29,9 @@ Prove it — GREEN for every family at every LLVM flavor:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python
-python tools/check_byte_identity.py                            # llvm20
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # llvm20
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # llvm23
 python tools/check_byte_identity.py --only gemm                # scope to a family
 ```
 

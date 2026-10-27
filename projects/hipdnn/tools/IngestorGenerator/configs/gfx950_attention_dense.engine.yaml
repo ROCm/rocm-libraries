@@ -120,7 +120,7 @@ enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
   # Selects the one non-persistent grid candidate.
-  pin: {algorithm: attention_dense_grid, spec_id: gfx950_dense_grid}
+  pin: {algorithm: attention_dense_grid, spec_id: gfx950_dense_qbminor}
   # Request fields every cell shares.
   fixed: {arch: gfx950, batch: 1, seqlen_q: 512, seqlen_k: 512}
   # Crossed in order, first group outermost (the catalog order).
@@ -177,7 +177,7 @@ enumerate:
   # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
   # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
   # diffs the enumeration against the shipped catalog on the shipped fields (g3).
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
   max_kernels: 840
 

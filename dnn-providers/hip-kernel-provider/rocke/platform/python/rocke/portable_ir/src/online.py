@@ -95,7 +95,8 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
     """Return the CMake-compatible ID for the portable-IR native bundle.
 
     The ID covers repository-owned inputs that determine the shared engine and
-    replay CLI: engine sources/headers, the CLI source, and their CMake recipes.
+    replay CLI: engine sources/headers, the CLI source, their CMake recipes, and
+    the inputs of the generated arch-domain table.
     It is a source/build-recipe ID, not a compiler or binary identity. Installed
     Python packages carry no engine source surface; ``None`` means freshness
     cannot be established locally.
@@ -108,7 +109,12 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
     files = [path for path in files if bindings not in path.parents]
     if not files:
         return None
+    data = root / "python" / "rocke" / "core" / "arch" / "data"
+    files += list(data.glob("intrinsic_arch_domain.*.json"))
     for relative in (
+        "python/rocke/core/arch/data/arch_domain_waivers.json",
+        "python/rocke/core/arch/domain.py",
+        "tools/gen_arch_domain_cpp.py",
         "tests/portable_ir/replay_cli.cpp",
         "CMakeLists.txt",
         "tests/CMakeLists.txt",

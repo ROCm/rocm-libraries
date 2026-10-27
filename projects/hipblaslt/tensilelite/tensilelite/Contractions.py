@@ -107,7 +107,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -357,6 +357,8 @@ class ProblemType:
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
             rv.metadataLayout = d['MetadataLayout']
+
+        rv.stochasticRounding = bool(d.get('StochasticRounding', False))
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -772,6 +774,7 @@ class CustomKernel:
 
 class SizeMapping:
     StateKeys = ['waveNum',
+                 'WavefrontSize',
                  'workGroup',
                  'macroTile',
                  'threadTile',
@@ -829,8 +832,16 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
+                 'OneLDSBuffer',
+                 'SourceSwap',
+                 'UnrollMajorLDSA',
+                 'UnrollMajorLDSB',
+                 'enableLDSTrA',
+                 'enableLDSTrB',
                  'ExpertSchedulingMode',
-                 'clusterDim'
+                 'clusterDim',
+                 'BufferLoad',
+                 'BufferStore'
                  ]
 
     @classmethod
@@ -872,6 +883,7 @@ class SizeMapping:
         dtlB = bool(d['DirectToLdsB'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
+                   WavefrontSize            = d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
                    macroTile                = cls.ReadOriginalMacroTile(d),
                    threadTile               = d['ThreadTile'],
@@ -929,8 +941,22 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   OneLDSBuffer             = d.get('1LDSBuffer', 0) == 1,
+                   SourceSwap               = bool(d.get('SourceSwap', False)),
+                   UnrollMajorLDSA          = int(bool(d['UnrollMajorLDSA'])) if 'UnrollMajorLDSA' in d else -1,
+                   UnrollMajorLDSB          = int(bool(d['UnrollMajorLDSB'])) if 'UnrollMajorLDSB' in d else -1,
+                   enableLDSTrA             = bool(d.get('enableLDSTrA', False)),
+                   enableLDSTrB             = bool(d.get('enableLDSTrB', False)),
                    ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
-                   clusterDim               = d['ClusterDim']
+                   clusterDim               = d['ClusterDim'],
+                   # BufferLoad/BufferStore were only added to SizeMapping's
+                   # serialized state by this change, so libraries built before
+                   # it won't have these keys; default to True (the prior,
+                   # implicit behavior) for backward compatibility, matching
+                   # the other newly-added-but-optional fields above (e.g.
+                   # PrefetchAcrossPersistent, TemporalHintA/B).
+                   BufferLoad               = bool(d.get('BufferLoad', True)),
+                   BufferStore              = bool(d.get('BufferStore', True))
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

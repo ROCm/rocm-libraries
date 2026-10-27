@@ -585,6 +585,75 @@ class TestLlModeInvariant(unittest.TestCase):
         self.assertIn(ll, GATE_FAIL)
 
 
+class TestModeRejection(unittest.TestCase):
+    """Only the emitter's own refusal of a mode counts as MODE_UNSUPPORTED.
+
+    A config that raises exits 1 with a traceback, and a traceback can contain
+    any text: file paths, and on newer Pythons the whole multi-line call that
+    failed, including an emitter's `usage="usage: ..."` argument. Reading that
+    as a refused mode used to drop the whole family from the golden."""
+
+    TRACEBACK = (
+        "Traceback (most recent call last):\n"
+        '  File "/src/usage/parity/conv_emit.py", line 9, in main\n'
+        "    return run_emit(\n"
+        '        usage="usage: conv_emit.py <config_index> [ll|ir|verify]\\n",\n'
+        "    )\n"
+        "ValueError: invalid conv spec for gfx950: tile does not divide\n"
+    )
+
+    def test_the_emitters_refusal_is_recognized(self):
+        for message in ("unknown mode 'ir'\n", "usage: gemm_emit <idx> [mode]\n"):
+            with self.subTest(message=message):
+                emission = run_diff.Emission(2, False, None, message)
+                self.assertTrue(run_diff.mode_unsupported(emission))
+
+    def test_a_failing_config_is_not_a_refused_mode(self):
+        emission = run_diff.Emission(1, False, None, self.TRACEBACK)
+        self.assertFalse(run_diff.mode_unsupported(emission))
+
+    def test_a_refusal_needs_the_usage_exit_status_and_no_output(self):
+        refused = "unknown mode 'ir'\n"
+        self.assertFalse(
+            run_diff.mode_unsupported(run_diff.Emission(1, False, None, refused))
+        )
+        self.assertFalse(
+            run_diff.mode_unsupported(run_diff.Emission(2, True, "sha", refused))
+        )
+        # Earlier lines do not count; the refusal is the last thing printed.
+        self.assertFalse(
+            run_diff.mode_unsupported(
+                run_diff.Emission(2, False, None, refused + "error: bad index\n")
+            )
+        )
+
+    def reference_shas(self, emissions):
+        with mock.patch.object(
+            run_diff,
+            "_run_python_batch",
+            return_value=run_diff.BatchResult(emissions),
+        ):
+            return run_diff.python_reference_shas("conv", "ir", True, Path("."))
+
+    def test_a_failing_config_keeps_its_family_in_the_golden(self):
+        end = run_diff.Emission(1, False, None, "unknown config 2\n")
+        shas, error = self.reference_shas(
+            [
+                run_diff.Emission(0, True, "out0", "", canonical_sha="canon0"),
+                run_diff.Emission(1, False, None, self.TRACEBACK),
+                end,
+            ]
+        )
+        self.assertIsNone(error)
+        self.assertEqual(shas, {"0": "canon0"})
+
+    def test_a_refused_mode_records_nothing_for_the_family(self):
+        shas, error = self.reference_shas(
+            [run_diff.Emission(2, False, None, "unknown mode 'ir'\n")]
+        )
+        self.assertEqual((shas, error), ({}, None))
+
+
 class TestMainReturnsTheGateVerdict(unittest.TestCase):
     """The pure rule is only a gate if main() actually returns it."""
 
@@ -649,6 +718,65 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
     def test_discovering_no_families_exits_nonzero(self):
         with TemporaryDirectory() as d:
             self.assertEqual(self.drive_main(None, Path(d)), 1)
+
+    def test_a_golden_run_that_selects_no_family_exits_nonzero(self):
+        # A misspelled --only selects nothing: the check must not print
+        # GOLDEN OK over zero configs, and a record must not touch the file.
+        with TemporaryDirectory() as d:
+            golden = Path(d) / "golden.json"
+            store = run_diff.GoldenStore()
+            store.record(run_diff.LL, "llvm20", {"gemm": {"0": "a"}})
+            store.save(golden)
+            blessed = golden.read_text()
+            for step in ("--check-golden", "--record-golden"):
+                argv = [
+                    "run_diff.py",
+                    "--python-only",
+                    step,
+                    "--flavor",
+                    "llvm20",
+                    "--only",
+                    "no_such_family",
+                    "--golden-file",
+                    str(golden),
+                ]
+                with self.subTest(step=step):
+                    with mock.patch.object(sys, "argv", argv):
+                        self.assertEqual(run_diff.main(), 1)
+                    self.assertEqual(golden.read_text(), blessed)
+
+    def test_a_golden_record_keeps_the_families_it_excluded(self):
+        # --exclude leaves a family to another lane; a record without --only
+        # must still re-record only the families it ran, not drop the rest.
+        with TemporaryDirectory() as d:
+            golden = Path(d) / "golden.json"
+            store = run_diff.GoldenStore()
+            store.record(
+                run_diff.LL, "llvm20", {"kept": {"0": "old"}, "left_out": {"0": "x"}}
+            )
+            store.save(golden)
+            families = [("kept", Path(d)), ("left_out", Path(d))]
+            argv = [
+                "run_diff.py",
+                "--python-only",
+                "--record-golden",
+                "--flavor",
+                "llvm20",
+                "--exclude",
+                "left_out",
+                "--golden-file",
+                str(golden),
+            ]
+            with mock.patch.object(run_diff, "find_families", return_value=families):
+                with mock.patch.object(
+                    run_diff,
+                    "python_reference_families",
+                    return_value=({"kept": {"0": "new"}}, []),
+                ):
+                    with mock.patch.object(sys, "argv", argv):
+                        self.assertEqual(run_diff.main(), 0)
+            recorded = run_diff.GoldenStore.load(golden).section(run_diff.LL, "llvm20")
+            self.assertEqual(recorded, {"kept": {"0": "new"}, "left_out": {"0": "x"}})
 
 
 class TestConfigEnumeration(unittest.TestCase):
@@ -750,8 +878,12 @@ class TestConfigEnumeration(unittest.TestCase):
         indices = [c.args[1] for c in py.call_args_list if c.args[2] == "ll"]
         return rows, ir_artifact_diff.family_status(rows)[0], indices
 
+    def test_supported_catalog_census(self):
+        # This is a coverage contract, not a traversal requirement: a deliberate
+        # catalog change updates the census separately from the driver behavior.
+        self.assertEqual(self.config_count, 111)
+
     def test_both_drivers_visit_all_configs_and_stop_at_end(self):
-        self.assertEqual(self.config_count, 113)
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
             with self.subTest(driver=driver):
                 rows, actual_status, indices = self.drive_family(driver)
@@ -761,7 +893,7 @@ class TestConfigEnumeration(unittest.TestCase):
 
     def test_new_feature_probes_follow_the_existing_scale_configs(self):
         self.assertEqual(
-            [build.__name__ for build, arch in self.emitter.CONFIGS[108:]],
+            [build.__name__ for build, arch in self.emitter.CONFIGS[-5:]],
             [
                 "build_data_prefetch",
                 "build_cluster",
@@ -770,9 +902,7 @@ class TestConfigEnumeration(unittest.TestCase):
                 "build_tdm",
             ],
         )
-        self.assertTrue(
-            all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[108:])
-        )
+        self.assertTrue(all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[-5:]))
 
     def test_both_drivers_detect_drift_beyond_default_cap(self):
         late = run_diff.MAX_CFG

@@ -63,8 +63,14 @@ class Pass;
 /// \p splitWaveLoop duplicates each Rule 3 loop. Wave 0 falls into the original
 /// body and posts a bare cluster signal; every other wave takes the copy, which
 /// keeps the wait and omits the signal. Off by default.
+/// \p reduceClusterBarrierPerLoop emits Rule 3 on the first trigger of each
+/// enclosing loop, then permits another handshake after each 2000 estimated
+/// cycles in a long fall-through loop body. Nearby HalfPLR /
+/// ExpandPointerSwap copies still share one handshake. Off handshakes every
+/// loop trigger. The backend passes the resolved knob; this default is the
+/// static fallback.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    bool splitWaveLoop = false);
+    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false);
 
 }  // namespace stinkytofu

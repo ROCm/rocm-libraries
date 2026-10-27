@@ -21,6 +21,7 @@
 #include <cstdio> /* snprintf */
 #include <cstdlib> /* malloc, free */
 #include <cstring> /* strcmp, memset */
+#include <functional> /* std::function (the dY halo row map) */
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
@@ -113,6 +114,7 @@ rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void)
     s.split_k = 1;
     s.num_load_waves = 4;
     s.max_sub_gemms = 1024;
+    s.xcd_tile_order = true;
     return s;
 }
 
@@ -176,6 +178,97 @@ bool rocke_dgrad_conv_spec_is_strided(const rocke_dgrad_conv_spec_t* s)
     return s->problem.sH != 1 || s->problem.sW != 1 || s->problem.dH != 1 || s->problem.dW != 1;
 }
 
+/* Python _acc_regs_per_lane: fp32 accumulators per lane of one warp's tile. */
+static int _dgrad_acc_regs_per_lane(const rocke_dgrad_conv_spec_t* s)
+{
+    return rocke_dgrad_conv_spec_mfmas_per_warp_m(s) * rocke_dgrad_conv_spec_mfmas_per_warp_n(s)
+           * (s->warp_tile_m * s->warp_tile_n / _max(s->wave_size, 1));
+}
+
+/* Python _default_lds_k_pad: row pad of the M-outer LDS tiles when lds_k_pad
+ * is None. */
+static int _dgrad_default_lds_k_pad(int tile_k)
+{
+    return tile_k >= 16 ? 8 : 0;
+}
+
+/* Defined further down (shared with the builder). */
+static rocke_conv_lds_layout_t _dgrad_effective_lds_layout(const rocke_dgrad_conv_spec_t* spec);
+static const char* _dgrad_mma_family(const char* arch);
+
+/* Python _dgrad_lds_charge: (A/B bytes, C bytes, total bytes) of LDS the
+ * builder allocates. One A and one B tile whatever the pipeline (compv4 is a
+ * schedule policy here; async_dma / unroll_k are rejected). The spec has no
+ * cshuffle_no_alias field (Python's default False), so only the wavelet
+ * pipeline keeps C unaliased. */
+/* Python DgradConvSpec.dy_halo_lds_rows: LDS rows of the staged dY halo tile,
+ * tile_m + (Y-1)*halo_max_wo + (X-1) pixels padded to whole loader passes
+ * (block_size threads x 8 elements), plus the trailing all-zero row. */
+static int _dgrad_dy_halo_lds_rows(const rocke_dgrad_conv_spec_t* s)
+{
+    const rocke_conv_problem_t* p = &s->problem;
+    int rows = s->tile_m + (p->Y - 1) * s->halo_max_wo + (p->X - 1);
+    int pass_elems = rocke_dgrad_conv_spec_block_size(s) * 8;
+    int quantum = pass_elems / _gcd(pass_elems, s->tile_k);
+    return (rows + quantum - 1) / quantum * quantum + 1;
+}
+
+/* Python DgradConvSpec.kouter_b_pad: the K-outer B row pad. */
+static int _dgrad_kouter_b_pad(const rocke_dgrad_conv_spec_t* s)
+{
+    if(s->dy_halo > 0 && s->dy_halo_kouter_pad > 0)
+        return s->dy_halo_kouter_pad;
+    return ROCKE_DGRAD_KOUTER_PAD;
+}
+
+static void _dgrad_lds_charge(const rocke_dgrad_conv_spec_t* s, long* ab, long* c, long* total)
+{
+    int ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+    rocke_conv_lds_layout_t layout = _dgrad_effective_lds_layout(s);
+    long a_rows = s->dy_halo > 0 ? _dgrad_dy_halo_lds_rows(s) : s->tile_m;
+    long a_elems = a_rows * layout.row_stride;
+    long b_elems = s->lds_k_outer ? (long)s->tile_k * (s->tile_n + _dgrad_kouter_b_pad(s))
+                                  : (long)s->tile_n * layout.row_stride;
+    /* dy_halo=2 double-buffers the B tile. */
+    long b_copies = s->dy_halo == 2 ? 2 : 1;
+    long ab_bytes = (a_elems + b_copies * b_elems) * ab_dtype_bytes;
+    int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+    bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
+    long c_bytes = cshuffle ? (long)s->tile_m * s->tile_n * c_dtype_bytes : 0;
+    bool no_alias = s->pipeline && strcmp(s->pipeline, "wavelet") == 0;
+    *ab = ab_bytes;
+    *c = c_bytes;
+    *total = no_alias ? ab_bytes + c_bytes : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
+}
+
+/* Python DgradConvSpec.folds_sub_gemm_record: at stride 1 the only tilde
+ * sub-GEMM's record is a function of the kernargs, so the kernel builds it
+ * from them instead of searching and loading the record buffer. Keys on the
+ * stride alone (an AOT binary's stride capability). */
+static bool _dgrad_folds_sub_gemm_record(const rocke_dgrad_conv_spec_t* s)
+{
+    return s->problem.sH == 1 && s->problem.sW == 1;
+}
+
+/* Python _XCD_TILE_ORDER_ARCHES: the target whose grouped stride-1 kernels
+ * lay their tiles out XCD-contiguous, and its XCD count (8 on gfx950). */
+#define ROCKE_DGRAD_XCD_TILE_ORDER_ARCH "gfx950"
+#define ROCKE_DGRAD_XCD_TILE_ORDER_XCDS 8
+
+/* Python xcd_tile_order_xcds: the XCD count the kernel lays its tile order
+ * out for, or 0 (launch order). The build-time half of the rule; the kernel
+ * decides the rest from its kernargs. */
+static int _dgrad_xcd_tile_order_xcds(const rocke_dgrad_conv_spec_t* s, const char* arch)
+{
+    if(!arch || strcmp(arch, ROCKE_DGRAD_XCD_TILE_ORDER_ARCH) != 0 || !s->xcd_tile_order)
+        return 0;
+    if(s->problem.groups <= 1 || s->split_k != 1)
+        return 0;
+    if(!_dgrad_folds_sub_gemm_record(s))
+        return 0;
+    return ROCKE_DGRAD_XCD_TILE_ORDER_XCDS;
+}
+
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
 {
     /* split_k>1: multiple CTAs accumulate into the same dX elements via atomic_add.
@@ -219,7 +312,7 @@ rocke_status_t
         n += w_;                                                      \
     } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
-     * async, kouter, spk. C previously emitted spk before async, which only
+     * async, kouter, spk, ukd, kp, tapk, noxcd, halo, hprio, hkp, hwo. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
      * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
@@ -233,8 +326,125 @@ rocke_status_t
         ROCKE_DGRAD_NAME_APPEND("_ukd");
     if(s->patch)
         ROCKE_DGRAD_NAME_APPEND("_patch");
+    /* A non-default A row pad changes the LDS layout (Python flag "kp<n>"). */
+    if(s->has_lds_k_pad && s->lds_k_pad != _dgrad_default_lds_k_pad(s->tile_k))
+        ROCKE_DGRAD_NAME_APPEND("_kp%d", s->lds_k_pad);
+    /* A different K-loop body; only tagged when set (Python flag "tapk"). */
+    if(s->tap_outer_k)
+        ROCKE_DGRAD_NAME_APPEND("_tapk");
+    /* The launch-order tile walk (Python flag "noxcd"). */
+    if(!s->xcd_tile_order)
+        ROCKE_DGRAD_NAME_APPEND("_noxcd");
+    /* The dY halo loop and its knobs (Python flags halo/hprio/hkp/hwo). */
+    if(s->dy_halo > 0)
+        ROCKE_DGRAD_NAME_APPEND("_halo%d", s->dy_halo);
+    if(s->dy_halo_setprio > 0)
+        ROCKE_DGRAD_NAME_APPEND("_hprio%d", s->dy_halo_setprio);
+    if(s->dy_halo_kouter_pad > 0)
+        ROCKE_DGRAD_NAME_APPEND("_hkp%d", s->dy_halo_kouter_pad);
+    if(s->halo_max_wo > 0)
+        ROCKE_DGRAD_NAME_APPEND("_hwo%d", s->halo_max_wo);
 #undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
+}
+
+/* Python _dy_halo_conflict: false + reason when the dY halo knobs cannot be
+ * honoured (reasons verbatim). */
+static bool _dgrad_dy_halo_ok(const rocke_dgrad_conv_spec_t* s, char* reason, size_t reason_cap)
+{
+    const rocke_conv_problem_t* p = &s->problem;
+    if(s->dy_halo < 0 || s->dy_halo > 2)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "dy_halo must be 0 (off), 1 (staged halo) or 2 (staged halo with "
+                 "double-buffered B); got %d",
+                 s->dy_halo);
+        return false;
+    }
+    if(s->dy_halo_setprio < 0 || s->dy_halo_setprio > 3)
+    {
+        snprintf(reason, reason_cap, "dy_halo_setprio must be in 0..3; got %d", s->dy_halo_setprio);
+        return false;
+    }
+    if(s->dy_halo_kouter_pad < 0 || s->dy_halo_kouter_pad % 8 != 0)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "dy_halo_kouter_pad must be a non-negative multiple of 8 (16-byte "
+                 "rows for the wide LDS store and the transpose read); got %d",
+                 s->dy_halo_kouter_pad);
+        return false;
+    }
+    if(s->halo_max_wo < 0)
+    {
+        snprintf(reason, reason_cap, "halo_max_wo must be non-negative; got %d", s->halo_max_wo);
+        return false;
+    }
+    if(s->dy_halo == 0)
+    {
+        if(s->dy_halo_setprio > 0)
+        {
+            snprintf(reason, reason_cap, "dy_halo_setprio needs dy_halo > 0");
+            return false;
+        }
+        if(s->dy_halo_kouter_pad > 0)
+        {
+            snprintf(reason, reason_cap, "dy_halo_kouter_pad needs dy_halo > 0 and lds_k_outer");
+            return false;
+        }
+        if(s->halo_max_wo > 0)
+        {
+            snprintf(reason, reason_cap, "halo_max_wo needs dy_halo > 0");
+            return false;
+        }
+        return true;
+    }
+    if(!s->tap_outer_k)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "dy_halo needs the tap-outer K loop (tap_outer_k: stride 1, "
+                 "dilation 1, kpg %% tile_k == 0, no split-K, wave64)");
+        return false;
+    }
+    const int Ho = rocke_conv_problem_ho(p);
+    const int Wo = rocke_conv_problem_wo(p);
+    if(Ho != p->Hi || Wo != p->Wi)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "dy_halo needs an output the size of the input (Ho == Hi and Wo == Wi)");
+        return false;
+    }
+    if(p->Y * p->X == 1)
+    {
+        snprintf(reason, reason_cap, "dy_halo needs a filter with more than one tap");
+        return false;
+    }
+    if(s->halo_max_wo <= 0)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "dy_halo needs halo_max_wo > 0 (the widest Wo served; the staged "
+                 "halo is sized for it)");
+        return false;
+    }
+    if(Wo > s->halo_max_wo)
+    {
+        snprintf(reason,
+                 reason_cap,
+                 "dy_halo serves Wo <= halo_max_wo; got Wo=%d, halo_max_wo=%d",
+                 Wo,
+                 s->halo_max_wo);
+        return false;
+    }
+    if(s->dy_halo_kouter_pad > 0 && !s->lds_k_outer)
+    {
+        snprintf(reason, reason_cap, "dy_halo_kouter_pad needs dy_halo > 0 and lds_k_outer");
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -468,21 +678,58 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         return false;
     }
 
-    /* LDS budget (Python: target.fits_lds check). */
-    int ab_dtype_bytes = (strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
-    /* Simplified LDS estimate (no cshuffle for dgrad, pipeline="mem" only in practice). */
-    long a_lds = (long)s->tile_m * s->tile_k * ab_dtype_bytes;
-    long b_lds = (long)s->tile_n * s->tile_k * ab_dtype_bytes;
-    long total_lds = a_lds + b_lds;
-    if(!rocke_arch_fits_lds(tgt, total_lds))
+    /* Knobs the dgrad builder does not implement: rejected rather than
+     * silently ignored. Mirrors is_valid_dgrad_spec. */
     {
-        snprintf(reason,
-                 reason_cap,
-                 "LDS budget %ld bytes > %d cap on %s",
-                 total_lds,
-                 tgt->lds_capacity_bytes,
-                 arch);
-        return false;
+        const char* label = s->async_dma         ? "async_dma"
+                            : s->unroll_k        ? "unroll_k"
+                            : s->chiplet_swizzle ? "chiplet_swizzle"
+                                                 : NULL;
+        if(label)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "dgrad does not implement %s (the builder has no such path; "
+                     "the flag would be silently ignored)",
+                     label);
+            return false;
+        }
+    }
+
+    /* Accumulator footprint per lane (Python: _MAX_ACC_REGS_PER_LANE). A
+     * correctness guard, not a no-spill guarantee. */
+    {
+        int acc_regs = _dgrad_acc_regs_per_lane(s);
+        if(acc_regs > ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "accumulator tile needs %d fp32 registers per lane "
+                     "(> %d); it fills the whole register file",
+                     acc_regs,
+                     ROCKE_DGRAD_MAX_ACC_REGS_PER_LANE);
+            return false;
+        }
+    }
+
+    /* LDS budget (Python: _dgrad_lds_charge + target.fits_lds). */
+    {
+        long ab_lds = 0;
+        long c_lds = 0;
+        long total_lds = 0;
+        _dgrad_lds_charge(s, &ab_lds, &c_lds, &total_lds);
+        if(!rocke_arch_fits_lds(tgt, total_lds))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "LDS budget %ld bytes (A/B=%ld, C=%ld) > %d cap on %s",
+                     total_lds,
+                     ab_lds,
+                     c_lds,
+                     tgt->lds_capacity_bytes,
+                     arch);
+            return false;
+        }
     }
 
     /* Python: _uniform_k_decode_conflict. The wavelet load/math split has its
@@ -495,6 +742,58 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                  "wavelet load/math split has its own K loop");
         return false;
     }
+
+    /* Python _tap_outer_k_conflict (reasons verbatim): the tap-outer loop
+     * has no fallback, so a problem it cannot compute is rejected. */
+    if(s->tap_outer_k)
+    {
+        const int kpg = rocke_conv_problem_kpg(p);
+        if(p->sH != 1 || p->sW != 1 || p->dH != 1 || p->dW != 1)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k needs stride 1 and dilation 1 (the filter tap is the "
+                     "plain (y, x) only there)");
+            return false;
+        }
+        if(s->tile_k <= 0 || kpg % s->tile_k != 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k needs kpg %% tile_k == 0 (a K tile must not straddle "
+                     "two filter taps); got kpg=%d, tile_k=%d",
+                     kpg,
+                     s->tile_k);
+            return false;
+        }
+        if(s->split_k != 1)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k needs split_k == 1 (a K slice could start mid-tap)");
+            return false;
+        }
+        if(s->wave_size != 64 || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k is a wave64 MFMA K loop (the wavelet pipeline has its "
+                     "own K loop)");
+            return false;
+        }
+        if(s->uniform_k_decode)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "tap_outer_k replaces the K loop uniform_k_decode builds; set one "
+                     "of them");
+            return false;
+        }
+    }
+
+    /* Python _dy_halo_conflict (reasons verbatim). */
+    if(!_dgrad_dy_halo_ok(s, reason, reason_cap))
+        return false;
 
     /* wavelet-specific checks (Python: spec.pipeline == "wavelet" block). */
     bool is_wavelet = (s->pipeline && strcmp(s->pipeline, "wavelet") == 0);
@@ -690,6 +989,42 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      "(the wavelet loader writes the B tile M-outer into a K-outer "
                      "allocation)");
             return false;
+        }
+        /* Python _kouter_frag_reason: the transpose read returns 4 elements
+         * per lane on wave64 (ds_read_tr16_b64) and 8 on wave32
+         * (ds_load_tr16_b128), so the atom's B fragment length must be a
+         * multiple of it. The builder refuses it too; the validator says so
+         * first so a sweep filters the configuration out. */
+        {
+            const rocke_archtarget_t* kt = rocke_archtarget_from_gfx(arch);
+            const rocke_mmaop_t* kop = kt ? rocke_archtarget_op_for_shape(kt,
+                                                                          _dgrad_mma_family(arch),
+                                                                          s->dtype_a,
+                                                                          s->dtype_b,
+                                                                          "fp32",
+                                                                          s->warp_tile_m,
+                                                                          s->warp_tile_n,
+                                                                          s->warp_tile_k,
+                                                                          nullptr)
+                                          : NULL;
+            const int tr_lanes = s->wave_size == 32 ? 8 : 4;
+            if(!kop || kop->b_frag_len % tr_lanes != 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer needs a B fragment length that is a multiple of "
+                         "%d (%s returns %d elements per lane on wave%d); got "
+                         "b_per_lane=%d for atom %dx%dx%d",
+                         tr_lanes,
+                         s->wave_size == 32 ? "ds_load_tr16_b128" : "ds_read_tr16_b64",
+                         tr_lanes,
+                         s->wave_size,
+                         kop ? kop->b_frag_len : 0,
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
+                return false;
+            }
         }
     }
 
@@ -1852,6 +2187,128 @@ static rocke_value_t* _uk_w_descriptor_kouter(rocke_ir_builder_t* b_,
     return _uk_w_descriptor(b_, col, row, out_valid, user);
 }
 
+/* ---- tap_outer_k descriptors (Python _emit_tap_outer_loops) ----
+ *
+ * The K loop is (filter tap outer) x (output-channel chunk inner); the loop
+ * bodies write the per-tap (dh, dw, dy_tap) and per-chunk (kb, w_k) scalars
+ * into the contexts before every load. Operands are sequenced into
+ * temporaries in Python's left-to-right evaluation order. */
+struct tap_dy_ctx_t
+{
+    rocke_value_t* block_m_off;
+    dgrad_magic_div_t hw_div; // m_sub -> (n, m_rem)
+    dgrad_magic_div_t w_div; // m_rem -> (hi, wi)
+    rocke_value_t* c_Ho;
+    rocke_value_t* c_Wo;
+    rocke_value_t* c_K;
+    rocke_value_t* c0;
+    rocke_value_t* dh; /* pH - y (per tap) */
+    rocke_value_t* dw; /* pW - x (per tap) */
+    rocke_value_t* dy_tap; /* (dh*Wo + dw)*K (per tap) */
+    rocke_value_t* kb; /* absolute output-channel chunk base (per chunk) */
+};
+
+static rocke_value_t* _tap_dy_descriptor(rocke_ir_builder_t* b_,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         rocke_value_t** out_valid,
+                                         void* user)
+{
+    tap_dy_ctx_t* ctx = (tap_dy_ctx_t*)user;
+    rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
+    rocke_value_t *n_val, *m_rem, *hi, *wi;
+    _magic_divmod(b_, m_sub, &ctx->hw_div, &n_val, &m_rem);
+    _magic_divmod(b_, m_rem, &ctx->w_div, &hi, &wi);
+    rocke_value_t* ho = rocke_b_add(b_, hi, ctx->dh);
+    rocke_value_t* wo = rocke_b_add(b_, wi, ctx->dw);
+    rocke_value_t* ho_ge = rocke_b_cmp_ge(b_, ho, ctx->c0);
+    rocke_value_t* ho_lt = rocke_b_cmp_lt(b_, ho, ctx->c_Ho);
+    rocke_value_t* ho_ok = rocke_b_land(b_, ho_ge, ho_lt);
+    rocke_value_t* wo_ge = rocke_b_cmp_ge(b_, wo, ctx->c0);
+    rocke_value_t* wo_lt = rocke_b_cmp_lt(b_, wo, ctx->c_Wo);
+    rocke_value_t* wo_ok = rocke_b_land(b_, wo_ge, wo_lt);
+    rocke_value_t* valid = rocke_b_land(b_, ho_ok, wo_ok);
+    /* ((n*Ho + hi)*Wo + wi)*K + col */
+    rocke_value_t* n_ho = rocke_b_mul(b_, n_val, ctx->c_Ho);
+    rocke_value_t* n_ho_hi = rocke_b_add(b_, n_ho, hi);
+    rocke_value_t* row_off = rocke_b_mul(b_, n_ho_hi, ctx->c_Wo);
+    rocke_value_t* pix_w = rocke_b_add(b_, row_off, wi);
+    rocke_value_t* pix_k = rocke_b_mul(b_, pix_w, ctx->c_K);
+    rocke_value_t* pix = rocke_b_add(b_, pix_k, col);
+    rocke_value_t* tap_off = rocke_b_add(b_, pix, ctx->dy_tap);
+    rocke_value_t* offset = rocke_b_add(b_, tap_off, ctx->kb);
+    if(out_valid)
+        *out_valid = valid;
+    return offset;
+}
+
+struct tap_w_ctx_t
+{
+    rocke_value_t* block_n_off;
+    rocke_value_t* c_yxc; /* Y*X*Cs */
+    rocke_value_t* w_k; /* kb*Y*X*Cs + tap*Cs (per chunk) */
+};
+
+static rocke_value_t* _tap_w_descriptor(rocke_ir_builder_t* b_,
+                                        rocke_value_t* row,
+                                        rocke_value_t* col,
+                                        rocke_value_t** out_valid,
+                                        void* user)
+{
+    tap_w_ctx_t* ctx = (tap_w_ctx_t*)user;
+    rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
+    rocke_value_t* col_off = rocke_b_mul(b_, col, ctx->c_yxc);
+    rocke_value_t* inv = rocke_b_add(b_, col_off, c_val);
+    rocke_value_t* offset = rocke_b_add(b_, inv, ctx->w_k);
+    if(out_valid)
+        *out_valid = NULL; /* k_abs and the tap are in range by construction */
+    return offset;
+}
+
+/* K-outer coordinate swap, as _tilde_w_descriptor_kouter. */
+static rocke_value_t* _tap_w_descriptor_kouter(rocke_ir_builder_t* b_,
+                                               rocke_value_t* row,
+                                               rocke_value_t* col,
+                                               rocke_value_t** out_valid,
+                                               void* user)
+{
+    return _tap_w_descriptor(b_, col, row, out_valid, user);
+}
+
+/* ---- dy_halo loader descriptor (Python _emit_dy_halo_loop halo_dy) ----
+ * Linear dY pixel q = halo_base + row, valid inside [0, N*Hi*Wi) and below
+ * the tile's real row count (Wo < halo_max_wo leaves rows unloaded). */
+struct halo_dy_ctx_t
+{
+    rocke_value_t* halo_base;
+    rocke_value_t* c0;
+    rocke_value_t* npix; /* p_dg_M = N*Hi*Wi */
+    rocke_value_t* real_rows;
+    rocke_value_t* c_K;
+    rocke_value_t* kb; /* channel-chunk base (per chunk) */
+};
+
+static rocke_value_t* _halo_dy_descriptor(rocke_ir_builder_t* b_,
+                                          rocke_value_t* row,
+                                          rocke_value_t* col,
+                                          rocke_value_t** out_valid,
+                                          void* user)
+{
+    halo_dy_ctx_t* ctx = (halo_dy_ctx_t*)user;
+    rocke_value_t* q = rocke_b_add(b_, ctx->halo_base, row);
+    rocke_value_t* q_ge = rocke_b_cmp_ge(b_, q, ctx->c0);
+    rocke_value_t* q_lt = rocke_b_cmp_lt(b_, q, ctx->npix);
+    rocke_value_t* q_ok = rocke_b_land(b_, q_ge, q_lt);
+    rocke_value_t* in_tile = rocke_b_cmp_lt(b_, row, ctx->real_rows);
+    rocke_value_t* valid = rocke_b_land(b_, q_ok, in_tile);
+    rocke_value_t* q_k = rocke_b_mul(b_, q, ctx->c_K);
+    rocke_value_t* q_col = rocke_b_add(b_, q_k, col);
+    rocke_value_t* offset = rocke_b_add(b_, q_col, ctx->kb);
+    if(out_valid)
+        *out_valid = valid;
+    return offset;
+}
+
 // ===========================================================================
 // WMMA tilde direct epilogue (Python _emit_dgrad_tilde_direct_epilogue_wmma)
 // ===========================================================================
@@ -2379,51 +2836,157 @@ static rocke_kernel_def_t*
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
 
-    // ---- binary search ----
-    rocke_value_t* sg_idx = _emit_binary_search(
-        b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec->max_sub_gemms);
+    // ---- XCD-contiguous tile order (Python xcd_tile_order_xcds) ----
+    // Remap the launch-order linear id over (group, tile) when the kernargs
+    // ask for it (one uniform select) and split it back into tile and group.
+    // Operands are sequenced in Python's left-to-right evaluation order.
+    rocke_value_t* xcd_group = NULL;
+    const int num_xcds = _dgrad_xcd_tile_order_xcds(spec, arch);
+    if(num_xcds)
+    {
+        rocke_value_t* c1_xcd = rocke_b_const_i32(b, 1);
+        rocke_value_t* flat_tiles = rocke_b_mul(b, ctx.p_num_pid_m, ctx.p_num_pid_n);
+        rocke_value_t* num_wgs = rocke_b_mul(b, flat_tiles, ctx.p_groups);
+        rocke_value_t* by = rocke_b_block_id_y(b);
+        rocke_value_t* by_tiles = rocke_b_mul(b, by, flat_tiles);
+        rocke_value_t* linear_id = rocke_b_add(b, flat_block_id, by_tiles);
+        rocke_value_t* remapped
+            = rocke_chiplet_transform_chunked_runtime(b, linear_id, num_wgs, num_xcds, NULL);
+        if(!remapped)
+            return NULL;
+        rocke_value_t* taps = rocke_b_mul(b, ctx.p_Y, ctx.p_X);
+        rocke_value_t* multi_tap = rocke_b_cmp_gt(b, taps, c1_xcd);
+        rocke_value_t* multi_n = rocke_b_cmp_gt(b, ctx.p_num_pid_n, c1_xcd);
+        rocke_value_t* shares_rows = rocke_b_lor(b, multi_tap, multi_n);
+        rocke_value_t* is_grouped = rocke_b_cmp_gt(b, ctx.p_groups, c1_xcd);
+        rocke_value_t* grp_rows = rocke_b_land(b, is_grouped, shares_rows);
+        rocke_value_t* c_xcds = rocke_b_const_i32(b, num_xcds);
+        rocke_value_t* enough = rocke_b_cmp_ge(b, num_wgs, c_xcds);
+        rocke_value_t* use_xcd = rocke_b_land(b, grp_rows, enough);
+        rocke_value_t* logical_id = rocke_b_select(b, use_xcd, remapped, linear_id);
+        flat_block_id = rocke_b_mod(b, logical_id, flat_tiles);
+        xcd_group = rocke_b_div(b, logical_id, flat_tiles);
+    }
 
-    // ---- load all record fields ----
-    rocke_value_t* rec_block_start = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 0);
-    (void)_emit_load_record_field(b, sub_gemm_buf, sg_idx, 1); /* rec_num_m_tiles: unused */
-    rocke_value_t* rec_num_n_tiles = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 2);
-    rocke_value_t* rec_gemm_m = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 3);
-    rocke_value_t* rec_gemm_k = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 4);
-    rocke_value_t* rec_h_tilde_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 5);
-    rocke_value_t* rec_w_tilde_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 6);
-    rocke_value_t* rec_h_tilde_slice_begin = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 7);
-    rocke_value_t* rec_w_tilde_slice_begin = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 8);
-    (void)_emit_load_record_field(
-        b, sub_gemm_buf, sg_idx, 9); /* rec_y_dot_slice: unused (k_out innermost) */
-    rocke_value_t* rec_x_dot_slice = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 10);
-    rocke_value_t* rec_a_embed_h_coeff = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 11);
-    rocke_value_t* rec_a_embed_w_coeff = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 12);
-    rocke_value_t* rec_b_y_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 13);
-    rocke_value_t* rec_b_y_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 14);
-    rocke_value_t* rec_b_x_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 15);
-    rocke_value_t* rec_b_x_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 16);
-    rocke_value_t* rec_d_h_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 17);
-    rocke_value_t* rec_d_h_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 18);
-    rocke_value_t* rec_d_w_stride = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 19);
-    rocke_value_t* rec_d_w_offset = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 20);
+    // ---- sub-GEMM record ----
+    // Stride 1 (Python DgradConvSpec.folds_sub_gemm_record): the only
+    // sub-GEMM's record is rebuilt from the kernargs -- no search, no record
+    // loads. Otherwise binary-search the record buffer and load the fields.
+    const bool fold_record = _dgrad_folds_sub_gemm_record(spec);
+    rocke_value_t* sg_idx = NULL;
+    rocke_value_t* c0_rec = NULL;
+    rocke_value_t* c1_rec = NULL;
+    if(fold_record)
+    {
+        c0_rec = rocke_b_const_i32(b, 0);
+        c1_rec = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        sg_idx = _emit_binary_search(
+            b, flat_block_id, sub_gemm_buf, num_sub_gemms_param, spec->max_sub_gemms);
+    }
+    auto _ld = [&](int field_idx) -> rocke_value_t* {
+        if(!fold_record)
+            return _emit_load_record_field(b, sub_gemm_buf, sg_idx, field_idx);
+        switch(field_idx)
+        {
+        case 0:
+            return c0_rec; /* block_start */
+        case 1:
+            return ctx.p_num_pid_m;
+        case 2:
+            return ctx.p_num_pid_n;
+        case 3:
+            return ctx.p_dg_M;
+        case 4:
+            return ctx.p_dg_K;
+        case 5:
+            return ctx.p_Hi; /* h_tilde_slice */
+        case 6:
+            return ctx.p_Wi; /* w_tilde_slice */
+        case 7:
+            return ctx.p_pH; /* h_tilde_slice_begin */
+        case 8:
+            return ctx.p_pW; /* w_tilde_slice_begin */
+        case 9:
+            return ctx.p_Y; /* y_dot_slice */
+        case 10:
+            return ctx.p_X; /* x_dot_slice */
+        case 11:
+            return rocke_b_sub(b, c0_rec, ctx.p_dH); /* a_embed_h_coeff */
+        case 12:
+            return rocke_b_sub(b, c0_rec, ctx.p_dW); /* a_embed_w_coeff */
+        case 21:
+        {
+            /* gemm_k_padded: dg_K rounded up to tile_k * split_k. */
+            const int kq = spec->tile_k * spec->split_k;
+            rocke_value_t* c_kq = rocke_b_const_i32(b, kq);
+            rocke_value_t* c_kq1 = rocke_b_const_i32(b, kq - 1);
+            rocke_value_t* k_up = rocke_b_add(b, ctx.p_dg_K, c_kq1);
+            rocke_value_t* k_q = rocke_b_div(b, k_up, c_kq);
+            return rocke_b_mul(b, k_q, c_kq);
+        }
+        default: /* 13..20: unit strides, zero offsets */
+            return (field_idx % 2) ? c1_rec : c0_rec;
+        }
+    };
+
+    // ---- record fields ----
+    rocke_value_t* rec_block_start = _ld(0);
+    (void)_ld(1); /* rec_num_m_tiles: unused */
+    rocke_value_t* rec_num_n_tiles = _ld(2);
+    rocke_value_t* rec_gemm_m = _ld(3);
+    rocke_value_t* rec_gemm_k = _ld(4);
+    rocke_value_t* rec_h_tilde_slice = _ld(5);
+    rocke_value_t* rec_w_tilde_slice = _ld(6);
+    rocke_value_t* rec_h_tilde_slice_begin = _ld(7);
+    rocke_value_t* rec_w_tilde_slice_begin = _ld(8);
+    (void)_ld(9); /* rec_y_dot_slice: unused (k_out innermost) */
+    rocke_value_t* rec_x_dot_slice = _ld(10);
+    rocke_value_t* rec_a_embed_h_coeff = _ld(11);
+    rocke_value_t* rec_a_embed_w_coeff = _ld(12);
+    rocke_value_t* rec_b_y_stride = _ld(13);
+    rocke_value_t* rec_b_y_offset = _ld(14);
+    rocke_value_t* rec_b_x_stride = _ld(15);
+    rocke_value_t* rec_b_x_offset = _ld(16);
+    rocke_value_t* rec_d_h_stride = _ld(17);
+    rocke_value_t* rec_d_h_offset = _ld(18);
+    rocke_value_t* rec_d_w_stride = _ld(19);
+    rocke_value_t* rec_d_w_offset = _ld(20);
 
     // ---- magic-division pairs of this record's divisors ----
     // (Python sub_gemm_magic_pairs); the table starts after the last record.
-    rocke_value_t* _c_rec_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS);
-    rocke_value_t* _magic_rec_end = rocke_b_mul(b, num_sub_gemms_param, _c_rec_fields);
-    rocke_value_t* _c_magic_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);
-    rocke_value_t* _magic_rec_off = rocke_b_mul(b, sg_idx, _c_magic_fields);
-    rocke_value_t* _magic_base = rocke_b_add(b, _magic_rec_end, _magic_rec_off);
+    // The folded record's table is one entry right after the one record, at
+    // constant offsets.
     rocke_value_t* rec_magic[ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS];
-    for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+    if(fold_record)
     {
-        rocke_value_t* _c_j = rocke_b_const_i32(b, j);
-        rocke_value_t* _off = rocke_b_add(b, _magic_base, _c_j);
-        rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+        for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+        {
+            rocke_value_t* _off = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS + j);
+            rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+        }
+    }
+    else
+    {
+        rocke_value_t* _c_rec_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_RECORD_FIELDS);
+        rocke_value_t* _magic_rec_end = rocke_b_mul(b, num_sub_gemms_param, _c_rec_fields);
+        rocke_value_t* _c_magic_fields = rocke_b_const_i32(b, ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS);
+        rocke_value_t* _magic_rec_off = rocke_b_mul(b, sg_idx, _c_magic_fields);
+        rocke_value_t* _magic_base = rocke_b_add(b, _magic_rec_end, _magic_rec_off);
+        for(int j = 0; j < ROCKE_DGRAD_SUB_GEMM_MAGIC_FIELDS; j++)
+        {
+            rocke_value_t* _c_j = rocke_b_const_i32(b, j);
+            rocke_value_t* _off = rocke_b_add(b, _magic_base, _c_j);
+            rec_magic[j] = rocke_b_global_load_i32(b, sub_gemm_buf, _off, 4);
+        }
     }
 
     // ---- compute local tile indices ----
-    rocke_value_t* local_flat = rocke_b_sub(b, flat_block_id, rec_block_start);
+    // The folded record's block_start is 0, so the subtraction is skipped.
+    rocke_value_t* local_flat
+        = fold_record ? flat_block_id : rocke_b_sub(b, flat_block_id, rec_block_start);
     rocke_value_t* local_m_tile = rocke_b_div(b, local_flat, rec_num_n_tiles);
     rocke_value_t* local_n_tile = rocke_b_mod(b, local_flat, rec_num_n_tiles);
 
@@ -2487,7 +3050,7 @@ static rocke_kernel_def_t*
     rocke_value_t* k_hi;
     if(is_split_k)
     {
-        rocke_value_t* rec_gemm_k_padded = _emit_load_record_field(b, sub_gemm_buf, sg_idx, 21);
+        rocke_value_t* rec_gemm_k_padded = _ld(21);
         rocke_value_t* c_split_k = rocke_b_const_i32(b, spec->split_k);
         rocke_value_t* k_slice = rocke_b_div(b, rec_gemm_k_padded, c_split_k);
         k_lo = rocke_b_mul(b, rocke_b_block_id_z(b), k_slice);
@@ -2544,7 +3107,8 @@ static rocke_kernel_def_t*
     rocke_value_t* c_group_base = NULL;
     if(grouped)
     {
-        rocke_value_t* group_idx = rocke_b_block_id_y(b);
+        /* Under the XCD-contiguous order the group comes from the remapped id. */
+        rocke_value_t* group_idx = xcd_group ? xcd_group : rocke_b_block_id_y(b);
         c_kpg = ctx.p_kpg;
         k_out_group_base = rocke_b_mul(b, group_idx, c_kpg);
         c_group_base = rocke_b_mul(b, group_idx, ctx.p_cpg);
@@ -2566,16 +3130,21 @@ static rocke_kernel_def_t*
 
     // ---- LDS ----
     rocke_conv_lds_layout_t lds_layout = _dgrad_effective_lds_layout(spec);
-    int a_shape[2] = {block_m, lds_layout.row_stride};
+    /* The staged dY halo tile (dy_halo) replaces the A tile. */
+    int a_shape[2]
+        = {spec->dy_halo ? _dgrad_dy_halo_lds_rows(spec) : block_m, lds_layout.row_stride};
     /* A stays M-outer; only B flips. Mirrors the Python branch. */
     int b_shape_arr[2] = {block_n, lds_layout.row_stride};
     if(spec->lds_k_outer)
     {
         b_shape_arr[0] = block_k;
-        b_shape_arr[1] = block_n + ROCKE_DGRAD_KOUTER_PAD;
+        b_shape_arr[1] = block_n + _dgrad_kouter_b_pad(spec);
     }
     rocke_value_t* A_smem = rocke_b_smem_alloc(b, ab_ir, a_shape, 2, "A_smem");
     rocke_value_t* B_smem = rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem");
+    /* dy_halo=2: the second B buffer of the per-tap double buffer. */
+    rocke_value_t* B_smem2
+        = spec->dy_halo == 2 ? rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem2") : NULL;
 
     // ---- MFMA tile counts ----
     int mfmas_m = rocke_dgrad_conv_spec_mfmas_per_warp_m(spec);
@@ -3164,7 +3733,11 @@ static rocke_kernel_def_t*
     // ---- MFMA phase (shared by every synchronous K loop below) ----
     // Emits exactly the ops of the former inline loop body, so a spec with
     // a single K loop lowers byte-identically.
-    auto emit_mfma_phase = [&](rocke_value_t* const* in_vars, rocke_value_t** new_accs) {
+    typedef std::function<rocke_value_t*(rocke_value_t*)> a_row_map_fn;
+    auto emit_mfma_phase_src = [&](rocke_value_t* const* in_vars,
+                                   rocke_value_t** new_accs,
+                                   rocke_value_t* B_src,
+                                   const a_row_map_fn* a_row_map) {
         if(!is_wmma && atom)
         {
             rocke_lane_decode_t decoded = rocke_decode_mfma_lanes(b, atom, lane);
@@ -3190,6 +3763,9 @@ static rocke_kernel_def_t*
                         b,
                         warp_m_off,
                         rocke_b_add(b, rocke_b_const_i32(b, mi * spec->warp_tile_m), m_in_atom));
+                    /* Python a_row_map (the dY halo loop). */
+                    if(a_row_map)
+                        a_row = (*a_row_map)(a_row);
                     a_rows[mi] = rocke_conv_emit_smem_load(b, A_smem, a_row, col_base, a_per_lane);
                 }
 
@@ -3209,7 +3785,7 @@ static rocke_kernel_def_t*
                                                         lane,
                                                         tr_lane_mod4,
                                                         tr_grp16,
-                                                        B_smem,
+                                                        B_src,
                                                         mn_base,
                                                         k_c,
                                                         spec->warp_tile_n,
@@ -3222,7 +3798,7 @@ static rocke_kernel_def_t*
                         b,
                         warp_n_off,
                         rocke_b_add(b, rocke_b_const_i32(b, ni * spec->warp_tile_n), n_in_atom));
-                    b_cols[ni] = rocke_conv_emit_smem_load(b, B_smem, b_row, col_base, b_per_lane);
+                    b_cols[ni] = rocke_conv_emit_smem_load(b, B_src, b_row, col_base, b_per_lane);
                 }
 
                 int flat = 0;
@@ -3242,13 +3818,16 @@ static rocke_kernel_def_t*
         }
         else if(is_wmma)
         {
-            emit_wmma_phase(A_smem, B_smem, in_vars, new_accs);
+            emit_wmma_phase(A_smem, B_src, in_vars, new_accs);
         }
         else
         {
             for(int i = 0; i < num_accs; i++)
                 new_accs[i] = in_vars[i];
         }
+    };
+    auto emit_mfma_phase = [&](rocke_value_t* const* in_vars, rocke_value_t** new_accs) {
+        emit_mfma_phase_src(in_vars, new_accs, B_smem, NULL);
     };
 
     // ---- plain K-loop body: per-element descriptors, read+write per chunk ----
@@ -3279,7 +3858,302 @@ static rocke_kernel_def_t*
 
     rocke_value_t* final_accs[ROCKE_CONV_MAX_ACCS];
     int num_final = 0;
-    if(spec->uniform_k_decode)
+    if(spec->dy_halo)
+    {
+        /* Python _emit_dy_halo_loop: output-channel chunk outer, filter tap
+         * inner (unrolled over the baked Y x X), one staged dY halo per
+         * chunk. The pad is baked with the filter ((Y-1)/2, (X-1)/2 at stride
+         * 1 with Ho == Hi), Wo and everything derived from it is runtime. */
+        const int Y = p->Y;
+        const int X = p->X;
+        const int pH = p->pH;
+        const int pW = p->pW;
+        const int lds_rows = _dgrad_dy_halo_lds_rows(spec);
+        const int load_rows = lds_rows - 1;
+        rocke_value_t* c_kd = c_kdiv;
+        rocke_value_t* c_cs = c_cstride;
+        rocke_value_t* c_yx = rocke_b_const_i32(b, Y * X);
+        rocke_value_t* c_yxc = rocke_b_mul(b, c_yx, c_cs);
+
+        rocke_coalesced_tile_loader_t halo_loader = a_sync_loader;
+        halo_loader.tile_rows = load_rows;
+
+        /* min_shift = (pH - Y + 1)*Wo + (pW - X + 1); real rows. */
+        rocke_value_t* c_ms_h = rocke_b_const_i32(b, pH - Y + 1);
+        rocke_value_t* ms_h = rocke_b_mul(b, c_ms_h, c_Wo);
+        rocke_value_t* c_ms_w = rocke_b_const_i32(b, pW - X + 1);
+        rocke_value_t* min_shift = rocke_b_add(b, ms_h, c_ms_w);
+        rocke_value_t* c_rr_h = rocke_b_const_i32(b, Y - 1);
+        rocke_value_t* rr_h = rocke_b_mul(b, c_rr_h, c_Wo);
+        rocke_value_t* c_rr_w = rocke_b_const_i32(b, block_m + X - 1);
+        rocke_value_t* real_rows = rocke_b_add(b, rr_h, c_rr_w);
+        rocke_value_t* halo_base = rocke_b_add(b, block_m_off_v, min_shift);
+        rocke_value_t* c_zero_row = rocke_b_const_i32(b, lds_rows - 1);
+
+        halo_dy_ctx_t hctx;
+        hctx.halo_base = halo_base;
+        hctx.c0 = c0;
+        hctx.npix = ctx.p_dg_M;
+        hctx.real_rows = real_rows;
+        hctx.c_K = c_K;
+        hctx.kb = NULL;
+        tap_w_ctx_t tw;
+        tw.block_n_off = block_n_off_v;
+        tw.c_yxc = c_yxc;
+        tw.w_k = NULL;
+        rocke_loads_descriptor_fn w_desc
+            = spec->lds_k_outer ? _tap_w_descriptor_kouter : _tap_w_descriptor;
+
+        /* Zero row: every thread writes the same zeros; the first chunk's
+         * barrier orders it before any read and the loader never writes it. */
+        const int zvec = block_k < 8 ? block_k : 8;
+        rocke_value_t* c_zc = rocke_b_const_i32(b, block_k / zvec);
+        rocke_value_t* z_mod = rocke_b_mod(b, tid, c_zc);
+        rocke_value_t* c_zv = rocke_b_const_i32(b, zvec);
+        rocke_value_t* zcol = rocke_b_mul(b, z_mod, c_zv);
+        rocke_value_t* zval = rocke_b_zero_vec(b, ab_ir, zvec);
+        rocke_value_t* zidx[2] = {c_zero_row, zcol};
+        rocke_b_smem_store_vN(b, A_smem, zidx, 2, zval, zvec);
+
+        /* Python row_map(y, x): the tap's scalars once, then per fragment
+         * row the (hi, wi) decode, its bounds and the select. */
+        auto row_map = [&](int y, int x) -> a_row_map_fn {
+            const int dh = pH - y;
+            const int dw = pW - x;
+            rocke_value_t* c_sh = rocke_b_const_i32(b, Y - 1 - y);
+            rocke_value_t* sh_h = rocke_b_mul(b, c_sh, c_Wo);
+            rocke_value_t* c_sw = rocke_b_const_i32(b, X - 1 - x);
+            rocke_value_t* shift = rocke_b_add(b, sh_h, c_sw);
+            rocke_value_t* h_hi = NULL;
+            if(dh > 0)
+            {
+                rocke_value_t* c_dh = rocke_b_const_i32(b, dh);
+                h_hi = rocke_b_sub(b, c_Ho, c_dh);
+            }
+            rocke_value_t* w_hi = NULL;
+            if(dw > 0)
+            {
+                rocke_value_t* c_dw = rocke_b_const_i32(b, dw);
+                w_hi = rocke_b_sub(b, c_Wo, c_dw);
+            }
+            return [=, &hw_div, &w_div](rocke_value_t* a_row) -> rocke_value_t* {
+                rocke_value_t* m = rocke_b_add(b, block_m_off_v, a_row);
+                rocke_value_t *n_q, *rem, *hi, *wi;
+                _magic_divmod(b, m, &hw_div, &n_q, &rem);
+                _magic_divmod(b, rem, &w_div, &hi, &wi);
+                rocke_value_t* conds[4];
+                int nc = 0;
+                if(dh < 0)
+                {
+                    rocke_value_t* c = rocke_b_const_i32(b, -dh);
+                    conds[nc++] = rocke_b_cmp_ge(b, hi, c);
+                }
+                if(h_hi)
+                    conds[nc++] = rocke_b_cmp_lt(b, hi, h_hi);
+                if(dw < 0)
+                {
+                    rocke_value_t* c = rocke_b_const_i32(b, -dw);
+                    conds[nc++] = rocke_b_cmp_ge(b, wi, c);
+                }
+                if(w_hi)
+                    conds[nc++] = rocke_b_cmp_lt(b, wi, w_hi);
+                rocke_value_t* row = rocke_b_add(b, a_row, shift);
+                if(nc == 0)
+                    return row;
+                rocke_value_t* ok = conds[0];
+                for(int i = 1; i < nc; i++)
+                    ok = rocke_b_land(b, ok, conds[i]);
+                return rocke_b_select(b, ok, row, c_zero_row);
+            };
+        };
+
+        const int n_taps = Y * X;
+        auto mfma_tap
+            = [&](int t, rocke_value_t* b_src, rocke_value_t* const* cur_in, rocke_value_t** out) {
+                  const int y = t / X;
+                  const int x = t % X;
+                  if(spec->dy_halo_setprio > 0)
+                      rocke_b_s_setprio(b, spec->dy_halo_setprio);
+                  a_row_map_fn map = row_map(y, x);
+                  emit_mfma_phase_src(cur_in, out, b_src, &map);
+                  if(spec->dy_halo_setprio > 0)
+                      rocke_b_s_setprio(b, 0);
+              };
+
+        rocke_value_t* bufs[2] = {B_smem, B_smem2};
+        rocke_for_t chunk_for
+            = rocke_b_scf_for_iter(b, c0, c_kd, c_block_k, iter_args, num_accs, "kb", false, true);
+        rocke_b_region_enter(b, chunk_for.body);
+        {
+            rocke_value_t* kb0 = chunk_for.iv;
+            rocke_value_t* kb = grouped ? rocke_b_add(b, kb0, k_out_group_base) : kb0;
+            hctx.kb = kb;
+            rocke_value_t* w_kb = rocke_b_mul(b, kb, c_yxc);
+            auto set_tap = [&](int t) {
+                rocke_value_t* c_t = rocke_b_const_i32(b, t);
+                rocke_value_t* t_cs = rocke_b_mul(b, c_t, c_cs);
+                tw.w_k = rocke_b_add(b, w_kb, t_cs);
+            };
+            rocke_value_t* cur[ROCKE_CONV_MAX_ACCS];
+            rocke_value_t* nxt_accs[ROCKE_CONV_MAX_ACCS];
+            for(int i = 0; i < num_accs; i++)
+                cur[i] = chunk_for.iter_vars[i];
+            if(spec->dy_halo == 2)
+            {
+                /* Chunk prologue: the halo and tap 0's B tile. */
+                set_tap(0);
+                rocke_ctl_staged_t a_st;
+                rocke_ctl_staged_t b_st;
+                rocke_coalesced_tile_loader_load_global(
+                    b, &halo_loader, tid, _halo_dy_descriptor, &hctx, dy_rsrc, NULL, &a_st);
+                rocke_coalesced_tile_loader_load_global(
+                    b, &b_sync_loader, tid, w_desc, &tw, w_rsrc, NULL, &b_st);
+                rocke_coalesced_tile_loader_store_lds(b, &halo_loader, A_smem, &a_st);
+                rocke_coalesced_tile_loader_store_lds(b, &b_sync_loader, bufs[0], &b_st);
+                rocke_b_sync(b);
+                for(int t = 0; t < n_taps; t++)
+                {
+                    rocke_ctl_staged_t nxt;
+                    const bool has_nxt = t + 1 < n_taps;
+                    if(has_nxt)
+                    {
+                        /* Tap t+1's B tile into registers, pinned ahead of
+                         * the MFMAs. */
+                        set_tap(t + 1);
+                        rocke_coalesced_tile_loader_load_global(
+                            b, &b_sync_loader, tid, w_desc, &tw, w_rsrc, NULL, &nxt);
+                        rocke_b_sched_barrier(b, 0);
+                    }
+                    mfma_tap(t, bufs[t % 2], cur, nxt_accs);
+                    for(int i = 0; i < num_accs; i++)
+                        cur[i] = nxt_accs[i];
+                    if(has_nxt)
+                    {
+                        rocke_b_sched_barrier(b, 0);
+                        rocke_coalesced_tile_loader_store_lds(
+                            b, &b_sync_loader, bufs[(t + 1) % 2], &nxt);
+                    }
+                    rocke_b_sync(b);
+                }
+            }
+            else
+            {
+                for(int t = 0; t < n_taps; t++)
+                {
+                    set_tap(t);
+                    rocke_ctl_staged_t a_st;
+                    rocke_ctl_staged_t b_st;
+                    if(t == 0)
+                        rocke_coalesced_tile_loader_load_global(
+                            b, &halo_loader, tid, _halo_dy_descriptor, &hctx, dy_rsrc, NULL, &a_st);
+                    rocke_coalesced_tile_loader_load_global(
+                        b, &b_sync_loader, tid, w_desc, &tw, w_rsrc, NULL, &b_st);
+                    if(t == 0)
+                        rocke_coalesced_tile_loader_store_lds(b, &halo_loader, A_smem, &a_st);
+                    rocke_coalesced_tile_loader_store_lds(b, &b_sync_loader, bufs[0], &b_st);
+                    rocke_b_sync(b);
+                    mfma_tap(t, bufs[0], cur, nxt_accs);
+                    for(int i = 0; i < num_accs; i++)
+                        cur[i] = nxt_accs[i];
+                    rocke_b_sync(b);
+                }
+            }
+            rocke_b_scf_yield(b, cur, num_accs);
+        }
+        rocke_b_region_leave(b);
+
+        for(int i = 0; i < chunk_for.op->num_results; i++)
+            final_accs[i] = chunk_for.op->results[i];
+        num_final = chunk_for.op->num_results;
+    }
+    else if(spec->tap_outer_k)
+    {
+        /* Python _emit_tap_outer_loops: filter tap outer, output-channel
+         * chunk inner. kpg % tile_k == 0 (validator), so a chunk never
+         * straddles a tap. */
+        rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* c_kd = c_kdiv;
+        rocke_value_t* c_cs = c_cstride;
+        rocke_value_t* c_taps = rocke_b_mul(b, c_Y, c_X);
+        rocke_value_t* c_yxc = rocke_b_mul(b, c_taps, c_cs);
+
+        tap_dy_ctx_t tdy;
+        tdy.block_m_off = block_m_off_v;
+        tdy.hw_div = hw_div;
+        tdy.w_div = w_div;
+        tdy.c_Ho = c_Ho;
+        tdy.c_Wo = c_Wo;
+        tdy.c_K = c_K;
+        tdy.c0 = c0;
+        tdy.dh = tdy.dw = tdy.dy_tap = tdy.kb = NULL;
+        tap_w_ctx_t tw;
+        tw.block_n_off = block_n_off_v;
+        tw.c_yxc = c_yxc;
+        tw.w_k = NULL;
+
+        rocke_for_t tap_for
+            = rocke_b_scf_for_iter(b, c0, c_taps, c1, iter_args, num_accs, "tap", false, true);
+        rocke_b_region_enter(b, tap_for.body);
+        {
+            rocke_value_t* tap = tap_for.iv;
+            rocke_value_t* ydot = rocke_b_div(b, tap, c_X);
+            rocke_value_t* ydot_x = rocke_b_mul(b, ydot, c_X);
+            rocke_value_t* xdot = rocke_b_sub(b, tap, ydot_x);
+            tdy.dh = rocke_b_sub(b, ctx.p_pH, ydot);
+            tdy.dw = rocke_b_sub(b, ctx.p_pW, xdot);
+            rocke_value_t* dh_wo = rocke_b_mul(b, tdy.dh, c_Wo);
+            rocke_value_t* dh_wo_dw = rocke_b_add(b, dh_wo, tdy.dw);
+            tdy.dy_tap = rocke_b_mul(b, dh_wo_dw, c_K);
+            rocke_value_t* tap_cs = rocke_b_mul(b, tap, c_cs);
+
+            rocke_iter_arg_t chunk_args[ROCKE_CONV_MAX_ACCS];
+            char chunk_names[ROCKE_CONV_MAX_ACCS][40];
+            for(int i = 0; i < num_accs; i++)
+            {
+                snprintf(chunk_names[i], sizeof(chunk_names[0]), "%s_t", iter_args[i].name);
+                chunk_args[i].name = chunk_names[i];
+                chunk_args[i].init = tap_for.iter_vars[i];
+            }
+            rocke_for_t chunk_for = rocke_b_scf_for_iter(
+                b, c0, c_kd, c_block_k, chunk_args, num_accs, "kb", false, true);
+            rocke_b_region_enter(b, chunk_for.body);
+            {
+                rocke_value_t* kb0 = chunk_for.iv;
+                tdy.kb = grouped ? rocke_b_add(b, kb0, k_out_group_base) : kb0;
+                rocke_value_t* kb_yxc = rocke_b_mul(b, tdy.kb, c_yxc);
+                tw.w_k = rocke_b_add(b, kb_yxc, tap_cs);
+                /* Every global read of the tile before the first LDS write. */
+                rocke_ctl_staged_t a_staged;
+                rocke_ctl_staged_t b_staged;
+                rocke_coalesced_tile_loader_load_global(
+                    b, &a_sync_loader, tid, _tap_dy_descriptor, &tdy, dy_rsrc, NULL, &a_staged);
+                rocke_coalesced_tile_loader_load_global(b,
+                                                        &b_sync_loader,
+                                                        tid,
+                                                        spec->lds_k_outer ? _tap_w_descriptor_kouter
+                                                                          : _tap_w_descriptor,
+                                                        &tw,
+                                                        w_rsrc,
+                                                        NULL,
+                                                        &b_staged);
+                rocke_coalesced_tile_loader_store_lds(b, &a_sync_loader, A_smem, &a_staged);
+                rocke_coalesced_tile_loader_store_lds(b, &b_sync_loader, B_smem, &b_staged);
+                rocke_b_sync(b);
+                rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+                emit_mfma_phase(chunk_for.iter_vars, new_accs);
+                rocke_b_sync(b);
+                rocke_b_scf_yield(b, new_accs, num_accs);
+            }
+            rocke_b_region_leave(b);
+            rocke_b_scf_yield(b, chunk_for.op->results, num_accs);
+        }
+        rocke_b_region_leave(b);
+
+        for(int i = 0; i < tap_for.op->num_results; i++)
+            final_accs[i] = tap_for.op->results[i];
+        num_final = tap_for.op->num_results;
+    }
+    else if(spec->uniform_k_decode)
     {
         /* Python _emit_uniform_k_decode_loops. Loop 1 carries the K tile's
          * decoded (k_out, xdot, ydot) and runs when kpg (K when ungrouped) is
