@@ -133,6 +133,7 @@ jobs:
             dnn-providers/miopen-provider
             projects/miopen
             shared/ctest
+          persist-credentials: false
 
       # The public/private split keeps five files in lockstep by hand: the
       # public header, the private _impl declarations, the compile-time rename,
@@ -169,6 +170,7 @@ jobs:
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
+          persist-credentials: false
 
       - name: Build rocjitsu
         if: matrix.job_id == 'hip-package-build'

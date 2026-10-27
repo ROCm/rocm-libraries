@@ -14,7 +14,8 @@
 
 name: Docs Preview
 
-on:
+# SECURITY: MEMBER/OWNER comments only; fork PRs rejected; PR code never checked out.
+on: # zizmor: ignore[dangerous-triggers]
   issue_comment:
     types: [created, edited]
 
@@ -38,7 +39,9 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-pull-requests: write
 
       - name: Checkout config files only
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -46,6 +49,7 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0

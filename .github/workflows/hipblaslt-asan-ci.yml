@@ -39,6 +39,7 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Load CI environment
         id: ci-env
@@ -67,7 +68,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
     container:
-      image: ${{ needs.setup.outputs.docker_image }}
+      # setup forwards ci-env's docker-image, which is pinned by digest.
+      image: ${{ needs.setup.outputs.docker_image }} # zizmor: ignore[unpinned-images]
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
@@ -77,6 +79,8 @@ jobs:
     steps:
       - name: "Check out rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -84,6 +88,7 @@ jobs:
           repository: "ROCm/TheRock"
           path: TheRock
           ref: ${{ needs.setup.outputs.therock_ref }}
+          persist-credentials: false
 
       - name: Install python deps
         run: |
@@ -228,6 +233,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: ${{ needs.setup.outputs.therock_ref }}
+          persist-credentials: false
 
       - name: Checkout rocm-libraries repository for scripts
         timeout-minutes: 30
@@ -238,6 +244,7 @@ jobs:
             .github/scripts
             test/therock
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Download hipBLASLt ASAN trees
         timeout-minutes: 30

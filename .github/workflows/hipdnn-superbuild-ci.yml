@@ -71,6 +71,7 @@ jobs:
             projects/hipdnn
             projects/miopen
             test
+          persist-credentials: false
 
       # Shared CI constants, kpack-ref among them, defined in one place.
       - name: Load CI environment
@@ -133,6 +134,8 @@ jobs:
 
       - name: Install rocm_kpack
         shell: pwsh
+        env:
+          KPACK_REF: ${{ steps.ci-env.outputs.kpack-ref }}
         run: |
           $python = $env:VENV_PYTHON
           # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
@@ -148,13 +151,13 @@ jobs:
           git -C $kpackSrc sparse-checkout init --cone
           git -C $kpackSrc sparse-checkout set shared/kpack
           if ($LASTEXITCODE -ne 0) { throw "Failed to prepare the rocm-systems sparse checkout" }
-          git -C $kpackSrc fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch rocm-systems ${{ steps.ci-env.outputs.kpack-ref }}" }
+          git -C $kpackSrc fetch --depth 1 --filter=blob:none origin "$env:KPACK_REF"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch rocm-systems $env:KPACK_REF" }
           git -C $kpackSrc checkout -q FETCH_HEAD
-          if ($LASTEXITCODE -ne 0) { throw "Failed to check out ${{ steps.ci-env.outputs.kpack-ref }}" }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to check out $env:KPACK_REF" }
           # Confirms the fetch landed on the pinned commit.
           $fetched = (& git -C $kpackSrc rev-parse HEAD).Trim()
-          if ($fetched -ne "${{ steps.ci-env.outputs.kpack-ref }}") { throw "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" }
+          if ($fetched -ne "$env:KPACK_REF") { throw "rocm-systems is $fetched, expected $env:KPACK_REF" }
           # Installing the directory rebuilds and reinstalls every time, so a
           # warm venv cannot keep an older build of this same 0.1.0 version.
           & $python -m pip install (Join-Path $kpackSrc "shared\kpack")
@@ -280,6 +283,7 @@ jobs:
             projects/hipdnn
             projects/miopen
             test
+          persist-credentials: false
 
       # Shared CI constants, kpack-ref among them, defined in one place.
       - name: Load CI environment
@@ -355,6 +359,8 @@ jobs:
             --deps-dir "$THIRD_PARTY_DEPS_DIR"
 
       - name: Install rocm_kpack
+        env:
+          KPACK_REF: ${{ steps.ci-env.outputs.kpack-ref }}
         run: |
           set -euo pipefail
           # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
@@ -367,11 +373,11 @@ jobs:
           git -C "$KPACK_SRC" remote add origin https://github.com/ROCm/rocm-systems.git
           git -C "$KPACK_SRC" sparse-checkout init --cone
           git -C "$KPACK_SRC" sparse-checkout set shared/kpack
-          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${KPACK_REF}"
           git -C "$KPACK_SRC" checkout -q FETCH_HEAD
           # Confirms the fetch landed on the pinned commit.
           fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
-          test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
+          test "$fetched" = "${KPACK_REF}" || { echo "rocm-systems is $fetched, expected ${KPACK_REF}" >&2; exit 1; }
           # Installing the directory rebuilds and reinstalls every time, so a
           # warm venv cannot keep an older build of this same 0.1.0 version.
           "$VENV_PYTHON" -m pip install "$KPACK_SRC/shared/kpack"
@@ -469,9 +475,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Report results
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
         run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+          echo "${NEEDS_JSON}"
+          FAILED_JOBS="$(echo "${NEEDS_JSON}" \
             | jq --raw-output \
             'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"

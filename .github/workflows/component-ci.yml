@@ -37,6 +37,7 @@ jobs:
             .github/scripts/ci_utils.py
             .github/scripts/component_ci.py
           fetch-depth: 2
+          persist-credentials: false
       - uses: ./.github/actions/ci-env
         id: env
       - name: Detect changed components
@@ -106,10 +107,12 @@ jobs:
           ref: ${{ needs.changes.outputs.therock-ref }}
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJson(needs) }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
-            --needs-json '${{ toJson(needs) }}'
+            --needs-json "${NEEDS_JSON}"

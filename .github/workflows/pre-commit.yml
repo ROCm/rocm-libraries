@@ -37,6 +37,7 @@ jobs:
           # the projects touched by the diff instead of the full ~9 GB tree.
           filter: blob:none
           sparse-checkout: .github
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

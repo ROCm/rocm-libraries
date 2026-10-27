@@ -21,10 +21,13 @@ jobs:
     name: Linux
     runs-on: ${{ inputs.linux_runner }}
     container:
-      image: ${{ inputs.docker_image }}
+      # Callers pass ci-env's docker-image, which is pinned by digest.
+      image: ${{ inputs.docker_image }} # zizmor: ignore[unpinned-images]
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-linux
@@ -46,7 +49,8 @@ jobs:
     name: Linux (stinkytofu ${{ matrix.config }})
     runs-on: ${{ inputs.linux_runner }}
     container:
-      image: ${{ inputs.docker_image }}
+      # Callers pass ci-env's docker-image, which is pinned by digest.
+      image: ${{ inputs.docker_image }} # zizmor: ignore[unpinned-images]
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +73,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-linux
@@ -93,6 +99,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

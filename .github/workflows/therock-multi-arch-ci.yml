@@ -103,6 +103,7 @@ jobs:
         with:
           sparse-checkout: .github/actions/ci-env
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Load CI environment
         id: ci-env
@@ -129,6 +130,7 @@ jobs:
           sparse-checkout: |
             .github/repos-config.json
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -138,6 +140,7 @@ jobs:
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Configure CI
         id: configure
@@ -219,7 +222,9 @@ jobs:
         needs.configure.outputs.skip_tests != 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
-    secrets: inherit
+    # TheRock's multi_arch_ci_* declare no workflow_call secrets and pass
+    # theirs on by inheritance, so they cannot be forwarded by name.
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -229,7 +234,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.test_projects || '' }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
@@ -247,7 +252,9 @@ jobs:
         needs.configure.outputs.skip_tests != 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
-    secrets: inherit
+    # TheRock's multi_arch_ci_* declare no workflow_call secrets and pass
+    # theirs on by inheritance, so they cannot be forwarded by name.
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -255,7 +262,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.test_projects || '' }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
@@ -308,10 +315,12 @@ jobs:
           ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
-            --needs-json '${{ toJSON(needs) }}'
+            --needs-json "${NEEDS_JSON}"

@@ -17,11 +17,12 @@ runs:
       uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
     - name: Create venv
+      id: venv
       shell: bash
       run: |
         VENV_DIR=$(mktemp -d)
         python3 -m venv "$VENV_DIR"
-        echo "VENV_DIR=$VENV_DIR" >> "$GITHUB_ENV"
+        echo "dir=$VENV_DIR" >> "$GITHUB_OUTPUT"
 
     - name: pip install
       shell: bash
@@ -31,6 +32,8 @@ runs:
         CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
         CMAKE_GENERATOR: Ninja
         LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        VENV_DIR: ${{ steps.venv.outputs.dir }}
+        PACKAGE_PATH: ${{ inputs.package_path }}
       run: |
         if [ -f "$VENV_DIR/bin/activate" ]; then
           source "$VENV_DIR/bin/activate"
@@ -38,23 +41,28 @@ runs:
           source "$VENV_DIR/Scripts/activate"
         fi
         pip install pytest
-        pip install ${{ inputs.package_path }}
+        pip install "${PACKAGE_PATH}"
 
     - name: pytest
       shell: bash
       env:
         LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        VENV_DIR: ${{ steps.venv.outputs.dir }}
+        PACKAGE_PATH: ${{ inputs.package_path }}
+        TEST_PATH: ${{ inputs.test_path }}
       run: |
         if [ -f "$VENV_DIR/bin/activate" ]; then
           source "$VENV_DIR/bin/activate"
         else
           source "$VENV_DIR/Scripts/activate"
         fi
-        TEST_DIR=$( cd ${{ inputs.package_path }}/${{ inputs.test_path }} && pwd )
+        TEST_DIR=$( cd "${PACKAGE_PATH}/${TEST_PATH}" && pwd )
         cd "$VENV_DIR"
         pytest "$TEST_DIR"
 
     - name: Cleanup venv
       shell: bash
-      if: always()
+      if: always() && steps.venv.outputs.dir != ''
+      env:
+        VENV_DIR: ${{ steps.venv.outputs.dir }}
       run: rm -rf "$VENV_DIR"

@@ -36,6 +36,7 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           fetch-depth: 2
+          persist-credentials: false
 
       - name: Load CI environment
         id: ci-env
@@ -53,10 +54,13 @@ jobs:
           repository: "ROCm/TheRock"
           path: TheRock
           ref: ${{ inputs.therock_ref_override || '5c677058a44d6cc4a06587857cf8fca3c9abc925' }}
+          persist-credentials: false
 
       - name: Log locked TheRock ref
+        env:
+          THEROCK_SHA: ${{ steps.checkout_therock.outputs.commit }}
         run: |
-          RESOLVED_REF="${{ steps.checkout_therock.outputs.commit }}"
+          RESOLVED_REF="${THEROCK_SHA}"
           COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
           echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
           {
@@ -71,6 +75,7 @@ jobs:
           repository: ROCm/therock-ci-config
           ref: main
           path: ci-config
+          persist-credentials: false
         continue-on-error: true
 
       - name: Set up Python
@@ -85,10 +90,12 @@ jobs:
 
       - name: Compute package version
         id: rocm_package_version
+        env:
+          THEROCK_SHA: ${{ steps.checkout_therock.outputs.commit }}
         run: |
           python TheRock/build_tools/compute_rocm_package_version.py \
             --release-type=dev \
-            --override-git-sha=${{ steps.checkout_therock.outputs.commit }}
+            --override-git-sha=${THEROCK_SHA}
 
       - name: Determine Linux projects to run
         id: linux_projects
@@ -140,7 +147,9 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
     uses: ./.github/workflows/therock-ci-linux.yml
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       docker_image: ${{ needs.setup.outputs.docker_image }}
@@ -165,7 +174,9 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
     uses: ./.github/workflows/therock-ci-windows.yml
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
@@ -186,9 +197,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
         run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+          echo "${NEEDS_JSON}"
+          FAILED_JOBS="$(echo "${NEEDS_JSON}" \
             | jq --raw-output \
             'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"
