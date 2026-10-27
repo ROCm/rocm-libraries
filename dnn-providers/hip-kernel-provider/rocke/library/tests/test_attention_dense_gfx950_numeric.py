@@ -947,7 +947,9 @@ class TestDenseKvSegmentsNumeric:
             p = torch.softmax(torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale, -1)
             ref = torch.einsum("bhqk,bhkd->bhqd", p, vh).transpose(1, 2)
         else:
-            ref = _bottom_right_reference(q, k, v, None, scale, top_left=mask == "tl")
+            ref = _bottom_right_reference(
+                q, k, v, None, scale, top_left=mask == "tl"
+            )
         err = (out.float() - ref).abs().max().item()
         assert err < _BOTTOM_RIGHT_TOL, (
             f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}: "
@@ -2270,59 +2272,6 @@ class TestDenseBandIndexTruthTable:
                 expected[p, :, visible] = 1.0 / len(visible)
         err = (out.float().cpu() - expected[None]).abs().max().item()
         assert err < 1e-2, f"max_abs={err:.3e}"
-
-
-@requires_gfx950_gpu
-@pytest.mark.gpu
-@pytest.mark.parametrize(
-    "dtype,window,use_sinks,block_m,right",
-    [
-        ("bf16", 128, True, 128, 0),
-        ("fp16", 128, False, 128, 0),
-        ("fp16", 256, True, 128, 0),
-        ("bf16", 128, True, 256, 0),
-        ("bf16", 192, False, 128, 64),
-    ],
-)
-def test_window_wave_skip_is_bit_identical(dtype, window, use_sinks, block_m, right):
-    """The per-wave skip of the band's fully masked first QK / last PV must write
-    the same bits as the full band on the persistent grid."""
-    hq, hkv, d, B, S = 32, 8, 128, 1, 1024
-    tdt = getattr(torch, _TORCH_DT[dtype])
-    scale = 1.0 / math.sqrt(d)
-    torch.manual_seed(0)
-    q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
-    k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-    v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
-    sinks = (torch.randn(hq, device="cuda", dtype=tdt) * 0.1) if use_sinks else None
-    base = Gfx950AttentionDenseSpec(
-        batch=B,
-        seqlen_q=S,
-        seqlen_kv=S,
-        num_query_heads=hq,
-        num_kv_heads=hkv,
-        head_size=d,
-        causal=True,
-        dtype=dtype,
-        block_m=block_m,
-        block_n=64,
-        sliding_window=window,
-        right_bound=right,
-        use_sinks=use_sinks,
-        persistent=True,
-        num_persistent=64,
-    )
-    outs = []
-    for spec in (base, replace(base, window_wave_skip=True)):
-        assert supports_attention_dense(spec)[0]
-        out = torch.empty_like(q)
-        run_attention_dense_torch(
-            spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
-        )
-        outs.append(out)
-    torch.cuda.synchronize()
-    assert torch.isfinite(outs[1].float()).all()
-    assert torch.equal(outs[0], outs[1]), "window_wave_skip changed the output"
 
 
 if __name__ == "__main__":

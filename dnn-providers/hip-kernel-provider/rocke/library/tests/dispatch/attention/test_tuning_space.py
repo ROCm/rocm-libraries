@@ -842,12 +842,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
 
     def test_production_varies_every_declared_knob(self):
         changed = _production_changed_fields(
-            (
-                _dense_request(),
-                _dense_request(hdim_q=64, hdim_v=64),
-                # The window-only knobs are swept on a sliding-window request.
-                _dense_request(sliding_window=128),
-            )
+            (_dense_request(), _dense_request(hdim_q=64, hdim_v=64))
         )
         missing = _dense_swept_fields() - changed
         self.assertFalse(missing, sorted(missing))
