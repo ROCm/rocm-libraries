@@ -22,10 +22,11 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
 # ``lse`` is an output feature, not part of ATTENTION_FEATURES: only candidates
-# whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_3d`` and the
-# ``_u3d_`` split-KV tuning candidates) declare it, so every other candidate
-# must keep declining it. The generated ``_u3d_`` candidates are not in this map;
-# their feature set is checked in the tuning-candidate test below.
+# whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_2d``,
+# ``attention_unified_3d`` and every unified tuning candidate except the gfx942
+# 4-warp GQA one) declare it, so every other candidate must keep declining it.
+# The generated tuning candidates are not in this map; their feature set is
+# checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
@@ -92,6 +93,7 @@ EXPECTED_FEATURES = {
         "fp8",
         "sinks",
         "sliding_window",
+        "lse",
     },
     "attention_unified_3d": {
         "band",
@@ -101,7 +103,7 @@ EXPECTED_FEATURES = {
         "fp8",
         "sinks",
         "sliding_window",
-        # Split-KV only: the 2D path writes no LSE (see attention_unified_2d).
+        # Both unified paths write LSE (tiled 2D and split-KV).
         "lse",
     },
 }
@@ -387,9 +389,9 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
-            # Only split-KV (u3d) geometries write the optional LSE output.
+            # Every unified geometry writes LSE except the gfx942 4-warp GQA one.
             expected = set(ATTENTION_FEATURES) | (
-                {"lse"} if "_u3d_" in candidate.name else set()
+                set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)
