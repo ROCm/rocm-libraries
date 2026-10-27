@@ -28,10 +28,11 @@ struct PreparedNumericalGenerator {
     PreparedGenerationValues values;
     bool usesCoordinates;
     bool isConstant;
+    size_t indexOffset = 0;
 
     double operator()(std::span<const size_t> indices, const Shape& shape,
                       size_t logicalIndex) const {
-        return value(*component, pattern, seed, domain, indices, shape, logicalIndex,
+        return value(*component, pattern, seed, domain, indices, shape, logicalIndex + indexOffset,
                      destinationType, values);
     }
 };
@@ -45,10 +46,12 @@ struct PreparedRawGenerator {
                       size_t, ScalarType, const PreparedGenerationValues&);
     PreparedGenerationValues values;
     bool usesCoordinates;
+    size_t indexOffset = 0;
 
     uint64_t operator()(std::span<const size_t> indices, const Shape& shape,
                         size_t logicalIndex) const {
-        return value(pattern, seed, domain, indices, shape, logicalIndex, destinationType, values);
+        return value(pattern, seed, domain, indices, shape, logicalIndex + indexOffset,
+                     destinationType, values);
     }
 };
 
@@ -65,4 +68,9 @@ uint64_t generatedRawValue(const GenerationRecipe& recipe, std::span<const size_
 void generateElement(Tensor destination, const GenerationRecipe& recipe,
                      std::span<const size_t> indices, size_t logicalIndex);
 void generateTensor(Tensor destination, const GenerationRecipe& recipe);
+void generateTensor(Tensor destination, const GenerationRecipe& recipe,
+                    const ScalarConversionOptions& options);
+void generateElement(Tensor destination, const GenerationRecipe& recipe,
+                     std::span<const size_t> indices, size_t logicalIndex,
+                     const ScalarConversionOptions& options);
 }  // namespace roc::hostnumerics::detail

@@ -370,3 +370,34 @@ TEST(GenerationRecipe, ValidationFailures) {
 TEST(GenerationRecipe, CallableOverload) {
     testCallableOverload();
 }
+
+TEST(GenerationRecipe, FairBinomialAndSampleOffset) {
+    using namespace roc::hostnumerics;
+    EXPECT_THROW(GenerationRecipe::binomialHalf({.trials = 65}), std::runtime_error);
+    for (uint32_t trials : {0U, 64U}) {
+        const auto boundary = generate(ScalarType::Float64, Shape{1},
+                                       GenerationRecipe::realOnlyLastDimensionFastest(
+                                           GenerationRecipe::binomialHalf({.trials = trials}), 19));
+        const double value = boundary.loadAs<double>({0});
+        EXPECT_GE(value, 0.0);
+        EXPECT_LE(value, trials);
+        if (trials != 0) EXPECT_GT(value, 0.0);
+    }
+    const auto recipe = GenerationRecipe::realOnlyLastDimensionFastest(
+        GenerationRecipe::binomialHalf({.trials = 21})
+            .withExp2Transform()
+            .withAffineValueMapping({.scale = 0x1p-11}),
+        19);
+    const auto whole = generate(ScalarType::Float64, Shape{32}, recipe);
+    const auto slice = generate(ScalarType::Float64, Shape{7}, recipe.withIndexOffset(9));
+    for (size_t i = 0; i < 7; ++i)
+        EXPECT_EQ(slice.loadAs<double>({i}), whole.loadAs<double>({i + 9}));
+    EXPECT_THROW(generate(ScalarType::Float64, Shape{2},
+                          recipe.withIndexOffset(std::numeric_limits<size_t>::max())),
+                 std::runtime_error);
+    const auto trig =
+        generate(ScalarType::Float64, Shape{3},
+                 GenerationRecipe::realOnlyLastDimensionFastest(GenerationRecipe::sine(), 0)
+                     .withIndexOffset(12));
+    EXPECT_EQ(trig.loadAs<double>({1}), std::sin(13.0));
+}

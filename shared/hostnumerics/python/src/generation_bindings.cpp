@@ -24,12 +24,49 @@ Tensor generateTensor(ScalarType type, std::vector<size_t> dimensions,
 }  // namespace
 
 void registerGenerationBindings(nb::module_& module) {
+    nb::enum_<IntegerRounding>(module, "IntegerRounding")
+        .value("TowardZero", IntegerRounding::TowardZero)
+        .value("NearestEven", IntegerRounding::NearestEven);
+    nb::enum_<IntegerOverflow>(module, "IntegerOverflow")
+        .value("Identity", IntegerOverflow::Identity)
+        .value("Saturate", IntegerOverflow::Saturate)
+        .value("ModuloWrap", IntegerOverflow::ModuloWrap);
+    nb::enum_<BFloat16Rounding>(module, "BFloat16Rounding")
+        .value("NearestEven", BFloat16Rounding::NearestEven)
+        .value("Truncate", BFloat16Rounding::Truncate);
+    nb::enum_<FloatingSourcePrecision>(module, "FloatingSourcePrecision")
+        .value("Float32", FloatingSourcePrecision::Float32)
+        .value("Direct", FloatingSourcePrecision::Direct);
+    nb::enum_<FloatingOverflow>(module, "FloatingOverflow")
+        .value("FormatDefault", FloatingOverflow::FormatDefault)
+        .value("SaturateFinite", FloatingOverflow::SaturateFinite);
+    nb::enum_<E8M0Underflow>(module, "E8M0Underflow")
+        .value("Nearest", E8M0Underflow::Nearest)
+        .value("FlushBelowFloat32Normal", E8M0Underflow::FlushBelowFloat32Normal);
+    nb::class_<ScalarConversionOptions>(module, "ScalarConversionOptions")
+        .def(nb::init<IntegerRounding, IntegerOverflow, BFloat16Rounding, FloatingSourcePrecision,
+                      FloatingOverflow, E8M0Underflow>(),
+             "integer_rounding"_a, "integer_overflow"_a,
+             "bfloat16_rounding"_a = BFloat16Rounding::NearestEven,
+             "floating_source_precision"_a = FloatingSourcePrecision::Float32,
+             "floating_overflow"_a = FloatingOverflow::FormatDefault,
+             "e8m0_underflow"_a = E8M0Underflow::Nearest)
+        .def_rw("floating_source_precision", &ScalarConversionOptions::floatingSourcePrecision)
+        .def_rw("floating_overflow", &ScalarConversionOptions::floatingOverflow)
+        .def_rw("bfloat16_rounding", &ScalarConversionOptions::bfloat16Rounding)
+        .def_rw("e8m0_underflow", &ScalarConversionOptions::e8m0Underflow)
+        .def_rw("integer_rounding", &ScalarConversionOptions::integerRounding)
+        .def_rw("integer_overflow", &ScalarConversionOptions::integerOverflow);
+    nb::class_<BinomialHalfGenerationParameters>(module, "BinomialHalfGenerationParameters")
+        .def(nb::init<uint32_t>(), "trials"_a = 1)
+        .def_rw("trials", &BinomialHalfGenerationParameters::trials);
     nb::class_<GenerationRecipeSettings>(
         module, "GenerationRecipeSettings",
         "Seed and logical index order shared by one immutable recipe.")
         .def(nb::init<uint64_t, std::vector<size_t>>(), "seed"_a, "index_order"_a)
         .def_rw("seed", &GenerationRecipeSettings::seed)
-        .def_rw("index_order", &GenerationRecipeSettings::indexOrder);
+        .def_rw("index_order", &GenerationRecipeSettings::indexOrder)
+        .def_rw("index_offset", &GenerationRecipeSettings::indexOffset);
 
     nb::class_<ConstantGenerationParameters>(module, "ConstantGenerationParameters",
                                              "One numerical value for constant generation.")
@@ -114,6 +151,7 @@ void registerGenerationBindings(nb::module_& module) {
         .def("with_absolute_transform", &GenerationRecipe::Component::withAbsoluteTransform)
         .def("with_sine_transform", &GenerationRecipe::Component::withSineTransform)
         .def("with_cosine_transform", &GenerationRecipe::Component::withCosineTransform)
+        .def("with_exp2_transform", &GenerationRecipe::Component::withExp2Transform)
         .def("with_affine_value_mapping", &GenerationRecipe::Component::withAffineValueMapping,
              "parameters"_a)
         .def("with_alternating_sign", &GenerationRecipe::Component::withAlternatingSign,
@@ -129,6 +167,7 @@ void registerGenerationBindings(nb::module_& module) {
                     "parameters"_a)
         .def_static("uniform_real", &GenerationRecipe::uniformReal, "parameters"_a)
         .def_static("normal", &GenerationRecipe::normal, "parameters"_a)
+        .def_static("binomial_half", &GenerationRecipe::binomialHalf, "parameters"_a)
         .def_static("sine", &GenerationRecipe::sine)
         .def_static("cosine", &GenerationRecipe::cosine)
         .def_static("absolute_sine", &GenerationRecipe::absoluteSine)
@@ -161,6 +200,8 @@ void registerGenerationBindings(nb::module_& module) {
         .def_static("cartesian", &GenerationRecipe::cartesian, "real"_a, "imaginary"_a,
                     "settings"_a)
         .def_prop_ro("seed", &GenerationRecipe::seed)
+        .def_prop_ro("index_offset", &GenerationRecipe::indexOffset)
+        .def("with_index_offset", &GenerationRecipe::withIndexOffset, "offset"_a)
         .def("index_order", &GenerationRecipe::indexOrder, "rank"_a)
         .def_static("real_only_last_dimension_fastest",
                     &GenerationRecipe::realOnlyLastDimensionFastest, "component"_a, "seed"_a)
@@ -200,5 +241,32 @@ void registerGenerationBindings(nb::module_& module) {
         },
         "tensor"_a, "logical_index"_a, "recipe"_a, nb::rv_policy::reference,
         "Fill one logical tensor element from a typed recipe.");
+    module.def(
+        "generate_tensor",
+        [](ScalarType type, std::vector<size_t> shape, const GenerationRecipe& recipe,
+           const ScalarConversionOptions& options) {
+            return generate(type, Shape(std::move(shape)), recipe, options);
+        },
+        "type"_a, "shape"_a, "recipe"_a, "options"_a);
+    module.def("generate_tensor",
+               static_cast<Tensor (*)(ScalarType, Layout, const GenerationRecipe&,
+                                      const ScalarConversionOptions&)>(&generate),
+               "type"_a, "layout"_a, "recipe"_a, "options"_a);
+    module.def(
+        "generate_tensor",
+        [](Tensor& tensor, const GenerationRecipe& recipe,
+           const ScalarConversionOptions& options) -> Tensor& {
+            generate(tensor, recipe, options);
+            return tensor;
+        },
+        "tensor"_a, "recipe"_a, "options"_a, nb::rv_policy::reference);
+    module.def(
+        "generate_at",
+        [](Tensor& tensor, size_t index, const GenerationRecipe& recipe,
+           const ScalarConversionOptions& options) -> Tensor& {
+            generateAt(tensor, index, recipe, options);
+            return tensor;
+        },
+        "tensor"_a, "logical_index"_a, "recipe"_a, "options"_a, nb::rv_policy::reference);
 }
 }  // namespace roc::hostnumerics::python_bindings
