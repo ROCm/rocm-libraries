@@ -159,6 +159,21 @@ exclude = ["tensilelite.Tests.unit.source_only*"]
 # (it already builds rocisa via `tox -e rocisa`). No version is pinned here;
 # uv picks whatever satisfies requires-python (>=3.10).
 python-preference = "only-system"
+# rocisa's manual editable rebuild reuses its CMake tree. Build against the
+# project environment so that tree does not retain paths into a deleted isolated
+# build environment; keep its build dependencies in the default dev sync.
+no-build-isolation-package = ["rocisa"]
+
+[tool.uv.config-settings-package.rocisa]
+# Separate uv's development CMake settings from standalone pip/Invoke builds.
+# Tox overrides this with a directory inside each environment.
+"build-dir" = "build/uv/{wheel_tag}"
+# Rebuild explicitly before tests instead of checking on every process's import.
+"editable.rebuild" = "false"
+# Report watched native sources newer than the extension if a rebuild was missed.
+"cmake.define.ROCISA_INCLUDE_BUILD_INFO" = "ON"
+# Exercise the example pass in uv development; standalone rocisa defaults stay unchanged.
+"cmake.define.ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN" = "ON"
 
 [tool.uv.sources]
 rocisa = { workspace = true }

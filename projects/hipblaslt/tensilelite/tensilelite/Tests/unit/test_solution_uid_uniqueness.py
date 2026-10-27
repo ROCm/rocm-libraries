@@ -18,7 +18,6 @@ import pytest
 def _load_solution_id_gen() -> ModuleType:
     """Load SolutionIdGen without importing ``tensilelite.Common``.
 
-    The ``library-uniqueness`` tox env skips installing tensilelite and rocisa.
     ``from tensilelite.Common.SolutionIdGen import ...`` still executes
     ``tensilelite.Common.__init__``, which imports rocisa.
 
