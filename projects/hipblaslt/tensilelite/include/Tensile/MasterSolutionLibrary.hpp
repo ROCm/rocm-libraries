@@ -468,7 +468,6 @@ namespace TensileLite
             auto it = uidIndexMapping.find(uid);
             if(it == uidIndexMapping.end())
                 return {};
-            loadLibrary(it->second);
             return getSolutionByIndex(problem, hardware, it->second);
         }
 
