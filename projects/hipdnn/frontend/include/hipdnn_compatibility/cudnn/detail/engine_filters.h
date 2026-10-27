@@ -39,8 +39,8 @@ inline bool isDeterminismClaimed(int64_t engineId)
     return engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
 }
 
-// cuDNN heuristic modes the shim accepts but cannot honor: hipDNN only has
-// fallback selection. The v9 and v8 APIs name different subsets of these.
+// cuDNN heuristic modes a shim API accepts but runs as fallback selection. The v0.x builders
+// run every mode as fallback; the v9 API honors A and B and falls back only for OPENSOURCE.
 enum class UnhonoredHeuristicMode : std::uint8_t
 {
     A,
@@ -87,8 +87,8 @@ inline void warnUnhonoredHeuristicMode(UnhonoredHeuristicMode mode)
                           "choice may differ from cuDNN.");
 }
 
-// A and B select hipDNN's ModeA/ModeB prediction policies; OPENSOURCE has no hipDNN
-// counterpart and runs fallback selection.
+// OPENSOURCE has no hipDNN counterpart on any path. On the v9 API A and B select hipDNN's
+// ModeA/ModeB prediction policies; the v0.x path warns for them per backend mode.
 inline void warnUnhonoredHeuristicMode(HeurMode_t mode)
 {
     if(mode == HeurMode_t::OPENSOURCE)

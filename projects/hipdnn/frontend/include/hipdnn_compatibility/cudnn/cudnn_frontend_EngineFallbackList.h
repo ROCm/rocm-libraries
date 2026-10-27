@@ -128,14 +128,17 @@ public:
 
     ~EngineFallbackList_v8() = default;
 
-    EngineFallbackList_v8(EngineFallbackList_v8&& from)
-        : BackendDescriptor(from.get_desc(), from.get_status(), from.get_error())
-        , opGraph(from.opGraph)
+    EngineFallbackList_v8(EngineFallbackList_v8&& from) noexcept
+        : opGraph(std::move(from.opGraph))
         , mode(from.mode)
         , num_ops(from.num_ops)
-        , opGraphTag(from.opGraphTag)
+        , m_engine_configs(std::move(from.m_engine_configs))
+        , opGraphTag(std::move(from.opGraphTag))
     {
-        m_engine_configs.swap(from.m_engine_configs);
+        // BackendDescriptor has no move constructor and its copy can throw.
+        pointer = std::move(from.pointer);
+        status = from.status;
+        err_msg = std::move(from.err_msg);
     }
 
 private:
@@ -144,8 +147,8 @@ private:
     EngineFallbackList_v8& operator=(const EngineFallbackList_v8&) = delete;
 
     ManagedOpaqueDescriptor opGraph = nullptr;
-    DescriptorType_t mode;
-    uint64_t num_ops;
+    DescriptorType_t mode = DescriptorType_t::NOT_SET;
+    uint64_t num_ops = 0;
     std::vector<ManagedOpaqueDescriptor> m_engine_configs;
     std::string opGraphTag;
 };

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -18,7 +20,9 @@
 
 #include <hipdnn_backend.h>
 
+#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/engine_space.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
@@ -48,34 +52,12 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 // The shim's own `graph` namespace (the v9 API) shadows hipDNN's.
 namespace fe_graph = ::hipdnn_frontend::graph;
 
-// Names the lowerable operation kinds as cuDNN does.
-inline const char* operationKindName(cudnnBackendDescriptorType_t kind) noexcept
+// cuDNN's name for an operation kind, from upstream's DescriptorType_t names.
+inline std::string operationKindName(cudnnBackendDescriptorType_t kind)
 {
-    switch(kind)
-    {
-    case CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_NORM_FORWARD_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_NORM_FORWARD_DESCRIPTOR";
-    case CUDNN_BACKEND_OPERATION_NORM_BACKWARD_DESCRIPTOR:
-        return "CUDNN_BACKEND_OPERATION_NORM_BACKWARD_DESCRIPTOR";
-    default:
-        return "operation";
-    }
+    std::ostringstream name;
+    name << "CUDNN_BACKEND_" << toFe(kind).value_or(DescriptorType_t::NOT_SET);
+    return name.str();
 }
 
 // Caller-chosen names that prefix graph errors, so each caller keeps its own
@@ -91,10 +73,10 @@ struct LoweringLabels
     std::string constantValue;
     // Names an operation kind in node-lifecycle errors; null means
     // operationKindName.
-    const char* (*operationName)(cudnnBackendDescriptorType_t) = &operationKindName;
+    std::string (*operationName)(cudnnBackendDescriptorType_t) = &operationKindName;
 };
 
-inline const char* operationLabel(const LoweringLabels& labels, cudnnBackendDescriptorType_t kind)
+inline std::string operationLabel(const LoweringLabels& labels, cudnnBackendDescriptorType_t kind)
 {
     return labels.operationName != nullptr ? labels.operationName(kind) : operationKindName(kind);
 }
@@ -122,19 +104,11 @@ inline void addPort(std::vector<TensorPtr>& ports, const TensorPtr& tensor)
     }
 }
 
-inline OperationPorts operationPorts(const ConvolutionForwardOperationRecord& op)
+template <cudnnBackendDescriptorType_t K, OperationTarget T>
+OperationPorts operationPorts(const ConvolutionOperationRecordOf<K, T>& op)
 {
-    return {{op.x(), op.w()}, {op.y()}};
-}
-
-inline OperationPorts operationPorts(const ConvolutionBackwardDataOperationRecord& op)
-{
-    return {{op.dy(), op.w()}, {op.dx()}};
-}
-
-inline OperationPorts operationPorts(const ConvolutionBackwardFilterOperationRecord& op)
-{
-    return {{op.dy(), op.x()}, {op.dw()}};
+    const std::array<TensorPtr, 3>& tensors = op.tensors();
+    return {{tensors[0], tensors[1]}, {tensors[2]}};
 }
 
 inline OperationPorts operationPorts(const PointwiseOperationRecord& op)
@@ -521,54 +495,44 @@ void lowerNode(Attributes attributes,
     checkFrontend(node.create_operation(context.tensorDescs, context.operations), label);
 }
 
-inline void lowerOperation(const ConvolutionForwardOperationRecord& op, LoweringContext& context)
+// The caller sets the tensors; the convolution parameters are the same for all
+// three convolution nodes.
+template <typename Node, typename Attributes, typename Record>
+void lowerConvolution(Attributes attributes, const Record& op, LoweringContext& context)
 {
     const ConvolutionRecord& convolution = *op.convolution();
-    fe_graph::ConvFpropAttributes attributes;
-    attributes.set_x(context.tensor(op.x()))
-        .set_w(context.tensor(op.w()))
-        .set_y(context.tensor(op.y()))
-        .set_pre_padding(convolution.prePaddings())
+    attributes.set_pre_padding(convolution.prePaddings())
         .set_post_padding(convolution.postPaddings())
         .set_stride(convolution.filterStrides())
         .set_dilation(convolution.dilations())
         .set_convolution_mode(convolution.mode());
-    lowerNode<fe_graph::ConvolutionFpropNode>(
-        std::move(attributes), convolution.computeType(), op, context);
+    lowerNode<Node>(std::move(attributes), convolution.computeType(), op, context);
+}
+
+inline void lowerOperation(const ConvolutionForwardOperationRecord& op, LoweringContext& context)
+{
+    const auto& [x, w, y] = op.tensors();
+    fe_graph::ConvFpropAttributes attributes;
+    attributes.set_x(context.tensor(x)).set_w(context.tensor(w)).set_y(context.tensor(y));
+    lowerConvolution<fe_graph::ConvolutionFpropNode>(std::move(attributes), op, context);
 }
 
 inline void lowerOperation(const ConvolutionBackwardDataOperationRecord& op,
                            LoweringContext& context)
 {
-    const ConvolutionRecord& convolution = *op.convolution();
+    const auto& [dy, w, dx] = op.tensors();
     fe_graph::ConvDgradAttributes attributes;
-    attributes.set_dy(context.tensor(op.dy()))
-        .set_w(context.tensor(op.w()))
-        .set_dx(context.tensor(op.dx()))
-        .set_pre_padding(convolution.prePaddings())
-        .set_post_padding(convolution.postPaddings())
-        .set_stride(convolution.filterStrides())
-        .set_dilation(convolution.dilations())
-        .set_convolution_mode(convolution.mode());
-    lowerNode<fe_graph::ConvolutionDgradNode>(
-        std::move(attributes), convolution.computeType(), op, context);
+    attributes.set_dy(context.tensor(dy)).set_w(context.tensor(w)).set_dx(context.tensor(dx));
+    lowerConvolution<fe_graph::ConvolutionDgradNode>(std::move(attributes), op, context);
 }
 
 inline void lowerOperation(const ConvolutionBackwardFilterOperationRecord& op,
                            LoweringContext& context)
 {
-    const ConvolutionRecord& convolution = *op.convolution();
+    const auto& [dy, x, dw] = op.tensors();
     fe_graph::ConvWgradAttributes attributes;
-    attributes.set_x(context.tensor(op.x()))
-        .set_dy(context.tensor(op.dy()))
-        .set_dw(context.tensor(op.dw()))
-        .set_pre_padding(convolution.prePaddings())
-        .set_post_padding(convolution.postPaddings())
-        .set_stride(convolution.filterStrides())
-        .set_dilation(convolution.dilations())
-        .set_convolution_mode(convolution.mode());
-    lowerNode<fe_graph::ConvolutionWgradNode>(
-        std::move(attributes), convolution.computeType(), op, context);
+    attributes.set_x(context.tensor(x)).set_dy(context.tensor(dy)).set_dw(context.tensor(dw));
+    lowerConvolution<fe_graph::ConvolutionWgradNode>(std::move(attributes), op, context);
 }
 
 // hipDNN carries pointwise parameters as float; a bound beyond float range
@@ -647,44 +611,41 @@ inline void lowerOperation(const ReductionOperationRecord& op, LoweringContext& 
     lowerNode<fe_graph::ReductionNode>(std::move(attributes), reduction.computeType(), op, context);
 }
 
-inline void lowerOperation(const ResampleForwardOperationRecord& op, LoweringContext& context)
+// The caller sets the tensors; the window parameters are the same for both
+// resample nodes.
+template <typename Node, typename Attributes, typename Record>
+void lowerResample(Attributes attributes, const Record& op, LoweringContext& context)
 {
     const ResampleRecord& resample = *op.resample();
-    fe_graph::ResampleFwdAttributes attributes;
-    attributes.set_x(context.tensor(op.x()))
-        .set_y(context.tensor(op.y()))
-        .set_pre_padding(resample.prePaddings())
+    attributes.set_pre_padding(resample.prePaddings())
         .set_post_padding(resample.postPaddings())
         .set_stride(resample.strides())
         .set_window(resample.windowDims())
         .set_resample_mode(resample.mode())
         .set_padding_mode(resample.paddingMode());
+    lowerNode<Node>(std::move(attributes), resample.computeType(), op, context);
+}
+
+inline void lowerOperation(const ResampleForwardOperationRecord& op, LoweringContext& context)
+{
+    fe_graph::ResampleFwdAttributes attributes;
+    attributes.set_x(context.tensor(op.x())).set_y(context.tensor(op.y()));
     if(op.index())
     {
         attributes.set_index(context.tensor(op.index())).set_generate_index(true);
     }
-    lowerNode<fe_graph::ResampleFwdNode>(
-        std::move(attributes), resample.computeType(), op, context);
+    lowerResample<fe_graph::ResampleFwdNode>(std::move(attributes), op, context);
 }
 
 inline void lowerOperation(const ResampleBackwardOperationRecord& op, LoweringContext& context)
 {
-    const ResampleRecord& resample = *op.resample();
     fe_graph::ResampleBwdAttributes attributes;
-    attributes.set_dy(context.tensor(op.dy()))
-        .set_dx(context.tensor(op.dx()))
-        .set_pre_padding(resample.prePaddings())
-        .set_post_padding(resample.postPaddings())
-        .set_stride(resample.strides())
-        .set_window(resample.windowDims())
-        .set_resample_mode(resample.mode())
-        .set_padding_mode(resample.paddingMode());
+    attributes.set_dy(context.tensor(op.dy())).set_dx(context.tensor(op.dx()));
     if(op.index())
     {
         attributes.set_index(context.tensor(op.index()));
     }
-    lowerNode<fe_graph::ResampleBwdNode>(
-        std::move(attributes), resample.computeType(), op, context);
+    lowerResample<fe_graph::ResampleBwdNode>(std::move(attributes), op, context);
 }
 
 inline void lowerBatchnorm(const NormForwardOperationRecord& op, LoweringContext& context)

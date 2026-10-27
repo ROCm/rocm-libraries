@@ -239,15 +239,8 @@ private:
             return;
         }
         std::call_once(_notesOnce, [this] {
-            std::vector<hipdnnBackendBehaviorNote_t> hipdnnNotes;
-            checkFrontend(
-                ::hipdnn_frontend::detail::getDescriptorAttrVec(_hipdnnEngine,
-                                                                HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
-                                                                HIPDNN_TYPE_BEHAVIOR_NOTE,
-                                                                hipdnnNotes,
-                                                                "engine behavior notes"),
-                "reading the behavior notes of engine " + std::to_string(_id));
-            std::vector<cudnnBackendBehaviorNote_t> notes = cudnnBehaviorNotes(hipdnnNotes);
+            std::vector<cudnnBackendBehaviorNote_t> notes = readCudnnBehaviorNotes(
+                _hipdnnEngine, "reading the behavior notes of engine " + std::to_string(_id));
             // The name is informational, so a backend without it is not an error.
             std::string name;
             std::optional<std::string> engineName;
@@ -276,7 +269,8 @@ private:
 };
 
 // The engine at dense `index` of `graph`; `indexLabel` names the index in the
-// out-of-range message.
+// out-of-range message. An index past the engine count is NOT_SUPPORTED, as cuDNN reports
+// for an engine the graph has no implementation of.
 inline std::shared_ptr<const EngineRecord> makeEngineRecord(std::shared_ptr<const GraphCore> graph,
                                                             std::int64_t index,
                                                             std::string_view indexLabel)
@@ -284,7 +278,7 @@ inline std::shared_ptr<const EngineRecord> makeEngineRecord(std::shared_ptr<cons
     const std::optional<std::int64_t> id = graph->engineIdAt(index);
     if(!id)
     {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
+        throw ShimError(index < 0 ? CUDNN_STATUS_BAD_PARAM : CUDNN_STATUS_NOT_SUPPORTED,
                         std::string(indexLabel) + " = " + std::to_string(index) + " is outside [0, "
                             + std::to_string(graph->engineCount()) + ")");
     }
@@ -341,8 +335,8 @@ inline void checkHeuristicSettings(const HeuristicSettings& settings, const Heur
     }
 }
 
-// Every mode runs hipDNN's fallback selection, so the results are the graph's
-// rank snapshot; modes hipDNN cannot honor are warned about once per process.
+// The shim enumerates with fallback selection only, so every mode returns the graph's rank
+// snapshot; modes other than FALLBACK warn once per process.
 inline std::vector<std::shared_ptr<const EngineRecord>>
     heuristicResults(const std::shared_ptr<const GraphCore>& graph,
                      cudnnBackendHeurMode_t mode,
@@ -535,9 +529,9 @@ inline std::shared_ptr<const ConfigRecord>
                            std::int64_t index,
                            std::vector<cudnnBackendBehaviorNote_t> behaviorNotes,
                            KnobChoices knobChoices,
+                           KnobChoices requested,
                            std::optional<std::string> name)
 {
-    KnobChoices requested = knobChoices;
     return std::make_shared<const ConfigRecord>(
         std::make_shared<const EngineRecord>(id, index, std::move(behaviorNotes), std::move(name)),
         std::move(requested),

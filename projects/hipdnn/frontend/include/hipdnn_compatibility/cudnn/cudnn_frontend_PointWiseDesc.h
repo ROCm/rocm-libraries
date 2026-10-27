@@ -26,7 +26,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -42,6 +42,10 @@ class PointWiseDesc_v8 : public BackendDescriptor
 {
 public:
     friend class PointWiseDescBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -177,87 +181,77 @@ public:
         static const detail::v8::PointwiseLabels s_labels{
             "PointWiseDescBuilder: mode",
             "PointWiseDescBuilder: compute type",
+            "PointWiseDescBuilder: ReLU lower clip",
+            "PointWiseDescBuilder: ReLU upper clip",
             "PointWiseDescBuilder: ReLU lower clip slope",
             "PointWiseDescBuilder: ELU alpha",
             "PointWiseDescBuilder: softplus beta",
             "PointWiseDescBuilder: swish beta",
         };
-        auto outcome = detail::v8::guarded([&] {
-            m_pointWiseDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_POINTWISE_DESCRIPTOR);
-
-            cudnnPointwiseMode_t cudnn_pointwise_mode;
-            auto status = detail::convert_to_cudnn_type(m_pointWiseDesc.mode, cudnn_pointwise_mode);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                throw detail::v8::ShimError(
-                    status, "PointWiseDescBuilder: mode is not set or not a valid PointwiseMode_t");
-            }
-
-            cudnnDataType_t cudnn_data_type;
-            status = detail::convert_to_cudnn_type(m_pointWiseDesc.compute_type, cudnn_data_type);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                throw detail::v8::ShimError(
-                    status, "PointWiseDescBuilder: compute type is not a valid DataType_t");
-            }
-
-            detail::v8::PointwiseInputs inputs;
-            inputs.mode = cudnn_pointwise_mode;
-            inputs.computeType = cudnn_data_type;
-            if(m_pointWiseDesc.mode == PointwiseMode_t::RELU_FWD
-               || m_pointWiseDesc.mode == PointwiseMode_t::RELU_BWD)
-            {
-                detail::v8::requireEnumerator(m_pointWiseDesc.nan_propagation,
-                                              "PointWiseDescBuilder: NaN propagation");
-                inputs.reluLowerClip = m_pointWiseDesc.lower_clip;
-                if(m_pointWiseDesc.compute_type == DataType_t::FLOAT)
+        return detail::v8::buildDescriptor(
+            m_pointWiseDesc, CUDNN_BACKEND_POINTWISE_DESCRIPTOR, [&] {
+                cudnnPointwiseMode_t cudnn_pointwise_mode;
+                auto status
+                    = detail::convert_to_cudnn_type(m_pointWiseDesc.mode, cudnn_pointwise_mode);
+                if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    inputs.reluUpperClip
-                        = std::min<double>(m_pointWiseDesc.upper_clip,
-                                           static_cast<double>(std::numeric_limits<float>::max()));
+                    throw detail::v8::ShimError(
+                        status,
+                        "PointWiseDescBuilder: mode is not set or not a valid PointwiseMode_t");
                 }
-                else
+
+                cudnnDataType_t cudnn_data_type;
+                status
+                    = detail::convert_to_cudnn_type(m_pointWiseDesc.compute_type, cudnn_data_type);
+                if(status != CUDNN_STATUS_SUCCESS)
                 {
-                    inputs.reluUpperClip = m_pointWiseDesc.upper_clip;
+                    throw detail::v8::ShimError(
+                        status, "PointWiseDescBuilder: compute type is not a valid DataType_t");
                 }
-                inputs.reluLowerClipSlope = m_pointWiseDesc.lower_clip_slope;
-            }
-            else if(m_pointWiseDesc.mode == PointwiseMode_t::ELU_FWD
-                    || m_pointWiseDesc.mode == PointwiseMode_t::ELU_BWD)
-            {
-                inputs.eluAlpha = m_pointWiseDesc.elu_alpha;
-            }
-            else if(m_pointWiseDesc.mode == PointwiseMode_t::SOFTPLUS_FWD
-                    || m_pointWiseDesc.mode == PointwiseMode_t::SOFTPLUS_BWD)
-            {
-                inputs.softplusBeta = m_pointWiseDesc.softplus_beta;
-            }
-            else if(m_pointWiseDesc.mode == PointwiseMode_t::SWISH_FWD
-                    || m_pointWiseDesc.mode == PointwiseMode_t::SWISH_BWD)
-            {
-                inputs.swishBeta = m_pointWiseDesc.swish_beta;
-            }
-            else if(m_pointWiseDesc.mode == PointwiseMode_t::GEN_INDEX)
-            {
-                inputs.axis = m_pointWiseDesc.axis;
-            }
 
-            m_pointWiseDesc.pointer
-                = detail::v8::makeManaged(CUDNN_BACKEND_POINTWISE_DESCRIPTOR,
-                                          detail::v8::makePointwiseRecord(inputs, s_labels));
-        });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(
-                &m_pointWiseDesc, outcome.status, outcome.message.c_str());
-            return std::move(m_pointWiseDesc);
-        }
+                detail::v8::PointwiseInputs inputs;
+                inputs.mode = cudnn_pointwise_mode;
+                inputs.computeType = cudnn_data_type;
+                if(m_pointWiseDesc.mode == PointwiseMode_t::RELU_FWD
+                   || m_pointWiseDesc.mode == PointwiseMode_t::RELU_BWD)
+                {
+                    detail::v8::requireEnumerator(m_pointWiseDesc.nan_propagation,
+                                                  "PointWiseDescBuilder: NaN propagation");
+                    inputs.reluLowerClip = m_pointWiseDesc.lower_clip;
+                    if(m_pointWiseDesc.compute_type == DataType_t::FLOAT)
+                    {
+                        inputs.reluUpperClip = std::min<double>(
+                            m_pointWiseDesc.upper_clip,
+                            static_cast<double>(std::numeric_limits<float>::max()));
+                    }
+                    else
+                    {
+                        inputs.reluUpperClip = m_pointWiseDesc.upper_clip;
+                    }
+                    inputs.reluLowerClipSlope = m_pointWiseDesc.lower_clip_slope;
+                }
+                else if(m_pointWiseDesc.mode == PointwiseMode_t::ELU_FWD
+                        || m_pointWiseDesc.mode == PointwiseMode_t::ELU_BWD)
+                {
+                    inputs.eluAlpha = m_pointWiseDesc.elu_alpha;
+                }
+                else if(m_pointWiseDesc.mode == PointwiseMode_t::SOFTPLUS_FWD
+                        || m_pointWiseDesc.mode == PointwiseMode_t::SOFTPLUS_BWD)
+                {
+                    inputs.softplusBeta = m_pointWiseDesc.softplus_beta;
+                }
+                else if(m_pointWiseDesc.mode == PointwiseMode_t::SWISH_FWD
+                        || m_pointWiseDesc.mode == PointwiseMode_t::SWISH_BWD)
+                {
+                    inputs.swishBeta = m_pointWiseDesc.swish_beta;
+                }
+                else if(m_pointWiseDesc.mode == PointwiseMode_t::GEN_INDEX)
+                {
+                    inputs.axis = m_pointWiseDesc.axis;
+                }
 
-        // A retry after a failed build() must not keep that failure's status.
-        m_pointWiseDesc.set_status(CUDNN_STATUS_SUCCESS);
-        m_pointWiseDesc.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_pointWiseDesc);
-        return std::move(m_pointWiseDesc);
+                return detail::v8::makePointwiseRecord(inputs, s_labels);
+            });
     }
 
     explicit PointWiseDescBuilder_v8() = default;

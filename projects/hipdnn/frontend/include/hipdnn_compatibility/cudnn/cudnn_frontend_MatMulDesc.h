@@ -24,7 +24,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -40,6 +40,10 @@ class MatMulDesc_v8 : public BackendDescriptor
 {
 public:
     friend class MatMulDescBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -100,9 +104,7 @@ public:
             "MatMulDescBuilder: compute type",
             "MatMulDescBuilder: padding value",
         };
-        auto outcome = detail::v8::guarded([&] {
-            m_matMulDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_MATMUL_DESCRIPTOR);
-
+        return detail::v8::buildDescriptor(m_matMulDesc, CUDNN_BACKEND_MATMUL_DESCRIPTOR, [&] {
             cudnnDataType_t cudnn_data_type;
             auto status = detail::convert_to_cudnn_type(m_matMulDesc.compute_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
@@ -110,22 +112,8 @@ public:
                 throw detail::v8::ShimError(
                     status, "MatMulDescBuilder: compute type is not set or not a valid DataType_t");
             }
-
-            m_matMulDesc.pointer = detail::v8::makeManaged(
-                CUDNN_BACKEND_MATMUL_DESCRIPTOR,
-                detail::v8::makeMatmulRecord({cudnn_data_type, m_matMulDesc.isPadded}, s_labels));
+            return detail::v8::makeMatmulRecord({cudnn_data_type, m_matMulDesc.isPadded}, s_labels);
         });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(&m_matMulDesc, outcome.status, outcome.message.c_str());
-            return std::move(m_matMulDesc);
-        }
-
-        // A retry after a failed build() must not keep that failure's status.
-        m_matMulDesc.set_status(CUDNN_STATUS_SUCCESS);
-        m_matMulDesc.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_matMulDesc);
-        return std::move(m_matMulDesc);
     }
 
     explicit MatMulDescBuilder_v8() = default;

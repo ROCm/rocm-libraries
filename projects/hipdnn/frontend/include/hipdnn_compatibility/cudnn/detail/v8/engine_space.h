@@ -16,6 +16,7 @@
 #include <hipdnn_backend.h>
 
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/notes.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -214,23 +215,8 @@ private:
                                    << message);
                 continue;
             }
-            hipdnnBackendDescriptor_t rawEngine = nullptr;
-            checkHipdnn(hipdnnBackend()->backendGetAttribute(rawConfigs[i],
-                                                             HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                             1,
-                                                             nullptr,
-                                                             static_cast<void*>(&rawEngine)),
-                        "reading the engine of a hipDNN engine config");
-            ScopedHipdnnBackendDescriptor engine(rawEngine);
-            std::int64_t id = 0;
-            checkHipdnn(hipdnnBackend()->backendGetAttribute(engine.get(),
-                                                             HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                                             HIPDNN_TYPE_INT64,
-                                                             1,
-                                                             nullptr,
-                                                             static_cast<void*>(&id)),
-                        "reading a hipDNN engine ID");
+            ScopedHipdnnBackendDescriptor engine = engineOfConfig(rawConfigs[i]);
+            const std::int64_t id = engineGlobalIndex(engine.get());
             if(!seen.insert(id).second)
             {
                 continue;

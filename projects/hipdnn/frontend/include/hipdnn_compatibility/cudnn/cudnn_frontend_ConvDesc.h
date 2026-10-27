@@ -26,7 +26,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -42,6 +42,10 @@ class ConvDesc_v8 : public BackendDescriptor
 {
 public:
     friend class ConvDescBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -224,10 +228,7 @@ public:
             "ConvDescBuilder: dilation",
             "ConvDescBuilder: spatial stride",
         };
-        auto outcome = detail::v8::guarded([&] {
-            // Created before upstream's prechecks so that a failed descriptor still has a (null)
-            // raw descriptor to report.
-            m_convDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR);
+        return detail::v8::buildDescriptor(m_convDesc, CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR, [&] {
             if(m_convDesc.nDims <= 0)
             {
                 throw detail::v8::ShimError(
@@ -262,21 +263,8 @@ public:
             inputs.postPaddings.assign(m_convDesc.padUpper, m_convDesc.padUpper + count);
             inputs.dilations.assign(m_convDesc.dilation, m_convDesc.dilation + count);
             inputs.filterStrides.assign(m_convDesc.stride, m_convDesc.stride + count);
-            m_convDesc.pointer
-                = detail::v8::makeManaged(CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR,
-                                          detail::v8::makeConvRecord(std::move(inputs), s_labels));
+            return detail::v8::makeConvRecord(std::move(inputs), s_labels);
         });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(&m_convDesc, outcome.status, outcome.message.c_str());
-            return std::move(m_convDesc);
-        }
-
-        // A retry after a failed build() must not keep that failure's status.
-        m_convDesc.set_status(CUDNN_STATUS_SUCCESS);
-        m_convDesc.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_convDesc);
-        return std::move(m_convDesc);
     }
 
     explicit ConvDescBuilder_v8() = default;

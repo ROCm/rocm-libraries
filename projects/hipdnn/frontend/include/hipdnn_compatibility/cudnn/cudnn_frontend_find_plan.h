@@ -81,13 +81,20 @@ auto time_sorted_plan(cudnnHandle_t handle,
         float time_run_ms[3] = {0.0f, 0.0f, 0.0f};
         for(int i = 0; i < maxIterCount; i++)
         {
-            static_cast<void>(timer.start());
+            const cudnnStatus_t start_status = timer.start();
 
             detail::execute(handle, plan.get_raw_desc(), variantPack.get_raw_desc());
 
-            static_cast<void>(timer.stop());
-            static_cast<void>(timer.elapsedMs(&time_ms));
-
+            const cudnnStatus_t stop_status = timer.stop();
+            // Upstream ignores its CUDA event errors and keeps the previous (or initial 0)
+            // time, which would rank an unmeasured plan first; it sorts last instead.
+            if(start_status != CUDNN_STATUS_SUCCESS || stop_status != CUDNN_STATUS_SUCCESS
+               || timer.elapsedMs(&time_ms) != CUDNN_STATUS_SUCCESS)
+            {
+                CUDNN_FE_LOG_LABEL_ENDL("Plan " << plan.getTag() << " could not be timed");
+                final_time_ms = std::numeric_limits<float>::max();
+                break;
+            }
             if constexpr(samplingTechnique
                          == CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE)
             {

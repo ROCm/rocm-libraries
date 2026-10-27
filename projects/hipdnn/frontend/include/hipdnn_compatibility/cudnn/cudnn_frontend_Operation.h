@@ -266,8 +266,8 @@ private:
     bool commit_record(MakeRecord&& make_record)
     {
         const detail::v8::Outcome outcome = detail::v8::guarded([&] {
-            m_operation.pointer
-                = detail::v8::makeManaged(m_operation.pointer->get_type(), make_record());
+            m_operation.pointer = detail::v8::makeManaged(
+                detail::v8::RecordAccess::type(*m_operation.pointer), make_record());
         });
         if(!outcome)
         {
@@ -632,6 +632,7 @@ private:
                 "OperationBuilder: resample descriptor",
                 "OperationBuilder: X tensor",
                 "OperationBuilder: Y tensor",
+                "OperationBuilder: index tensor",
                 "OperationBuilder: alpha",
                 "OperationBuilder: beta"};
             detail::v8::ResampleForwardOperationInputs inputs;
@@ -641,7 +642,7 @@ private:
             inputs.beta = m_operation.beta_d;
             inputs.resample = slot_record<detail::v8::ResampleRecord>(m_operation.resampledesc,
                                                                       labels.resample);
-            inputs.index = tensor_record(m_operation.idxdesc, "OperationBuilder: index tensor");
+            inputs.index = tensor_record(m_operation.idxdesc, labels.index);
             return detail::v8::makeOperationRecord(inputs, labels);
         });
         return std::move(m_operation);
@@ -855,26 +856,6 @@ private:
         {
             msg = "OperationBuilder: X tensor is required";
             return CUDNN_STATUS_BAD_PARAM;
-        }
-
-        if(detail::get_backend_version() == 8500)
-        {
-            const detail::v8::TensorPtr x
-                = detail::v8::recordOf<detail::v8::TensorRecord>(m_operation.xdesc);
-            if(x == nullptr || x->dimensions().size() < 2)
-            {
-                msg = "OperationBuilder: X tensor has invalid dimensions";
-                return CUDNN_STATUS_BAD_PARAM;
-            }
-
-            int64_t N = x->dimensions()[0];
-            int64_t C = x->dimensions()[1];
-
-            if((N != 1) || ((C % 8) != 0))
-            {
-                msg = "OperationBuilder: X tensor has bad dimensions";
-                return CUDNN_STATUS_BAD_PARAM;
-            }
         }
 
         return CUDNN_STATUS_SUCCESS;

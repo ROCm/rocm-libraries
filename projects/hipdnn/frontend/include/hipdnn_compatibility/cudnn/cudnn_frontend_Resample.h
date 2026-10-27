@@ -27,7 +27,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -43,6 +43,10 @@ class ResampleDesc_v8 : public BackendDescriptor
 {
 public:
     friend class ResampleDescBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -281,10 +285,7 @@ public:
             "ResampleDescBuilder: post-padding",
             "ResampleDescBuilder: spatial stride",
         };
-        auto outcome = detail::v8::guarded([&] {
-            // Created before upstream's precheck so that a failed descriptor still has a (null)
-            // raw descriptor to report.
-            m_resampleDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_RESAMPLE_DESCRIPTOR);
+        return detail::v8::buildDescriptor(m_resampleDesc, CUDNN_BACKEND_RESAMPLE_DESCRIPTOR, [&] {
             if(m_resampleDesc.spatialDim < 0)
             {
                 throw detail::v8::ShimError(
@@ -347,20 +348,8 @@ public:
             inputs.prePaddings = fractions(m_resampleDesc.prePadding, s_labels.prePaddings);
             inputs.postPaddings = fractions(m_resampleDesc.postPadding, s_labels.postPaddings);
             inputs.strides = fractions(m_resampleDesc.stride, s_labels.strides);
-            m_resampleDesc.pointer
-                = detail::v8::makeManaged(CUDNN_BACKEND_RESAMPLE_DESCRIPTOR,
-                                          detail::v8::makeResampleRecord(inputs, s_labels));
+            return detail::v8::makeResampleRecord(inputs, s_labels);
         });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(&m_resampleDesc, outcome.status, outcome.message.c_str());
-            return std::move(m_resampleDesc);
-        }
-        // A retry after a failed build() must not keep that failure's status.
-        m_resampleDesc.set_status(CUDNN_STATUS_SUCCESS);
-        m_resampleDesc.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_resampleDesc);
-        return std::move(m_resampleDesc);
     }
 
     explicit ResampleDescBuilder_v8() = default;

@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -489,73 +490,6 @@ struct PointwiseModeTraits
     std::int64_t portCount; // upstream get_pointwise_mode_port_count
 };
 
-constexpr std::optional<PointwiseModeTraits> pointwiseModeTraits(PointwiseMode_t mode) noexcept
-{
-    switch(mode)
-    {
-    case PointwiseMode_t::ADD:
-    case PointwiseMode_t::MUL:
-    case PointwiseMode_t::DIV:
-    case PointwiseMode_t::SUB:
-    case PointwiseMode_t::ADD_SQUARE:
-    case PointwiseMode_t::MIN:
-    case PointwiseMode_t::MAX:
-    case PointwiseMode_t::MOD:
-    case PointwiseMode_t::POW:
-    case PointwiseMode_t::CMP_EQ:
-    case PointwiseMode_t::CMP_NEQ:
-    case PointwiseMode_t::CMP_GT:
-    case PointwiseMode_t::CMP_GE:
-    case PointwiseMode_t::CMP_LT:
-    case PointwiseMode_t::CMP_LE:
-    case PointwiseMode_t::LOGICAL_AND:
-    case PointwiseMode_t::LOGICAL_OR:
-        return PointwiseModeTraits{PointwiseModeClass::MATH, 3};
-    case PointwiseMode_t::SQRT:
-    case PointwiseMode_t::RSQRT:
-    case PointwiseMode_t::SIN:
-    case PointwiseMode_t::COS:
-    case PointwiseMode_t::TAN:
-    case PointwiseMode_t::LOG:
-    case PointwiseMode_t::NEG:
-    case PointwiseMode_t::ABS:
-    case PointwiseMode_t::CEIL:
-    case PointwiseMode_t::FLOOR:
-    case PointwiseMode_t::LOGICAL_NOT:
-    case PointwiseMode_t::GEN_INDEX:
-    case PointwiseMode_t::ERF:
-    case PointwiseMode_t::RECIPROCAL:
-        return PointwiseModeTraits{PointwiseModeClass::MATH, 2};
-    case PointwiseMode_t::BINARY_SELECT:
-        return PointwiseModeTraits{PointwiseModeClass::MATH, 4};
-    case PointwiseMode_t::IDENTITY:
-        return PointwiseModeTraits{PointwiseModeClass::IDENTITY, 2};
-    case PointwiseMode_t::RELU_FWD:
-    case PointwiseMode_t::TANH_FWD:
-    case PointwiseMode_t::SIGMOID_FWD:
-    case PointwiseMode_t::ELU_FWD:
-    case PointwiseMode_t::GELU_FWD:
-    case PointwiseMode_t::GELU_APPROX_TANH_FWD:
-    case PointwiseMode_t::SOFTPLUS_FWD:
-    case PointwiseMode_t::SWISH_FWD:
-    case PointwiseMode_t::EXP:
-        return PointwiseModeTraits{PointwiseModeClass::ACTIVATION_FORWARD, 2};
-    case PointwiseMode_t::RELU_BWD:
-    case PointwiseMode_t::TANH_BWD:
-    case PointwiseMode_t::SIGMOID_BWD:
-    case PointwiseMode_t::ELU_BWD:
-    case PointwiseMode_t::GELU_BWD:
-    case PointwiseMode_t::GELU_APPROX_TANH_BWD:
-    case PointwiseMode_t::SOFTPLUS_BWD:
-    case PointwiseMode_t::SWISH_BWD:
-        return PointwiseModeTraits{PointwiseModeClass::ACTIVATION_BACKWARD, 3};
-    case PointwiseMode_t::NOT_SET:
-    case PointwiseMode_t::COUNT:
-    default:
-        return std::nullopt;
-    }
-}
-
 inline const char* pointwiseModeClassName(PointwiseModeClass modeClass) noexcept
 {
     switch(modeClass)
@@ -577,25 +511,8 @@ inline const char* pointwiseModeClassName(PointwiseModeClass modeClass) noexcept
 class OperationRecord : public Record
 {
 public:
-    static constexpr bool isKind(cudnnBackendDescriptorType_t kind) noexcept
-    {
-        switch(kind)
-        {
-        case CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_NORM_FORWARD_DESCRIPTOR:
-        case CUDNN_BACKEND_OPERATION_NORM_BACKWARD_DESCRIPTOR:
-            return true;
-        default:
-            return false;
-        }
-    }
+    // Defined after the operation records.
+    static constexpr bool isKind(cudnnBackendDescriptorType_t kind) noexcept;
 
     OperationTarget target() const noexcept
     {
@@ -631,21 +548,21 @@ protected:
     }
 };
 
-// X, W -> Y.
-class ConvolutionForwardOperationRecord final
-    : public OperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR>
+// One record for the three convolution operations. `tensors` holds inputs 0
+// and 1, then the output: X, W -> Y (forward); DY, W -> DX (backward data);
+// DY, X -> DW (backward filter).
+template <cudnnBackendDescriptorType_t K, OperationTarget T>
+class ConvolutionOperationRecordOf final : public OperationRecordOf<K>
 {
 public:
     struct Fields
     {
         std::shared_ptr<const ConvolutionRecord> convolution;
-        TensorPtr x;
-        TensorPtr w;
-        TensorPtr y;
+        std::array<TensorPtr, 3> tensors;
     };
 
-    explicit ConvolutionForwardOperationRecord(Fields fields)
-        : OperationRecordOf(OperationTarget::CONVOLUTION_FPROP)
+    explicit ConvolutionOperationRecordOf(Fields fields)
+        : OperationRecordOf<K>(T)
         , _fields(std::move(fields))
     {
     }
@@ -655,110 +572,24 @@ public:
         return _fields.convolution;
     }
 
-    const TensorPtr& x() const noexcept
+    const std::array<TensorPtr, 3>& tensors() const noexcept
     {
-        return _fields.x;
-    }
-
-    const TensorPtr& w() const noexcept
-    {
-        return _fields.w;
-    }
-
-    const TensorPtr& y() const noexcept
-    {
-        return _fields.y;
+        return _fields.tensors;
     }
 
 private:
     Fields _fields;
 };
 
-// DY, W -> DX.
-class ConvolutionBackwardDataOperationRecord final
-    : public OperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR>
-{
-public:
-    struct Fields
-    {
-        std::shared_ptr<const ConvolutionRecord> convolution;
-        TensorPtr dy;
-        TensorPtr w;
-        TensorPtr dx;
-    };
-
-    explicit ConvolutionBackwardDataOperationRecord(Fields fields)
-        : OperationRecordOf(OperationTarget::CONVOLUTION_DGRAD)
-        , _fields(std::move(fields))
-    {
-    }
-
-    const std::shared_ptr<const ConvolutionRecord>& convolution() const noexcept
-    {
-        return _fields.convolution;
-    }
-
-    const TensorPtr& dy() const noexcept
-    {
-        return _fields.dy;
-    }
-
-    const TensorPtr& w() const noexcept
-    {
-        return _fields.w;
-    }
-
-    const TensorPtr& dx() const noexcept
-    {
-        return _fields.dx;
-    }
-
-private:
-    Fields _fields;
-};
-
-// DY, X -> DW.
-class ConvolutionBackwardFilterOperationRecord final
-    : public OperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR>
-{
-public:
-    struct Fields
-    {
-        std::shared_ptr<const ConvolutionRecord> convolution;
-        TensorPtr dy;
-        TensorPtr x;
-        TensorPtr dw;
-    };
-
-    explicit ConvolutionBackwardFilterOperationRecord(Fields fields)
-        : OperationRecordOf(OperationTarget::CONVOLUTION_WGRAD)
-        , _fields(std::move(fields))
-    {
-    }
-
-    const std::shared_ptr<const ConvolutionRecord>& convolution() const noexcept
-    {
-        return _fields.convolution;
-    }
-
-    const TensorPtr& dy() const noexcept
-    {
-        return _fields.dy;
-    }
-
-    const TensorPtr& x() const noexcept
-    {
-        return _fields.x;
-    }
-
-    const TensorPtr& dw() const noexcept
-    {
-        return _fields.dw;
-    }
-
-private:
-    Fields _fields;
-};
+using ConvolutionForwardOperationRecord
+    = ConvolutionOperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+                                   OperationTarget::CONVOLUTION_FPROP>;
+using ConvolutionBackwardDataOperationRecord
+    = ConvolutionOperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
+                                   OperationTarget::CONVOLUTION_DGRAD>;
+using ConvolutionBackwardFilterOperationRecord
+    = ConvolutionOperationRecordOf<CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+                                   OperationTarget::CONVOLUTION_WGRAD>;
 
 // Slot map: forward classes X -> IN_0, B -> IN_1, T -> IN_2, Y -> OUT_0;
 // activation-backward DY -> IN_0, X -> IN_1, DX -> OUT_0.
@@ -1200,5 +1031,25 @@ public:
 private:
     Fields _fields;
 };
+
+template <typename... Records>
+constexpr bool isAnyKind(cudnnBackendDescriptorType_t kind) noexcept
+{
+    return ((kind == Records::KIND) || ...);
+}
+
+constexpr bool OperationRecord::isKind(cudnnBackendDescriptorType_t kind) noexcept
+{
+    return isAnyKind<ConvolutionForwardOperationRecord,
+                     ConvolutionBackwardDataOperationRecord,
+                     ConvolutionBackwardFilterOperationRecord,
+                     PointwiseOperationRecord,
+                     MatmulOperationRecord,
+                     ReductionOperationRecord,
+                     ResampleForwardOperationRecord,
+                     ResampleBackwardOperationRecord,
+                     NormForwardOperationRecord,
+                     NormBackwardOperationRecord>(kind);
+}
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8

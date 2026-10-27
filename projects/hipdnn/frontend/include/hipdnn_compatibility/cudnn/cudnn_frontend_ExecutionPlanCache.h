@@ -123,7 +123,8 @@ public:
             return true;
         }
 
-        // A graph that already has a cached plan is never re-tuned.
+        // A plan already cached for the graph is kept. This does not skip tuning: check
+        // get_plan_from_cache before calling cudnnFindPlanAndCache.
         const cudnn_frontend::ExecutionPlan* plan = nullptr;
         if(get_plan_from_cache(op_graph, plan))
         {

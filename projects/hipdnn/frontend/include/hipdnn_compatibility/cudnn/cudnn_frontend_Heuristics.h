@@ -174,7 +174,7 @@ public:
                 = detail::v8::heuristicResults(
                     graph,
                     mode,
-                    {m_heuristics.target_sm_count >= 0, m_heuristics.device_properties != nullptr},
+                    {m_heuristics.target_sm_count > 0, m_heuristics.device_properties != nullptr},
                     LABELS);
             results.reserve(engines.size());
             for(std::shared_ptr<const detail::v8::EngineRecord>& engine : engines)
@@ -382,17 +382,31 @@ inline std::vector<cudnnStatus_t>
                         int32_t sm_count = -1,
                         std::shared_ptr<const DeviceProperties> device_properties = nullptr)
 {
+    // Upstream's map has no OPENSOURCE entry, so its .at() throws std::out_of_range for a valid
+    // enumerator. OPENSOURCE runs fallback selection, as it does on the v9 API.
     std::unordered_map<HeurMode_t, std::string> mode_to_string = {
         {HeurMode_t::A, "heuristics_mode_a"},
         {HeurMode_t::B, "heuristics_mode_b"},
         {HeurMode_t::FALLBACK, "heuristics_fallback"},
+        {HeurMode_t::OPENSOURCE, "heuristics_fallback"},
     };
 
-    std::vector<std::string> string_modes(modes.size());
-    std::transform(modes.begin(),
-                   modes.end(),
-                   string_modes.begin(),
-                   [&mode_to_string](const auto& mode) { return mode_to_string.at(mode); });
+    std::vector<std::string> string_modes;
+    string_modes.reserve(modes.size());
+    for(const HeurMode_t mode : modes)
+    {
+        const auto found = mode_to_string.find(mode);
+        if(found == mode_to_string.end())
+        {
+            set_error_and_throw_exception(
+                nullptr,
+                CUDNN_STATUS_BAD_PARAM,
+                "get_heuristics_list: the heuristic mode is not a HeurMode_t enumerator");
+            return {CUDNN_STATUS_BAD_PARAM};
+        }
+        detail::warnUnhonoredHeuristicMode(mode);
+        string_modes.push_back(found->second);
+    }
 
     return get_heuristics_list(string_modes,
                                opGraph,

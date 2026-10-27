@@ -23,7 +23,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -39,6 +39,10 @@ class ReductionDesc_v8 : public BackendDescriptor
 {
 public:
     friend class ReductionDescBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -111,48 +115,33 @@ public:
             "ReductionDescBuilder: reduction operator",
             "ReductionDescBuilder: compute type",
         };
-        auto outcome = detail::v8::guarded([&] {
-            m_reductionDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_REDUCTION_DESCRIPTOR);
+        return detail::v8::buildDescriptor(
+            m_reductionDesc, CUDNN_BACKEND_REDUCTION_DESCRIPTOR, [&] {
+                cudnnDataType_t cudnn_data_type;
+                auto status
+                    = detail::convert_to_cudnn_type(m_reductionDesc.compute_type, cudnn_data_type);
+                if(status != CUDNN_STATUS_SUCCESS)
+                {
+                    throw detail::v8::ShimError(
+                        status,
+                        "ReductionDescBuilder: compute type is not set or not a valid DataType_t");
+                }
 
-            cudnnDataType_t cudnn_data_type;
-            auto status
-                = detail::convert_to_cudnn_type(m_reductionDesc.compute_type, cudnn_data_type);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                throw detail::v8::ShimError(
-                    status,
-                    "ReductionDescBuilder: compute type is not set or not a valid DataType_t");
-            }
+                cudnnReduceTensorOp_t cudnn_reduction_mode;
+                status = detail::convert_to_cudnn_type(m_reductionDesc.reduction_mode,
+                                                       cudnn_reduction_mode);
+                if(status != CUDNN_STATUS_SUCCESS)
+                {
+                    throw detail::v8::ShimError(
+                        status,
+                        "ReductionDescBuilder: reduction operator is not set or "
+                        "not a valid ReductionMode_t");
+                }
 
-            cudnnReduceTensorOp_t cudnn_reduction_mode;
-            status = detail::convert_to_cudnn_type(m_reductionDesc.reduction_mode,
-                                                   cudnn_reduction_mode);
-            if(status != CUDNN_STATUS_SUCCESS)
-            {
-                throw detail::v8::ShimError(
-                    status,
-                    "ReductionDescBuilder: reduction operator is not set or "
-                    "not a valid ReductionMode_t");
-            }
-
-            m_reductionDesc.pointer = detail::v8::makeManaged(
-                CUDNN_BACKEND_REDUCTION_DESCRIPTOR,
-                detail::v8::makeReductionRecord(
+                return detail::v8::makeReductionRecord(
                     {cudnn_reduction_mode, cudnn_data_type, m_reductionDesc.is_deterministic},
-                    s_labels));
-        });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(
-                &m_reductionDesc, outcome.status, outcome.message.c_str());
-            return std::move(m_reductionDesc);
-        }
-
-        // A retry after a failed build() must not keep that failure's status.
-        m_reductionDesc.set_status(CUDNN_STATUS_SUCCESS);
-        m_reductionDesc.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_reductionDesc);
-        return std::move(m_reductionDesc);
+                    s_labels);
+            });
     }
 
     explicit ReductionDescBuilder_v8() = default;

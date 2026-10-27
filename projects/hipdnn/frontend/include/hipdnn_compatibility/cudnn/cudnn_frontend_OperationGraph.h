@@ -149,6 +149,15 @@ public:
                 "CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR: numOps exceeds MAX_OPGRAPH_OPS");
             return *this;
         }
+        // Upstream lets a negative count reach resize(), which throws std::length_error.
+        if(numOps_ < 0)
+        {
+            set_error_and_throw_exception(
+                &m_operationGraph,
+                CUDNN_STATUS_BAD_PARAM,
+                "OperationGraphBuilder: setOperationGraph count is negative");
+            return *this;
+        }
         m_operationGraph.numOps = numOps_;
         m_operationGraph.feature_vectors.resize(static_cast<size_t>(numOps_));
         for(auto i = 0u; i < numOps_; i++)

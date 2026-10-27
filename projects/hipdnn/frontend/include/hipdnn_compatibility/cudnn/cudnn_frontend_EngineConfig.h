@@ -116,7 +116,8 @@ public:
                     CUDNN_STATUS_BAD_PARAM,
                     "EngineConfigBuilder: the engine is not a built Engine");
             }
-            // Every knob's type reaches the config, sent or not, as upstream's knob choices do.
+            // Every knob type is range-checked, sent or not, as upstream's setEngine sets each knob
+            // choice's type.
             for(const auto& choice : m_engine_config.knobChoices)
             {
                 detail::v8::requireEnumerator(choice.first, "EngineConfigBuilder: knob type");

@@ -23,7 +23,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -39,6 +39,10 @@ class RngDesc_v8 : public BackendDescriptor
 {
 public:
     friend class RngDescBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -174,9 +178,7 @@ public:
 
     RngDesc_v8&& build()
     {
-        auto outcome = detail::v8::guarded([&] {
-            m_RngDesc.initialize_managed_backend_pointer(CUDNN_BACKEND_RNG_DESCRIPTOR);
-
+        return detail::v8::buildDescriptor(m_RngDesc, CUDNN_BACKEND_RNG_DESCRIPTOR, [&] {
             cudnnRngDistribution_t cudnn_rng_distribution;
             auto status
                 = detail::convert_to_cudnn_type(m_RngDesc.distribution, cudnn_rng_distribution);
@@ -186,21 +188,9 @@ public:
                     status,
                     "RngDescBuilder: distribution is not set or not a valid RngDistribution_t");
             }
-
-            m_RngDesc.pointer = detail::v8::makeManaged(
-                CUDNN_BACKEND_RNG_DESCRIPTOR,
-                detail::v8::makeRngRecord(cudnn_rng_distribution, "RngDescBuilder: distribution"));
+            return detail::v8::makeRngRecord(cudnn_rng_distribution,
+                                             "RngDescBuilder: distribution");
         });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(&m_RngDesc, outcome.status, outcome.message.c_str());
-            return std::move(m_RngDesc);
-        }
-        // A retry after a failed build() must not keep that failure's status.
-        m_RngDesc.set_status(CUDNN_STATUS_SUCCESS);
-        m_RngDesc.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_RngDesc);
-        return std::move(m_RngDesc);
     }
 
     explicit RngDescBuilder_v8() = default;

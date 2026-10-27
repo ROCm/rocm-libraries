@@ -23,6 +23,8 @@
 #include <hipdnn_compatibility/cudnn/cudnn.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/error.h>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
@@ -130,6 +132,19 @@ inline cudnnStatus_t get_stream(cudnnHandle_t handle, hipStream_t* stream)
 
 // NOLINTEND(readability-identifier-naming,modernize-redundant-void-arg,readability-redundant-inline-specifier,misc-misplaced-const,readability-avoid-return-with-void-value,misc-const-correctness,bugprone-unused-local-non-trivial-variable)
 
+// hipDNN keeps a failed call's message until it is read. The timer reports only a status,
+// so the message is drained here rather than left for the next shim error on this thread.
+inline cudnnStatus_t profilingStatus(hipdnnStatus_t status)
+{
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        // Read outside the log macro, which skips its arguments when logging is off.
+        const std::string message = v8::takeHipdnnMessage();
+        HIPDNN_FE_LOG_INFO("[cudnn_frontend] hipDNN profiling call failed: " << message);
+    }
+    return toCudnnStatus(status);
+}
+
 // Replaces upstream's CUDA event wrappers: device time between start() and stop() on the
 // handle's stream, measured by one hipDNN profiling descriptor reused across measurements.
 class PlanTimer
@@ -152,7 +167,7 @@ public:
         {
             return status;
         }
-        status = toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+        status = profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
             _profiling.get(),
             HIPDNN_ATTR_PROFILING_HANDLE_EXT,
             HIPDNN_TYPE_HANDLE,
@@ -176,7 +191,7 @@ public:
         {
             return status;
         }
-        return toCudnnStatus(
+        return profilingStatus(
             hipdnn_frontend::detail::hipdnnBackend()->backendFinalize(_profiling.get()));
     }
 
@@ -192,7 +207,7 @@ public:
         }
         float value = 0.0F;
         const cudnnStatus_t status
-            = toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
+            = profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
                 _profiling.get(),
                 HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
                 HIPDNN_TYPE_FLOAT,
@@ -216,7 +231,7 @@ private:
     cudnnStatus_t setTrigger(hipdnnBackendAttributeName_t attribute)
     {
         const bool trigger = true;
-        return toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+        return profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
             _profiling.get(), attribute, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
     }
 
@@ -234,7 +249,7 @@ inline cudnnStatus_t deviceSynchronize()
         return CUDNN_STATUS_NOT_INITIALIZED;
     }
     const bool trigger = true;
-    return toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+    return profilingStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
         sync.get(), HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
 }
 

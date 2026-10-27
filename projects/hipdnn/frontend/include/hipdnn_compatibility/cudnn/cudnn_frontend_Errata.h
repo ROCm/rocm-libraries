@@ -75,42 +75,42 @@ enum class ErrataTensorSlot
     CONVOLUTION_BWD_DATA_W,
 };
 
+// Null when op is not a `Record`.
+template <typename Record>
+v8::TensorPtr convolutionTensor(const ManagedOpaqueDescriptor& op, std::size_t index)
+{
+    const auto record = v8::recordOf<Record>(op);
+    return record ? record->tensors()[index] : nullptr;
+}
+
 // Null when op is not the slot's operation kind.
 inline v8::TensorPtr errataTensor(const ManagedOpaqueDescriptor& op, ErrataTensorSlot slot)
 {
     switch(slot)
     {
     case ErrataTensorSlot::CONVOLUTION_FORWARD_X:
+        return convolutionTensor<v8::ConvolutionForwardOperationRecord>(op, 0);
     case ErrataTensorSlot::CONVOLUTION_FORWARD_W:
-        if(const auto record = v8::recordOf<v8::ConvolutionForwardOperationRecord>(op))
-        {
-            return slot == ErrataTensorSlot::CONVOLUTION_FORWARD_X ? record->x() : record->w();
-        }
-        break;
+        return convolutionTensor<v8::ConvolutionForwardOperationRecord>(op, 1);
     case ErrataTensorSlot::CONVOLUTION_BWD_FILTER_X:
+        return convolutionTensor<v8::ConvolutionBackwardFilterOperationRecord>(op, 1);
     case ErrataTensorSlot::CONVOLUTION_BWD_FILTER_DW:
-        if(const auto record = v8::recordOf<v8::ConvolutionBackwardFilterOperationRecord>(op))
-        {
-            return slot == ErrataTensorSlot::CONVOLUTION_BWD_FILTER_X ? record->x() : record->dw();
-        }
-        break;
+        return convolutionTensor<v8::ConvolutionBackwardFilterOperationRecord>(op, 2);
     case ErrataTensorSlot::CONVOLUTION_BWD_DATA_DX:
+        return convolutionTensor<v8::ConvolutionBackwardDataOperationRecord>(op, 2);
     case ErrataTensorSlot::CONVOLUTION_BWD_DATA_W:
-        if(const auto record = v8::recordOf<v8::ConvolutionBackwardDataOperationRecord>(op))
-        {
-            return slot == ErrataTensorSlot::CONVOLUTION_BWD_DATA_DX ? record->dx() : record->w();
-        }
-        break;
+        return convolutionTensor<v8::ConvolutionBackwardDataOperationRecord>(op, 1);
     default:
-        break;
+        return nullptr;
     }
-    return nullptr;
 }
 
 } // namespace detail
 
 // Returns true when the tensor_slot tensor of op matches blocked_shape, given in shape_format
-// ("NCHW" or "NHWC") order; a -1 entry is a wildcard.
+// ("NCHW" or "NHWC") order. Ported as upstream, quirks included: blocked_shape[i] is compared
+// with the tensor's dims[i + 1] (a 4-D tensor's missing fifth dim reads as 0), and a -1 entry
+// resets the result to true, so only the entries after the last -1 decide.
 inline bool check_shape(const ManagedOpaqueDescriptor& op,
                         const std::string& shape_format,
                         detail::ErrataTensorSlot tensor_slot,

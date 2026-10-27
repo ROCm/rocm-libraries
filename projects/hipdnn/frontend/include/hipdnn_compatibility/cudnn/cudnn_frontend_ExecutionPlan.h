@@ -287,10 +287,8 @@ public:
             return std::move(m_execution_plan);
         }
 #endif
-        // Upstream's build() never sends the plan handle; the plan runs on its graph's handle.
-        const detail::v8::Outcome outcome = detail::v8::guarded([&] {
-            m_execution_plan.adopt(detail::v8::buildPlan(std::move(config), nullptr, PLAN_LABELS));
-        });
+        const detail::v8::Outcome outcome = detail::v8::guarded(
+            [&] { m_execution_plan.adopt(detail::v8::buildPlan(std::move(config))); });
         if(!outcome)
         {
             set_error_and_throw_exception(&m_execution_plan,
@@ -328,7 +326,7 @@ public:
         text = text.substr(0, text.find('\0'));
         const detail::v8::Outcome outcome = detail::v8::guarded([&] {
             std::shared_ptr<const detail::v8::PlanRecord> plan
-                = detail::v8::loadPlan(m_execution_plan.handle, text, PLAN_LABELS);
+                = detail::v8::loadPlan(m_execution_plan.handle, text, "loadFromJson's plan JSON");
             m_execution_plan.engine_config
                 = detail::v8::makeManaged(CUDNN_BACKEND_ENGINECFG_DESCRIPTOR, plan->configRecord());
             m_execution_plan.adopt(std::move(plan));
@@ -352,9 +350,6 @@ public:
     ExecutionPlanBuilder_v8& operator=(const ExecutionPlanBuilder_v8&) = delete;
 
 private:
-    static constexpr detail::v8::PlanLabels PLAN_LABELS{
-        "the handle (setHandle)", "handle", "loadFromJson's plan JSON"};
-
     ExecutionPlan_v8 m_execution_plan;
 };
 

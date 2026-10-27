@@ -36,8 +36,6 @@
 
 #if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
 #include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
 #endif
 
 // NOLINTNEXTLINE(bugprone-macro-parentheses)
@@ -48,6 +46,12 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend
 static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "cuDNN FE version pin changed: re-diff this file against upstream "
               "include/cudnn_frontend_utils.h at the new tag, then update this assert.");
+
+#if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
+// Upstream declares this alias at global scope; here it stays in the shim namespace so it cannot
+// collide with a consumer's own global `json`.
+using json = nlohmann::json;
+#endif
 
 // NOLINTBEGIN(readability-identifier-naming,modernize-use-override,readability-make-member-function-const,misc-const-correctness,modernize-return-braced-init-list):
 // ported verbatim; upstream's spelling and shapes are the source-compatible surface.

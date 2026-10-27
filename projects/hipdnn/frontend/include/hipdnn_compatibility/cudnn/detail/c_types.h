@@ -2,6 +2,14 @@
 // SPDX-License-Identifier:  MIT
 //
 // Declares identifiers matching the NVIDIA cuDNN C API, for source compatibility.
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend_*.h, include/cudnn_backend_base.h
+//     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend/knobs.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file c_types.h
@@ -358,12 +366,12 @@ static_assert(sizeof(cudnnReduceTensorOp_t) == 4, "cudnnReduceTensorOp_t must be
 /// @brief Mirrors NVIDIA `cudnnResampleMode_t`.
 typedef enum
 {
-    CUDNN_RESAMPLE_AVGPOOL = 0,
-    CUDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING = 1,
-    CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING = 2,
-    CUDNN_RESAMPLE_BILINEAR = 3,
-    CUDNN_RESAMPLE_MAXPOOL = 4,
-    CUDNN_RESAMPLE_NEAREST = 5,
+    CUDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING = 0,
+    CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING = 1,
+    CUDNN_RESAMPLE_BILINEAR = 2,
+    CUDNN_RESAMPLE_MAXPOOL = 3,
+    CUDNN_RESAMPLE_NEAREST = 4,
+    CUDNN_RESAMPLE_AVGPOOL = CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING,
 } cudnnResampleMode_t;
 static_assert(sizeof(cudnnResampleMode_t) == 4, "cudnnResampleMode_t must be 4 bytes");
 
@@ -384,5 +392,80 @@ typedef enum
     CUDNN_TENSOR_NHWC = 2,
 } cudnnTensorFormat_t;
 static_assert(sizeof(cudnnTensorFormat_t) == 4, "cudnnTensorFormat_t must be 4 bytes");
+
+namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
+{
+
+// Largest value of each enum above; the shim rejects anything past it as
+// BAD_PARAM.
+template <typename CEnum>
+inline constexpr int LAST_ENUMERATOR = -1;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendBehaviorNote_t>
+    = CUDNN_BEHAVIOR_NOTE_SUPPORTS_CUDA_GRAPH_NATIVE_API;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendDescriptorType_t>
+    = CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendHeurMode_t> = CUDNN_HEUR_MODE_INSTANT;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendKnobType_t> = CUDNN_KNOB_TYPE_WORKSPACE;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendNormFwdPhase_t> = CUDNN_NORM_FWD_TRAINING;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendNormMode_t> = CUDNN_RMS_NORM;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendNumericalNote_t>
+    = CUDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendReshapeMode_t> = CUDNN_RESHAPE_VIEW_ONLY;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBackendTensorReordering_t>
+    = CUDNN_TENSOR_REORDERING_F8_128x4;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnBnFinalizeStatsMode_t>
+    = CUDNN_BN_FINALIZE_STATISTICS_TRAINING;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnConvolutionMode_t> = CUDNN_CROSS_CORRELATION;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnDataType_t> = CUDNN_DATA_UINT8x4;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnGenStatsMode_t> = CUDNN_GENSTATS_SUM_SQSUM;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnNanPropagation_t> = CUDNN_PROPAGATE_NAN;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnPaddingMode_t> = CUDNN_ZERO_PAD;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnPointwiseMode_t> = CUDNN_POINTWISE_TANH_FWD;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnReduceTensorOp_t> = CUDNN_REDUCE_TENSOR_NORM2;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnResampleMode_t> = CUDNN_RESAMPLE_NEAREST;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnRngDistribution_t> = CUDNN_RNG_DISTRIBUTION_UNIFORM;
+
+template <>
+inline constexpr int LAST_ENUMERATOR<cudnnTensorFormat_t> = CUDNN_TENSOR_NHWC;
+
+} // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 
 // NOLINTEND(readability-identifier-naming)

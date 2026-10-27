@@ -31,9 +31,12 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
 //   {"version":1,
 //    "engine":{"globalIndex":i,"id":"<decimal>","name":"...","behaviorNotes":[n,...]},
 //    "knobs":[{"type":t,"value":v},...],
+//    "requestedKnobs":[{"type":t,"value":v},...],
 //    "payload":"<base64 of the hipDNN serialized plan>"}
 // "id" is a string because hashed engine IDs exceed 2^53. "name" and "payload"
-// are optional; a plan without a payload cannot be loaded.
+// are optional; a plan without a payload cannot be loaded. "requestedKnobs" is
+// written only when the requested choices (unset -1 entries included, which
+// the plan tag keeps) differ from "knobs"; it defaults to "knobs".
 namespace plan_json
 {
 
@@ -47,7 +50,8 @@ struct Plan
     std::int64_t id = 0;
     std::optional<std::string> name;
     std::vector<cudnnBackendBehaviorNote_t> behaviorNotes;
-    std::vector<std::pair<cudnnBackendKnobType_t, std::int64_t>> knobs;
+    KnobChoices knobs;
+    std::optional<KnobChoices> requestedKnobs;
     std::vector<std::uint8_t> payload;
 };
 
@@ -180,6 +184,18 @@ inline void appendString(std::string& out, std::string_view text)
     out += '"';
 }
 
+inline void appendKnobs(std::string& out, const KnobChoices& knobs)
+{
+    out += '[';
+    for(std::size_t i = 0; i < knobs.size(); ++i)
+    {
+        out += (i == 0 ? R"({"type":)" : R"(,{"type":)")
+               + std::to_string(static_cast<int>(knobs[i].first)) + R"(,"value":)"
+               + std::to_string(knobs[i].second) + "}";
+    }
+    out += ']';
+}
+
 inline std::string write(const Plan& plan, bool withPayload)
 {
     std::string out = R"({"version":)" + std::to_string(VERSION) + R"(,"engine":{"globalIndex":)"
@@ -195,14 +211,13 @@ inline std::string write(const Plan& plan, bool withPayload)
     {
         out += (i == 0 ? "" : ",") + std::to_string(static_cast<int>(plan.behaviorNotes[i]));
     }
-    out += R"(]},"knobs":[)";
-    for(std::size_t i = 0; i < plan.knobs.size(); ++i)
+    out += R"(]},"knobs":)";
+    appendKnobs(out, plan.knobs);
+    if(plan.requestedKnobs)
     {
-        out += (i == 0 ? R"({"type":)" : R"(,{"type":)")
-               + std::to_string(static_cast<int>(plan.knobs[i].first)) + R"(,"value":)"
-               + std::to_string(plan.knobs[i].second) + "}";
+        out += R"(,"requestedKnobs":)";
+        appendKnobs(out, *plan.requestedKnobs);
     }
-    out += ']';
     if(withPayload)
     {
         out += R"(,"payload":")";
@@ -230,6 +245,15 @@ public:
         throw ShimError(CUDNN_STATUS_BAD_PARAM,
                         std::string(_label) + ": " + what + " at offset " + std::to_string(_pos)
                             + " (expected the format written by the hipDNN cuDNN shim)");
+    }
+
+    void markSeen(bool& seen, std::string_view key) const
+    {
+        if(seen)
+        {
+            fail("duplicate key \"" + std::string(key) + "\"");
+        }
+        seen = true;
     }
 
     bool consume(char c)
@@ -383,13 +407,6 @@ inline void readEngine(Reader& reader, Plan& plan)
     bool haveId = false;
     bool haveName = false;
     bool haveNotes = false;
-    const auto once = [&reader](bool& seen, const std::string& key) {
-        if(seen)
-        {
-            reader.fail("duplicate key \"" + key + "\"");
-        }
-        seen = true;
-    };
     reader.expect('{');
     if(!reader.consume('}'))
     {
@@ -399,7 +416,7 @@ inline void readEngine(Reader& reader, Plan& plan)
             reader.expect(':');
             if(key == "globalIndex")
             {
-                once(haveIndex, key);
+                reader.markSeen(haveIndex, key);
                 plan.globalIndex = reader.integer();
                 if(plan.globalIndex < 0)
                 {
@@ -408,17 +425,17 @@ inline void readEngine(Reader& reader, Plan& plan)
             }
             else if(key == "id")
             {
-                once(haveId, key);
+                reader.markSeen(haveId, key);
                 plan.id = reader.integerString();
             }
             else if(key == "name")
             {
-                once(haveName, key);
+                reader.markSeen(haveName, key);
                 plan.name = reader.string();
             }
             else if(key == "behaviorNotes")
             {
-                once(haveNotes, key);
+                reader.markSeen(haveNotes, key);
                 reader.expect('[');
                 if(!reader.consume(']'))
                 {
@@ -447,7 +464,7 @@ inline void readEngine(Reader& reader, Plan& plan)
     }
 }
 
-inline void readKnob(Reader& reader, Plan& plan)
+inline void readKnob(Reader& reader, KnobChoices& knobs)
 {
     std::optional<std::int64_t> type;
     std::optional<std::int64_t> value;
@@ -484,7 +501,22 @@ inline void readKnob(Reader& reader, Plan& plan)
     {
         reader.fail("invalid knob type");
     }
-    plan.knobs.emplace_back(static_cast<cudnnBackendKnobType_t>(*type), *value);
+    knobs.emplace_back(static_cast<cudnnBackendKnobType_t>(*type), *value);
+}
+
+inline KnobChoices readKnobs(Reader& reader)
+{
+    KnobChoices knobs;
+    reader.expect('[');
+    if(!reader.consume(']'))
+    {
+        do
+        {
+            readKnob(reader, knobs);
+        } while(reader.consume(','));
+        reader.expect(']');
+    }
+    return knobs;
 }
 
 // nullopt when the JSON is well formed but carries no payload.
@@ -495,14 +527,8 @@ inline std::optional<Plan> read(std::string_view text, std::string_view label)
     bool haveVersion = false;
     bool haveEngine = false;
     bool haveKnobs = false;
+    bool haveRequestedKnobs = false;
     bool havePayload = false;
-    const auto once = [&reader](bool& seen, const std::string& key) {
-        if(seen)
-        {
-            reader.fail("duplicate key \"" + key + "\"");
-        }
-        seen = true;
-    };
     reader.expect('{');
     if(!reader.consume('}'))
     {
@@ -512,7 +538,7 @@ inline std::optional<Plan> read(std::string_view text, std::string_view label)
             reader.expect(':');
             if(key == "version")
             {
-                once(haveVersion, key);
+                reader.markSeen(haveVersion, key);
                 if(reader.integer() != VERSION)
                 {
                     reader.fail("unsupported version");
@@ -520,25 +546,22 @@ inline std::optional<Plan> read(std::string_view text, std::string_view label)
             }
             else if(key == "engine")
             {
-                once(haveEngine, key);
+                reader.markSeen(haveEngine, key);
                 readEngine(reader, plan);
             }
             else if(key == "knobs")
             {
-                once(haveKnobs, key);
-                reader.expect('[');
-                if(!reader.consume(']'))
-                {
-                    do
-                    {
-                        readKnob(reader, plan);
-                    } while(reader.consume(','));
-                    reader.expect(']');
-                }
+                reader.markSeen(haveKnobs, key);
+                plan.knobs = readKnobs(reader);
+            }
+            else if(key == "requestedKnobs")
+            {
+                reader.markSeen(haveRequestedKnobs, key);
+                plan.requestedKnobs = readKnobs(reader);
             }
             else if(key == "payload")
             {
-                once(havePayload, key);
+                reader.markSeen(havePayload, key);
                 std::optional<std::vector<std::uint8_t>> payload = decodeBase64(reader.string());
                 if(!payload || payload->empty())
                 {
@@ -567,14 +590,6 @@ inline std::optional<Plan> read(std::string_view text, std::string_view label)
 
 } // namespace plan_json
 
-// Names the caller's inputs in plan error messages.
-struct PlanLabels
-{
-    std::string_view planHandle;
-    std::string_view graphHandle;
-    std::string_view json;
-};
-
 // A finalized hipDNN EXECUTION_PLAN and the config it runs. The JSON
 // representation is written on first use.
 class PlanRecord final : public RecordOf<CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR>
@@ -582,12 +597,10 @@ class PlanRecord final : public RecordOf<CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR
 public:
     PlanRecord(std::shared_ptr<const ConfigRecord> config,
                ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor plan,
-               cudnnHandle_t contextHandle,
                std::int64_t workspaceSize)
         : _config(std::move(config))
         , _tag(engineTag(*_config))
         , _plan(std::move(plan))
-        , _contextHandle(contextHandle)
         , _workspaceSize(workspaceSize)
     {
     }
@@ -605,13 +618,6 @@ public:
     hipdnnBackendDescriptor_t hipdnnPlan() const noexcept
     {
         return _plan.get();
-    }
-
-    // The handle whose hipDNN resource manager holds the plan's execution
-    // context: the graph's handle (built plans) or the load handle.
-    cudnnHandle_t contextHandle() const noexcept
-    {
-        return _contextHandle;
     }
 
     std::int64_t workspaceSize() const noexcept
@@ -693,6 +699,10 @@ private:
         plan.name = engine.name();
         plan.behaviorNotes = engine.behaviorNotes();
         plan.knobs = _config->knobChoices();
+        if(_config->requestedChoices() != plan.knobs)
+        {
+            plan.requestedKnobs = _config->requestedChoices();
+        }
         std::optional<std::vector<std::uint8_t>> payload = serialize();
         if(payload)
         {
@@ -706,7 +716,6 @@ private:
     std::shared_ptr<const ConfigRecord> _config;
     std::string _tag;
     ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _plan;
-    cudnnHandle_t _contextHandle;
     std::int64_t _workspaceSize;
     mutable std::once_flag _jsonOnce;
     mutable std::string _json;
@@ -726,21 +735,12 @@ inline std::int64_t readWorkspaceSize(hipdnnBackendDescriptor_t plan)
     return workspaceSize;
 }
 
-// hipDNN creates the execution context on the graph's handle, so `planHandle`
-// is optional (upstream's builder never sets one) and, when set, must name that
-// handle.
-inline std::shared_ptr<const PlanRecord> buildPlan(std::shared_ptr<const ConfigRecord> config,
-                                                   cudnnHandle_t planHandle,
-                                                   const PlanLabels& labels)
+// The plan runs on its engine config's graph's handle, which holds its
+// execution context.
+inline std::shared_ptr<const PlanRecord> buildPlan(std::shared_ptr<const ConfigRecord> config)
 {
     using ::hipdnn_frontend::detail::hipdnnBackend;
 
-    if(planHandle != nullptr && planHandle != config->engine().graph().handle())
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.planHandle) + " differs from the "
-                            + std::string(labels.graphHandle) + " of the engine config's graph");
-    }
     auto* const hipdnnConfig = config->hipdnnEngineConfig();
     ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor plan = createHipdnnDescriptor(
         HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, "creating the hipDNN execution plan");
@@ -754,30 +754,22 @@ inline std::shared_ptr<const PlanRecord> buildPlan(std::shared_ptr<const ConfigR
                 "finalizing the hipDNN execution plan for engine "
                     + std::to_string(config->engineId()));
     const std::int64_t workspaceSize = readWorkspaceSize(plan.get());
-    const cudnnHandle_t contextHandle = config->engine().graph().handle();
-    return std::make_shared<const PlanRecord>(
-        std::move(config), std::move(plan), contextHandle, workspaceSize);
+    return std::make_shared<const PlanRecord>(std::move(config), std::move(plan), workspaceSize);
 }
 
 // Restores a plan written by PlanRecord::json() on `handle`, which holds its
 // execution context. The JSON "id" must match the engine hipDNN reports for the
-// deserialized payload.
+// deserialized payload. `jsonLabel` prefixes every JSON message.
 inline std::shared_ptr<const PlanRecord>
-    loadPlan(cudnnHandle_t handle, std::string_view json, const PlanLabels& labels)
+    loadPlan(cudnnHandle_t handle, std::string_view json, std::string_view jsonLabel)
 {
     using ::hipdnn_frontend::detail::hipdnnBackend;
 
-    if(handle == nullptr)
-    {
-        throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.planHandle)
-                            + " is required to load a serialized execution plan");
-    }
-    std::optional<plan_json::Plan> parsed = plan_json::read(json, labels.json);
+    std::optional<plan_json::Plan> parsed = plan_json::read(json, jsonLabel);
     if(!parsed)
     {
         throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        std::string(labels.json)
+                        std::string(jsonLabel)
                             + " has no \"payload\": the engine could not serialize the plan, so "
                               "it cannot be loaded");
     }
@@ -799,19 +791,21 @@ inline std::shared_ptr<const PlanRecord>
     if(id != parsed->id)
     {
         throw ShimError(CUDNN_STATUS_BAD_PARAM,
-                        std::string(labels.json) + ": \"id\" " + std::to_string(parsed->id)
+                        std::string(jsonLabel) + ": \"id\" " + std::to_string(parsed->id)
                             + " does not match engine " + std::to_string(id)
                             + " of the serialized plan");
     }
+    KnobChoices requested
+        = parsed->requestedKnobs ? std::move(*parsed->requestedKnobs) : parsed->knobs;
     std::shared_ptr<const ConfigRecord> config
         = makeLoadedConfigRecord(parsed->id,
                                  parsed->globalIndex,
                                  std::move(parsed->behaviorNotes),
                                  std::move(parsed->knobs),
+                                 std::move(requested),
                                  std::move(parsed->name));
     const std::int64_t workspaceSize = readWorkspaceSize(plan.get());
-    return std::make_shared<const PlanRecord>(
-        std::move(config), std::move(plan), handle, workspaceSize);
+    return std::make_shared<const PlanRecord>(std::move(config), std::move(plan), workspaceSize);
 }
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8

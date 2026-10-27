@@ -71,6 +71,14 @@ class VariantPackBuilder_v8
 public:
     auto setDataPointers(int64_t num_ptr, void** ptrs) -> VariantPackBuilder_v8&
     {
+        // Upstream lets a negative count reach reserve(), which throws std::length_error.
+        if(num_ptr < 0)
+        {
+            set_error_and_throw_exception(&m_variant_pack,
+                                          CUDNN_STATUS_BAD_PARAM,
+                                          "VariantPackBuilder: setDataPointers count is negative");
+            return *this;
+        }
         m_variant_pack.data_pointers.reserve(static_cast<size_t>(num_ptr));
         std::copy(ptrs, ptrs + num_ptr, std::back_inserter(m_variant_pack.data_pointers));
         m_variant_pack.num_ptrs = num_ptr;
@@ -83,6 +91,13 @@ public:
 
     auto setUids(int64_t num_uids, int64_t* uid) -> VariantPackBuilder_v8&
     {
+        if(num_uids < 0)
+        {
+            set_error_and_throw_exception(&m_variant_pack,
+                                          CUDNN_STATUS_BAD_PARAM,
+                                          "VariantPackBuilder: setUids count is negative");
+            return *this;
+        }
         m_variant_pack.uid.reserve(static_cast<size_t>(num_uids));
         std::copy(uid, uid + num_uids, std::back_inserter(m_variant_pack.uid));
         return *this;

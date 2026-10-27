@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <hipdnn_backend.h>
@@ -14,6 +15,7 @@
 #include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/type_mapping.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/error.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -34,10 +36,19 @@ inline std::vector<cudnnBackendNumericalNote_t> numericalNotes(std::int64_t engi
     return {CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
 }
 
-// Only notes with a cuDNN counterpart, in hipDNN's order.
+// Only notes with a cuDNN counterpart, in hipDNN's order. `context` prefixes
+// the error when the GET fails.
 inline std::vector<cudnnBackendBehaviorNote_t>
-    cudnnBehaviorNotes(const std::vector<hipdnnBackendBehaviorNote_t>& hipdnnNotes)
+    readCudnnBehaviorNotes(hipdnnBackendDescriptor_t engine, const std::string& context)
 {
+    std::vector<hipdnnBackendBehaviorNote_t> hipdnnNotes;
+    // getDescriptorAttrVec drains hipDNN's last error when the GET fails.
+    checkFrontend(::hipdnn_frontend::detail::getDescriptorAttrVec(engine,
+                                                                  HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
+                                                                  HIPDNN_TYPE_BEHAVIOR_NOTE,
+                                                                  hipdnnNotes,
+                                                                  "engine behavior notes"),
+                  context);
     std::vector<cudnnBackendBehaviorNote_t> notes;
     for(const hipdnnBackendBehaviorNote_t note : hipdnnNotes)
     {
@@ -53,25 +64,29 @@ inline std::vector<cudnnBackendBehaviorNote_t>
     return notes;
 }
 
-// The ENGINE behind a finalized hipDNN ENGINECFG, as a wrapper the caller
-// owns; null (with hipDNN's error drained) when the GET fails.
+// The ENGINE behind a finalized hipDNN ENGINECFG, as a wrapper the caller owns.
 inline ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor
     engineOfConfig(hipdnnBackendDescriptor_t engineConfig)
 {
     hipdnnBackendDescriptor_t engine = nullptr;
-    if(::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
-           engineConfig,
-           HIPDNN_ATTR_ENGINECFG_ENGINE,
-           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-           1,
-           nullptr,
-           static_cast<void*>(&engine))
-       != HIPDNN_STATUS_SUCCESS)
-    {
-        takeHipdnnMessage();
-        return {};
-    }
+    checkHipdnn(::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
+                    engineConfig,
+                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                    1,
+                    nullptr,
+                    static_cast<void*>(&engine)),
+                "reading the engine of a hipDNN engine config");
     return {engine};
+}
+
+inline std::int64_t engineGlobalIndex(hipdnnBackendDescriptor_t engine)
+{
+    std::int64_t id = 0;
+    checkHipdnn(::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
+                    engine, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, &id),
+                "reading a hipDNN engine ID");
+    return id;
 }
 
 // Whether the engine of a raw hipDNN ENGINECFG has `note`, for filters that only
@@ -83,59 +98,23 @@ inline bool engineConfigHasNumericalNote(hipdnnBackendDescriptor_t engineConfig,
     {
         return false;
     }
-    try
-    {
-        const ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor engine
-            = engineOfConfig(engineConfig);
-        if(engine.get() == nullptr)
-        {
-            return false;
-        }
-        std::int64_t id = 0;
-        if(::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
-               engine.get(), HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, &id)
-           != HIPDNN_STATUS_SUCCESS)
-        {
-            takeHipdnnMessage();
-            return false;
-        }
-        return !isDeterminismClaimed(id);
-    }
-    catch(...)
-    {
-        return false;
-    }
+    bool found = false;
+    return guarded([&] {
+               found = !isDeterminismClaimed(engineGlobalIndex(engineOfConfig(engineConfig).get()));
+           })
+           && found;
 }
 
 inline bool engineConfigHasBehaviorNote(hipdnnBackendDescriptor_t engineConfig,
                                         cudnnBackendBehaviorNote_t note) noexcept
 {
-    try
-    {
-        const ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor engine
-            = engineOfConfig(engineConfig);
-        if(engine.get() == nullptr)
-        {
-            return false;
-        }
-        std::vector<hipdnnBackendBehaviorNote_t> hipdnnNotes;
-        if(::hipdnn_frontend::detail::getDescriptorAttrVec(engine.get(),
-                                                           HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
-                                                           HIPDNN_TYPE_BEHAVIOR_NOTE,
-                                                           hipdnnNotes,
-                                                           "engine behavior notes")
-               .is_bad())
-        {
-            takeHipdnnMessage();
-            return false;
-        }
-        const std::vector<cudnnBackendBehaviorNote_t> notes = cudnnBehaviorNotes(hipdnnNotes);
-        return std::find(notes.begin(), notes.end(), note) != notes.end();
-    }
-    catch(...)
-    {
-        return false;
-    }
+    bool found = false;
+    return guarded([&] {
+               const std::vector<cudnnBackendBehaviorNote_t> notes = readCudnnBehaviorNotes(
+                   engineOfConfig(engineConfig).get(), "reading engine behavior notes");
+               found = std::find(notes.begin(), notes.end(), note) != notes.end();
+           })
+           && found;
 }
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8

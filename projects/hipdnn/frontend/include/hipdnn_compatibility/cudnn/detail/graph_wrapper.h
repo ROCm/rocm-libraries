@@ -143,7 +143,8 @@ public:
     }
 
     /// @brief Creates execution plans and applies pending plan filters.
-    /// @note Only HeurMode_t::FALLBACK is honored; other modes are accepted with a warning.
+    /// @note A and B select hipDNN's prediction policies; OPENSOURCE is accepted with a warning
+    ///       and runs fallback selection.
     error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
         warnUnhonoredHeuristicModes(modes);
@@ -1937,8 +1938,6 @@ private:
         return {};
     }
 
-    // A and B select hipDNN's ModeA/ModeB prediction policies; OPENSOURCE has no hipDNN
-    // counterpart and runs fallback selection.
     static void warnUnhonoredHeuristicModes(const std::vector<HeurMode_t>& modes)
     {
         for(const auto mode : modes)

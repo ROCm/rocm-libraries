@@ -98,12 +98,15 @@ public:
     }
 };
 
-/// @brief Empty placeholder: `set_kernel_cache()` accepts it; nothing is honored.
+/// @brief Empty placeholder for source compatibility. `Graph::set_kernel_cache()` ignores it; a
+/// non-null cache makes `ExecutionPlanBuilder::build()` return NOT_SUPPORTED.
 struct KernelCache
 {
 };
 
-/// @brief Empty placeholder: `set_device_properties()` accepts it; nothing is honored.
+/// @brief Empty placeholder for source compatibility. `Graph::set_device_properties()` records
+/// INVALID_VALUE for any value; a non-null value makes `EngineHeuristicsBuilder` and
+/// `get_heuristics_list` return NOT_SUPPORTED.
 struct DeviceProperties
 {
 };

@@ -28,7 +28,7 @@
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
-#include <hipdnn_compatibility/cudnn/detail/v8/boundary.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/build_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend
@@ -44,6 +44,10 @@ class Tensor_v8 : public BackendDescriptor
 {
 public:
     friend class TensorBuilder_v8;
+    template <typename Descriptor, typename MakeRecord>
+    friend Descriptor&& detail::v8::buildDescriptor(Descriptor& descriptor,
+                                                    cudnnBackendDescriptorType_t type,
+                                                    MakeRecord&& makeRecord);
     std::string describe() const override
     {
         std::stringstream ss;
@@ -303,7 +307,8 @@ public:
         {
             return failPrecheck("TensorBuilder: dimensions must be set and positive");
         }
-        if(m_tensor.pointer != nullptr)
+        // A failed build() leaves an empty placeholder, which does not count as built.
+        if(detail::v8::recordOf<detail::v8::TensorRecord>(m_tensor.pointer) != nullptr)
         {
             return failPrecheck("TensorBuilder: the tensor is already built");
         }
@@ -317,10 +322,9 @@ public:
             "TensorBuilder: vector count",
             "TensorBuilder: reordering mode",
             "TensorBuilder: constant value",
+            "TensorBuilder: virtual tensor",
         };
-        auto outcome = detail::v8::guarded([&] {
-            m_tensor.initialize_managed_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
-
+        return detail::v8::buildDescriptor(m_tensor, CUDNN_BACKEND_TENSOR_DESCRIPTOR, [&] {
             cudnnDataType_t cudnn_data_type;
             auto status = detail::convert_to_cudnn_type(m_tensor.data_type, cudnn_data_type);
             if(status != CUDNN_STATUS_SUCCESS)
@@ -377,22 +381,13 @@ public:
             inputs.isByValue = m_tensor.isByValue;
             if(m_tensor.hasConstValue)
             {
-                inputs.constantValue = static_cast<const void*>(m_tensor.constValueBytes.data());
+                inputs.constantValue.emplace(m_tensor.constValueBytes.size());
+                std::memcpy(inputs.constantValue->data(),
+                            m_tensor.constValueBytes.data(),
+                            m_tensor.constValueBytes.size());
             }
-            m_tensor.pointer = detail::v8::makeManaged(
-                CUDNN_BACKEND_TENSOR_DESCRIPTOR,
-                detail::v8::makeTensorRecord(std::move(inputs), s_labels));
+            return detail::v8::makeTensorRecord(std::move(inputs), s_labels);
         });
-        if(!outcome)
-        {
-            set_error_and_throw_exception(&m_tensor, outcome.status, outcome.message.c_str());
-            return std::move(m_tensor);
-        }
-        // A retry after a failed build() must not keep that failure's status.
-        m_tensor.set_status(CUDNN_STATUS_SUCCESS);
-        m_tensor.set_error("");
-        CUDNN_FE_LOG_LABEL_ENDL(m_tensor);
-        return std::move(m_tensor);
     }
 
     explicit TensorBuilder_v8() = default;
@@ -402,9 +397,9 @@ public:
     TensorBuilder_v8& operator=(const TensorBuilder_v8&) = delete;
 
 private:
-    // Upstream's prechecks run before the descriptor exists, so with exceptions a builder that failed
-    // one can be fixed and built again. Without exceptions the failed tensor is handed back, so it
-    // gets an empty pointer to keep get_raw_desc() safe.
+    // Upstream's prechecks run before the descriptor exists. Without exceptions the failed tensor
+    // is handed back, so it gets an empty pointer to keep get_raw_desc() safe; build() treats that
+    // placeholder as unbuilt, so a fixed builder can still build.
     Tensor_v8&& failPrecheck(const char* message)
     {
 #ifdef NV_CUDNN_DISABLE_EXCEPTION
