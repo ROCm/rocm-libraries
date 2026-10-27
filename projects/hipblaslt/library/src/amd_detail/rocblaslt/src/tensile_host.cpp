@@ -7579,6 +7579,18 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             return rocblaslt_status_invalid_value;
         }
 
+        // XF32 requests may use FP32 kernels, just as in getBestSolutions. Check
+        // that candidate in FP32 mode without changing the caller's problem:
+        // a later candidate may still require the original XF32 mode.
+        if(tensile_prob.f32XdlMathOp() == rocisa::DataType::XFloat32
+           && solution->problemType.f32XdlMathOp == rocisa::DataType::Float)
+        {
+            auto fallbackProblem = tensile_prob;
+            fallbackProblem.setF32XdlMathOp(rocisa::DataType::Float);
+            return isSolutionSupported(
+                handle, fallbackProblem, inputs, algo, tuning, workspaceSizeInBytes);
+        }
+
         if(isCustomKernelForPointerArray(tensile_prob, *solution))
         {
             log_error(__func__, "custom kernels do not support batch_mode=POINTER_ARRAY");
