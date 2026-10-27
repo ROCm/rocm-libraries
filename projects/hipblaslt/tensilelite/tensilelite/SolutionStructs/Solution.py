@@ -1101,10 +1101,12 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "MacroTile mismatch")
 
     # dot2: currently only support fp16 with HPA on gfx942 or fp16 &bf16 on gfx950/gfx11
+    # gfx1030 (RDNA2) has v_dot2_f32_f16 / v_dot2c_f32_f16 but no matrix instruction,
+    # so it needs the dot2 path as much as gfx11 does.
     state["UseDotInstruction"] = (not state["EnableMatrixInstruction"]) \
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
-      or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11) \
+      or ((state["ISA"] == IsaVersion(9,5,0) or state["ISA"][0] == 11 or state["ISA"] == IsaVersion(10,3,0)) \
           and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
@@ -2828,6 +2830,28 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"]:
         state["MIWaveTileA"] = state["MIWaveTile"][1]
         state["MIWaveTileB"] = state["MIWaveTile"][0]
+
+    if not state["EnableMatrixInstruction"]:
+      # A non-MI (mac/dot) kernel has no matrix instruction, but the assembly
+      # writer's packed (<4 byte) data path still reads the matrix-tile state:
+      # KernelWriterAssembly sizes the packed value registers with
+      #   ceil(VectorWidthA * bpe / bpr) * MIWaveTileA // VectorWidthA
+      # over MIInputPerThreadA elements, and Solution's own register budget
+      # uses MIWaveTileA * MIInputPerThreadA * bpe // bpr.
+      #
+      # Without a matrix instruction there is exactly one wave tile, and each
+      # thread holds ThreadTileA (resp. ThreadTileB) elements of the operand.
+      # Setting those keeps the packed path's arithmetic identical to the
+      # non-MI valu allocation, which is ThreadTileA * bpe // bpr.
+      #
+      # This is what a wave32 architecture without any matrix instruction
+      # needs -- gfx1030 (RDNA2) has V_DOT2 but no MFMA and no WMMA -- and
+      # there is no such logic file in the tree to have exercised it before.
+      state["MIWaveTileA"] = 1
+      state["MIWaveTileB"] = 1
+      state["MIInputPerThread"] = state["ThreadTileA"]
+      state["MIInputPerThreadA"] = state["ThreadTileA"]
+      state["MIInputPerThreadB"] = state["ThreadTileB"]
 
     if state["ProblemType"]["Sparse"] == 2 and state["DirectToVgprSparseMetadata"]:
       reject(state, printRejectionReason, "Sparse B does not supprot DirectToVgprSparseMetadata")
@@ -7371,7 +7395,7 @@ class Solution(collections.abc.Mapping):
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work.
       # gfx11 dot2 with K-contiguous operands reads along K and never shifts pointers.
-      gfx11Dot = state["UseDotInstruction"] and state["ISA"][0] == 11
+      gfx11Dot = state["UseDotInstruction"] and (state["ISA"][0] == 11 or state["ISA"] == IsaVersion(10,3,0))
       dotNoShiftA = gfx11Dot and not state["ProblemType"]["TLUA"]
       dotNoShiftB = gfx11Dot and not state["ProblemType"]["TLUB"]
       if state["GlobalReadVectorWidthA"] > 1 and not dotNoShiftA \

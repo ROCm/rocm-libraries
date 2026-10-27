@@ -864,6 +864,8 @@ class KernelWriterAssembly(KernelWriter):
       if self.db["AssertOnSgprOverflow"]:
         raise e
 
+    if isinstance(num, float):
+      raise TypeError(f"allocTmpSgpr expects an integer register count, got {num!r} (tag={tag})")
     tmpSgpr = allocTmpGpr(self.sgprPool, num, self.states.regCaps["MaxSgpr"], alignment, tag, overflowListener)
     return tmpSgpr
 
@@ -18240,7 +18242,7 @@ class KernelWriterAssembly(KernelWriter):
           tP          = tPA if kernel["ProblemType"]["BiasSrc"] == "A" else tPB
           tile01      = tP["tile01Idx"]
           maxKId      = self.states.lraTileProperties[tile01].maxKId
-          biasMaxVgpr = kernel["VectorWidthA"] * kernel["ProblemType"]["ComputeDataType"].numRegisters() * maxKId
+          biasMaxVgpr = int(ceil(kernel["VectorWidthA"] * kernel["ProblemType"]["ComputeDataType"].numRegisters())) * maxKId
           maxAlign    = max(1, (kernel["VectorWidthA"] + 1) // 2 * 2)
           tmpVgpr     = self.vgprPool.checkOutAligned(biasMaxVgpr, maxAlign, "store tmps")
           tmpVgprRes  = ContinuousRegister(idx=tmpVgpr, size=biasMaxVgpr)
@@ -20190,10 +20192,14 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def getGlobalShiftOffset(self, kernel, dataType, gwvw):
-    numVgprs  = int(ceil(dataType.numRegisters() * gwvw))
+    # Registers are 32-bit wide. A 16-bit element still occupies a whole
+    # register slot in this path (one element per register), so the reserved
+    # and the used register counts are rounded up to whole registers.
+    numVgprs  = max(1, int(ceil(dataType.numRegisters() * gwvw)))
     reg = dataType.numRegisters() if dataType.numRegisters() >= kernel["ProblemType"]["ComputeDataType"].numRegisters() \
       else kernel["ProblemType"]["ComputeDataType"].numRegisters()
-    return gwvw * reg - numVgprs
+    reg = max(1, int(ceil(reg * gwvw)))
+    return reg - numVgprs
 
   def getEpilogueGlobalLoadTurn(self, kernel, gwvw, dim):
     """Macro-tile coverage turns for epilogue vector global loads and LDS staging."""
@@ -20297,7 +20303,10 @@ class KernelWriterAssembly(KernelWriter):
 
     # Calculate nums of vgpr for store data
     totalReg  = 0
-    regPerVec = gwvw * kernel["ProblemType"]["ComputeDataType"].numRegisters()
+    # Registers reserved per vector of bias/scale data. numRegisters() is
+    # fractional for 16-bit types (0.5 per fp16 element), but a VGPR index
+    # must be a whole number, so round up to whole registers.
+    regPerVec = max(1, int(ceil(gwvw * kernel["ProblemType"]["ComputeDataType"].numRegisters())))
     if biasDataType:
       vectorDataTypes.bias(dim).dstVgpr = totalReg
       vectorDataTypes.bias(dim).turn = self.getTurn(kernel, gwvw, dim)[0]

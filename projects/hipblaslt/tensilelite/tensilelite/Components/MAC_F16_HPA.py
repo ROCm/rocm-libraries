@@ -96,7 +96,7 @@ class FMA_F16_HPA_MAD_MIX(MAC):
               "UseDotInstruction": False,
              }
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_HPA_MAD_MIX")
