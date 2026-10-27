@@ -212,6 +212,136 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         spec->async_dma = true;
         *arch = "gfx942";
         return 0;
+    /* --- depthwise + merged groups ---------------------------------------
+     * Every config below is depthwise (C == K == groups, so cpg == kpg == 1),
+     * which is the only shape group_merge admits. 21 is the unmerged control:
+     * without it the merged configs would have nothing to differ *from*, and
+     * the depthwise path itself carried no structural coverage at all.
+     *
+     * 22-26 span the axes that change emitted IR under merge: the shift/mask
+     * width (log2 Gm) of the merged k decode, Gm == groups (one merged group,
+     * the grouped decode still engaged), which epilogue consumes the merged
+     * dims, and the unroll_k K loop over the in-kernel merged extent. Keep in
+     * lockstep with the matching block in conv_implicit_gemm_emit.py. */
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+    case 26:
+    {
+        /* groups=64, C=64 -> cpg=1, K=64 -> kpg=1. M = 2*14*14 = 392. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        static const int kGm[] = {1, 8, 32, 4, 64, 8}; /* idx 21..26 */
+        spec->group_merge = kGm[idx - 21];
+        /* 24 keeps the *direct* epilogue by pinning vector_size_c=1 -- merged
+         * kpg would otherwise auto-derive vec_c > 1, which the validator turns
+         * into a cshuffle requirement, so without the pin no merged config
+         * would exercise rocke_conv_emit_direct_epilogue. */
+        if(idx == 24)
+        {
+            spec->has_vector_size_c = true;
+            spec->vector_size_c = 1;
+        }
+        else if(idx != 21)
+        {
+            spec->epilogue = "cshuffle";
+        }
+        spec->unroll_k = (idx == 26);
+        *arch = "gfx950";
+        return 0;
+    }
+    case 27:
+    case 28:
+    {
+        /* The 1-wide cshuffle store (store_vec == 1): 27 is merged Gm=8 pinned
+         * to vector_size_c=1, 28 the unmerged depthwise control whose open
+         * store width derives from kpg == 1. Same depthwise problem as 21-26.
+         * Keep in lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->epilogue = "cshuffle";
+        if(idx == 27)
+        {
+            spec->group_merge = 8;
+            spec->has_vector_size_c = true;
+            spec->vector_size_c = 1;
+        }
+        *arch = "gfx950";
+        return 0;
+    }
+    case 29:
+    case 30:
+    case 31:
+    case 32:
+    {
+        /* Group merging on WMMA (wave32). Same depthwise problem as 21-28.
+         * 29: gfx1250 mem/cshuffle, 30: gfx1250 wavelet/cshuffle, 31: gfx1250
+         * direct epilogue (vector_size_c pinned to 1), 32: gfx1151 (gfx11
+         * WMMA, 16x16x16 atom) mem/cshuffle. Keep in lockstep with
+         * conv_implicit_gemm_emit.py. */
+        static const int kGm[] = {8, 16, 4, 8}; /* idx 29..32 */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->group_merge = kGm[idx - 29];
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = (idx == 32) ? 16 : 32;
+        spec->wave_size = 32;
+        if(idx == 30)
+        {
+            spec->pipeline = "wavelet";
+            spec->num_load_waves = 2;
+        }
+        if(idx == 31)
+        {
+            spec->has_vector_size_c = true;
+            spec->vector_size_c = 1;
+        }
+        else
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = (idx == 32) ? "gfx1151" : "gfx1250";
+        return 0;
+    }
+    case 33:
+    case 34:
+    case 35:
+    {
+        /* Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+         * 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+         * depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
+         * Keep in lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = (idx == 34) ? 64 : 4;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        if(idx == 35)
+        {
+            spec->pipeline = "wavelet";
+            spec->num_load_waves = 2;
+        }
+        if(idx != 34)
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = "gfx1250";
+        return 0;
+    }
     default:
         return -1;
     }

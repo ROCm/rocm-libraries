@@ -52,6 +52,7 @@
 #include <Tensile/DataTypes_Float6.hpp>
 #include <Tensile/DataTypes_BFloat6.hpp>
 #include <Tensile/DataTypes_Float4.hpp>
+#include <Tensile/DataTypes_Int4.hpp>
 #include <Tensile/DataTypes_E8.hpp>
 #include <Tensile/DataTypes_E5M3.hpp>
 
@@ -305,6 +306,11 @@ namespace TensileLite
     };
     template <>
     struct TypeInfo<Float4x2> : public BaseTypeInfo<Float4x2, rocisa::DataType::Float4, 2, false, false>
+    {
+    };
+    // w4a16 weights.
+    template <>
+    struct TypeInfo<Int4x2> : public BaseTypeInfo<Int4x2, rocisa::DataType::Int4, 2, false, true>
     {
     };
     template <>
