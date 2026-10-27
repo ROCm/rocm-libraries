@@ -351,9 +351,36 @@ namespace TensileLite
         struct TopEntry
         {
             std::string  key;
+            size_t       hash; // std::hash<std::string_view> of key
             TopSolutions value;
         };
         using TopList = std::list<TopEntry>;
+
+        // A key of m_top: a view of a cache key with its std::hash<std::string_view>
+        // value, so that a lookup hashes the key once however many map operations
+        // it makes. Equal views have equal hashes, so comparing the hashes first
+        // changes no equality.
+        struct TopMapKey
+        {
+            std::string_view text;
+            size_t           hash;
+        };
+        struct TopMapKeyHash
+        {
+            size_t operator()(TopMapKey const& k) const noexcept
+            {
+                return k.hash;
+            }
+        };
+        struct TopMapKeyEqual
+        {
+            bool operator()(TopMapKey const& a, TopMapKey const& b) const noexcept
+            {
+                return a.hash == b.hash && a.text == b.text;
+            }
+        };
+        using TopMap = std::
+            unordered_map<TopMapKey, typename TopList::iterator, TopMapKeyHash, TopMapKeyEqual>;
 
         SolutionVector<MySolution> findTopSolutionsByKey(MyProblem const& problem,
                                                          AMDGPU const&    amdgpu,
@@ -362,12 +389,14 @@ namespace TensileLite
             thread_local std::string key;
             key.clear();
             AppendCacheKeys(key, amdgpu, problem);
+            // The key's only hash: the lookup, the store and the insert reuse it.
+            size_t const keyHash = std::hash<std::string_view>{}(key);
 
             SolutionVector<MySolution> solutions;
             bool                       returnedAll = false;
             {
                 std::lock_guard<std::mutex> lock(m_topMutex);
-                auto                        it = m_top.find(key);
+                auto                        it = m_top.find(TopMapKey{key, keyHash});
                 if(it != m_top.end())
                 {
                     m_topOrder.splice(m_topOrder.begin(), m_topOrder, it->second);
@@ -387,7 +416,7 @@ namespace TensileLite
             {
                 TopSolutions entry{solutions, m_subLibrary->lastFindTopAlreadyRetAll()};
                 std::lock_guard<std::mutex> lock(m_topMutex);
-                storeTopSolutions(std::move(ownKey), std::move(entry));
+                storeTopSolutions(std::move(ownKey), keyHash, std::move(entry));
             }
 
             // can't reach the requested number, means findTop already done its best
@@ -395,10 +424,10 @@ namespace TensileLite
             return solutions;
         }
 
-        // Called with m_topMutex held.
-        void storeTopSolutions(std::string&& key, TopSolutions&& entry) const
+        // Called with m_topMutex held; keyHash is std::hash<std::string_view> of key.
+        void storeTopSolutions(std::string&& key, size_t keyHash, TopSolutions&& entry) const
         {
-            auto it = m_top.find(key);
+            auto it = m_top.find(TopMapKey{key, keyHash});
             if(it != m_top.end())
             {
                 it->second->value = std::move(entry);
@@ -410,18 +439,19 @@ namespace TensileLite
                 m_top.reserve(TopSolutionsCapacity);
             if(m_top.size() < TopSolutionsCapacity)
             {
-                m_topOrder.push_front(TopEntry{std::move(key), std::move(entry)});
-                m_top.emplace(m_topOrder.front().key, m_topOrder.begin());
+                m_topOrder.push_front(TopEntry{std::move(key), keyHash, std::move(entry)});
+                m_top.emplace(TopMapKey{m_topOrder.front().key, keyHash}, m_topOrder.begin());
                 return;
             }
             // The map keys view the list's strings: drop the evicted key from the
             // map before its string is overwritten, then reuse both nodes.
             auto oldest   = std::prev(m_topOrder.end());
-            auto node     = m_top.extract(oldest->key);
+            auto node     = m_top.extract(TopMapKey{oldest->key, oldest->hash});
             oldest->key   = std::move(key);
+            oldest->hash  = keyHash;
             oldest->value = std::move(entry);
             m_topOrder.splice(m_topOrder.begin(), m_topOrder, oldest);
-            node.key() = oldest->key;
+            node.key() = TopMapKey{oldest->key, keyHash};
             m_top.insert(std::move(node));
         }
 
@@ -434,8 +464,8 @@ namespace TensileLite
 
         mutable std::mutex m_topMutex;
         // Most recently used first.
-        mutable TopList                                                          m_topOrder;
-        mutable std::unordered_map<std::string_view, typename TopList::iterator> m_top;
+        mutable TopList m_topOrder;
+        mutable TopMap  m_top;
     };
 
     /// `library` without the CachingLibrary that wraps it, if any.
