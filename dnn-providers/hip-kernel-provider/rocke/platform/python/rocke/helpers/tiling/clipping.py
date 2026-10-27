@@ -68,6 +68,7 @@ from rocke.core.param_facts import int_type_limits
 from .descriptors import TensorWindow
 from .encoding import lane_terms, register_coord_offsets
 from .fragments import TileDesc
+from .stated_relations import poly_of, proving_relation, relations_among
 from .tensor_transforms.graph import TransformGraph, identity_graph
 from .tensor_transforms.ranges import (
     AffineCoord,
@@ -188,6 +189,10 @@ class BoundsCheckPlan:
     - ``edge_vectors_load_whole``: a vector crossing a bound is still one wide load, its elements
       outside replaced by a select (a buffer-path form; ``False`` on the global path).
     - ``path``: the memory instructions; ``form``: how a global access forms its addresses.
+    - ``address_facts``: the relations between kernel parameters, as stated, that the build used to
+      prove every element offset of the access fits one 32-bit index (``N le difference_of(...)``);
+      empty when the numbers alone prove it or when the access does not take that form. A fact is
+      named here only when the proof uses it.
     """
 
     axes: tuple[AxisChecks, ...]
@@ -199,6 +204,7 @@ class BoundsCheckPlan:
     edge_vectors_load_whole: bool
     path: AccessPath
     form: GlobalForm
+    address_facts: tuple[str, ...] = ()
     # Internal (not part of the public API, but compared like the public fields): the upper
     # sides the buffer instruction checks (none on the global path), and per tensor axis the
     # loop stops whose missing multiple-of fact is the only reason its upper side is checked
@@ -236,6 +242,12 @@ class BoundsCheckPlan:
             lines.append(
                 f"  each access is {self.vector_width} elements along window axis "
                 f"{self.vector_axis}, validity {self.vector_validity.value}"
+            )
+        lines.append(f"  addresses: {self.form.value}")
+        if self.address_facts:
+            lines.append(
+                "  the 32-bit index is proven by the stated relations: "
+                + "; ".join(self.address_facts)
             )
         return "\n".join(lines)
 
@@ -368,10 +380,12 @@ def plan_window(
     else:
         validity = VectorValidity.FIRST_AND_LAST_ELEMENT
 
+    address_facts: tuple[str, ...] = ()
     if checked:
         form = GlobalForm.MASKED
-    elif _fits_index32(tensor, ranges):
+    elif (proof := _index32_proof(tensor, ranges)) is not None:
         form = GlobalForm.INDEX32
+        address_facts = proof
     else:
         form = GlobalForm.PLACED
     plan = BoundsCheckPlan(
@@ -383,6 +397,7 @@ def plan_window(
         vector_validity=validity,
         edge_vectors_load_whole=False,
         path=AccessPath.GLOBAL,
+        address_facts=address_facts,
         form=form,
         _upper_side_loop_stops=upper_side_loop_stops,
     )
@@ -528,22 +543,66 @@ def fits_i32(n: int) -> bool:
     return least <= n <= most
 
 
-def _fits_index32(tensor: TensorDesc, ranges: list[Interval]) -> bool:
-    """Whether the one-i32-element-index form can address every element: int strides, no begin
-    offset, and ``sum(position * stride)`` inside i32 over the positions' numeric ranges.
+def _index32_proof(
+    tensor: TensorDesc, ranges: list[Interval]
+) -> tuple[str, ...] | None:
+    """Whether the one-i32-element-index form can address every element of a proven window, and
+    the stated relations the proof uses (``()`` when the numbers alone prove it); ``None`` when it
+    is not proven. The form needs int strides and no begin offset.
+
+    By the numbers: ``sum(position * stride)`` inside i32 over the positions' numeric ranges. By a
+    stated relation, when the numbers do not do it: the window is proven, so every position lies
+    in ``[0, length)``, and the largest offset is at most ``sum((length - 1) * stride)`` over the
+    axes with a positive stride. With runtime lengths that is ``C + sum(...)`` for a relation that
+    states a constant ``C`` at least ``sum(stride * length)`` over those lengths (``N le
+    difference_of(2147483647, product_of(M, 4096))`` bounds ``4096 * M + N``); the offset fits when
+    that stays inside i32.
     """
     if any(isinstance(stride, Value) for stride in tensor.strides):
-        return False
+        return None
     if any(not (isinstance(begin, int) and begin == 0) for begin in tensor.begin):
-        return False
+        return None
     least = most = 0
+    numeric = True
     for positions, stride in zip(ranges, tensor.strides):
         lo, last = positions.numeric_ends()
         if lo is None or last is None:
-            return False
+            numeric = False
+            break
         least += min(lo * stride, last * stride)
         most += max(lo * stride, last * stride)
-    return fits_i32(least) and fits_i32(most)
+    if numeric and fits_i32(least) and fits_i32(most):
+        return ()
+    return _index32_by_relation(tensor)
+
+
+def _index32_by_relation(tensor: TensorDesc) -> tuple[str, ...] | None:
+    """The stated relation that bounds a proven window's largest offset inside i32, as a
+    one-text tuple, or ``None`` (see :func:`_index32_proof`)."""
+    small: dict[tuple[str, ...], int] = {}
+    extra = least = 0
+    for length, stride in zip(tensor.lengths, tensor.strides):
+        if isinstance(length, Value):
+            term = poly_of(length)
+            if stride < 0 or term is None:
+                return None
+            for key, coeff in term.items():
+                small[key] = small.get(key, 0) + coeff * stride
+            extra -= stride
+        elif stride > 0:
+            extra += (length - 1) * stride
+        else:
+            least += (length - 1) * stride
+    small = {key: coeff for key, coeff in small.items() if coeff != 0}
+    if not small or not fits_i32(least):
+        return None
+    relation = proving_relation(
+        relations_among(tensor.lengths), small, big=None, values=tensor.lengths
+    )
+    if relation is None:
+        return None
+    bound = relation.big_poly().get((), 0)
+    return (relation.text,) if fits_i32(bound + extra) else None
 
 
 # --- the layout facts and the vector width -----------------------------------------------------------

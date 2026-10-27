@@ -58,6 +58,13 @@ from rocke.core.ir import (
 from rocke.core.param_facts import LOWER_WORDS, int_type_limits
 from rocke.core.value_sources import ASSUME_RANGE_OP, value_text
 
+from .stated_relations import (
+    StatedRelation,
+    poly_of,
+    poly_product,
+    proving_relation,
+    relations_among,
+)
 from .tensor_transforms.emit import emit_bound_check
 from .tensor_transforms.walk import (
     leaf_varying_within_workgroup,
@@ -192,19 +199,28 @@ class TensorDesc:
     def _strides_injective(self) -> bool:
         """Whether the strides are proven to keep every two positions inside the lengths on
         different elements. ``False`` means only that no proof was found; a proven overlap is
-        :meth:`_aliasing_positions`'s question.
+        :meth:`_aliasing_positions`'s question. The proof is :meth:`_injective_proof`'s.
+        """
+        return self._injective_proof() is not None
+
+    def _injective_proof(self) -> tuple[str, ...] | None:
+        """The stated relations a proof that no two positions share an element uses (``()`` when
+        the numbers alone prove it), or ``None`` when there is no proof.
 
         The rule is a mixed radix. Some order of the axes must exist in which each axis's stride
         is larger than the farthest element the axes before it reach together, ``sum((length -
         1) * |stride|)``. Then the last axis on which two positions differ moves the element
-        further than all the earlier axes can move it back. Each step is proven one of three
-        ways:
+        further than all the earlier axes can move it back. Each step is proven one of four ways:
 
         - from ints and the stated facts of runtime lengths and strides;
         - packed: the previous axis has stride 1 and this stride is the same Value as the
           previous axis's length (``(M, K), (K, 1)``);
         - a packed product: this stride is the Value ``gpu_checked_value`` returned for the
-          previous axis's length times its stride (an int or the same Value).
+          previous axis's length times its stride (an int or the same Value);
+        - a stated relation: this stride is a kernel parameter stated at least the previous
+          axis's length times its stride (``ldc ge N`` over rows of stride 1, ``sb ge
+          product_of(M, ldc)`` over rows of stride ``ldc``, in any of the shapes the relation can
+          be stated in, see :mod:`~rocke.helpers.tiling.stated_relations`).
 
         An axis of length 1 positions nothing and is left out. The begin offset of a slice moves
         every element alike and is not read.
@@ -214,7 +230,8 @@ class TensorDesc:
             for axis, length in enumerate(self.lengths)
             if _largest_length(length) > 1
         ]
-        return _chain_exists(self, varying, previous=None, reach=0)
+        relations = relations_among((*self.lengths, *self.strides))
+        return _chain(self, varying, None, 0, relations)
 
     def _aliasing_positions(self) -> tuple[tuple[int, ...], tuple[int, ...]] | None:
         """Two positions inside the lengths that reach the same element at every launch the
@@ -300,37 +317,78 @@ def _largest_step(stride: int | Value) -> int:
     return abs(stride)
 
 
-def _chain_exists(
-    tensor: TensorDesc, remaining: list[int], previous: int | None, reach: int
-) -> bool:
+def _chain(
+    tensor: TensorDesc,
+    remaining: list[int],
+    previous: int | None,
+    reach: int,
+    relations: tuple[StatedRelation, ...],
+) -> tuple[str, ...] | None:
     """Whether the ``remaining`` axes can follow ``previous`` in a mixed-radix order (see
-    :meth:`TensorDesc._strides_injective`). ``reach`` bounds the farthest element the axes placed
-    so far reach together. Every order is tried: the first axis that clears ``reach`` is not
-    always the one the rest of the order needs (strides 1, 4, 8 over lengths 4, 2, 3 fit only in
-    that order)."""
+    :meth:`TensorDesc._injective_proof`), and the stated relations that order uses. ``reach``
+    bounds the farthest element the axes placed so far reach together. Every order is tried: the
+    first axis that clears ``reach`` is not always the one the rest of the order needs (strides 1,
+    4, 8 over lengths 4, 2, 3 fit only in that order)."""
     if not remaining:
-        return True
+        return ()
     for axis in remaining:
-        if not _clears(tensor, axis, previous, reach):
+        used = _clears(tensor, axis, previous, reach, relations)
+        if used is None:
             continue
         span = (_largest_length(tensor.lengths[axis]) - 1) * _largest_step(
             tensor.strides[axis]
         )
         rest = [other for other in remaining if other != axis]
-        if _chain_exists(tensor, rest, axis, reach + span):
-            return True
-    return False
+        tail = _chain(tensor, rest, axis, reach + span, relations)
+        if tail is not None:
+            return used + tail
+    return None
 
 
-def _clears(tensor: TensorDesc, axis: int, previous: int | None, reach: int) -> bool:
-    """Whether one step along ``axis`` moves past every element the axes placed so far reach:
-    by the numbers, or because its stride is the previous axis's whole packed extent."""
+def _clears(
+    tensor: TensorDesc,
+    axis: int,
+    previous: int | None,
+    reach: int,
+    relations: tuple[StatedRelation, ...],
+) -> tuple[str, ...] | None:
+    """Whether one step along ``axis`` moves past every element the axes placed so far reach --
+    by the numbers, because its stride is the previous axis's whole packed extent, or by a stated
+    relation that makes it at least that extent -- and the relation used (``()`` for none);
+    ``None`` when it is not proven."""
     stride = tensor.strides[axis]
     if _smallest_step(stride) > reach:
-        return True
+        return ()
     if previous is None:
-        return False
-    return _is_packed_extent(stride, tensor.lengths[previous], tensor.strides[previous])
+        return None
+    length, inner = tensor.lengths[previous], tensor.strides[previous]
+    if _is_packed_extent(stride, length, inner):
+        return ()
+    return _stated_extent(stride, length, inner, relations)
+
+
+def _stated_extent(
+    stride: int | Value,
+    length: int | Value,
+    inner_stride: int | Value,
+    relations: tuple[StatedRelation, ...],
+) -> tuple[str, ...] | None:
+    """The stated relation that makes ``stride >= length * inner_stride``, as a one-text tuple,
+    or ``None``. As for a packed product, the axes placed up to the previous one reach less than
+    ``length * inner_stride`` elements, so a stride at least that clears them;
+    ``KernelLauncher.from_artifact`` checks the relation exactly, in 64 bits, before each launch,
+    so it holds whatever the values.
+    """
+    big, length_poly, inner_poly = (poly_of(t) for t in (stride, length, inner_stride))
+    if big is None or length_poly is None or inner_poly is None:
+        return None
+    if not any(term != () for term in big):
+        return None  # an int stride: the numbers decide it
+    target = poly_product(length_poly, inner_poly)
+    relation = proving_relation(
+        relations, target, big=big, values=(stride, length, inner_stride)
+    )
+    return None if relation is None else (relation.text,)
 
 
 def _is_packed_extent(

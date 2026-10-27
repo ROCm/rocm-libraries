@@ -400,6 +400,10 @@ def test_the_print_names_every_side_in_plain_words():
             "  each access is 4 elements along window axis 1, validity decided by its "
             "first element"
         ),
+        (
+            "  addresses: the per-wave part on the 64-bit pointer, the per-lane part a 32-bit "
+            "offset, each access under its validity"
+        ),
     ]
 
 

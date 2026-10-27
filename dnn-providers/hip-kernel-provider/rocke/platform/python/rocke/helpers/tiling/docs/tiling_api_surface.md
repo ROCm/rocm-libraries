@@ -104,7 +104,10 @@ a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A (M,
   than their int stride, a sliding-window view), naming the two positions: two lanes would race on
   that element. Loading through such a view is fine. A view the build can decide neither way -- a
   runtime row stride over a runtime row length with no stated relation between them -- is trusted,
-  as CK and CUTLASS trust their strides.
+  as CK and CUTLASS trust their strides. A relation stated between kernel parameters proves it:
+  `ldc = b.param("ldc", I32, ge=N)` clears padded rows, `b.param("sb", I32, ge=product_of(M, ldc))`
+  clears a batch of them, in whichever shape the declaration order allows (`le=quotient_of(sb, M)`
+  on `ldc` when `sb` comes first; a `difference_of` reads as a sum).
 
 ### One axis convention
 
@@ -525,7 +528,11 @@ a_frag = load_fragment(b, a_ptr, a_win, mma.a_desc, lane)     # OOB -> 0
 store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)  # OOB writes dropped
 ```
 `explain_bounds_checks` takes the builder, pointer, window and tile the verb is given and reports
-exactly what the verb emits; an LDS buffer is refused (LDS accesses are never bound-checked).
+exactly what the verb emits; an LDS buffer is refused (LDS accesses are never bound-checked). Its
+last line says how an element is addressed. When the numbers alone do not keep a proven window's
+offsets inside one 32-bit index but a relation stated between kernel parameters does (`N` stated at
+most `difference_of(2147483647, product_of(M, 4096))` over rows of 4096), the window takes the
+32-bit form and `plan.address_facts` names that relation -- only a relation the proof used.
 
 ---
 
