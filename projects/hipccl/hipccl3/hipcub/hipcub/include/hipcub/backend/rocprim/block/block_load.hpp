@@ -36,6 +36,7 @@
 
 #include "block_load_func.hpp" // IWYU pragma: export
 
+#include <ostream>
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -66,6 +67,22 @@ enum BlockLoadAlgorithm
     BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED
         = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_warp_transpose)
 };
+
+inline ::std::ostream& operator<<(::std::ostream& os, BlockLoadAlgorithm algo)
+{
+    switch(algo)
+    {
+        case BLOCK_LOAD_DIRECT: return os << "BLOCK_LOAD_DIRECT";
+        case BLOCK_LOAD_STRIPED: return os << "BLOCK_LOAD_STRIPED";
+        case BLOCK_LOAD_VECTORIZE: return os << "BLOCK_LOAD_VECTORIZE";
+        case BLOCK_LOAD_TRANSPOSE: return os << "BLOCK_LOAD_TRANSPOSE";
+        case BLOCK_LOAD_WARP_TRANSPOSE: return os << "BLOCK_LOAD_WARP_TRANSPOSE";
+        // Note: for rocPRIM backend this is a duplicate of BLOCK_LOAD_WARP_TRANSPOSE
+        // case BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED:
+        //     return os << "BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED";
+        default: return os << "<unknown BlockLoadAlgorithm: " << static_cast<int>(algo) << ">";
+    }
+}
 
 template<typename T,
          int                BlockDimX,

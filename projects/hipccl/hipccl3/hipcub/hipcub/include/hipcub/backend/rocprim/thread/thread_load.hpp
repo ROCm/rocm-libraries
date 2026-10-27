@@ -36,6 +36,7 @@
 #include <rocprim/thread/thread_load.hpp> // IWYU pragma: export
 
 #include <iterator>
+#include <ostream>
 #include <stdint.h>
 #include <type_traits>
 
@@ -51,6 +52,21 @@ enum CacheLoadModifier : int32_t
     LOAD_LDG      = 5, ///< Cache as texture
     LOAD_VOLATILE = 6 ///< Volatile (any memory space)
 };
+
+inline ::std::ostream& operator<<(::std::ostream& os, CacheLoadModifier modifier)
+{
+    switch(modifier)
+    {
+        case LOAD_DEFAULT: return os << "LOAD_DEFAULT";
+        case LOAD_CA: return os << "LOAD_CA";
+        case LOAD_CG: return os << "LOAD_CG";
+        case LOAD_CS: return os << "LOAD_CS";
+        case LOAD_CV: return os << "LOAD_CV";
+        case LOAD_LDG: return os << "LOAD_LDG";
+        case LOAD_VOLATILE: return os << "LOAD_VOLATILE";
+        default: return os << "<unknown CacheLoadModifier: " << static_cast<int>(modifier) << ">";
+    }
+}
 
 template<int Count, CacheLoadModifier MODIFIER, typename T>
 HIPCUB_DEVICE
