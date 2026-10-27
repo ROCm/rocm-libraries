@@ -773,7 +773,7 @@ TEST(TestParseBundleMetadataJson, ErrorNamesTheSource)
 TEST(TestParseBundleMetadataJson, ParsesNumericInputsKeys)
 {
     auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1,
-            "inputs": {"0": {"fill": "zeros"}, "12": {"fill": "ones"}}})"),
+            "inputs": {"0": {"kind": "free", "fill": "zeros"}, "12": {"kind": "free", "fill": "ones"}}})"),
                                         "case_0");
     ASSERT_TRUE(meta.inputs.has_value());
     ASSERT_EQ(meta.inputs->size(), 2u);
@@ -944,6 +944,22 @@ TEST(TestLoadBundleMetadata, MalformedInputRecipeThrowsAndValidMixLoads)
     ASSERT_TRUE(meta->inputs.has_value());
     EXPECT_EQ(meta->inputs->size(), 10u);
     EXPECT_EQ(meta->inputs->at(4), nlohmann::json::parse(R"({"kind": "large", "scale": 100})"));
+}
+
+// Bug caught: a misspelled "kind" key loaded no recipe and the case silently ran on default
+// fills. An inputs entry with neither "kind" nor "seed" fails the metadata parse naming the uid
+// and its keys; a seed-only entry and unknown keys beside a kind remain valid.
+TEST(TestParseBundleMetadataJson, InputsEntryWithNeitherKindNorSeedIsRejected)
+{
+    const auto message = parseError(
+        metadataWithInputs(R"({"2": {"kind": "zeros"}, "5": {"Kind": "nonzero", "lo": -1}})"));
+    ASSERT_FALSE(message.empty());
+    EXPECT_TRUE(mentions(message, "uid 5")) << message;
+    EXPECT_TRUE(mentions(message, "\"Kind\"")) << message;
+
+    EXPECT_EQ(
+        parseError(metadataWithInputs(R"({"2": {"seed": 5}, "3": {"kind": "free", "note": "x"}})")),
+        "");
 }
 
 // NOLINTEND(readability-identifier-naming)

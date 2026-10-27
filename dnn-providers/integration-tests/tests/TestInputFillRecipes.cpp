@@ -615,3 +615,40 @@ TEST(TestInputFillRecipes, FieldsTheKindDoesNotReadAreIgnored)
     EXPECT_EQ(loadOne(R"({"kind":"nonzero","lo":-1,"hi":2,"value":3,"scale":0,"special":"x"})"),
               FillRecipe::nonzero(-1.0f, 2.0f));
 }
+
+// A misspelled "kind" (or any entry with neither "kind" nor "seed") loaded nothing and the case
+// ran on default fills; it is now an error naming the uid and the keys it has.
+TEST(TestInputFillRecipes, EntryWithNeitherKindNorSeedIsAnError)
+{
+    const auto misspelled = loadError(R"({"Kind":"nonzero","lo":-1,"hi":1})");
+    EXPECT_TRUE(contains(misspelled, "uid 7")) << misspelled;
+    EXPECT_TRUE(contains(misspelled, "\"Kind\"")) << misspelled;
+    EXPECT_TRUE(contains(misspelled, "\"lo\"")) << misspelled;
+    EXPECT_TRUE(contains(misspelled, "neither \"kind\" nor \"seed\"")) << misspelled;
+
+    const auto other = loadError(R"({"fill":"zeros"})");
+    EXPECT_TRUE(contains(other, "uid 7")) << other;
+    EXPECT_TRUE(contains(other, "\"fill\"")) << other;
+
+    const auto empty = loadError("{}");
+    EXPECT_TRUE(contains(empty, "uid 7")) << empty;
+    EXPECT_TRUE(contains(empty, "none")) << empty;
+}
+
+// Either key alone is a valid entry: a seed-only entry (what toJson writes for a seeded tensor
+// without a recipe) and a kind-only one; unknown keys beside a kind or a seed stay ignored.
+TEST(TestInputFillRecipes, SeedOnlyAndKindOnlyEntriesStillLoad)
+{
+    EXPECT_EQ(loadError(R"({"seed":5})"), "");
+    EXPECT_EQ(loadError(R"({"kind":"zeros"})"), "");
+    EXPECT_EQ(loadError(R"({"seed":5,"note":"x"})"), "");
+    EXPECT_EQ(loadOne(R"({"kind":"nonzero","lo":-1,"hi":2,"note":"x","comment":[1]})"),
+              FillRecipe::nonzero(-1.0f, 2.0f));
+
+    InputMap inputs;
+    inputs[7] = nlohmann::json::parse(R"({"seed":5})");
+    InputFillRecipes recipes;
+    recipes.loadFromJson(inputs);
+    EXPECT_EQ(recipes.resolveSeed(7), 5u);
+    EXPECT_EQ(recipes.fills().count(7), 0u);
+}

@@ -278,8 +278,9 @@ public:
     /// number,
     /// a `seed` that is not an unsigned 32-bit integer, a nonzero or special entry with
     /// lo > hi, a large entry without a `scale` > 0, and a special entry without a
-    /// `special` in {"nan", "inf", "-inf"} or without a `fraction` in [0, 1]. Nothing is
-    /// loaded when any entry is rejected.
+    /// `special` in {"nan", "inf", "-inf"} or without a `fraction` in [0, 1], and an entry
+    /// with neither `kind` nor `seed` (a misspelled key). Nothing is loaded when any entry is
+    /// rejected.
     ///
     /// Fields the kind does not read (a `value` next to `free`, `lo`/`hi` next to `fixed` or
     /// `zeros`) are ignored, whatever they hold.
@@ -298,6 +299,27 @@ public:
             {
                 throw FillRecipeError(at + ": the input spec must be a JSON object, got "
                                       + j.dump());
+            }
+            if(!j.contains("kind") && !j.contains("seed"))
+            {
+                // A misspelled key ("Kind") would otherwise load nothing and run on defaults.
+                std::string keys;
+                for(const auto& item : j.items())
+                {
+                    if(!keys.empty())
+                    {
+                        keys += ", ";
+                    }
+                    keys += '"';
+                    keys += item.key();
+                    keys += '"';
+                }
+                if(keys.empty())
+                {
+                    keys = "none";
+                }
+                throw FillRecipeError(
+                    at + ": the input spec has neither \"kind\" nor \"seed\" (keys: " + keys + ")");
             }
             if(j.contains("kind"))
             {

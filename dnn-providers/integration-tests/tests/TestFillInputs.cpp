@@ -1703,6 +1703,75 @@ TEST(TestFillInputs, NonzeroOnIntegersSkipsZero)
     expectUnsupported<std::int32_t>(FillRecipe::nonzero(0.2f, 0.8f), "no nonzero integer");
 }
 
+// Fills a T input with `recipe` and checks every element is in [lowest, highest], nonzero, and
+// that more than one value was drawn.
+template <typename T>
+void expectNonzeroValuesIn(const FillRecipe& recipe, std::int64_t lowest, std::int64_t highest)
+{
+    SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
+    const auto filled = fillSingle<T>(recipe);
+    ASSERT_TRUE(filled.result.filled) << filled.result.reason;
+    std::set<std::int64_t> seen;
+    for(const T v : filled.values)
+    {
+        const auto value = static_cast<std::int64_t>(v);
+        ASSERT_GE(value, lowest);
+        ASSERT_LE(value, highest);
+        ASSERT_NE(value, 0);
+        seen.insert(value);
+    }
+    EXPECT_GT(seen.size(), 1u);
+}
+
+// The integers of [lo, hi] are judged against the type before it clamps: [200, 300] on int8
+// used to clamp both ends to 127 and fill everything with 127, a value outside the range. A
+// range the type cannot reach, an empty one, and one holding only zero are refused, for every
+// integer type.
+TEST(TestFillInputs, NonzeroOnIntegersRefusesRangesTheTypeCannotReach)
+{
+    const std::string why = "no nonzero integer";
+    expectUnsupported<std::int8_t>(FillRecipe::nonzero(200.0f, 300.0f), why);
+    expectUnsupported<std::int8_t>(FillRecipe::nonzero(-300.0f, -200.0f), why);
+    expectUnsupported<std::uint8_t>(FillRecipe::nonzero(256.0f, 300.0f), why);
+    expectUnsupported<std::uint8_t>(FillRecipe::nonzero(-300.0f, -5.0f), why);
+    expectUnsupported<std::int32_t>(FillRecipe::nonzero(1e10f, 2e10f), why);
+    expectUnsupported<std::int32_t>(FillRecipe::nonzero(-2e10f, -1e10f), why);
+    expectUnsupported<std::int64_t>(FillRecipe::nonzero(1e30f, 2e30f), why);
+    expectUnsupported<std::int64_t>(FillRecipe::nonzero(-2e30f, -1e30f), why);
+
+    expectUnsupported<std::int8_t>(FillRecipe::nonzero(0.0f, 0.0f), why);
+    expectUnsupported<std::int8_t>(FillRecipe::nonzero(-0.5f, 0.5f), why);
+    expectUnsupported<std::uint8_t>(FillRecipe::nonzero(-0.5f, 0.5f), why);
+    expectUnsupported<std::int32_t>(FillRecipe::nonzero(-0.5f, 0.5f), why);
+    expectUnsupported<std::int64_t>(FillRecipe::nonzero(0.0f, 0.0f), why);
+    expectUnsupported<std::int64_t>(FillRecipe::nonzero(-0.5f, 0.5f), why);
+}
+
+// A range straddling the type's edge is cut to the part the type holds, never to the edge alone.
+TEST(TestFillInputs, NonzeroOnIntegersDrawsFromTheRangeIntersectedWithTheType)
+{
+    expectNonzeroValuesIn<std::int8_t>(FillRecipe::nonzero(100.0f, 300.0f), 100, 127);
+    expectNonzeroValuesIn<std::int8_t>(FillRecipe::nonzero(-300.0f, -100.0f), -128, -100);
+    expectNonzeroValuesIn<std::uint8_t>(FillRecipe::nonzero(200.0f, 400.0f), 200, 255);
+    expectNonzeroValuesIn<std::int32_t>(FillRecipe::nonzero(2e9f, 3e9f),
+                                        static_cast<std::int64_t>(2e9f),
+                                        std::numeric_limits<std::int32_t>::max());
+    expectNonzeroValuesIn<std::int64_t>(FillRecipe::nonzero(5e18f, 1e19f),
+                                        static_cast<std::int64_t>(5e18f),
+                                        std::numeric_limits<std::int64_t>::max());
+}
+
+// Ordinary ranges are untouched by the intersection and never yield zero, with both signs
+// reached when the range has both.
+TEST(TestFillInputs, NonzeroOnIntegersOrdinaryRangesNeverYieldZero)
+{
+    expectNonzeroValuesIn<std::int8_t>(FillRecipe::nonzero(-5.0f, 5.0f), -5, 5);
+    expectNonzeroValuesIn<std::int32_t>(FillRecipe::nonzero(-1000.0f, 7.0f), -1000, 7);
+    expectNonzeroValuesIn<std::int64_t>(FillRecipe::nonzero(-3.0f, 2.0f), -3, 2);
+    expectNonzeroValuesIn<std::uint8_t>(FillRecipe::nonzero(0.0f, 9.0f), 1, 9);
+    expectNonzeroValuesIn<std::int32_t>(FillRecipe::nonzero(10.0f, 20.0f), 10, 20);
+}
+
 // An integer large fill is in [ceil(top / 2), top] with top at most the type's maximum: an
 // int8 scale of 1000 is [64, 127], a uint8 scale of 300 is [128, 255], and a scale below 1 has
 // no integer.

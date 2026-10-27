@@ -351,12 +351,24 @@ FillResult fillTyped(const FillRecipe& recipe,
         }
         if constexpr(isInteger)
         {
-            const auto first = clampToInteger<T>(std::ceil(static_cast<double>(recipe.lo)));
-            const auto last = clampToInteger<T>(std::floor(static_cast<double>(recipe.hi)));
+            // The integers of [lo, hi] are tested against the type before any clamping, so a
+            // range the type cannot reach is refused rather than collapsed onto its edge.
+            const double ceilLo = std::ceil(static_cast<double>(recipe.lo));
+            const double floorHi = std::floor(static_cast<double>(recipe.hi));
+            const bool reachable
+                = ceilLo <= floorHi
+                  && floorHi >= static_cast<double>(std::numeric_limits<T>::lowest())
+                  && ceilLo <= static_cast<double>(std::numeric_limits<T>::max());
+            const auto first = clampToInteger<T>(ceilLo);
+            const auto last = clampToInteger<T>(floorHi);
             const bool spansZero = first <= 0 && last >= 0;
-            if(first > last || (first == 0 && last == 0))
+            if(!reachable || (first == 0 && last == 0))
             {
-                return unsupportedKind(recipe, typeName, "the range holds no nonzero integer");
+                return unsupportedKind(recipe,
+                                       typeName,
+                                       "the range [" + std::to_string(recipe.lo) + ", "
+                                           + std::to_string(recipe.hi)
+                                           + "] holds no nonzero integer the type can store");
             }
             // Zero is skipped by drawing from one value fewer and shifting the draws that
             // reach zero up by one.
