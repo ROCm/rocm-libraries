@@ -720,9 +720,9 @@ def test_interleaved_accumulator_lds_round_trip() -> None:
     # would undo it.
     c_desc = TileMma(
         (64, 64, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
         style=InterleavedStyle(),
@@ -756,9 +756,9 @@ def _convention_gemm(wave):
     m_len = n_len = k_len = 64
     mma = TileMma(
         wave,
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )

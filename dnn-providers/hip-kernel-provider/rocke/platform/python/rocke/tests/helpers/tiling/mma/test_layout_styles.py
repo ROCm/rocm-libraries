@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from rocke.core.ir import F16, F32, FP4E2M1
 from rocke.helpers.tiling.mma.styles import CanonicalStyle, InterleavedStyle
 from rocke.helpers.tiling.traits import load_mma_traits
 
@@ -62,9 +63,9 @@ def test_shipped_styles_build_a_plan_without_raising() -> None:
         for shape, tiling in configs:
             TileMmaPlan(
                 shape,
-                a="f16",
-                b="f16",
-                c="f32",
+                a=F16,
+                b=F16,
+                c=F32,
                 target="gfx90a",
                 style=style,
                 tiling=tiling,
@@ -82,9 +83,9 @@ def test_a_operand_with_several_m_blocks_builds_canonical_and_refuses_interleave
     def plan(style):
         return TileMmaPlan(
             (32, 16, 128),
-            a="fp4e2m1",
-            b="fp4e2m1",
-            c="f32",
+            a=FP4E2M1,
+            b=FP4E2M1,
+            c=F32,
             target="gfx1250",
             style=style,
             atom_override="wmma_f32_32x16x128_f4",
@@ -113,4 +114,4 @@ def test_unsound_operand_rejected_at_plan_construction(monkeypatch) -> None:
         lambda *a, **k: Diagnostic("error", "forced-unsound (test)"),
     )
     with pytest.raises(ValueError, match="not sound"):
-        TileMmaPlan((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+        TileMmaPlan((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")

@@ -183,8 +183,9 @@ compile-verified only, until a hardware lane-map run confirms them.
 ## Selection
 
 `load_mma_traits().select(target=, a=, b=, c=, m=, n=, k=, d=None, family="dense",
-scale_block_k=None)` returns the one row for an intent. Inputs are canonical dtype names. `d=None`
-means the result has the accumulator's dtype. `scale_block_k` is required for family `scaled` and
+scale_block_k=None)` returns the one row for an intent. The dtypes are IR types (`rocke.core.ir.F16`,
+...), matched against the row's canonical names; `MmaTraits.ir_dtypes()` gives a row's (A, B, C, D) as IR
+types. `d=None` means the result has the accumulator's dtype. `scale_block_k` is required for family `scaled` and
 refused otherwise: block-16 and block-32 scaled instructions decode scales differently, so a kernel
 names the one it holds.
 

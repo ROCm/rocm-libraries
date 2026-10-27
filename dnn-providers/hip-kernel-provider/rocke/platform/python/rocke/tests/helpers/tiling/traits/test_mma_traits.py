@@ -15,6 +15,7 @@ import dataclasses
 
 import pytest
 
+from rocke.core.ir import BF16, F16, F32, FP4E2M1, FP8E4M3, I8, I32, TF32, U8
 from rocke.helpers.tiling.mma import TileMmaPlan
 from rocke.helpers.tiling.traits import MmaLayoutParams, load_mma_traits
 
@@ -22,7 +23,7 @@ from rocke.helpers.tiling.traits import MmaLayoutParams, load_mma_traits
 def _m1_atom():
     catalog = load_mma_traits()
     return catalog, catalog.select(
-        target="gfx90a", a="fp16", b="fp16", c="fp32", m=16, n=16, k=16
+        target="gfx90a", a=F16, b=F16, c=F32, m=16, n=16, k=16
     )
 
 
@@ -69,13 +70,15 @@ def test_gfx90a_16x16x16_f16_matches_the_catalog() -> None:
 def test_select_unknown_combo_raises_valueerror_with_query() -> None:
     catalog = load_mma_traits()
     with pytest.raises(ValueError) as excinfo:
-        catalog.select(target="gfx90a", a="fp16", b="fp16", c="fp32", m=13, n=16, k=16)
+        catalog.select(target="gfx90a", a=F16, b=F16, c=F32, m=13, n=16, k=16)
     message = str(excinfo.value)
     assert message.startswith(
-        "no MMA instruction for target='gfx90a' a='fp16' b='fp16' c='fp32' d='fp32' "
-        "shape=(13,16,16) family='dense' -- selectable on 'gfx90a': ["
+        "no MMA instruction found for a=f16, b=f16, c=f32, shape=(13, 16, 16), "
+        "family='dense', target='gfx90a' -- available on 'gfx90a' (a x b -> c, MxNxK): ["
     )
-    assert "'mfma_f32_16x16x16f16'" in message  # lists the candidates
+    # The candidates are spelled by their dtypes in IR type names, not by instruction name.
+    assert "'f16 x f16 -> f32, 16x16x16'" in message
+    assert "fp32" not in message
 
 
 @pytest.mark.parametrize(
@@ -90,7 +93,7 @@ def test_select_unknown_combo_raises_valueerror_with_query() -> None:
 )
 def test_select_on_real_target_ids(target, op_id) -> None:
     chosen = load_mma_traits().select(
-        target=target, a="fp16", b="fp16", c="fp32", m=16, n=16, k=16
+        target=target, a=F16, b=F16, c=F32, m=16, n=16, k=16
     )
     assert chosen.op_id == op_id
 
@@ -98,12 +101,10 @@ def test_select_on_real_target_ids(target, op_id) -> None:
 def test_family_name_is_not_a_target() -> None:
     # Rows list real target ids; a family name such as 'gfx11' selects nothing.
     with pytest.raises(ValueError) as excinfo:
-        load_mma_traits().select(
-            target="gfx11", a="fp16", b="fp16", c="fp32", m=16, n=16, k=16
-        )
+        load_mma_traits().select(target="gfx11", a=F16, b=F16, c=F32, m=16, n=16, k=16)
     assert str(excinfo.value) == (
-        "no MMA instruction for target='gfx11' a='fp16' b='fp16' c='fp32' d='fp32' "
-        "shape=(16,16,16) family='dense' -- selectable on 'gfx11': []"
+        "no MMA instruction found for a=f16, b=f16, c=f32, shape=(16, 16, 16), "
+        "family='dense', target='gfx11' -- available on 'gfx11': none"
     )
 
 
@@ -153,28 +154,50 @@ def test_scaled_rows_carry_their_scale_block_size() -> None:
 
 def test_result_dtype_is_part_of_the_selection() -> None:
     # gfx1250 has two dense bf16 x bf16, f32-accumulator 16x16x32 instructions that differ only in
-    # the result: d defaults to c, and naming d="bf16" picks the bf16-result instruction.
+    # the result: d defaults to c, and naming d=BF16 picks the bf16-result instruction.
     catalog = load_mma_traits()
     query = {
         "target": "gfx1250",
-        "a": "bf16",
-        "b": "bf16",
-        "c": "fp32",
+        "a": BF16,
+        "b": BF16,
+        "c": F32,
         "m": 16,
         "n": 16,
         "k": 32,
     }
     assert catalog.select(**query).op_id == "wmma_f32_16x16x32_bf16"
-    assert catalog.select(**query, d="bf16").op_id == "wmma_bf16f32_16x16x32_bf16"
+    assert catalog.select(**query, d=BF16).op_id == "wmma_bf16f32_16x16x32_bf16"
+
+
+@pytest.mark.parametrize(
+    "dtype,k,op_id",
+    [(TF32, 8, "mfma_f32_16x16x8_xf32"), (FP8E4M3, 32, "mfma_f32_16x16x32_fp8_fp8")],
+)
+def test_select_takes_ir_types(dtype, k, op_id) -> None:
+    chosen = load_mma_traits().select(
+        target="gfx942", a=dtype, b=dtype, c=F32, m=16, n=16, k=k
+    )
+    assert chosen.op_id == op_id
+
+
+def test_ir_dtypes_gives_a_row_its_ir_types() -> None:
+    catalog = load_mma_traits()
+    assert catalog.get("mfma_f32_16x16x8_xf32").ir_dtypes() == (TF32, TF32, F32, F32)
+    assert catalog.get("wmma_bf16f32_16x16x32_bf16").ir_dtypes() == (
+        BF16,
+        BF16,
+        F32,
+        BF16,
+    )
 
 
 def test_scaled_selection_names_the_scale_block_size() -> None:
     catalog = load_mma_traits()
     query = {
         "target": "gfx1250",
-        "a": "fp8e4m3",
-        "b": "fp4e2m1",
-        "c": "fp32",
+        "a": FP8E4M3,
+        "b": FP4E2M1,
+        "c": F32,
         "m": 16,
         "n": 16,
         "k": 128,
@@ -197,15 +220,15 @@ def test_unscaled_gfx950_f8f6f4_rows_are_selected_by_their_formats() -> None:
     # is its own row, selected by the two formats, and the scaled instruction of the same formats
     # stays a separate row of family 'scaled'.
     catalog = load_mma_traits()
-    query = {"target": "gfx950", "c": "fp32", "m": 16, "n": 16, "k": 128}
-    same = catalog.select(**query, a="fp8e4m3", b="fp8e4m3")
+    query = {"target": "gfx950", "c": F32, "m": 16, "n": 16, "k": 128}
+    same = catalog.select(**query, a=FP8E4M3, b=FP8E4M3)
     assert same.op_id == "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3"
     assert (same.family, same.scale) == ("dense", None)
-    mixed = catalog.select(**query, a="fp8e4m3", b="fp4e2m1")
+    mixed = catalog.select(**query, a=FP8E4M3, b=FP4E2M1)
     assert mixed.op_id == "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1"
     assert (mixed.a_dtype, mixed.b_dtype) == ("fp8e4m3", "fp4e2m1")
     scaled = catalog.select(
-        **query, a="fp8e4m3", b="fp8e4m3", family="scaled", scale_block_k=32
+        **query, a=FP8E4M3, b=FP8E4M3, family="scaled", scale_block_k=32
     )
     assert scaled.op_id == "mfma_scale_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3"
 
@@ -215,9 +238,9 @@ def test_scale_block_size_is_refused_outside_family_scaled() -> None:
     with pytest.raises(ValueError) as excinfo:
         catalog.select(
             target="gfx90a",
-            a="fp16",
-            b="fp16",
-            c="fp32",
+            a=F16,
+            b=F16,
+            c=F32,
             m=16,
             n=16,
             k=16,
@@ -235,7 +258,7 @@ def test_pin_only_rows_are_never_selected() -> None:
     pinned = catalog.get("wmma_f32_16x16x128_f8f6f4_fp8e4m3_fp8e4m3")
     assert not pinned.auto_select
     chosen = catalog.select(
-        target="gfx1250", a="fp8e4m3", b="fp8e4m3", c="fp32", m=16, n=16, k=128
+        target="gfx1250", a=FP8E4M3, b=FP8E4M3, c=F32, m=16, n=16, k=128
     )
     assert chosen.op_id == "wmma_f32_16x16x128_fp8_fp8"
 
@@ -244,14 +267,14 @@ def test_selectable_signedness_also_takes_unsigned_operands() -> None:
     # Integer WMMA has a signedness flag per operand, so u8 matches its i8 row, independently for A
     # and B; integer MFMA is signed only.
     catalog = load_mma_traits()
-    for a, b in (("u8", "i8"), ("i8", "u8"), ("u8", "u8")):
-        chosen = catalog.select(target="gfx1250", a=a, b=b, c="i32", m=16, n=16, k=64)
+    for a, b in ((U8, I8), (I8, U8), (U8, U8)):
+        chosen = catalog.select(target="gfx1250", a=a, b=b, c=I32, m=16, n=16, k=64)
         assert chosen.op_id == "wmma_i32_16x16x64_iu8"
         assert chosen.operand_signedness == "selectable"
-    signed = catalog.select(target="gfx942", a="i8", b="i8", c="i32", m=16, n=16, k=32)
+    signed = catalog.select(target="gfx942", a=I8, b=I8, c=I32, m=16, n=16, k=32)
     assert signed.operand_signedness == "signed"
     with pytest.raises(ValueError, match="no MMA instruction"):
-        catalog.select(target="gfx942", a="u8", b="i8", c="i32", m=16, n=16, k=32)
+        catalog.select(target="gfx942", a=U8, b=I8, c=I32, m=16, n=16, k=32)
 
 
 # ---- multi-block rows -----------------------------------------------------------------------------
@@ -274,7 +297,7 @@ def test_multi_block_row_loads_and_plan_build_refuses_it() -> None:
 def test_multi_block_rows_are_never_selected() -> None:
     catalog = load_mma_traits()
     with pytest.raises(ValueError, match="no MMA instruction"):
-        catalog.select(target="gfx90a", a="fp32", b="fp32", c="fp32", m=16, n=16, k=1)
+        catalog.select(target="gfx90a", a=F32, b=F32, c=F32, m=16, n=16, k=1)
 
 
 def test_get_unknown_op_raises_valueerror() -> None:

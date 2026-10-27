@@ -78,12 +78,10 @@ def _flat_tile(registers: int):
     )
 
 
-def _operand_desc(dtype_name: str):
+def _operand_desc(dtype):
     """The canonical A-operand layout of gfx950's 16x16x128 f8f6f4 instruction for a 4-bit or 6-bit
     operand: each lane holds one run of 32 K elements."""
-    return TileMma(
-        (16, 16, 128), a=dtype_name, b=dtype_name, c="f32", target="gfx950"
-    ).a_desc
+    return TileMma((16, 16, 128), a=dtype, b=dtype, c=F32, target="gfx950").a_desc
 
 
 # ---- the storage type ---------------------------------------------------------------------------------
@@ -149,7 +147,7 @@ def test_a_tf32_value_must_be_reinterpreted_to_its_storage_type() -> None:
 
 
 def test_a_packed_value_must_be_its_words() -> None:
-    a_desc = _operand_desc("fp4e2m1")
+    a_desc = _operand_desc(FP4E2M1)
     b = IRBuilder("fp4_bytes_value")
     expected = (
         "Fragment value expected vec<i32x4> for TileDesc(shape=(16, 128)), got vec<i8x32> -- "
@@ -164,7 +162,7 @@ def test_a_packed_value_must_be_its_words() -> None:
 @pytest.mark.parametrize("dtype,words", [(FP4E2M1, 4), (FP6E2M3, 6), (TF32, 32)])
 def test_a_zero_fill_is_all_zero_storage_words(dtype, words) -> None:
     b = IRBuilder("zero_fill")
-    fragment = make_fragment(_operand_desc("fp4e2m1"), dtype)
+    fragment = make_fragment(_operand_desc(FP4E2M1), dtype)
     fill_fragment(b, fragment, 0)
     assert fragment.value.type == VectorType(I32, words)
     (fill,) = [op for op in b.kernel.body.ops if op.name == "arith.constant_vec"]
@@ -244,7 +242,7 @@ def test_a_k_major_strided_packed_tensor_is_refused() -> None:
     # registers would be single 4-bit elements 16 apart.
     td = make_tensor_desc((16, 128), (1, 16), FP4E2M1)
     with pytest.raises(ValueError) as raised:
-        _load(td, _operand_desc("fp4e2m1"))
+        _load(td, _operand_desc(FP4E2M1))
     assert str(raised.value) == (
         "load_fragment of fp4e2m1 needs each lane's registers to form runs of whole 32-bit "
         "words along the tensor's stride-1 axis (multiples of 8 elements, starting on an "
@@ -272,18 +270,18 @@ def test_runs_shorter_than_a_word_group_are_refused() -> None:
 def test_a_row_stride_that_splits_a_word_is_refused() -> None:
     td = make_tensor_desc((16, 128), (132, 1), FP4E2M1)
     with pytest.raises(ValueError, match="tensor axis 0 steps by 132 elements"):
-        _load(td, _operand_desc("fp4e2m1"))
+        _load(td, _operand_desc(FP4E2M1))
 
 
 def test_an_origin_inside_a_word_is_refused() -> None:
     td = make_tensor_desc((16, 256), (256, 1), FP4E2M1)
     with pytest.raises(ValueError, match="the window origin on the stride-1 axis is 4"):
-        _load(td, _operand_desc("fp4e2m1"), origin=(0, 4))
+        _load(td, _operand_desc(FP4E2M1), origin=(0, 4))
 
 
 @pytest.mark.parametrize("verb", ["load", "store"])
 def test_a_clipped_packed_window_needs_a_whole_word_bound(verb) -> None:
-    a_desc = _operand_desc("fp4e2m1")
+    a_desc = _operand_desc(FP4E2M1)
     td = make_tensor_desc((16, 128), (128, 1), FP4E2M1)
     window = make_window(td, (0, 0), (None, 100))
     b = IRBuilder("packed_clip")
@@ -305,7 +303,7 @@ def test_a_clipped_packed_window_needs_a_whole_word_bound(verb) -> None:
 def test_a_packed_lds_buffer_must_hold_words() -> None:
     td = make_tensor_desc((16, 128), (128, 1), FP4E2M1)
     with pytest.raises(ValueError) as raised:
-        _load(td, _operand_desc("fp4e2m1"), lds_elem=F16)
+        _load(td, _operand_desc(FP4E2M1), lds_elem=F16)
     assert str(raised.value) == (
         "LDS buffer for fp4e2m1 fragments must hold its storage words -- allocate "
         "smem_alloc(I32, [words]) sized from the descriptor; got smem<f16, [2048]>"
@@ -315,7 +313,7 @@ def test_a_packed_lds_buffer_must_hold_words() -> None:
 def test_a_packed_lds_buffer_is_sized_in_words() -> None:
     # 16 x 128 fp4 elements are 256 words: a buffer of 255 words is refused, one of 256 accepted.
     td = make_tensor_desc((16, 128), (128, 1), FP4E2M1)
-    a_desc = _operand_desc("fp4e2m1")
+    a_desc = _operand_desc(FP4E2M1)
     for words, ok in ((255, False), (256, True)):
         b = IRBuilder("packed_lds_size")
         tid = b.thread_id_x()
@@ -508,7 +506,7 @@ def test_packed_operand_tile_round_trips(name, dtype, bits) -> None:
     # through an LDS buffer of i32 words; both must equal the input bytes.
     from rocke.helpers.spec import SignatureBuilder
 
-    a_desc = _operand_desc("fp4e2m1" if bits == 4 else name)
+    a_desc = _operand_desc(FP4E2M1 if bits == 4 else dtype)
     rows, cols = a_desc.shape
     td = make_tensor_desc((rows, cols), (cols, 1), dtype)
     words = register_packing(name, a_desc.register_count).carrier_count
@@ -574,7 +572,7 @@ def test_clipped_packed_window_masks_whole_words(name, dtype, bits) -> None:
     # there); before the bound both equal the input.
     from rocke.helpers.spec import SignatureBuilder
 
-    a_desc = _operand_desc(name)
+    a_desc = _operand_desc(dtype)
     rows, cols = a_desc.shape
     bound = 64
     td = make_tensor_desc((rows, cols), (cols, 1), dtype)

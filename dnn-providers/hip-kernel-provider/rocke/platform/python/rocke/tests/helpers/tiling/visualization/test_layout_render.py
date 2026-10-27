@@ -14,6 +14,7 @@ import os
 
 import pytest
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.mma.mma_operation import TileMma
 from rocke.helpers.tiling.visualization import _canvas as cv
 from rocke.helpers.tiling.visualization import layout_render as lr
@@ -21,7 +22,7 @@ from rocke.helpers.tiling import lds_conflict as lc
 
 
 def _mma():
-    return TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+    return TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 
 
 # ---------------------------------------------------------------- primitive-layer invariants
@@ -109,15 +110,15 @@ def test_from_mma_default_renders_canonical_not_the_configured_style():
     atom = Tiling(atom_shape=(16, 16, 16))
     styled = TileMma(
         (32, 32, 16),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=atom,
         style=InterleavedStyle(),
     )
     canon = TileMma(
-        (32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a", tiling=atom
+        (32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a", tiling=atom
     )  # canonical sibling
     # self-check: the configured a_layout really is NON-canonical, or this test proves nothing.
     assert styled.a_layout != canon.a_desc.layout

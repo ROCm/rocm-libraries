@@ -42,9 +42,9 @@ from rocke.helpers.tiling import tiling_recorder
 # 64-lane wave.
 _MMA = TileMma(
     (32, 32, 16),
-    a="f16",
-    b="f16",
-    c="f32",
+    a=F16,
+    b=F16,
+    c=F32,
     target="gfx90a",
     tiling=Tiling(atom_shape=(16, 16, 16)),
 )
