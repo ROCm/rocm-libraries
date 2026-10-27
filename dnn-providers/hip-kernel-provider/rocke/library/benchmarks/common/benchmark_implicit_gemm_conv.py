@@ -852,8 +852,8 @@ def parse_miopen_cmd(cmd: str):
             -y 11 -x 11 -p 2 -q 2 -u 4 -v 4 -l 1 -j 1 -m conv -g 1 -F 1 \\
             -t 1 -in_layout=NHWC
 
-    Only 2-D NHWC convolutions are supported; the function raises
-    ``ValueError`` for unsupported cases (3-D, NCHW).
+    2-D NHWC and 3-D NDHWC (``--spatial_dim 3``) convolutions are supported;
+    the function raises ``ValueError`` for other layouts (NCHW, NCDHW).
     Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
     ``"bf16"``, or ``"fp32"`` and ``forw`` is the raw MIOpenDriver ``-F``
     value (1=fwd, 2=bwd_data, 4=bwd_weight, 0=all).
@@ -911,14 +911,33 @@ def parse_miopen_cmd(cmd: str):
     sub.add_argument("-m", "--m", dest="_mode", type=str, default="conv")
     sub.add_argument("-t", "--t", dest="_time", type=int, default=0)
     sub.add_argument("-V", "--V", dest="_verify", type=int, default=1)
-    sub.add_argument("-_", "--_", dest="_spatial_dim", type=int, default=2)
+    sub.add_argument(
+        "-_", "--_", "--spatial_dim", dest="_spatial_dim", type=int, default=2
+    )
+    # 3-D (MIOpenDriver --spatial_dim 3): depth extents, NDHWC only.
+    sub.add_argument("-!", "--in_d", dest="Di", type=int, default=None)
+    sub.add_argument("-@", "--fil_d", dest="Z", type=int, default=None)
+    sub.add_argument("-$", "--pad_d", dest="pD", type=int, default=0)
+    sub.add_argument("-#", "--conv_stride_d", dest="sD", type=int, default=1)
+    sub.add_argument("-^", "--dilation_d", dest="dD", type=int, default=1)
 
     miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
 
     layout = miopen_args.in_layout.upper()
-    if layout not in ("NHWC", "NWC"):
+    is_3d = miopen_args._spatial_dim == 3
+    if layout not in (("NDHWC",) if is_3d else ("NHWC", "NWC")):
         raise ValueError(
-            f"Layout {layout!r} is not supported; only NHWC/NWC inputs are accepted"
+            f"Layout {layout!r} is not supported; only NHWC/NWC (2-D) or NDHWC "
+            f"(3-D) inputs are accepted"
+        )
+    depth = {}
+    if is_3d:
+        depth = dict(
+            Di=miopen_args.Di if miopen_args.Di is not None else 1,
+            Z=miopen_args.Z if miopen_args.Z is not None else 1,
+            pD=miopen_args.pD,
+            sD=miopen_args.sD,
+            dD=miopen_args.dD,
         )
 
     from kernels.common.conv_implicit_gemm import ConvProblem
@@ -938,6 +957,7 @@ def parse_miopen_cmd(cmd: str):
         dH=miopen_args.dH,
         dW=miopen_args.dW,
         groups=miopen_args.groups,
+        **depth,
     )
     return problem, dtype, miopen_args.forw
 
