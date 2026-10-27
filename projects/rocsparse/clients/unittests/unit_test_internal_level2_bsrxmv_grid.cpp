@@ -575,7 +575,7 @@ TEST_F(BsrxmvGridClamp, wave32_small_block_dims_reach_the_general_buckets)
     if(device_warp_size() != 32)
     {
         GTEST_SKIP() << "block_dim 2/3/4 dispatch to the 2x2/3x3/4x4 kernels on wave64, which "
-                        "do not clamp their grids";
+                        "do not clamp their grids (AISPARSE-937)";
     }
 
     std::vector<rocsparse_int> mask;
