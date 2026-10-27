@@ -22,6 +22,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   served for it. That kernel returned a weight gradient with a relative error of about 0.306.
   The problem now uses the next recorded solver, `GemmWrwUniversal`.
 
+### Added
+* [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
+  RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
+  filters up to 7x7 and is selected through Find mode.
+
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues

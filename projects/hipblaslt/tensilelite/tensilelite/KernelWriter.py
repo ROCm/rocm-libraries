@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
@@ -383,6 +383,7 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  rndSeedKernArgOffset: int              = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -3240,6 +3241,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+      elif tdmA and tdmB and isPersistent(kernel) and not kernel["UseSubtileImpl"]:
+        # Subtile offsets Address{A,B} before building its descriptors.
+        module.add(self.tdmApplyTileKOffset(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx already freed for subtile (before graWorkGroup above).
       # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
@@ -7391,6 +7395,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       support = kernel["InternalSupportParams"]
       if support.get("PersistentLoopArgsVersion", 0) != 1 or support["KernArgsVersion"] != 3:
         raise ValueError("DataParallel code generation requires PersistentLoopArgsVersion=1 and KernArgsVersion=3")
+    if isStreamKSpatialCluster(kernel):
+      support = kernel["InternalSupportParams"]
+      if support.get("PersistentLoopArgsVersion", 0) != 2 or support["KernArgsVersion"] != 3:
+        raise ValueError("Clustered StreamK requires PersistentLoopArgsVersion=2 and KernArgsVersion=3")
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
@@ -9943,7 +9951,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
-      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # from it by immediate offset (client/src/FusedA2ARunner.cpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounterPtr", 2, 2)
@@ -11978,22 +11986,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     fileString += str(kb)
 
-    if isPersistentDataParallel(kernel):
-      # rocisa emits the outer ABI version. DataParallel kernels must also carry
-      # their policy and payload version when this assembly is reused as a
-      # prebuilt custom kernel without its original solution record.
+    if isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel):
+      # rocisa emits the outer ABI version. Persistent kernels with a newer
+      # payload must carry its version when this assembly is reused without
+      # its original solution record. This also prevents unsupported custom
+      # StreamK ABI2 descriptors from being mistaken for legacy ABI0.
       legacyMetadata = "custom.config:\n  InternalSupportParams:\n    KernArgsVersion: 3\n"
-      dataParallelMetadata = (
+      policyMetadata = (
         "custom.config:\n"
-        "  TileProcessingStrategy: DataParallel\n"
+        f"  TileProcessingStrategy: {kernel['TileProcessingStrategy']}\n"
         "  WorkAssignment: StaticGrid\n"
+      )
+      if isStreamKSpatialCluster(kernel):
+        policyMetadata += f"  ClusterDim: {list(kernel['ClusterDim'])}\n"
+      policyMetadata += (
         "  InternalSupportParams:\n"
         "    KernArgsVersion: 3\n"
-        "    PersistentLoopArgsVersion: 1\n"
+        f"    PersistentLoopArgsVersion: {kernel['InternalSupportParams']['PersistentLoopArgsVersion']}\n"
       )
       if legacyMetadata not in fileString:
-        raise ValueError("DataParallel kernel is missing its KernArgsVersion=3 assembly metadata")
-      fileString = fileString.replace(legacyMetadata, dataParallelMetadata, 1)
+        raise ValueError("Persistent kernel is missing its KernArgsVersion=3 assembly metadata")
+      fileString = fileString.replace(legacyMetadata, policyMetadata, 1)
 
     if error != 0:
       if self.debugConfig.forceGenerateKernel:
@@ -12101,6 +12114,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     assert False, "Should be overrided"
 
   def tdmApplyTileKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmApplyTileKOffset(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
