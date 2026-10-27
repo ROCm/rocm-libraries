@@ -3,11 +3,19 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## (Unreleased) rocFFT 1.0.41
+## (Unreleased) rocFFT 1.0.42
 
 ### Added
 
-* Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly one device; otherwise the existing MPI paths remain. Set `ROCFFT_RCCL_DISABLE=1` to force the MPI fallback.
+* Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and 
+  `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly
+  one device; otherwise the existing MPI paths remain. Set `ROCFFT_RCCL_DISABLE=1` to force the MPI fallback.
+
+## rocFFT 1.0.41 for ROCm 10.2
+
+### Added
+
+* Added further support for very large FFTs (length greater than 2^32).
 * JIT callbacks specified with the `rocfft_plan_description_set_load_callback` and
   `rocfft_plan_description_set_store_callback` APIs can now be used with transforms that have fields
   specified on the same plan description.
@@ -33,10 +41,6 @@ Documentation for rocFFT is available at
   factors when the output data layout uses a batch distance larger than the transform length.
 * Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
   lengths involving large prime factors when batches are interleaved (unit batch distance).
-
-### Added
-
-* Added further support for very large FFTs (length greater than 2^32).
 
 ### Optimized
 

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "SdpaGraphUtils.hpp"
@@ -17,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -112,19 +115,32 @@ namespace
 // max/sum_exp request, so the plan builder's rejection of those softmax-stats outputs
 // can only be exercised at the flatbuffer level. `attrs` carries the unsupported field
 // under test; the q/k/v/o uids and a packed float [1, 2, 4, 8] shape are filled in here.
-flatbuffers::FlatBufferBuilder makeRawSdpaFwdGraph(SdpaAttributesT attrs)
+//
+// When `maskDataType` is engaged (any dtype, including DataType::UNSET), a [1, 1, 4, 4] mask
+// tensor of that dtype is added under uid 5 and attrs.attn_mask_tensor_uid is set to 5. When
+// disengaged the mask is left as `attrs` has it, so a caller-set attn_mask_tensor_uid dangles
+// (no tensor behind it).
+flatbuffers::FlatBufferBuilder
+    makeRawSdpaFwdGraph(SdpaAttributesT attrs, std::optional<DataType> maskDataType = std::nullopt)
 {
     constexpr int64_t Q_UID = 1;
     constexpr int64_t K_UID = 2;
     constexpr int64_t V_UID = 3;
     constexpr int64_t O_UID = 4;
+    constexpr int64_t MASK_UID = 5;
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> maskDims = {1, 1, 4, 4};
+    const auto maskStrides = hipdnn_data_sdk::utilities::generateStrides(maskDims);
 
     attrs.q_tensor_uid = Q_UID;
     attrs.k_tensor_uid = K_UID;
     attrs.v_tensor_uid = V_UID;
     attrs.o_tensor_uid = O_UID;
+    if(maskDataType.has_value())
+    {
+        attrs.attn_mask_tensor_uid = MASK_UID;
+    }
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -136,6 +152,11 @@ flatbuffers::FlatBufferBuilder makeRawSdpaFwdGraph(SdpaAttributesT attrs)
         CreateTensorAttributesDirect(builder, V_UID, "V", DataType::FLOAT, &strides, &dims));
     tensors.push_back(
         CreateTensorAttributesDirect(builder, O_UID, "O", DataType::FLOAT, &strides, &dims));
+    if(maskDataType.has_value())
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, MASK_UID, "Mask", maskDataType.value(), &maskStrides, &maskDims));
+    }
 
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -722,6 +743,124 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
            "leftBound=-1, rightBound=0, BOTTOM_RIGHT alignment.";
 }
 
+namespace
+{
+
+struct MaskSpelling
+{
+    bool causalMask;
+    bool causalMaskBottomRight;
+    std::optional<int64_t> leftBound;
+    std::optional<int64_t> rightBound;
+    hipdnn_frontend::DiagonalAlignment alignment;
+};
+
+struct DeprecatedCausalMaskMergeCase
+{
+    const char* name;
+    MaskSpelling deprecated;
+    MaskSpelling merged;
+};
+
+class TestSdpaFwdPlanBuilderDeprecatedCausalMask
+    : public TestWithParam<DeprecatedCausalMaskMergeCase>
+{
+};
+
+void executeSdpaFwdPlan(SdpaFwdTensorBundle<float>& bundle, const MaskSpelling& mask)
+{
+    auto graphTuple = buildSdpaFwdGraph(bundle,
+                                        DataType::FLOAT,
+                                        mask.causalMask,
+                                        mask.causalMaskBottomRight,
+                                        mask.leftBound,
+                                        mask.rightBound,
+                                        mask.alignment);
+    auto& graph = std::get<0>(graphTuple);
+    auto& variantPack = std::get<1>(graphTuple);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    planBuilder.buildNodePlan(wrapper, wrapper.getNode(0))->execute(variantPack);
+}
+
+} // namespace
+
+TEST_P(TestSdpaFwdPlanBuilderDeprecatedCausalMask, MatchesMergedExplicitBounds)
+{
+    const auto& param = GetParam();
+    // Sq != Skv so TOP_LEFT and BOTTOM_RIGHT alignments produce different output.
+    const std::vector<int64_t> qDims = {1, 2, 2, 8};
+    const std::vector<int64_t> kvDims = {1, 2, 4, 8};
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> deprecatedBundle(qDims, kvDims, kvDims, seed);
+    SdpaFwdTensorBundle<float> mergedBundle(qDims, kvDims, kvDims, seed);
+
+    executeSdpaFwdPlan(deprecatedBundle, param.deprecated);
+    executeSdpaFwdPlan(mergedBundle, param.merged);
+
+    const CpuFpReferenceValidation<float> exactValidation(0.0f, 0.0f);
+    EXPECT_TRUE(exactValidation.allClose(deprecatedBundle.oTensor, mergedBundle.oTensor));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestSdpaFwdPlanBuilderDeprecatedCausalMask,
+    Values(
+        DeprecatedCausalMaskMergeCase{
+            "CausalWithRightBoundOnly",
+            {true, false, std::nullopt, 0, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            {false, false, -1, 0, hipdnn_frontend::DiagonalAlignment::TOP_LEFT}},
+        DeprecatedCausalMaskMergeCase{
+            "CausalWithUnboundedRight",
+            {true, false, std::nullopt, -1, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            {false, false, -1, 0, hipdnn_frontend::DiagonalAlignment::TOP_LEFT}},
+        DeprecatedCausalMaskMergeCase{
+            "CausalWithLeftBoundOnly",
+            {true, false, 1, std::nullopt, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            {false, false, 1, 0, hipdnn_frontend::DiagonalAlignment::TOP_LEFT}},
+        DeprecatedCausalMaskMergeCase{
+            "CausalWithBottomRightAlignment",
+            {true,
+             false,
+             std::nullopt,
+             std::nullopt,
+             hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT},
+            {false, false, -1, 0, hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT}},
+        DeprecatedCausalMaskMergeCase{
+            "BottomRightWithRightBoundOnly",
+            {false, true, std::nullopt, 1, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            {false, false, -1, 1, hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT}},
+        DeprecatedCausalMaskMergeCase{
+            "BottomRightWithLeftBoundOnly",
+            {false, true, 1, std::nullopt, hipdnn_frontend::DiagonalAlignment::TOP_LEFT},
+            {false, false, 1, 0, hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT}}),
+    [](const TestParamInfo<DeprecatedCausalMaskMergeCase>& info) {
+        return std::string(info.param.name);
+    });
+
+TEST(TestSdpaFwdPlanBuilder, BothDeprecatedCausalMasksThrow)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    SdpaFwdTensorBundle<float> bundle(dims, dims, dims, getGlobalTestSeed());
+
+    auto graphTuple = buildSdpaFwdGraph(bundle,
+                                        DataType::FLOAT,
+                                        /*causalMask=*/true,
+                                        /*causalMaskBottomRight=*/true);
+    auto& graph = std::get<0>(graphTuple);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    EXPECT_THROW(planBuilder.buildNodePlan(wrapper, wrapper.getNode(0)), std::invalid_argument);
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
 {
     // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). The dispatcher
@@ -916,4 +1055,175 @@ TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
     const CpuFpReferenceValidation<bfloat16> cpuRefOutputValidation(tolerance, tolerance);
     EXPECT_TRUE(cpuRefOutputValidation.allClose(oExpected, oTensor))
         << "FP8 plan output does not match the dequantized-input reference";
+}
+
+namespace
+{
+
+template <class MaskT>
+std::vector<uint8_t> serializeSdpaFwdGraph(SdpaFwdTensorBundle<float, MaskT>& bundle,
+                                           std::unordered_map<int64_t, void*>* variantPack
+                                           = nullptr)
+{
+    auto graphTuple = buildSdpaFwdGraph(bundle, DataType::FLOAT);
+    if(variantPack != nullptr)
+    {
+        *variantPack = std::get<1>(graphTuple);
+    }
+    auto [serializedGraph, serErr] = std::get<0>(graphTuple)->to_binary();
+    EXPECT_TRUE(serErr.is_good()) << serErr.get_message();
+    return serializedGraph;
+}
+
+// Runs the bundle's graph through the CPU reference executor (key -> registry -> plan).
+template <class MaskT>
+void executeSdpaFwd(SdpaFwdTensorBundle<float, MaskT>& bundle)
+{
+    std::unordered_map<int64_t, void*> variantPack;
+    auto serializedGraph = serializeSdpaFwdGraph(bundle, &variantPack);
+    CpuReferenceGraphExecutor executor;
+    executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+}
+
+} // namespace
+
+template <class MaskT>
+class SdpaFwdPlanMaskDtype : public Test
+{
+};
+
+using SupportedMaskTypes
+    = Types<float, hipdnn_data_sdk::types::half, hipdnn_data_sdk::types::bfloat16>;
+TYPED_TEST_SUITE(SdpaFwdPlanMaskDtype, SupportedMaskTypes, );
+
+// A half/bfloat16 mask must give exactly the result of the same graph with a float mask holding
+// the same values. Reading the mask buffer as float instead gives a different result.
+TYPED_TEST(SdpaFwdPlanMaskDtype, OutputMatchesFloatMask)
+{
+    const unsigned int seed = getGlobalTestSeed();
+
+    SdpaFwdTensorBundle<float, float> floatMaskBundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS, seed);
+    emplaceNonUniformMask(floatMaskBundle);
+    ASSERT_NO_FATAL_FAILURE(executeSdpaFwd(floatMaskBundle));
+
+    SdpaFwdTensorBundle<float, TypeParam> typedMaskBundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS, seed);
+    emplaceNonUniformMask(typedMaskBundle);
+    ASSERT_NO_FATAL_FAILURE(executeSdpaFwd(typedMaskBundle));
+
+    const CpuFpReferenceValidation<float> exact(EXACT_TOLERANCE, EXACT_TOLERANCE);
+    EXPECT_TRUE(exact.allClose(floatMaskBundle.oTensor, typedMaskBundle.oTensor));
+
+    // The mask must actually influence the result, otherwise the comparison above is vacuous.
+    SdpaFwdTensorBundle<float, float> noMaskBundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS, seed);
+    ASSERT_NO_FATAL_FAILURE(executeSdpaFwd(noMaskBundle));
+    EXPECT_FALSE(exact.allClose(noMaskBundle.oTensor, typedMaskBundle.oTensor));
+}
+
+TYPED_TEST(SdpaFwdPlanMaskDtype, ExecutorAcceptsGraph)
+{
+    SdpaFwdTensorBundle<float, TypeParam> bundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS);
+    emplaceNonUniformMask(bundle);
+    auto serializedGraph = serializeSdpaFwdGraph(bundle);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+}
+
+TEST(TestSdpaFwdPlanMask, ExecutorAcceptsGraphWithoutMask)
+{
+    SdpaFwdTensorBundle<float> bundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS);
+    auto serializedGraph = serializeSdpaFwdGraph(bundle);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+}
+
+TEST(TestSdpaFwdPlanMask, UnsupportedMaskDtypeHasNoPlan)
+{
+    SdpaFwdTensorBundle<float, int32_t> bundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS);
+    bundle.maskTensor.emplace(std::vector<int64_t>{1, 2, 4, 6});
+    std::unordered_map<int64_t, void*> variantPack;
+    auto serializedGraph = serializeSdpaFwdGraph(bundle, &variantPack);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+
+    try
+    {
+        executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+        FAIL() << "An INT32 mask must not resolve to a plan";
+    }
+    catch(const CpuReferenceNotApplicableError& e)
+    {
+        FAIL() << "Expected the registry error naming the mask dtype, got not-applicable: "
+               << e.what();
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("mask=INT32"), std::string::npos) << e.what();
+    }
+}
+
+TEST(TestSdpaFwdPlanMask, MaskTensorWithUnsetDtypeIsNotApplicable)
+{
+    auto graphBuilder = makeRawSdpaFwdGraph(SdpaAttributesT{}, DataType::UNSET);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    EXPECT_THROW(executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), {}),
+                 CpuReferenceNotApplicableError);
+}
+
+TEST(TestSdpaFwdPlanMask, DanglingMaskUidIsNotApplicable)
+{
+    SdpaAttributesT attrs;
+    attrs.attn_mask_tensor_uid = 99;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+
+    CpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(graphBuilder.GetBufferPointer(), graphBuilder.GetSize()));
+    EXPECT_THROW(executor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), {}),
+                 std::out_of_range);
+}
+
+// A builder claims only graphs whose mask dtype is exactly its own, so the no-mask builder never
+// reads a mask buffer as its placeholder float type.
+TEST(TestSdpaFwdPlanMask, BuilderAcceptsOnlyMatchingMaskDtype)
+{
+    using hipdnn_data_sdk::types::half;
+
+    SdpaFwdTensorBundle<float, half> halfMaskBundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS);
+    emplaceNonUniformMask(halfMaskBundle);
+    auto halfMaskGraph = serializeSdpaFwdGraph(halfMaskBundle);
+    const GraphWrapper halfMaskWrapper(halfMaskGraph.data(), halfMaskGraph.size());
+
+    SdpaFwdTensorBundle<float, float> floatMaskBundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS);
+    emplaceNonUniformMask(floatMaskBundle);
+    auto floatMaskGraph = serializeSdpaFwdGraph(floatMaskBundle);
+    const GraphWrapper floatMaskWrapper(floatMaskGraph.data(), floatMaskGraph.size());
+
+    SdpaFwdTensorBundle<float, float> noMaskBundle(MASK_QDIMS, MASK_KDIMS, MASK_VDIMS);
+    auto noMaskGraph = serializeSdpaFwdGraph(noMaskBundle);
+    const GraphWrapper noMaskWrapper(noMaskGraph.data(), noMaskGraph.size());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT,
+                             DataType::FLOAT,
+                             DataType::FLOAT,
+                             DataType::FLOAT,
+                             DataType::HALF>
+        halfMaskBuilder;
+    EXPECT_TRUE(
+        halfMaskBuilder.isApplicable(halfMaskWrapper.getNode(0), halfMaskWrapper.getTensorMap()));
+    EXPECT_FALSE(
+        halfMaskBuilder.isApplicable(floatMaskWrapper.getNode(0), floatMaskWrapper.getTensorMap()));
+    EXPECT_FALSE(
+        halfMaskBuilder.isApplicable(noMaskWrapper.getNode(0), noMaskWrapper.getTensorMap()));
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        noMaskBuilder;
+    EXPECT_TRUE(noMaskBuilder.isApplicable(noMaskWrapper.getNode(0), noMaskWrapper.getTensorMap()));
+    EXPECT_FALSE(
+        noMaskBuilder.isApplicable(halfMaskWrapper.getNode(0), halfMaskWrapper.getTensorMap()));
+    EXPECT_FALSE(
+        noMaskBuilder.isApplicable(floatMaskWrapper.getNode(0), floatMaskWrapper.getTensorMap()));
 }

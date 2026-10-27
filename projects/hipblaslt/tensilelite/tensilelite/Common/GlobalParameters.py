@@ -31,6 +31,7 @@ from copy import deepcopy
 from typing import Dict
 
 from .. import __version__
+from ..Toolchain.Component import get_rocm_version
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -42,7 +43,7 @@ startTime = time.time()
 
 globalParameters = OrderedDict()
 globalParameters["MinimumRequiredVersion"] = (
-    "0.0.0"  # which version of tensile is required to handle all the features required by this configuration file
+    "0.0.0"  # which version of TensileLite is required to handle all the features required by this configuration file
 )
 globalParameters["PerformanceMetric"] = (
     "DeviceEfficiency"  # performance metric for benchmarking; one of {DeviceEfficiency, CUEfficiency}
@@ -99,17 +100,17 @@ globalParameters["ValidationMaxToPrint"] = 4  # maximum number of mismatches to 
 globalParameters["ValidationPrintValids"] = False  # print matches too
 # steps
 globalParameters["ForceRedoBenchmarkProblems"] = (
-    True  # if False and benchmarking already complete, then benchmarking will be skipped when tensile is re-run
+    True  # if False and benchmarking already complete, then benchmarking will be skipped when TensileLite is re-run
 )
 globalParameters["ForceRedoLibraryLogic"] = (
-    True  # if False and library logic already analyzed, then library logic will be skipped when tensile is re-run
+    True  # if False and library logic already analyzed, then library logic will be skipped when TensileLite is re-run
 )
 globalParameters["ForceRedoLibraryClient"] = (
-    True  # if False and library client already built, then building library client will be skipped when tensile is re-run
+    True  # if False and library client already built, then building library client will be skipped when TensileLite is re-run
 )
 
 globalParameters["ShowProgressBar"] = (
-    True  # if False and library client already built, then building library client will be skipped when tensile is re-run
+    True  # if False and library client already built, then building library client will be skipped when TensileLite is re-run
 )
 globalParameters["SolutionSelectionAlg"] = (
     1  # algorithm to determine which solutions to keep. 0=removeLeastImportantSolutions, 1=keepWinnerSolutions (faster)
@@ -134,7 +135,7 @@ globalParameters["CpuThreads"] = (
 # generated ``.s`` and participate in this check; that same encoding total feeds
 # ``.amdhsa_inst_pref_size`` in ``.amdhsa_kernel`` metadata for CP instruction prefetch.
 # Currently this applies to gfx1250 only (StinkyTofu gfx1250 emitter and CP prefetch on that arch).
-# Testing: ``tox`` turns on ``CheckASMCodeSize=True`` for the default Tensile pytest runs (see
+# Testing: ``tox`` turns on ``CheckASMCodeSize=True`` for the default TensileLite pytest runs (see
 # ``tox.ini``), so gfx1250 kernels built during those tests are verified automatically.
 globalParameters["CheckASMCodeSize"] = False
 globalParameters["NumWarmups"] = 0
@@ -197,6 +198,13 @@ globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
+# Where A/B data come from. None keeps the default: mxDataGenerator for MX inputs only.
+# True:  A/B come from mxDataGenerator whether MX or not (non-MX A/B must be FP8/BF8), so F8 and
+#        MXF8 runs of the same problem get the same A/B bytes.
+# False: A/B use DataInitTypeA/B through the non-MX init path whether MX or not (Trig gives the
+#        plain F8 pattern) and MX scales use DataInitTypeMXSA/MXSB. MX data must be FP8/BF8/FP4
+#        (MXF8, MXF4, NVF4).
+globalParameters["MXDataGenerator"] = None
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # Runtime steering for solutions compiled with WorkAssignment=Hybrid; this
 # does not select a compiled tile-processing or work-assignment family.
@@ -225,8 +233,8 @@ globalParameters["CheckSynchronizer"] = True
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
-# When this parameter is set to 0, the Tensile client will use srand(time(NULL)).
-# If not 0 the Tensile client will use srand(seed).
+# When this parameter is set to 0, the TensileLite client will use srand(time(NULL)).
+# If not 0 the TensileLite client will use srand(seed).
 globalParameters["DataInitSeed"] = 0
 globalParameters["PruneSparseMode"] = (
     0  # Prune mode for Sparse Matrix: 0=random, 1=XX00, 2=X0X0, 3=0XX0, 4=X00X, 5=0X0X, 6=00XX
@@ -316,18 +324,18 @@ globalParameters["GranularityThreshold"] = 0.0
 globalParameters["PredictionThreshold"] = 2.0
 
 globalParameters["PristineOnGPU"] = (
-    True  # use Pristine memory on Tensile trainning verification or not
+    True  # use Pristine memory on TensileLite trainning verification or not
 )
 
 globalParameters["SeparateArchitectures"] = (
-    False  # write Tensile library metadata to separate files for each architecture
+    False  # write TensileLite library metadata to separate files for each architecture
 )
 
 globalParameters["LazyLibraryLoading"] = (
     False  # Load library and code object files when needed instead of at startup
 )
 
-globalParameters["EnableMarker"] = False  # Enable Tensile markers
+globalParameters["EnableMarker"] = False  # Enable TensileLite markers
 
 globalParameters["UseUserArgs"] = False
 
@@ -408,14 +416,8 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # slow kernel generation can be attributed to individual passes.
 globalParameters["StinkyTofuTimePasses"] = False
 
-# StinkyTofu ds_load issue cap (gfx1250 DAG scheduler): at most DsReadPerCap ds_loads per
-# DsIssueCapSpanCycles. Mode 0 = sliding (each ds_load frees its slot that many cycles after
-# its own issue), 1 = periodic (a period opens at its first ds_load; all slots free together).
-# Span 0 = one WMMA window. See stinkytofu docs/user/scheduler-tuning-parameters.md.
-globalParameters["StinkyTofuDsIssueCapMode"] = 0
-globalParameters["StinkyTofuDsIssueCapSpanCycles"] = 0
 # Extra StinkyTofu module options, applied last so they override KernelWriter's own values,
-# e.g. {WmmaQueueDepth: 8, DsReadPerCap: 12}. Keys are StinkyAsmModule::ModuleOptions names;
+# e.g. {WmmaQueueDepth: 8, WmmaBatchSize: 2}. Keys are StinkyAsmModule::ModuleOptions names;
 # see stinkytofu docs/user/scheduler-tuning-parameters.md.
 globalParameters["StinkyTofuModuleOptions"] = {}
 
@@ -423,6 +425,13 @@ globalParameters["StinkyTofuModuleOptions"] = {}
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
 globalParameters["StinkyTofuCostOutputDir"] = ""
+
+# StinkyTofu register-allocation dump, for debugging a colouring. Each kernel that
+# runs allocation writes what it saw and did -- the IR before the lift, the SSA form,
+# its live ranges, and each attempt's placement table -- to
+# <StinkyTofuCostOutputDir>/<kernel>/ra/, or ./<kernel>/ra/ when that is unset.
+# Changes no code, so it is global rather than part of the kernel name.
+globalParameters["StinkyTofuRegisterAllocationDump"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
 
@@ -448,7 +457,7 @@ defaultGlobalParameters = deepcopy(globalParameters)
 
 
 ################################################################################
-# Tensile internal parameters
+# TensileLite internal parameters
 ################################################################################
 # These parameters are not adjustable by the config yamls. They change with the
 # generator versions
@@ -569,6 +578,7 @@ defaultBenchmarkCommonParameters = [
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
+    {"LDSSegmentBRotate": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},
@@ -643,6 +653,7 @@ defaultBenchmarkCommonParameters = [
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
+    {"PostLoopStoreInNll": [True]},
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
@@ -663,10 +674,18 @@ defaultBenchmarkCommonParameters = [
     # ahead of execution. Legacy booleans are accepted as a deprecated alias
     # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
     {"SwInstructionPrefetch": [1]},
+    # StinkyTofuRegisterAllocation — per kernel: a mode 0..3, or a StinkyTofu config
+    # string such as "apply,classes=vs". See ValidParameters.py.
+    # 0 leaves the colouring Tensile emitted.
+    {"StinkyTofuRegisterAllocation": [0]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
+    # half of the cluster grid. -1 disables; 0-7 is the XCC that receives cluster 0;
+    # -2 reads each cluster's XCC from the hardware.
+    {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
 ]
@@ -713,8 +732,8 @@ libraryLogicTypeOverrides = {
 
 ################################################################################
 # Is query version compatible with current version
-# a yaml file is compatible with tensile if
-# tensile.major == yaml.major and tensile.minor.step > yaml.minor.step
+# a yaml file is compatible with TensileLite if
+# TensileLite.major == yaml.major and TensileLite.minor.step > yaml.minor.step
 ################################################################################
 def restoreDefaultGlobalParameters():
     """
@@ -777,6 +796,7 @@ globalParameterTypeOverrides = {
     "AMDSMIPath":              {type(None), str},   # path, populated at startup
     "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
     "RocProfCounter":          {type(None), str},   # counter spec or None
+    "MXDataGenerator":         {type(None), bool},  # unset keeps the per-problem default
 }
 
 
@@ -871,7 +891,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
-    #     Tensile/Common/Types.py) directly from the raw config dict
+    #     tensilelite/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
     #     registry:
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
@@ -905,7 +925,7 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     if "MinimumRequiredVersion" in config:
         if not versionIsCompatible(config["MinimumRequiredVersion"]):
             printExit(
-                "Config file requires version=%s is not compatible with current Tensile version=%s"
+                "Config file requires version=%s is not compatible with current TensileLite version=%s"
                 % (config["MinimumRequiredVersion"], __version__)
             )
 
@@ -974,24 +994,12 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     # The alternative would be to install the `distro` package.
     # See https://docs.python.org/3.7/library/platform.html#platform.linux_distribution
 
-    # The following try except block computes the hipcc version
-    # TODO: hipcc is deprecated, this block should be removed.
     try:
-        compiler = "hipcc"
-        output = subprocess.run(
-            [compiler, "--version"], check=True,
-            stdout=subprocess.PIPE,
-            # Avoids some warning spam on Windows.
-            stderr=subprocess.DEVNULL,
-        ).stdout.decode()
-
-        for line in output.split("\n"):
-            if "HIP version" in line:
-                globalParameters["HipClangVersion"] = line.split()[2]
-                print1("# Found hipcc version " + globalParameters["HipClangVersion"])
-
-    except (subprocess.CalledProcessError, OSError) as e:
-        printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
+        version = get_rocm_version()
+        globalParameters["HipClangVersion"] = f"{version.major}.{version.minor}.{version.patch}"
+        print1("# Found ROCm version " + globalParameters["HipClangVersion"])
+    except RuntimeError as e:
+        printWarning("Failed to determine ROCm version: {}".format(e))
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
 
