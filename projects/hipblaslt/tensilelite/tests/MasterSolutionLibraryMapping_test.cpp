@@ -169,6 +169,38 @@ TEST_F(MasterSolutionLibraryMappingTest, CompressedUidMappingRetainsFullWidthIde
     EXPECT_EQ(lib.getSolutionByUid(hardware, 0), nullptr);
 }
 
+TEST_F(MasterSolutionLibraryMappingTest, UidMappingLoadsOnFirstUidLookup)
+{
+    const std::string arch = "gfx9999";
+    writeMappingFile(perArchMappingPath(arch), {{"10", "kernel_a_" + arch}});
+    const uint64_t uid = uint64_t{1} << 40;
+    {
+        msgpack::sbuffer buffer;
+        msgpack::pack(buffer, std::map<uint64_t, int>{{uid, 3}});
+        std::ofstream out(tmpDir / ("TensileLiteLibrary_lazy_" + arch + "_UidMapping.dat"),
+                          std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        ASSERT_TRUE(out.good());
+    }
+
+    TestLibrary lib;
+    ASSERT_TRUE(lib.initLibraryMapping(masterPath(arch).string()));
+    EXPECT_TRUE(lib.uidIndexMapping.empty());
+
+    // Index 3 is below the first mapped shard, so the lookup resolves it from
+    // `solutions` without opening a shard file.
+    auto solution         = std::make_shared<TensileLite::ContractionSolution>();
+    solution->index       = 3;
+    solution->solutionUid = uid;
+    solution->requiredHostWorkspaceSizePerProblem = 0;
+    lib.solutions.emplace(3, solution);
+
+    TensileLite::AMDGPU hardware(TensileLite::AMDGPU::Processor::gfx942, 304, "test-device");
+    EXPECT_EQ(lib.getSolutionByUid(hardware, uid), solution);
+    EXPECT_EQ(lib.uidIndexMapping.size(), 1u);
+}
+
 // The kpack-collision regression: the legacy global Mapping.dat sitting in
 // the same directory must NOT be picked up when the per-arch file is absent.
 // If it ever were, two shard installs that overlay onto the same prefix
