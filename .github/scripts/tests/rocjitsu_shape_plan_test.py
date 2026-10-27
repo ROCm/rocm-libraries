@@ -12,7 +12,7 @@ from unittest.mock import patch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rocjitsu_shape_plan import benchmark_group_plan, digest
+from rocjitsu_shape_plan import benchmark_group_plan, digest, whole_yaml_plan
 
 
 class BenchmarkGroupPlanTest(unittest.TestCase):
@@ -132,6 +132,47 @@ class BenchmarkGroupPlanTest(unittest.TestCase):
                     benchmark_group_plan(
                         dict(jobs=jobs, excluded=[]), self.root / change
                     )
+
+    def test_whole_yaml_keeps_original_group_identities_after_removal(self):
+        source = self.root / "original.yaml"
+        document = yaml.safe_load(Path(self.jobs[0]["yaml"]).read_text())
+        document["TestParameters"] = dict(skip=False)
+        source.write_text(yaml.safe_dump(document))
+        jobs = copy.deepcopy(self.jobs)
+        for index, job in enumerate(jobs):
+            job.update(
+                source=str(source),
+                source_sha256=digest(source),
+                problem_type_index=2 if index == 2 else 0,
+                group_index=4 if index == 2 else 2,
+                nodeid=f"sample/p{2 if index == 2 else 0}_g{5 if index == 2 else 3}_s{index}",
+            )
+        plan = dict(
+            jobs=jobs,
+            excluded=[dict(nodeid="excluded", work=99999)],
+            sources=[
+                dict(
+                    path=str(source), sha256=digest(source), nodeid="sample", markers=[]
+                )
+            ],
+        )
+        result = whole_yaml_plan(plan, self.root / "whole")
+        self.assertEqual(result["excluded"], plan["excluded"])
+        self.assertEqual(len(result["jobs"]), 1)
+        job = result["jobs"][0]
+        self.assertEqual(job["group_mapping"], {"0:0": [0, 2], "1:0": [2, 4]})
+        self.assertEqual(job["problems"], [j["problems"][0] for j in jobs])
+        retained = yaml.safe_load(Path(job["yaml"]).read_text())
+        self.assertEqual(retained["GlobalParameters"], document["GlobalParameters"])
+        self.assertEqual(retained["TestParameters"], document["TestParameters"])
+        self.assertEqual([len(p) for p in retained["BenchmarkProblems"]], [2, 2])
+        self.assertEqual(
+            [
+                (g["problem_type_index"], g["group_index"])
+                for g in job["benchmark_groups"]
+            ],
+            [(0, 2), (2, 4)],
+        )
 
 
 if __name__ == "__main__":

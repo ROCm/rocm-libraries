@@ -249,6 +249,17 @@ def group_indices(path):
     return int(match[1]), int(match[2])
 
 
+def original_group(item, directory):
+    identity = item.get("job", {})
+    indices = group_indices(directory)
+    mapping = identity.get("group_mapping")
+    if mapping is not None:
+        return mapping[f"{indices[0]}:{indices[1]}"]
+    if "problem_type_index" in identity:
+        return [identity["problem_type_index"], identity["group_index"]]
+    return list(indices)
+
+
 def client_events(path):
     header, ini, block = None, None, -1
     for number, line in enumerate(path.read_text().splitlines(), 1):
@@ -514,7 +525,12 @@ def audit(root):
             group=[j.get("problem_type_index"), j.get("group_index")],
             problems=problems,
         )
-        for j in admitted
+        for outer in admitted
+        for j in (
+            [dict(outer, **group) for group in outer["benchmark_groups"]]
+            if "benchmark_groups" in outer
+            else [outer]
+        )
         for problems in (
             [j["problems"]]
             if j.get("grouped") or j.get("atomic_reason")
@@ -610,17 +626,26 @@ def audit_item(root, directory, item):
             inis[str(output / relative)] = read_ini(directory / "run" / relative)
     if not groups or not inis:
         raise ValueError("missing accepted solutions or effective client INIs")
+    mapping = item.get("job", {}).get("group_mapping")
+    if mapping is not None:
+        actual = {f"{pi}:{gi}" for pi, gi in map(group_indices, groups)}
+        if (
+            set(mapping) != actual
+            or any(
+                not isinstance(value, list)
+                or len(value) != 2
+                or any(type(i) is not int or i < 0 for i in value)
+                for value in mapping.values()
+            )
+            or len({tuple(value) for value in mapping.values()}) != len(mapping)
+        ):
+            raise ValueError("retained groups differ from original-group mapping")
     for ini, values in inis.items():
         relative = Path(ini).relative_to(output)
         group = relative.parts[1]
         if group not in groups:
             raise ValueError("client config has no matching solution inventory")
-        identity = item.get("job", {})
-        indices = (
-            [identity["problem_type_index"], identity["group_index"]]
-            if "problem_type_index" in identity
-            else list(group_indices(group))
-        )
+        indices = original_group(item, group)
         shapes = ini_shapes(values)
         controls = {
             k: v for k, v in values.items() if k not in PROBLEM_FIELDS | PATH_FIELDS
@@ -646,12 +671,7 @@ def audit_item(root, directory, item):
             raise ValueError("client log references an unretained INI")
         values = inis[event["ini"]]
         group = Path(event["ini"]).relative_to(output).parts[1]
-        identity = item.get("job", {})
-        indices = (
-            [identity["problem_type_index"], identity["group_index"]]
-            if "problem_type_index" in identity
-            else list(group_indices(group))
-        )
+        indices = original_group(item, group)
         row = event["row"]
         solution_index = int(row["solution-progress"].split("/")[0])
         matches = [

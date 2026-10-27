@@ -73,6 +73,41 @@ class CompareTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown solution/header schema"):
             solutions(path)
 
+    def test_original_group_mapping_applies_to_solutions_and_verdicts(self):
+        root = self.root / "mapped"
+        directory, item = self.item(root, "filtered", [4, 12], True)
+        item["job"] = dict(group_mapping={"0:0": [2, 4]})
+        inventory, ledger = audit_item(root, directory, item)
+        self.assertTrue(inventory and ledger)
+        self.assertEqual({tuple(row["group"]) for row in inventory + ledger}, {(2, 4)})
+        for mapping in ({}, {"0:0": [2, -1]}, {"0:0": [2, 4], "1:0": [2, 4]}):
+            with self.subTest(mapping=mapping):
+                item["job"]["group_mapping"] = mapping
+                with self.assertRaisesRegex(ValueError, "original-group mapping"):
+                    audit_item(root, directory, item)
+
+    def test_gated_allocation_retains_reference_controls_and_serial_candidates(self):
+        specs = rocjitsu_experiment.trial_specifications(
+            "gated-allocation", 16, 16, 4, "16:4,64:1"
+        )
+        self.assertEqual(
+            specs,
+            [
+                ("gated-reference", "gated-reference", 16, 4),
+                ("groups-16-dispatch4", "shape", 16, 4),
+                ("groups-64-dispatch1", "shape", 64, 1),
+            ],
+        )
+        reference = commands(
+            "gated-reference", self.root, dict(excluded=[{}]), self.env, 16, 450, 500
+        )
+        candidate = commands(
+            "shape", self.root, dict(excluded=[{}]), self.env, 64, 450, 500
+        )
+        self.assertNotIn("CpuThreads=1", " ".join(reference))
+        self.assertIn("CpuThreads=1", " ".join(candidate))
+        self.assertIn("rocjitsu_shape_queue.py", " ".join(reference))
+
     def item(self, root, nodeid, sizes, candidate):
         output = root / "output" / nodeid.replace("/", "_")
         group = "sample_00_00" if candidate else "sample_01_02"

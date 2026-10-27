@@ -35,6 +35,79 @@ def problem_signature(problem):
     }
 
 
+def whole_yaml_plan(plan, directory):
+    """Retain admitted groups in one YAML per source, with original identities."""
+    groups = benchmark_group_plan(plan, directory / "groups")
+    by_source = defaultdict(list)
+    for job in groups["jobs"]:
+        by_source[job["source"]].append(job)
+    sources = {source["path"]: source for source in plan["sources"]}
+    jobs = []
+    for source, originals in by_source.items():
+        if any(job.get("atomic_reason") for job in originals):
+            if len(originals) != 1:
+                raise ValueError("indivisible config has multiple jobs")
+            jobs.extend(originals)
+            continue
+        originals.sort(key=lambda j: (j["problem_type_index"], j["group_index"]))
+        document = yaml.safe_load(Path(source).read_text())
+        if digest(Path(source)) != sources[source]["sha256"]:
+            raise ValueError("source changed before whole-YAML filtering")
+        document["BenchmarkProblems"] = []
+        mapping, descriptors, problem_types = {}, [], {}
+        for job in originals:
+            if digest(Path(job["yaml"])) != job["yaml_sha256"]:
+                raise ValueError("admitted group changed before whole-YAML filtering")
+            selected = yaml.safe_load(Path(job["yaml"]).read_text())
+            problem = selected["BenchmarkProblems"][0]
+            pi, gi = job["problem_type_index"], job["group_index"]
+            if pi not in problem_types:
+                problem_types[pi] = len(document["BenchmarkProblems"])
+                document["BenchmarkProblems"].append([problem[0]])
+            new_pi = problem_types[pi]
+            retained = document["BenchmarkProblems"][new_pi]
+            new_gi = len(retained) - 1
+            retained.append(problem[1])
+            mapping[f"{new_pi}:{new_gi}"] = [pi, gi]
+            descriptors.append(
+                {
+                    k: job[k]
+                    for k in (
+                        "problem_type_index",
+                        "group_index",
+                        "grouped",
+                        "problems",
+                    )
+                }
+            )
+        nodeid = sources[source]["nodeid"] + "/admitted-whole-YAML"
+        identifier = hashlib.sha256(nodeid.encode()).hexdigest()[:20]
+        destination = directory / f"{Path(source).stem}__{identifier}.yaml"
+        destination.write_text(yaml.safe_dump(document, sort_keys=False))
+        if yaml.safe_load(destination.read_text()) != document:
+            raise ValueError("whole-YAML round trip changed controls")
+        jobs.append(
+            dict(
+                id=identifier,
+                nodeid=nodeid,
+                source=source,
+                source_sha256=sources[source]["sha256"],
+                markers=sources[source]["markers"],
+                work=sum(job["work"] for job in originals),
+                grouped=False,
+                problems=[p for job in originals for p in job["problems"]],
+                benchmark_groups=descriptors,
+                group_mapping=mapping,
+                yaml=str(destination),
+                yaml_sha256=digest(destination),
+            )
+        )
+    result = copy.deepcopy(plan)
+    result["partition"] = "whole-YAML"
+    result["jobs"] = sorted(jobs, key=lambda job: (-job["work"], job["nodeid"]))
+    return result
+
+
 def benchmark_group_plan(plan, directory):
     """Bundle already admitted ordinary shapes from the same benchmark group."""
     from tensilelite.SolutionStructs import ProblemSizes, ProblemType

@@ -22,7 +22,7 @@ on:
       strategy:
         type: choice
         description: "Matrix compares worker counts; allocation compares dispatch widths; partition compares shape and benchmark-group jobs"
-        options: [shape, reference, paired, safety, matrix, allocation, partition]
+        options: [shape, reference, paired, safety, matrix, allocation, partition, gated-allocation]
         default: shape
       dispatch_threads:
         type: string
@@ -34,8 +34,8 @@ on:
         default: "48:1,32:2,16:4"
       max_work:
         type: string
-        description: "Maximum logical GEMM work including batch; default is 4096 cubed"
-        default: "68719476736"
+        description: "Maximum logical GEMM work including batch; default is 1024 cubed"
+        default: "1073741824"
       per_job_seconds:
         type: string
         description: "Maximum build and execution time for one admitted shape job"

@@ -38,7 +38,7 @@ on:
         default: "48:1,32:2,16:4"
       max_work:
         type: string
-        default: "68719476736"
+        default: "1073741824"
       per_job_seconds:
         type: string
         default: "600"
@@ -101,13 +101,14 @@ jobs:
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
           [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
           [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
-          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix|allocation|partition)$ ]] || { echo "::error::invalid strategy"; exit 1; }
+          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix|allocation|partition|gated-allocation)$ ]] || { echo "::error::invalid strategy"; exit 1; }
           trials=1
           [[ "${STRATEGY}" != paired && "${STRATEGY}" != safety ]] || trials=2
           [[ "${STRATEGY}" != matrix && "${STRATEGY}" != partition ]] || trials=3
-          if [[ "${STRATEGY}" == allocation ]]; then
+          if [[ "${STRATEGY}" == allocation || "${STRATEGY}" == gated-allocation ]]; then
             IFS=',' read -ra pairs <<< "${REQUESTED_ALLOCATIONS}"
             trials=${#pairs[@]}
+            [[ "${STRATEGY}" != gated-allocation ]] || trials=$(( trials + 1 ))
             (( trials >= 2 )) || { echo "::error::allocation requires at least two pairs"; exit 1; }
             for pair in "${pairs[@]}"; do
               [[ "${pair}" =~ ^[1-9][0-9]*:[124]$ ]] || { echo "::error::allocations must be workers:dispatch pairs with dispatch 1, 2 or 4"; exit 1; }

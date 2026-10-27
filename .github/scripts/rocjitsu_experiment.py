@@ -20,7 +20,7 @@ from rocjitsu_compare import audit, compare, workload_coverage
 from rocjitsu_check_suite import memory_lines
 from rocjitsu_evidence import digest, source_name
 from rocjitsu_pytest import write_json
-from rocjitsu_shape_plan import benchmark_group_plan
+from rocjitsu_shape_plan import benchmark_group_plan, whole_yaml_plan
 
 
 def commands(strategy, root, plan, env, workers, seconds, suite):
@@ -63,7 +63,7 @@ def commands(strategy, root, plan, env, workers, seconds, suite):
         str(root / "rocjitsu-config.json"),
         "--",
     ]
-    if strategy == "shape":
+    if strategy != "reference":
         test = [
             sys.executable,
             "-m",
@@ -155,6 +155,10 @@ def trial(
     shutil.copytree(parent / "shape-yamls", root / "shape-yamls")
     if label == "benchmark-groups":
         plan = benchmark_group_plan(plan, root / "shape-yamls")
+    if label and label.startswith("groups-"):
+        plan = benchmark_group_plan(plan, root / "shape-yamls")
+    if strategy == "gated-reference":
+        plan = whole_yaml_plan(plan, root / "shape-yamls")
     # Paths inside the plan are immutable original inputs. Retained copies in
     # each report allow later offline hash verification without the runner.
     write_json(root / "shape-plan.json", plan)
@@ -170,9 +174,10 @@ def trial(
         config.update(cpu_dispatch_threads=dispatch_threads, async_helper_threads=0)
     write_json(root / "rocjitsu-config.json", config)
     runtime = dict(
-        strategy=strategy,
+        strategy="shape" if strategy == "gated-reference" else strategy,
+        execution_strategy=strategy,
         partition=(
-            plan.get("partition", "shape") if strategy == "shape" else "whole-YAML"
+            plan.get("partition", "shape") if strategy != "reference" else "whole-YAML"
         ),
         workers=workers,
         available_cpus=len(os.sched_getaffinity(0)),
@@ -261,6 +266,17 @@ def trial_specifications(
     dispatch_threads=1,
     allocations="48:1,32:2,16:4",
 ):
+    if strategy == "gated-allocation":
+        specifications = trial_specifications(
+            "allocation", workers, reference_workers, dispatch_threads, allocations
+        )
+        return [
+            ("gated-reference", "gated-reference", reference_workers, dispatch_threads),
+            *[
+                (label.replace("shape-", "groups-"), mode, count, width)
+                for label, mode, count, width in specifications
+            ],
+        ]
     if strategy == "partition":
         return [
             ("reference", "reference", reference_workers, dispatch_threads),
@@ -393,6 +409,7 @@ def benchmark_report(parent, reports, comparisons):
         "Workload elapsed time includes job startup, compilation, validation and cleanup. Shared artifact/environment setup and initial workload planning are outside each trial. Average CPU use includes child processes and may include host waiters; it is not a measure of useful emulator arithmetic. Container memory peaks span the shared job and are not per-strategy peaks.",
         "Whole-YAML reference arms retain the original generator settings and use one engine, automatic dispatch and a reference thread budget based on available CPUs divided by workers. Shape arms use serial generation and references with the reported dispatch width. These are comparisons of complete strategies in a common harness; shape arms with the same dispatch width isolate outer concurrency. Allocation comparisons vary workers and dispatch together. All arms use the same artifacts, fixed seed, verdict reporting and Mirage startup-pool limit.",
         "Partition mode compares single-shape jobs with admitted shapes bundled by original benchmark group, at the same worker/dispatch allocation. Grouped GEMM and search-dependent configurations remain indivisible. The gate applies before bundling; a bundle's summed work may exceed the per-case ceiling. Queue-job counts describe granularity; requested descriptors, accepted solutions and numerical verdicts must still match.",
+        "Gated-allocation mode filters the whole-YAML control to exactly the admitted source cases, preserving original group identities after removal. Its other arms bundle those same cases by benchmark group and vary worker/dispatch allocation. The grouped pair can hold nominal dispatch capacity constant while varying how many independent clients claim work. Setup, references and actual CPU demand can still differ.",
         "",
         "| Strategy | Queue jobs | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -422,6 +439,7 @@ def main():
             "matrix",
             "allocation",
             "partition",
+            "gated-allocation",
         ),
         default="shape",
     )
