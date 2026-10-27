@@ -755,7 +755,20 @@ def parseLibraryLogicData(
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
+            # Logic YAML may widen custom.config size bounds (e.g. skinny MXFP8 selection
+            # shapes) without editing the linked .s metadata block.
+            yaml_size_predicates = {
+                key: solutionState[key]
+                for key in (
+                    "AssertSizeEqual",
+                    "AssertSizeGreaterThan",
+                    "AssertSizeLessThan",
+                    "AssertSizeMultiple",
+                )
+                if key in solutionState
+            }
             solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
+            solutionState.update(yaml_size_predicates)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")

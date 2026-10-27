@@ -14,16 +14,17 @@ external manifest.
 
 ## Subdirectories
 
-| Directory     | Origin                                            |
-| ------------- | ------------------------------------------------- |
-| `tensile/`    | Kernels emitted by Tensile's own assembly writer. |
-| `aiter/`      | External: AITER-sourced GEMM kernels.             |
-| `ck/`         | External: Composable Kernel-sourced kernels.     |
-| `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
-| `vllm/`       | External: vLLM wvSplitK skinny-GEMM kernels.     |
-| `rocroller/`  | External: rocRoller-sourced kernels.              |
-| `wave/`       | External: Wave (handwritten) kernels.             |
-| `triton/`     | External: Triton-compiled GEMM kernels.           |
+| Directory       | Origin                                            |
+| --------------- | ------------------------------------------------- |
+| `tensile/`      | Kernels emitted by Tensile's own assembly writer. |
+| `aiter/`        | External: AITER-sourced GEMM kernels.             |
+| `ck/`           | External: Composable Kernel-sourced kernels.      |
+| `rocblas/`      | External: rocBLAS wvSpltK skinny-GEMM kernels.    |
+| `vllm/`         | External: vLLM wvSplitK skinny-GEMM kernels.      |
+| `skinny_mxfp8/` | External: skinny MXFP8 emitter kernels.           |
+| `rocroller/`    | External: rocRoller-sourced kernels.              |
+| `wave/`         | External: Wave (handwritten) kernels.             |
+| `triton/`       | External: Triton-compiled GEMM kernels.           |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.

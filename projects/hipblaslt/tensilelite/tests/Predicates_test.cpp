@@ -259,3 +259,74 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
 }
+
+// ----------------------------------------------------------------------------
+// StrideAMultiple / StrideBMultiple: strides are in elements.
+// ----------------------------------------------------------------------------
+
+// Non-transposed GEMM, so lda and ldb are the leading dimensions under test.
+static TensileLite::ContractionProblemGemm strideProblem(size_t lda, size_t ldb)
+{
+    using namespace TensileLite;
+    return ContractionProblemGemm::GEMM_Strides(false,
+                                                false,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::Float8,
+                                                rocisa::DataType::BFloat16,
+                                                rocisa::DataType::BFloat16,
+                                                /*m=*/64,
+                                                /*n=*/64,
+                                                /*k=*/64,
+                                                /*batchSize=*/1,
+                                                lda,
+                                                /*aStride=*/-1,
+                                                ldb,
+                                                /*bStride=*/-1,
+                                                /*ldc=*/64,
+                                                /*cStride=*/-1,
+                                                /*ldd=*/64,
+                                                /*dStride=*/-1,
+                                                /*beta=*/0.0);
+}
+
+TEST(Predicates, StrideMultiple_LeadingDimensionMultipleOfFour)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::StrideAMultiple predA(1, 4);
+    Predicates::Contraction::StrideBMultiple predB(1, 4);
+
+    for(size_t ld : {4, 8, 5120})
+    {
+        EXPECT_TRUE(predA(strideProblem(ld, 64))) << "lda=" << ld;
+        EXPECT_TRUE(predB(strideProblem(64, ld))) << "ldb=" << ld;
+    }
+    for(size_t ld : {5121, 5122, 5123})
+    {
+        EXPECT_FALSE(predA(strideProblem(ld, 64))) << "lda=" << ld;
+        EXPECT_FALSE(predB(strideProblem(64, ld))) << "ldb=" << ld;
+    }
+}
+
+TEST(Predicates, StrideMultiple_OperandsAreIndependent)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::StrideAMultiple predA(1, 4);
+    Predicates::Contraction::StrideBMultiple predB(1, 4);
+
+    ContractionProblemGemm badA = strideProblem(5121, 5120);
+    EXPECT_FALSE(predA(badA));
+    EXPECT_TRUE(predB(badA));
+
+    ContractionProblemGemm badB = strideProblem(5120, 5121);
+    EXPECT_TRUE(predA(badB));
+    EXPECT_FALSE(predB(badB));
+}
+
+TEST(Predicates, StrideMultiple_UnitStrideIndex)
+{
+    using namespace TensileLite;
+    // Index 0 is the unit stride, which is 1 for the problems built here.
+    EXPECT_TRUE(Predicates::Contraction::StrideAMultiple(0, 1)(strideProblem(5121, 5121)));
+    EXPECT_TRUE(Predicates::Contraction::StrideBMultiple(0, 1)(strideProblem(5121, 5121)));
+    EXPECT_FALSE(Predicates::Contraction::StrideAMultiple(0, 4)(strideProblem(5120, 5120)));
+}

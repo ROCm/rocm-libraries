@@ -100,6 +100,10 @@ _METADATA_NAME_TO_SEMANTIC = {
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
     "batchOffsetB":           "BatchOffsetB",
+    "m":                      "SizeFree0",
+    "n":                      "SizeFree1",
+    "k":                      "SizeSum",
+    "spk":                    "Spk",
 }
 
 _ACTIVATION_ARG_INDEX = {

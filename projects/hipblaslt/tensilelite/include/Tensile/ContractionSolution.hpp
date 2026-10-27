@@ -65,6 +65,7 @@ namespace TensileLite
         X_MACRO(SizeSumDiv2) \
         X_MACRO(SizeSum1) \
         X_MACRO(SizeSum2) \
+        X_MACRO(Spk) \
         X_MACRO(StrideA0) \
         X_MACRO(StrideA1) \
         X_MACRO(StrideA2) \
@@ -183,7 +184,11 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* Each dimension of the launched grid; unlike NumWorkGroups these are never flattened. */ \
+        X_MACRO(NumWorkGroupsX) \
+        X_MACRO(NumWorkGroupsY) \
+        X_MACRO(NumWorkGroupsZ)
 
     enum class CustomArgSemantic
     {
@@ -226,6 +231,8 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        TilesWide,
+        TilesSkinny,
         CustomGridSize_Count,
     };
 
@@ -1042,8 +1049,14 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
+        void                 calculateFreeExtents(size_t& extentX,
+                                                  size_t& extentY,
+                                                  ContractionSolution::Problem const& problem) const;
         void                 calculateTiles(dim3& tiles,
                                             ContractionSolution::Problem const& problem) const;
+        void                 calculateWideSkinnyTiles(size_t& tilesWide,
+                                                      size_t& tilesSkinny,
+                                                      ContractionSolution::Problem const& problem) const;
         void                 calculateGrid(dim3&                               workGroupSize,
                                            dim3&                               numWorkGroups,
                                            ContractionSolution::Problem const& problem) const;
@@ -1522,6 +1535,10 @@ namespace TensileLite
                                                  size_t         tiles) const;
 
         bool handwrittenCustomKernel() const;
+
+        // Logic YAML stores the symbol on CustomKernelName; lazy-loaded solutions
+        // may only populate kernelName until custom.config is merged.
+        std::string linkedCustomKernelName() const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.

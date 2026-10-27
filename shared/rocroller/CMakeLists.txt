@@ -206,6 +206,12 @@ if(ROCROLLER_ENABLE_YAML_CPP)
             FetchContent_MakeAvailable(yaml_cpp)
         endblock()
         set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
+        # yaml-cpp 0.8.0 uses uint16_t/uint32_t in emitterutils.cpp without
+        # including <cstdint>. GCC 15's libstdc++ no longer provides those
+        # typedefs transitively through <sstream> or <algorithm>.
+        if(TARGET yaml-cpp)
+            target_compile_options(yaml-cpp PRIVATE "SHELL:-include cstdint")
+        endif()
     else()
         find_package(yaml-cpp 0.8.0 REQUIRED)
     endif()

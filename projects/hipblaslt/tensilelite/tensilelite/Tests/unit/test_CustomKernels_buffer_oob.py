@@ -138,15 +138,21 @@ NO_BUFFER_OOB_KERNELS = {
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_": "rocRoller",
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_": "rocRoller",
     "wave_bf16_gemm_256x256x64": "Wave, global_store only",
-    "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
-    "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
-    "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
     # All compiled from one source.
     **{
         name: "vLLM wvSplitK, global_store only"
         for name in custom_kernel_names()
         if name.startswith("wvSplitK_vllm_")
     },
+    "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",
+    "wvSpltK_bf16_tn_m4": "rocBLAS wvSpltK, global_store only",
+    "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1": "skinny MXFP8, exact-size buffer stores",
+    "gemm_BM2_TN4_LANES_K64_WAVES1_UP_ITERS0_PARTIAL_STEPS0_PF1_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1": "skinny MXFP8, exact-size buffer stores",
+    "gemm_BM16_TN1_LANES_K64_WAVES1_UP_ITERS0_PARTIAL_STEPS0_PF4_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1_MFMA1_LDS1": "skinny MXFP8, exact-size buffer stores",
+    "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PARTIAL_STEPS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1": "skinny MXFP8, exact-size buffer stores",
+    "gemm_BM32_TN2_LANES_K64_WAVES1_UP_ITERS0_PARTIAL_STEPS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1_MFMA1_LDS1": "skinny MXFP8, exact-size buffer stores",
+    "gemm_BM32_TN2_LANES_K64_WAVES2_UP_ITERS0_PARTIAL_STEPS0_PF4_GROUP8_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1": "skinny MXFP8, exact-size buffer stores",
 }
 # HIP-compiled W4A16 decode: a single 64-bit global_store, kept inside an exec
 # mask against the free size taken at entry.
