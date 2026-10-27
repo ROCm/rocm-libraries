@@ -90,7 +90,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos3, qc2534, mplate]
 
-# row_block_dim_C == 1 forces segment size 2 in both the nnz and convert kernels.
 - name: gebsr2gebsr
   category: quick
   function: gebsr2gebsr
@@ -106,7 +105,6 @@ Tests:
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
-# Fast gebsr2gebsr kernel: row_block_dim_C > 16 selects block size 32.
 - name: gebsr2gebsr
   category: quick
   function: gebsr2gebsr

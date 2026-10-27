@@ -134,8 +134,10 @@
 // have fixed defaults and
 // are not resolved by the heuristics. Gfx1250Backend resolves unset
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
-// wins; degenerate main-loop IR falls back to the static Rule3 default). See
+// wins; degenerate main-loop IR falls back to the static default). See
 // SchedulingKnobHeuristics.hpp.
+// ReduceClusterBarrierPerLoop: <0 unset, 0 = a Rule 3 handshake on every loop
+// trigger, >0 = one handshake per enclosing loop. propose() currently leaves it off.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
     X(LockDsReadOrder, bool, true)                                                                 \
     X(EvenSpreadFillers, bool, true)                                                               \
@@ -151,6 +153,7 @@
     X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
     X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
+    X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
