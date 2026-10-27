@@ -52,8 +52,10 @@
 #                uninterpreted, so their meaning belongs to the lowerer, not to
 #                the recipe format. A lowerer that silently ignores an attribute
 #                it does not understand is a real hazard and this version number
-#                cannot catch it. Kernel-attr value TAGS are the exception: the
-#                VM itself drops tags it does not know (KERNEL_ATTR_TAGS).
+#                cannot catch it by itself. Kernel-attr value TAGS are one
+#                exception: the VM itself drops tags it does not know
+#                (KERNEL_ATTR_TAGS). The other is an attr registered by NAME
+#                once a lowerer learned it (KERNEL_ATTR_NAMES).
 #
 # So the genuinely dangerous change -- one an old engine ACCEPTS and gets wrong
 # -- is the one a human has to notice and bump for. `stamp` refuses to stamp a
@@ -68,7 +70,7 @@ from typing import Any, Dict, List, Optional
 #: cpp/include/rocke/abi.h; a test pins the two together against the built
 #: engine, because a Python generator that believed it was newer than the C
 #: engine would stamp artifacts that engine then refuses.
-RECIPE_ABI = 3
+RECIPE_ABI = 4
 
 #: Binary ABI the ctypes bindings in online.py are written against. MUST equal
 #: ROCKE_ABI_VERSION in cpp/include/rocke/abi.h. Unlike the wire level, this one
@@ -132,6 +134,15 @@ KERNEL_ATTR_TAGS: Dict[str, int] = {
     "l": 2,
 }
 
+# Kernel attrs above level 1, by name. A reader passes kernel attrs to its
+# lowerer uninterpreted, and a lowerer older than the attr ignores it without an
+# error, so the kernel it builds is not the one recorded.
+KERNEL_ATTR_NAMES: Dict[str, int] = {
+    # Level 4. An older lowerer ignores the exact block size and sizes the kernel
+    # for max_workgroup_size (or its default) instead.
+    "workgroup_size": 4,
+}
+
 # Nested instruction lists, by the key that holds them.
 _BODY_KEYS = ("body", "then", "else")
 
@@ -189,7 +200,8 @@ def recipe_min_reader(recipe: Dict[str, Any], *, strict: bool = True) -> int:
             for key in node:
                 if key in INTEXPR_NODES:
                     level = max(level, INTEXPR_NODES[key])
-    for tv in (recipe.get("attrs") or {}).values():
+    for name, tv in (recipe.get("attrs") or {}).items():
+        level = max(level, KERNEL_ATTR_NAMES.get(name, 1))
         if isinstance(tv, dict):
             level = max(level, KERNEL_ATTR_TAGS.get(tv.get("t"), 1))
     return level

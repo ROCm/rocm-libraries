@@ -25,6 +25,8 @@ Checks performed:
 * **Attr maps** — required keys present per opcode; enum-valued attrs legal.
 * **Vector / smem / addrspace sanity** — vector widths > 0, smem shapes
   positive, pointer address spaces from the known set.
+* **Block size** -- a kernel sets at most one of ``workgroup_size`` (exact) and
+  ``max_workgroup_size`` (an upper bound).
 
 Standard library only.
 """
@@ -121,6 +123,13 @@ _UNARY_SAME_TYPE = {
 # Comparison ops: 2 operands, 1 i1 result; require a 'pred' attr.
 _CMP_OPS = {"arith.cmp", "arith.fcmp"}
 
+# The two block-size kernel attrs state one fact two ways; a kernel sets one.
+_BOTH_WORKGROUP_SIZES = (
+    "kernel sets both workgroup_size and max_workgroup_size -- set one: "
+    "workgroup_size is the exact launch block size, max_workgroup_size an upper "
+    "bound on it"
+)
+
 # Legal pointer address spaces.
 _ADDR_SPACES = {"global", "constant", "shared", "lds", "private"}
 
@@ -173,6 +182,10 @@ class _Verifier:
     # ---- entry ----
 
     def run(self) -> List[Diagnostic]:
+        attrs = self.kernel.attrs
+        if "workgroup_size" in attrs and "max_workgroup_size" in attrs:
+            self.err(_BOTH_WORKGROUP_SIZES)
+
         # Top-level scope: kernel params.
         scope: Dict[str, Value] = {}
         param_names: Set[str] = set()

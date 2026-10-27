@@ -171,6 +171,10 @@ class LaunchSummary:
     launches: int
 
 
+# The block a launch uses when its LaunchConfig leaves ``block`` unset.
+_DEFAULT_BLOCK: Tuple[int, int, int] = (64, 1, 1)
+
+
 @dataclass
 class LaunchConfig:
     """Per-call options for a launcher.
@@ -191,8 +195,9 @@ class LaunchConfig:
     grid: Tuple[int, int, int] = (1, 1, 1)
     """3D launch grid (number of CTAs in each dim)."""
 
-    block: Tuple[int, int, int] = (64, 1, 1)
-    """3D block dim (threads per CTA). Default is a single wave64."""
+    block: Optional[Tuple[int, int, int]] = None
+    """3D block dim (threads per CTA). ``None`` launches with
+    ``(64, 1, 1)``, a single wave64."""
 
     shared_bytes: int = 0
     """Dynamic LDS bytes requested at launch (in addition to the
@@ -476,6 +481,9 @@ class KernelLauncher:
             )
         return self._fn
 
+    def _resolve_block(self, config: LaunchConfig) -> Tuple[int, int, int]:
+        return _DEFAULT_BLOCK if config.block is None else config.block
+
     def _resolve_cluster(self, config: LaunchConfig) -> Optional[Tuple[int, int, int]]:
         if config.cluster is None:
             return self._cluster_dims
@@ -494,6 +502,7 @@ class KernelLauncher:
         config: LaunchConfig,
     ) -> LaunchSummary:
         rt = _runtime()
+        block = self._resolve_block(config)
         cluster = self._resolve_cluster(config)
         args = self._packer(values)
         stream = resolve_stream(config.stream)
@@ -512,7 +521,7 @@ class KernelLauncher:
             rt.launch_blocking(
                 self._live_fn(),
                 config.grid,
-                config.block,
+                block,
                 args,
                 shared_bytes=config.shared_bytes,
                 stream=stream,
@@ -533,7 +542,7 @@ class KernelLauncher:
         rt.launch(
             self._live_fn(),
             config.grid,
-            config.block,
+            block,
             args,
             shared_bytes=config.shared_bytes,
             stream=stream,
@@ -562,7 +571,7 @@ class KernelLauncher:
         launch = _runtime().prepare_launch(
             self._live_fn(),
             config.grid,
-            config.block,
+            self._resolve_block(config),
             self._packer(values),
             shared_bytes=config.shared_bytes,
             stream=resolve_stream(config.stream),

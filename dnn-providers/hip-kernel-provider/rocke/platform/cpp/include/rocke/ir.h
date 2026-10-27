@@ -782,7 +782,8 @@ bool rocke_opcode_is_pure(rocke_opcode_t op);
 rocke_value_t* rocke_op_result(rocke_ir_builder_t* b, rocke_op_t* op);
 /* Python @property Op.is_pure: attrs["pure"] override, else opcode purity. */
 bool rocke_op_is_pure(const rocke_op_t* op);
-/* Python @property KernelDef.max_workgroup_size (default 256). */
+/* Python @property KernelDef.max_workgroup_size: the exact workgroup_size attr
+ * when set, else the max_workgroup_size upper bound, else 256. */
 int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k);
 
 /* ============================== BUILDER ================================= */
