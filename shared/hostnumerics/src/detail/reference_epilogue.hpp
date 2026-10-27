@@ -317,8 +317,9 @@ inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request)
 
 inline void initializeOwnedEpilogueTensor(Tensor tensor) {
     const RuntimeTensorWriter<double> writer(tensor);
-    forEachIndex(tensor.shape(),
-                 [&](std::span<const size_t> indices, size_t) { writer.store(indices, 0.0); });
+    tensor.shape().forEachCoordinateLastDimensionFastest(
+        roc::hostnumerics::IndexRange::all(tensor.shape().elementCount()),
+        [&](size_t, std::span<const size_t> indices) { writer.store(indices, 0.0); });
 }
 
 template <typename Accumulator, bool QuantizeResult>

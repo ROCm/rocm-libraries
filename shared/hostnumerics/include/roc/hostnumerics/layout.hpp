@@ -144,9 +144,7 @@ class Layout {
 
     static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayoutLastDimensionFastest(
         const Shape& shape) {
-        std::vector<size_t> order(shape.rank());
-        std::iota(order.begin(), order.end(), size_t{0});
-        return getContiguousLayout(shape, order);
+        return getContiguousLayout(shape, shape.indexOrderLastDimensionFastest());
     }
 
     // Throwing forms of getContiguousLayout.
@@ -162,9 +160,7 @@ class Layout {
 
     // For a matrix this is row-major/C-order: the last dimension has unit stride.
     static Layout contiguousLastDimensionFastest(const Shape& shape) {
-        auto result = getContiguousLayoutLastDimensionFastest(shape);
-        if (!result) throw std::runtime_error(result.error().message());
-        return std::move(*result);
+        return contiguous(shape, shape.indexOrderLastDimensionFastest());
     }
 
     // For a matrix this is column-major/Fortran-order: the first dimension has unit stride.

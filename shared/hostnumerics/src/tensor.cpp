@@ -132,11 +132,13 @@ void Tensor::copyLogicalElementsToEncodedStorage(std::span<std::byte> destinatio
     }
 
     const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-    detail::forEachIndex(shape(), [&](std::span<const size_t> indices, size_t) {
-        const uint64_t offset =
-            detail::preparedBitOffset(m_type, detail::preparedElementOffset(layout(), indices));
-        detail::preparedCopyBitRange(rawEncodedBackingStorage(), offset, destination, offset, bits);
-    });
+    shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(shape().elementCount()), [&](size_t, std::span<const size_t> indices) {
+            const uint64_t offset =
+                detail::preparedBitOffset(m_type, detail::preparedElementOffset(layout(), indices));
+            detail::preparedCopyBitRange(rawEncodedBackingStorage(), offset, destination, offset,
+                                         bits);
+        });
 }
 
 void Tensor::copySelectedElementsToEncodedStorage(std::span<std::byte> destination,

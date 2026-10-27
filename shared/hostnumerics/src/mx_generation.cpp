@@ -490,13 +490,15 @@ void MxTensor::refreshReference() const {
     const detail::RuntimeTensorWriter<float> writer(reference);
     const size_t scaleCount = scales.elementCount();
     const size_t fast = scales.shape().dimensions()[1];
-    detail::forEachIndex(data.shape(), [&](std::span<const size_t> index, size_t) {
-        if (indexReader(index) >= scaleCount)
-            throw std::runtime_error("MX scale index exceeds scale count.");
-    });
-    detail::forEachIndex(data.shape(), [&](std::span<const size_t> index, size_t) {
-        const size_t scale = indexReader(index);
-        writer.store(index, dataReader(index) * scaleReader(scale / fast, scale % fast));
-    });
+    data.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(data.shape().elementCount()), [&](size_t, std::span<const size_t> index) {
+            if (indexReader(index) >= scaleCount)
+                throw std::runtime_error("MX scale index exceeds scale count.");
+        });
+    data.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(data.shape().elementCount()), [&](size_t, std::span<const size_t> index) {
+            const size_t scale = indexReader(index);
+            writer.store(index, dataReader(index) * scaleReader(scale / fast, scale % fast));
+        });
 }
 }  // namespace roc::hostnumerics

@@ -20,9 +20,9 @@ The argument order is (start, end, stride). A start at or beyond end yields
 an empty range. count() and indices() use the bound stored in the range.
 )doc")
         .def(nb::init<size_t, size_t, size_t>(), "start"_a, "end"_a, "stride"_a)
-        .def_ro("start", &IndexRange::start)
-        .def_ro("end", &IndexRange::end)
-        .def_ro("stride", &IndexRange::stride)
+        .def_prop_ro("start", &IndexRange::start)
+        .def_prop_ro("end", &IndexRange::end)
+        .def_prop_ro("stride", &IndexRange::stride)
         .def("count", &IndexRange::count, "Count entries without enumerating them.")
         .def("indices", &IndexRange::indices, "Return an owning list of the range's entries.")
         .def_static("all", &IndexRange::all, "end"_a,

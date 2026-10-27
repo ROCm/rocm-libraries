@@ -20,10 +20,11 @@ double realScalar(const Tensor& scalar) {
 size_t uncertifiedValues(const Tensor& input, double limit) {
     const detail::RuntimeTensorReader<double> reader(input);
     size_t count = 0;
-    detail::forEachIndex(input.shape(), [&](std::span<const size_t> at, size_t) {
-        const double value = reader(at);
-        count += !detail::isExactInteger(value) || !(std::abs(value) < limit);
-    });
+    input.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(input.shape().elementCount()), [&](size_t, std::span<const size_t> at) {
+            const double value = reader(at);
+            count += !detail::isExactInteger(value) || !(std::abs(value) < limit);
+        });
     return count;
 }
 
@@ -76,13 +77,14 @@ ExactVerification verifyExactActivation(const Tensor& observed, const Tensor& au
     const detail::RuntimeTensorReader<double> auxiliaryReader(auxiliary);
     const detail::RuntimeTensorWriter<double> preWriter(pre);
     bool finite = true;
-    detail::forEachIndex(auxiliary.shape(), [&](std::span<const size_t> at, size_t) {
-        // Preserve division, including F64 rounding. Multiplication by a
-        // rounded reciprocal is not equivalent.
-        const double value = auxiliaryReader(at) / scaleE;
-        finite &= std::isfinite(value);
-        preWriter.store(at, value);
-    });
+    auxiliary.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(auxiliary.shape().elementCount()), [&](size_t, std::span<const size_t> at) {
+            // Preserve division, including F64 rounding. Multiplication by a
+            // rounded reciprocal is not equivalent.
+            const double value = auxiliaryReader(at) / scaleE;
+            finite &= std::isfinite(value);
+            preWriter.store(at, value);
+        });
     if (!finite) {
         result.reason = "Auxiliary scale reconstruction overflows Float64.";
         return result;
@@ -119,9 +121,9 @@ ExactVerification verifyExactSum(const Tensor& observed, const Tensor& input,
             "Exact reduction observed shape does not match the reduced shape.");
     const detail::RuntimeTensorReader<double> boundsReader(bounds);
     bool exact = true;
-    detail::forEachIndex(bounds.shape(), [&](std::span<const size_t> at, size_t) {
-        exact &= boundsReader(at) < limit;
-    });
+    bounds.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(bounds.shape().elementCount()),
+        [&](size_t, std::span<const size_t> at) { exact &= boundsReader(at) < limit; });
     if (!exact) {
         result.reason = "Exact reduction absolute-sum bound reaches the compute type's limit.";
         return result;
