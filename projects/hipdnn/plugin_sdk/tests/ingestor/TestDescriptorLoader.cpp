@@ -2552,9 +2552,10 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactInASubdirectoryOfTheDescriptor)
 
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_TRUE(sets.front().heuristic.has_value());
-    EXPECT_EQ(
-        sets.front().heuristic->modelArtifactPath,
-        std::filesystem::absolute(dir.path() / "models" / "model.bin").lexically_normal().string());
+    // The parser resolves the artifact canonically, so the expectation is canonical too. On
+    // Windows that yields the on-disk case of each component, which %TEMP% need not match.
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath,
+              std::filesystem::weakly_canonical(dir.path() / "models" / "model.bin").string());
 }
 
 /// RFC 0019 §11.2: a `predict_engine` model gets the same artifact pre-flight as a ranker.
