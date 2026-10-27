@@ -56,7 +56,6 @@
     "maxnum.f64": "llvm.maxnum.f64",
     "mbcnt.hi": "llvm.amdgcn.mbcnt.hi",
     "mbcnt.lo": "llvm.amdgcn.mbcnt.lo",
-    "mfma.f32.16x16x128.fp8.hero": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
     "mfma.f32.16x16x16bf16.1k": "llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
     "mfma.f32.16x16x16f16": "llvm.amdgcn.mfma.f32.16x16x16f16",
     "mfma.f32.16x16x32.bf16": "llvm.amdgcn.mfma.f32.16x16x32.bf16",
@@ -75,9 +74,9 @@
     "mfma.f32.32x32x8f16": "llvm.amdgcn.mfma.f32.32x32x8f16",
     "mfma.f32.4x4x4bf16.1k": "llvm.amdgcn.mfma.f32.4x4x4bf16.1k",
     "mfma.f32.4x4x4f16": "llvm.amdgcn.mfma.f32.4x4x4f16",
+    "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
     "mfma.f64.16x16x4f64": "llvm.amdgcn.mfma.f64.16x16x4f64",
     "mfma.f64.4x4x4f64": "llvm.amdgcn.mfma.f64.4x4x4f64",
-    "mfma.scale.f32.16x16x128.f8f6f4": "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
     "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32": "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
     "minnum.bf16": "llvm.minnum.bf16",
     "minnum.f16": "llvm.minnum.f16",
@@ -3616,89 +3615,6 @@
         "verified_on": "llvm20"
       }
     },
-    "mfma.f32.16x16x128.fp4": {
-      "gfx11-generic": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1151": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx12-generic": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1201": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1250": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx90a": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx942": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx950": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      }
-    },
-    "mfma.f32.16x16x128.fp8.hero": {
-      "gfx11-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1151": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1201": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1250": {
-        "evidence": "invalid target ID",
-        "status": "target_unsupported",
-        "verified_on": "llvm20"
-      },
-      "gfx90a": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx942": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
-        "status": "arch_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx950": {
-        "status": "ok",
-        "verified_on": "llvm20"
-      }
-    },
     "mfma.f32.16x16x16bf16.1k": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
@@ -4016,48 +3932,6 @@
       "gfx950": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x8.xf32",
         "status": "arch_absent",
-        "verified_on": "llvm20"
-      }
-    },
-    "mfma.f32.16x16x96.fp6": {
-      "gfx11-generic": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1151": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx12-generic": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1201": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx1250": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx90a": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx942": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
-        "verified_on": "llvm20"
-      },
-      "gfx950": {
-        "evidence": "not an intrinsic in llvm20",
-        "status": "name_absent",
         "verified_on": "llvm20"
       }
     },
@@ -4537,7 +4411,7 @@
         "verified_on": "llvm20"
       }
     },
-    "mfma.scale.f32.16x16x128.f8f6f4": {
+    "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
         "status": "arch_absent",
