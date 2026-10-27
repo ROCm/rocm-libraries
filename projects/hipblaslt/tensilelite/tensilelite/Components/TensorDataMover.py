@@ -376,7 +376,15 @@ class TensorDataMoverLoad(TensorDataMover):
     def incrementGlobalAddr(self, writer: "KernelWriterAssembly", group0: int | str, sgprIncrement: int | str) -> Module:
         mod = Module()
         mod.addComment("TDM increment global addr")
-        mod.add(SAddU32(sgpr(f"{group0}+2"), sgpr(f"{group0}+2"), sgpr(sgprIncrement), "TDM increment lo"))
+        # Persistent, unstaggered non-transposed tensors can fold their
+        # increment into an assembler constant instead of reserving an SGPR.
+        # Paired-wave TDM increments still live in their own descriptor SGPR.
+        if isinstance(sgprIncrement, str) and sgprIncrement.startswith("GlobalReadIncs"):
+            tc = sgprIncrement[len("GlobalReadIncs"):]
+            increment = writer.globalReadIncsOperand(tc, 0)
+        else:
+            increment = sgpr(sgprIncrement)
+        mod.add(SAddU32(sgpr(f"{group0}+2"), sgpr(f"{group0}+2"), increment, "TDM increment lo"))
         mod.add(SAddCU32(sgpr(f"{group0}+3"), sgpr(f"{group0}+3"), 0, "TDM increment hi (carry)"))
         return mod
 

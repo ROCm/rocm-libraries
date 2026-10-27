@@ -1106,7 +1106,7 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelRejectsPaddedTileCountOverf
 TEST(PersistentLaunchSummaryTest, ClusterDataParallelInvocationsUseWholeClusterRanks)
 {
     for(auto cluster : {TensileLite::dim3(2, 1, 1), TensileLite::dim3(2, 2, 1),
-                        TensileLite::dim3(2, 4, 1)})
+                        TensileLite::dim3(2, 4, 1), TensileLite::dim3(1, 4, 1)})
     for(bool prefetch : {false, true})
     for(int selected : {1, 13, 1000})
     {
@@ -1140,7 +1140,7 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelInvocationsUseWholeClusterR
         device.persistentDynamicGrid = 0;
         device.persistentFixedGrid = selected;
         auto launch = solution.resolvePersistentSettings(problem, device);
-        const size_t blockCount = cluster.y == 1 ? 27 : cluster.y == 2 ? 18 : 9;
+        const size_t blockCount = cluster.x == 1 ? 15 : cluster.y == 1 ? 27 : cluster.y == 2 ? 18 : 9;
         const size_t clusterSize = cluster.x * cluster.y;
         const size_t clusters = prefetch ? blockCount
             : std::min(blockCount, std::max(size_t{1}, size_t(selected) / clusterSize));
