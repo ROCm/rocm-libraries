@@ -35,8 +35,10 @@
 #include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <sstream>
@@ -45,11 +47,9 @@ namespace TensileLite
 {
     namespace Client
     {
-        ReferenceValidator::ReferenceValidator(po::variables_map const&            args,
-                                               std::shared_ptr<DataInitialization> dataInit,
-                                               hipStream_t                         stream)
-            : m_stream(stream)
-            , m_dataInit(dataInit)
+        ReferenceValidator::ReferenceValidator(po::variables_map const&                    args,
+                                               std::vector<std::shared_ptr<DeviceContext>> devices)
+            : m_devices(std::move(devices))
         {
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
             m_printValids        = args["print-valids"].as<bool>();
@@ -94,6 +94,8 @@ namespace TensileLite
         void ReferenceValidator::preProblem(ContractionProblem* const problem)
         {
             m_outputSelections.clear();
+            m_freivaldsPlans.clear();
+            m_freivaldsPlans.resize(m_devices.size());
             if(m_enabled)
             {
                 m_problem = problem;
@@ -101,6 +103,9 @@ namespace TensileLite
                 // Report problem context for timing correlation
                 if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
                 {
+                    if(m_freivalds && gemm->fusedGemmA2A())
+                        throw std::runtime_error(
+                            "Freivalds does not support fused GEMM all-to-all validation.");
                     if(!m_freivalds)
                         m_outputSelections.push_back(referenceIndexRange(
                             gemm->d(), static_cast<size_t>(m_elementsToValidate)));
@@ -142,15 +147,29 @@ namespace TensileLite
 
                 {
                     ScopedTimer timer("cpu_data_init");
-                    m_referenceInputs = m_dataInit->prepareCPUInputs(problem);
+                    m_referenceInputs.clear();
+                    forEachDevice(m_devices, [&](DeviceContext& device) {
+                        m_referenceInputs.push_back(device.dataInit->prepareCPUInputs(problem));
+                    });
                 }
 
                 {
                     ScopedTimer timer(m_freivalds ? "freivalds_prepare" : "cpu_reference_gemm");
-                    if(m_freivalds)
-                        prepareFreivalds();
-                    else
-                        SolveCPU(problem, m_referenceInputs.get(), m_outputSelections);
+                    auto        referenceSelections = m_outputSelections;
+                    if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem);
+                       gemm && gemm->fusedGemmA2A() && m_elementsToValidate != 0)
+                    {
+                        // Receive checks need full source goldens even when D validation is sampled.
+                        referenceSelections.front()
+                            = roc::hostnumerics::IndexRange::all(gemm->d().totalLogicalElements());
+                    }
+                    for(size_t card = 0; card < m_devices.size(); ++card)
+                    {
+                        if(m_freivalds)
+                            prepareFreivalds(card);
+                        else
+                            SolveCPU(problem, m_referenceInputs[card].get(), referenceSelections);
+                    }
                 }
             }
         }
@@ -160,9 +179,10 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
+            m_fusedA2A          = solution != nullptr && solution->problemType.fusedGemmA2A;
 
             // Re-run CPU reference after DataInitialization refreshes MX inputs.
-            if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
+            if(!m_enabled || m_problem == nullptr || m_referenceInputs.empty()
                || solution == nullptr)
                 return;
 
@@ -175,14 +195,18 @@ namespace TensileLite
                 // inputs for this solution (solution-dependent HostPreSwizzle).
                 // Otherwise the preProblem reference is unchanged, so reuse it
                 // instead of paying a full dense reference GEMM per solution.
-                if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
-                    return;
-                ScopedTimer timer(m_freivalds ? "freivalds_prepare_per_solution"
-                                              : "cpu_reference_gemm_per_solution");
-                if(m_freivalds)
-                    prepareFreivalds();
-                else
-                    SolveCPU(m_problem, m_referenceInputs.get(), m_outputSelections);
+                for(size_t card = 0; card < m_devices.size(); ++card)
+                {
+                    if(!m_devices[card]->dataInit->referenceNeedsPerSolutionRecompute(*gemm,
+                                                                                      solution))
+                        continue;
+                    ScopedTimer timer(m_freivalds ? "freivalds_prepare_per_solution"
+                                                  : "cpu_reference_gemm_per_solution");
+                    if(m_freivalds)
+                        prepareFreivalds(card);
+                    else
+                        SolveCPU(m_problem, m_referenceInputs[card].get(), m_outputSelections);
+                }
             }
         }
 
@@ -207,16 +231,16 @@ namespace TensileLite
         void ReferenceValidator::preWarmup() {}
 
         void ReferenceValidator::postWarmup(TimingEvents const& startEvents,
-                                            TimingEvents const& stopEvents,
-                                            hipStream_t const&  stream)
+                                            TimingEvents const& stopEvents)
         {
             m_executedSolution = true;
         }
 
-        void ReferenceValidator::prepareFreivalds()
+        void ReferenceValidator::prepareFreivalds(size_t card)
         {
             using namespace roc::hostnumerics;
-            m_freivaldsPlans.clear();
+            auto& plans = m_freivaldsPlans.at(card);
+            plans.clear();
             auto prepare = [&](const ContractionProblemGemm& problem,
                                const ContractionInputs&      inputs) {
                 if(!problem.stridedBatched())
@@ -238,24 +262,26 @@ namespace TensileLite
                     batches.emplace_back(std::get<FreivaldsPlan>(std::move(prepared)),
                                          adapter.outputLayout(batch));
                 }
-                m_freivaldsPlans.push_back(std::move(batches));
+                plans.push_back(std::move(batches));
             };
             if(const auto* grouped = dynamic_cast<const ContractionProblemGroupedGemm*>(m_problem))
             {
                 const auto& inputs
-                    = dynamic_cast<const ContractionGroupedInputs&>(*m_referenceInputs);
+                    = dynamic_cast<const ContractionGroupedInputs&>(*m_referenceInputs.at(card));
                 for(size_t i = 0; i < grouped->gemms.size(); ++i)
                     prepare(grouped->gemms[i], inputs.grouped.at(i));
             }
             else
                 prepare(dynamic_cast<const ContractionProblemGemm&>(*m_problem),
-                        dynamic_cast<const ContractionInputs&>(*m_referenceInputs));
+                        dynamic_cast<const ContractionInputs&>(*m_referenceInputs.at(card)));
         }
 
-        bool ReferenceValidator::validateFreivalds(const ProblemInputs& inputs)
+        bool ReferenceValidator::validateFreivalds(size_t card, const ProblemInputs& inputs)
         {
             using namespace roc::hostnumerics;
-            int             device = 0;
+            const auto&     plans       = m_freivaldsPlans.at(card);
+            const auto      boundsCheck = m_devices.at(card)->dataInit->getCurBoundsCheck();
+            int             device      = 0;
             hipDeviceProp_t properties{};
             HIP_CHECK_EXC(hipGetDevice(&device));
             HIP_CHECK_EXC(hipGetDeviceProperties(&properties, device));
@@ -267,11 +293,11 @@ namespace TensileLite
                              const ContractionInputs&      reference,
                              const ContractionInputs&      output) {
                 const auto* data = static_cast<const std::byte*>(output.d) + output.batchOffsetD;
-                for(size_t batch = 0; batch < m_freivaldsPlans.at(gemm).size(); ++batch)
+                for(size_t batch = 0; batch < plans.at(gemm).size(); ++batch)
                 {
-                    const auto& [plan, layout] = m_freivaldsPlans[gemm][batch];
+                    const auto& [plan, layout] = plans[gemm][batch];
                     auto observation           = hipblaslt::client::observeFreivalds(
-                        plan.copyRequest(), data, layout, m_stream);
+                        plan.copyRequest(), data, layout, m_devices.at(card)->stream);
                     const auto options = hipblaslt::client::freivaldsCheckOptions(
                         properties.major,
                         plan,
@@ -298,8 +324,7 @@ namespace TensileLite
                 }
                 if(m_printAny)
                     printTensors(problem, reference, output);
-                if(m_dataInit->getCurBoundsCheck() == BoundsCheckMode::NaN
-                   && problem.d().totalLogicalElements() != 0)
+                if(boundsCheck == BoundsCheckMode::NaN && problem.d().totalLogicalElements() != 0)
                 {
                     // Preserve the requested guard check without a numerical reference.
                     // Its existing readback includes D; account for this explicit cost.
@@ -310,7 +335,8 @@ namespace TensileLite
                                             output.maxElements.at(index),
                                             output.gpu,
                                             roc::hostnumerics::IndexRange(0, 0, 1),
-                                            -1);
+                                            -1,
+                                            boundsCheck);
                     readbackBytes
                         += output.maxElements.at(index) * size_t(problem.d().elementBytes());
                     fallback = true;
@@ -321,14 +347,14 @@ namespace TensileLite
                 const auto& problems
                     = dynamic_cast<const ContractionProblemGroupedGemm&>(*m_problem);
                 const auto& references
-                    = dynamic_cast<const ContractionGroupedInputs&>(*m_referenceInputs);
+                    = dynamic_cast<const ContractionGroupedInputs&>(*m_referenceInputs.at(card));
                 for(size_t i = 0; i < grouped->grouped.size(); ++i)
                     check(i, problems.gemms.at(i), references.grouped.at(i), grouped->grouped[i]);
             }
             else
                 check(0,
                       dynamic_cast<const ContractionProblemGemm&>(*m_problem),
-                      dynamic_cast<const ContractionInputs&>(*m_referenceInputs),
+                      dynamic_cast<const ContractionInputs&>(*m_referenceInputs.at(card)),
                       dynamic_cast<const ContractionInputs&>(inputs));
             std::cout << "Freivalds: checked_elements=" << checkedElements
                       << ", readback_bytes=" << readbackBytes
@@ -337,21 +363,22 @@ namespace TensileLite
             return passed;
         }
 
-        bool ReferenceValidator::validateSolution(std::shared_ptr<ProblemInputs> inputs)
+        bool ReferenceValidator::validateSolution(size_t                         card,
+                                                  std::shared_ptr<ProblemInputs> inputs)
         {
             if(!m_enabled)
                 return false;
 
             if(m_freivalds)
-                return validateFreivalds(*inputs);
+                return validateFreivalds(card, *inputs);
             bool rv = false;
 
             if(m_elementsToValidate != 0)
             {
                 if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                 {
-                    auto reference
-                        = dynamic_cast<ContractionGroupedInputs const&>(*m_referenceInputs);
+                    auto reference = dynamic_cast<ContractionGroupedInputs const&>(
+                        *m_referenceInputs.at(card));
                     auto result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
                     rv          = true;
                     for(size_t j = 0; j < problems->gemms.size(); j++)
@@ -359,14 +386,20 @@ namespace TensileLite
                         rv &= validate(problems->gemms[j],
                                        reference.grouped[j],
                                        result.grouped[j],
-                                       m_outputSelections.at(j));
+                                       m_outputSelections.at(j),
+                                       m_devices.at(card)->dataInit->getCurBoundsCheck());
                     }
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    auto reference = dynamic_cast<ContractionInputs const&>(*m_referenceInputs);
-                    auto result    = dynamic_cast<ContractionInputs const&>(*inputs);
-                    rv = validate(*problem, reference, result, m_outputSelections.front());
+                    auto reference
+                        = dynamic_cast<ContractionInputs const&>(*m_referenceInputs.at(card));
+                    auto result = dynamic_cast<ContractionInputs const&>(*inputs);
+                    rv          = validate(*problem,
+                                  reference,
+                                  result,
+                                  m_outputSelections.front(),
+                                  m_devices.at(card)->dataInit->getCurBoundsCheck());
                 }
                 else
                 {
@@ -377,15 +410,104 @@ namespace TensileLite
             return rv;
         }
 
-        void ReferenceValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                                 TimingEvents const&            startEvents,
-                                                 TimingEvents const&            stopEvents)
+        void ReferenceValidator::validateWarmups(std::vector<size_t> const& slots,
+                                                 TimingEvents const&        startEvents,
+                                                 TimingEvents const&        stopEvents)
         {
             if(m_enabled && !m_validatedSolution)
             {
-                validateSolution(inputs);
+                validateSlots(slots);
                 m_validatedSolution = true;
             }
+        }
+
+        void ReferenceValidator::validateEnqueues(std::vector<size_t> const& slots,
+                                                  TimingEvents const&        startEvents,
+                                                  TimingEvents const&        stopEvents)
+        {
+            if(m_enabled && m_devices.size() > 1)
+            {
+                validateSlots(slots);
+                m_validatedSolution = true;
+                m_executedSolution  = true;
+            }
+        }
+
+        void ReferenceValidator::validateSlots(std::vector<size_t> const& slots)
+        {
+            for(size_t d = 0; d < m_devices.size(); d++)
+            {
+                ScopedDevice device(m_devices[d]->deviceId);
+                for(size_t slot : slots)
+                {
+                    auto const& inputs = m_devices[d]->inputArr[slot];
+                    validateSolution(d, inputs);
+                    if(m_fusedA2A && m_elementsToValidate != 0
+                       && !recvMatches(d, dynamic_cast<ContractionInputs const&>(*inputs)))
+                    {
+                        m_errorInSolution = true;
+                        m_error           = true;
+                    }
+                }
+            }
+        }
+
+        bool ReferenceValidator::recvMatches(size_t dst, ContractionInputs const& inputs)
+        {
+            using namespace roc::hostnumerics;
+            auto const&  problem      = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
+            const size_t world        = m_devices.size();
+            const size_t columns      = problem.freeSizeB(0);
+            const size_t shard        = static_cast<size_t>(problem.fusedA2AExtent()) / world;
+            const auto&  descriptor   = problem.d();
+            const auto   rowStride    = descriptor.strides()[problem.freeIndices()[0].d];
+            const auto   columnStride = descriptor.strides()[problem.freeIndices()[1].d];
+
+            auto host = std::make_shared<std::vector<BFloat16>>(world * columns * shard);
+            HIP_CHECK_EXC(hipMemcpy(host->data(),
+                                    inputs.fusedA2APeers[dst][FUSED_A2A_SLOT_RECV_PTR],
+                                    host->size() * sizeof(BFloat16),
+                                    hipMemcpyDeviceToHost));
+            auto options = validationComparisonOptions(rocisa::DataType::BFloat16, -1);
+            options.computeElementwiseStatistics = false;
+            options.computeFrobenius             = false;
+            size_t mismatches                    = 0;
+            for(size_t src = 0; src < world; ++src)
+            {
+                // Each source sends this destination's feature shard for every token.
+                auto const& golden
+                    = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]);
+                const auto expected = Tensor::shareExternalMutableBackingStorage(
+                    ScalarType::BFloat16,
+                    Layout(
+                        Shape{shard, columns},
+                        {static_cast<ptrdiff_t>(rowStride), static_cast<ptrdiff_t>(columnStride)},
+                        static_cast<ptrdiff_t>(dst * shard * rowStride)),
+                    m_referenceInputs[src],
+                    std::span(static_cast<std::byte*>(golden.d), descriptor.totalAllocatedBytes()));
+                const auto observed = Tensor::shareExternalMutableBackingStorage(
+                    ScalarType::BFloat16,
+                    Layout(Shape{shard, columns},
+                           {1, static_cast<ptrdiff_t>(shard)},
+                           static_cast<ptrdiff_t>(src * columns * shard)),
+                    host,
+                    std::as_writable_bytes(std::span(*host)));
+                options.maxReportedMismatches = mismatches < 5 ? 5 - mismatches : 0;
+                const auto report             = compare(observed,
+                                            expected,
+                                            options,
+                                            IndexRange::all(expected.elementCount()),
+                                            std::array<size_t, 2>{1, 0});
+                for(const auto& sample : report.reportedMismatches)
+                    std::cerr << "[fused-a2a] RECV MISMATCH card=" << dst << " src=" << src
+                              << " t=" << sample.coordinates[1] << " f=" << sample.coordinates[0]
+                              << " got=" << sample.observed << " want=" << sample.expected << "\n";
+                mismatches += report.mismatches;
+            }
+            if(mismatches)
+                std::cerr << "[fused-a2a] RECV card " << dst << ": " << mismatches
+                          << " mismatches\n";
+            return mismatches == 0;
         }
 
         bool ReferenceValidator::checkResults(TensorDescriptor const&              tensor,
@@ -394,7 +516,8 @@ namespace TensileLite
                                               size_t                               maxElements,
                                               bool                                 isgpu,
                                               const roc::hostnumerics::IndexRange& outputSelection,
-                                              double                               threshold)
+                                              double                               threshold,
+                                              BoundsCheckMode                      boundsCheck)
         {
             const roc::hostnumerics::ScalarType scalarType
                 = toHostNumericsScalarType(tensor.dataType());
@@ -410,7 +533,6 @@ namespace TensileLite
             size_t       elementsBeforeData = 0;
             size_t       elementsAfterData  = 0;
 
-            const BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
             if(boundsCheck == BoundsCheckMode::NaN)
                 elementsToCopy = maxElements;
 
@@ -623,7 +745,8 @@ namespace TensileLite
         bool ReferenceValidator::validate(ContractionProblemGemm const&        problem,
                                           ContractionInputs const&             reference,
                                           ContractionInputs const&             result,
-                                          const roc::hostnumerics::IndexRange& outputSelection)
+                                          const roc::hostnumerics::IndexRange& outputSelection,
+                                          BoundsCheckMode                      boundsCheck)
         {
             if(problem.tensors().empty())
                 return false;
@@ -788,7 +911,8 @@ namespace TensileLite
                                    result.maxElements[i],
                                    result.gpu,
                                    comparisonSelection,
-                                   threshold);
+                                   threshold,
+                                   boundsCheck);
             }
             return rv;
         }

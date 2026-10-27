@@ -7,6 +7,7 @@
 #include <optional>
 #include <roc/hostnumerics/comparison.hpp>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -41,14 +42,32 @@ namespace hipblaslt::hostnumerics
         roc::hostnumerics::ComparisonTolerance allCloseTolerance;
     };
 
+    struct MatmulAllCloseFailure
+    {
+        // Complex real and imaginary components are counted separately.
+        size_t badCount      = 0;
+        size_t comparedCount = 0;
+        size_t gemm          = 0;
+        size_t batch         = 0;
+        size_t row           = 0;
+        size_t column        = 0;
+        bool   imaginary     = false;
+        double observed      = 0.0;
+        double expected      = 0.0;
+        double error         = 0.0;
+    };
+
+    [[nodiscard]] std::string formatAllCloseFailure(const MatmulAllCloseFailure& failure);
+
     struct MatmulValidationSummary
     {
-        bool   passed                 = true;
-        double relativeFrobeniusError = 0.0;
-        double absoluteTolerance      = 0.0;
-        double relativeTolerance      = 0.0;
-        double maximumUlp             = 0.0;
-        double averageUlp             = 0.0;
+        bool                                 passed                 = true;
+        double                               relativeFrobeniusError = 0.0;
+        double                               absoluteTolerance      = 0.0;
+        double                               relativeTolerance      = 0.0;
+        double                               maximumUlp             = 0.0;
+        double                               averageUlp             = 0.0;
+        std::optional<MatmulAllCloseFailure> allCloseFailure;
     };
 
     [[nodiscard]] MatmulValidationSummary

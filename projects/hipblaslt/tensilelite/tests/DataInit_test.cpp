@@ -1358,10 +1358,7 @@ TEST(DataInitializationFreivalds, RestoresOutputAndChecksRequestedGuards)
                             "print-tensor-amaxd"})
         setOption(args, name, false);
     setOption(args, "print-max", 8);
-    hipStream_t stream = nullptr;
-    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-    const std::shared_ptr<void> streamOwner(
-        stream, [](void* s) { (void)hipStreamDestroy(hipStream_t(s)); });
+    auto device = std::make_shared<DeviceContext>(0, false);
     for(const auto bounds : {BoundsCheckMode::Disable, BoundsCheckMode::NaN})
     {
         SCOPED_TRACE(static_cast<int>(bounds));
@@ -1370,17 +1367,19 @@ TEST(DataInitializationFreivalds, RestoresOutputAndChecksRequestedGuards)
         auto                 dataInit = std::make_shared<DataInitialization>(args, factory);
         auto*                problem  = factory.problems().front().get();
         auto                 reporter = std::make_shared<Reporter>();
-        ReferenceValidator   validator(args, dataInit, stream);
+        device->dataInit              = dataInit;
+        ReferenceValidator validator(args, {device});
         validator.setReporter(reporter);
         dataInit->preProblem(problem);
         validator.preProblem(problem);
-        const TimingEvents events(0, 0);
+        const TimingEvents events({}, 0, 0);
         for(int attempt = 0; attempt < 4; ++attempt)
         {
             SCOPED_TRACE(attempt);
             validator.preSolution(nullptr);
             EXPECT_EQ(validator.numWarmupRuns(), 1);
-            auto               inputs = dataInit->prepareGPUInputs(problem);
+            auto inputs               = dataInit->prepareGPUInputs(problem);
+            device->inputArr          = {inputs};
             auto&              output = dynamic_cast<TensileLite::ContractionInputs&>(*inputs);
             std::vector<float> observed(26);
             ASSERT_EQ(hipMemcpy(observed.data(),
@@ -1406,10 +1405,10 @@ TEST(DataInitializationFreivalds, RestoresOutputAndChecksRequestedGuards)
                                      observed.data(),
                                      observed.size() * sizeof(float),
                                      hipMemcpyHostToDevice,
-                                     stream),
+                                     device->stream),
                       hipSuccess);
-            validator.postWarmup(events, events, stream);
-            validator.validateWarmups(inputs, events, events);
+            validator.postWarmup(events, events);
+            validator.validateWarmups({0}, events, events);
             EXPECT_EQ(validator.numWarmupRuns(), 0);
             validator.postSolution();
         }
