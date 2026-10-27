@@ -28,8 +28,9 @@ GPU architecture detection for TensileLite unit and common tests.
 
 import contextlib
 import os
+import re
 
-from Tensile.GpuArch import cmake_gpu_target, detect_gpu_archs
+from Tensile.GpuArch import _ROCMINFO_RELPATHS, _run, _tool, cmake_gpu_target, detect_gpu_archs
 
 
 @contextlib.contextmanager
@@ -94,3 +95,60 @@ def get_available_archs() -> list[str]:
 def has_arch(target: str) -> bool:
     """Check if a specific GPU architecture is available."""
     return any(target in arch for arch in get_available_archs())
+
+
+# Device tags name a product that shares its gfx architecture with others, which
+# the ``skip-<arch>`` marks cannot tell apart. MI300A is gfx942 like MI300X, but
+# has 228 CUs (six XCDs) where MI300X has 304 (eight XCDs).
+MI300A_CU_COUNT = 228
+
+# ``Name:`` and ``Compute Unit:`` lines of one rocminfo agent block. "Marketing
+# Name:" does not match the first pattern, which wants the line to start at Name.
+_ROCMINFO_AGENT_START_RE = re.compile(r"^\s*Agent \d+\s*$")
+_ROCMINFO_NAME_RE = re.compile(r"^\s+Name:\s+(.+?)\s*$")
+_ROCMINFO_COMPUTE_UNIT_RE = re.compile(r"^\s+Compute Unit:\s+(\d+)\s*$")
+
+
+def device_tags_from_rocminfo(rocminfo_output: str) -> list[str]:
+    """Device tags (e.g. ``mi300a``) for the agents in ``rocminfo`` output.
+
+    A tag is only given to an agent whose block carries both its gfx name and its
+    CU count, so a CPU agent, which also reports a CU count, never earns one.
+    """
+    tags = []
+    agentName = None
+    for line in rocminfo_output.splitlines():
+        if _ROCMINFO_AGENT_START_RE.match(line):
+            agentName = None
+            continue
+        nameMatch = _ROCMINFO_NAME_RE.match(line)
+        if nameMatch:
+            agentName = nameMatch.group(1)
+            continue
+        cuMatch = _ROCMINFO_COMPUTE_UNIT_RE.match(line)
+        if cuMatch and agentName and agentName.split(":")[0] == "gfx942":
+            if int(cuMatch.group(1)) == MI300A_CU_COUNT and "mi300a" not in tags:
+                tags.append("mi300a")
+    return tags
+
+
+def get_available_device_tags() -> list[str]:
+    """Device tags for the GPUs on this machine, or ``[]`` if none can be found.
+
+    ``TENSILE_TEST_DEVICE_TAGS`` (semicolon-separated, e.g. ``mi300a``) replaces
+    detection, the way ``--gpu-targets`` replaces arch detection. Set it empty to
+    declare that no device tag applies.
+
+    Environment variable priority for the ROCm install that supplies rocminfo:
+        1. TENSILE_ROCM_PATH (test-specific override)
+        2. ROCM_PATH (standard ROCm variable)
+        3. /opt/rocm (default)
+    """
+    override = os.environ.get("TENSILE_TEST_DEVICE_TAGS")
+    if override is not None:
+        return [t.strip() for t in override.split(";") if t.strip()]
+
+    with _rocmPathFromTestOverride():
+        rocminfo = _tool(_ROCMINFO_RELPATHS)
+        output = _run([rocminfo]) if rocminfo else None
+    return device_tags_from_rocminfo(output) if output else []
