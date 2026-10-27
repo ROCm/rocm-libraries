@@ -75,6 +75,8 @@ def mint_ids(config: IngestorConfig) -> dict:
     if config.engine.has_heuristic:
         ids["uhd"] = str(uuid.uuid4())
     ids["udd"] = str(uuid.uuid4())
+    for dispatch in config.pack_dispatches[1:]:
+        ids[("udd", dispatch)] = str(uuid.uuid4())
     for pack_index, pack in enumerate(config.packs):
         ids[("pack", pack_index)] = str(uuid.uuid4())
         if config.has_operation_matchers:
@@ -140,13 +142,28 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
     return ued
 
 
-def build_udd(config: IngestorConfig, ids: dict) -> dict:
+def build_udd(config: IngestorConfig, ids: dict, dispatch: str = "") -> dict:
+    """The UDD of the engine's own dispatch handler, or of the one a pack's
+    ``dispatch`` names."""
+    if not dispatch:
+        return {
+            "version": "1.0",
+            "id": ids["udd"],
+            "name": f"{config.engine.local_name} dispatch",
+            "dispatch_symbol": config.dispatch_symbol,
+        }
     return {
         "version": "1.0",
-        "id": ids["udd"],
-        "name": f"{config.engine.local_name} dispatch",
-        "dispatch_symbol": config.dispatch_symbol,
+        "id": ids[("udd", dispatch)],
+        "name": f"{config.engine.local_name} {dispatch} dispatch",
+        "dispatch_symbol": f"{config.native_symbol_namespace}.{dispatch}_dispatch",
     }
+
+
+def udd_filename(config: IngestorConfig, dispatch: str = "") -> str:
+    """The UDD file of ``dispatch`` ("" for the engine's own handler)."""
+    slug = config.engine.slug
+    return f"{slug}.udd.json" if not dispatch else f"{slug}_{dispatch}.udd.json"
 
 
 def build_kernel_match_umd(config: IngestorConfig, ids: dict) -> dict:
@@ -587,7 +604,7 @@ def build_kdp(
         "name": f"{config.engine.namespace}:{config.kdp_stem(pack)}",
         "matchers": matchers,
         "engine": ids["ued"],
-        "dispatch": ids["udd"],
+        "dispatch": ids[("udd", pack.dispatch)] if pack.dispatch else ids["udd"],
         # Declared once per pack, after minting, since every kernel shares one
         # engine, KMD and field partition. A reader resolves a kernel's own
         # declaration first (``hkp_pack.agreement.resolved_contract``), so a
@@ -718,8 +735,7 @@ class IngestorGenerator:
         files = [
             f"{ddir}/{slug}.kmd.json",
             f"{ddir}/{slug}.ued.json",
-            f"{ddir}/{slug}.udd.json",
-        ]
+        ] + [f"{ddir}/{udd_filename(config, d)}" for d in config.pack_dispatches]
         if config.engine.has_heuristic:
             files.append(f"{ddir}/{slug}.uhd.json")
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
@@ -761,7 +777,11 @@ class IngestorGenerator:
 
         write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
         write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-        write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+        for dispatch in config.pack_dispatches:
+            write_json(
+                f"{ddir}/{udd_filename(config, dispatch)}",
+                build_udd(config, ids, dispatch),
+            )
         uhd = build_uhd(config, ids)
         if uhd is not None:
             write_json(f"{ddir}/{slug}.uhd.json", uhd)

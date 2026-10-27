@@ -3,21 +3,27 @@
 # SPDX-License-Identifier: MIT
 """Turn rocKE AOT forward-conv instances into a hipkernel:Gfx950ConvFwdAot config.
 
-An instance is one rocKE ``KernelIdentity`` (``benchmarks/common/kernel_cache.py``):
+An instance is one rocKE ``KernelIdentity`` (``kernels/conv/kernel_identity.py``):
 a compiled configuration with no problem extents, which serves every problem its
 capabilities admit. The input is a JSON list whose entries are either an identity
 dict (``KernelIdentity.to_dict()``) or an object carrying one under ``"identity"``;
 other keys of such an object are ignored here.
 
 Every entry must be a gfx950 forward identity in fp16 or bf16 that the packaged
-launch supports: an implicit-GEMM identity of the AOT sweep, or a forward identity of
-the direct sweep (``benchmarks/common/direct_kernel_sweep.py``), any of its algorithms
-(``PACKAGED_DIRECT_ALGORITHMS``). Anything else is listed with its reason and the tool
-exits non-zero, unless ``--skip-unsupported`` is given. Entries
+launch supports: an implicit-GEMM identity of the AOT sweep
+(``kernels/conv/aot_jobs.py``), or a forward identity of the direct sweep
+(``kernels/conv/direct_aot_jobs.py``) of an algorithm the packaged launch runs
+(``PACKAGED_DIRECT_ALGORITHMS``). The rocKE adapter decides
+(``gfx950_conv_fwd_aot_spec_for_identity`` in
+``builders/common/convolution_forward.py``); it refuses, with a reason, every identity
+feature the packaged launch does not model: group-merged implicit GEMM, the
+grouped-halo and split-C direct kernels and any other field off its default.
+Anything refused is listed with its reason and the tool exits non-zero, unless
+``--skip-unsupported`` is given. Entries
 are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
 key that ties a packaged kernel back to the identity it was built from.
 
-The shipped catalog is rocKE's full forward sweep, one list per dtype
+The shipped catalog is a curated subset of rocKE's forward sweeps, one list per dtype
 (``configs/gfx950_conv_fwd_aot_<dtype>.instances.json``), written by
 ``tools/enumerate_conv_aot_instances.py``; ``--instances`` takes them all as one
 catalog. ``--engine-name`` emits the same instances as another engine over the
@@ -65,7 +71,9 @@ PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
 #: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
-#: Identity fields the packaged forward launch takes from the identity.
+#: Identity fields the packaged forward launch takes from the identity
+#: (``AOT_IMPLICIT_GEMM_CARRIED`` of the rocKE adapter). Every other field must hold
+#: its KernelIdentity default; the adapter refuses the identity otherwise.
 _CARRIED = (
     "tile_m",
     "tile_n",
@@ -86,38 +94,6 @@ _CARRIED = (
     "async_chunk_a",
     "async_chunk_b",
     "grouped",
-)
-#: Identity fields that are not carried; each must hold its KernelIdentity default
-#: (they select emission the packaged launch or matcher does not model).
-_CONSTANT = (
-    "chiplet_swizzle",
-    "lds_layout",
-    "lds_k_pad",
-    "lds_k_outer",
-    "waves_per_eu",
-    "acc_epilogue",
-    "split_k",
-    "two_stage",
-    "ws_replicas",
-    "group_merge",
-    "num_load_waves",
-    "cshuffle_no_alias",
-    "is_3d",
-    "is_pointwise",
-    "filter_h",
-    "filter_w",
-    "filter_d",
-    "stride_h",
-    "stride_w",
-    "dilation_h",
-    "dilation_w",
-    "pad_h",
-    "pad_w",
-    "cpg",
-    "kpg",
-    "block_h",
-    "max_sub_gemms",
-    "knobs",
 )
 #: Spec field order of an implicit-GEMM Gfx950ConvFwdAotSpec; also its descriptor
 #: spec order.
@@ -161,6 +137,8 @@ DIRECT_KNOB_FIELDS = {
     "swizzle_wgm": 0,
     "iglp": -1,
     "waves_per_eu": 0,
+    "group_merge": 1,
+    "split_c": 1,
 }
 #: Spec field order of a std or spatial direct instance.
 DIRECT_SPEC_ORDER = SPEC_ORDER + tuple(DIRECT_FIELDS)
@@ -183,7 +161,23 @@ DIRECT_VARIANT_FIELDS = {
         "iglp",
         "waves_per_eu",
     ),
+    "grouped_halo": (
+        "tile_h",
+        "tile_w",
+        "tile_k_out",
+        "ck",
+        "waves_m",
+        "waves_n",
+        "atom",
+        "swizzle_wgm",
+        "iglp",
+        "waves_per_eu",
+        "group_merge",
+    ),
 }
+#: Spec field order of a group-merged implicit-GEMM instance: the merge degree
+#: after the implicit-GEMM fields, every direct field at its builder_default.
+MERGED_SPEC_ORDER = SPEC_ORDER + ("group_merge",)
 _STRING_FIELDS = (
     "dtype",
     "pipeline",
@@ -238,6 +232,8 @@ ENGINE_KNOBS = (
     "swizzle_wgm",
     "iglp",
     "waves_per_eu",
+    "group_merge",
+    "split_c",
 )
 #: Direct-sweep algorithm -> the instance's direct_variant, for the algorithms the
 #: exact-shape engine's direct launch runs.
@@ -251,6 +247,7 @@ PACKAGED_DIRECT_ALGORITHMS = {
     "direct_depthwise_col": "col",
     "direct_grouped": "grouped",
     "direct_nongrouped": "nongrouped",
+    "direct_grouped_halo": "grouped_halo",
 }
 #: The generator variant (kernel name) of each direct variant. std and spatial keep
 #: the name they had when they were the only direct instances.
@@ -261,6 +258,22 @@ _DIRECT_VARIANT_NAMES = {
     "col": "gfx950_conv_fwd_aot_dwcol_{dtype}_{instance_id}",
     "grouped": "gfx950_conv_fwd_aot_grouped_{dtype}_{instance_id}",
     "nongrouped": "gfx950_conv_fwd_aot_nongrouped_{dtype}_{instance_id}",
+    "grouped_halo": "gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}",
+}
+#: The generator variant of a group-merged implicit-GEMM instance and of a
+#: split-C non-grouped one.
+_MERGED_VARIANT_NAME = "gfx950_conv_fwd_aot_merged_{dtype}_{instance_id}"
+_SPLIT_C_VARIANT_NAME = "gfx950_conv_fwd_aot_nongroupedsplit_{dtype}_{instance_id}"
+#: The dispatch a split-C pack names (``hipkernel.gfx950_conv_fwd_aot.split_c_dispatch``):
+#: its kernels launch twice, the conv pass and the fold, so its handler declares
+#: the launches ``conv`` and ``reduce`` and every other pack keeps the engine's
+#: single-launch handler.
+SPLIT_C_DISPATCH = "split_c"
+#: The launches of a split-C kernel: its conv pass (the instance's own builder)
+#: and rocKE's split reduction over the same spec.
+SPLIT_C_LAUNCHES = {
+    "conv": {},
+    "reduce": {"builder": "build_gfx950_conv_fwd_aot_split_reduce"},
 }
 
 
@@ -274,18 +287,29 @@ def _bind_rocke(rocke_root: Path) -> None:
 def spec_order(spec) -> tuple:
     """The descriptor spec order of ``spec``'s family and direct variant."""
     if not spec.is_direct:
-        return SPEC_ORDER
-    return DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
+        return MERGED_SPEC_ORDER if spec.is_merged else SPEC_ORDER
+    order = DIRECT_SPEC_ORDER + DIRECT_VARIANT_FIELDS[spec.direct_variant]
+    return order + ("split_c",) if spec.is_split_c else order
 
 
 def instance_spec(identity_dict: dict):
-    """``(Gfx950ConvFwdAotSpec, "")`` for a supported identity, else ``(None, reason)``."""
-    from benchmarks.common.kernel_cache import KernelIdentity
+    """``(Gfx950ConvFwdAotSpec, "")`` for a supported identity, else ``(None, reason)``.
 
-    identity = KernelIdentity.from_dict(identity_dict)
-    if identity.direction == "direct_fwd":
-        return _direct_instance_spec(identity)
-    return _implicit_instance_spec(identity)
+    The rocKE adapter's ``gfx950_conv_fwd_aot_spec_for_identity``: the identity must
+    be one rocKE's forward sweeps build (``job_for_identity`` /
+    ``direct_job_for_identity``) and use no feature the packaged launch does not
+    model.
+    """
+    from builders.common.convolution_forward import (
+        gfx950_conv_fwd_aot_spec_for_identity,
+    )
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    try:
+        identity = KernelIdentity.from_dict(identity_dict)
+    except TypeError as exc:
+        return None, f"not a KernelIdentity: {exc}"
+    return gfx950_conv_fwd_aot_spec_for_identity(identity)
 
 
 def instance_specs(identities: list, jobs: int = 1) -> list:
@@ -300,107 +324,6 @@ def instance_specs(identities: list, jobs: int = 1) -> list:
     chunk = max(1, len(identities) // (jobs * 8))
     with multiprocessing.get_context("fork").Pool(jobs) as pool:
         return pool.map(instance_spec, identities, chunksize=chunk)
-
-
-def _carried_values(identity) -> dict:
-    values = {name: getattr(identity, name) for name in _CARRIED}
-    for name in ("unroll_k", "async_dma", "grouped"):
-        values[name] = int(values[name])
-    return values
-
-
-def _checked(spec):
-    from builders.common.convolution_forward import supports_gfx950_conv_fwd_aot
-
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
-    return (spec, "") if ok else (None, reason)
-
-
-def _implicit_instance_spec(identity):
-    from benchmarks.common.kernel_cache import KernelIdentity
-    from builders.common.convolution_forward import Gfx950ConvFwdAotSpec
-
-    defaults = KernelIdentity(
-        arch=identity.arch,
-        direction=identity.direction,
-        algorithm=identity.algorithm,
-        dtype_a=identity.dtype_a,
-        dtype_b=identity.dtype_b,
-        dtype_d=identity.dtype_d,
-        tile_m=0,
-        tile_n=0,
-        tile_k=0,
-        warp_m=0,
-        warp_n=0,
-        warp_tile_m=0,
-        warp_tile_n=0,
-        warp_tile_k=0,
-        pipeline="",
-        epilogue="",
-        wave_size=0,
-        vector_size_a=0,
-        vector_size_b=0,
-        vector_size_c=0,
-        llvm_flavor=identity.llvm_flavor,
-    )
-    if (identity.arch, identity.direction, identity.algorithm) != (
-        "gfx950",
-        "fwd",
-        "implicit_gemm",
-    ):
-        return None, (
-            f"not a gfx950 forward implicit-GEMM identity "
-            f"({identity.arch}, {identity.direction}, {identity.algorithm})"
-        )
-    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
-        return None, "mixed operand dtypes are not packaged"
-    for name in _CONSTANT:
-        if getattr(identity, name) != getattr(defaults, name):
-            return None, (
-                f"{name}={getattr(identity, name)!r} is not packaged "
-                f"(only {getattr(defaults, name)!r})"
-            )
-    spec = Gfx950ConvFwdAotSpec(
-        dtype=identity.dtype_a,
-        instance_id=identity.stable_hash(),
-        **_carried_values(identity),
-    )
-    return _checked(spec)
-
-
-def _direct_instance_spec(identity):
-    """A forward direct identity: the direct sweep must be able to build it, and the
-    packaged AOT launch must run its algorithm."""
-    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from builders.common.convolution_forward import (
-        Gfx950ConvFwdAotSpec,
-        aot_direct_instance_fields,
-    )
-
-    if identity.arch != "gfx950":
-        return None, f"not a gfx950 forward direct identity ({identity.arch})"
-    if identity.algorithm not in PACKAGED_DIRECT_ALGORITHMS:
-        return None, (
-            f"direct algorithm {identity.algorithm!r} has no packaged launch "
-            f"(supported: {sorted(PACKAGED_DIRECT_ALGORITHMS)})"
-        )
-    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
-        return None, "mixed operand dtypes are not packaged"
-    # Every other field must be what the direct grid writes for these caps and
-    # knobs; the sweep's own round trip refuses anything else, after asking the
-    # kernel's validator.
-    try:
-        direct_job_for_identity(identity)
-        fields = aot_direct_instance_fields(identity)
-    except (LookupError, TypeError, ValueError) as exc:
-        return None, str(exc)
-    spec = Gfx950ConvFwdAotSpec(
-        dtype=identity.dtype_a,
-        instance_id=identity.stable_hash(),
-        **_carried_values(identity),
-        **fields,
-    )
-    return _checked(spec)
 
 
 def _variant(name: str, order: tuple, specs: list) -> dict:
@@ -437,11 +360,16 @@ SHARDINGS = ("dtype", "k-loop")
 def shard_name(spec, sharding: str = "dtype") -> str:
     """The pack ``spec`` belongs to under ``sharding`` (see :data:`SHARDINGS`)."""
     if sharding == "dtype":
-        return spec.dtype
+        # A split-C kernel launches through its own dispatch handler.
+        return f"{spec.dtype}_split" if spec.is_split_c else spec.dtype
     if sharding != "k-loop":
         raise ValueError(f"unknown sharding {sharding!r}; expected one of {SHARDINGS}")
     if spec.is_direct:
-        return f"{spec.dtype}_direct"
+        # A split-C kernel launches twice, through its own dispatch handler,
+        # so it cannot share a pack with single-launch kernels.
+        return (
+            f"{spec.dtype}_direct_split" if spec.is_split_c else f"{spec.dtype}_direct"
+        )
     k_loop = "async" if spec.async_dma else ("unroll" if spec.unroll_k else "plain")
     return f"{spec.dtype}_{spec.pipeline}_{k_loop}"
 
@@ -487,13 +415,16 @@ def build_config(
     packs = []
     for shard in sorted(shards):
         variants = []
-        implicit = [s for s in shards[shard] if not s.is_direct]
+        implicit = [s for s in shards[shard] if not s.is_direct and not s.is_merged]
         if implicit:
             variants.append(
                 _variant(
                     "gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, implicit
                 )
             )
+        merged = [s for s in shards[shard] if s.is_merged]
+        if merged:
+            variants.append(_variant(_MERGED_VARIANT_NAME, MERGED_SPEC_ORDER, merged))
         # std and spatial share one variant, as before the other direct variants.
         for group in (
             ("std", "spatial"),
@@ -501,9 +432,12 @@ def build_config(
             ("col",),
             ("grouped",),
             ("nongrouped",),
+            ("grouped_halo",),
         ):
             members = [
-                s for s in shards[shard] if s.is_direct and s.direct_variant in group
+                s
+                for s in shards[shard]
+                if s.is_direct and s.direct_variant in group and not s.is_split_c
             ]
             if members:
                 variants.append(
@@ -513,18 +447,27 @@ def build_config(
                         members,
                     )
                 )
-        packs.append(
-            {
-                "name": shard,
-                "arch": ["gfx950"],
-                "kernel_defaults": {
-                    "kind": "rocke",
-                    "source": "builders/common/convolution_forward.py",
-                    "builder": "build_gfx950_conv_fwd_aot",
-                },
-                "variants": variants,
+        split = [s for s in shards[shard] if s.is_split_c]
+        if split:
+            variants.append(
+                _variant(_SPLIT_C_VARIANT_NAME, spec_order(split[0]), split)
+            )
+        defaults = {
+            "kind": "rocke",
+            "source": "builders/common/convolution_forward.py",
+            "builder": "build_gfx950_conv_fwd_aot",
+        }
+        pack = {"name": shard, "arch": ["gfx950"]}
+        if split:
+            if len(split) != len(shards[shard]):
+                raise ValueError(
+                    f"pack {shard!r} mixes split-C kernels with single-launch ones"
+                )
+            defaults["launches"] = {
+                name: dict(override) for name, override in SPLIT_C_LAUNCHES.items()
             }
-        )
+            pack["dispatch"] = SPLIT_C_DISPATCH
+        packs.append({**pack, "kernel_defaults": defaults, "variants": variants})
     engine = {
         "name": engine_name,
         "sdk_version": "1.0.0",
@@ -539,7 +482,9 @@ def build_config(
         "engine": engine,
         "kmd_fields": kmd,
         "kernel_source_kind": "rocke",
-        "workspace_policy": "none",
+        # Only the split-C instances use a workspace (their fp32 partial sums),
+        # sized per graph by the native handler.
+        "workspace_policy": "derived" if any(s.is_split_c for s in specs) else "none",
         "graph_match": {"shape": "shared_shape", "discriminator": "none"},
         "specialization": {
             "metadata_fields": metadata,
@@ -631,7 +576,9 @@ def kernel_uuid(instance_id: str, engine_name: str = PRODUCT_ENGINE) -> str:
 
 def _kernels(node):
     if isinstance(node, dict):
-        if isinstance(node.get("kernel_source"), dict) and "metadata" in node:
+        # A multi-launch (split-C) kernel carries ``sources`` instead.
+        source = node.get("kernel_source", node.get("sources"))
+        if isinstance(source, dict) and "metadata" in node:
             yield node
             return
         for value in node.values():

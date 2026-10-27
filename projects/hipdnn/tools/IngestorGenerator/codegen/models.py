@@ -380,6 +380,12 @@ class PackSpec:
     #: Native symbol suffix for this pack's operation-matcher, e.g. "add" ->
     #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack.
     discriminator: str = ""
+    #: The dispatch handler this pack's kernels launch through. Empty is the
+    #: engine's own, ``hipkernel.<engine>.dispatch``; a name, e.g. "split_c",
+    #: is ``hipkernel.<engine>.split_c_dispatch``, with its own UDD. A handler
+    #: declares one set of launch names, so packs whose kernels carry another
+    #: launch set (a multi-launch kernel beside single-launch ones) name one.
+    dispatch: str = ""
 
     @property
     def pascal_name(self) -> str:
@@ -413,6 +419,10 @@ class EngineSpec:
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model.
     heuristic: str = "native"
+    #: Another engine whose native symbols this engine's descriptors name, e.g. a
+    #: test-only engine serving a subset of a shipped engine's catalog through the
+    #: shipped engine's registered code. Empty names this engine's own symbols.
+    native_symbols_from: str = ""
     #: Optional IngestorPacks.hpp engine-name constant used by the generated
     #: census test; the descriptor still carries ``name`` above.
     census_name_symbol: str | None = None
@@ -575,6 +585,23 @@ class IngestorConfig:
     @property
     def dispatch_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.dispatch"
+
+    def pack_dispatch_symbol(self, pack: PackSpec) -> str:
+        """The dispatch symbol of ``pack``: the engine's own, or the one its
+        ``dispatch`` names."""
+        if not pack.dispatch:
+            return self.dispatch_symbol
+        return f"{self.native_symbol_namespace}.{pack.dispatch}_dispatch"
+
+    @property
+    def pack_dispatches(self) -> list[str]:
+        """The ``dispatch`` names the packs use, the engine's own ("") first,
+        each once, in pack order: one UDD each."""
+        names = [""]
+        for pack in self.packs:
+            if pack.dispatch not in names:
+                names.append(pack.dispatch)
+        return names
 
     @property
     def kernel_match_symbol(self) -> str:

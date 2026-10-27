@@ -535,6 +535,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
 | `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
+| `configs/gfx950_conv_fwd_aot_seed.yaml` | Sharded multi-pack engine: one pack per dtype and no `discriminator`, so no operation-scoped UMD. It is also an engine that names another engine's native symbols (`native_symbols_from`): the test-only seed of `hipkernel:Gfx950ConvFwdAot`, written by `tools/make_conv_aot_config.py` |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
@@ -658,6 +659,8 @@ packs:
     arch: [gfx942]                # optional; empty means arch-independent
     discriminator: add             # on every pack or none of a >1-pack engine; forbidden
                                     # for a single-pack engine
+    dispatch: split_c              # optional: a dispatch handler of its own (own UDD),
+                                    # for kernels of another launch set
     kernels:
       - name: my_engine.f32_block64
         kernel_source:
@@ -758,10 +761,14 @@ launches that report it (see the packaging reference).
 
 The descriptor only lists the launches: the pack's native dispatch handler declares the
 names it launches and owns their order, and the provider drops a kernel whose launch names
-differ from the handler's when it builds its catalog. One engine has one handler, so every
-kernel of an engine must name the same set of launches: a config mixing single- and
-multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). See the
+differ from the handler's when it builds its catalog. The packs of an engine share its
+handler, so every kernel launched through one handler must name the same set of launches:
+a config mixing single- and multi-launch kernels, or two different sets, on one handler is
+a `ConfigError`. A pack whose kernels launch another set names a handler of its own with
+`dispatch: <name>` (a lowercase identifier): the generator emits one more UDD,
+`<slug>_<name>.udd.json`, with the native symbol `<namespace>.<name>_dispatch`, and the
+pack's KDP references it. `hipkernel:Gfx950ConvFwdAot` does so for its split-C kernels
+(`dispatch: split_c`), which launch a conv pass and a fold. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
 
 ## The five pre-mint config-loader checks
