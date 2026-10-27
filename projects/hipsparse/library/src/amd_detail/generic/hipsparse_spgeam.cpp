@@ -31,8 +31,6 @@
 
 #include <vector>
 
-#ifdef HIPSPARSE_WITH_SPGEAM
-
 // hipSPARSE SpGEAM descriptor. Wraps the staged rocSPARSE SpGEAM descriptor and
 // caches the analysis buffer size so that it can be shared by the nnz and compute
 // steps (matching the single-buffer cuSPARSE SpGEAM interface).
@@ -205,12 +203,13 @@ namespace hipsparse
     }
 
     // Read a host/device scalar (per the handle pointer mode) and test whether it is zero.
-    static bool spgeamScalarIsZero(rocsparse_handle   rocHandle,
-                                   const void*        scalar,
-                                   rocsparse_datatype dataType)
+    static hipsparseStatus_t spgeamScalarIsZero(rocsparse_handle   rocHandle,
+                                                const void*        scalar,
+                                                rocsparse_datatype dataType,
+                                                bool*              is_zero)
     {
-        rocsparse_pointer_mode pmode = rocsparse_pointer_mode_host;
-        rocsparse_get_pointer_mode(rocHandle, &pmode);
+        rocsparse_pointer_mode pmode;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(rocHandle, &pmode));
 
         size_t sz = 0;
         switch(dataType)
@@ -228,62 +227,73 @@ namespace hipsparse
             sz = 2 * sizeof(double);
             break;
         default:
-            return false;
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
         }
 
-        unsigned char buffer[2 * sizeof(double)];
-        const void*   host_scalar = scalar;
+        alignas(double) unsigned char buffer[2 * sizeof(double)];
+        const void*                   host_scalar = scalar;
         if(pmode == rocsparse_pointer_mode_device)
         {
-            if(hipMemcpy(buffer, scalar, sz, hipMemcpyDeviceToHost) != hipSuccess)
-            {
-                return false;
-            }
+            RETURN_IF_HIP_ERROR(hipMemcpy(buffer, scalar, sz, hipMemcpyDeviceToHost));
             host_scalar = buffer;
         }
 
         switch(dataType)
         {
         case rocsparse_datatype_f32_r:
-            return *reinterpret_cast<const float*>(host_scalar) == 0.0f;
+            *is_zero = *reinterpret_cast<const float*>(host_scalar) == 0.0f;
+            break;
         case rocsparse_datatype_f64_r:
-            return *reinterpret_cast<const double*>(host_scalar) == 0.0;
+            *is_zero = *reinterpret_cast<const double*>(host_scalar) == 0.0;
+            break;
         case rocsparse_datatype_f32_c:
         {
             const float* p = reinterpret_cast<const float*>(host_scalar);
-            return p[0] == 0.0f && p[1] == 0.0f;
+            *is_zero       = p[0] == 0.0f && p[1] == 0.0f;
+            break;
         }
         case rocsparse_datatype_f64_c:
         {
             const double* p = reinterpret_cast<const double*>(host_scalar);
-            return p[0] == 0.0 && p[1] == 0.0;
+            *is_zero        = p[0] == 0.0 && p[1] == 0.0;
+            break;
         }
         default:
-            return false;
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
         }
+
+        return HIPSPARSE_STATUS_SUCCESS;
     }
 
-    static spgeam_zero_mode spgeamZeroMode(rocsparse_handle   rocHandle,
-                                           const void*        alpha,
-                                           const void*        beta,
-                                           rocsparse_datatype dataType)
+    static hipsparseStatus_t spgeamZeroMode(rocsparse_handle   rocHandle,
+                                            const void*        alpha,
+                                            const void*        beta,
+                                            rocsparse_datatype dataType,
+                                            spgeam_zero_mode*  mode)
     {
-        const bool alpha_zero = spgeamScalarIsZero(rocHandle, alpha, dataType);
-        const bool beta_zero  = spgeamScalarIsZero(rocHandle, beta, dataType);
+        bool alpha_zero = false;
+        bool beta_zero  = false;
+        RETURN_IF_HIPSPARSE_ERROR(spgeamScalarIsZero(rocHandle, alpha, dataType, &alpha_zero));
+        RETURN_IF_HIPSPARSE_ERROR(spgeamScalarIsZero(rocHandle, beta, dataType, &beta_zero));
 
         if(alpha_zero && beta_zero)
         {
-            return spgeam_zero_mode::empty;
+            *mode = spgeam_zero_mode::empty;
         }
-        if(alpha_zero)
+        else if(alpha_zero)
         {
-            return spgeam_zero_mode::collapse_to_b;
+            *mode = spgeam_zero_mode::collapse_to_b;
         }
-        if(beta_zero)
+        else if(beta_zero)
         {
-            return spgeam_zero_mode::collapse_to_a;
+            *mode = spgeam_zero_mode::collapse_to_a;
         }
-        return spgeam_zero_mode::normal;
+        else
+        {
+            *mode = spgeam_zero_mode::normal;
+        }
+
+        return HIPSPARSE_STATUS_SUCCESS;
     }
 
     // Analysis (nnz) step for the degenerate zero-scalar cases: set C's nonzero count and copy the
@@ -443,7 +453,7 @@ namespace hipsparse
         // C.values = scalar * source.values, with the scalar's memory space taken from the handle
         // pointer mode and described on the dense vector descriptor itself.
         rocsparse_pointer_mode pmode = rocsparse_pointer_mode_host;
-        rocsparse_get_pointer_mode(rocHandle, &pmode);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(rocHandle, &pmode));
 
         rocsparse_dnvec_descr scalar_descr;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_dnvec_descr_create_scalar(
@@ -527,9 +537,10 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 
     // Degenerate zero-scalar cases collapse to a scaled copy of a single operand (matching
     // cuSPARSE) and are handled without rocsparse_spgeam.
-    const rocsparse_datatype          rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
-    const hipsparse::spgeam_zero_mode zeroMode
-        = hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType);
+    const rocsparse_datatype    rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
+    hipsparse::spgeam_zero_mode zeroMode;
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType, &zeroMode));
     if(zeroMode != hipsparse::spgeam_zero_mode::normal)
     {
         return hipsparse::spgeamCollapseNnz((rocsparse_handle)handle,
@@ -581,9 +592,10 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
 
     // Degenerate zero-scalar cases collapse to a scaled copy of a single operand (matching
     // cuSPARSE) and are handled with rocsparse_spmat_scale instead of rocsparse_spgeam.
-    const rocsparse_datatype          rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
-    const hipsparse::spgeam_zero_mode zeroMode
-        = hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType);
+    const rocsparse_datatype    rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
+    hipsparse::spgeam_zero_mode zeroMode;
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType, &zeroMode));
     if(zeroMode != hipsparse::spgeam_zero_mode::normal)
     {
         return hipsparse::spgeamCollapseCompute((rocsparse_handle)handle,
@@ -622,5 +634,3 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
 
     return HIPSPARSE_STATUS_SUCCESS;
 }
-
-#endif /* HIPSPARSE_WITH_SPGEAM */

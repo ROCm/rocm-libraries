@@ -26,10 +26,6 @@ pytestmark = pytest.mark.unit
 
 @contextlib.contextmanager
 def _gp(**over):
-    # Snapshot+restore the ENTIRE dict: ParallelMap2's joblib n_jobs=1 in-process
-    # path calls OverwriteGlobalParameters(globalParameters), which does
-    # clear()+update(self) and empties the live dict. Full restore keeps the
-    # shared session intact regardless of such side effects.
     saved = dict(globalParameters)
     globalParameters.update(over)
     try:
@@ -135,3 +131,32 @@ def test_parallel_map2_joblib_njobs1_in_process():
     with _gp(CpuThreads=1, ShowProgressBar=False):
         rv = P.ParallelMap2(_add, [(1, 2), (10, 20)], multiArg=True)
     assert list(rv) == [3, 30]
+
+
+def test_parallel_map2_n_jobs1_keeps_global_parameters():
+    with _gp(CpuThreads=1, ShowProgressBar=False):
+        expected = dict(globalParameters)
+        P.ParallelMap2(_add, [(1, 2)], multiArg=True)
+        assert dict(globalParameters) == expected
+
+
+@pytest.fixture
+def njobs(monkeypatch):
+    calls = []
+
+    class _RecordingParallel:
+        def __init__(self, n_jobs, **_):
+            calls.append(n_jobs)
+
+        def __call__(self, tasks):
+            return list(tasks)
+
+    monkeypatch.setattr(P, "Parallel", _RecordingParallel)
+    monkeypatch.setattr(P, "CPUThreadCount", lambda enable=True: 8)
+    return calls
+
+
+def test_parallel_map2_caps_workers_at_task_count(njobs):
+    with _gp(ShowProgressBar=False):
+        P.ParallelMap2(_add, zip([1, 3], [2, 4]))
+    assert njobs == [2]
