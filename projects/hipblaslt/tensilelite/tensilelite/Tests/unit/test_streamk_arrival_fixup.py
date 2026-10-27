@@ -46,6 +46,7 @@ from tensilelite.Common import DataDirection, IsaVersion
 from tensilelite.Common.Capabilities import makeIsaInfoMap
 from tensilelite.Components import StreamK as StreamKModule
 from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
+from tensilelite.ExecutionPolicy import usesStreamKArrivalFixup
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
@@ -209,6 +210,26 @@ def test_epilogue_vectors_past_the_mailbox_are_not_saved(strategy):
 def test_uses_arrival_fixup_gating(strategy, hasSAtomic, pap, debug, expected):
     kernel = dict(_KERNEL, DebugStreamK=debug)
     assert strategy().usesArrivalFixup(_writer(hasSAtomic, pap), kernel) is expected
+
+
+@pytest.mark.parametrize("hasSAtomic,pap,debug,expected", [
+    (True, False, 0, True),
+    (False, False, 0, False),
+    (True, True, 0, False),
+    (True, False, 1, False),
+])
+def test_host_capability_matches_codegen(strategy, hasSAtomic, pap, debug, expected):
+    # Codegen and the host capability share one predicate.
+    assert usesStreamKArrivalFixup(debug, hasSAtomic, pap) is expected
+    kernel = dict(_KERNEL, DebugStreamK=debug,
+                  InternalSupportParams={"SupportStreamKArrivalFixup": expected})
+    assert strategy().usesArrivalFixup(_writer(hasSAtomic, pap), kernel) is expected
+
+
+def test_codegen_rejects_a_mismatched_capability(strategy):
+    kernel = dict(_KERNEL, InternalSupportParams={"SupportStreamKArrivalFixup": True})
+    with pytest.raises(AssertionError, match="SupportStreamKArrivalFixup"):
+        strategy().usesArrivalFixup(_writer(hasSAtomic=False), kernel)
 
 
 def test_other_strategies_keep_flags():
