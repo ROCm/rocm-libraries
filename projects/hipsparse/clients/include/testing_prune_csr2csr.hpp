@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -56,8 +57,7 @@ void testing_prune_csr2csr_bad_arg(const Arguments& argus)
 
     hipsparseStatus_t status;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr_A(new descr_struct);
     hipsparseMatDescr_t           descr_A = unique_ptr_descr_A->descr;
@@ -528,8 +528,7 @@ void testing_prune_csr2csr(Arguments argus)
     hipsparseIndexBase_t csr_idx_base_C = argus.baseB;
     std::string          filename       = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr_A(new descr_struct);
     hipsparseMatDescr_t           descr_A = unique_ptr_descr_A->descr;

@@ -6,4 +6,8 @@ find_dependency(origami CONFIG
           "${CMAKE_CURRENT_LIST_DIR}/origami"
     NO_DEFAULT_PATH)
 
+find_dependency(tensilelite CONFIG
+    PATHS "${CMAKE_CURRENT_LIST_DIR}/../tensilelite"
+    NO_DEFAULT_PATH)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")

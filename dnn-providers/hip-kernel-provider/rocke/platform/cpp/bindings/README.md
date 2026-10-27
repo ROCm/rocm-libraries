@@ -45,7 +45,7 @@ name    = rocke_engine.gemm_kernel_name(spec)              # -> str
 | `gemm_is_valid(spec, arch)`     | `rocke_gemm_universal_is_valid_spec` | `(bool, reason)` |
 | `gemm_kernel_name(spec)`        | `rocke_gemm_universal_kernel_name` | `str` |
 
-`arch` defaults to `"gfx950"`.
+`arch` is required: there is no default target, and an empty string raises.
 
 ### Compiler selection
 

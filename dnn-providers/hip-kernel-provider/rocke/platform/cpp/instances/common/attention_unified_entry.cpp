@@ -468,7 +468,7 @@ rocke_kernel_def_t*
 /* ===================================================================== *
  *  build_unified_attention_reduce(spec)
  *
- *  ctx_init -> declare_reduce_params -> emit_reduce_max_loop ->
+ *  ctx_init -> declare_reduce_params -> descriptors -> emit_reduce_max_loop ->
  *  emit_reduce_combine_loop -> emit_reduce_epilogue -> ctx.kernel.
  * ===================================================================== */
 rocke_kernel_def_t*
@@ -496,6 +496,16 @@ rocke_kernel_def_t*
     /* Reduce-specific narrow ABI declaration (output + segm_* + seq_lens + cu_q)
      * plus the grid ids. */
     rocke_attn_unified_declare_reduce_params(&ctx);
+
+    /* ml_desc, seg_out_desc = _segm_descriptors(p, num_segments); q_desc =
+     * _q_descriptor(p). Python builds all three after the grid ids and before
+     * the first loop. The prologue that fills descriptors for the other kinds is
+     * never run for reduce, so without this every loop below reads a NULL
+     * ml_desc. */
+    if(!rocke_unified_attn_segm_descriptors(
+           b, &ctx.sel_p, ctx.num_segments, &ctx.ml_desc, &ctx.out_desc))
+        return NULL;
+    ctx.q_desc = rocke_unified_attn_q_descriptor(b, &ctx.sel_p);
 
     rocke_attn_unified_emit_reduce_max_loop(&ctx);
     rocke_attn_unified_emit_reduce_combine_loop(&ctx);
@@ -566,7 +576,17 @@ rocke_kernel_def_t*
 
 /* ===================================================================== *
  *  _lower_to_llvm convenience: build into an internally-owned builder, lower.
+ *
+ *  Alone among the families, these three signatures carry no target, so they
+ *  lower for the codegen default. That is a fixed target, not a fallback: the
+ *  lowerer itself has no default any more (a NULL arch is now an error, so a
+ *  caller that forgot one cannot lower for one arch and compile for another),
+ *  and the default is named here, once, where the header documents it. To
+ *  choose a target, use the _new entry and call rocke_lower_kernel_to_llvm_ex.
  * ===================================================================== */
+
+/* AGENTS.md: gfx950 is the codegen default and the byte-identity baseline. */
+#define LOWER_TO_LLVM_DEFAULT_ARCH "gfx950"
 
 rocke_status_t
     rocke_unified_attention_2d_scalar_lower_to_llvm(const rocke_unified_attention_problem_t* p,
@@ -597,7 +617,8 @@ rocke_status_t
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, NULL, out_ll, err, err_cap);
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, flavor, LOWER_TO_LLVM_DEFAULT_ARCH, out_ll, err, err_cap);
     rocke_ir_builder_free(&b);
     return st;
 }
@@ -632,7 +653,8 @@ rocke_status_t
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, NULL, out_ll, err, err_cap);
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, flavor, LOWER_TO_LLVM_DEFAULT_ARCH, out_ll, err, err_cap);
     rocke_ir_builder_free(&b);
     return st;
 }
@@ -667,7 +689,8 @@ rocke_status_t
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, NULL, out_ll, err, err_cap);
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, flavor, LOWER_TO_LLVM_DEFAULT_ARCH, out_ll, err, err_cap);
     rocke_ir_builder_free(&b);
     return st;
 }

@@ -131,7 +131,7 @@ class TestClassLocationParity(unittest.TestCase):
         self.assertEqual(OutputOptions.__module__, _base.__name__)
 
     def test_top_level_reexport_for_isainfo(self):
-        # ``from rocisa import IsaInfo`` must keep working (Tensile API).
+        # ``from rocisa import IsaInfo`` must keep working (TensileLite API).
         from rocisa_stinkytofu_adaptor import IsaInfo as TopLevelIsaInfo
         self.assertIs(TopLevelIsaInfo, _base.IsaInfo)
 
@@ -342,7 +342,7 @@ class TestBackwardCompatPrivateFields(_StateSaveRestore):
 
 
 class TestParallelMap2RoundTrip(_StateSaveRestore):
-    """Tensile spawns workers via ``ParallelMap2`` and re-hydrates state with
+    """TensileLite spawns workers via ``ParallelMap2`` and re-hydrates state with
     ``rocIsa.getInstance().setData(pickled_data)`` /
     ``.setOutputOptions(pickled_opts)``. Verify both round-trip cleanly."""
 

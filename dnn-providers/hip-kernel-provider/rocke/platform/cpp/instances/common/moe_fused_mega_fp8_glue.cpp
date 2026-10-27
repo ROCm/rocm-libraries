@@ -959,7 +959,7 @@ rocke_kernel_def_t*
 
     /* ---- resolve + gate BOTH fp8 atoms ---- (Python 1672-1678) *
      * The hero atom reuses the mfma.scale.f32.16x16x128.f8f6f4 intrinsic with
-     * the in-instruction E8M0 scales pinned to the neutral value (verified
+     * both E8M0 scales at literal 0 (unscaled instruction; verified
      * numerically standalone). gate_up_k and down_k select independently, so
      * both atoms are checked. */
     ctx.atom = rocke_fused_mega_fp8_spec_gate_up_atom(spec);

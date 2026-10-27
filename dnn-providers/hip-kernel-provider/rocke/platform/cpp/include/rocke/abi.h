@@ -79,8 +79,11 @@ extern "C" {
 
 /* Binary ABI of the shared library: struct layout, enum values, signatures.
  * 2: rocke_memory_caps_t gained mid-struct fields; rocke_opcode gained
- *    mid-enum gfx1250 cluster/prefetch opcodes. */
-#define ROCKE_ABI_VERSION 2
+ *    mid-enum gfx1250 cluster/prefetch opcodes.
+ * 3: rocke_mma_op_t gained emulation_recipe and emulation_physical_op_id at its
+ *    end, which changes sizeof and with it the stride of every ops[] array a
+ *    catalog hands out. */
+#define ROCKE_ABI_VERSION 3
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them. */

@@ -113,17 +113,19 @@ Frontend API control flow
         c. Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
         d. Backend: hipdnnBackendFinalize(heuristic)
            -> EngineHeuristicDescriptor::finalize()
-              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [per plugin]
-              -> Plugin: hipdnnEnginePluginGetEngineDetails()        [per applicable engine]
+              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+              -> Plugin: hipdnnEnginePluginGetPrediction()          [per applicable engine,
+                                                                     prediction-ranked policies only]
+              [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
      4. graph.check_support()         [validates descriptors exist]
      5. graph.build_plans()
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
-              -> Plugin: hipdnnEnginePluginGetEngineDetails()          [if not cached]
               -> Plugin: hipdnnEnginePluginCreateExecutionContext()
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+              -> Record the device of the graph handle's stream
 
 
 ``graph.get_workspace_size()``
@@ -148,11 +150,21 @@ Frontend API control flow
      4. Backend: hipdnnBackendSetAttribute(variantPack, WORKSPACE, ...)
      5. Backend: hipdnnBackendFinalize(variantPackDesc)
      6. Backend: hipdnnBackendExecute(handle, execPlanDesc, variantPackDesc)
+        -> Check that the handle's stream is on the plan's device [else BAD_PARAM]
         -> EnginePluginResourceManager::executeOpGraph()
            -> Extract engine ID from execution plan chain
            -> Look up plugin handle for engine ID
            -> Plugin: hipdnnEnginePluginExecuteOpGraph(handle, ctx, workspace, buffers, count)
               [Actual GPU kernel execution happens here]
+
+An execution plan is bound to the device of the handle it was finalized on, or of the
+handle passed to ``hipdnnBackendCreateAndDeserializeExecutionPlan_ext()``. A concrete
+stream maps to the device that owns it; the null, ``hipStreamLegacy`` and
+``hipStreamPerThread`` streams map to the calling thread's current device. The plan can
+run on any handle whose stream is on that device, for example one handle per thread, at
+the cost of one HIP device query per execute. A handle on another device fails with
+``HIPDNN_STATUS_BAD_PARAM`` before any plugin is called. If the device could not be
+determined when the plan was created, the check is skipped.
 
 
 Handle destruction (implicit via RAII)
@@ -181,9 +193,18 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
          -> Backend: hipdnnBackendFinalize(engine)
-            -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
+            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
       -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
          -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
+            -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
+
+Engine finalization checks applicability, not plugin metadata. The first engine-name,
+knob-info, or behavior-note read fetches and validates ``EngineDetails``; count-only
+queries also trigger this load. Retrieval or validation errors are therefore returned
+by ``hipdnnBackendGetAttribute()``, even after successful finalization. Callers that
+need eager metadata validation can issue a metadata query immediately after finalizing.
+Successful metadata loads are cached; a failed load can be retried without exposing
+partial metadata.
 
 ``get_ranked_engine_ids()``
 ---------------------------
@@ -195,10 +216,36 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendCreateDescriptor(HEURISTIC)
          -> Backend: hipdnnBackendSetAttribute(heuristic, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
+         -> Backend: hipdnnBackendSetAttribute(heuristic, POLICY_ORDER_EXT, policyIds)
+            [only when HeuristicMode::A or ::B is requested]
+         -> Backend: hipdnnBackendSetAttribute(heuristic, RANKING_METRIC_EXT, metric)
+            [only when graph.set_ranking_metric() was called]
          -> Backend: hipdnnBackendFinalize(heuristic)
-            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()
-            -> Plugin: hipdnnEnginePluginGetEngineDetails() [per engine]
+            -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+            -> Prediction policy: query engine/configuration predictions in the metric
+               [only when ModeA or ModeB is reached in the policy order]
       -> detail::getEngineConfigs(configs, ids, heuristicDesc)
+
+``HeuristicMode::A`` and ``HeuristicMode::B`` are policy requests, not backend modes.
+The frontend hashes them into the descriptor's ordered policy list
+(``HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT``) as ``SelectionHeuristic::ModeA`` and
+``SelectionHeuristic::ModeB``, bracketed by ``SelectionHeuristic::Config`` first and
+``SelectionHeuristic::StaticOrdering`` last; ``HIPDNN_ATTR_ENGINEHEUR_MODE`` still
+carries a single ``HIPDNN_HEUR_MODE_FALLBACK``. Mode A requests graph-level predictions
+without materializing candidate catalogs. Mode B first requests an exact, calibrated
+configuration prediction for each engine and uses its graph-level prediction if that is
+unavailable or invalid. Both rank usable predictions best first in the ranking
+metric's direction -- descending for ``tflops``, ascending for ``time`` -- and retain
+unscored applicable engines afterward. The metric comes from ``HIPDNN_HEUR_RANKING_METRIC``,
+else ``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT``, else ``tflops``; an engine with no
+model for it is unscored rather than ranked by another metric. If all predictions are
+unusable, the policy declines and the next policy in the order runs.
+
+Heuristic results carry the engine ID, the ranking metric and, for scored
+configurations, the owned knob tuple. Plan construction preserves those settings to
+execute the scored configuration. Graph-level selections use the chosen engine's
+normal selector, ranking its kernels by the same metric, with
+``global.benchmarking=0``. The engine cache behaves as it does for any other selection.
 
 
 ``create_execution_plan_ext()``
@@ -207,23 +254,38 @@ Handle destruction (implicit via RAII)
 .. code::
 
    Frontend: graph.create_execution_plan_ext(engineId, knobSettings)
-     1. get_knob_lookup_for_engine(engineId) [validate knob settings]
-     2. initializeEngineConfig(engineId)
-        -> detail::createEngineDescriptorForGraph(engineId)
+     -> compilePlanFromSpec(engineId, knobSettings, plan)
+        1. detail::createEngineDescriptorForGraph(engineDesc, graphDesc, engineId)
            -> Backend: hipdnnBackendCreateDescriptor(ENGINE)
            -> Backend: hipdnnBackendSetAttribute(engine, GRAPH, graphDesc)
            -> Backend: hipdnnBackendSetAttribute(engine, ENGINE_ID, engineId)
            -> Backend: hipdnnBackendFinalize(engine)
-              -> Plugin: hipdnnEnginePluginGetEngineDetails()
-     3. applyKnobSettingsToEngineConfig(settings)
-        -> Backend: hipdnnBackendSetAttribute(engineConfig, KNOB_CHOICE, ...)
-     4. Backend: hipdnnBackendFinalize(engineConfig)
-     5. Create executionPlanDesc
-        -> Backend: hipdnnBackendCreateDescriptor(EXECUTION_PLAN)
+              -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()  [one pass across plugins]
+        2. Backend: hipdnnBackendCreateDescriptor(ENGINECFG)
+           -> Backend: hipdnnBackendSetAttribute(engineConfig, ENGINE, engineDesc)
+           -> Backend: hipdnnBackendSetAttribute(engineConfig, RANKING_METRIC_EXT, metric)
+              [only when graph.set_ranking_metric() was called; the engine picks
+               its kernel by this metric]
+        3. knobLookupFromEngineDescriptor(engineDesc, knobs)  [reads this engine's knobs]
+           -> detail::unpackKnobsFromDescriptors(engineDesc, knobs)
+              -> Backend: hipdnnBackendGetAttribute(engine, KNOB_INFO, ...)
+                 -> Plugin: hipdnnEnginePluginGetEngineDetails()  [loaded here, this engine only]
+        4. validateAndFilterKnobSettings(knobSettings, knobs, validatedSettings)
+        5. detail::applyKnobSettingsViaDescriptors(engineConfig, validatedSettings)
+           -> Backend: hipdnnBackendSetAttribute(engineConfig, KNOB_CHOICES, ...)
+        6. Backend: hipdnnBackendFinalize(engineConfig)
+           -> EngineConfigDescriptor::finalize()
+              -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+        7. Backend: hipdnnBackendCreateDescriptor(EXECUTION_PLAN)  [unfinalized]
+
+   Frontend: graph.build_plans()
+     -> finalizePlanDescriptor(plan)
         -> Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, ...)
         -> Backend: hipdnnBackendFinalize(execPlan)
-           -> Plugin: hipdnnEnginePluginCreateExecutionContext()
-           -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+           -> ExecutionPlanDescriptor::finalize()
+              -> Plugin: hipdnnEnginePluginCreateExecutionContext()
+              -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
+        -> Backend: hipdnnBackendGetAttribute(execPlan, WORKSPACE_SIZE, ...)
 
 
 Plugin lifecycle
@@ -231,10 +293,11 @@ Plugin lifecycle
 
 1. **Discovery**: ``Plugin.so`` loaded, metadata queried (name, version, type)
 2. **Instance creation**: ``PluginCreate`` and ``GetAllEngineIds`` during handle creation
-3. **Engine selection**: ``GetApplicableEngineIds`` and ``GetEngineDetails`` during graph build
-4. **Context creation**: ``CreateExecutionContext`` and ``GetWorkspaceSize`` during plan finalization
-5. **Execution**: ``ExecuteOpGraph``
-6. **Cleanup**: ``DestroyExecutionContext``, ``DestroyEngineDetails``, and ``PluginDestroy``
+3. **Engine selection**: ``GetApplicableEngineIds`` during graph build, plus ``GetPrediction`` for prediction-ranked policies
+4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, or behavior-note query for an engine
+5. **Context creation**: ``CreateExecutionContext`` and ``GetWorkspaceSize`` during plan finalization
+6. **Execution**: ``ExecuteOpGraph``
+7. **Cleanup**: ``DestroyExecutionContext``, ``DestroyEngineDetails``, and ``PluginDestroy``
 
 By default, hipDNN keeps plugins loaded after all hipDNN handles are closed.
 This reduces the overhead of reloading plugins when subsequent hipDNN handles are created.
@@ -269,9 +332,10 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 --------------------------------------------------------
 
 - Represents a backend engine.
-- Contains engine ID, and a set of behavioral notes and configurable settings.
+- Binds the engine ID to an operation graph; finalization validates applicability.
 - Retrieved from engine config descriptor.
 - Exposes the engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``).
+- Loads name, knob-info, and behavior-note metadata on the first corresponding attribute query.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------

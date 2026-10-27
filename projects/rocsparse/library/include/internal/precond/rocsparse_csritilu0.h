@@ -201,7 +201,6 @@ rocsparse_status rocsparse_csritilu0_preprocess(rocsparse_handle     handle,
 *  \p rocsparse_csritilu0 has a number of options that can be useful for examining the convergence history, easily printing debug
 *  information, and using the COO internal format.
 *  <table>
-*  <caption id="csritilu0 options">Options</caption>
 *  <tr><th>Option                                              <th>Notes
 *  <tr><td>rocsparse_itilu0_option_verbose</td>                <td>Print to stdout convergence data as the routine runs. Useful for debugging.</td>
 *  <tr><td>rocsparse_itilu0_option_stopping_criteria</td>      <td>Enable stopping criteria.</td>

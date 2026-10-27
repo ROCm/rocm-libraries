@@ -20,8 +20,10 @@ Functions:
         Load all YAML libraries in a folder into a collection.
     merge_solutions(input_dir) -> LibraryCollection
         Merge optimized solutions from multiple build directories into single libraries.
-    extract_solutions(df, match_table_path) -> LibraryCollection
+    extract_solutions(df, match_table_path, hipblaslt_path=None, fill_perf=False) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
+        Same-name libraries with different default solutions are merged with
+        TensileMergeLibrary when hipblaslt_path is given.
     merge(hipblaslt_path, orig_dir, inc_dir, output_dir) -> None
         Merge incremental library into original using TensileMergeLibrary.
     create(hipblaslt_path, input_dir, output_dir) -> None
@@ -43,6 +45,7 @@ import logging
 import copy
 import pandas as pd
 import glob
+import tempfile
 
 from pathlib import Path
 from typing import List, Tuple, Sequence
@@ -215,7 +218,85 @@ def merge_solutions(
     return merged
 
 
-def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> LibraryCollection:
+def _merge_extracted_libraries(
+    hipblaslt_path: str | Path,
+    original: Library,
+    incremental: Library,
+) -> Library:
+    """Merge two extracted same-name libraries with TensileMergeLibrary.
+
+    Args:
+        hipblaslt_path (str | Path): Path to the hipBLASLt checkout.
+        original (Library): Accumulated extracted library.
+        incremental (Library): Next extracted library with the same filename.
+
+    Returns:
+        Library: Merged library loaded from TensileMergeLibrary output.
+
+    Raises:
+        FileNotFoundError: If TensileMergeLibrary does not produce the expected file.
+    """
+    with tempfile.TemporaryDirectory(prefix="geko-extract-merge-") as tmp:
+        tmp_path = Path(tmp)
+        original_dir = tmp_path / "original"
+        incremental_dir = tmp_path / "incremental"
+        output_dir = tmp_path / "output"
+        original.dump(original_dir)
+        incremental.dump(incremental_dir)
+        merge(
+            hipblaslt_path,
+            original_dir,
+            incremental_dir,
+            output_dir,
+            eff=False,
+            force=True,
+        )
+
+        merged_path = output_dir / original.name
+        if not merged_path.is_file():
+            raise FileNotFoundError(
+                f"TensileMergeLibrary did not produce expected library '{merged_path}'"
+            )
+        return load_library(merged_path)
+
+
+def _reindex_and_append(base: Library, incoming: Library) -> None:
+    """Append an extracted library, continuing solution indexes.
+
+    ``incoming`` has solution indexes that restart at 0. Each solution is
+    copied onto ``base`` at the next free index, and the exact-logic rows
+    that selected it are copied with that new index.
+
+    Args:
+        base (Library): Library that already holds extracted solutions.
+        incoming (Library): Library to append. Must use the same filename
+            as ``base``.
+
+    Returns:
+        None: ``base.solutions`` and ``base.sizes`` are extended in place.
+
+    Raises:
+        None.
+    """
+    for solution in incoming.solutions:
+        solution = copy.deepcopy(solution)
+        old_index = solution["SolutionIndex"]
+        solution["SolutionIndex"] = len(base.solutions)
+        base.solutions.append(solution)
+        for size in incoming.sizes:
+            if size[1][0] != old_index:
+                continue
+            size = copy.deepcopy(size)
+            size[1][0] = solution["SolutionIndex"]
+            base.sizes.append(size)
+
+
+def extract_solutions(
+    df: pd.DataFrame,
+    match_table_path: str | Path,
+    hipblaslt_path: str | Path | None = None,
+    fill_perf: bool = False,
+) -> LibraryCollection:
     """Extract solutions by solution index from a DataFrame.
 
     Processes all GEMMs and their corresponding 'winning' solutions,
@@ -224,12 +305,20 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     Args:
         df (DataFrame): DataFrame containing GEMM and winning solution index pairs.
         match_table_path (str | Path): Path to MatchTable.yaml to extract the solutions.
+        hipblaslt_path (str | Path | None, optional): Path to the hipBLASLt
+            checkout. When provided, libraries with the same filename but
+            different default solutions are merged with TensileMergeLibrary.
+            Defaults to None.
+        fill_perf (bool, optional): Whether to fill performance data for the extracted solutions.
+            Defaults to False.
 
     Returns:
-        LibraryCollection: LibraryCollection with all exctractes solutions.
+        LibraryCollection: LibraryCollection with all extracted solutions.
 
     Raises:
         ValueError: If no valid YAML library logic files found.
+        NotImplementedError: If default solutions differ and hipblaslt_path
+            was not provided.
 
     Note:
         All new libraries are exported as 'Equality'.
@@ -254,31 +343,26 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     for lib, lib_path in zip(parallel_for(load_library, lib_paths), lib_paths):
         mapping = {}
         for _, row in df.iterrows():
-            if match_table[row["solutionIdx"]][0] != lib_path:
+            solution_idx = int(row["solutionIdx"])
+            if match_table[solution_idx][0] != lib_path:
                 continue
-            kidx = match_table[row["solutionIdx"]][1]
+            kidx = match_table[solution_idx][1]
             if kidx not in mapping:
                 mapping[kidx] = []
-            mapping[kidx].append([row["m"], row["n"], row["batch_count"], row["k"]])
+            mapping[kidx].append(
+                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"]), row.get("hipblaslt-Gflops", 0.0)]
+            )
 
-        if lib.name not in libs:  # First library for the given GEMM type
-            libs[lib.name] = lib
-            lib.order = [2, 3, 0, 1]
-            lib.metric = "DeviceEfficiency"
-            lib.type = "Equality"
-            new_sols = []
-            new_sizes = []
-        else:
-            if libs[lib.name].default_solution != lib.default_solution:
-                raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
-                                          f"Use TensileMergeLibrary instead.")
-            new_sols = libs[lib.name].solutions
-            new_sizes = libs[lib.name].sizes
+        lib.order = [2, 3, 0, 1]
+        lib.metric = "DeviceEfficiency"
+        lib.type = "Equality"
+        new_sols = []
+        new_sizes = []
 
         for kidx, sizes in mapping.items():
             sol = copy.deepcopy(lib.solutions[kidx])
             sol["SolutionIndex"] = len(new_sols)
-            sizes = [[size, [sol["SolutionIndex"], 0.0]] for size in sizes]
+            sizes = [[size[:4], [sol["SolutionIndex"], size[4] if fill_perf else 0.0]] for size in sizes]
             new_sols.append(sol)
             new_sizes.extend(sizes)
         logger.debug(
@@ -288,6 +372,24 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
 
         lib.solutions = new_sols
         lib.sizes = new_sizes
+
+        if lib.name not in libs:  # First library for the given GEMM type
+            libs[lib.name] = lib
+        elif libs[lib.name].default_solution != lib.default_solution:
+            if hipblaslt_path is None:
+                raise NotImplementedError(
+                    f"Default solution mismatch for library '{lib.name}'. "
+                    f"Pass hipblaslt_path to use TensileMergeLibrary."
+                )
+            logger.info(
+                f"Default solution mismatch for library '{lib.name}'; "
+                "falling back to TensileMergeLibrary"
+            )
+            libs[lib.name] = _merge_extracted_libraries(
+                hipblaslt_path, libs[lib.name], lib
+            )
+        else:
+            _reindex_and_append(libs[lib.name], lib)
 
     return LibraryCollection(list(libs.values()))
 

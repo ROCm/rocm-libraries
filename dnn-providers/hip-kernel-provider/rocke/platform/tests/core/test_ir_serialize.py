@@ -130,8 +130,8 @@ class TestRoundTrip(unittest.TestCase):
         for name, k in self.corpus.items():
             with self.subTest(kernel=name):
                 k2 = parse(serialize(k))
-                ll1 = lower_kernel_to_llvm(k)
-                ll2 = lower_kernel_to_llvm(k2)
+                ll1 = lower_kernel_to_llvm(k, arch="gfx950")
+                ll2 = lower_kernel_to_llvm(k2, arch="gfx950")
                 self.assertEqual(
                     _sha(ll1), _sha(ll2), f"{name}: lowered LLVM sha differs"
                 )
@@ -203,7 +203,10 @@ class TestAttrEncoding(unittest.TestCase):
         s1 = serialize(k)
         k2 = parse(s1)
         self.assertEqual(s1, serialize(k2))
-        self.assertEqual(_sha(lower_kernel_to_llvm(k)), _sha(lower_kernel_to_llvm(k2)))
+        self.assertEqual(
+            _sha(lower_kernel_to_llvm(k, arch="gfx950")),
+            _sha(lower_kernel_to_llvm(k2, arch="gfx950")),
+        )
         # the original attr text survives the round-trip
         op = next(o for o in k2.body.ops if o.name == "tile.inline_asm")
         self.assertEqual(op.attrs["template"], 'v_mov_b32 $0, $1\n  ; note "x"')

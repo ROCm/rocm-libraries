@@ -90,6 +90,50 @@ class TestAttentionTuningContract(unittest.TestCase):
             refused_knobs=[{"use_k_hbm_direct": True}],
         )
 
+    def test_rdna_wmma_candidates(self):
+        # Prefill: plain, causal with tails, a wave-pair D256 object, MLA
+        # widths and a runtime-head-width bucket. Decode: GQA decode,
+        # speculative rows on the D256 bucket, and FP8 K/V with softcap.
+        def rdna(arch, **kw):
+            shape = dict(arch=arch, dtype="fp16", nhead_q=16, nhead_k=4, num_cus=40)
+            shape.update(mask_type=0)
+            shape.update(kw)
+            return _req(**shape)
+
+        for arch in ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201"):
+            tag = arch.replace("-", "_")
+            _check(
+                self,
+                [f"attention_{tag}_wmma_prefill"],
+                [
+                    rdna(arch),
+                    rdna(arch, seqlen_q=100, seqlen_k=100, mask_type=1),
+                    rdna(arch, hdim_q=256, hdim_v=256, batch=1, nhead_q=4, nhead_k=4),
+                    rdna(arch, hdim_q=192, hdim_v=128),
+                    rdna(arch, seqlen_q=17, seqlen_k=17, runtime_head_dims=True),
+                ],
+                other_requests=[
+                    rdna(arch, seqlen_q=37, seqlen_k=53, mask_type=1),
+                    rdna(arch, hdim_q=96, hdim_v=96, seqlen_q=2048, seqlen_k=2048),
+                ],
+                refused_knobs=[{"not_a_knob": True}, {"num_waves": 2}],
+            )
+            _check(
+                self,
+                [f"attention_{tag}_wmma_decode"],
+                [
+                    rdna(arch, seqlen_q=1, seqlen_k=4096, mask_type=2),
+                    rdna(arch, seqlen_q=4, seqlen_k=777, hdim_q=256, hdim_v=256),
+                    rdna(
+                        arch, seqlen_q=1, seqlen_k=4096, use_fp8=True, use_softcap=True
+                    ),
+                ],
+                other_requests=[
+                    rdna(arch, seqlen_q=2, seqlen_k=100, batch=8, mask_type=2),
+                ],
+                refused_knobs=[{"not_a_knob": True}, {"block_m": 64}],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

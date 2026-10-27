@@ -367,7 +367,8 @@ void check_validator()
     CHECK(rejects(s,
                   "gfx9999",
                   "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1151', "
-                  "'gfx1201', 'gfx1250', 'gfx90a', 'gfx942', 'gfx950']. Add a row to "
+                  "'gfx12-generic', 'gfx1201', 'gfx1250', 'gfx90a', 'gfx942', 'gfx950']. "
+                  "Add a row to "
                   "arch_specs.json.\""));
 
     /* Depthwise ConvProblem(N=2, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1,

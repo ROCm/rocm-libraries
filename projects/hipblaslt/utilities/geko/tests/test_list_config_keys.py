@@ -60,7 +60,33 @@ def test_list_rows_carry_the_mx_format(tmp_path: Path, keys: dict, scale: int, f
 def test_list_yaml_forwards_epilogue_and_library_keys(tmp_path: Path) -> None:
     path = _write(tmp_path, {**_TN, "DataType": "F8", "MX_BLOCK": 32, "EPILOGUES": False})
     _, overrides = _rows_from_gemm_config_yaml(path, "gfx1250-strict")
-    assert overrides == {"EPILOGUES": False, "LIBRARY_TYPE": "OOB"}
+    assert set(overrides) == set(LIST_FORWARDED_KEYS)
+    assert overrides["EPILOGUES"] is False
+    assert overrides["LIBRARY_TYPE"] == "OOB"
+
+
+def test_list_yaml_forwards_tuning_shape_keys(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        {
+            **_TN,
+            "DataType": "F8",
+            "MX_BLOCK": 32,
+            "MACROTILE_OPT": True,
+            "MT_DU": [128, 128, 32],
+            "ONE_SIZE_PER_CONFIG": False,
+            "MI_FILTER": 0,
+            "CLUSTER": 1,
+            "DUCTILE_VALIDATION_PROFILE": 2,
+        },
+    )
+    _, overrides = _rows_from_gemm_config_yaml(path, "gfx1250-strict")
+    assert overrides["MACROTILE_OPT"] is True
+    assert overrides["MT_DU"] == [128, 128, 32]
+    assert overrides["ONE_SIZE_PER_CONFIG"] is False
+    assert overrides["MI_FILTER"] == 0
+    assert overrides["CLUSTER"] == 1
+    assert overrides["DUCTILE_VALIDATION_PROFILE"] == 2
 
 
 def test_list_yaml_mx_keys_leave_other_log_types_alone(tmp_path: Path) -> None:

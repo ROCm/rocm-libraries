@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.verify_stinky_comment_vs_elf_text``:
+"""Characterization tests for ``tensilelite.verify_stinky_comment_vs_elf_text``:
 the STINKY_TOTAL_INST_BYTES verification logic with synthetic fixtures."""
 
 import importlib
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-verify_stinky = importlib.import_module("Tensile.verify_stinky_comment_vs_elf_text")
+verify_stinky = importlib.import_module("tensilelite.verify_stinky_comment_vs_elf_text")
 
 pytestmark = pytest.mark.unit
 

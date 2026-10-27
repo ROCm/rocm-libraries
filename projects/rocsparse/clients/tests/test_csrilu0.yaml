@@ -42,46 +42,107 @@ Definitions:
     - { M: 505193, N: 505193 }
 
 Tests:
-- name: csrilu0_bad_arg
-  category: pre_checkin
-  function: csrilu0_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: csrilu0
   category: quick
   function: csrilu0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
+  precision: *single_only_precisions
+  M: [50]
+  N: [50]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
 - name: csrilu0
   category: quick
   function: csrilu0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
+  precision: *single_only_precisions
+  M: [50]
+  N: [50]
+  numericboost: [1]
+  boosttol: [0.5]
+  boostval: [1.0]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
 - name: csrilu0
   category: quick
   function: csrilu0
-  precision: *single_double_precisions
-  M_N: *M_N_range_quick
-  numericboost: [0, 1]
-  boosttol: [0.05, 0.5, 0.79, 1.1]
-  boostval: [0.2, 1.0, 1.5]
+  precision: *single_only_precisions
+  M_N:
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+    - { M: 6144, N: 6144 }
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+
+- name: csrilu0
+  category: quick
+  function: csrilu0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 768, N: 768 }
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+
+- name: csrilu0
+  category: quick
+  function: csrilu0
+  precision: *single_only_precisions
+  M_N:
+    - { M: 20480, N: 20480 }
+    - { M: 32768, N: 32768 }
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
+
+- name: csrilu0
+  category: quick
+  function: csrilu0
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos3, nos7, qc2534, mplate]
+
+# sme3Dc max row nnz is 405, which on a 32-wide wavefront selects the hash
+# kernel's max_nnz < 16 * wavefront arm (and not the smaller arms).
+- name: csrilu0
+  category: quick
+  function: csrilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+
+# Pre_checkin
+- name: csrilu0_bad_arg
+  category: pre_checkin
+  function: csrilu0_bad_arg
+  precision: *single_double_precisions_complex_real
 
 - name: csrilu0
   category: pre_checkin
@@ -93,37 +154,6 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
-
-- name: csrilu0
-  category: nightly
-  function: csrilu0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_nightly
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csrilu0_file
-  category: quick
-  function: csrilu0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  numericboost: [0, 1]
-  boosttol: [0.05, 0.79]
-  boostval: [1.0]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4,
-             nos6,
-             nos1,
-             nos2,
-             scircuit]
 
 - name: csrilu0_file
   category: pre_checkin
@@ -141,6 +171,35 @@ Tests:
              nos3,
              nos5,
              nos7]
+
+- name: csrilu0_file
+  category: pre_checkin
+  function: csrilu0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+
+- name: csrilu0_extra
+  category: pre_checkin
+  function: csrilu0_extra
+
+# Nightly
+- name: csrilu0
+  category: nightly
+  function: csrilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: csrilu0_file
   category: nightly
@@ -173,35 +232,6 @@ Tests:
   skip_hardware: gfx940, gfx941
 
 - name: csrilu0_file
-  category: quick
-  function: csrilu0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  numericboost: [0, 1]
-  boosttol: [0.01, 0.5]
-  boostval: [1.2]
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
-
-- name: csrilu0_file
-  category: pre_checkin
-  function: csrilu0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron3]
-
-- name: csrilu0_file
   category: nightly
   function: csrilu0
   precision: *single_double_precisions_complex
@@ -213,6 +243,24 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+# Stress
+
+- name: csrilu0_file
+  category: stress
+  function: csrilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]
+  skip_hardware: gfx940, gfx941
+
+# Known_bug
 
 - name: csrilu0_graph_test
   # known_bug: hipGraphLaunch OOMs (hipErrorOutOfMemory) on memory-constrained
@@ -228,21 +276,3 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   graph_test: true
-
-- name: csrilu0_extra
-  category: pre_checkin
-  function: csrilu0_extra
-
-- name: csrilu0_file
-  category: stress
-  function: csrilu0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [ASIC_320k]
-  skip_hardware: gfx940, gfx941

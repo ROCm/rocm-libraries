@@ -1,0 +1,4 @@
+# Bundles extracted by reference_common/artifact.py unpack into the source
+# default, <operation>/<arch>/. Each operation's .gitignore lists its
+# DVC-tracked archives.
+/*/*/

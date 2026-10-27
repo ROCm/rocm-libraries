@@ -1184,6 +1184,60 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, ops, 3, rty, &attrs, hint);
 }
 
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
+ * f16/bf16 take n in {2, 4, 8}, f32/i32 take n in {1, 2, 4}; the
+ * <dwords x i32> payload is typed <n x dtype>. */
+rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voffset,
+                                      rocke_value_t* soffset,
+                                      const rocke_type_t* dtype,
+                                      int n)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    int elem_bytes;
+    int dwords;
+    char hint[16];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset || !dtype)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load_vN: NULL operand");
+    if(dtype == rocke_f16() || dtype == rocke_bf16())
+        elem_bytes = 2;
+    else if(dtype == rocke_f32() || dtype == rocke_i32())
+        elem_bytes = 4;
+    else
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_vN: unsupported dtype '%s'", dtype->name);
+    if(n <= 0 || (n * elem_bytes) % 4 != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "buffer_load_vN: n=%d dtype=%s is not a whole number of dwords",
+            n,
+            dtype->name);
+    dwords = (n * elem_bytes) / 4;
+    if(!(dwords == 1 || dwords == 2 || dwords == 4))
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "buffer_load_vN: n=%d dtype=%s -> dwords=%d "
+                                               "must be 1, 2, or 4",
+                                               n,
+                                               dtype->name,
+                                               dwords);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    rocke_attr_set_str(b, &attrs, "elem_type", dtype->name);
+    /* result_name_hint = f"bl{n}" */
+    snprintf(hint, sizeof(hint), "bl%d", n);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_BUFFER_LOAD_VN, ops, 3, rocke_vector_type(b, dtype, n), &attrs, hint);
+}
+
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
@@ -1404,6 +1458,45 @@ void rocke_b_s_barrier_bare(rocke_ir_builder_t* b)
     if(!rocke_i_live(b))
         return;
     rocke_i_op0(b, ROCKE_OP_TILE_S_BARRIER_BARE, NULL, 0, NULL);
+}
+
+/* Python sync / sync_lds_only / s_barrier_bare(fence=mode): the same op with
+ * the string attr fence=mode ("compiler" or "workgroup"; NULL or "none" is the
+ * plain barrier). */
+static void rocke_i_fenced_barrier(rocke_ir_builder_t* b, rocke_opcode_t opcode, const char* mode)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!mode || strcmp(mode, "none") == 0)
+    {
+        rocke_i_op0(b, opcode, NULL, 0, NULL);
+        return;
+    }
+    if(strcmp(mode, "compiler") != 0 && strcmp(mode, "workgroup") != 0)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "barrier fence '%s' not in ('compiler', 'workgroup')", mode);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "fence", mode);
+    rocke_i_op0(b, opcode, NULL, 0, &attrs);
+}
+
+void rocke_b_sync_fence(rocke_ir_builder_t* b, const char* mode)
+{
+    rocke_i_fenced_barrier(b, ROCKE_OP_TILE_SYNC, mode);
+}
+
+void rocke_b_sync_lds_only_fence(rocke_ir_builder_t* b, const char* mode)
+{
+    rocke_i_fenced_barrier(b, ROCKE_OP_TILE_SYNC_LDS_ONLY, mode);
+}
+
+void rocke_b_s_barrier_bare_fence(rocke_ir_builder_t* b, const char* mode)
+{
+    rocke_i_fenced_barrier(b, ROCKE_OP_TILE_S_BARRIER_BARE, mode);
 }
 
 void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector)
@@ -2126,6 +2219,18 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_for_iter: NULL iter_args");
         return out;
     }
+    for(i = 0; i < num_iter_args; ++i)
+    {
+        if(rocke_i_is_buffer_descriptor(iter_args[i].init))
+        {
+            char msg[ROCKE_ERR_MSG_CAP];
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "%s",
+                            rocke_i_loop_carried_descriptor_message(i, msg, sizeof msg));
+            return out;
+        }
+    }
 
     body = rocke_i_new_region(b, "body");
     if(!body)
@@ -2285,9 +2390,28 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
     return out;
 }
 
+/* Python IRBuilder._current_region_is_loop_body: true while `b` is emitting
+ * into an scf.for body. The loop op is the last op of the region enclosing its
+ * body: it was emitted there before its body was entered, and every op since
+ * went into the body. */
+static bool current_region_is_loop_body(const rocke_ir_builder_t* b)
+{
+    const rocke_region_t* enclosing;
+    const rocke_op_t* loop;
+    if(b->region_depth < 2)
+        return false;
+    enclosing = b->region_stack[b->region_depth - 2];
+    if(enclosing->num_ops == 0)
+        return false;
+    loop = enclosing->ops[enclosing->num_ops - 1];
+    return loop->opcode == ROCKE_OP_SCF_FOR && loop->num_regions >= 1
+           && loop->regions[0] == b->region_stack[b->region_depth - 1];
+}
+
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values)
 {
     rocke_attr_map_t attrs;
+    int i;
     if(!rocke_i_live(b))
         return;
     if(num_values < 0)
@@ -2296,6 +2420,22 @@ void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int 
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_yield: NULL values");
         return;
+    }
+    /* Yielded values become the next iteration's iter_args in a loop body. */
+    if(current_region_is_loop_body(b))
+    {
+        for(i = 0; i < num_values; ++i)
+        {
+            if(rocke_i_is_buffer_descriptor(values[i]))
+            {
+                char msg[ROCKE_ERR_MSG_CAP];
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "%s",
+                                rocke_i_loop_carried_descriptor_message(i, msg, sizeof msg));
+                return;
+            }
+        }
     }
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "num", (int64_t)num_values);

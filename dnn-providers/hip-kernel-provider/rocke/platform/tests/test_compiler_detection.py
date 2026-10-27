@@ -125,11 +125,11 @@ def test_auto_lowering_recovers_then_retains_success(monkeypatch):
     builder.kernel.attrs["max_workgroup_size"] = 64
     builder.const_i32(1)
     with pytest.raises(comgr.ComgrError, match="could not be loaded"):
-        lower_llvm.lower_kernel_to_llvm(builder.kernel)
-    second = lower_llvm.lower_kernel_to_llvm(builder.kernel)
+        lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
+    second = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950")
     assert lower_llvm._datalayout_for_flavor("llvm23") in second
     info = comgr.loaded_compiler_info()
-    assert lower_llvm.lower_kernel_to_llvm(builder.kernel) == second
+    assert lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950") == second
     assert comgr.loaded_compiler_info() is info
     assert load.call_count == 2
     library.LLVMGetVersion.assert_called_once()
@@ -163,7 +163,7 @@ def test_explicit_lowering_bypasses_library_load(monkeypatch, source):
     kwargs = {"llvm_flavor": "llvm23"} if source == "api" else {}
     if source == "environment":
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm23")
-    ir = lower_llvm.lower_kernel_to_llvm(builder.kernel, **kwargs)
+    ir = lower_llvm.lower_kernel_to_llvm(builder.kernel, arch="gfx950", **kwargs)
     assert lower_llvm._datalayout_for_flavor("llvm23") in ir
     load.assert_not_called()
 
@@ -283,7 +283,7 @@ def test_explicit_offline_lowering_never_queries_comgr(monkeypatch):
     query = Mock(side_effect=AssertionError("offline emission queried COMGR"))
     monkeypatch.setattr(comgr, "loaded_compiler_info", query)
     ir = lower_llvm.lower_kernel_to_llvm(
-        IRBuilder("offline").kernel, llvm_flavor="llvm20"
+        IRBuilder("offline").kernel, llvm_flavor="llvm20", arch="gfx950"
     )
     assert lower_llvm._datalayout_for_flavor("llvm20") in ir
     query.assert_not_called()

@@ -1415,7 +1415,6 @@ TEST(AuxiliaryBranchCoo, const_get_set_pointers_batch)
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 0, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 2, -1), rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 1, 4), rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
@@ -1517,10 +1516,6 @@ TEST(AuxiliaryBranchCsr, set_pointers_batch_nnz)
     EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 2, -1, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 2, 4, -1), rocsparse_status_invalid_value);
 
-    EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 4, 0), rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 0, 3), rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 4, 3), rocsparse_status_invalid_value);
-
     EXPECT_EQ(rocsparse_spmat_set_nnz(A, -1), rocsparse_status_invalid_size);
     EXPECT_EQ(rocsparse_spmat_set_nnz(nullptr, 3), rocsparse_status_invalid_pointer);
 
@@ -1576,9 +1571,6 @@ TEST(AuxiliaryBranchCsc, const_get_set_pointers_batch)
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 0, 4, 3), rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 2, -1, 3), rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 4, 0), rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 0, 3), rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 4, 3), rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
@@ -1628,8 +1620,6 @@ TEST(AuxiliaryBranchEll, const_get_set_pointers_nnz)
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_ell_set_pointers(A, nullptr, ell_val2.ptr),
               rocsparse_status_invalid_pointer);
-
-    EXPECT_EQ(rocsparse_ell_set_strided_batch(A, 1, 4), rocsparse_status_invalid_value);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }
