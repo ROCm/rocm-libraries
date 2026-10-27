@@ -24,8 +24,8 @@
  * lengths from `seq_lens` and ragged Q offsets from `query_start_len`, and a contiguous BSHD
  * K/V tensor IS that cache with an identity block table. What differs per architecture is
  * the wave width, whether the grid is kv-major or q-major, and the geometry the builder
- * accepts. Those are the traits; a pack for another architecture (gfx942, AICK-2544)
- * supplies its own traits and its own builder-legality check and reuses everything here.
+ * accepts. Those are the traits; a pack for another architecture (e.g. a future gfx942
+ * pack) supplies its own traits and its own builder-legality check and reuses everything here.
  *
  * Pure functions of KMD fields and graph dimensions: testable with no HIP context.
  */
