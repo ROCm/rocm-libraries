@@ -24,7 +24,6 @@ namespace tensor_core_test {
 namespace {
 using roc::hostnumerics::test::require;
 using roc::hostnumerics::test::requireError;
-using roc::hostnumerics::test::requireNear;
 }  // namespace
 
 void testLayoutBasics();

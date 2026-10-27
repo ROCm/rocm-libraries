@@ -5,7 +5,6 @@
 
 #include <gtest/gtest.h>
 
-#include <cmath>
 #include <source_location>
 #include <stdexcept>
 #include <string>
@@ -19,11 +18,6 @@ inline void require(bool condition, std::string_view message,
         ADD_FAILURE_AT(location.file_name(), static_cast<int>(location.line())) << message;
         throw std::runtime_error(std::string(message));
     }
-}
-
-inline void requireNear(double observed, double expected, double tolerance,
-                        std::string_view message) {
-    if (std::abs(observed - expected) > tolerance) require(false, message);
 }
 
 template <typename Exception, typename Function>
