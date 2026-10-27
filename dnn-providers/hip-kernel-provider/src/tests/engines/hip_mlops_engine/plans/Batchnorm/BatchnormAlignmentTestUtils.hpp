@@ -17,9 +17,9 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
-#include "mocks/MockCompiledProgram.hpp"
-#include "mocks/MockKernelCompiler.hpp"
-#include "mocks/MockRunnableKernel.hpp"
+#include "compilation/ICompiledProgram.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "compilation/IRunnableKernel.hpp"
 
 namespace hip_kernel_provider::batchnorm::test
 {
@@ -139,36 +139,67 @@ void expectDeclinedBelowElementAlignment(const flatbuffers::FlatBufferBuilder& v
     }
 }
 
-/// Runs @p compile against a mock kernel compiler that records the options it is given and hands
-/// back as many mock kernels as the plan asks for, and returns the recorded options.
+/// A kernel that accepts every launch setting and does nothing. Hand-written rather than a gmock
+/// mock: the plans only configure kernels here, and none of the tests that use it verify the calls.
+class RecordingKernel : public compilation::IRunnableKernel
+{
+public:
+    void setBlockSize(unsigned int, unsigned int, unsigned int) override {}
+    void setGridSize(unsigned int, unsigned int, unsigned int) override {}
+    void setSharedMemBytes(unsigned int) override {}
+
+protected:
+    void launchImpl(hipStream_t, void**) const override {}
+};
+
+/// A compiled program that hands back as many kernels as the plan asks for.
+class RecordingProgram : public compilation::ICompiledProgram
+{
+public:
+    std::unique_ptr<compilation::IRunnableKernel> getKernel(const std::string&) const override
+    {
+        return std::make_unique<RecordingKernel>();
+    }
+};
+
+/// A kernel compiler that records the options of every compile it is asked for.
+class RecordingCompiler : public compilation::IKernelCompiler
+{
+public:
+    std::unique_ptr<compilation::ICompiledProgram>
+        compile(const std::string&, const std::vector<std::string>& options) const override
+    {
+        _options = options;
+        ++_compileCount;
+        return std::make_unique<RecordingProgram>();
+    }
+
+    const std::vector<std::string>& options() const
+    {
+        return _options;
+    }
+
+    size_t compileCount() const
+    {
+        return _compileCount;
+    }
+
+private:
+    mutable std::vector<std::string> _options;
+    mutable size_t _compileCount = 0;
+};
+
+/// Runs @p compile against a recording kernel compiler, asserts that it compiled exactly once, and
+/// returns the options of that compile.
 ///
 /// @param compile Callable taking `const IKernelCompiler&` that compiles one plan.
 template <typename CompileFn>
 std::vector<std::string> compileAndCaptureOptions(CompileFn&& compile)
 {
-    const MockKernelCompiler mockCompiler;
-    std::vector<std::string> capturedOptions;
-
-    const auto createKernel = []() {
-        auto kernel = std::make_unique<MockRunnableKernel>();
-        EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-        EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-        return kernel;
-    };
-
-    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
-        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
-            capturedOptions = options;
-            auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel(::testing::_))
-                .Times(::testing::AtLeast(1))
-                .WillRepeatedly(
-                    ::testing::Invoke([&](const std::string&) { return createKernel(); }));
-            return program;
-        });
-
-    compile(mockCompiler);
-    return capturedOptions;
+    const RecordingCompiler compiler;
+    compile(compiler);
+    EXPECT_EQ(compiler.compileCount(), 1U);
+    return compiler.options();
 }
 
 /// Whether the recorded compile options contain @p option, such as "-DHIP_PLUGIN_BN_VARIANT=2".

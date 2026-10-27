@@ -535,21 +535,6 @@ std::string compiledVectorSize(const std::vector<int64_t>& strides,
                                const std::vector<int64_t>& dims,
                                const AlignmentByName& alignments)
 {
-    const MockKernelCompiler mockCompiler;
-
-    std::vector<std::string> capturedOptions;
-    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
-        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
-            capturedOptions = options;
-            auto kernel = std::make_unique<MockRunnableKernel>();
-            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-            auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel(::testing::_))
-                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            return program;
-        });
-
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(strides, dims);
     const auto patched = withNamedAlignments(builder.GetBufferPointer(), alignments);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(patched.data(),
@@ -557,10 +542,11 @@ std::string compiledVectorSize(const std::vector<int64_t>& strides,
     const auto& attr = *graph.getNode(0).attributes_as_BatchnormInferenceAttributes();
 
     BatchnormFwdInferencePlan plan{BatchnormFwdInferenceParams(attr, graph.getTensorMap())};
-    plan.compile(mockCompiler, createTestDeviceProps());
+    const auto options = compileAndCaptureOptions(
+        [&](const IKernelCompiler& compiler) { plan.compile(compiler, createTestDeviceProps()); });
 
     const std::string prefix = "-DHIP_PLUGIN_BN_VEC_SIZE=";
-    for(const auto& option : capturedOptions)
+    for(const auto& option : options)
     {
         if(option.rfind(prefix, 0) == 0)
         {
