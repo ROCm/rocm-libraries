@@ -212,3 +212,22 @@ def test_paired_capacity_includes_only_final_layout_and_other_lds_users(
     # can require more than the final data footprint.
     assert sol["LDSSegInterleaveOffsets"]["pairedUsedBytes"] == 265216
     assert sol["LdsNumBytes"] == expected
+
+
+@pytest.mark.parametrize("mode", [-1, 1])
+def test_streamk_retains_existing_tight_interleave(derive, mode):
+    # Match the MXFP8 StreamK geometry shipped in the gfx1250 Origami logic.
+    sol, out = derive(mode, mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
+                      StreamK=3, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
+                      VectorWidthA=1, VectorWidthB=1, DepthU=512,
+                      PrefetchGlobalRead=2,
+                      ProblemType={"DestDataType": "s", "MXBlockA": 32, "MXBlockB": 32})
+    assert sol["Valid"], out
+    assert sol["LDSSegmentInterleave"] == 1
+    assert sol["LDSSegInterleaveOffsets"] == {
+        "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+        "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
+    }
+    assert sol["StoreSwapAddr"] is False
+    assert sol["NumLdsBlk"] == 2
+    assert sol["LdsNumBytes"] == 235520

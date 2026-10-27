@@ -33,7 +33,7 @@ The component sizes and LDS base determine which of two layouts applies:
     ping and pong blocks separate, each with the same internal order and gap.
 
   Packed order already reaches another segment ("tight"):
-    Place each group's ping/pong copies together, using these physical orders:
+    Nonpersistent kernels place each group's ping/pong copies together:
       split A/B: [A0 pair][B0 pair][gap if needed][A1 pair][B1 pair]
       B whole:   [A0 pair][B pair] [gap if needed][A1 pair]
       A whole:   [B0 pair][A pair] [gap if needed][B1 pair]
@@ -43,14 +43,16 @@ The component sizes and LDS base determine which of two layouts applies:
 
 For example, with [2,2], split B and LDS base 0, let fA/fB include one component's
 internal padding. If fA + fB < 64 KiB, insert a gap after [A0][B0] (aligned).
-Otherwise the one-buffer order needs no gap (tight), and uses pairing above.
+Otherwise the one-buffer order needs no gap (tight).
 Pairing can still add gaps; "tight" describes the one-buffer order, not the final
 ping/pong allocation. See paired_buffer_reason() for supported buffering settings.
+Persistent kernels retain their existing interleave layout with separate ping/pong
+blocks; they do not use pairing.
 
 For problems with both MX scales, buffer placement is:
   Non-TDMSplit tight, with supported pairing:
     [all paired A/B data][MXSA ping][MXSA pong][MXSB ping][MXSB pong]
-  Aligned or TDMSplit interleave:
+  Aligned, TDMSplit or persistent interleave:
     ping: [interleaved A/B data][MXSA][MXSB]
     pong: [interleaved A/B data][MXSA][MXSB]
 

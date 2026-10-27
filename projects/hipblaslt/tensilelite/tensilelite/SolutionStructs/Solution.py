@@ -6529,7 +6529,8 @@ class Solution(collections.abc.Mapping):
       if _bRotReason is not None:
         reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
         return
-    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned:
+    # Persistent kernels retain their existing interleave offsets and buffer swaps.
+    if state["LDSSegmentInterleave"] == 1 and not state["TDMSplit"] and not _segAligned and not isPersistent(state):
       _pairedReason = None if state["LDSSegmentBRotate"] else segPairedReason(state, isPersistent(state))
       if _pairedReason is None:
         _pairedOffsets = segPairedOffsets(state)
