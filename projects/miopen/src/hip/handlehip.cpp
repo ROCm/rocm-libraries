@@ -686,13 +686,16 @@ void StreamTracker::abandon(Slot slot)
 
     // Queued behind everything already on the stream, so it runs once the
     // evaluation's last kernel has retired; the runtime holds the stream until
-    // it returns. Enqueued outside mutex_, which it has no need of.
-    const auto status = hipLaunchHostFunc(stream, &StreamTracker::OnSlotRetired, retire.get());
-    if(status == hipSuccess)
-        (void)retire.release(); // Owned by the callback now.
-    else
+    // it returns. Enqueued outside mutex_, which it has no need of. The callback
+    // owns the context once queued; if queuing fails, ownership comes back here.
+    RetireContext* const context = retire.release();
+    const auto status = hipLaunchHostFunc(stream, &StreamTracker::OnSlotRetired, context);
+    if(status != hipSuccess)
+    {
+        const std::unique_ptr<RetireContext> unqueued{context};
         MIOPEN_LOG_W("Could not queue retirement of an abandoned evaluation stream: "
                      << hipGetErrorString(status) << "; acquire() reclaims it once idle");
+    }
 }
 
 StreamTracker::~StreamTracker()

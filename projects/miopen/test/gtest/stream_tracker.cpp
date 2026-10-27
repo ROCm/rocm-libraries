@@ -113,6 +113,22 @@ bool ReleasedWithin(const std::weak_ptr<miopen::ScratchAllocation>& scratch,
     return true;
 }
 
+/// Waits for a recorded event to complete. How soon an event signals after it
+/// is recorded is up to the runtime - on Windows it can trail the call by
+/// milliseconds - so a test that needs acquire() to find a done event complete
+/// waits for it first rather than racing it.
+bool CompletedWithin(hipEvent_t event, std::chrono::milliseconds limit = std::chrono::seconds(10))
+{
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    auto status         = hipEventQuery(event);
+    while(status == hipErrorNotReady && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        status = hipEventQuery(event);
+    }
+    return status == hipSuccess;
+}
+
 /// A scratch buffer no other test holds, so its only owner is the slot it is
 /// given to and its release is observable. Call it before gating any stream:
 /// dropping the probe buffer frees it with hipFree, which waits for every
@@ -489,8 +505,10 @@ TEST_F(GPU_StreamTracker_FP32, ALateCallbackDoesNotRetireALaterReuseOfItsStream)
     ASSERT_EQ(hipEventRecord(done.get(), stream), hipSuccess); // a's work is finished...
     auto& hold_a_callback = NewGate();                         // ...but its callback waits here
     ASSERT_EQ(hipLaunchHostFunc(stream, StreamGate::callback, &hold_a_callback), hipSuccess);
-    a.done = miopen::StreamTracker::EventPtr{std::move(done)};
+    a.done            = miopen::StreamTracker::EventPtr{std::move(done)};
+    const auto a_done = a.done;
     tracker.abandon(std::move(a));
+    ASSERT_TRUE(CompletedWithin(a_done.get())) << "a's done event never completed";
 
     auto b = tracker.acquire(handle);
     ASSERT_EQ(b.stream, stream) << "acquire() did not reclaim on the done event";
@@ -599,7 +617,8 @@ TEST_F(GPU_StreamTracker_FP32, AcquireLeavesTheDeallocatorToTheWorker)
     ASSERT_EQ(hipEventRecord(done.get(), stream), hipSuccess); // its work is finished...
     auto& hold_callback = NewGate(); // ...but its callback waits here, so acquire() reclaims it
     ASSERT_EQ(hipLaunchHostFunc(stream, StreamGate::callback, &hold_callback), hipSuccess);
-    slot.done = miopen::StreamTracker::EventPtr{std::move(done)};
+    slot.done            = miopen::StreamTracker::EventPtr{std::move(done)};
+    const auto slot_done = slot.done;
     slow_tracker.abandon(std::move(slot));
 
     // Opened from elsewhere: a deallocator run inside acquire() would wait on
@@ -610,6 +629,9 @@ TEST_F(GPU_StreamTracker_FP32, AcquireLeavesTheDeallocatorToTheWorker)
         hold_callback.open();
     });
 
+    // Non-fatal: an early return here would leave slow_handle's teardown waiting
+    // on the gate.
+    EXPECT_TRUE(CompletedWithin(slot_done.get())) << "the slot's done event never completed";
     const auto before = std::chrono::steady_clock::now();
     auto next         = slow_tracker.acquire(slow_handle);
     const std::chrono::duration<double, std::milli> waited =
