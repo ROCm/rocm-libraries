@@ -383,6 +383,7 @@ class StateValues:
   batchOffsetCKernArgOffset: int         = 0
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
+  rndSeedKernArgOffset: int              = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -7252,13 +7253,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                             startLabel="label_LoopBeginL" + self.RAP_ITERN_SUFFIX))
       stinky_module_options["CloneList"] = cloneList
       # Prefetch lead before its tensor_load, in WMMA windows. With HalfPLR the loop body holds
-      # three TDM stages: measured best ~25 when A is sub-byte and ~40 otherwise on gfx1250
-      # MAF. Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
+      # three TDM stages: measured best ~25 when A is sub-byte and ~30 otherwise on gfx1250
+      # MAF (it was 40 while the hazard model delayed each prefetch by about 5 windows).
+      # Without it the body holds one stage, and a lead below 8 tells stinkytofu to issue
       # the whole prefetch group in the tensor_load's window (temporary per-shape defaults).
       # stinkytofu drops the lead itself where a stage has under 64 WMMAs (counted in the asm).
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
-        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
+        25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 30
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
       # Tuning overrides from GlobalParameters win over the values above.
@@ -9942,7 +9944,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["ProblemType"]["FusedGemmA2A"]:
       self.defineSgpr("FusedTotalWGs", 1)
       # Counter-block base, loaded once in the prologue. Every region is reached
-      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # from it by immediate offset (client/src/FusedA2ARunner.cpp).
       # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
       # address bit omitted from the encoding.
       self.defineSgpr("FusedCounterPtr", 2, 2)
