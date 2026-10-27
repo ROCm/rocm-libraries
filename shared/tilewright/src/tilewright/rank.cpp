@@ -1704,8 +1704,11 @@ void rank_pool(const Model& model,
     throw std::invalid_argument("tilewright: the prior holds " + std::to_string(prior->size()) +
                                 " values for " + std::to_string(n) + " configs");
   if (n == 0 || (out.limit == 0 && !out.unscored)) return out.results.clear();
-  if (!supports(model, context, hardware) || !valid_hardware(hardware))
-    return write_unscored(n, out);
+  // Features and launch plans are those of the context the model scores
+  // `context` at; the caller launches the kernels with its own budget.
+  const std::optional<ExecutionContext> scoring =
+      model.catalog->scoring_context(model, context, hardware);
+  if (!scoring || !valid_hardware(hardware)) return write_unscored(n, out);
   const int cell = route_cell(model, problem);
   if (cell < 0) return write_unscored(n, out);
   const std::vector<double>* order_prior = tie_break == TieBreak::Prior ? prior : nullptr;
@@ -1715,7 +1718,7 @@ void rank_pool(const Model& model,
                         ci,
                         problem,
                         hardware,
-                        context,
+                        *scoring,
                         configs,
                         *keys,
                         min_scored,
@@ -1728,7 +1731,7 @@ void rank_pool(const Model& model,
                ci,
                problem,
                hardware,
-               context,
+               *scoring,
                configs,
                built,
                min_scored,
@@ -2645,6 +2648,12 @@ bool supports(const Model& model,
               const ExecutionContext& context,
               const Hardware& hardware) noexcept {
   return model.catalog->supports(model, context, hardware);
+}
+
+std::optional<ExecutionContext> scoring_context(const Model& model,
+                                                const ExecutionContext& context,
+                                                const Hardware& hardware) noexcept {
+  return model.catalog->scoring_context(model, context, hardware);
 }
 
 std::vector<std::string> attribute_names(const Model& model) {

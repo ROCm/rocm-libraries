@@ -676,6 +676,17 @@ bool v2_supports(const Model&, const ExecutionContext& context, const Hardware& 
          context.schedule == Schedule::Default;
 }
 
+// Every CU is the only budget a v2 model was trained for, so every budget of
+// the default schedule is scored as exclusive use (v2 features read no
+// context); another schedule is not scored.
+std::optional<ExecutionContext> v2_scoring_context(const Model& m,
+                                                   const ExecutionContext& context,
+                                                   const Hardware& hardware) {
+  if (v2_supports(m, context, hardware)) return context;
+  if (hardware.N_CU == 0 || context.schedule != Schedule::Default) return std::nullopt;
+  return ExecutionContext{};
+}
+
 constexpr FeatureCatalog kCatalogV2 = {"e7fe4b524851e895",
                                        2,
                                        kV2QueryDim,
@@ -684,6 +695,7 @@ constexpr FeatureCatalog kCatalogV2 = {"e7fe4b524851e895",
                                        false,
                                        &v2_view_key,
                                        &v2_supports,
+                                       &v2_scoring_context,
                                        &build_query_features,
                                        &v2_item_features,
                                        &build_inter_features,
@@ -816,6 +828,41 @@ bool v3_supports(const Model& m, const ExecutionContext& context, const Hardware
   return fraction >= m.min_cu_fraction && fraction <= m.max_cu_fraction;
 }
 
+// The usable CUs nearest to `usable` that a v3 model supports on a device of
+// `n_cu` CUs (at least 1), with the fraction comparisons v3_supports makes:
+// below its range the fewest it supports, its CU floor or its smallest
+// fraction of the device, whichever is more, and the whole device when the
+// floor exceeds it; above its range the most. Where a device cannot meet
+// both the floor and the largest fraction, the fraction wins.
+std::size_t nearest_supported_cus(const Model& m, std::size_t usable, std::size_t n_cu) {
+  const double n = static_cast<double>(n_cu);
+  std::size_t lo =
+      std::clamp<std::size_t>(static_cast<std::size_t>(std::ceil(m.min_cu_fraction * n)), 1, n_cu);
+  while (lo > 1 && static_cast<double>(lo - 1) / n >= m.min_cu_fraction) --lo;
+  while (lo < n_cu && static_cast<double>(lo) / n < m.min_cu_fraction) ++lo;
+  std::size_t hi =
+      std::clamp<std::size_t>(static_cast<std::size_t>(std::floor(m.max_cu_fraction * n)), 1, n_cu);
+  while (hi < n_cu && static_cast<double>(hi + 1) / n <= m.max_cu_fraction) ++hi;
+  while (hi > 1 && static_cast<double>(hi) / n > m.max_cu_fraction) --hi;
+  lo = std::max(lo, std::min(m.min_effective_cus, n_cu));
+  return std::min(std::max(usable, lo), hi);
+}
+
+// A context outside the model's range only by its CU budget is scored at
+// the nearest usable CUs it supports on this device (nearest_supported_cus),
+// so that a budget below the trained ones ranks as the smallest of them
+// does; a schedule the model does not list is not scored.
+std::optional<ExecutionContext> v3_scoring_context(const Model& m,
+                                                   const ExecutionContext& context,
+                                                   const Hardware& hardware) {
+  if (v3_supports(m, context, hardware)) return context;
+  if (hardware.N_CU == 0) return std::nullopt;
+  const unsigned s = static_cast<unsigned>(context.schedule);
+  if (s > 2 || ((m.schedules >> s) & 1u) == 0) return std::nullopt;
+  const std::size_t cus = nearest_supported_cus(m, effective_cus(context, hardware), hardware.N_CU);
+  return ExecutionContext{cus < hardware.N_CU ? cus : 0, context.schedule};
+}
+
 constexpr FeatureCatalog kCatalogV3 = {"b8b9f4a518add96f",
                                        3,
                                        kV3QueryDim,
@@ -824,6 +871,7 @@ constexpr FeatureCatalog kCatalogV3 = {"b8b9f4a518add96f",
                                        true,
                                        &v3_view_key,
                                        &v3_supports,
+                                       &v3_scoring_context,
                                        &v3_query_features,
                                        &v3_item_features,
                                        &v3_inter_features,

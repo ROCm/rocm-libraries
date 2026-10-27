@@ -1331,7 +1331,7 @@ TEST(PredictionLibraryTest, OrigamiRanksWhenTilewrightScoresNothing)
     EXPECT_EQ(top[0]->index, 13);
 }
 
-TEST(PredictionLibraryTest, OrigamiRanksCallsWithACuBudgetBelowTheDevice)
+TEST(PredictionLibraryTest, TilewrightRanksCallsWithACuBudgetBelowTheDevice)
 {
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
@@ -1341,9 +1341,20 @@ TEST(PredictionLibraryTest, OrigamiRanksCallsWithACuBudgetBelowTheDevice)
     loadWithTilewright(dir, writeV2Model(dir), contestedTable, solutions, lib);
     ASSERT_NE(lib.tilewright_ranker, nullptr);
 
+    // A v2 model was trained for every CU only: a smaller budget is ranked as
+    // every CU, never by origami.
+    auto const device = makeGfx950Device();
+    for(int budget : {224, 31, 1})
+    {
+        SCOPED_TRACE("smCountTarget " + std::to_string(budget));
+        auto problem = TensileLite::testing::dummyProblem();
+        problem.setParams().setSmCountTarget(budget);
+        EXPECT_FALSE(lib.tilewright_ranker->rank(problem, device, 3).empty());
+        EXPECT_EQ(solutionIndices(lib.findTopSolutions(problem, device, 3)), tilewrightOrder(lib));
+    }
     auto problem = TensileLite::testing::dummyProblem();
     problem.setParams().setSmCountTarget(224);
-    expectOrigamiOrder(lib, problem);
+    expectTilewrightOrder(lib, problem);
 }
 
 TEST(PredictionLibraryTest, TilewrightNamesTheCompilerTargetOfTheLibrary)

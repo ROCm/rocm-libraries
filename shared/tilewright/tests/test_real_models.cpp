@@ -133,17 +133,15 @@ tw::PoolOptions shipped_options(const tw::Model& model) {
   return options;
 }
 
-// A context the model scores nothing in, when it has one: MLREC_v2 models
-// support every CU with the default schedule only, MLREC_v3 models the CU
-// fractions and schedules their file declares.
+// A context the model scores nothing in, when it has one: a schedule it does
+// not list (MLREC_v2 models: the default only; MLREC_v3 models: those their
+// file declares). A CU budget alone never leaves a ranking unscored.
 bool unsupported_context(const tw::Model& model,
                          const tw::Hardware& hw,
                          tw::ExecutionContext* context) {
-  for (const tw::ExecutionContext& c : {tw::ExecutionContext{hw.N_CU / 2, tw::Schedule::Default},
-                                        tw::ExecutionContext{1, tw::Schedule::Default},
-                                        tw::ExecutionContext{0, tw::Schedule::Dynamic},
+  for (const tw::ExecutionContext& c : {tw::ExecutionContext{0, tw::Schedule::Dynamic},
                                         tw::ExecutionContext{0, tw::Schedule::Auto}})
-    if (!tw::supports(model, c, hw)) {
+    if (!tw::scoring_context(model, c, hw)) {
       *context = c;
       return true;
     }
@@ -303,6 +301,16 @@ TEST_CASE("shipped models rank repeated kernels like kernels scored one by one",
               REQUIRE(same_results(prepared.rank_top(p, hw, {}, min_scored),
                                    scored_prefix(expect, min_scored)));
               for (const tw::Result& x : expect) scored += x.scored ? 1 : 0;
+              // A budget the model was not trained for ranks as the nearest
+              // one it was, bit for bit.
+              for (std::size_t budget : {std::size_t{1}, hw.N_CU / 8, hw.N_CU / 2}) {
+                const tw::ExecutionContext small{budget, tw::Schedule::Default};
+                const std::optional<tw::ExecutionContext> at =
+                    tw::scoring_context(*model, small, hw);
+                REQUIRE(at.has_value());
+                REQUIRE(same_results(set.rank(p, hw, small, min_scored),
+                                     set.rank(p, hw, *at, min_scored)));
+              }
               if (!has_unsupported) continue;
               const std::vector<tw::Result> none = set.rank(p, hw, unsupported, min_scored);
               for (std::size_t j = 0; j < none.size(); ++j) {

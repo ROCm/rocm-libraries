@@ -648,8 +648,9 @@ NB_MODULE(_tilewright, m) {
           "prior"_a      = nb::none(),
           "One Result per config: whitelist survivors best-first, then (when min_scored "
           "exceeds their count) the remaining feasible configs best-first, then unscored "
-          "configs in input order. context None means exclusive use of the device; every "
-          "config is unscored when the model does not support the context. With "
+          "configs in input order. context None means exclusive use of the device; a context "
+          "is ranked at scoring_context(), and every config is unscored for a schedule the "
+          "model does not list. With "
           "TieBreak.Prior, prior (one float per config) orders equal scores; ValueError "
           "when it has the wrong length.")
       .def(
@@ -827,9 +828,24 @@ NB_MODULE(_tilewright, m) {
       "model"_a,
       "context"_a,
       "hardware"_a,
-      "True when the model was trained for the context on this hardware (v2 models: every CU "
+      "True when the model declares the context on this hardware (v2 models: every CU "
       "and Schedule.Default; v3 models: the schedules and CU fractions they declare, and at "
       "least the usable CUs of their CU floor).");
+
+  m.def(
+      "scoring_context",
+      [](const PyModel& model, const tw::ExecutionContext& context, const tw::Hardware& h) {
+        return tw::scoring_context(model_of(model), context, h);
+      },
+      "model"_a,
+      "context"_a,
+      "hardware"_a,
+      "The context a ranking for `context` is scored at: the context itself when supports() "
+      "holds; for a context outside it only by its CU budget, the same schedule with the "
+      "nearest usable CUs the model supports on this hardware or, on hardware where it "
+      "supports none (fewer CUs than the CU floor), the most its largest CU fraction allows "
+      "(cu_budget 0 for every CU); None for a schedule the model does not list or hardware "
+      "with no CUs.");
 
   m.def(
       "rank_configs",

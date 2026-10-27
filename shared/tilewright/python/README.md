@@ -39,14 +39,18 @@ config = tw.Config(mt=tw.Dim3(256, 128, 64), mi=tw.Dim3(16, 16, 32),
 config.attributes  # {'workgroup_mapping': 8, 'global_split_u': 1}, a copy
 ```
 
-A ranking can name the execution context it is for; a model scores only the
-contexts it was trained for (shipped models: every CU and `Schedule.Default`),
-and leaves every kernel unscored otherwise:
+A ranking can name the execution context it is for. A CU budget outside the
+model's range is ranked at the nearest one in it (`scoring_context`), and a
+schedule it does not list leaves every kernel unscored (for an MLREC_v2 model,
+trained with every CU and `Schedule.Default`):
 
 ```python
 context = tw.ExecutionContext(cu_budget=32, schedule=tw.Schedule.Default)
-tw.supports(model, context, hardware)  # False: a budget below hardware.N_CU
-results = pool.rank(problem, hardware, context=context)  # all unscored
+tw.supports(model, context, hardware)         # False: a budget below hardware.N_CU
+tw.scoring_context(model, context, hardware)  # ExecutionContext(cu_budget=0, ...)
+results = pool.rank(problem, hardware, context=context)  # ranked as every CU
+dynamic = tw.ExecutionContext(schedule=tw.Schedule.Dynamic)
+results = pool.rank(problem, hardware, context=dynamic)  # all unscored
 ```
 
 A library directory's `tilewright_index` can list a model per PCI chip ID:

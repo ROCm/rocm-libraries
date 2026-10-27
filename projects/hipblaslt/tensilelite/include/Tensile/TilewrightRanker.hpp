@@ -1164,8 +1164,11 @@ namespace TensileLite
 
         // Pool positions of the numSolutions kernels (every kernel when
         // negative) tilewright ranks first for `problem` on `device`, best
-        // first; with `everyScored`, every kernel the same ranking scores. Calls
-        // outside the execution contexts the model supports get none.
+        // first; with `everyScored`, every kernel the same ranking scores. A
+        // call whose CU budget is outside the model's range is ranked at the
+        // nearest budget in it (tilewright::scoring_context) and still runs
+        // with its own budget; a call with a schedule the model does not list
+        // gets none.
         template <typename MyProblem>
         std::vector<size_t> rank(MyProblem const&      problem,
                                  hip::HipAMDGPU const& device,

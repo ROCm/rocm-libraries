@@ -2788,14 +2788,16 @@ The round's stage04 enriches every trained context's logs with its
 `cu_budget` / `schedule` columns (`--context-log-dir`), so each (shape,
 context) is its own GEMM and ranking group in stages 4.5 and 5 and in the run
 history. A model declares the CU fractions from the smallest trained
-budget's to 1 (stage05's `min_cu_fraction`), so that hipBLASLt ranks a call
-of fewer CUs with Origami; `train.min_cu_fraction` can only raise that
+budget's to 1 (stage05's `min_cu_fraction`), so that the engine ranks a call
+of fewer CUs as the smallest trained budget (the kernels still launch with
+the call's own budget); `train.min_cu_fraction` can only raise that
 floor. It also declares the fewest usable CUs it trained, its CU floor
 (stage05's `min_effective_cus`, a budget or the bench device's CU count):
 a device of fewer CUs than the bench device, a compute partition for one,
 is a whole device to the engine, so a call there is in the declared range
-of shares whatever its CUs, and the floor makes hipBLASLt rank a call of
-fewer usable CUs than the model trained with Origami there too.
+of shares whatever its CUs, and the floor makes the engine rank a call of
+fewer usable CUs than the model trained as the floor there too (as the
+whole device on a device with fewer CUs than the floor).
 `train.min_cu_fraction` raises the shares only. An engine that predates the
 CU floor refuses every such model (`unknown serving flags`), so port the
 engine to the deploy checkout and the stage-7 build before such a model

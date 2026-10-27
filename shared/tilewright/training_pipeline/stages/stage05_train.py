@@ -4708,12 +4708,13 @@ def declared_contexts(
 ) -> Dict[str, Any]:
     """The contexts an MLREC_v3 model declares: usable-CU fractions from the
     smallest share it trained (`trained_cu_fraction` of `gemms`), or from
-    `min_cu_fraction` when that is larger, to 1, so that serving falls back
-    below the lowest trained share; the CU floor, the fewest usable CUs it
-    trained (`trained_effective_cus`), so that serving also falls back on a
-    smaller device (a compute partition) for fewer CUs than it trained,
-    where the fraction alone looks in range; and the `schedules` (default:
-    default plus those in `gemms`)."""
+    `min_cu_fraction` when that is larger, to 1, so that serving ranks a
+    share below the lowest trained one as that share; the CU floor, the
+    fewest usable CUs it trained (`trained_effective_cus`), so that serving
+    also ranks fewer CUs than it trained as the floor on a smaller device (a
+    compute partition), where the fraction alone looks in range, and a
+    device with fewer CUs than the floor as a whole; and the `schedules`
+    (default: default plus those in `gemms`)."""
     seen = [ev.context_of(g) for g in gemms]
     if min_cu_fraction is not None and not 0.0 < float(min_cu_fraction) <= 1.0:
         raise ValueError(f"min CU fraction {min_cu_fraction} must be in (0, 1]")

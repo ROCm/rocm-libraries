@@ -582,7 +582,8 @@ TEST_CASE("rank_top of nothing to score is empty", "[pool][top]") {
   CHECK(set.rank_top(p, hw, {}, 0).empty());
   CHECK(set.rank_top(make_problem(8, 8, 8), hw, {}, kAll).empty());
   CHECK(set.rank_top(p, tw::Hardware{64, 65536, 0}, {}, kAll).empty());
-  CHECK(set.rank_top(p, hw, {hw.N_CU - 1, tw::Schedule::Default}, kAll).empty());
+  CHECK(set.rank_top(p, hw, {0, tw::Schedule::Dynamic}, kAll).empty());
+  CHECK(set.rank_top(p, hw, {hw.N_CU - 1, tw::Schedule::Default}, kAll).size() == 2);
   CHECK(tw::CandidateSet(model, {}).rank_top(p, hw, {}, kAll).empty());
   const std::vector<double> short_prior(1, 0.0);
   CHECK_THROWS_AS(set.rank_top(p, hw, {}, 1, &short_prior), std::invalid_argument);
@@ -731,7 +732,8 @@ TEST_CASE("v2 models read no attributes", "[attributes]") {
   CHECK(tw::attribute_names(*load_spec(grid_model())).empty());
 }
 
-TEST_CASE("an unsupported context leaves every config unscored", "[context]") {
+TEST_CASE("an unlisted schedule leaves every config unscored; a CU budget never does",
+          "[context]") {
   Random rnd(3);
   ModelSpec spec                     = grid_model(tw::WeightType::Int4);
   const std::vector<tw::Config> pool = rnd.pool(6, 20);
@@ -743,10 +745,12 @@ TEST_CASE("an unsupported context leaves every config unscored", "[context]") {
     const tw::Problem p              = rnd.problem();
     const std::vector<double> prior  = rnd.prior(pool.size());
     const std::vector<tw::Result> ex = tw::rank_configs(*model, p, hw, pool, kAll);
-    for (const tw::ExecutionContext& ok :
-         {tw::ExecutionContext{},
-          tw::ExecutionContext{hw.N_CU, tw::Schedule::Default},
-          tw::ExecutionContext{3 * hw.N_CU, tw::Schedule::Default}}) {
+    // A v2 model is trained for every CU only: other budgets rank as every CU.
+    for (const tw::ExecutionContext& ok : {tw::ExecutionContext{},
+                                           tw::ExecutionContext{hw.N_CU, tw::Schedule::Default},
+                                           tw::ExecutionContext{3 * hw.N_CU, tw::Schedule::Default},
+                                           tw::ExecutionContext{hw.N_CU - 1, tw::Schedule::Default},
+                                           tw::ExecutionContext{1, tw::Schedule::Default}}) {
       CHECK(same_results(set.rank(p, hw, ok, kAll), ex));
       CHECK(same_results(tw::rank_configs(*model, p, hw, ok, pool, kAll), ex));
       CHECK(same_results(
@@ -754,8 +758,8 @@ TEST_CASE("an unsupported context leaves every config unscored", "[context]") {
           tw::rank_configs(*model, p, hw, ok, pool, kAll, tw::TieBreak::Prior, &prior)));
     }
     for (const tw::ExecutionContext& bad :
-         {tw::ExecutionContext{hw.N_CU - 1, tw::Schedule::Default},
-          tw::ExecutionContext{0, tw::Schedule::Dynamic},
+         {tw::ExecutionContext{0, tw::Schedule::Dynamic},
+          tw::ExecutionContext{hw.N_CU - 1, tw::Schedule::Dynamic},
           tw::ExecutionContext{0, tw::Schedule::Auto}}) {
       CHECK(all_unscored_in_order(set.rank(p, hw, bad, kAll, &prior), pool.size()));
       CHECK(all_unscored_in_order(tw::rank_configs(*model, p, hw, bad, pool, kAll), pool.size()));

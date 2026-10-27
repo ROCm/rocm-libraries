@@ -320,7 +320,31 @@ def test_full_scores_are_the_engines(tw, launch_keys):
                 assert t.full[i, fp[u.key[c]]] == np.float32(r.score)
                 checked += 1
     assert checked > 1000
-    assert (t.cell < 0).any() and (t.cell >= 0).any()
+    # The engine ranks every context of a schedule the model lists, a CU
+    # budget below its range at the nearest budget in it; it ranks none of
+    # a schedule the model does not list.
+    assert (t.cell >= 0).all()
+    unlisted = [ss.ScoreJob(t.problems[0], fs.ExecutionContext(0, "auto"))]
+    emb, full, cell = ss.engine_scores(mv, u, unlisted)
+    assert cell.tolist() == [-1] and np.isnan(full).all() and np.isnan(emb).all()
+
+
+def test_a_budget_below_the_range_is_simulated_at_its_scoring_context(tw):
+    """The simulator scores a CU budget below the model's range as the
+    engine does: exactly as the budget it ranks it at, its embedding term
+    included."""
+    u, mv, t, data = setup(tw)
+    hw = ev.make_hardware(tw, HW)
+    low = fs.ExecutionContext(32)
+    at = tw.scoring_context(ev.load_model_bytes(data, tw), ev.make_context(tw, low), hw)
+    assert at is not None and int(at.cu_budget) not in (0, 32)
+    nearest = fs.ExecutionContext(int(at.cu_budget))
+    for p in t.problems[:8]:
+        got = ss.engine_scores(mv, u, [ss.ScoreJob(p, low)])
+        want = ss.engine_scores(mv, u, [ss.ScoreJob(p, nearest)])
+        assert int(got[2][0]) >= 0
+        for x, y in zip(got, want):
+            np.testing.assert_array_equal(x, y)
 
 
 @pytest.mark.parametrize(

@@ -59,6 +59,7 @@ TEST_CASE("concurrent loads and ranks agree with a serial run", "[concurrency]")
         *reference, problems[i], test_hardware(), {}, pool, depth[i], tw::TieBreak::Prior, &prior));
   }
   const tw::ExecutionContext budgeted{test_hardware().N_CU / 2, tw::Schedule::Default};
+  const tw::ExecutionContext unlisted{0, tw::Schedule::Dynamic};
 
   // Fresh model and sets: dequantization and the per-cell caches are built by
   // the racing threads.
@@ -101,8 +102,14 @@ TEST_CASE("concurrent loads and ranks agree with a serial run", "[concurrency]")
               ++failures;
             break;
           case 5: {
+            // A budget a v2 model was not trained for ranks as every CU; a
+            // schedule it does not list leaves every config unscored.
+            if (!same_results(
+                    prior_set.rank(problems[i], test_hardware(), budgeted, depth[i], &prior),
+                    expect_prior[i]))
+              ++failures;
             const std::vector<tw::Result> r =
-                prior_set.rank(problems[i], test_hardware(), budgeted, depth[i], &prior);
+                prior_set.rank(problems[i], test_hardware(), unlisted, depth[i], &prior);
             for (std::size_t j = 0; j < r.size(); ++j)
               if (r[j].scored || r[j].config_index != j) ++failures;
             break;

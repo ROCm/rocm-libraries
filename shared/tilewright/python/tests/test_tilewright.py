@@ -435,7 +435,11 @@ def test_rank_top_is_the_scored_prefix_of_rank(model, flat_model):
                     )
     cs = tw.CandidateSet(model, POOL)
     budget = tw.ExecutionContext(cu_budget=1)
-    assert cs.rank_top(_problem(), HW, 1000, context=budget) == []
+    assert cs.rank_top(_problem(), HW, 1000, context=budget) == cs.rank_top(
+        _problem(), HW, 1000
+    )
+    dynamic = tw.ExecutionContext(schedule=tw.Schedule.Dynamic)
+    assert cs.rank_top(_problem(), HW, 1000, context=dynamic) == []
     with pytest.raises(ValueError, match="prior"):
         cs.rank_top(_problem(), HW, 1, prior=[0.0])
 
@@ -604,14 +608,27 @@ def test_execution_context_and_supports(model):
     assert all(tw.supports(model, c, HW) for c in supported)
     assert not any(tw.supports(model, c, HW) for c in unsupported)
 
+    def fields(c):
+        return None if c is None else (c.cu_budget, c.schedule)
+
+    # A v2 model covers every CU only: a smaller budget is scored as every
+    # CU; a schedule it does not list is not scored.
+    budget_only, schedule_only = unsupported[:2], unsupported[2:]
+    for c in supported:
+        assert fields(tw.scoring_context(model, c, HW)) == fields(c)
+    for c in budget_only:
+        assert fields(tw.scoring_context(model, c, HW)) == (0, tw.Schedule.Default)
+    for c in schedule_only:
+        assert tw.scoring_context(model, c, HW) is None
+
     cs = tw.CandidateSet(model, POOL)
     for depth in (0, 3):
         exclusive = cs.rank(_problem(), HW, depth)
         assert any(r.scored for r in exclusive)
-        for c in supported + [None]:
+        for c in supported + budget_only + [None]:
             assert cs.rank(_problem(), HW, depth, context=c) == exclusive
             assert tw.rank_configs(model, _problem(), HW, POOL, depth, c) == exclusive
-        for c in unsupported:
+        for c in schedule_only:
             for r in (
                 cs.rank(_problem(), HW, depth, context=c),
                 tw.rank_configs(model, _problem(), HW, POOL, depth, context=c),
@@ -826,16 +843,14 @@ class _ShippedLaunch:
 
 
 def _unsupported_context(model, hw):
-    """A context the model scores nothing in, or None: MLREC_v2 models support
-    every CU with the default schedule only, MLREC_v3 models the CU fractions
-    and schedules their file declares."""
+    """A context the model scores nothing in, or None: a schedule it does not
+    list (MLREC_v2 models: the default only; MLREC_v3 models: those their file
+    declares). A CU budget alone never leaves a ranking unscored."""
     for context in (
-        tw.ExecutionContext(cu_budget=hw.N_CU // 2),
-        tw.ExecutionContext(cu_budget=1),
         tw.ExecutionContext(schedule=tw.Schedule.Dynamic),
         tw.ExecutionContext(schedule=tw.Schedule.Auto),
     ):
-        if not tw.supports(model, context, hw):
+        if tw.scoring_context(model, context, hw) is None:
             return context
     return None
 
@@ -879,3 +894,8 @@ def test_shipped_models():
         unsupported = _unsupported_context(m, hw)
         if unsupported is not None:
             assert not any(r.scored for r in cs.rank(p, hw, context=unsupported))
+        for budget in (1, hw.N_CU // 8, hw.N_CU // 2):
+            small = tw.ExecutionContext(cu_budget=budget)
+            at = tw.scoring_context(m, small, hw)
+            assert at is not None
+            assert cs.rank(p, hw, context=small) == cs.rank(p, hw, context=at)

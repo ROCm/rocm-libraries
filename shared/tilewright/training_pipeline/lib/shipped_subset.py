@@ -486,17 +486,24 @@ def _score_chunk(jobs: Sequence[ScoreJob]) -> Tuple[np.ndarray, np.ndarray, np.n
     full = np.full((len(jobs), w["n"]), np.nan, dtype=np.float32)
     cell = np.full(len(jobs), -1, dtype=np.int32)
     for j, job in enumerate(jobs):
-        ctx = w["contexts"].get(job.context)
-        if ctx is None:
-            ctx = w["contexts"][job.context] = ev.make_context(tw, job.context)
+        # The engine ranks a context with the features of its scoring context
+        # (tilewright.scoring_context: another CU budget for one outside the
+        # model's CU range only by its budget) and ranks nothing for a
+        # schedule the model does not list.
+        entry = w["contexts"].get(job.context)
+        if entry is None:
+            ctx = ev.make_context(tw, job.context)
+            at = tw.scoring_context(model, ctx, hw)
+            entry = w["contexts"][job.context] = (ctx, at)
+        ctx, at = entry
         p = ev.make_problem(tw, job.problem)
         ci = int(tw.route(model, p))
-        if ci < 0 or not tw.supports(model, ctx, hw):
+        if ci < 0 or at is None:
             continue
         cell[j] = ci
         c = w["cells"][ci]
         q = np.asarray(
-            tw.compute_features(model, p, w["rep"], hw, ctx).query, dtype=np.float32
+            tw.compute_features(model, p, w["rep"], hw, at).query, dtype=np.float32
         )
         with np.errstate(all="ignore"):
             e = (w["item_emb"][ci] @ query_embedding(c, q)) / c["t"]

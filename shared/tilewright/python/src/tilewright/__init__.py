@@ -35,6 +35,7 @@ from ._tilewright import (
     load_model_from_memory,
     rank_configs,
     route,
+    scoring_context,
     set_cache_limit,
     supports,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "load_model_from_memory",
     "rank_configs",
     "route",
+    "scoring_context",
     "set_cache_limit",
     "supports",
 ]

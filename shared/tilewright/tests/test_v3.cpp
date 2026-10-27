@@ -15,6 +15,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -1445,16 +1446,35 @@ TEST_CASE("v3 models declare the contexts they support", "[v3][context]") {
   const std::vector<tw::Config> pool = {make_config(128, 128, 64), make_config(64, 64, 64)};
   const tw::Problem p                = make_problem(1000, 2000, 512);
   const tw::CandidateSet set(m, pool);
-  CHECK(scored_indices(set.rank(p, hw, context(15, tw::Schedule::Default))).empty());
-  CHECK(scored_indices(set.rank(p, hw, context(0, tw::Schedule::Auto))).empty());
   const std::vector<tw::Result> r16 = set.rank(p, hw, context(16, tw::Schedule::Default));
   const std::vector<tw::Result> r64 = set.rank(p, hw);
   CHECK(scored_indices(r16).size() == 2);
   CHECK(scored_indices(r64).size() == 2);
   CHECK_FALSE(same_results(r16, r64));
+  // A budget below the range is scored as the smallest budget in it, bit
+  // for bit, with its own schedule; a schedule the model does not list
+  // leaves every config unscored.
+  CHECK(tw::scoring_context(*m, context(15, tw::Schedule::Default), hw)->cu_budget == 16);
+  CHECK(tw::scoring_context(*m, context(1, tw::Schedule::Dynamic), hw)->cu_budget == 16);
+  CHECK(tw::scoring_context(*m, context(1, tw::Schedule::Dynamic), hw)->schedule ==
+        tw::Schedule::Dynamic);
+  CHECK(tw::scoring_context(*m, context(64, tw::Schedule::Default), hw)->cu_budget == 64);
+  CHECK_FALSE(tw::scoring_context(*m, context(0, tw::Schedule::Auto), hw));
+  CHECK_FALSE(tw::scoring_context(*m, {}, tw::Hardware{0, 65536, 1u << 20}));
+  CHECK(same_results(set.rank(p, hw, context(15, tw::Schedule::Default)), r16));
+  CHECK(same_results(set.rank(p, hw, context(1, tw::Schedule::Default)), r16));
+  CHECK(scored_indices(set.rank(p, hw, context(0, tw::Schedule::Auto))).empty());
+  // Above the range, the largest budget in it.
+  const tw::CandidateSet partial_set(q, pool);
+  const std::vector<tw::Result> r32 = partial_set.rank(p, hw, context(32, tw::Schedule::Auto));
+  CHECK(scored_indices(r32).size() == 2);
+  CHECK(tw::scoring_context(*q, context(0, tw::Schedule::Auto), hw)->cu_budget == 32);
+  CHECK(same_results(partial_set.rank(p, hw, context(33, tw::Schedule::Auto)), r32));
+  CHECK(same_results(partial_set.rank(p, hw, context(0, tw::Schedule::Auto)), r32));
+  CHECK(scored_indices(partial_set.rank(p, hw, context(32, tw::Schedule::Default))).empty());
 }
 
-TEST_CASE("a CU floor refuses every context with fewer usable CUs, on any device",
+TEST_CASE("a CU floor raises a context with fewer usable CUs to it, or a smaller device whole",
           "[v3][context]") {
   ModelSpec plain       = v3_grid();
   plain.min_cu_fraction = 0.25;
@@ -1492,7 +1512,8 @@ TEST_CASE("a CU floor refuses every context with fewer usable CUs, on any device
   CHECK_FALSE(tw::supports(*m, context(0, tw::Schedule::Auto), device(64)));
 
   // A supported context ranks as the model without the floor does, bit for
-  // bit; any other leaves every config unscored in input order.
+  // bit; any other ranks as the floor does on that device (the whole device
+  // when it has fewer CUs than the floor), never unscored.
   std::vector<tw::Config> pool = {make_config(128, 128, 64),
                                   make_config(64, 64, 64),
                                   make_config(256, 128, 64),
@@ -1500,7 +1521,7 @@ TEST_CASE("a CU floor refuses every context with fewer usable CUs, on any device
   for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
   const tw::Problem p = make_problem(1000, 2000, 512);
   const tw::CandidateSet set(m, pool), unfloored_set(unfloored, pool);
-  std::size_t scored = 0, refused = 0;
+  std::size_t scored = 0, raised = 0;
   for (std::size_t n_cu : {64u, 32u, 16u, 15u})
     for (std::size_t budget : {0u, 8u, 15u, 16u, 20u, 31u, 48u})
       for (tw::Schedule schedule : {tw::Schedule::Default, tw::Schedule::Dynamic}) {
@@ -1510,18 +1531,108 @@ TEST_CASE("a CU floor refuses every context with fewer usable CUs, on any device
         const std::vector<tw::Result> r = set.rank(p, hw, ctx, kAll);
         CHECK(same_results(r, tw::rank_configs(*m, p, hw, ctx, pool, kAll)));
         CHECK(same_results(set.rank_top(p, hw, ctx, 2), scored_prefix(set.rank(p, hw, ctx, 2), 2)));
+        CHECK_FALSE(scored_indices(r).empty());
+        const std::optional<tw::ExecutionContext> at = tw::scoring_context(*m, ctx, hw);
+        REQUIRE(at.has_value());
+        CHECK(at->schedule == schedule);
         if (tw::supports(*m, ctx, hw)) {
           ++scored;
+          CHECK(at->cu_budget == budget);
           CHECK(same_results(r, unfloored_set.rank(p, hw, ctx, kAll)));
-          CHECK_FALSE(scored_indices(r).empty());
         } else {
-          ++refused;
-          CHECK(scored_indices(r).empty());
-          for (std::size_t i = 0; i < r.size(); ++i) CHECK(r[i].config_index == i);
+          ++raised;
+          // The floor of 16 or the fraction 0.25 of the device, whichever
+          // is more, and at most the whole device.
+          const std::size_t usable = budget > 0 && budget < n_cu ? budget : n_cu;
+          const std::size_t floor =
+              std::max<std::size_t>((n_cu + 3) / 4, std::min<std::size_t>(16, n_cu));
+          CHECK(usable <= floor);
+          CHECK(at->cu_budget == (floor < n_cu ? floor : 0));
+          CHECK(same_results(r, set.rank(p, hw, *at, kAll)));
+          CHECK(same_results(r, unfloored_set.rank(p, hw, *at, kAll)));
         }
       }
   CHECK(scored > 0);
-  CHECK(refused > 0);
+  CHECK(raised > 0);
+}
+
+// Plans every config alike, with a grid that depends on the budget of the
+// context it is asked for, and records those budgets.
+struct BudgetLaunch final : tw::LaunchModel {
+  mutable std::vector<std::size_t> budgets;
+  tw::LaunchPlan plan(const tw::Config&,
+                      const tw::Problem&,
+                      const tw::ExecutionContext& context) const override {
+    budgets.push_back(context.cu_budget);
+    return {false, 3 + context.cu_budget, tw::PartialReduction::None};
+  }
+};
+
+TEST_CASE("a CU budget outside a model's range ranks as the nearest budget it covers",
+          "[v3][context]") {
+  ModelSpec spec                     = v3_grid();
+  spec.min_cu_fraction               = 0.25;
+  spec.schedules                     = 0x3;
+  const tw::ModelPtr m               = load_spec(spec);
+  const std::vector<tw::Config> pool = variant_pool();
+  const tw::Problem p                = make_problem(4096, 2048, 512);
+  for (std::size_t n_cu : {256u, 128u, 64u, 32u, 8u, 3u}) {
+    const tw::Hardware hw{n_cu, 65536, 4u << 20};
+    const std::size_t lo = (n_cu + 3) / 4;  // the fewest usable CUs at fraction 0.25
+    const auto launch    = std::make_shared<BudgetLaunch>();
+    const tw::PoolOptions options{tw::TieBreak::PoolOrder, launch};
+    const tw::CandidateSet set(m, pool, options);
+    for (std::size_t budget = 0; budget <= n_cu + 2; ++budget)
+      for (tw::Schedule schedule : {tw::Schedule::Default, tw::Schedule::Dynamic}) {
+        INFO("device " << n_cu << " budget " << budget);
+        const tw::ExecutionContext ctx               = context(budget, schedule);
+        const std::size_t usable                     = budget > 0 && budget < n_cu ? budget : n_cu;
+        const std::optional<tw::ExecutionContext> at = tw::scoring_context(*m, ctx, hw);
+        REQUIRE(at.has_value());
+        CHECK(at->schedule == schedule);
+        if (usable >= lo) {
+          // In the range: the context itself, so the ranking is unchanged.
+          CHECK(tw::supports(*m, ctx, hw));
+          CHECK(at->cu_budget == budget);
+        } else {
+          CHECK_FALSE(tw::supports(*m, ctx, hw));
+          CHECK(at->cu_budget == lo);
+          CHECK(tw::supports(*m, *at, hw));
+        }
+        launch->budgets.clear();
+        const std::vector<tw::Result> r = set.rank(p, hw, ctx, kAll);
+        CHECK_FALSE(scored_indices(r).empty());
+        CHECK_FALSE(launch->budgets.empty());
+        // Launches are planned for the scoring context only.
+        for (std::size_t b : launch->budgets) CHECK(b == at->cu_budget);
+        CHECK(same_results(r, set.rank(p, hw, *at, kAll)));
+        CHECK(same_results(r, tw::rank_configs(*m, p, hw, ctx, pool, options, kAll)));
+        CHECK(same_results(set.rank_top(p, hw, ctx, 3), scored_prefix(set.rank(p, hw, ctx, 3), 3)));
+      }
+    // A schedule the model does not list stays unscored, at any budget.
+    for (std::size_t budget : {std::size_t{0}, std::size_t{1}, lo, n_cu}) {
+      CHECK_FALSE(tw::scoring_context(*m, context(budget, tw::Schedule::Auto), hw));
+      CHECK(scored_indices(set.rank(p, hw, context(budget, tw::Schedule::Auto), kAll)).empty());
+    }
+  }
+  CHECK_FALSE(
+      tw::scoring_context(*m, context(8, tw::Schedule::Default), tw::Hardware{0, 65536, 4u << 20}));
+
+  // A v2 model covers every CU only: every budget of the default schedule
+  // ranks as exclusive use, another schedule not at all.
+  const tw::ModelPtr v2 = load_spec(grid_model());
+  const tw::Hardware hw = test_hardware();
+  const tw::CandidateSet v2_set(v2, pool);
+  const std::vector<tw::Result> exclusive = v2_set.rank(p, hw, kAll);
+  CHECK_FALSE(scored_indices(exclusive).empty());
+  for (std::size_t budget : {1u, 15u, 63u, 64u, 100u}) {
+    INFO("budget " << budget);
+    const tw::ExecutionContext ctx = context(budget, tw::Schedule::Default);
+    CHECK(same_results(v2_set.rank(p, hw, ctx, kAll), exclusive));
+    CHECK(tw::scoring_context(*v2, ctx, hw)->cu_budget == (budget >= hw.N_CU ? budget : 0));
+  }
+  CHECK_FALSE(tw::scoring_context(*v2, context(0, tw::Schedule::Dynamic), hw));
+  CHECK(scored_indices(v2_set.rank(p, hw, context(0, tw::Schedule::Dynamic), kAll)).empty());
 }
 
 TEST_CASE("v3 soft feasibility rules apply only when the model selects them", "[v3][rules]") {

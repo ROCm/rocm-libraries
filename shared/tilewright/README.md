@@ -81,20 +81,30 @@ model unusable for the library.
 
 **Execution context.** A ranking describes where the kernels will run: the CUs
 they may use and the tile scheduling (`ExecutionContext {cu_budget, schedule}`;
-the default is exclusive use of the device with the default schedule). A model
-scores only the contexts it was trained for (`supports(model, context,
-hardware)`). MLREC_v2 models, the shipped ones included, were trained with every
-CU of the device and the default schedule: a `cu_budget` below the device's CU
-count, or a dynamic or automatic schedule, leaves every kernel unscored, and
-TensileLite then uses its Origami ranking. An MLREC_v3 model declares the range
-of usable-CU fractions (`N_eff / N_CU`, with `N_eff = cu_budget` when
-`0 < cu_budget < N_CU`, else `N_CU`) and the schedules it was trained for, and
-scores every call in them; its features describe the context. The fraction is
-relative to the device it is given, and a compute partition is a device of its
-own with fewer CUs, so a model may also declare a CU floor: the fewest usable
-CUs it was trained with. It then leaves every kernel unscored for a context of
-fewer usable CUs on any device, a small partition (whose fraction is 1) or a
-small budget inside one included.
+the default is exclusive use of the device with the default schedule).
+`supports(model, context, hardware)` tells whether a model declares a context.
+MLREC_v2 models declare every CU of the device with the default schedule, the
+context they were trained with. An MLREC_v3 model declares the range of usable-CU
+fractions (`N_eff / N_CU`, with `N_eff = cu_budget` when `0 < cu_budget <
+N_CU`, else `N_CU`) and the schedules it was trained for; its features
+describe the context. The fraction is relative to the device it is given, and
+a compute partition is a device of its own with fewer CUs, so a model may also
+declare a CU floor: the fewest usable CUs it was trained with.
+
+A CU budget never leaves a ranking unscored. A context outside the declared
+ones only by its CU budget is ranked at the nearest one the model declares on
+that device (`scoring_context(model, context, hardware)`): a budget below the
+range as the fewest usable CUs it declares (its CU floor or its smallest
+fraction of the device, whichever is more), a budget above it as the most
+(every CU, for an MLREC_v2 model). A device on which the model declares no
+context, one with fewer CUs than the floor, is ranked at the most CUs its
+largest fraction allows: the whole device, for a model that declares every
+CU. The features and launch plans of the ranking are those of that context,
+so it ranks bit for bit as a call made with it; the caller still launches the
+chosen kernel with its own budget. On a compute partition that context is one
+of the partition, which the model declares but need not have been trained on.
+A schedule the model does not list leaves every kernel unscored, and
+TensileLite then uses its Origami ranking.
 
 **Routing.** A problem maps to one of 96 base cells
 `<M tier>|<N tier>|<K tier>|<batch tier>`: M and N are `Tiny` (≤ 32), `Small`
@@ -458,9 +468,11 @@ tilewright::CandidateSet candidates(model, std::move(pool));  // reuse for every
 tilewright::Hardware hw{n_cu, lds_bytes, l2_bytes};       // queried from the device
 std::vector<tilewright::Result> ranked = candidates.rank(problem, hw, /*min_scored=*/0);
 
-// A call that runs with a CU budget or another tile schedule.
+// A call that runs with a CU budget or another tile schedule. A budget
+// outside the model's range is ranked at the nearest one in it; only a
+// schedule it does not list leaves the call to another ranking.
 tilewright::ExecutionContext context{cu_budget, tilewright::Schedule::Dynamic};
-if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
+if (!tilewright::scoring_context(*model, context, hw)) { /* use another ranking */ }
 ```
 
 - `load_model(path)`, `load_model_from_memory(data, size)`,
@@ -495,7 +507,8 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
   out of `rank`.
   `rank(problem, hardware, min_scored)` ranks for exclusive use of the device;
   `rank(problem, hardware, context, min_scored, prior)` ranks for `context`
-  (every kernel unscored unless `supports(model, context, hardware)`) and, with
+  (ranked at `scoring_context(model, context, hardware)`, every kernel unscored
+  when that has no value) and, with
   `TieBreak::Prior`, orders equal scores by `prior` (a vector with one value per
   kernel, or null; another size throws `std::invalid_argument`).
   `rank_top(problem, hardware, context, k, prior)` returns only the best `k`
@@ -583,7 +596,9 @@ when given neither cells nor a problem)
 and `rank_configs(model, problem, hardware, configs, min_scored=0, context=None,
 tie_break=TieBreak.PoolOrder, prior=None, launch=None)` take the context and tie-break
 arguments of the C++ API (`context=None` is exclusive use),
-`supports(model, context, hardware)` reports whether a model scores a context,
+`supports(model, context, hardware)` reports whether a model declares a
+context, `scoring_context(model, context, hardware)` the context it ranks one at
+(`None`: not ranked),
 `attribute_names(model)` lists the attributes it reads, and
 `set_cache_limit(bytes)`, `cache_limit()` and `cache_usage()` manage the cache
 limit.

@@ -243,10 +243,12 @@ def test_a_run_sizes_the_shares_for_the_partition_it_benches_on(
 
 @pytest.mark.parametrize("eighth", [False, True], ids=["eighth_off", "eighth_on"])
 @pytest.mark.parametrize("parts", [1, 2], ids=["whole", "half"])
-def test_serving_falls_back_below_the_smallest_trained_share(eighth, parts, config_env):
-    """The engine serves a model at every budget from the smallest one its
-    run trained up to every CU, and at none below it, on the device the
-    run benched on."""
+def test_a_model_covers_budgets_down_to_the_smallest_trained_share(
+    eighth, parts, config_env
+):
+    """A model covers every budget from the smallest one its run trained up
+    to every CU, and none below it, on the device the run benched on; the
+    engine ranks a budget below it as that smallest budget."""
     tw = pytest.importorskip("tilewright")
     from lib import evaluate as ev
     from lib import features as fs
@@ -266,16 +268,20 @@ def test_serving_falls_back_below_the_smallest_trained_share(eighth, parts, conf
         if tw.supports(model, ev.make_context(tw, fs.ExecutionContext(b)), hw)
     ]
     assert served == [0] + list(range(lowest, n_cu + 2))
+    for b in range(1, lowest):
+        at = tw.scoring_context(model, ev.make_context(tw, fs.ExecutionContext(b)), hw)
+        assert at is not None and at.cu_budget == lowest, (b, at)
     assert lowest == (GRANULE if eighth or parts > 1 else 2 * GRANULE)
 
 
 @pytest.mark.parametrize("eighth", [False, True], ids=["eighth_off", "eighth_on"])
-def test_a_smaller_device_serves_no_fewer_cus_than_the_run_trained(eighth, config_env):
+def test_a_smaller_device_covers_no_fewer_cus_than_the_run_trained(eighth, config_env):
     """On a compute partition of the bench device, which looks to the model
-    like a whole device of fewer CUs, it serves every budget and the whole
+    like a whole device of fewer CUs, it covers every budget and the whole
     partition down to the fewest CUs its run trained (its CU floor) and
-    none below, however large a share of the partition that is. Without
-    the floor only the share would count."""
+    none below, however large a share of the partition that is; the
+    engine ranks those as the floor, or as the whole partition when it has
+    fewer CUs. Without the floor only the share would count."""
     tw = pytest.importorskip("tilewright")
     from lib import evaluate as ev
     from lib import features as fs

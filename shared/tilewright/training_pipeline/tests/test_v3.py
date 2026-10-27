@@ -730,11 +730,22 @@ def test_launch_models_through_the_binding():
     defaults = [tw.LaunchPlan()] * len(kernels)
     assert tw.CandidateSet(model, configs, launch=defaults).rank(p, h) == plain
     assert plain != ranked
-    asked.clear()
-    tw.CandidateSet(model, configs, launch=launch).rank(
-        p, h, context=ev.make_context(tw, fs.ExecutionContext(cu_budget=16))
-    )
-    assert asked == []
+    # A budget below the model's range is ranked as its smallest budget: the
+    # launch model is asked for that budget only.
+    budgets = []
+
+    def budgeted(config, problem, context):
+        budgets.append(context.cu_budget)
+        return plans[config.index]
+
+    at = {
+        b: tw.CandidateSet(model, configs, launch=budgeted).rank(
+            p, h, context=ev.make_context(tw, fs.ExecutionContext(cu_budget=b))
+        )
+        for b in (16, 64)
+    }
+    assert at[16] == at[64]
+    assert budgets and set(budgets) == {64}
 
     def fails(config, problem, context):
         raise ZeroDivisionError("launch")
@@ -1005,9 +1016,10 @@ def test_ranking_through_engine_with_cu_budget():
         weight_dtype="fp32", tw=tw,
     )  # fmt: skip
     served = [r.served_by for r in evaluation.results]
-    # 16 of 256 CUs is below the model's 0.25 fraction; auto is not declared.
-    assert served == ["model", "model", "model", "origami_fallback", "origami_fallback"]
-    assert all(r.n_scored == 3 for r in evaluation.results[:3])
+    # 16 of 256 CUs is below the model's 0.25 fraction: ranked as 64 of 256;
+    # auto is not declared.
+    assert served == ["model", "model", "model", "model", "origami_fallback"]
+    assert all(r.n_scored == 3 for r in evaluation.results[:4])
 
     model = tw.load_model_from_memory(write(bundle))
     kernels = [ev._kernel(c) for c in gemms[0]["candidates"]]
@@ -1044,7 +1056,8 @@ def test_ranking_through_engine_with_cu_budget():
         mlrec.bundle_from_model(mlrec.read_model(_v2_model())), gemms[:2],
         arch="gfx950", constants=consts, hardware=HW, weight_dtype="fp32", tw=tw,
     )  # fmt: skip
-    assert [r.served_by for r in v2.results] == ["model", "origami_fallback"]
+    # A v2 model covers every CU only: a budget is ranked as every CU.
+    assert [r.served_by for r in v2.results] == ["model", "model"]
 
 
 def _v2_model():
@@ -1525,9 +1538,11 @@ def test_cu_floor_defects_are_rejected_by_reader_and_engine():
 
 
 def test_cu_floor_through_the_binding():
-    """The engine refuses a context with fewer usable CUs than the floor on
-    any device, a compute partition included, and serves the others as the
-    model without the floor does."""
+    """The engine ranks a context with fewer usable CUs than the floor on
+    any device, a compute partition included, as the floor (as the whole
+    device when it has fewer CUs than the floor), and the others as the
+    model without the floor does; a schedule it does not list stays
+    unscored."""
     tw = pytest.importorskip("tilewright")
     floored = write(v3_bundle(labels=[LARGE], contexts=FLOORED))
     model = ev.load_model_bytes(floored, tw)
@@ -1550,12 +1565,21 @@ def test_cu_floor_through_the_binding():
                 want = tw.supports(plain, tctx, hw) and usable >= 64
                 assert tw.supports(model, tctx, hw) == want, (n_cu, budget, schedule)
                 ranked = cs.rank(p, hw, 2, context=tctx)
+                at = tw.scoring_context(model, tctx, hw)
                 if want:
                     assert ranked == free.rank(p, hw, 2, context=tctx)
                     assert any(r.scored for r in ranked)
-                else:
+                elif schedule == "auto":
+                    assert at is None
                     assert not any(r.scored for r in ranked)
-    # A partition of 64 CUs is served whole; one of 32 never.
+                else:
+                    assert at is not None
+                    assert at.cu_budget == (64 if n_cu > 64 else 0), (n_cu, budget)
+                    assert ranked == cs.rank(p, hw, 2, context=at)
+                    assert ranked == free.rank(p, hw, 2, context=at)
+                    assert any(r.scored for r in ranked)
+    # The model covers a partition of 64 CUs whole, and not one of 32 (which
+    # it ranks whole, the nearest it can).
     assert tw.supports(model, ev.make_context(tw, fs.EXCLUSIVE),
                        ev.make_hardware(tw, dataclasses.replace(HW, n_cu=64)))  # fmt: skip
     assert not tw.supports(model, ev.make_context(tw, fs.EXCLUSIVE),
