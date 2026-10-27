@@ -232,7 +232,7 @@ void testReferenceEpilogue() {
          .rawOutput = ScalarType::Float32,
          .auxiliaryOutput = ScalarType::BFloat16,
          .amax = ScalarType::Float32},
-        emptyOptions, IndexRange(4, 1, std::numeric_limits<size_t>::max()), LastDimensionFastest{});
+        emptyOptions, IndexRange(4, std::numeric_limits<size_t>::max(), 1), LastDimensionFastest{});
     require(empty.output.loadAs<float>({0, 0}) == 0 && empty.rawOutput &&
                 empty.rawOutput->loadAs<float>({0, 0}) == 0 && empty.auxiliaryOutput &&
                 empty.auxiliaryOutput->loadAs<float>({0, 0}) == 0 && empty.amax &&

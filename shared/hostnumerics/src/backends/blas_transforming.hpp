@@ -179,9 +179,10 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         MatmulOptions stagedOptions(nativeScalarType<Accumulator>);
         stagedOptions.conjugateA = conjugateA;
         stagedOptions.conjugateB = conjugateB;
-        GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
-                                     stagedOptions, roc::hostnumerics::IndexRange::all(),
-                                     stagedOutput.shape().indexOrderLastDimensionFastest());
+        GemmInvocation stagedProblem(
+            std::move(stagedA), std::move(stagedB), stagedOutput, stagedOptions,
+            roc::hostnumerics::IndexRange::all(stagedOutput.elementCount()),
+            stagedOutput.shape().indexOrderLastDimensionFastest());
 
         blas.run(stagedProblem);
     }

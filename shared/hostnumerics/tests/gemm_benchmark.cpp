@@ -239,7 +239,7 @@ int main(int argc, char** argv) {
         const size_t outputElements = options.rows * options.columns;
         const IndexRange selection =
             options.selectedOutputs == 0 || options.selectedOutputs >= outputElements
-                ? IndexRange::all()
+                ? IndexRange::all(outputElements)
                 : primeIndexRange(outputElements, outputElements, options.selectedOutputs);
 
         const ptrdiff_t aLeadingDimension =
@@ -290,7 +290,7 @@ int main(int argc, char** argv) {
         }
 
         const IndexRange validationSelection =
-            selection.count(outputElements) == outputElements && outputElements > 128
+            selection.count() == outputElements && outputElements > 128
                 ? primeIndexRange(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
@@ -301,7 +301,7 @@ int main(int argc, char** argv) {
                                                validationSelection, LastDimensionFastest{});
         runScalarOracle(expectedRequest, expected);
 
-        const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);
+        const std::vector<size_t> validationIndices = validationSelection.indices();
         const double tolerance = comparisonTolerance(profile.outputType);
         ComparisonOptions comparisonOptions =
             allCloseComparisonOptions(tolerance, 2.0 * tolerance, false);

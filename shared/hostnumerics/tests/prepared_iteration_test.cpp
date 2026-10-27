@@ -189,8 +189,8 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
                       included ? input.loadAs<float>(coordinates) + 1.0f : -7.0f);
         }
     };
-    check(IndexRange::all());
-    check(IndexRange(1, 3, 5));
+    check(IndexRange::all(shape.elementCount()));
+    check(IndexRange(1, 16, 3));
     check(std::set<size_t>{1, 7, 19});
     for (const Shape& emptyOrScalar : {Shape{2, 0, 4}, Shape{}}) {
         Tensor tensor(ScalarType::Float32, emptyOrScalar);
@@ -202,7 +202,7 @@ TEST(PreparedIteration, ElementwiseSelectionUsesPermutationAndRejectsInvalidEmpt
                                       selection, invalidOrder),
                          std::runtime_error);
         };
-        checkEmpty(IndexRange::all());
+        checkEmpty(IndexRange::all(emptyOrScalar.elementCount()));
         checkEmpty(std::set<size_t>{});
     }
 }

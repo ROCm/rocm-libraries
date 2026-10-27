@@ -19,7 +19,7 @@ void testShapeVisitation() {
                     d.loadAs<float>({0, 0}) == -99 && d.loadAs<float>({1, 1}) == -99,
                 "Selected GEMM modified the wrong coordinates.");
     };
-    check(IndexRange(1, 2, 1));
+    check(IndexRange(1, 3, 2));
     check(std::set<size_t>{1});
 }
 }  // namespace hostnumerics_test

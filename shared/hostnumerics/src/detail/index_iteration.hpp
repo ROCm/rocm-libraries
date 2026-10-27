@@ -35,7 +35,7 @@ inline std::vector<size_t> reverseIndexOrder(size_t rank) {
 }
 
 inline std::function<size_t(size_t)> indexFunction(const IndexRange& range) {
-    return [first = range.first, stride = range.stride](size_t ordinal) {
+    return [first = range.start, stride = range.stride](size_t ordinal) {
         return first + ordinal * stride;
     };
 }
@@ -45,7 +45,7 @@ inline std::function<size_t(size_t)> indexFunction(const std::set<size_t>& indic
     };
 }
 inline std::optional<size_t> contiguousFirst(const IndexRange& range) {
-    return range.stride == 1 ? std::optional<size_t>{range.first} : std::nullopt;
+    return range.stride == 1 ? std::optional<size_t>{range.start} : std::nullopt;
 }
 inline std::optional<size_t> contiguousFirst(const std::set<size_t>& indices) {
     if (indices.empty()) return std::nullopt;
@@ -58,7 +58,9 @@ template <typename Invocation>
 void bindIndices(Invocation& invocation, const Shape& shape, const IndexRange& indices,
                  std::span<const size_t> order) {
     invocation.indicesOrder = validatedIndexOrder(shape.rank(), order);
-    invocation.indicesCount = indices.count(shape.elementCount());
+    const IndexRange clipped{indices.start, std::min(indices.end, shape.elementCount()),
+                             indices.stride};
+    invocation.indicesCount = clipped.count();
     invocation.indexAt = indexFunction(indices);
     if constexpr (requires { invocation.firstContiguousIndex; })
         invocation.firstContiguousIndex = contiguousFirst(indices);

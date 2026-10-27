@@ -19,7 +19,8 @@ void testComparisonProgram() {
     const auto compareEmpty = [&](const ComparisonOptions& options) {
         return compare(Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
                        Tensor::copyNativeStorage(emptyLayout, std::span<const float>(emptyStorage)),
-                       options, IndexRange::all(), std::vector<size_t>{1, 0});
+                       options, IndexRange::all(emptyLayout.shape().elementCount()),
+                       std::vector<size_t>{1, 0});
     };
     const ComparisonReport emptyResult = compareEmpty(emptyOptions);
     require(emptyResult.compared == 0 && emptyResult.allCloseEvaluated &&
@@ -38,7 +39,7 @@ void testComparisonProgram() {
     const ComparisonReport identicalResult =
         compare(Tensor::copyNativeStorage(std::span<const float>(identicalValues)),
                 Tensor::copyNativeStorage(std::span<const float>(identicalValues)), encodedEquality,
-                IndexRange::all(), LastDimensionFastest{});
+                IndexRange::all(identicalValues.size()), LastDimensionFastest{});
     require(identicalResult.passed() && identicalResult.compared == identicalValues.size() &&
                 identicalResult.matchedNaNs == 0 && identicalResult.matchedInfinities == 0,
             "Encoded-equality comparison changed all-close-only report semantics.");
@@ -96,7 +97,8 @@ void testComparisonProgram() {
         Tensor expected(type, Shape{16});
         const Tensor observed = expected.deepCopy();
         const ComparisonReport result =
-            compare(observed, expected, encodedEquality, IndexRange::all(), LastDimensionFastest{});
+            compare(observed, expected, encodedEquality, IndexRange::all(observed.elementCount()),
+                    LastDimensionFastest{});
         require(result.passed() && result.compared == expected.elementCount(),
                 "Encoded-equality comparison failed for a supported scalar type.");
     }
@@ -113,7 +115,7 @@ void testComparisonProgram() {
     const std::array<float, 1> negativeZero{-0.0f};
     require(compare(Tensor::copyNativeStorage(std::span<const float>(positiveZero)),
                     Tensor::copyNativeStorage(std::span<const float>(negativeZero)),
-                    encodedEquality, IndexRange::all(), LastDimensionFastest{})
+                    encodedEquality, IndexRange::all(positiveZero.size()), LastDimensionFastest{})
                 .passed(),
             "Encoded-equality fallback distinguished signed zeros.");
 
@@ -124,7 +126,8 @@ void testComparisonProgram() {
                                                       packedObserved),
                     Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
                                                       packedExpected),
-                    encodedEquality, IndexRange::all(), LastDimensionFastest{})
+                    encodedEquality, IndexRange::all(packedOffsetLayout.shape().elementCount()),
+                    LastDimensionFastest{})
                 .passed(),
             "Encoded-equality optimization compared packed bits outside the logical tensor.");
     const std::array<std::byte, 2> packedMismatch{std::byte{0xa5}, std::byte{0xac}};
@@ -132,7 +135,8 @@ void testComparisonProgram() {
                                                        packedMismatch),
                      Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
                                                        packedExpected),
-                     encodedEquality, IndexRange::all(), LastDimensionFastest{})
+                     encodedEquality, IndexRange::all(packedOffsetLayout.shape().elementCount()),
+                     LastDimensionFastest{})
                  .passed(),
             "Encoded-equality optimization ignored a packed logical mismatch.");
 
@@ -141,7 +145,8 @@ void testComparisonProgram() {
     const Layout paddedLayout(Shape{2, 2}, {1, 3}, 0);
     require(compare(Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedObserved)),
                     Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedExpected)),
-                    encodedEquality, IndexRange::all(), LastDimensionFastest{})
+                    encodedEquality, IndexRange::all(paddedLayout.shape().elementCount()),
+                    LastDimensionFastest{})
                 .passed(),
             "Encoded-equality optimization compared padding outside the logical tensor.");
 
@@ -187,7 +192,7 @@ void testComparisonProgram() {
         "Empty comparison accepted a Frobenius criterion without Frobenius evidence.");
     bool rejectedZeroSelectionStride = false;
     try {
-        (void)IndexRange(0, 0, std::numeric_limits<size_t>::max()), LastDimensionFastest{};
+        (void)IndexRange(0, std::numeric_limits<size_t>::max(), 0), LastDimensionFastest{};
     } catch (const std::runtime_error&) {
         rejectedZeroSelectionStride = true;
     }
@@ -233,7 +238,7 @@ void testComparisonProgram() {
     const auto selectedResult = compare(
         Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
         Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), selected,
-        IndexRange(0, 2, std::numeric_limits<size_t>::max()), std::vector<size_t>{1, 0});
+        IndexRange(0, std::numeric_limits<size_t>::max(), 2), std::vector<size_t>{1, 0});
     require(selectedResult.compared == 3 && selectedResult.mismatches == 1,
             "Selected comparison visited the wrong logical elements.");
     require(selectedResult.reportedMismatches[0].index == 4 &&
@@ -255,10 +260,10 @@ void testComparisonProgram() {
     paddedMetrics.computeFrobenius = true;
     paddedMetrics.maxReportedMismatches = 0;
 
-    const auto paddedMetricResult =
-        compare(Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
-                Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)),
-                paddedMetrics, IndexRange::all(), std::vector<size_t>{1, 0});
+    const auto paddedMetricResult = compare(
+        Tensor::copyNativeStorage(layout, std::span<const float>(observedStorage)),
+        Tensor::copyNativeStorage(layout, std::span<const float>(expectedStorage)), paddedMetrics,
+        IndexRange::all(layout.shape().elementCount()), std::vector<size_t>{1, 0});
     require(paddedMetricResult.compared == 6 && paddedMetricResult.frobeniusDifference > 0.0,
             "Regular strided comparison produced incorrect evidence.");
 
@@ -425,14 +430,14 @@ void testComparisonProgram() {
     parallelOptions.maxReportedMismatches = 3;
 
     const ComparisonReport parallelResult =
-        compare(largeObservedTensor, largeExpectedTensor, parallelOptions, IndexRange::all(),
-                std::vector<size_t>{1, 0});
+        compare(largeObservedTensor, largeExpectedTensor, parallelOptions,
+                IndexRange::all(largeObservedTensor.elementCount()), std::vector<size_t>{1, 0});
 
     ComparisonOptions serialOptions = parallelOptions;
 
     const ComparisonReport serialResult =
         compare(largeObservedTensor, largeExpectedTensor, serialOptions,
-                IndexRange(0, 1, std::numeric_limits<size_t>::max()), std::vector<size_t>{1, 0});
+                IndexRange(0, std::numeric_limits<size_t>::max(), 1), std::vector<size_t>{1, 0});
     require(parallelResult.compared == serialResult.compared &&
                 parallelResult.mismatches == serialResult.mismatches &&
                 parallelResult.matchedNaNs == serialResult.matchedNaNs &&
@@ -471,7 +476,7 @@ void testComparisonProgram() {
 
     const ComparisonReport lastDimensionParallelResult =
         compare(largeLastDimensionObserved, largeLastDimensionExpected, allCloseOnly,
-                IndexRange::all(), LastDimensionFastest{});
+                IndexRange::all(largeLastDimensionObserved.elementCount()), LastDimensionFastest{});
     require(!lastDimensionParallelResult.passed() &&
                 lastDimensionParallelResult.compared == largeComparisonElements &&
                 lastDimensionParallelResult.mismatches == 3,

@@ -95,8 +95,12 @@ namespace hipblaslt::hostnumerics
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = validation.compareAllClose ? 10 : 0;
 
-                result.comparison = compare(
-                    observed, expected, options, roc::hostnumerics::IndexRange::all(), order);
+                result.comparison
+                    = compare(observed,
+                              expected,
+                              options,
+                              roc::hostnumerics::IndexRange::all(observed.elementCount()),
+                              order);
             }
 
             if(computeUlp)
@@ -109,8 +113,12 @@ namespace hipblaslt::hostnumerics
                 options.ulpType                      = expected.type();
                 options.maxReportedMismatches        = 0;
 
-                result.unitsInLastPlace = compare(
-                    observed, expected, options, roc::hostnumerics::IndexRange::all(), order);
+                result.unitsInLastPlace
+                    = compare(observed,
+                              expected,
+                              options,
+                              roc::hostnumerics::IndexRange::all(observed.elementCount()),
+                              order);
             }
 
             if(validation.compareNorm && expected.elementCount() != 0)
@@ -135,7 +143,7 @@ namespace hipblaslt::hostnumerics
                         = compare(batchView(observed, batch),
                                   batchExpected,
                                   options,
-                                  roc::hostnumerics::IndexRange::all(),
+                                  roc::hostnumerics::IndexRange::all(batchExpected.elementCount()),
                                   batchOrder);
                     result.relativeFrobeniusError += batchReport.relativeFrobeniusError;
                 }
@@ -156,14 +164,14 @@ namespace hipblaslt::hostnumerics
                     1e-2,
                     1e-1,
                 };
-                result.allCloseTolerance
-                    = findAllCloseTolerance(observed,
-                                            expected,
-                                            candidates,
-                                            candidates,
-                                            options,
-                                            roc::hostnumerics::IndexRange::all(),
-                                            order);
+                result.allCloseTolerance = findAllCloseTolerance(
+                    observed,
+                    expected,
+                    candidates,
+                    candidates,
+                    options,
+                    roc::hostnumerics::IndexRange::all(observed.elementCount()),
+                    order);
             }
             return result;
         }
