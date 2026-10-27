@@ -796,6 +796,43 @@ void CheckFDBEntry(size_t thread_index,
             auto db         = miopen::GetDb(ctx);
             const auto solv = id.GetSolver();
 
+            // The find-db workspace must be what Find() would record for this entry, i.e. the
+            // workspace of the solution built with the perf-db config.
+            const auto check_workspace = [&](const miopen::solver::ConvSolution& solution,
+                                             const std::string& perf_cfg) {
+                miopen::FindDbData fdb_data;
+                if(!fdb_data.Deserialize(val.vals))
+                {
+                    ADD_FAILURE() << '[' << (++failures) << "] " //
+                                  << "Ill-formed find-db value fdb-key:" << kinder.first
+                                  << ", Solver: " << val.solver_id << ":" << val.vals;
+                    return;
+                }
+                if(fdb_data.workspace == solution.workspace_sz)
+                    return;
+                if(env::enabled(MIOPEN_DBSYNC_CLEAN))
+                {
+                    MIOPEN_LOG_W("Wrong workspace found fdb-key:"
+                                 << kinder.first << ", solver:" << val.solver_id << ", find-db "
+                                 << fdb_data.workspace << ", required " << solution.workspace_sz
+                                 << ", Updating entry in fdb");
+                    fdb_data.workspace = solution.workspace_sz;
+                    auto record        = miopen::DbRecord(miopen::DbKinds::FindDb, kinder.first);
+                    record.SetValues(id.ToString(), fdb_data);
+                    EXPECT_TRUE(find_db_rw.UpdateRecord(record))
+                        << '[' << (++failures) << "] " //
+                        << "Failed to update fdb-key:" << kinder.first
+                        << ", Solver: " << val.solver_id;
+                }
+                else
+                {
+                    EXPECT_EQ(fdb_data.workspace, solution.workspace_sz)
+                        << '[' << (++failures) << "] " //
+                        << "Wrong workspace fdb-key:" << kinder.first
+                        << ", Solver: " << val.solver_id << " perf config:" << perf_cfg;
+                }
+            };
+
             // Skip MLIR
             if(miopen::StartsWith(id.ToString(), "ConvMlir"))
             {
@@ -804,7 +841,8 @@ void CheckFDBEntry(size_t thread_index,
                 continue;
             }
 
-            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not solv.IsApplicable(ctx, problem))
+            const auto is_applicable = solv.IsApplicable(ctx, problem);
+            if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not is_applicable)
             {
                 MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
                              << kinder.first << ", pdb-key:" << pdb_key << ", solver:"
@@ -819,8 +857,8 @@ void CheckFDBEntry(size_t thread_index,
             }
             else
             {
-                EXPECT_TRUE(solv.IsApplicable(ctx, problem)) //
-                    << '[' << (++failures) << "] "           //
+                EXPECT_TRUE(is_applicable)         //
+                    << '[' << (++failures) << "] " //
                     << "Solver is not applicable fdb-key:" << kinder.first
                     << " Solver: " << id.ToString();
             }
@@ -885,6 +923,10 @@ void CheckFDBEntry(size_t thread_index,
                     << '[' << (++failures) << "] " //
                     << "Invalid solution fdb-key:" << kinder.first << " Solver: " << id.ToString()
                     << " perf config:" << perf_cfg;
+                // Without a perf-db entry the solution uses the default config, whose workspace
+                // may legitimately differ from the recorded one. That case is reported above.
+                if(sol.Succeeded() && pdb_entry_exists)
+                    check_workspace(sol, perf_cfg);
                 if(!SKIP_KDB_TESTING && fdb_idx == 0)
                 {
                     for(const auto& kern : sol.construction_params)
@@ -922,9 +964,20 @@ void CheckFDBEntry(size_t thread_index,
                 }
             }
             else
+            {
                 EXPECT_TRUE(!pdb_entry_exists)
                     << '[' << (++failures) << "] " //
                     << "Non-Tunable solver found in PDB" << solv.GetSolverDbId();
+                if(is_applicable)
+                {
+                    sol = solv.FindSolution(ctx, problem, db, {}, "");
+                    EXPECT_TRUE(sol.Succeeded()) << '[' << (++failures) << "] " //
+                                                 << "Invalid solution fdb-key:" << kinder.first
+                                                 << " Solver: " << id.ToString();
+                    if(sol.Succeeded())
+                        check_workspace(sol, "");
+                }
+            }
             ++fdb_idx;
         }
         if(kidx % 100 == 0)
