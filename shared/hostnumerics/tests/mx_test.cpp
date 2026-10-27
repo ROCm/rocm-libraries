@@ -477,11 +477,13 @@ TEST(MxGeneration, Behavior) {
     generate(refreshed.scales, GenerationRecipe::realOnlyLastDimensionFastest(
                                    GenerationRecipe::constant({.value = 2.0}), 0));
     refreshed.refreshReference();
-    detail::forEachIndex(refreshed.data.shape(), [&](std::span<const size_t> index, size_t) {
-        require(
-            refreshed.reference.loadAs<float>(index) == 2.0f * refreshed.data.loadAs<float>(index),
-            "MX reference refresh used stale scales.");
-    });
+    refreshed.data.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(refreshed.data.shape().elementCount()),
+        [&](size_t, std::span<const size_t> index) {
+            require(refreshed.reference.loadAs<float>(index) ==
+                        2.0f * refreshed.data.loadAs<float>(index),
+                    "MX reference refresh used stale scales.");
+        });
     refreshed.scaleIndices.storeFrom({0, 0},
                                      static_cast<uint32_t>(refreshed.scales.elementCount()));
     bool invalidScale = false;

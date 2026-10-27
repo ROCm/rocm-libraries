@@ -46,11 +46,13 @@ void appendTensorValues(nb::list& result, Tensor tensor) {
         tensor.type(), []<typename Tag>() -> LoadFunction { return &loadTensorValue<Value, Tag>; });
     const auto storage = tensor.rawEncodedBackingStorage();
     const auto& layout = tensor.layout();
-    detail::forEachIndex(tensor.shape(), [&](std::span<const size_t> indices, size_t) {
-        const auto offset = layout.elementOffset(indices);
-        if (!offset) throw std::runtime_error(offset.error().message());
-        result.append(load(storage, *offset));
-    });
+    tensor.shape().forEachCoordinateLastDimensionFastest(
+        IndexRange::all(tensor.shape().elementCount()),
+        [&](size_t, std::span<const size_t> indices) {
+            const auto offset = layout.elementOffset(indices);
+            if (!offset) throw std::runtime_error(offset.error().message());
+            result.append(load(storage, *offset));
+        });
 }
 
 nb::list tensorValues(Tensor tensor) {
