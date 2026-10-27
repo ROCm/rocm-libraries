@@ -1393,8 +1393,6 @@ private:
     /// (skv > sq + offset - L); rightBound = R keeps R keys past it (SdpaSemanticsRegister SEM-001).
     /// topLeftAlignment: if true, diagonal at skv==sq; if false, diagonal at
     /// skv==sq+(seqKv-seqQ).
-    /// Follows cuDNN: leftBound = L keeps the L keys ending at the diagonal (diagonal
-    /// included), and rightBound = R keeps R keys past it.
     static bool isMasked(int64_t sq,
                          int64_t skv,
                          int64_t seqQ,

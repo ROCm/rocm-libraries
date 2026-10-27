@@ -13,7 +13,8 @@ Supported, fully composable operation axes:
   - dtype:        bf16, fp16, fp8 (FP8_E4M3 inputs, BF16 output, per-tensor descale)
   - head dim:     hd128, hd192 (via --q-dims / --v-dims)
   - causal mask:  none, top_left, bottom_right
-  - sliding window: --window-left / --window-right
+  - sliding window: --left-bound (cuDNN / graph convention) or --window-left
+                    (FlashAttention convention), and --window-right
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
   - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
   - LSE output:   --stats (adds tensor uid=4)
@@ -61,10 +62,13 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
     compute_contiguous_strides,
     compute_forward,
     compute_lse,
+    add_left_bound_arguments,
     compute_strides,
+    resolve_left_bound,
     save_tensor_bin,
     script_sha256,
     to_physical_layout,
+    window_left_from_left_bound,
 )
 
 # Bump when generator logic changes in a way that affects emitted output: the
@@ -118,7 +122,11 @@ from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
 #          score_sum_exp_ref). Every other bundle is unchanged.
 # 1.11.0 — Added --graph-only: graph and metadata with harness input recipes, no golden data,
 #          for bundles above the RFC 0011 size budget. Every golden bundle is unchanged.
-GENERATOR_VERSION = "1.11.0"
+# 1.12.0 — --left-bound is the graph's (cuDNN) left_bound; --window-left is now FlashAttention's
+#          window_size_left (written as left_bound = W + 1). The two are mutually exclusive, and
+#          the metadata config records the graph value as left_bound (was window_left). The
+#          graph JSON and tensors for a given graph left_bound are unchanged.
+GENERATOR_VERSION = "1.12.0"
 
 # FP8 operation: OCP fp8 inputs (Q/K/V, E4M3 by default), BF16 output (or fp8 with --fp8-scaling).
 # AITER's fmha fp8 path uses OCP e4m3 (float8_e4m3fn) with a per-tensor scalar descale; mirror it.
@@ -400,7 +408,7 @@ def build_graph_json(
     stats=False,
     *,
     causal="none",
-    window_left=-1,
+    left_bound=-1,
     window_right=-1,
     emit_seq_lens=False,
     fp8=False,
@@ -549,13 +557,13 @@ def build_graph_json(
 
     # Causal / window -> bounds + diagonal alignment (non-deprecated path).
     diagonal_alignment = "BOTTOM_RIGHT" if causal == "bottom_right" else "TOP_LEFT"
-    left_bound = None
+    graph_left_bound = None
     right_bound = None
     if causal != "none":
-        left_bound = -1
+        graph_left_bound = -1
         right_bound = 0
-    if window_left >= 0:
-        left_bound = window_left
+    if left_bound >= 0:
+        graph_left_bound = left_bound
     if window_right >= 0:
         right_bound = window_right
 
@@ -605,7 +613,7 @@ def build_graph_json(
                     "causal_mask_bottom_right": False,
                     "dropout_probability": None,
                     "attn_scale_value": scale,
-                    "left_bound": left_bound,
+                    "left_bound": graph_left_bound,
                     "right_bound": right_bound,
                     "max_seq_len_kv": None,
                     "diagonal_alignment": diagonal_alignment,
@@ -666,7 +674,7 @@ def build_meta_json(config, pytorch_version):
             "head_dim_v": config["v_dims"][3],
             "dtype": config["dtype"],
             "causal": config["causal"],
-            "window_left": config["window_left"],
+            "left_bound": config["left_bound"],
             "window_right": config["window_right"],
             "group_mode": config["group_mode"],
             "seq_lens_q": config["seq_lens_q"],
@@ -745,7 +753,7 @@ def validate_against_aiter(
     golden_O,
     scale,
     causal=False,
-    window_left=-1,
+    left_bound=-1,
     window_right=-1,
     stats=False,
 ):
@@ -775,7 +783,7 @@ def validate_against_aiter(
             aiter_ver = getattr(aiter, "__version__", "unknown")
         print(f"  AITER version: {aiter_ver}")
         print(
-            f"  Args: is_causal={causal}, window=({window_left},{window_right}), "
+            f"  Args: is_causal={causal}, left_bound={left_bound}, window_right={window_right}, "
             f"return_softmax_lse={stats}"
         )
 
@@ -791,7 +799,7 @@ def validate_against_aiter(
             softmax_scale=scale,
             is_causal=causal,
             # AITER/FA count the keys left of the diagonal: window_size_left = L - 1.
-            window_size_left=window_left - 1 if window_left > 0 else window_left,
+            window_size_left=window_left_from_left_bound(left_bound),
             window_size_right=window_right,
             return_softmax_lse=stats,
             return_dropout_randval=False,
@@ -844,7 +852,7 @@ def _compute_group_forward(
     H_q,
     H_kv,
     causal,
-    window_left,
+    left_bound,
     window_right,
     seq_lens_q,
     seq_lens_kv,
@@ -870,7 +878,7 @@ def _compute_group_forward(
         q_b = Q[b : b + 1, :, :sq, :]
         k_b = K[b : b + 1, :, :skv, :]
         v_b = V[b : b + 1, :, :skv, :]
-        keep = build_mask(sq, skv, causal, window_left, window_right)
+        keep = build_mask(sq, skv, causal, left_bound, window_right)
         o_b = compute_forward(q_b, k_b, v_b, scale, H_q, H_kv, keep)
         O[b : b + 1, :, :sq, :] = o_b.to(o_torch_dtype)
         if want_lse:
@@ -884,7 +892,7 @@ def generate_forward_bundle(
     v_dims,
     dtype="bf16",
     causal="none",
-    window_left=-1,
+    left_bound=-1,
     window_right=-1,
     seq_lens_q=None,
     seq_lens_kv=None,
@@ -1030,7 +1038,7 @@ def generate_forward_bundle(
             o_json=o_json,
             dtype=dtype,
             causal=causal,
-            window_left=window_left,
+            left_bound=left_bound,
             window_right=window_right,
             stats=stats,
             seed=seed,
@@ -1049,7 +1057,7 @@ def generate_forward_bundle(
     print(f"  dtype: {dtype} (output {o_torch_dtype})")
     print(f"  H_q={H_q}, H_kv={H_kv}, GQA ratio={H_q // H_kv}")
     print(
-        f"  causal={causal}, window=({window_left},{window_right}), "
+        f"  causal={causal}, left_bound={left_bound}, window_right={window_right}, "
         f"group={has_seq_lens and not ragged}, stats={stats}"
     )
     print(f"  layout={layout}, ragged={ragged}")
@@ -1077,7 +1085,7 @@ def generate_forward_bundle(
         Q_compute, K_compute, V_compute = Q, K, V
         Q_store, K_store, V_store = Q, K, V
 
-    keep_mask = build_mask(S_q, S_kv, causal, window_left, window_right)
+    keep_mask = build_mask(S_q, S_kv, causal, left_bound, window_right)
     block_mask_t = None
     # An additive score bias the generator applies itself (block mask or ALiBi).
     extra_bias = None
@@ -1119,7 +1127,7 @@ def generate_forward_bundle(
                 H_q,
                 H_kv,
                 causal,
-                window_left,
+                left_bound,
                 window_right,
                 seq_lens_q,
                 seq_lens_kv,
@@ -1259,7 +1267,7 @@ def generate_forward_bundle(
         dtype_str=io_json,
         stats=stats,
         causal=causal,
-        window_left=window_left,
+        left_bound=left_bound,
         window_right=window_right,
         emit_seq_lens=has_seq_lens,
         fp8=is_fp8,
@@ -1294,7 +1302,7 @@ def generate_forward_bundle(
         "v_dims": v_dims,
         "dtype": dtype,
         "causal": causal,
-        "window_left": window_left,
+        "left_bound": left_bound,
         "window_right": window_right,
         "group_mode": has_seq_lens and not ragged,
         "seq_lens_q": seq_lens_q,
@@ -1338,7 +1346,7 @@ def generate_forward_bundle(
                 O,
                 attn_scale,
                 causal=(causal != "none"),
-                window_left=window_left,
+                left_bound=left_bound,
                 window_right=window_right,
                 stats=stats,
             )
@@ -1357,7 +1365,7 @@ def write_graph_only_bundle(
     o_json,
     dtype,
     causal,
-    window_left,
+    left_bound,
     window_right,
     stats,
     seed,
@@ -1385,7 +1393,7 @@ def write_graph_only_bundle(
         dtype_str=io_json,
         stats=stats,
         causal=causal,
-        window_left=window_left,
+        left_bound=left_bound,
         window_right=window_right,
         emit_seq_lens=False,
         fp8=is_fp8,
@@ -1409,7 +1417,7 @@ def write_graph_only_bundle(
         "v_dims": v_dims,
         "dtype": dtype,
         "causal": causal,
-        "window_left": window_left,
+        "left_bound": left_bound,
         "window_right": window_right,
         "group_mode": False,
         "seq_lens_q": None,
@@ -1477,13 +1485,7 @@ def main():
         help="Causal mask type. bottom_right maps to AITER mask=2; top_left is "
         "reference-only (no AITER kernel) (default: none)",
     )
-    parser.add_argument(
-        "--window-left",
-        type=int,
-        default=-1,
-        help="Sliding window left bound (cuDNN left_bound: keeps this many keys including "
-        "the diagonal; must be positive), -1 = unbounded (default: -1)",
-    )
+    add_left_bound_arguments(parser)
     parser.add_argument(
         "--window-right",
         type=int,
@@ -1586,10 +1588,7 @@ def main():
         help=f"Install aiter v{AITER_VERSION} wheel for the detected ROCm version",
     )
     args = parser.parse_args()
-    if args.window_left == 0:
-        parser.error(
-            "--window-left must be positive or -1 (hipDNN rejects left_bound = 0)"
-        )
+    left_bound = resolve_left_bound(parser, args)
 
     if args.install_aiter:
         install_aiter()
@@ -1600,7 +1599,7 @@ def main():
         v_dims=args.v_dims,
         dtype=args.dtype,
         causal=args.causal,
-        window_left=args.window_left,
+        left_bound=left_bound,
         window_right=args.window_right,
         seq_lens_q=args.seq_lens_q,
         seq_lens_kv=args.seq_lens_kv,

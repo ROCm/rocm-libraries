@@ -62,6 +62,110 @@ class TestGenerateSdpaFwdGoldenScale(unittest.TestCase):
         self.assertEqual(graph["nodes"][0]["attributes"]["attn_scale_value"], 0.25)
         self.assertEqual(meta["config"]["scale"], 0.25)
 
+    def test_window_left_is_written_as_cudnn_left_bound(self):
+        # --window-left is FlashAttention's window_size_left (W keeps W + 1 keys);
+        # the graph's left_bound follows cuDNN (L keeps L keys), so it is W + 1.
+        graph, meta = self.generate("--causal", "top_left", "--window-left", "2")
+        attributes = graph["nodes"][0]["attributes"]
+        self.assertEqual(attributes["left_bound"], 3)
+        self.assertEqual(attributes["right_bound"], 0)
+        self.assertEqual(meta["config"]["left_bound"], 3)
+
+    def test_left_bound_is_written_unchanged(self):
+        # --left-bound is the graph's (cuDNN) left_bound: the same window as --window-left 2.
+        graph, meta = self.generate("--causal", "top_left", "--left-bound", "3")
+        self.assertEqual(graph["nodes"][0]["attributes"]["left_bound"], 3)
+        self.assertEqual(meta["config"]["left_bound"], 3)
+        window_graph, _ = self.generate("--causal", "top_left", "--window-left", "2")
+        self.assertEqual(graph["nodes"], window_graph["nodes"])
+
+    def test_left_bound_one_is_diagonal_only(self):
+        graph, meta = self.generate("--left-bound", "1", "--window-right", "0")
+        self.assertEqual(graph["nodes"][0]["attributes"]["left_bound"], 1)
+        self.assertEqual(meta["config"]["left_bound"], 1)
+        window_graph, _ = self.generate("--window-left", "0", "--window-right", "0")
+        self.assertEqual(graph["nodes"], window_graph["nodes"])
+
+    def test_invalid_left_bound_flags_are_rejected(self):
+        for extra in (
+            ("--left-bound", "0"),
+            ("--left-bound", "-2"),
+            ("--window-left", "-2"),
+            ("--left-bound", "3", "--window-left", "2"),
+        ):
+            with self.subTest(extra=extra), self.assertRaises(
+                subprocess.CalledProcessError
+            ):
+                self.generate(*extra)
+
+
+def cudnn_keep_mask(torch, s_q, s_kv, diag_offset, left_bound, right_bound):
+    """cuDNN's sliding-window rule, as cudnn-frontend's own reference states it
+    (test/python/sdpa/fp16_ref.py): with rel = col - row, a key is masked when
+    rel > diag_offset + right_bound or rel <= diag_offset - left_bound. It shares no
+    code or convention with hipDNN's references, so it pins the contract from outside.
+    """
+    rows = torch.arange(s_q).view(s_q, 1)
+    cols = torch.arange(s_kv).view(1, s_kv)
+    rel = cols - rows
+    masked = torch.zeros(s_q, s_kv, dtype=torch.bool)
+    if right_bound is not None:
+        masked |= rel > diag_offset + right_bound
+    if left_bound is not None:
+        masked |= rel <= diag_offset - left_bound
+    return ~masked
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestGenerateSdpaFwdGoldenWindowMatchesCudnn(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.gen = load_generator_module()
+        # Loading the generator puts utilities/ on sys.path.
+        cls.common = importlib.import_module("sdpa_common")
+
+    def assert_matches_cudnn(self, s_q, s_kv, causal, left_bound, window_right):
+        torch = self.gen.torch
+        keep = self.gen.build_mask(s_q, s_kv, causal, left_bound, window_right)
+        diag_offset = s_kv - s_q if causal == "bottom_right" else 0
+        if window_right >= 0:
+            right_bound = window_right
+        else:
+            right_bound = 0 if causal != "none" else None
+        expected = cudnn_keep_mask(
+            torch, s_q, s_kv, diag_offset, left_bound, right_bound
+        )
+        self.assertTrue(
+            torch.equal(keep, expected),
+            f"S_q={s_q} S_kv={s_kv} causal={causal} left_bound={left_bound} "
+            f"window_right={window_right}\nbuild_mask:\n{keep.int()}\n"
+            f"cuDNN:\n{expected.int()}",
+        )
+
+    def test_left_bound_two_keeps_two_keys_including_the_diagonal(self):
+        # cuDNN: left_bound = 2, TOP_LEFT, query 5 keeps keys {4, 5}.
+        torch = self.gen.torch
+        keep = cudnn_keep_mask(torch, 6, 6, 0, 2, 0)
+        self.assertEqual(keep[5].nonzero().flatten().tolist(), [4, 5])
+        self.assertEqual(self.common.left_bound_from_window_left(1), 2)
+        self.assertEqual(self.common.left_bound_from_window_left(-1), -1)
+        self.assertEqual(self.common.window_left_from_left_bound(2), 1)
+        self.assertEqual(self.common.window_left_from_left_bound(-1), -1)
+
+    def test_causal_windows_match_cudnn(self):
+        for s_q, s_kv in ((6, 6), (4, 7), (7, 4)):
+            for causal in ("top_left", "bottom_right"):
+                for left_bound in (1, 2, 3, 6):
+                    self.assert_matches_cudnn(s_q, s_kv, causal, left_bound, -1)
+
+    def test_non_causal_windows_match_cudnn(self):
+        for s_q, s_kv in ((6, 6), (4, 7)):
+            for left_bound in (1, 2, 3, 6):
+                for window_right in (-1, 0, 2):
+                    self.assert_matches_cudnn(
+                        s_q, s_kv, "none", left_bound, window_right
+                    )
+
 
 @unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
 class TestGenerateSdpaFwdGoldenMask(unittest.TestCase):
@@ -93,12 +197,6 @@ class TestGenerateSdpaFwdGoldenMask(unittest.TestCase):
                 [True, True, True, True],
             ],
         )
-
-    def test_left_bound_keeps_that_many_keys_including_diagonal(self):
-        # cuDNN: left_bound = 2 keeps the diagonal and one key before it (query 5 -> keys 4, 5).
-        mask = self.gen.build_mask(6, 6, "top_left", 2, -1)
-        self.assertEqual([j for j in range(6) if mask[5][j]], [4, 5])
-        self.assertEqual([j for j in range(6) if mask[0][j]], [0])
 
     def test_bottom_right_causal_shifts_diagonal(self):
         mask = self.gen.build_mask(2, 4, "bottom_right", -1, -1)

@@ -1008,12 +1008,16 @@ TEST(TestSdpaFwdPlanPaged, FrontendGraphValidatesAndExecutes)
 }
 
 // The shared band rule rejects left_bound = 0 and values below -1 (hipDNN's band domain), and
-// passes positive bounds and -1 through unchanged.
+// passes positive bounds and -1 through unchanged; an unset left_bound is unbounded (-1). The
+// frontend rejects 0 too, so the graph is built raw.
 TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
 {
-    const auto extract = [](int64_t left) {
+    const auto extract = [](std::optional<int64_t> left) {
         SdpaAttributesT attrs;
-        attrs.left_bound = left;
+        if(left.has_value())
+        {
+            attrs.left_bound = *left;
+        }
         attrs.right_bound = 0;
         auto graphBuilder = makeRawSdpaFwdGraph(attrs);
         const auto* node = GetGraph(graphBuilder.GetBufferPointer())->nodes()->Get(0);
@@ -1021,6 +1025,7 @@ TEST(TestSdpaFwdPlanBand, LeftBoundZeroIsRejected)
     };
     EXPECT_EQ(extract(1).leftBound, 1);
     EXPECT_EQ(extract(-1).leftBound, -1);
+    EXPECT_EQ(extract(std::nullopt).leftBound, -1);
     EXPECT_THROW(extract(0), std::invalid_argument);
     EXPECT_THROW(extract(-2), std::invalid_argument);
 }
@@ -2212,24 +2217,6 @@ TEST(TestSdpaFwdPlanMask, BuilderAcceptsOnlyMatchingMaskDtype)
         noMaskBuilder.isApplicable(halfMaskWrapper.getNode(0), halfMaskWrapper.getTensorMap()));
     EXPECT_FALSE(
         noMaskBuilder.isApplicable(floatMaskWrapper.getNode(0), floatMaskWrapper.getTensorMap()));
-}
-
-// left_bound follows cuDNN: L keeps the L keys ending at the diagonal, so 0 keeps no key at or
-// before it, and the plans reject it. The frontend rejects it too, so the attributes are built
-// directly.
-TEST(TestSdpaDiagonalBandParams, RejectsZeroLeftBound)
-{
-    const auto bandFor = [](std::optional<int64_t> leftBound) {
-        SdpaAttributesT attrs;
-        attrs.left_bound = leftBound;
-        flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(CreateSdpaAttributes(builder, &attrs));
-        const auto* parsed = flatbuffers::GetRoot<SdpaAttributes>(builder.GetBufferPointer());
-        return extractDiagonalBandParams(*parsed, "SdpaFwdPlan");
-    };
-    EXPECT_THROW(bandFor(0), std::invalid_argument);
-    EXPECT_EQ(bandFor(1).leftBound, 1);
-    EXPECT_EQ(bandFor(std::nullopt).leftBound, -1);
 }
 
 // The runtime scale may be an ordinary FLOAT tensor (its host buffer is in the variant pack), as

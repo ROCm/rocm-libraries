@@ -37,16 +37,9 @@ public:
                               ErrorCode::INVALID_VALUE,
                               attributes.getUnsupportedReason());
 
-        // left_bound counts the diagonal key; -1 is unbounded. 0 is rejected in both directions
-        // (cuDNN's backward rejects it too).
-        HIPDNN_RETURN_IF_TRUE(
-            attributes.left_bound.has_value()
-                && (*attributes.left_bound == 0 || *attributes.left_bound < -1),
-            ErrorCode::INVALID_VALUE,
-            std::string("SdpaFwdNode: left_bound must be positive or -1 (unbounded)"));
-        HIPDNN_RETURN_IF_TRUE(attributes.right_bound.has_value() && *attributes.right_bound < -1,
-                              ErrorCode::INVALID_VALUE,
-                              std::string("SdpaFwdNode: right_bound must be >= -1"));
+        // Band domain (SdpaSemanticsRegister SEM-005): left_bound -1 or >= 1, right_bound >= -1.
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDiagonalBand(
+            attributes.left_bound, attributes.right_bound, "SdpaFwdNode"));
 
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
@@ -218,9 +211,6 @@ public:
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
-
-        // Rule 6c: left_bound follows cuDNN and must be -1 or >= 1
-        HIPDNN_CHECK_ERROR(detail::validateSdpaLeftBound(attributes.left_bound, "SdpaFwdNode"));
 
         // Rule 7: If O has dims already set, validate them
         const auto& oDims = o->get_dim();

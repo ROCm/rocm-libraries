@@ -605,10 +605,10 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
 
 // The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
 // included); the kernel's window_left follows FlashAttention (keys before the
-// diagonal), so the same window binds as L - 1. left_bound = 0 is declined.
+// diagonal), so the same window binds as L - 1. left_bound = 0 is outside hipDNN's
+// band domain (positive or -1, SEM-005), so it is declined.
 TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindowLeft)
 {
-    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
     GraphSpec spec;
     spec.leftBound = 7;
     spec.rightBound = 3;
@@ -627,16 +627,6 @@ TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindow
 
     spec.leftBound = 0;
     EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-// left_bound = 0 is outside hipDNN's band domain (positive or -1), so it is declined.
-TEST(TestGfx1151WmmaAttentionMatchers, LeftBoundZeroIsDeclined)
-{
-    GraphSpec spec;
-    spec.leftBound = 0;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-    spec.leftBound = 1;
-    EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
 // The deprecated causal flags compose with the bounds the way cuDNN's setters do

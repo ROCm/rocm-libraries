@@ -34,12 +34,13 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN:** the same for every accepted value. `left_bound` must be positive or -1 (unbounded); the frontend
   nodes, the CPU/GPU graph plans and the hip-kernel-provider band resolution reject 0 and values below -1 (SEM-005).
   - References: `CpuFpReferenceSdpa.hpp` / `CpuFpReferenceSdpaRagged.hpp` `isMasked`, `GpuRefSdpa{Fwd,RaggedFwd,Bwd}.cpp`,
-    golden generator `build_mask` (its `--window-left` is the graph's `left_bound`).
+    golden generators' `build_bound_mask` (`utilities/sdpa_common.py`; `--left-bound` is the graph's `left_bound`,
+    `--window-left` is FlashAttention's `window_size_left` and is written as `left_bound = W + 1`).
   - Kernels count the keys left of the diagonal (FlashAttention `window_size_left`), so providers convert once at the
     boundary: `asm_sdpa_engine/plans/SdpaPlanUtils.hpp` `resolveDiagonalBand` stores `left_bound - 1` (asm forward
     and backward, hip_flash2), and `Gfx1151WmmaAttentionNative.cpp` `maskFor` passes `left_bound - 1` as
     `window_left`. The gfx950 dense pack declines windows.
-  - `TestCpuFpReferenceSdpaFp64.LeftBoundCountsTheDiagonalKey` pins the count.
+  - `TestCpuFpReferenceSdpaFp64.LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn` pins the count.
 - **Other use cases:**
   - FlashAttention, AITER, AOTriton, TransformerEngine and FlashInfer: `window_left = L - 1`.
   - vLLM `sliding_window = W` keeps W keys including self, so it maps to `L = W`.

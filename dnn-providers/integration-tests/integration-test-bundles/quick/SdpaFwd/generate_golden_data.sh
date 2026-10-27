@@ -314,7 +314,7 @@ if [[ "${GENERATE_PAGED:-0}" == "1" ]]; then
         --num-heads-q 4 --num-heads-kv 2 --head-dim 64 \
         --ragged-q --seq-lens-q 6 1 4 \
         --block-size 16 --max-seq-len-kv 80 --seq-lens-kv 70 1 0 \
-        --causal bottom_right --window-left 8 --seed 42 --attn-scale "$SCALE_D64"
+        --causal bottom_right --left-bound 8 --seed 42 --attn-scale "$SCALE_D64"
 
     echo ""
 fi
@@ -347,7 +347,7 @@ if [[ "${GENERATE_SINKS:-0}" == "1" ]]; then
         --ragged-q --seq-lens-q 5 1 2 3 1 \
         --block-size 16 --max-seq-len-kv 256 --seq-lens-kv 200 33 0 3 150 \
         --interleaved-kv --shared-page-table --sinks --causal bottom_right \
-        --window-left 128 --seed 42 --attn-scale "$SCALE_D64"
+        --left-bound 128 --seed 42 --attn-scale "$SCALE_D64"
 
     # fp16 decode with LSE (the sink is part of it; an empty sequence has LSE = sink).
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/fp16/hd64_causal_paged_sinks"
@@ -420,7 +420,7 @@ if [[ "${GENERATE_REFERENCE_FEATURES:-0}" == "1" ]]; then
         --num-heads-q 8 --num-heads-kv 2 --head-dim 64 \
         --ragged-q --seq-lens-q 96 1 32 \
         --block-size 32 --max-seq-len-kv 832 --seq-lens-kv 832 300 32 \
-        --sinks --stats --causal bottom_right --window-left 128 --seed 97 \
+        --sinks --stats --causal bottom_right --left-bound 128 --seed 97 \
         --attn-scale "$SCALE_D64"
 
     echo ""

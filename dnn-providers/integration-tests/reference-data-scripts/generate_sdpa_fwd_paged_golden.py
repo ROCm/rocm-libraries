@@ -74,6 +74,7 @@ from generate_sdpa_fwd_golden import (
     UID_SEQ_LEN_KV,
     UID_SEQ_LEN_Q,
     UID_V,
+    add_left_bound_arguments,
     build_graph_json,
     build_mask,
     compute_forward,
@@ -81,6 +82,7 @@ from generate_sdpa_fwd_golden import (
     compute_strides,
     pack_ragged,
     ragged_offsets,
+    resolve_left_bound,
     save_tensor_bin,
     to_physical_layout,
 )
@@ -92,7 +94,12 @@ from generate_sdpa_fwd_golden import (
 # 1.2.0 - cuDNN's paged contract: seq_len_q always emitted (dense Q too) with
 #         padding_mask set, FLOAT sinks only (--sink-dtype removed); window bounds
 #         follow SdpaSemanticsRegister SEM-001 (left_bound = L keeps L keys)
-GENERATOR_VERSION = "1.2.0"
+# 1.3.0 - --left-bound is the graph's (cuDNN) left_bound; --window-left is now
+#         FlashAttention's window_size_left (written as left_bound = W + 1). The two
+#         are mutually exclusive, and the metadata config records the graph value as
+#         left_bound (was window_left). The graph JSON and tensors for a given graph
+#         left_bound are unchanged
+GENERATOR_VERSION = "1.3.0"
 
 UID_PAGE_TABLE_K = 12
 UID_PAGE_TABLE_V = 13
@@ -187,7 +194,7 @@ def compute_paged_forward(
     seq_lens_kv,
     scale,
     causal,
-    window_left,
+    left_bound,
     window_right,
     o_torch_dtype,
     want_lse,
@@ -220,7 +227,7 @@ def compute_paged_forward(
         q_f = Q[b : b + 1, :, :sq, :].float()
         k_f = k_b.unsqueeze(0).float()
         v_f = v_b.unsqueeze(0).float()
-        keep = build_mask(sq, skv, causal, window_left, window_right)
+        keep = build_mask(sq, skv, causal, left_bound, window_right)
         if sinks is not None:
             o_b, lse_b = compute_sink_forward(q_f, k_f, v_f, scale, keep, sinks)
             O[b : b + 1, :, :sq, :] = o_b.to(o_torch_dtype)
@@ -259,7 +266,7 @@ def compute_sink_forward(q_f, k_f, v_f, scale, keep_mask, sinks):
     return torch.matmul(probs, v_f), torch.logsumexp(logits, dim=-1, keepdim=True)
 
 
-def fully_masked_live_rows(seq_lens_q, seq_lens_kv, causal, window_left, window_right):
+def fully_masked_live_rows(seq_lens_q, seq_lens_kv, causal, left_bound, window_right):
     """(batch, row) pairs of live query rows that see no key."""
     rows = []
     for b, (sq, skv) in enumerate(zip(seq_lens_q, seq_lens_kv)):
@@ -268,7 +275,7 @@ def fully_masked_live_rows(seq_lens_q, seq_lens_kv, causal, window_left, window_
         if skv == 0:
             rows += [(b, r) for r in range(sq)]
             continue
-        keep = build_mask(sq, skv, causal, window_left, window_right)
+        keep = build_mask(sq, skv, causal, left_bound, window_right)
         if keep is not None:
             rows += [(b, int(r)) for r in torch.nonzero(~keep.any(dim=1)).flatten()]
     return rows
@@ -285,7 +292,7 @@ def build_paged_graph_json(
     dtype_str,
     stats,
     causal,
-    window_left,
+    left_bound,
     window_right,
     ragged_q,
     max_seq_len_kv,
@@ -304,7 +311,7 @@ def build_paged_graph_json(
         dtype_str=dtype_str,
         stats=stats,
         causal=causal,
-        window_left=window_left,
+        left_bound=left_bound,
         window_right=window_right,
         layout="bshd",
     )
@@ -533,7 +540,7 @@ def generate_paged_bundle(
     seq_lens_q=None,
     dtype="bf16",
     causal="bottom_right",
-    window_left=-1,
+    left_bound=-1,
     window_right=-1,
     stats=False,
     shared_page_table=False,
@@ -571,7 +578,7 @@ def generate_paged_bundle(
         # must avoid fully masked live rows.
         if stats and not sinks:
             masked = fully_masked_live_rows(
-                live_q, seq_lens_kv, causal, window_left, window_right
+                live_q, seq_lens_kv, causal, left_bound, window_right
             )
             if masked:
                 errors.append(
@@ -618,7 +625,7 @@ def generate_paged_bundle(
     )
     print(f"  seq_lens_q={live_q}, seq_lens_kv={list(seq_lens_kv)}")
     print(
-        f"  dtype={dtype}, causal={causal}, window=({window_left},{window_right}), "
+        f"  dtype={dtype}, causal={causal}, left_bound={left_bound}, window_right={window_right}, "
         f"stats={stats}, shared_page_table={shared_page_table}, "
         f"interleaved_kv={interleaved_kv}"
     )
@@ -669,7 +676,7 @@ def generate_paged_bundle(
         seq_lens_kv,
         attn_scale,
         causal,
-        window_left,
+        left_bound,
         window_right,
         io_torch,
         want_lse=stats,
@@ -748,7 +755,7 @@ def generate_paged_bundle(
         io_json,
         stats,
         causal,
-        window_left,
+        left_bound,
         window_right,
         ragged_q,
         max_seq_len_kv,
@@ -774,7 +781,7 @@ def generate_paged_bundle(
         "head_dim_v": D_v,
         "dtype": dtype,
         "causal": causal,
-        "window_left": window_left,
+        "left_bound": left_bound,
         "window_right": window_right,
         "stats": stats,
         "scale": attn_scale,
@@ -880,13 +887,7 @@ def main():
         choices=["none", "top_left", "bottom_right"],
         help="Diagonal alignment of the causal band (default: bottom_right)",
     )
-    parser.add_argument(
-        "--window-left",
-        type=int,
-        default=-1,
-        help="Sliding window left bound (cuDNN left_bound: keeps this many keys "
-        "including the diagonal), -1 = open",
-    )
+    add_left_bound_arguments(parser)
     parser.add_argument(
         "--window-right",
         type=int,
@@ -927,6 +928,7 @@ def main():
         help="Add an attention sink_token (uid 14) [1, Hq, 1, 1], N(0, 1) per head",
     )
     args = parser.parse_args()
+    left_bound = resolve_left_bound(parser, args)
 
     generate_paged_bundle(
         base_filename=args.base_filename,
@@ -942,7 +944,7 @@ def main():
         seq_lens_q=args.seq_lens_q,
         dtype=args.dtype,
         causal=args.causal,
-        window_left=args.window_left,
+        left_bound=left_bound,
         window_right=args.window_right,
         stats=args.stats,
         shared_page_table=args.shared_page_table,

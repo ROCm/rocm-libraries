@@ -260,7 +260,7 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
             "2",
             "--stats",
             "--interleaved-kv",
-            "--window-left",
+            "--left-bound",
             "3",
             *extra,
         )
@@ -470,6 +470,7 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
         self.assertEqual(config["num_blocks"], bundle.tensors[UID_K]["dims"][0])
         self.assertEqual(config["seq_lens_q"], [3, 0, 2])
         self.assertEqual(config["seq_lens_kv"], [9, 5, 2])
+        self.assertEqual(config["left_bound"], 3)
         self.assertTrue(config["shared_page_table"])
         self.assertEqual(
             config["page_table_k"],
@@ -486,6 +487,34 @@ class TestGenerateSdpaFwdPagedCli(unittest.TestCase):
             check=False,
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_window_left_is_the_flash_attention_convention(self):
+        # --window-left W (FlashAttention) is the graph's cuDNN left_bound W + 1, so
+        # --window-left 2 writes the same bundle as --left-bound 3.
+        window = self.generate(
+            "window", "--seq-q", "2", "--seq-lens-kv", "7", "3", "--window-left", "2"
+        )
+        bound = self.generate(
+            "bound", "--seq-q", "2", "--seq-lens-kv", "7", "3", "--left-bound", "3"
+        )
+        self.assertEqual(window.node, bound.node)
+        self.assertEqual(window.node["attributes"]["left_bound"], 3)
+        for uid in window.tensors:
+            if window.bin_path(uid).exists():
+                self.assertEqual(
+                    window.bin_path(uid).read_bytes(),
+                    bound.bin_path(uid).read_bytes(),
+                    f"tensor {uid}",
+                )
+
+    def test_conflicting_or_zero_left_bound_rejected(self):
+        shape = ("--seq-q", "2", "--seq-lens-kv", "7")
+        self.assert_generator_rejects(
+            "not allowed with", *shape, "--left-bound", "3", "--window-left", "2"
+        )
+        self.assert_generator_rejects(
+            "--left-bound must be positive", *shape, "--left-bound", "0"
+        )
 
     def assert_generator_rejects(self, expected_message: str, *args: str):
         completed = self.run_generator("rejected", *args)
