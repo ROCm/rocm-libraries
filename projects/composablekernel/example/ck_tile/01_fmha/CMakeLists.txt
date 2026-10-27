@@ -77,17 +77,20 @@ endif()
 
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/fmha_fwd_source_flags.cmake)
+set(FMHA_FWD_CODEGEN_RECEIPT 0 CACHE STRING "Codegen receipt for FMHA forward instances")
+set(FMHA_BWD_CODEGEN_RECEIPT 3 CACHE STRING "Codegen receipt for FMHA backward instances")
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api ${FMHA_FWD_APIS}
   --optdim ${FMHA_FWD_OPTDIM}
+  --receipt ${FMHA_FWD_CODEGEN_RECEIPT}
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api bwd
-  --receipt 3
+  --receipt ${FMHA_BWD_CODEGEN_RECEIPT}
   --optdim 32,64,96,128,256
   # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
 )
