@@ -308,6 +308,15 @@ TEST(CustomKernelTest, ScaleStrideIsCompactNotPadded)
     }
 }
 
+// The batch stride is the same rule as the row stride. A packed caller gets
+// the product of the unpadded scale sizes; K=128 and M=64 give 4 * 64.
+TEST(CustomKernelTest, ScaleBatchStrideFollowsTheCallerBuffer)
+{
+    auto problem = mxScaleProblem(64, 64, 128, /*transA*/ true, /*transB*/ false);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem), 4 * 64);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem), 4 * 64);
+}
+
 // The packed pitch is for callers whose scale buffer really is packed. The
 // TensileLite benchmark client is not one of them: DataInitialization allocates the
 // MX scale tensor straight from the padded descriptor and restrides the canonical
