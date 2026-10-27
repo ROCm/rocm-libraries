@@ -19,9 +19,11 @@
 #   case 7  5x5 F(3x3,5x5), groups 4, dilation 2, bf16 I/O     gfx950
 #   case 8  1x11 6s2, C = K = 33 (odd: vec 1), dilation 3      gfx1250
 #   case 9  1x3 F(2,3), vec 2, N = 3                           gfx1250
-#   30      rejected by both engines: stride 2
-#   31      rejected by both engines: F(4,11) single segment (no default points)
-#   32      rejected by both engines: segments along H
+#   case 10 1x5 F(4,5) (the selector's only 1x5 variant)       gfx1250
+#   case 11 5x1 F(4,5), bf16 I/O, dilation 2                   gfx1250
+#   60      rejected by both engines: stride 2
+#   61      rejected by both engines: F(4,11) single segment (no default points)
+#   62      rejected by both engines: segments along H
 from _emit_common import run_emit
 from kernels.common._conv_implicit_gemm_common import ConvProblem as P
 from kernels.common.conv_winograd_gen import (
@@ -76,17 +78,23 @@ def _case(i: int):
     if i == 9:
         p = P(N=3, Hi=1, Wi=40, C=64, K=32, Y=1, X=3, pW=1)
         return p, ONE, A(2, 3), dict(vec=2), "gfx1250"
+    if i == 10:
+        p = P(N=2, Hi=1, Wi=130, C=64, K=64, Y=1, X=5, pW=2)
+        return p, ONE, A(4, 5), {}, "gfx1250"
+    if i == 11:
+        p = P(N=1, Hi=60, Wi=3, C=32, K=64, Y=5, X=1, pH=4, dH=2)
+        return p, A(4, 5), ONE, dict(io_dtype="bf16"), "gfx1250"
     return None
 
 
 def _spec(idx: int):
-    if idx == 30:
+    if idx == 60:
         p = P(N=1, Hi=1, Wi=64, C=64, K=64, Y=1, X=3, pW=1, sW=2)
         return (WinogradGenSpec(p, ONE, A(2, 3)), "K1"), "gfx1250"
-    if idx == 31:
+    if idx == 61:
         p = P(N=1, Hi=1, Wi=64, C=64, K=64, Y=1, X=11, pW=5)
         return (WinogradGenSpec(p, ONE, A(4, 11)), "K2"), "gfx1250"
-    if idx == 32:
+    if idx == 62:
         p = P(N=1, Hi=20, Wi=20, C=64, K=64, Y=5, X=5, pH=2, pW=2)
         return (WinogradGenSpec(p, A(3, 5, 2), A(2, 5)), "K4"), "gfx1250"
     case = _case(idx // 3)

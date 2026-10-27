@@ -4843,9 +4843,9 @@ def cases():
         )
 
     # --- conv_winograd_gen: generalized Winograd forward transforms ---
-    # K1 filter / K2 input / K4 output transforms of a segmented 1-D filter
-    # and a grouped 5x5 one. The full matrix (and the C++ twin) lives in
-    # library/tests/parity/conv_winograd_gen_emit.*.
+    # K1 filter / K2 input / K4 output transforms of a segmented 1-D filter,
+    # a grouped 5x5 one and the 1x5 / 5x1 F(4,5). The full matrix (and the
+    # C++ twin) lives in library/tests/parity/conv_winograd_gen_emit.*.
     def build_winograd_gen_case(stage, prob, ay, ax, **spec_kw):
         def _build():
             from kernels.common import conv_winograd_gen as G
@@ -4868,10 +4868,18 @@ def cases():
 
     _wg_1x11 = dict(N=2, Hi=1, Wi=200, C=64, K=64, Y=1, X=11, pW=5)
     _wg_5x5 = dict(N=1, Hi=20, Wi=20, C=64, K=64, Y=5, X=5, pH=2, pW=2, groups=2)
+    # F(4,5): the selector's only 1x5 / 5x1 variant. K1 / K2 / K4 pin its
+    # G / B^T / A^T respectively.
+    _wg_1x5 = dict(N=2, Hi=1, Wi=130, C=64, K=64, Y=1, X=5, pW=2)
+    _wg_5x1 = dict(N=1, Hi=60, Wi=3, C=32, K=64, Y=5, X=1, pH=4, dH=2)
     for _case_id, _stage, _prob, _ay, _ax, _kw in (
         ("1x11_6s2_k1", "K1", _wg_1x11, (1, 1), (6, 11, 2), {}),
         ("1x11_6s2_k2", "K2", _wg_1x11, (1, 1), (6, 11, 2), {}),
         ("5x5_f2_g2_bf16_k4", "K4", _wg_5x5, (2, 5), (2, 5), dict(io_dtype="bf16")),
+        ("1x5_f4_k1", "K1", _wg_1x5, (1, 1), (4, 5), {}),
+        ("1x5_f4_k2", "K2", _wg_1x5, (1, 1), (4, 5), {}),
+        ("1x5_f4_k4", "K4", _wg_1x5, (1, 1), (4, 5), {}),
+        ("5x1_f4_d2_bf16_k2", "K2", _wg_5x1, (4, 5), (1, 1), dict(io_dtype="bf16")),
     ):
         add(
             "conv_winograd_gen",

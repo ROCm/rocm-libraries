@@ -49,18 +49,26 @@ GEN_CASES = [
     # (cmd, variants)
     (_cmd(2, 32, 32, 1, 203, 1, 11, 0, 15, 1, 3), "4s3,6s2,2"),
     (_cmd(1, 64, 32, 1, 301, 1, 7, 0, 15, 1, 5), "4,4s2,2"),
-    (_cmd(2, 32, 48, 1, 97, 1, 3, 0, 1, 1, 1), "4,6,8"),
+    (_cmd(2, 32, 48, 1, 97, 1, 3, 0, 1, 1, 1), "4,6"),
     (_cmd(2, 48, 64, 13, 11, 5, 5, 2, 2, 1, 1), "2x2,3x3"),
     (_cmd(2, 32, 32, 17, 17, 7, 1, 3, 0, 1, 1), "4,2"),
+    # F(4,5): the selector's only variant for 1x5 and 5x1 filters.
+    (_cmd(2, 64, 48, 1, 157, 1, 5, 0, 2, 1, 1), "4"),
+    (_cmd(1, 32, 64, 61, 3, 5, 1, 4, 0, 2, 1), "4"),
+]
+
+# Toom-Cook table shapes not exposed by the selector (conv_winograd_select
+# never picks them), kept so their table entries stay numerically checked.
+UNSELECTED_CASES = [
+    # F(8,3): the selector's 1x3 variants are F(6,3) / F(4,3) only.
+    (_cmd(2, 32, 48, 1, 97, 1, 3, 0, 1, 1, 1), "8"),
 ]
 
 
-@pytest.mark.parametrize("case", range(len(GEN_CASES)))
-def test_gen_pipeline(case):
+def _run_gen(cmd, variants):
     from benchmarks.common import benchmark_winograd_gen as B
 
-    cmd, variants = GEN_CASES[case]
-    rc = B.main(
+    return B.main(
         [
             "--miopen-cmd",
             cmd,
@@ -73,7 +81,16 @@ def test_gen_pipeline(case):
         ]
         + _COMMON
     )
-    assert rc == 0
+
+
+@pytest.mark.parametrize("case", range(len(GEN_CASES)))
+def test_gen_pipeline(case):
+    assert _run_gen(*GEN_CASES[case]) == 0
+
+
+@pytest.mark.parametrize("case", range(len(UNSELECTED_CASES)))
+def test_gen_table_shapes_not_exposed_by_selector(case):
+    assert _run_gen(*UNSELECTED_CASES[case]) == 0
 
 
 FUSED_CASES = [

@@ -129,3 +129,23 @@ def test_dispatch_winograd_1x11_fp16():
     for spec in kinds.values():
         err, l2 = _run(req, spec)
         assert err < _TOL, f"{spec.name}: err={err:.3e} relL2={l2:.3e}"
+
+
+@pytest.mark.parametrize(
+    "geom, dtype",
+    [
+        (dict(Hi=1, Wi=157, Y=1, X=5, pad_w=2), "fp16"),
+        (dict(Hi=61, Wi=3, Y=5, X=1, pad_h=4, dilation_h=2), "bf16"),
+    ],
+    ids=["1x5_fp16", "5x1_d2_bf16"],
+)
+def test_dispatch_winograd_f45(geom, dtype):
+    """1x5 / 5x1 filters: the selector's only variant is F(4,5) (unfused)."""
+    from dispatch.grouped_convolution import dispatch_conv_grouped
+
+    req = _request(N=2, C=64, K=48, dtype=dtype, **geom)
+    res = dispatch_conv_grouped(req)
+    plan = res.spec.plan
+    assert (plan.kind, plan.variant) == ("unfused_gen", "4")
+    err, l2 = _run(req, res.spec)
+    assert err < _TOL, f"{res.spec.name}: err={err:.3e} relL2={l2:.3e}"

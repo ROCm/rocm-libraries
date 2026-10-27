@@ -112,6 +112,18 @@ static int make_case(int i, rocke_winograd_gen_spec_t* s, const char** arch)
         s->ax_x = ax(2, 3, 1);
         s->vec = 2;
         return 0;
+    case 10:
+        s->problem = prob(2, 1, 130, 64, 64, 1, 5);
+        s->problem.pW = 2;
+        s->ax_x = ax(4, 5, 1);
+        return 0;
+    case 11:
+        s->problem = prob(1, 60, 3, 32, 64, 5, 1);
+        s->problem.pH = 4;
+        s->problem.dH = 2;
+        s->ax_y = ax(4, 5, 1);
+        s->io_dtype = "bf16";
+        return 0;
     default:
         return -1;
     }
@@ -123,20 +135,20 @@ static int make_cfg(int idx, rocke_winograd_gen_spec_t* s, const char** stage, c
     *arch = "gfx1250";
     switch(idx)
     {
-    case 30:
+    case 60:
         s->problem = prob(1, 1, 64, 64, 64, 1, 3);
         s->problem.pW = 1;
         s->problem.sW = 2;
         s->ax_x = ax(2, 3, 1);
         *stage = "K1";
         return 0;
-    case 31:
+    case 61:
         s->problem = prob(1, 1, 64, 64, 64, 1, 11);
         s->problem.pW = 5;
         s->ax_x = ax(4, 11, 1);
         *stage = "K2";
         return 0;
-    case 32:
+    case 62:
         s->problem = prob(1, 20, 20, 64, 64, 5, 5);
         s->problem.pH = 2;
         s->problem.pW = 2;
