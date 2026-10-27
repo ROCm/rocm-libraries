@@ -120,6 +120,13 @@ namespace
 
     TEST(PreswizzledScaleLayout, smoke_rejects_partial_k_block_when_k_runs_along_columns)
     {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+        // The guard lives in the generator, which the client skips over entirely when it
+        // is not built. Skipping from the callee only returns from it, so the helper's
+        // FAIL() would turn that skip into a failure. The other cases in this suite are
+        // refused before initialization and so do not need this.
+        GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON";
+#else
         Arguments arg{};
         arg.init();
         arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
@@ -136,6 +143,7 @@ namespace
         // check, while the reference indexes a 64 by 2 grid. The shape itself is refused.
         expect_preswizzled_fp4_error(
             arg, "GFX950 scales with K along the columns require K to be a multiple of 32, got 33");
+#endif
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_padded_lda)
