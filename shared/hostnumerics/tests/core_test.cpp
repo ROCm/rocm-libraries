@@ -449,7 +449,7 @@ TEST(PrimeCpp, InclusiveSearchAndPrimality) {
 TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
     const Shape shape{2, 4};
     const std::array<size_t, 2> order{0, 1};
-    const IndexRange range{1, 2, 3};
+    const IndexRange range{1, 7, 2};
     const std::set<size_t> indices{5, 1, 3, 5};
     std::vector<std::vector<size_t>> ranged, explicitCoordinates;
     shape.forEachCoordinate(range, order, [&](size_t, std::span<const size_t> coordinates) {
@@ -466,7 +466,16 @@ TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
         shape.forEachCoordinate(invalid, order, [&](size_t, std::span<const size_t>) { ++calls; }),
         std::runtime_error);
     EXPECT_EQ(calls, 0);
-    EXPECT_THROW(IndexRange(0, 0, 3), std::runtime_error);
+    const IndexRange clipped{6, 12, 2};
+    EXPECT_EQ(clipped.count(), 3);
+    shape.forEachCoordinate(clipped, order, [&](size_t index, std::span<const size_t> coordinates) {
+        EXPECT_EQ(index, 6);
+        EXPECT_EQ(std::vector<size_t>(coordinates.begin(), coordinates.end()),
+                  (std::vector<size_t>{1, 2}));
+        ++calls;
+    });
+    EXPECT_EQ(calls, 1);
+    EXPECT_THROW(IndexRange(0, 3, 0), std::runtime_error);
 }
 
 TEST(ShapeVisitationCpp, ContiguousRangeCrossesAxis) {
@@ -474,7 +483,7 @@ TEST(ShapeVisitationCpp, ContiguousRangeCrossesAxis) {
     const std::array<size_t, 2> order{0, 1};
     std::vector<size_t> indices;
     std::vector<std::vector<size_t>> points;
-    shape.forEachCoordinate(IndexRange(2, 1, 3), order,
+    shape.forEachCoordinate(IndexRange(2, 5, 1), order,
                             [&](size_t index, std::span<const size_t> coordinates) {
                                 indices.push_back(index);
                                 points.emplace_back(coordinates.begin(), coordinates.end());
@@ -488,14 +497,17 @@ TEST(ShapeVisitationCpp, ChecksCompleteOrdersForEmptyWork) {
     const std::array<size_t, 1> wrongRank{0};
     size_t calls = 0;
     const auto visit = [&](size_t, std::span<const size_t>) { ++calls; };
-    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(), wrongRank, visit), std::runtime_error);
+    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(shape.elementCount()), wrongRank, visit),
+                 std::runtime_error);
     EXPECT_THROW(shape.forEachCoordinate(std::set<size_t>{}, wrongRank, visit), std::runtime_error);
     EXPECT_EQ(calls, 0);
     const std::array<size_t, 2> duplicate{0, 0};
-    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(), duplicate, visit), std::runtime_error);
+    EXPECT_THROW(shape.forEachCoordinate(IndexRange::all(shape.elementCount()), duplicate, visit),
+                 std::runtime_error);
     const Shape scalar{};
     scalar.forEachCoordinateLastDimensionFastest(
-        IndexRange::all(), [&](size_t index, std::span<const size_t> coordinates) {
+        IndexRange::all(scalar.elementCount()),
+        [&](size_t index, std::span<const size_t> coordinates) {
             EXPECT_EQ(index, 0);
             EXPECT_TRUE(coordinates.empty());
             ++calls;
@@ -506,17 +518,16 @@ TEST(ShapeVisitationCpp, ChecksCompleteOrdersForEmptyWork) {
 TEST(IndexRangeCpp, SizeBoundaries) {
     static_assert(!std::is_default_constructible_v<IndexRange>);
     const size_t maximum = std::numeric_limits<size_t>::max();
-    EXPECT_EQ(IndexRange::all().count(maximum), maximum);
-    EXPECT_EQ(IndexRange(maximum - 2, 3, maximum).indices(maximum),
-              (std::vector<size_t>{maximum - 2}));
-    EXPECT_EQ(IndexRange(1, maximum - 2, maximum).indices(maximum),
-              (std::vector<size_t>{1, maximum - 1}));
-    EXPECT_EQ(IndexRange(2, 3, 1).indices(10), (std::vector<size_t>{2}));
-    EXPECT_EQ(IndexRange(10, 1, 1).count(10), 0);
-    EXPECT_EQ(IndexRange::all().count(0), 0);
-    IndexRange invalid(0, 1, 0);
+    EXPECT_EQ(IndexRange::all(maximum).count(), maximum);
+    EXPECT_EQ(IndexRange(maximum - 2, maximum, 3).indices(), (std::vector<size_t>{maximum - 2}));
+    EXPECT_EQ(IndexRange(1, maximum, maximum - 2).indices(), (std::vector<size_t>{1, maximum - 1}));
+    EXPECT_EQ(IndexRange(2, 3, 3).indices(), (std::vector<size_t>{2}));
+    EXPECT_EQ(IndexRange(10, 10, 1).count(), 0);
+    EXPECT_EQ(IndexRange(10, 9, 1).count(), 0);
+    EXPECT_EQ(IndexRange::all(0).count(), 0);
+    IndexRange invalid(0, 0, 1);
     invalid.stride = 0;
-    EXPECT_THROW(invalid.count(0), std::runtime_error);
+    EXPECT_THROW(invalid.count(), std::runtime_error);
     EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
 }
 
