@@ -4198,6 +4198,31 @@ def _mubuf_enum_int(val: Any, default: int = 0) -> int:
     return int(val)
 
 
+def _mubuf_to_string(self) -> str:
+    """Match ``MUBUFReadInstruction::toString`` / ``MUBUFStoreInstruction::toString``.
+
+    gfx12 has no constant MUBUF soffset, so a literal ``0`` is ``null``. A real
+    vaddr without ``offen`` still needs ``offen offset:0`` or the assembler
+    reports too few operands.
+    """
+    from .base import getAsmCaps  # noqa: WPS433
+
+    vaddr = self.srcs[0] if self.srcs else None
+    saddr = self.srcs[1] if len(self.srcs) > 1 else None
+    soffset = self.srcs[2] if len(self.srcs) > 2 else None
+    soffset_str = _input_to_str(soffset) if soffset is not None else "0"
+    if not getAsmCaps().get("HasMUBUFConst", 0) and soffset_str == "0":
+        soffset_str = "null"
+    parts = [_input_to_str(self.dst), _input_to_str(vaddr), _input_to_str(saddr), soffset_str]
+    kstr = self.preStr() + " " + ", ".join(part for part in parts if part)
+    mubuf = getattr(self, "mubuf", None)
+    if mubuf is not None and hasattr(mubuf, "toString"):
+        kstr += mubuf.toString()
+    if (mubuf is None or not getattr(mubuf, "offen", False)) and not _mubuf_vaddr_is_off(vaddr):
+        kstr += " offen offset:0"
+    return self.formatWithComment(kstr)
+
+
 def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for MUBUF load shims: rocisa(dst, vaddr, saddr, soffset, mubuf, comment)."""
     if base is None:
@@ -4238,6 +4263,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
 
     cls = type(class_name, (base,), {
         "__init__": __init__,
+        "toString": _mubuf_to_string,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
         **_mem_issue_latency(latency),
@@ -4286,6 +4312,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
 
     cls = type(class_name, (base,), {
         "__init__": __init__,
+        "toString": _mubuf_to_string,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
         **_mem_issue_latency(latency),
@@ -5187,6 +5214,16 @@ def _make_tensor_load_class():
             vop3=None, comment=comment)
         self.setInst("tensor_load_to_lds")
 
+    def getArgStr(self) -> str:
+        # Native getParams drops group2 and group3 unless both are set.
+        # Printing a missing one yields the assembler operand ``None``.
+        group2 = self.srcs[1] if len(self.srcs) > 1 else None
+        group3 = self.srcs[2] if len(self.srcs) > 2 else None
+        operands = [self.dst, self.srcs[0]]
+        if group2 is not None and group3 is not None:
+            operands.extend((group2, group3))
+        return ", ".join(_input_to_str(operand) for operand in operands if operand is not None)
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         # group2/group3 are the TDM iterate-mode (TDMIterateMode) descriptors.
@@ -5211,6 +5248,7 @@ def _make_tensor_load_class():
 
     cls = type("TensorLoadToLds", (CommonInstruction,), {
         "__init__": __init__,
+        "getArgStr": getArgStr,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
         **_mem_issue_latency(1),

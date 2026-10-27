@@ -2448,6 +2448,10 @@ class TestBufferLoadInstructions(AdaptorTestCase):
                            soffset=0, comment="load")
                 self.assertIn(mnemonic, str(inst))
 
+    def test_real_vaddr_prints_offen_offset(self):
+        inst = BufferLoadB32(dst=vgpr(15), vaddr=vgpr(23), saddr=sgpr(88, 4), soffset=sgpr(24))
+        self.assertIn("buffer_load_b32 v15, v23, s[88:91], s24 offen offset:0", str(inst))
+
     def test_deepcopy(self):
         for cls, _ in _BUFFER_LOAD:
             with self.subTest(cls=cls.__name__):
@@ -2798,6 +2802,18 @@ class TestTensorLoadToLds(AdaptorTestCase):
     def test_construction(self):
         inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1), comment="tld")
         self.assertIn("tensor_load_to_lds", str(inst))
+
+    def test_absent_groups_are_omitted(self):
+        inst = TensorLoadToLds(group0=sgpr(0, 4), group1=sgpr(4, 8))
+        self.assertEqual(str(inst), "tensor_load_to_lds s[0:3], s[4:11]\n")
+
+    def test_both_iterate_groups_are_printed(self):
+        inst = TensorLoadToLds(
+            group0=sgpr(0, 4), group1=sgpr(4, 8), group2=sgpr(12, 4), group3=sgpr(16, 4),
+        )
+        self.assertEqual(
+            str(inst), "tensor_load_to_lds s[0:3], s[4:11], s[12:15], s[16:19]\n",
+        )
 
     def test_deepcopy(self):
         inst = TensorLoadToLds(group0=vgpr(0), group1=vgpr(1))
