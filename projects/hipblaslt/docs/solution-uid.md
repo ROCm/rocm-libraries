@@ -13,6 +13,28 @@ including copies from Origami. These are new records, even when they describe
 the same GPU kernel. When `TensileMergeLibrary` reuses an existing Equality
 solution with the same `SolutionNameMin`, it retains the Equality record's UID.
 
+## Solution indices and the UID
+
+A solution has three numbers:
+
+- `SolutionIndex` in logic YAML is the solution's position in that file. Every
+  file starts at 0, and the file's size table refers to solutions by this
+  position. Tuning, `TensileMergeLibrary`, and Geko renumber it when they add,
+  remove, or copy solutions.
+- The solution index used by `hipblaslt-bench --solution_index`,
+  `getIndexFromAlgo`, and `MatchTable.yaml` is not stored anywhere. Each
+  `TensileCreateLibrary` run assigns it by numbering the solutions of every
+  architecture and logic file in the build, so adding, removing, or filtering
+  logic files, or building a different set of architectures, can change it.
+- `SolutionUID` is stored with the solution record and is not derived from
+  either position. Tools that move, copy, or renumber a record keep its UID, so
+  the UID stays the same while both indices change. Generation needs no shared
+  counter: the timestamp separates UIDs drawn at different times, and the
+  random bits separate UIDs drawn in the same millisecond.
+
+A UID is stable only while the YAML keeps it. A tool that rewrites a logic
+file must carry `SolutionUID` forward instead of dropping or regenerating it.
+
 ## Identifier format
 
 ```text
