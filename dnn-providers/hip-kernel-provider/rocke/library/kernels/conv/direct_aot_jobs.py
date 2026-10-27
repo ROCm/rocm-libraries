@@ -21,10 +21,12 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
+    DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    DIRECT_WAVE_PARAMETRIC,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     direct_wgrad_fold_knobs,
@@ -225,6 +227,86 @@ WGRAD_WAVES_FIXED = (
 WGRAD_WAVES_C_WIDE = (3, 4, 6, 8, 12, 16)
 WGRAD_WAVES_K_WIDE = (1, 2, 4)
 WGRAD_HPB = (30, 60, 120)
+# Wave32 WMMA direct dgrad (direct_dgrad_wmma): (waves_c, waves_p, tiles_c,
+# tiles_p, tile_w, tile_n, ck, stages, prefetch), prefetch builds with the
+# iterative-ilp scheduler. The union of the five best configurations per
+# shape of a tuning sweep over the dense and grouped (cpg >= 8) stride-1 3x3
+# dgrad layers of the reference workloads; each binary serves any extent and
+# channel count, and the per-problem tile-efficiency check
+# (direct_spec_for_problem) drops the ones a shape would mostly pad.
+DGRAD_WMMA_KNOBS = (
+    (1, 2, 1, 4, 8, 1, 32, 3, True),
+    (1, 2, 1, 4, 16, 1, 32, 3, True),
+    (1, 2, 1, 4, 32, 1, 32, 3, True),
+    (1, 2, 4, 4, 8, 1, 64, 3, True),
+    (1, 2, 4, 4, 16, 1, 64, 2, True),
+    (1, 2, 4, 4, 16, 1, 64, 3, True),
+    (1, 4, 1, 4, 16, 1, 32, 2, True),
+    (1, 4, 1, 4, 16, 2, 32, 3, True),
+    (1, 4, 1, 4, 32, 1, 32, 3, True),
+    (1, 4, 1, 8, 16, 2, 32, 2, False),
+    (1, 4, 1, 8, 16, 2, 32, 2, True),
+    (1, 4, 2, 4, 16, 1, 32, 2, False),
+    (1, 4, 2, 8, 16, 2, 32, 2, False),
+    (1, 4, 2, 8, 16, 2, 32, 2, True),
+    (1, 4, 4, 4, 16, 1, 32, 2, True),
+    (1, 4, 4, 4, 16, 1, 64, 2, True),
+    (1, 4, 4, 4, 16, 2, 64, 2, True),
+    (1, 4, 4, 4, 32, 1, 32, 2, True),
+    (1, 4, 4, 4, 32, 2, 32, 2, True),
+    (1, 4, 4, 6, 16, 1, 32, 2, False),
+    (1, 4, 4, 6, 16, 1, 32, 2, True),
+    (1, 4, 4, 6, 16, 1, 64, 2, True),
+    (1, 4, 4, 6, 16, 2, 32, 2, True),
+    (1, 4, 4, 6, 16, 2, 64, 2, True),
+    (1, 4, 4, 6, 32, 1, 32, 2, False),
+    (1, 4, 4, 6, 32, 1, 32, 2, True),
+    (1, 4, 4, 6, 32, 1, 64, 2, True),
+    (1, 4, 4, 6, 32, 2, 64, 2, True),
+    (1, 4, 8, 4, 16, 1, 32, 2, True),
+    (1, 4, 8, 4, 32, 1, 32, 2, True),
+    (1, 4, 8, 4, 64, 1, 32, 2, True),
+    (1, 8, 1, 2, 8, 4, 32, 2, False),
+    (1, 8, 1, 2, 8, 4, 32, 2, True),
+    (1, 8, 1, 2, 8, 4, 32, 3, False),
+    (1, 8, 1, 2, 8, 4, 32, 3, True),
+    (1, 8, 1, 4, 16, 2, 32, 2, False),
+    (1, 8, 1, 4, 16, 2, 32, 2, True),
+    (1, 8, 2, 4, 16, 2, 32, 2, False),
+    (1, 8, 2, 4, 16, 2, 32, 2, True),
+    (2, 2, 2, 4, 16, 1, 64, 2, True),
+    (2, 2, 2, 4, 16, 1, 64, 3, True),
+    (2, 2, 4, 4, 8, 2, 32, 3, True),
+    (2, 2, 4, 4, 16, 1, 32, 3, True),
+    (2, 2, 4, 6, 16, 1, 32, 2, True),
+    (2, 2, 4, 6, 16, 1, 32, 3, True),
+    (2, 2, 4, 6, 32, 1, 32, 2, True),
+    (2, 2, 4, 8, 32, 1, 32, 2, True),
+    (2, 2, 4, 8, 64, 1, 32, 2, True),
+    (2, 4, 2, 4, 16, 1, 64, 2, True),
+    (2, 4, 2, 4, 16, 2, 64, 2, True),
+    (2, 4, 2, 8, 32, 1, 32, 2, True),
+    (2, 4, 4, 6, 4, 4, 32, 2, True),
+    (2, 4, 4, 6, 8, 2, 32, 2, False),
+    (2, 4, 4, 6, 8, 2, 32, 2, True),
+    (2, 4, 4, 6, 8, 4, 32, 2, True),
+    (2, 4, 4, 6, 16, 1, 32, 2, True),
+    (2, 4, 4, 6, 64, 1, 32, 2, True),
+    (2, 4, 4, 8, 16, 1, 32, 2, True),
+    (2, 4, 4, 8, 16, 2, 32, 2, True),
+    (2, 4, 4, 8, 16, 4, 32, 2, True),
+    (2, 4, 4, 8, 32, 1, 32, 2, True),
+    (2, 4, 4, 8, 32, 2, 32, 2, True),
+    (2, 4, 4, 8, 32, 4, 32, 2, True),
+    (2, 4, 4, 8, 64, 1, 32, 2, True),
+    (2, 4, 6, 4, 16, 1, 32, 2, True),
+    (2, 4, 6, 4, 16, 2, 32, 2, True),
+    (2, 4, 6, 4, 32, 1, 32, 2, True),
+    (4, 2, 2, 8, 16, 1, 32, 2, True),
+    (4, 2, 2, 8, 16, 1, 32, 3, False),
+    (4, 2, 2, 8, 16, 1, 32, 3, True),
+    (4, 2, 2, 8, 32, 1, 32, 2, True),
+)
 WGRAD_MFMA_K = (32,)
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
@@ -259,6 +341,22 @@ WGRAD_GATHER_WAVES = ((2, 1), (1, 3), (2, 3), (1, 6), (2, 2))
 WGRAD_GATHER_PREFETCH = (1, 2)
 WGRAD_GATHER_RPS = (8, 16)
 WGRAD_GATHER_BLOCKS = (256, 1024, 2048)
+# Depthwise wgrad on the batched 4x4x4 MFMA (DwWgradMfmaSpec): (4-column
+# tiles per block, images packed per tile), input rows per unit, staging
+# buffers, workgroups. Measured on gfx950 bf16 7x7 layers (ConvNeXt):
+# 16-wide tiles lead below 32 columns, 32-wide on 56x56; 7x7 images pack 2 to
+# a 20-wide or 3 to a 32-wide tile.
+WGRAD_DW_MFMA_TILES = ((4, 1), (8, 1), (5, 2), (8, 3))
+WGRAD_DW_MFMA_RPC = (7, 14, 28)
+WGRAD_DW_MFMA_PREFETCH = (1, 2)
+WGRAD_DW_MFMA_BLOCKS = (1024, 2048)
+# Grouped wgrad, 4 or 8 channels per group, on the batched 4x4x4 MFMA
+# (GroupedWgradMfmaSpec): (waves_q, wave_q4), rows per unit, staging
+# buffers, workgroups.
+WGRAD_GROUPED_MFMA_WAVES = ((4, 2), (4, 1), (2, 1), (2, 2))
+WGRAD_GROUPED_MFMA_RPC = (28, 56)
+WGRAD_GROUPED_MFMA_PREFETCH = (2, 3)
+WGRAD_GROUPED_MFMA_BLOCKS = (1024, 2048)
 
 # Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc). Its compute pass is the
 # forward kernel on the transposed problem, whose K reduction runs over the
@@ -351,6 +449,8 @@ _NONGROUPED_FILTERS = (3,)
 _WGRAD_FILTERS = (3, 5, 7)
 # Input channel counts the dense small-C gather wgrad bakes (KW * C <= 96).
 _GATHER_CHANNELS = (3, 4, 8, 16, 24, 32)
+# Channels per group (= filters per group) the 4x4x4 MFMA grouped wgrad bakes.
+_GROUPED_MFMA_CHANNELS = (4, 8)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
 # kernel bounds its rows and columns by the runtime output extents, so any
 # padding works; the rows bake the "same" padding of the symmetric dilations
@@ -563,6 +663,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         "dgrad",
         (DirectCaps(KH=3, PAD=1, stride=1, cpg=0, kpg=0),),
     ),
+    # Wave32 WMMA dgrad: stride 1, channels and groups runtime. It bounds rows
+    # and columns against the runtime extents, so it serves "valid" padding as
+    # well as "same".
+    _DGRAD_WMMA: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3)
+        ),
+    ),
     # Tiled wgrad: dense and grouped, channel counts runtime, stride 1.
     "direct_wgrad_tiled": (
         "wgrad",
@@ -590,6 +699,26 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
             for k, s in itertools.product(_DEPTHWISE_FILTERS, _STRIDES)
             for pad in _col_pads(k)
+        ),
+    ),
+    # Depthwise wgrad on the batched 4x4x4 MFMA: every depthwise filter,
+    # stride 1, C runtime (a multiple of 8).
+    "direct_wgrad_dw_mfma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+            for pad in _col_pads(k)
+        ),
+    ),
+    # Grouped wgrad with 4 or 8 channels per group (cpg = kpg baked, groups
+    # runtime), 3x3 stride 1, on the batched 4x4x4 MFMA.
+    "direct_wgrad_grouped_mfma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=c, kpg=c)
+            for c in _GROUPED_MFMA_CHANNELS
+            for pad in _col_pads(3)
         ),
     ),
     # Dense small-C wgrad, any stride: C is baked, K runtime.
@@ -785,6 +914,25 @@ def _knob_grid(
                     k_atoms=ka,
                     m_tiles=mt,
                 )
+    elif variant == _DGRAD_WMMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        for wc, wp, tc, tp, tw, tn, ck, st, pf in DGRAD_WMMA_KNOBS:
+            knobs = dict(
+                waves_c=wc,
+                waves_p=wp,
+                tiles_c=tc,
+                tiles_p=tp,
+                tile_w=tw,
+                tile_n=tn,
+                ck=ck,
+                stages=st,
+            )
+            if pf:
+                knobs.update(prefetch=True, sched="iterative-ilp")
+            yield knobs
     elif variant == "direct_wgrad_tiled":
         for (wk16, wc16, wk, wc), (pf, ru), rps, tb, un in itertools.product(
             WGRAD_TILED_WAVES,
@@ -834,6 +982,34 @@ def _knob_grid(
             WGRAD_DW_COLS_BLOCKS,
         ):
             yield dict(channels=c, strip=st, threads=th, target_blocks=tb)
+    elif variant == "direct_wgrad_dw_mfma":
+        for (qt, un), rpc, pf, tb in itertools.product(
+            WGRAD_DW_MFMA_TILES,
+            WGRAD_DW_MFMA_RPC,
+            WGRAD_DW_MFMA_PREFETCH,
+            WGRAD_DW_MFMA_BLOCKS,
+        ):
+            yield dict(
+                q_tiles=qt,
+                rows_per_chunk=rpc,
+                prefetch=pf,
+                target_blocks=tb,
+                unfold_n=un,
+            )
+    elif variant == "direct_wgrad_grouped_mfma":
+        for (wq, q4), rpc, pf, tb in itertools.product(
+            WGRAD_GROUPED_MFMA_WAVES,
+            WGRAD_GROUPED_MFMA_RPC,
+            WGRAD_GROUPED_MFMA_PREFETCH,
+            WGRAD_GROUPED_MFMA_BLOCKS,
+        ):
+            yield dict(
+                waves_q=wq,
+                wave_q4=q4,
+                rows_per_chunk=rpc,
+                prefetch=pf,
+                target_blocks=tb,
+            )
     elif variant == "direct_wgrad_gather":
         for (wk16, wk), pf, rps, tb in itertools.product(
             WGRAD_GATHER_WAVES,
@@ -1135,6 +1311,20 @@ def _dw_cols_probe_width(caps: DirectCaps, channels: int, strip: int) -> int:
     return 64
 
 
+def _dw_mfma_probe_width(caps: DirectCaps, knobs: dict) -> int:
+    """The narrowest W whose ``unfold_n`` packed images fit the depthwise
+    MFMA wgrad's column tile (W is a runtime extent, so any such width probes
+    the same binary), or 64 when none does."""
+    for w in range(1, 65):
+        wo = w + 2 * caps.PAD - caps.KH + 1
+        if wo < 1:
+            continue
+        pitch = max(wo, wo + caps.KH - 1 - caps.PAD, caps.PAD + w)
+        if knobs["unfold_n"] * pitch <= 4 * knobs["q_tiles"]:
+            return w
+    return 64
+
+
 def probe_problem(
     caps: DirectCaps,
     dtype: str = DIRECT_DTYPE,
@@ -1169,6 +1359,21 @@ def probe_problem(
             H=64,
             W=_dw_cols_probe_width(caps, knobs["channels"], knobs["strip"]),
             groups=knobs["channels"],
+            cpg=1,
+            kpg=1,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_dw_mfma" and knobs.get("unfold_n", 1) > 1:
+        # Packed images: the narrowest image ``unfold_n`` of fit the tile.
+        return DirectConvProblem(
+            N=knobs["unfold_n"],
+            H=64,
+            W=_dw_mfma_probe_width(caps, knobs),
+            groups=256,
             cpg=1,
             kpg=1,
             KH=caps.KH,
@@ -1312,8 +1517,12 @@ def _caps_jobs(
     n_raw = 0
     rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
     # The runtime-channel dgrad probe follows each knob's tile counts, the
-    # small-C depthwise wgrad's its baked channel count.
-    knob_probe = rtc_dgrad or variant == "direct_wgrad_dw_cols"
+    # small-C depthwise wgrad's its baked channel count, the depthwise MFMA
+    # wgrad's its packed images (a narrow enough image).
+    knob_probe = rtc_dgrad or variant in (
+        "direct_wgrad_dw_cols",
+        "direct_wgrad_dw_mfma",
+    )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant, arch, dtype, caps):
         n_raw += 1
@@ -1331,7 +1540,7 @@ def _caps_jobs(
             caps, knobs, arch, dtype
         ):
             continue
-        spec = make_spec(variant, probe, knobs)
+        spec = make_spec(variant, probe, knobs, wave_size)
         if not validate_spec(variant, spec, arch)[0]:
             continue
         if variant in _HALO_VARIANTS and _nongrouped_spills(spec, arch):
@@ -1411,11 +1620,17 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
-    spec = make_spec(variant, probe, job.spec_kwargs)
+    spec = make_spec(variant, probe, job.spec_kwargs, job.identity.wave_size)
     ok, why = validate_spec(variant, spec, arch)
     if not ok:
         raise ValueError(why)
-    return _build_kernel(variant, spec, arch), {}
+    # The wave size the binary is built at, which the run side checks against
+    # the identity before it derives a launch geometry from it
+    # (direct_entry_wave_reason).
+    meta = (
+        {"spec_wave_size": spec.wave_size} if variant in DIRECT_WAVE_PARAMETRIC else {}
+    )
+    return _build_kernel(variant, spec, arch), meta
 
 
 def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
@@ -1480,7 +1695,7 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         # computes (a dilated grouped kernel, say): ask the kernel's validator.
         variant = identity.algorithm
         probe = probe_problem(caps, identity.dtype_a, variant, knobs)
-        spec = make_spec(variant, probe, knobs)
+        spec = make_spec(variant, probe, knobs, identity.wave_size)
         ok, why = validate_spec(variant, spec, identity.arch)
         if not ok:
             raise LookupError(f"the direct grid cannot build this identity: {why}")
