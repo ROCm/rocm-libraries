@@ -1028,11 +1028,17 @@ void rank_in_cell(const Model& model,
   h0.resize(cell.hidden_dim);
   h2.resize(cell.hidden_dim);
 #if TW_LEVER_PREFETCH
+  // Whether rank_tier will plan the tier's keys: their launch records are
+  // then asked for during the query tower as well (below).
+  const bool prefetch_launch = tier1_is_whitelist && launch != nullptr && cat.reads_launch;
   // The configs and kernel features of the tier's keys, which only their
   // first-config indices locate, during the query tower.
   if (tier1_is_whitelist) {
     for (const std::size_t key : tier1) {
       prefetch_object(&configs[keys.first[key]], sizeof(Config));
+      // The line of its index, which locates its launch record (a Config
+      // may span three lines).
+      if (prefetch_launch) prefetch(&configs[keys.first[key]].index);
       if (x_kernel != nullptr)
         prefetch_object(x_kernel + key * cat.inter_kernel_dim,
                         cat.inter_kernel_dim * sizeof(float));
@@ -1056,6 +1062,14 @@ void rank_in_cell(const Model& model,
     x_problem.resize(cat.inter_problem_dim);
     cat.inter_problem(problem, hw, x_problem.data());
   }
+#if TW_LEVER_PREFETCH
+  // The tier's launch records (LaunchModel::prefetch), which the configs'
+  // indices locate, once those (asked for above) have had the query
+  // features' time to arrive: the records arrive during the query embedding,
+  // before rank_tier plans the tier.
+  if (prefetch_launch)
+    for (const std::size_t key : tier1) launch->prefetch(configs[keys.first[key]]);
+#endif
   query_embedding(
       k, cell, w, q_feat.data(), cat.query_dim, norm.data(), h0.data(), h2.data(), q_emb.data());
   TILEWRIGHT_STAGE_LAP(QueryTower);

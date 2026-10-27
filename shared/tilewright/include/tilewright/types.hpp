@@ -165,6 +165,14 @@ class LaunchModel {
   // refuses a launch model whose id differs from the one its model records.
   // Empty for none.
   virtual std::string id() const { return {}; }
+  // Asks the memory system for what plan() will read of `config` (its
+  // per-config record, for instance) without waiting for it. In an engine
+  // built with TW_LEVER_PREFETCH, a ranking whose first tier is a cell
+  // whitelist calls it during the query tower for the first config of each
+  // key of that tier, before it plans them, so that the misses of their
+  // records overlap. It must not change what plan() or launch_key() return,
+  // and must not throw. The default asks for nothing.
+  virtual void prefetch(const Config&) const noexcept {}
 };
 
 // Fixed per CandidateSet. Without `launch`, every config gets LaunchPlan{}

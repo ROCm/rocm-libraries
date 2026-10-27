@@ -178,6 +178,22 @@ namespace TensileLite
         throw std::runtime_error("Invalid WorkAssignment");
     }
 
+    // Asks for every cache line of the `bytes` bytes at `p` without waiting
+    // for any. A prefetch never faults and changes no value.
+    inline void prefetchLines(void const* p, size_t bytes) noexcept
+    {
+#if defined(__GNUC__) || defined(__clang__)
+        if(p == nullptr || bytes == 0)
+            return;
+        auto const end = reinterpret_cast<std::uintptr_t>(p) + bytes;
+        for(auto at = reinterpret_cast<std::uintptr_t>(p) & ~std::uintptr_t{63}; at < end; at += 64)
+            __builtin_prefetch(reinterpret_cast<void const*>(at));
+#else
+        (void)p;
+        (void)bytes;
+#endif
+    }
+
     /**
      * The problem and device of the ranking in progress on this thread. The
      * launch plans that ranking asks for are those of this problem on this
@@ -375,6 +391,15 @@ namespace TensileLite
                     return rulePlan(kernel, device, problem, context);
             }
             return resolvedPlan(config.index, scope, hardware, problem, context);
+        }
+
+        // Every line of the record plan() reads of the config's kernel
+        // (LaunchModel::prefetch); nothing for a pool position plan() would
+        // refuse.
+        void prefetch(tilewright::Config const& config) const noexcept override
+        {
+            if(config.index < m_kernels.size())
+                prefetchLines(&m_kernels[config.index], sizeof(KernelLaunch));
         }
 
         // The plan resolvePersistentSettings() launches with, which plan()
@@ -1119,6 +1144,10 @@ namespace TensileLite
                                 : datatypeToTilewrightDatatype(problem.computeInputTypeA()),
             };
             auto const&                hardware           = *device.analyticalHardware;
+            // All of it, once per ranking: the launch plans read it (origami's
+            // grid and reduction selection in rulePlan()), after the records
+            // the engine asks for ahead of them (TilewrightLaunch::prefetch).
+            prefetchLines(&hardware, sizeof(hardware));
             tilewright::Hardware const tilewrightHardware = {
                 .N_CU         = hardware.N_CU,
                 .lds_capacity = hardware.lds_capacity,

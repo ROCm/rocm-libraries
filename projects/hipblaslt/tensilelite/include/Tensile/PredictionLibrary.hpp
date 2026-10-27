@@ -284,6 +284,8 @@ namespace TensileLite
                     ranked = ranker->rank(problem, *pAMDGPU, numSolutions);
                     for(bool everyScored = false;; everyScored = true)
                     {
+                        // What the offers of this pass read, asked for at once.
+                        prefetchOffers(ranked, offeredCount, rv.size(), numSolutions, residual);
                         for(; offeredCount < ranked.size() && rv.size() != numSolutions;
                             offeredCount++)
                         {
@@ -488,6 +490,86 @@ namespace TensileLite
         mutable std::atomic<ResidualTerms const*> m_lastResidual{nullptr};
 
 #ifdef TENSILELITE_HAS_TILEWRIGHT
+        // The most offers whose records prefetchOffers() asks for at once.
+        static constexpr size_t MaxOfferPrefetch = 4;
+
+        // Asks for what considerSolution() reads of the kernels the offer loop
+        // takes next, ranked[first...], when each passes (numSolutions - found
+        // of them, at most MaxOfferPrefetch), level by level: the
+        // solution_list entries and the residual rows; the solutions'
+        // predicate pointers and the residual term lists; the predicate
+        // objects. A level's pointers are read only once the lines of the
+        // whole level before it were asked for, so that the misses of these
+        // independent heap objects overlap instead of following one another.
+        // Reads only what considerSolution() reads; writes nothing.
+        void prefetchOffers(std::vector<size_t> const& ranked,
+                            size_t                     first,
+                            size_t                     found,
+                            int                        numSolutions,
+                            ResidualTerms const*       residual) const noexcept
+        {
+            size_t count = MaxOfferPrefetch;
+            if(numSolutions > 0)
+                count = std::min(count,
+                                 static_cast<size_t>(numSolutions)
+                                     - std::min(found, static_cast<size_t>(numSolutions)));
+            if(first >= ranked.size())
+                return;
+            size_t const end     = first + std::min(count, ranked.size() - first);
+            auto const   own     = [&](size_t i) { return ranked[i] < solution_list.size(); };
+            auto const   reduced = [&](size_t position) {
+                return residual != nullptr && residual->reduced[position] != 0;
+            };
+            for(size_t i = first; i < end; i++)
+            {
+                if(!own(i))
+                    continue;
+                size_t const position = ranked[i];
+                prefetchLines(&solution_list[position], sizeof(solution_list[position]));
+                if(residual != nullptr)
+                {
+                    prefetchLines(&residual->reduced[position], 1);
+                    prefetchLines(&residual->terms[position], sizeof(residual->terms[position]));
+                }
+            }
+            for(size_t i = first; i < end; i++)
+            {
+                if(!own(i))
+                    continue;
+                size_t const position = ranked[i];
+                if(auto const* solution = solution_list[position].second.get())
+                {
+                    prefetchLines(&solution->hardwarePredicate,
+                                  sizeof(solution->hardwarePredicate));
+                    if(!reduced(position))
+                        prefetchLines(&solution->problemPredicate,
+                                      sizeof(solution->problemPredicate));
+                }
+                if(reduced(position))
+                {
+                    auto const& terms = residual->terms[position];
+                    prefetchLines(terms.data(), terms.size() * sizeof(Term const*));
+                }
+            }
+            for(size_t i = first; i < end; i++)
+            {
+                if(!own(i))
+                    continue;
+                size_t const position = ranked[i];
+                if(auto const* solution = solution_list[position].second.get())
+                {
+                    prefetchLines(solution->hardwarePredicate.get(), 64);
+                    if(!reduced(position))
+                        prefetchLines(solution->problemPredicate.get(), 64);
+                }
+                if(reduced(position))
+                {
+                    for(Term const* term : residual->terms[position])
+                        prefetchLines(term, 64);
+                }
+            }
+        }
+
         // The bank pool for the device of `hardware`. Failing to build one
         // leaves tilewright ranking solution_list alone on that device.
         typename TilewrightBank<MySolution>::Pool makeBankPool(MyProblem const& problem,
