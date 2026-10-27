@@ -2614,12 +2614,12 @@ struct FmhaBwdOGradDotOKernel
             // hdim padding only needs per-element loads when a 16-byte vector could straddle
             // the hdim boundary or start misaligned; otherwise keep the vector path.
             constexpr index_t kVec = 16 / sizeof(ODataType);
-            const bool vec_ok =
-                (kargs.hdim_v % kVec == 0) && (kargs.stride_o % kVec == 0) &&
-                (kargs.stride_do % kVec == 0) && (kargs.nhead_stride_o % kVec == 0) &&
-                (kargs.nhead_stride_do % kVec == 0) &&
-                (reinterpret_cast<uintptr_t>(o_ptr) % 16 == 0) &&
-                (reinterpret_cast<uintptr_t>(do_ptr) % 16 == 0);
+            const bool vec_ok      = (kargs.hdim_v % kVec == 0) && (kargs.stride_o % kVec == 0) &&
+                                (kargs.stride_do % kVec == 0) &&
+                                (kargs.nhead_stride_o % kVec == 0) &&
+                                (kargs.nhead_stride_do % kVec == 0) &&
+                                (reinterpret_cast<uintptr_t>(o_ptr) % 16 == 0) &&
+                                (reinterpret_cast<uintptr_t>(do_ptr) % 16 == 0);
             if(vec_ok)
                 run(number<kVec>{});
             else
@@ -2930,12 +2930,13 @@ struct FmhaBwdConvertQGradKernel
 
         const auto run = [&](auto alignment) {
             constexpr index_t kAlign = decltype(alignment)::value;
-            const auto dq_acc_dram = [&, i_nhead_ = i_nhead]() {
+            const auto dq_acc_dram   = [&, i_nhead_ = i_nhead]() {
                 if constexpr(kIsDeterministic)
                 {
                     const AccDataType* dq_acc_ptr =
                         reinterpret_cast<const AccDataType*>(kargs.dq_acc_ptr) +
-                        static_cast<long_index_t>(i_nhead_) * nhead_stride_dq_acc + batch_offset_dq_acc;
+                        static_cast<long_index_t>(i_nhead_) * nhead_stride_dq_acc +
+                        batch_offset_dq_acc;
 
                     auto dq_acc_dram_naive = make_naive_tensor_view<address_space_enum::global>(
                         dq_acc_ptr,
@@ -2943,15 +2944,17 @@ struct FmhaBwdConvertQGradKernel
                         make_tuple(split_stride_dq_acc, kargs.hdim_q, 1),
                         number<kAlign>{},
                         number<1>{});
-                    return pad_tensor_view(dq_acc_dram_naive,
-                                           make_tuple(number<1>{}, number<kM0>{}, number<kQKHeaddim>{}),
-                                           sequence<false, kPadSeqLenQ, kPadHeadDimQ>{});
+                    return pad_tensor_view(
+                        dq_acc_dram_naive,
+                        make_tuple(number<1>{}, number<kM0>{}, number<kQKHeaddim>{}),
+                        sequence<false, kPadSeqLenQ, kPadHeadDimQ>{});
                 }
                 else
                 {
                     const AccDataType* dq_acc_ptr =
                         reinterpret_cast<const AccDataType*>(kargs.dq_acc_ptr) +
-                        static_cast<long_index_t>(i_nhead_) * nhead_stride_dq_acc + batch_offset_dq_acc;
+                        static_cast<long_index_t>(i_nhead_) * nhead_stride_dq_acc +
+                        batch_offset_dq_acc;
 
                     auto dq_acc_dram_naive = make_naive_tensor_view<address_space_enum::global>(
                         dq_acc_ptr,
@@ -2992,8 +2995,8 @@ struct FmhaBwdConvertQGradKernel
                 }
             }();
 
-            auto dq_dram_window =
-                make_tile_window(dq_dram, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {i_m0, 0});
+            auto dq_dram_window = make_tile_window(
+                dq_dram, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {i_m0, 0});
 
             if constexpr(kIsDeterministic)
             {
@@ -3009,11 +3012,11 @@ struct FmhaBwdConvertQGradKernel
         {
             // keep vector loads/stores when hdim_q and strides are multiples of the vector
             constexpr index_t kVec = FmhaBwdConvertQGrad::kVecQGrad;
-            const bool vec_ok = (kargs.hdim_q % kVec == 0) && (kargs.stride_dq % kVec == 0) &&
-                                (kargs.nhead_stride_dq % kVec == 0) &&
-                                (batch_offset_dq_acc % kVec == 0) &&
-                                (reinterpret_cast<uintptr_t>(kargs.dq_acc_ptr) % 16 == 0) &&
-                                (reinterpret_cast<uintptr_t>(dq_ptr) % (kVec * sizeof(QGradDataType)) == 0);
+            const bool vec_ok =
+                (kargs.hdim_q % kVec == 0) && (kargs.stride_dq % kVec == 0) &&
+                (kargs.nhead_stride_dq % kVec == 0) && (batch_offset_dq_acc % kVec == 0) &&
+                (reinterpret_cast<uintptr_t>(kargs.dq_acc_ptr) % 16 == 0) &&
+                (reinterpret_cast<uintptr_t>(dq_ptr) % (kVec * sizeof(QGradDataType)) == 0);
             if(vec_ok)
                 run(number<kVec>{});
             else

@@ -114,7 +114,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDKDVStage()
     {
         if constexpr(kTdmStoreDKDV)
-            return 2 * kN0 * (kQKHeaddim * sizeof(KGradDataType) + kVHeaddim * sizeof(VGradDataType));
+            return 2 * kN0 *
+                   (kQKHeaddim * sizeof(KGradDataType) + kVHeaddim * sizeof(VGradDataType));
         else
             return 0;
     }
@@ -480,9 +481,10 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         auto dkdv_stage = [&]() {
             if constexpr(kTdmStoreDKDV)
             {
-                auto* stage_base = reinterpret_cast<char*>(k_lds_ptr) + GetSmemSizeDKDVStageOffset();
+                auto* stage_base =
+                    reinterpret_cast<char*>(k_lds_ptr) + GetSmemSizeDKDVStageOffset();
                 // Unpadded rows: the TDM store reads LDS densely.
-                auto dk_stage    = make_tensor_view<address_space_enum::lds>(
+                auto dk_stage = make_tensor_view<address_space_enum::lds>(
                     reinterpret_cast<KGradDataType*>(stage_base),
                     make_naive_tensor_descriptor(
                         make_tuple(number<2 * kN0>{}, number<kQKHeaddim>{}),
@@ -490,13 +492,12 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                         number<16 / sizeof(KGradDataType)>{},
                         number<1>{}));
                 auto dv_stage = make_tensor_view<address_space_enum::lds>(
-                    reinterpret_cast<VGradDataType*>(stage_base + 2 * kN0 * kQKHeaddim *
-                                                                      sizeof(KGradDataType)),
-                    make_naive_tensor_descriptor(
-                        make_tuple(number<2 * kN0>{}, number<kVHeaddim>{}),
-                        make_tuple(number<kVHeaddim>{}, number<1>{}),
-                        number<16 / sizeof(VGradDataType)>{},
-                        number<1>{}));
+                    reinterpret_cast<VGradDataType*>(stage_base +
+                                                     2 * kN0 * kQKHeaddim * sizeof(KGradDataType)),
+                    make_naive_tensor_descriptor(make_tuple(number<2 * kN0>{}, number<kVHeaddim>{}),
+                                                 make_tuple(number<kVHeaddim>{}, number<1>{}),
+                                                 number<16 / sizeof(VGradDataType)>{},
+                                                 number<1>{}));
                 return make_tuple(
                     make_tile_window(dk_stage,
                                      make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
@@ -569,13 +570,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         lse = load_tile(lse_lds_read_window);
         d   = load_tile(d_lds_read_window);
 
-        // K/V prefetch (TDM policy only). K/V live in LDS only until they are
-        // copied into k/v/kt registers at the top of each iteration, so the
-        // next tile can be issued into the same buffer right after that copy
-        // and its transfer then overlaps the whole iteration instead of being
-        // waited on at the top of the next one. No extra LDS.
-        // Q/dO share the K/V region; their register copies above completed in
-        // the WaitAllMem barriers, so tile 0 may be issued now.
         constexpr bool kPrefetchKV = Policy::kUsesTdm;
         index_t kv_tiles_issued    = 0;
         auto issue_kv_tile         = [&]() {
@@ -589,7 +583,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         };
         if constexpr(kPrefetchKV)
         {
-            // LSE/D sit inside the V region; their LDS reads must retire first.
             block_sync_lds();
             issue_kv_tile();
         }
@@ -621,9 +614,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                 }
                 if constexpr(kTdmStoreDKDV)
                 {
-                    // TENSORcnt retires in issue order and the previous tile's
-                    // two dK/dV stores were issued after this K/V tile, so they
-                    // may stay in flight.
                     if(dkdv_store_inflight)
                         Policy::template WaitBlockToLds<2>();
                     else
@@ -638,8 +628,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                 load_tile_transpose(kt_reg_tensor, kt_lds_read_window);
                 if constexpr(kPrefetchKV)
                 {
-                    // Every wave's K/V LDS reads must retire before the next
-                    // tile overwrites the buffer.
                     block_sync_lds();
                     if(kv_tiles_issued < num_total_loop)
                         issue_kv_tile();
@@ -874,9 +862,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
                 if constexpr(kTdmStoreDKDV)
                 {
-                    // The stage buffer written here was last read by the
-                    // store issued two tiles ago, which the K/V wait at the
-                    // top of this tile already retired.
                     auto& [dk_in, dk_out, dv_in, dv_out] = dkdv_stage;
                     store_tile(dk_in, CastTile<KGradDataType>(dk_acc));
                     store_tile(dv_in, CastTile<VGradDataType>(dv_acc));
@@ -901,16 +886,12 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
             }
         };
 
-        // Zero dK/dV for kv blocks [from, to) the mask skips. With the TDM store
-        // a zeroed stage buffer is written once and stored for every block.
         auto zero_dkdv = [&](index_t from, index_t to) {
             if constexpr(kTdmStoreDKDV)
             {
                 if(from >= to)
                     return;
                 auto& [dk_in, dk_out, dv_in, dv_out] = dkdv_stage;
-                // The buffer dk_in/dv_in point at may still be read by the
-                // newest dK/dV store pair.
                 s_wait_tensorcnt<0>();
                 store_tile(dk_in, CastTile<KGradDataType>(decltype(gemm_3.MakeCBlockTile()){0}));
                 store_tile(dv_in, CastTile<VGradDataType>(decltype(gemm_1.MakeCBlockTile()){0}));
@@ -923,7 +904,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                     store_tile_tdm(tdm_cfg, dv_dram_window, dv_out);
                     move_tile_window(dv_dram_window, {kN0, 0});
                 }
-                // Keep the stage free for the main loop.
                 s_wait_tensorcnt<0>();
                 block_sync_lds();
             }

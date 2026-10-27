@@ -130,12 +130,6 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy : BlockFmhaBwdPipelineTrLoadDefaultPo
                                            Problem::BlockFmhaShape::kVHeaddim>();
     }
 
-    // dS @ K^T with the transposed warp C layout: each lane owns a run of
-    // consecutive hdim elements of dQ (instead of a run of rows), so the dQ
-    // epilogue can use 16-byte stores. Only the C layout changes; the A/B
-    // register layouts are the same as the trload policy's.
-    // Transposed C only pays off when dQ can be stored as vectors; with a
-    // 1-element hdim pad keep the trload layout.
     template <typename Problem>
     static constexpr bool kDQAlongHdim = Problem::kPadHeadDimQ != 1;
 

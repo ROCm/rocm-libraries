@@ -89,17 +89,11 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
 
-    // The hand-tuned schedule below (deferred dQ atomics, K-sliced gemm_0/1/3,
-    // split dS join, metadata-first TDM issue) was tuned for the unpadded
-    // 64x128 d128 tile without bias/dropout/determinism. Every other instance
-    // (padded head dims such as d80/d96, bias, dropout, ...) keeps the
-    // original schedule: the deferred dQ tile lengthens live ranges there.
     static constexpr bool kTunedSched =
         BlockFmhaShape::kM0 == 64 && BlockFmhaShape::kN0 == 128 &&
-        BlockFmhaShape::kQKHeaddim == 128 && BlockFmhaShape::kVHeaddim == 128 &&
-        !kPadHeadDimQ && !kPadHeadDimV && !kIsDeterministic &&
-        !FmhaDropout::IsDropout && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-        !kHasBiasGrad;
+        BlockFmhaShape::kQKHeaddim == 128 && BlockFmhaShape::kVHeaddim == 128 && !kPadHeadDimQ &&
+        !kPadHeadDimV && !kIsDeterministic && !FmhaDropout::IsDropout &&
+        BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !kHasBiasGrad;
     static constexpr bool kMaskTuned   = kTunedSched && FmhaMask::IsMasking;
     static constexpr bool kNoMaskTuned = kTunedSched && !FmhaMask::IsMasking;
 
@@ -124,19 +118,10 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
     static constexpr const char* name = "tdm_kr_ktr";
 
-    // dS write-after-read across hot-loop iterations: with two or more Q/dO
-    // slots no barrier separates iteration i's dS LDS reads (slow waves) from
-    // iteration i+1's dS store (fast waves). Elementwise bias / dbias already
-    // put a workgroup barrier in front of the store. Without them:
-    //   tuned schedule  -> alternate between two dS buffers; a barrier in
-    //                      front of the store would stall the overlapped
-    //                      gemm_3 / dQ atomics.
-    //   other schedules -> a barrier in front of the store; it is nearly free
-    //                      there, while the larger LDS footprint is not.
-    static constexpr bool kDSRaceExposed =
-        Policy::template GetQDOSlots<Problem>() >= 2 &&
-        BiasEnum != BlockAttentionBiasEnum::ELEMENTWISE_BIAS && !kHasBiasGrad;
-    static constexpr bool kDSDoubleBuf = kDSRaceExposed && kTunedSched;
+    static constexpr bool kDSRaceExposed = Policy::template GetQDOSlots<Problem>() >= 2 &&
+                                           BiasEnum != BlockAttentionBiasEnum::ELEMENTWISE_BIAS &&
+                                           !kHasBiasGrad;
+    static constexpr bool kDSDoubleBuf  = kDSRaceExposed && kTunedSched;
     static constexpr bool kDSPreBarrier = kDSRaceExposed && !kDSDoubleBuf;
     static constexpr index_t kDSSecondBufOffset =
         integer_least_multiple(Policy::template GetSmemSize<Problem>(), 128);
@@ -207,7 +192,10 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     }
 
     template <index_t MSlice, typename Window, typename Tensor>
-    CK_TILE_DEVICE static void AtomicPendingQGradSlice([[maybe_unused]] Window& window, const Tensor& x, int32x4_t rsrc, index_t col)
+    CK_TILE_DEVICE static void AtomicPendingQGradSlice([[maybe_unused]] Window& window,
+                                                       const Tensor& x,
+                                                       int32x4_t rsrc,
+                                                       index_t col)
     {
         static_for<0, 2, 1>{}([&](auto h) {
             const index_t addr = ((MSlice * 16 + h * 8) * 128 + col) * sizeof(AccDataType);
@@ -798,17 +786,17 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         auto issue_qdo_tile = [&](auto j, index_t tile) {
             if constexpr(kMaskTuned)
             {
-            load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
-            load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
-            load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
-            load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
+                load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
+                load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
+                load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
+                load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
             }
             else
             {
-            load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
-            load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
-            load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
-            load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
+                load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
+                load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
+                load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
+                load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
             }
             advance_qdo_windows(tile + 1);
         };
@@ -870,26 +858,24 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 return (j == 0 ? tup.at(number<0>{}) : tup.at(number<1>{}));
             else
             {
-            auto view = tup.at(number<0>{}).get_bottom_tensor_view();
-            // Select scalar LDS byte offsets; never dynamically address a
-            // tuple element. The slot windows have identical descriptors.
-            index_t off = slot_off(number<0>{});
-            static_for<1, kQDOSlots, 1>{}([&](auto k) {
-                off = j == k ? slot_off(k) : off;
-            });
-            using Ptr = decltype(view.get_buffer_view().p_data_);
-            view.get_buffer_view().p_data_ = static_cast<Ptr>(
-                static_cast<void*>(static_cast<char*>(smem_ptr) + off));
-            using W = remove_cvref_t<decltype(tup.at(number<0>{}))>;
-            if constexpr(is_tile_window_with_static_distribution_v<W>)
-                return make_tile_window(view,
-                    tup.at(number<0>{}).get_window_lengths(),
-                    tup.at(number<0>{}).get_window_origin(),
-                    tup.at(number<0>{}).get_tile_distribution());
-            else
-                return make_tile_window(view,
-                    tup.at(number<0>{}).get_window_lengths(),
-                    tup.at(number<0>{}).get_window_origin());
+                auto view = tup.at(number<0>{}).get_bottom_tensor_view();
+                // Select scalar LDS byte offsets; never dynamically address a
+                // tuple element. The slot windows have identical descriptors.
+                index_t off = slot_off(number<0>{});
+                static_for<1, kQDOSlots, 1>{}([&](auto k) { off = j == k ? slot_off(k) : off; });
+                using Ptr = decltype(view.get_buffer_view().p_data_);
+                view.get_buffer_view().p_data_ =
+                    static_cast<Ptr>(static_cast<void*>(static_cast<char*>(smem_ptr) + off));
+                using W = remove_cvref_t<decltype(tup.at(number<0>{}))>;
+                if constexpr(is_tile_window_with_static_distribution_v<W>)
+                    return make_tile_window(view,
+                                            tup.at(number<0>{}).get_window_lengths(),
+                                            tup.at(number<0>{}).get_window_origin(),
+                                            tup.at(number<0>{}).get_tile_distribution());
+                else
+                    return make_tile_window(view,
+                                            tup.at(number<0>{}).get_window_lengths(),
+                                            tup.at(number<0>{}).get_window_origin());
             }
         };
 
@@ -942,24 +928,25 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             auto s_acc = SPBlockTileType{};
 
             decltype(load_tile_transpose(dot_rd_cur)) dot_reg_tensor{};
-            if constexpr(kM0 == 64 && kN0 == 128 && kQKHeaddim == 128 &&
-                         kK0 == 128 && decltype(gemm_0)::KPerSubTile == 4 &&
+            if constexpr(kM0 == 64 && kN0 == 128 && kQKHeaddim == 128 && kK0 == 128 &&
+                         decltype(gemm_0)::KPerSubTile == 4 &&
                          BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
-                         BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 &&
-                         !kPadHeadDimQ && !kIsDeterministic && kTunedSched &&
-                         !FmhaDropout::IsDropout &&
+                         BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 && !kPadHeadDimQ &&
+                         !kIsDeterministic && kTunedSched && !FmhaDropout::IsDropout &&
                          decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                              memory_operation_enum::atomic_add)
             {
-        const auto& view = dq_dram_window.get_bottom_tensor_view();
-        const auto off = view.get_tensor_descriptor().calculate_offset(dq_dram_window.get_window_origin());
-        auto rsrc = make_wave_buffer_resource(view.get_buffer_view().p_data_ + off,
-            (view.get_buffer_view().buffer_size_ - off) * sizeof(AccDataType));
-        rsrc[0] = amd_wave_read_first_lane(rsrc[0]);
-        rsrc[1] = amd_wave_read_first_lane(rsrc[1]);
-        rsrc[2] = amd_wave_read_first_lane(rsrc[2]);
-        rsrc[3] = amd_wave_read_first_lane(rsrc[3]);
-        const index_t col = get_warp_id() * 32 + get_lane_id();
+                const auto& view = dq_dram_window.get_bottom_tensor_view();
+                const auto off   = view.get_tensor_descriptor().calculate_offset(
+                    dq_dram_window.get_window_origin());
+                auto rsrc         = make_wave_buffer_resource(view.get_buffer_view().p_data_ + off,
+                                                      (view.get_buffer_view().buffer_size_ - off) *
+                                                          sizeof(AccDataType));
+                rsrc[0]           = amd_wave_read_first_lane(rsrc[0]);
+                rsrc[1]           = amd_wave_read_first_lane(rsrc[1]);
+                rsrc[2]           = amd_wave_read_first_lane(rsrc[2]);
+                rsrc[3]           = amd_wave_read_first_lane(rsrc[3]);
+                const index_t col = get_warp_id() * 32 + get_lane_id();
 
                 clear_tile(s_acc);
                 static_for<0, 4, 1>{}([&](auto k) {
@@ -973,13 +960,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                         AtomicPendingQGradSlice<k>(dq_dram_window, pending_dq, rsrc, col);
                     if constexpr(!FmhaMask::IsMasking && kQDOSlots >= 3)
                     {
-                    __builtin_amdgcn_sched_group_barrier(0x010, 16, 0);
-                    __builtin_amdgcn_sched_group_barrier(0x008, 8, 0);
+                        __builtin_amdgcn_sched_group_barrier(0x010, 16, 0);
+                        __builtin_amdgcn_sched_group_barrier(0x008, 8, 0);
                     }
                     else
                     {
-                    __builtin_amdgcn_sched_group_barrier(0x008, 8, 0);
-                    __builtin_amdgcn_sched_group_barrier(0x010, 16, 0);
+                        __builtin_amdgcn_sched_group_barrier(0x008, 8, 0);
+                        __builtin_amdgcn_sched_group_barrier(0x010, 16, 0);
                     }
                 });
                 if(pending_dq_valid)
@@ -992,15 +979,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 flush_pending_dq();
             }
 
-
-            if constexpr(!(kM0 == 64 && kN0 == 128 && kQKHeaddim == 128 &&
-                         kK0 == 128 && decltype(gemm_0)::KPerSubTile == 4 &&
-                         BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
-                         BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 &&
-                         !kPadHeadDimQ && !kIsDeterministic && kTunedSched &&
-                         !FmhaDropout::IsDropout &&
-                         decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
-                             memory_operation_enum::atomic_add))
+            if constexpr(!(kM0 == 64 && kN0 == 128 && kQKHeaddim == 128 && kK0 == 128 &&
+                           decltype(gemm_0)::KPerSubTile == 4 &&
+                           BlockFmhaShape::Gemm4BlockWarps::at(number<0>{}) == 1 &&
+                           BlockFmhaShape::Gemm4BlockWarps::at(number<1>{}) == 4 && !kPadHeadDimQ &&
+                           !kIsDeterministic && kTunedSched && !FmhaDropout::IsDropout &&
+                           decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
+                               memory_operation_enum::atomic_add))
                 dot_reg_tensor = load_tile_transpose(dot_rd_cur);
             // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -1208,10 +1193,6 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 
             if constexpr(kDSDoubleBuf)
             {
-                // Alternate dS buffers: iteration i writes buffer i & 1, so the
-                // store never overwrites the buffer slow waves may still be
-                // reading from iteration i - 1. Only the base pointer moves;
-                // the precomputed window coordinates are buffer-relative.
                 GemmDataType* ds_ptr_it = (i_total_loops & 1) ? ds_lds_ptr1 : ds_lds_ptr;
                 ds_lds_window.set_bottom_tensor_view_data_ptr(ds_ptr_it);
                 ds_lds_read_window.set_bottom_tensor_view_data_ptr(ds_ptr_it);
@@ -1223,51 +1204,51 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             }
             if constexpr(!kTunedSched)
             {
-            // Original schedule for all non-tuned instances.
-            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            if constexpr(kHasBiasGrad || kDSPreBarrier)
-            {
-                // SGrad and BiasGrad use the same address in LDS; without
-                // dbias, every wave must have finished reading the previous
-                // tile's dS before it is overwritten.
+                // Original schedule for all non-tuned instances.
+                gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+                if constexpr(kHasBiasGrad || kDSPreBarrier)
+                {
+                    // SGrad and BiasGrad use the same address in LDS; without
+                    // dbias, every wave must have finished reading the previous
+                    // tile's dS before it is overwritten.
+                    block_sync_lds();
+                }
+                store_tile(ds_lds_window, dst_reg_tensor);
                 block_sync_lds();
-            }
-            store_tile(ds_lds_window, dst_reg_tensor);
-            block_sync_lds();
-            s_wait_tensorcnt_barrier<kTdmWaitCnt>();
+                s_wait_tensorcnt_barrier<kTdmWaitCnt>();
             }
             else if constexpr(kMaskTuned)
             {
-            store_tile(ds_lds_window, dst_reg_tensor);
-            // Both LDS producers retire before any wave signals arrival.
-            s_wait_tensorcnt<kTdmWaitCnt>();
-            s_waitcnt<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, 0>();
-            __builtin_amdgcn_s_barrier_signal(-1);
-            __builtin_amdgcn_sched_barrier(0);
-            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
-                gemm_3.template RunKSlice<0>(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            else
-                gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier_wait(-1);
-            // No cross-wave LDS consumer is allowed above the completed join.
+                store_tile(ds_lds_window, dst_reg_tensor);
+                // Both LDS producers retire before any wave signals arrival.
+                s_wait_tensorcnt<kTdmWaitCnt>();
+                s_waitcnt<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, 0>();
+                __builtin_amdgcn_s_barrier_signal(-1);
+                __builtin_amdgcn_sched_barrier(0);
+                if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+                    gemm_3.template RunKSlice<0>(dk_acc, dst_reg_tensor, qt_reg_tensor);
+                else
+                    gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+                __builtin_amdgcn_sched_barrier(0);
+                __builtin_amdgcn_s_barrier_wait(-1);
+                // No cross-wave LDS consumer is allowed above the completed join.
             }
             else
             {
-            store_tile(ds_lds_window, dst_reg_tensor);
-            if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
-                gemm_3.template RunKSlice<0>(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            else
-                gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
-            // TDM retirement, then DS retirement plus a single WG join.
-            s_wait_tensorcnt<kTdmWaitCnt>();
-            block_sync_lds();
+                store_tile(ds_lds_window, dst_reg_tensor);
+                if constexpr(FmhaMask::IsMasking && decltype(gemm_3)::KPerSubTile == 2)
+                    gemm_3.template RunKSlice<0>(dk_acc, dst_reg_tensor, qt_reg_tensor);
+                else
+                    gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+                // TDM retirement, then DS retirement plus a single WG join.
+                s_wait_tensorcnt<kTdmWaitCnt>();
+                block_sync_lds();
             }
             auto ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
             if constexpr(!kMaskTuned)
             {
-            q_reg_tensor       = load_tile(q_rd_dst);
-            lse                = load_tile(lse_rd_dst);
+                q_reg_tensor = load_tile(q_rd_dst);
+                lse          = load_tile(lse_rd_dst);
             }
             if constexpr(kMaskTuned && decltype(gemm_3)::KPerSubTile == 2)
                 __builtin_amdgcn_sched_barrier(0);
@@ -1289,13 +1270,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                 if constexpr(kMaskTuned && i_k4 == 1)
                 {
                     q_reg_tensor = load_tile(q_rd_dst);
-                    lse = load_tile(lse_rd_dst);
+                    lse          = load_tile(lse_rd_dst);
                     __builtin_amdgcn_sched_barrier(0);
                 }
                 if constexpr(kTunedSched && i_k4 == (kMaskTuned ? 1 : 0))
                 {
                     do_reg_tensor = load_tile(do_rd_dst);
-                    d = load_tile(d_rd_dst);
+                    d             = load_tile(d_rd_dst);
                     __builtin_amdgcn_sched_barrier(0);
                 }
             });
@@ -1303,13 +1284,13 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             if constexpr(!kTunedSched || k4_loops <= (kMaskTuned ? 1 : 0))
             {
                 do_reg_tensor = load_tile(do_rd_dst);
-                d = load_tile(d_rd_dst);
+                d             = load_tile(d_rd_dst);
             }
 
             if constexpr(kMaskTuned && k4_loops <= 1)
             {
                 q_reg_tensor = load_tile(q_rd_dst);
-                lse = load_tile(lse_rd_dst);
+                lse          = load_tile(lse_rd_dst);
             }
             // QGrad Scale
             if constexpr(FmhaDropout::IsDropout)
@@ -1416,41 +1397,41 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                     [&] {
                         if constexpr(kMaskTuned)
                         {
-                        load_tile_tdm(tdm_config_lse,
-                                      sec ? lse_lds_write_windows.at(number<0>{})
-                                          : lse_lds_write_windows.at(number<kB>{}),
-                                      lse_dram_window);
-                        load_tile_tdm(tdm_config_d,
-                                      sec ? d_lds_write_windows.at(number<0>{})
-                                          : d_lds_write_windows.at(number<kB>{}),
-                                      d_dram_window);
-                        load_tile_tdm(tdm_config_q,
-                                      sec ? q_lds_windows.at(number<0>{})
-                                          : q_lds_windows.at(number<kB>{}),
-                                      q_dram_window);
-                        load_tile_tdm(tdm_config_do,
-                                      sec ? do_lds_windows.at(number<0>{})
-                                          : do_lds_windows.at(number<kB>{}),
-                                      do_dram_window);
+                            load_tile_tdm(tdm_config_lse,
+                                          sec ? lse_lds_write_windows.at(number<0>{})
+                                              : lse_lds_write_windows.at(number<kB>{}),
+                                          lse_dram_window);
+                            load_tile_tdm(tdm_config_d,
+                                          sec ? d_lds_write_windows.at(number<0>{})
+                                              : d_lds_write_windows.at(number<kB>{}),
+                                          d_dram_window);
+                            load_tile_tdm(tdm_config_q,
+                                          sec ? q_lds_windows.at(number<0>{})
+                                              : q_lds_windows.at(number<kB>{}),
+                                          q_dram_window);
+                            load_tile_tdm(tdm_config_do,
+                                          sec ? do_lds_windows.at(number<0>{})
+                                              : do_lds_windows.at(number<kB>{}),
+                                          do_dram_window);
                         }
                         else
                         {
-                        load_tile_tdm(tdm_config_q,
-                                      sec ? q_lds_windows.at(number<0>{})
-                                          : q_lds_windows.at(number<kB>{}),
-                                      q_dram_window);
-                        load_tile_tdm(tdm_config_lse,
-                                      sec ? lse_lds_write_windows.at(number<0>{})
-                                          : lse_lds_write_windows.at(number<kB>{}),
-                                      lse_dram_window);
-                        load_tile_tdm(tdm_config_do,
-                                      sec ? do_lds_windows.at(number<0>{})
-                                          : do_lds_windows.at(number<kB>{}),
-                                      do_dram_window);
-                        load_tile_tdm(tdm_config_d,
-                                      sec ? d_lds_write_windows.at(number<0>{})
-                                          : d_lds_write_windows.at(number<kB>{}),
-                                      d_dram_window);
+                            load_tile_tdm(tdm_config_q,
+                                          sec ? q_lds_windows.at(number<0>{})
+                                              : q_lds_windows.at(number<kB>{}),
+                                          q_dram_window);
+                            load_tile_tdm(tdm_config_lse,
+                                          sec ? lse_lds_write_windows.at(number<0>{})
+                                              : lse_lds_write_windows.at(number<kB>{}),
+                                          lse_dram_window);
+                            load_tile_tdm(tdm_config_do,
+                                          sec ? do_lds_windows.at(number<0>{})
+                                              : do_lds_windows.at(number<kB>{}),
+                                          do_dram_window);
+                            load_tile_tdm(tdm_config_d,
+                                          sec ? d_lds_write_windows.at(number<0>{})
+                                              : d_lds_write_windows.at(number<kB>{}),
+                                          d_dram_window);
                         }
                         advance_qdo_windows(i_total_loops + kIssueAhead + 1);
                     });

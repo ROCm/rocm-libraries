@@ -343,8 +343,8 @@ struct BlockGemmARegBRegCRegV1
     // C += A * B
     template <index_t KSlice, typename CBlockTensor, typename ABlockTensor, typename BBlockTensor>
     CK_TILE_DEVICE void RunKSlice(CBlockTensor& c_block_tensor,
-                                   const ABlockTensor& a_block_tensor,
-                                   const BBlockTensor& b_block_tensor) const
+                                  const ABlockTensor& a_block_tensor,
+                                  const BBlockTensor& b_block_tensor) const
     {
         static_assert(std::is_same_v<ADataType, remove_cv_t<typename ABlockTensor::DataType>> &&
                           std::is_same_v<BDataType, remove_cv_t<typename BBlockTensor::DataType>> &&
@@ -391,46 +391,47 @@ struct BlockGemmARegBRegCRegV1
         static_ford<sequence<KPerSubTile, MIterPerWarp>>{}([&](auto km) {
             constexpr auto kIter = number<km[number<0>{}]>{};
             constexpr auto mIter = number<km[number<1>{}]>{};
-            if constexpr(kIter == KSlice) {
-            // read A warp tensor from A Block window
-            AWarpTensor a_warp_tensor;
-            a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
-                merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+            if constexpr(kIter == KSlice)
+            {
+                // read A warp tensor from A Block window
+                AWarpTensor a_warp_tensor;
+                a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
-            static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                // read B warp tensor from B block tensor
-                BWarpTensor b_warp_tensor;
-                b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-                    merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                    merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                    // read B warp tensor from B block tensor
+                    BWarpTensor b_warp_tensor;
+                    b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                        merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-                // read C warp tensor from C block tensor
-                using c_iter_idx =
-                    std::conditional_t<TransposeC, sequence<nIter, mIter>, sequence<mIter, nIter>>;
-                CWarpTensor c_warp_tensor;
-                c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-                    merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
-                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+                    // read C warp tensor from C block tensor
+                    using c_iter_idx = std::
+                        conditional_t<TransposeC, sequence<nIter, mIter>, sequence<mIter, nIter>>;
+                    CWarpTensor c_warp_tensor;
+                    c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                // warp GEMM
-                if constexpr(nIter != 0)
-                {
-                    WarpGemm{}.template operator()<ReuseA<true>, ReuseB<false>>(
-                        c_warp_tensor, a_warp_tensor, b_warp_tensor);
-                }
-                else
-                {
-                    WarpGemm{}.template operator()<ReuseA<false>, ReuseB<false>>(
-                        c_warp_tensor, a_warp_tensor, b_warp_tensor);
-                }
+                    // warp GEMM
+                    if constexpr(nIter != 0)
+                    {
+                        WarpGemm{}.template operator()<ReuseA<true>, ReuseB<false>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
+                    else
+                    {
+                        WarpGemm{}.template operator()<ReuseA<false>, ReuseB<false>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
 
-                // write C warp tensor into C block tensor
-                c_block_tensor.set_y_sliced_thread_data(
-                    merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
-                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-                    c_warp_tensor.get_thread_buffer());
-            });
+                    // write C warp tensor into C block tensor
+                    c_block_tensor.set_y_sliced_thread_data(
+                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                        c_warp_tensor.get_thread_buffer());
+                });
             }
         });
     }
