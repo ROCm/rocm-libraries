@@ -213,57 +213,45 @@ jobs:
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
+  # DO NOT MERGE: fast-fail stubs replacing TheRock's reusable build/test
+  # workflows to exercise notify_teams_on_failure with ANSI-colored job logs
+  # (gh >= 2.97 escape-sequence refusal). Job names mimic the real jobs.
   linux_build_and_test:
-    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.linux_build_config }}
-      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
-      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
-      repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    permissions:
-      contents: read
-      id-token: write
+    name: ${{ matrix.job_name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - job_name: "Linux::release / Test gfx94X-dcgpu / Test miopen (shard 1/1) (gfx94X-dcgpu)"
+            message: "[  FAILED  ] ConvFwdTest.Gfx94x (intentional Teams log-extraction test)"
+          - job_name: "Linux::release / Test gfx94X-dcgpu / Test hipdnn (shard 1/1) (gfx94X-dcgpu)"
+            message: "[  FAILED  ] HipdnnBackendTest.Graph (intentional Teams log-extraction test)"
+          - job_name: "Linux::release / Test gfx94X-dcgpu / Test miopen (xfail) (gfx94X-dcgpu)"
+            message: "[  FAILED  ] expected failure, must NOT be notified"
+    steps:
+      - name: Intentional test failure with colored output
+        env:
+          MESSAGE: ${{ matrix.message }}
+          SUMMARY: "50% tests passed, 1 tests failed out of 2"
+        run: |
+          printf '\033[36;1m%s\033[0m\n' "Running tests"
+          printf '\033[38;2;255;61;61m%s\033[0m\n' "${MESSAGE}"
+          printf '\033[38;2;184;166;48m%s\033[0m\n' "${SUMMARY}"
+          exit 1
 
   windows_build_and_test:
-    name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.windows_build_config }}
-      test_labels: ${{ needs.setup.outputs.windows_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
-      repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: b0958085a97cb03a2c38931b8e2ec86ac78d1563 # 2026-10-20
-    permissions:
-      contents: read
-      id-token: write
+    name: "Windows::release / Build Windows packages"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Intentional build failure with colored output
+        env:
+          CMAKE_ERROR: "CMake Error at projects/miopen/CMakeLists.txt:78 (message):"
+          DETAIL: "  Intentional build failure (Teams log-extraction test)"
+          TRAILER: "-- Configuring incomplete, errors occurred!"
+        run: |
+          printf '\033[31m%s\033[0m\n' "${CMAKE_ERROR}" "${DETAIL}" "${TRAILER}"
+          exit 1
 
   rocjitsu_race_check_gfx94x:
     name: rocjitsu race check (gfx94X-dcgpu)
