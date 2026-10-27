@@ -207,7 +207,7 @@ void case_scaled_mfma_shared_profile()
         fail("LLVM24 scaled-MFMA output differs from its shared LLVM23 profile", __LINE__);
     EXPECT_IR(ir24,
               "declare <4 x float> "
-              "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+              "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32("
               "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
               "i32 immarg, i32, i32 immarg, i32)");
 }
