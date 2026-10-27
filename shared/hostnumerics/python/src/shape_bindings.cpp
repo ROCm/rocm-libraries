@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
-#include <nanobind/stl/set.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -191,10 +190,10 @@ Return owning coordinate lists for the range clipped to element_count.
 Order must be a complete slowest-to-fastest axis permutation, even for empty
 work. Each coordinate list uses the original axis order.
 )doc")
-        .def("selected_coordinates", &selectedCoordinates<std::set<size_t>>, "indices"_a, "order"_a,
-             R"doc(
-Return owning coordinate lists for ascending unique flat indices in the set.
-Every index must be less than element_count. Bounds and the complete
+        .def("selected_coordinates", &selectedCoordinates<std::vector<size_t>>, "indices"_a,
+             "order"_a, R"doc(
+Return owning coordinate lists for flat indices in the order given, including
+repeats. Every index must be less than element_count. Bounds and the complete
 slowest-to-fastest axis permutation are checked before traversal, including
 empty work. Each coordinate list uses the original axis order.
 )doc")

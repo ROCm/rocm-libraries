@@ -50,28 +50,28 @@ class ShapeVisitationTests(unittest.TestCase):
                 interval = hn.IndexRange(start, end, stride)
                 self.assertEqual(interval.indices(), full_range)
                 self.assertEqual(interval.count(), len(full_range))
-                for positions in (interval, set(flat)):
+                for positions in (interval, flat):
                     self.assertEqual(
                         shape.selected_coordinates(positions, order), expected
                     )
 
-    def test_sets_and_bounds(self):
+    def test_explicit_indices_and_bounds(self):
         shape = hn.Shape([2, 4])
         self.assertEqual(
-            shape.selected_coordinates({7, 0, 3, 7}, [0, 1]), [[0, 0], [0, 3], [1, 3]]
+            shape.selected_coordinates([7, 0, 3, 7], [0, 1]),
+            [[1, 3], [0, 0], [0, 3], [1, 3]],
         )
-        with self.assertRaisesRegex(
-            RuntimeError, "index exceeds logical element count"
-        ):
-            shape.selected_coordinates({0, 8}, [0, 1])
+        self.assertEqual(shape.selected_coordinates((7, 0), [1, 0]), [[1, 3], [0, 0]])
+        with self.assertRaisesRegex(RuntimeError, r"index 8 is outside \[0, 8\)"):
+            shape.selected_coordinates([0, 8, 1], [0, 1])
         for bad in ([0, 0], [1], [0, 2]):
             with self.assertRaises(RuntimeError):
-                shape.selected_coordinates(set(), bad)
+                shape.selected_coordinates([], bad)
             with self.assertRaises(RuntimeError):
                 shape.selected_coordinates(hn.IndexRange(0, 0, 1), bad)
         for empty_shape in (hn.Shape(), hn.Shape([2, 0])):
             with self.assertRaisesRegex(RuntimeError, "rank"):
-                empty_shape.selected_coordinates(set(), [0])
+                empty_shape.selected_coordinates([], [0])
 
     def test_all_is_full_coverage(self):
         shape = hn.Shape([2, 4])
@@ -110,7 +110,7 @@ class ShapeVisitationTests(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     hn.IndexRange(*args)
             with self.assertRaises(TypeError):
-                hn.Shape([1]).selected_coordinates({value}, [0])
+                hn.Shape([1]).selected_coordinates([value], [0])
             with self.assertRaises(TypeError):
                 hn.IndexRange.all(value)
 

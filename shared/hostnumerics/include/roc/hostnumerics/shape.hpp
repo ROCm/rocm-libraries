@@ -4,13 +4,14 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <roc/hostnumerics/index_range.hpp>
-#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -174,13 +175,20 @@ class Shape {
         }
     }
 
-    // The set supplies ascending unique flat indices, all less than elementCount().
-    template <typename Function>
-    void forEachCoordinate(const std::set<size_t>& indices, std::span<const size_t> order,
+    // Explicit flat indices are visited in the order given, including repeats.
+    // Every index must be less than elementCount(); all are checked before the
+    // first callback, so the range is read twice.
+    template <typename Indices, typename Function>
+        requires std::ranges::forward_range<const Indices> &&
+                 std::same_as<std::ranges::range_value_t<const Indices>, size_t>
+    void forEachCoordinate(const Indices& indices, std::span<const size_t> order,
                            Function&& function) const {
         validateOrder(order);
-        if (!indices.empty() && *indices.rbegin() >= elementCount())
-            throw std::runtime_error("Explicit index exceeds logical element count.");
+        for (size_t index : indices)
+            if (index >= elementCount())
+                throw std::runtime_error("Tensor logical index " + std::to_string(index) +
+                                         " is outside [0, " + std::to_string(elementCount()) +
+                                         ").");
         std::vector<size_t> coordinates(rank());
         for (size_t index : indices) {
             computeCoordinates(index, order, coordinates);

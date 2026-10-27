@@ -460,8 +460,13 @@ TEST(ShapeVisitationCpp, RangeAndSetCoordinatesAndBounds) {
     });
     EXPECT_EQ(ranged, (std::vector<std::vector<size_t>>{{0, 1}, {0, 3}, {1, 1}}));
     EXPECT_EQ(explicitCoordinates, ranged);
+    const std::vector<size_t> repeated{5, 1, 5};
+    std::vector<size_t> visited;
+    shape.forEachCoordinate(
+        repeated, order, [&](size_t index, std::span<const size_t>) { visited.push_back(index); });
+    EXPECT_EQ(visited, repeated);
     size_t calls = 0;
-    const std::set<size_t> invalid{0, 8};
+    const std::array<size_t, 3> invalid{0, 1, 8};
     EXPECT_THROW(
         shape.forEachCoordinate(invalid, order, [&](size_t, std::span<const size_t>) { ++calls; }),
         std::runtime_error);
