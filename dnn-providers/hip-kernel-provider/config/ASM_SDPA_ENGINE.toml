@@ -34,7 +34,7 @@ filters = [
     "*_SdpaBackward_*.def03d_*_fp16_*",
     "*_SdpaBackward_*.x07_*_fp16_*",
 ]
-reason = "DEF-03: fp16 dV loses precision at Skv <= 2 and Sq >= 512 (AITER kernel); tracking issue to be filed"
+reason = "DEF-03: fp16 dV loses precision at Skv <= 2 and Sq >= 512 (AITER kernel); tracked as ALMIOPEN-3046"
 
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
