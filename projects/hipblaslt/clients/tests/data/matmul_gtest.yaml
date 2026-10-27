@@ -172,6 +172,32 @@ Tests:
    function: matmul, transA: N, transB: N, M: 32, N: 32, K: 32, alpha: 1.0, beta: 0.0,
    batch_count: 2, initialization: norm_dist_one_special }
 
+- {name: matmul_maf_ordinary, category: quick, precision: *real_precisions,
+   function: matmul, transA: N, transB: T, M: 32, N: 32, K: 32,
+   alpha: 1.0, beta: 1.0, batch_count: 2,
+   initialization: [maf2_0, maf2_0_unit_scale, maf1_0] }
+
+- {name: matmul_maf_double, category: quick, precision: *real_precisions_gemm_only,
+   function: matmul, transA: N, transB: T, M: 32, N: 32, K: 32,
+   alpha: 1.0, beta: 1.0, initialization: [maf2_0, maf1_0] }
+
+- name: matmul_maf_mxfp4
+  category: quick
+  function:
+    matmul:
+      - {a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 3, scaleB: 3}
+      - {a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 6, scaleB: 6}
+      - {a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, scaleA: 8, scaleB: 8}
+  transA: T
+  transB: N
+  M: 32
+  N: 32
+  K: 128
+  alpha: 1.0
+  beta: 0.0
+  initialization: [maf2_0, maf2_0_unit_scale, maf1_0]
+  gpu_arch: '1250'
+
 - name: matmul_one
   category: quick
   function:
