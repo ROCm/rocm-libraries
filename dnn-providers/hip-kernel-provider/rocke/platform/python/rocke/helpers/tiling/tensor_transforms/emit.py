@@ -40,6 +40,15 @@ accesses share is emitted once, in first-use order):
 - The stride fold multiplies each output's parts by its tensor stride: one uniform term per
   distinct set of graph inputs (i64 unless its range fits i32), one per-lane sum in i32, and the
   constant in Python.
+- A runtime stride (an i32 ``Value`` stated ``>= 1``) is an IR value: a uniform part times it is
+  one i64 multiply in its input set's term, a per-lane part times it one i32 multiply per call. A
+  constant times it is a runtime value too, so it cannot join the int constant: the call's least
+  constant on that axis joins the uniform term (one multiply per call), and what an access has
+  above it is that access's ``uniform_delta``, a wave-uniform value ``>= 0``.
+- A slice's begin (``tensor.begin``, one int or per-wave value per axis) is folded like a per-wave
+  origin part on its axis: its constant times an int stride joins the constant, and every other
+  product joins one uniform term keyed by no graph input, i32 or i64 by its range. So a slice may
+  start anywhere, past ``2^31`` elements included; its bounds are its own lengths.
 
 Integer widths follow the unconditioned ranges (what every lane computes, valid or not), so no
 emitted ``nsw`` operation can overflow even in a lane whose coordinates are out of bounds.
@@ -80,6 +89,7 @@ from typing import TYPE_CHECKING
 
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, I64, Type, Value, one_unsigned_compare_checks
+from rocke.core.value_sources import value_text
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 
 from .address import _require_nonnegative_strides
@@ -160,7 +170,9 @@ class ElementAddress:
     above), or ``None``; ``const`` is a Python int that may be negative (a halo). ``elem_bits``
     is the element size in bits, so byte proofs also hold for packed sub-byte types.
     ``uniform_delta`` (with its range) is this access's own wave-uniform term on runtime-stride
-    axes; it is ``None`` for a tensor whose strides are all ints.
+    axes: each such axis's constant above the call's least one, times the stride (``>= 0``). It is
+    ``None`` when every access has the same constant there, and always for a tensor whose strides
+    are all ints.
     """
 
     uniform: tuple[UniformTerm, ...]
@@ -351,9 +363,9 @@ def emit_addresses(
     accesses share one table: a sub-expression they have in common is emitted once.
     """
     _check_accesses(graph, accesses, tensor=tensor)
-    _require_nonnegative_strides(tensor)
+    begins = _check_strides_and_begins(b, tensor)
     split = [_split_access(b, access) for access in accesses]
-    _, addresses = _emit_addresses(_CallTable(b), graph, tensor, split)
+    _, addresses = _emit_addresses(_CallTable(b), graph, tensor, split, begins)
     return addresses
 
 
@@ -376,12 +388,12 @@ def _emit_access_entry(
         vector_axis=vector_axis,
         vector_width=vector_width,
     )
-    _require_nonnegative_strides(tensor)
+    begins = _check_strides_and_begins(b, tensor)
     run = VectorRun(vector_axis, vector_width) if vector_width > 1 else None
     split = [_split_access(b, access) for access in accesses]
     plans = _plan_validity(graph, tensor, split, run, buffer_checked_sides)
     table = _CallTable(b)
-    envs, addresses = _emit_addresses(table, graph, tensor, split)
+    envs, addresses = _emit_addresses(table, graph, tensor, split, begins)
     validity = _emit_validity(table, envs, plans, run)
     return tuple(
         Access(address, valid, span)
@@ -394,15 +406,62 @@ def _emit_addresses(
     graph: TransformGraph,
     tensor: TensorDesc,
     split: Sequence[tuple[AffineCoord, ...]],
+    begins: tuple[AffineCoord, ...],
 ) -> tuple[list[dict[str, _TableCoord]], tuple[ElementAddress, ...]]:
-    """Each access's coordinate table and element address, access by access."""
+    """Each access's coordinate table and element address.
+
+    Access by access when every stride is an int. A runtime stride needs the least constant of
+    the whole call on its axis before the first address, so every coordinate table is built
+    first.
+    """
     elem_bits = _elem_bits(tensor)
+    fold = _StrideFold(table, tensor, begins)
+    if fold.has_runtime_stride:
+        envs = [_emit_coord_table(table, graph, coords) for coords in split]
+        fold.take_least_constants(graph, envs)
+        addresses = [_element_address(fold, graph, env, elem_bits) for env in envs]
+        return envs, tuple(addresses)
     envs, addresses = [], []
     for coords in split:
         env = _emit_coord_table(table, graph, coords)
         envs.append(env)
-        addresses.append(_element_address(table, graph, tensor, env, elem_bits))
+        addresses.append(_element_address(fold, graph, env, elem_bits))
     return envs, tuple(addresses)
+
+
+def _check_strides_and_begins(
+    b: IRBuilder, tensor: TensorDesc
+) -> tuple[AffineCoord, ...]:
+    """Refuse a stride or a begin the address cannot be built from, before anything is
+    emitted; return each axis's begin split by the IR range walk."""
+    _require_nonnegative_strides(tensor)
+    for axis, stride in enumerate(tensor.strides):
+        if not isinstance(stride, Value):
+            continue
+        envelope = _stated_interval(stride)
+        least = _numeric_lo(envelope.lo)
+        if least is None or least < 1:
+            raise ValueError(
+                f"tensor axis {axis} has a runtime stride with stated range {envelope} -- a "
+                f"runtime stride must be >= 1 (state ge=1 where {value_text(stride)} is stated)"
+            )
+    begins = []
+    for axis, begin in enumerate(tensor.begin):
+        coord = split_coordinate(b, begin)
+        if coord.lane is not None:
+            raise ValueError(
+                f"the begin of tensor {_tensor_text(tensor)} on axis {axis} has a per-lane part "
+                f"({coord.lane.name}) -- a slice starts at the same element for the whole wave; "
+                "compute its begin from per-wave values (pass a value loaded from memory through "
+                "readfirstlane)"
+            )
+        begins.append(coord)
+    return tuple(begins)
+
+
+def _tensor_text(tensor: TensorDesc) -> str:
+    """A tensor in plain words: its lengths, a runtime one by its IR value's name."""
+    return f"({', '.join(str(n) for n in tensor.lengths)})"
 
 
 # --- the access checks --------------------------------------------------------------------------
@@ -625,6 +684,10 @@ class _CallTable:
     def sub(self, x: Value, y: Value) -> Value:
         return self._once(("sub", id(x), id(y)), lambda: self.b.sub(x, y))
 
+    def mul(self, x: Value, y: Value) -> Value:
+        """``x * y`` of two values of one type."""
+        return self._once(("mul2", id(x), id(y)), lambda: self.b.mul(x, y))
+
     def mul_const(self, x: Value, k: int) -> Value:
         """``x * k``; ``k == 1`` emits nothing."""
         if k == 1:
@@ -776,6 +839,33 @@ class _CallTable:
         if not _fits_lane(r):
             raise _lane_range_error(name, r)
         return _Lane(self.mul_const(lane.value, k), r, lane.congruence.scaled(k))
+
+    def term_times(
+        self, term: _Term, stride: Value, stride_range: Interval
+    ) -> tuple[Value, Interval]:
+        """``sext64(term) * sext64(stride)`` for a runtime stride: one i64 multiply."""
+        value = self.mul(
+            self.as_type(self.term_value(term), I64), self.as_type(stride, I64)
+        )
+        return value, term.range.times(stride_range)
+
+    def lane_times(
+        self, lane: _Lane, stride: Value, stride_range: Interval, name: str
+    ) -> _Lane:
+        """``lane * stride`` for a runtime stride, in i32 (once per distinct lane value)."""
+        r = lane.range.times(stride_range)
+        if not _fits_lane(r):
+            raise _lane_range_error(name, r)
+        return _Lane(self.mul(lane.value, stride), r, _ANY_RESIDUE)
+
+    def const_times(
+        self, k: int, stride: Value, stride_range: Interval
+    ) -> tuple[Value, Interval]:
+        """``k * stride`` for a runtime stride and an int ``k != 0``: i32 when its range is
+        proven inside i32, else i64."""
+        r = Interval(k, k + 1).times(stride_range)
+        ty = I32 if stride.type == I32 and _fits_i32(r) else I64
+        return self.mul_const(self.as_type(stride, ty), k), r
 
     def lane_sum(self, lanes: Sequence[tuple[_Lane, str]]) -> _Lane | None:
         """The per-lane values added in order, each partial sum proven to fit a lane part (the
@@ -1148,23 +1238,99 @@ def _piece(
 # --- the stride fold ----------------------------------------------------------------------------
 
 
+class _StrideFold:
+    """The per-call state of the stride fold, built once per call on its table.
+
+    Holds the call's least constant on each runtime-stride axis and the begin's products
+    (emitted on first use).
+    """
+
+    def __init__(
+        self, table: _CallTable, tensor: TensorDesc, begins: tuple[AffineCoord, ...]
+    ) -> None:
+        self.table = table
+        self.strides = tensor.strides
+        self.has_runtime_stride = any(
+            isinstance(stride, Value) for stride in self.strides
+        )
+        self.least: dict[int, int] = {}
+        self._begins = begins
+        self._begin_term: tuple[list[tuple[Value, Interval]], int] | None = None
+
+    def take_least_constants(
+        self, graph: TransformGraph, envs: Sequence[dict[str, _TableCoord]]
+    ) -> None:
+        """Each runtime-stride axis's least constant over every access of the call."""
+        for axis, (name, stride) in enumerate(zip(graph.outputs, self.strides)):
+            if isinstance(stride, Value):
+                self.least[axis] = min(env[name].const for env in envs)
+
+    def runtime_stride(self, axis: int) -> tuple[Value, Interval]:
+        """Axis ``axis``'s runtime stride and its stated range."""
+        stride = self.strides[axis]
+        return stride, _stated_interval(stride)
+
+    def begin_term(self) -> tuple[list[tuple[Value, Interval]], int]:
+        """The begin's per-wave products, in tensor-axis order, and its constant (in elements).
+
+        On an int-stride axis the begin's constant times the stride is a Python int; on a
+        runtime-stride axis it is one multiply. Every per-wave part is folded like an origin
+        part on its axis. Emitted once per call, at its first use.
+        """
+        if self._begin_term is None:
+            table, items, const = self.table, [], 0
+            for axis, (begin, stride) in enumerate(zip(self._begins, self.strides)):
+                term = _Term(frozenset(), begin.uniform)
+                if isinstance(stride, Value):
+                    value, r = self.runtime_stride(axis)
+                    if begin.uniform:
+                        items.append(table.term_times(term, value, r))
+                    if begin.const:
+                        items.append(table.const_times(begin.const, value, r))
+                    continue
+                const += begin.const * stride
+                if begin.uniform and stride != 0:
+                    scaled = table.scaled_term(term, stride)
+                    items.append((table.term_value(scaled), scaled.range))
+            self._begin_term = items, const
+        return self._begin_term
+
+
 def _element_address(
-    table: _CallTable,
+    fold: _StrideFold,
     graph: TransformGraph,
-    tensor: TensorDesc,
     env: dict[str, _TableCoord],
     elem_bits: int,
 ) -> ElementAddress:
-    """``sum(output_a * stride_a)`` in tensor-axis order, split into its parts."""
-    const = 0
+    """``sum(output_a * stride_a)`` plus the begin's products, in tensor-axis order, split into
+    its parts."""
+    table = fold.table
+    begin_items, const = fold.begin_term()
     lanes: list[tuple[_Lane, str]] = []
     by_inputs: dict[frozenset[int], list[tuple[Value, Interval]]] = {}
-    for name, stride in zip(graph.outputs, tensor.strides):
+    deltas: list[tuple[Value, Interval]] = []
+    for axis, (name, stride) in enumerate(zip(graph.outputs, fold.strides)):
         coord = env[name]
+        lane = _lane_of(coord)
+        if isinstance(stride, Value):
+            value, r = fold.runtime_stride(axis)
+            if lane is not None:
+                lanes.append((table.lane_times(lane, value, r, name), name))
+            for term in coord.terms:
+                by_inputs.setdefault(term.inputs, []).append(
+                    table.term_times(term, value, r)
+                )
+            least = fold.least[axis]
+            if least:
+                by_inputs.setdefault(coord.inputs, []).append(
+                    table.const_times(least, value, r)
+                )
+            if coord.const != least:
+                deltas.append(table.const_times(coord.const - least, value, r))
+            continue
         const += coord.const * stride
         if stride == 0:
             continue  # a zero part emits nothing
-        lane = _lane_of(coord)
         if lane is not None:
             lanes.append((table.scaled_lane(lane, stride, name), name))
         for term in coord.terms:
@@ -1172,11 +1338,14 @@ def _element_address(
             by_inputs.setdefault(term.inputs, []).append(
                 (table.term_value(scaled), scaled.range)
             )
+    if begin_items:
+        by_inputs.setdefault(frozenset(), []).extend(begin_items)
     uniform = []
     for key in sorted(by_inputs, key=lambda k: tuple(sorted(k))):
         value, r = table.sum_of(by_inputs[key])
         uniform.append(UniformTerm(value, r.as_pair(), key))
     lane_sum = table.lane_sum(lanes)
+    delta, delta_range = table.sum_of(deltas) if deltas else (None, None)
     return ElementAddress(
         uniform=tuple(uniform),
         lane=None if lane_sum is None else lane_sum.value,
@@ -1187,6 +1356,8 @@ def _element_address(
         ),
         const=const,
         elem_bits=elem_bits,
+        uniform_delta=delta,
+        uniform_delta_range=None if delta_range is None else delta_range.as_pair(),
     )
 
 

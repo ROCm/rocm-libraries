@@ -5,8 +5,9 @@
 
 - ``runtime_length`` -- a runtime length: a kernel parameter declared with its facts
   (``KernelLauncher.from_artifact`` checks them before each launch), a plain ``Value``.
-- ``RuntimeTensor`` -- a tensor description with runtime lengths (the entries read only
-  ``lengths``, ``strides`` and ``dtype``).
+- ``RuntimeTensor`` -- a tensor description built without ``TensorDesc``'s own checks (the entries
+  read only ``lengths``, ``strides``, ``dtype`` and ``begin``), so a test can reach the checks the
+  entries make themselves.
 - ``gfx90a_isa`` -- the disassembled gfx90a ISA of a kernel (compiled offline; no GPU needed).
 - ``run_lanes`` -- build a test-local kernel, compile it for the GPU present, run it, and return
   what every lane stored.
@@ -56,11 +57,17 @@ def runtime_length(
 
 @dataclass(frozen=True)
 class RuntimeTensor:
-    """A tensor description whose lengths may be runtime lengths."""
+    """A tensor description whose lengths and strides may be runtime values, with no checks of
+    its own; ``begin`` defaults to 0 on every axis (a tensor that is not a slice)."""
 
     lengths: tuple[int | Value, ...]
-    strides: tuple[int, ...]
+    strides: tuple[int | Value, ...]
     dtype: Any
+    begin: tuple[int | Value, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.begin:
+            object.__setattr__(self, "begin", (0,) * len(self.lengths))
 
 
 def ops(b: IRBuilder) -> list:

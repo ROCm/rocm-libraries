@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import gcd, prod
+from math import gcd, inf, prod
 from typing import TYPE_CHECKING
 
 from rocke.core.facts import stated_facts_of
@@ -299,6 +299,22 @@ class Interval:
         if k > 0:
             return Interval(_mul(lo, k), _shift_end(_mul(last, k), 1))
         return Interval(_mul(last, k), _shift_end(_mul(lo, k), 1))
+
+    def times(self, other: Interval) -> Interval:
+        """Range of ``x * y`` for ``x`` in this range and ``y`` in ``other``, any signs.
+
+        Bounded by the products of the two ranges' extreme values; an unbounded side stays
+        unbounded unless the other operand is exactly 0.
+        """
+        corners = [
+            _extended_product(x, y)
+            for x in _extended_ends(self)
+            for y in _extended_ends(other)
+        ]
+        least, last = min(corners), max(corners)
+        return Interval(
+            None if least == -inf else least, None if last == inf else last + 1
+        )
 
     def floor_div(self, k: int) -> Interval:
         """Range of ``x // k``, ``k >= 1`` (floor semantics for every sign)."""
@@ -625,6 +641,19 @@ def _shift_end(end: _End, k: int) -> _End:
 
 def _mul(end: int | None, k: int) -> int | None:
     return None if end is None else end * k
+
+
+def _extended_ends(r: Interval) -> tuple[float, float]:
+    """The least and the last value of ``r``, an unbounded side as a float infinity."""
+    lo, last = _numeric_lo(r.lo), _numeric_last(r.hi)
+    return (-inf if lo is None else lo, inf if last is None else last)
+
+
+def _extended_product(x: float, y: float) -> float:
+    """``x * y`` of two extended values; 0 times an infinity is 0 (the operand is exactly 0)."""
+    if x == 0 or y == 0:
+        return 0
+    return x * y
 
 
 def _add_ends(a: _End, b: _End, side: str) -> _End:

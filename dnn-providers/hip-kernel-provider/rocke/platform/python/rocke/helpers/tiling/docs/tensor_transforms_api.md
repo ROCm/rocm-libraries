@@ -183,7 +183,9 @@ End = int | Value | None      # a range end; None = unbounded on that side
   of graph inputs (`()` when there is none); `lane` is the i32 per-lane part with its unconditioned
   `lane_range`, which starts at 0 or above; `const` is a Python int that may be negative (a halo). `elem_bits` is
   the element size in bits, so byte proofs also hold for packed sub-byte types. `uniform_delta` (with its range)
-  is the access's own wave-uniform term on runtime-stride axes; it is `None` while every stride is an int.
+  is the access's own wave-uniform term on runtime-stride axes: on each such axis, its constant above the call's
+  least one, times the stride (`>= 0`; section 9). It is `None` when no access of the call has a constant above
+  the least one, and always while every stride is an int.
 - `UniformTerm.value` is i32 or i64 by its range; `inputs` names the graph inputs (by index) it derives from.
   Terms of different input sets are never summed here, so the memory side can decide per term where it goes (a
   term that does not change inside a loop, for example). Every op emitted for a uniform term is side-effect free,
@@ -228,8 +230,11 @@ def emit_accesses(b, graph, tensor, accesses: Sequence[tuple[Value | int, ...]],
 def value_ranges(graph, input_ranges: tuple[tuple[End, End], ...]) -> dict[str, tuple[End, End]]
 def required_checks(graph, tensor, input_ranges: tuple[tuple[End, End], ...]) -> tuple[BoundCheck, ...]
 def graph_injective(graph, input_ranges: tuple[tuple[End, End], ...]) -> bool
-def address_of(tensor, position: tuple[int, ...]) -> int             # one int per tensor axis
-def transform_address_of(graph, tensor, coords: tuple[int, ...]) -> int   # = address_of(tensor, graph.evaluate(coords))
+def address_of(tensor, position: tuple[int, ...],
+               launch_values: Sequence[tuple[Value, int]] = ()) -> int   # one int per tensor axis
+def transform_address_of(graph, tensor, coords: tuple[int, ...],
+                         launch_values: Sequence[tuple[Value, int]] = ()) -> int
+    # = address_of(tensor, graph.evaluate(coords), launch_values)
 
 # toolbox -- emit.py (builder first, IR side effects)
 def emit_coords(b, graph, coords: tuple[Value | int, ...]) -> dict[str, Value]
@@ -238,8 +243,14 @@ def emit_access_validity(b, graph, tensor, accesses) -> tuple[Value | None, ...]
 def emit_bound_check(b, value: Value | int, lo: End, hi: End) -> Value | None
 ```
 
-- `tensor` is a `TensorDesc`; the entries read only its `lengths`, `strides` and `dtype`. A length is an int, or
-  a `Value` for a runtime-length axis. Strides are non-negative ints.
+- `tensor` is a `TensorDesc`; the entries read only its `lengths`, `strides`, `dtype` and `begin`. A length is
+  an int, or a `Value` for a runtime-length axis. A stride is a non-negative int, or a `Value` stated `>= 1` (a
+  packed tensor's runtime row stride). `begin` is a slice's start in its parent, one int or per-wave i32 value
+  per axis, all 0 for a tensor that is not a slice.
+- `address_of` / `transform_address_of` return `sum((position[a] + begin[a]) * strides[a])`, so a slice's
+  address is its parent's at `position + begin`. `launch_values` gives the int every runtime stride and every
+  runtime begin takes at launch, as `(Value, int)` pairs matched by identity: an IR value is not hashable, so it
+  cannot key a dict.
 - `input_ranges` gives every input a range, positionally: `(None, None)` means "not known" and is always
   checked. There is no "trusted" default: being in domain is stated (`(0, n)`) or derived by the walk.
 - `emit_coords` returns each coordinate as its parts summed, `(uniform + lane) + const`: i32, or i64 when its
@@ -401,6 +412,42 @@ emitted once, in first-use order):
   reached it, else one uniform term keyed by both reads' inputs.
 - **The stride fold** multiplies each output's parts by its stride: per distinct set of graph inputs one
   `UniformTerm` (i64 unless its range fits i32), one per-lane sum in i32, and the constant in Python.
+
+**Runtime strides.** A stride that is a `Value` (stated `>= 1` on its `b.param` declaration; a packed `A[M, K]`
+has row stride `K`) is an IR value, so the fold multiplies by it at run time:
+
+- a uniform part: `sext64(u) * sext64(stride)`, one i64 multiply, in its input set's term;
+- a per-lane part: `lane * stride`, one i32 multiply per distinct per-lane value in the call; its `lane_range`
+  follows the stride's stated range (a per-lane part below `L` times a stride stated `le=S` reaches
+  `(L - 1) * S`), and leaving 32 bits is the lane-range error -- state the tightest `le`;
+- a constant: `c * stride` is a runtime value, so it cannot be `const`. The call's least constant on that axis,
+  times the stride, joins the axis's uniform term (one multiply per call); what each access has above it is its
+  `uniform_delta`, wave-uniform and `>= 0`, summed over the runtime-stride axes (i32 when its range fits).
+
+```
+A[256, K], strides (K, 1); rows origin + tid/4 + {0, 16, 48}, column (tid%4)*8
+  uniform       = sext64(origin) * sext64(K)          one i64 multiply, shared by the three accesses
+  lane          = (tid/4) * K + (tid%4)*8             one i32 multiply, shared
+  uniform_delta = None,  K * 16,  K * 48               one multiply per distinct constant
+  const         = 0                                   (a constant on the K-stride axis never lands here)
+```
+
+The contiguous axis keeps the int stride 1, so a vector along it stays one wide access; a vector along a
+runtime-stride axis is refused as not contiguous (reason `runtime stride`).
+
+**A slice's begin.** `tensor.begin` (set by the tiling layer when it slices a tensor) is folded like a per-wave
+origin part on its axis. Each begin is split by the walk: its constant times an int stride lands in `const`; every
+other product -- a per-wave part times its stride, a constant times a runtime stride -- joins ONE `UniformTerm`
+keyed by no graph input (`inputs = frozenset()`), summed in tensor-axis order, i32 or i64 by its range. So a
+slice may start past `2^31` elements: a begin whose product can reach it (or whose range is unknown, a value
+loaded through `readfirstlane`) gives an i64 term. A begin with a per-lane part is refused (a slice starts at one
+element for the whole wave). The bounds are the slice's own lengths, so a begin never enters a check, and a
+tensor whose begins are all 0 emits nothing new.
+
+```
+(H, T, D) slice of one sequence, strides (D, H*D, 1), begin (0, start, 0)
+  begin term = sext64(start) * (H*D)    i64 when start * H * D can reach 2^31, else i32
+```
 
 **Integer widths** follow the unconditioned ranges, so no emitted `nsw` operation can overflow even in a lane
 whose coordinates are out of bounds. A part is i32 when its range is proven inside i32, a uniform part otherwise
@@ -590,6 +637,8 @@ None of these is on the door; they are listed so the glass box stays open.
 | toolbox (`TypeError`) | `address_of takes the position as a tuple in tensor-axis order, got {type} -- coordinates are positional` |
 | toolbox | `address_of got {n} coordinates but the tensor has rank {r} -- give one int per tensor axis, in axis order` |
 | bind | `structured address needs non-negative strides; tensor axis {axis} has stride {s}` (also `emit_addresses` and the access entries) |
+| bind | `address_of needs the value of the runtime stride of axis {axis} -- pass it in launch_values` |
+| bind | `address_of needs the value of the runtime begin of axis {axis} -- pass it in launch_values` |
 
 **The IR range walk** (`walk.py`)
 
@@ -614,6 +663,8 @@ None of these is on the door; they are listed so the glass box stays open.
 | entry | `vector along input {axis} ('{name}') is not monotone at checked coordinate '{coord}' -- its validity cannot be decided from the first and last element; emit per element (vector_width=1)` |
 | emit | `unmerge of '{read}' needs its dividend in [0, 2^31) for magic division, but its range is {range} -- bound the origin with exit_if_tile_outside(b, origin, length), or state its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the GPU (b.gpu_checked_value(v, ge=0, le=...))` |
 | emit | `lane part of '{name}' has range {range}, outside 32 bits -- per-lane offsets must fit i32; move the large part into the uniform coordinate` |
+| bind | `the begin of tensor {lengths} on axis {a} has a per-lane part ({v}) -- a slice starts at the same element for the whole wave; compute its begin from per-wave values (pass a value loaded from memory through readfirstlane)` (`emit_addresses` and the access entries) |
+| bind | `tensor axis {axis} has a runtime stride with stated range {range} -- a runtime stride must be >= 1 (state ge=1 where {stride} is stated)` (`emit_addresses` and the access entries; `TensorDesc` refuses such a stride first, so this is reached only by a tensor description built without it) |
 | check (`TypeError`) | `emit_bound_check takes a plain i32 IR value or an int, got {type}` |
 | check (`TypeError`) | `bound check of '{name}': an end is an int, a Value or None, got {type}` |
 | check | `emit_bound_check of '{name}' got lo=None and hi=None -- that checks nothing; pass the end(s) to check, or emit no check` |

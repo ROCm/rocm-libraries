@@ -129,6 +129,23 @@ def test_interval_shifted_and_scaled_are_exact(k):
         _assert_exact(a.scaled(k), {x * k for x in _values(a)})
 
 
+def test_interval_times_is_exact_and_symmetric_for_every_pair():
+    for a, b in itertools.product(_SMALL_INTERVALS, repeat=2):
+        _assert_exact(a.times(b), {x * y for x in _values(a) for y in _values(b)})
+        assert a.times(b) == b.times(a)
+
+
+def test_interval_times_keeps_an_unbounded_side_unless_the_other_operand_is_zero():
+    # A runtime stride in [1, 101) times a lane part in [0, 16): its envelope bounds the product.
+    assert Interval(0, 16).times(Interval(1, 101)) == Interval(0, 15 * 100 + 1)
+    assert Interval(0, None).times(Interval(1, 101)) == Interval(0, None)
+    assert Interval(None, None).times(Interval(2, 3)) == Interval(None, None)
+    assert Interval(None, 3).times(Interval(1, 4)) == Interval(None, 7)
+    assert Interval(None, None).times(Interval(0, 1)) == Interval(0, 1)
+    # A runtime end counts with its envelope's extreme value.
+    assert Interval(0, _runtime("L", 9)).times(Interval(2, 4)) == Interval(0, 25)
+
+
 def test_interval_scaled_by_a_negative_constant_swaps_the_ends():
     assert Interval(2, 5).scaled(-3) == Interval(-12, -5)
 
