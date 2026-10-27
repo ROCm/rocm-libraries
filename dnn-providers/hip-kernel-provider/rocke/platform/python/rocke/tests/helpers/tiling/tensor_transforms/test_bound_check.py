@@ -18,7 +18,7 @@ import random
 
 import pytest
 
-from rocke.core.ir import F16, I32, I64, IRBuilder, Value
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, Value
 from rocke.helpers.tiling.tensor_transforms import emit_accesses, emit_bound_check
 from rocke.helpers.tiling.tensor_transforms.emit import (
     _emit_bound_check,
@@ -34,10 +34,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     UniformPart,
     _required_checks,
 )
-from rocke.helpers.tiling.tensor_transforms.walk import (
-    runtime_value_of,
-    split_coordinate,
-)
+from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
 from rocke.tests.gpu import current_device_arch
 
 from ._harness import (
@@ -157,7 +154,7 @@ def test_a_tile_origin_proven_by_the_guard_marker_emits_no_compare():
     b = builder()
     tile = 16
     m = runtime_length(b, "M", multiple_of=tile)
-    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, tile)), ge=0, lt=m.value)
+    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, tile)), ge=0, lt=m)
     row = b.add(origin, b.mod(b.thread_id_x(), _c(b, tile)))
     tensor = RuntimeTensor((m, 64), (64, 1), F16)
     (access,) = emit_accesses(b, identity_graph((m, 64)), tensor, [(row, 0)])
@@ -183,7 +180,7 @@ def test_a_value_is_checked_before_its_marker_and_proven_after_it():
 
 def _origin_with_lane(b: IRBuilder, m, upper):
     """A hand-split coordinate ``origin + lane``: the origin's range is ``[0, upper)``."""
-    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 16)), ge=0, lt=m.value)
+    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 16)), ge=0, lt=m)
     lane = b.mod(b.thread_id_x(), _c(b, 16))
     return AffineCoord(
         0,
@@ -317,6 +314,24 @@ def test_checking_nothing_or_an_empty_range_or_a_non_value_raises_before_emittin
     assert len(ops(b)) == before + 1  # only the test's own sext
 
 
+def test_an_end_that_is_not_an_i32_value_raises_before_emitting():
+    """A runtime end is compared in i32: an i64 or f32 Value given as an end is refused at the
+    door, naming the value and its type, before any IR is emitted for the check."""
+    b = builder()
+    wide = b.param("wide", I64, ge=1, le=1000)
+    real = b.param("real", F32)
+    x = b.block_id_x()
+    before = len(ops(b))
+    for end in (wide, real):
+        with raises(
+            TypeError,
+            f"bound check of '{x.name}': an end is an int, an i32 Value or None, got Value "
+            f"{end.name} of type {end.type.name}",
+        ):
+            emit_bound_check(b, x, 0, end)
+    assert len(ops(b)) == before
+
+
 def _rebase_cases(b: IRBuilder, lane: Value):
     """``c - lane`` (``c = 40``) and ``smin(lane - 3, 10)``: per-lane values whose walked range
     starts below 0, with their Python value per lane."""
@@ -334,7 +349,7 @@ def test_a_per_lane_value_starting_below_zero_is_checked_exactly_after_its_rebas
         for value, truth in _rebase_cases(b, lane):
             for lo in (-2, 0, 5):
                 valid = emit_bound_check(b, value, lo, hi)
-                leaves = [(hi.value.op.operands[0], 12)] if hi_runtime else []
+                leaves = [(hi, 12)] if hi_runtime else []
                 for t in range(WAVE):
                     expected = lo <= truth(t) < 12
                     assert _host(valid, (lane, t), *leaves) == expected, (lo, t)
@@ -385,7 +400,7 @@ def test_eight_accesses_against_a_runtime_bound_compare_once_per_folded_bound(wi
     if wide:
         origin = b.param("origin", I32)
     else:
-        origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 64)), ge=0, lt=m.value)
+        origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 64)), ge=0, lt=m)
     row = b.add(origin, b.div(tid, _c(b, 8)))
     col = b.mul(b.mod(tid, _c(b, 8)), _c(b, 8))
     accesses = [(b.add(row, _c(b, 8 * i)) if i else row, col) for i in range(8)]
@@ -505,7 +520,7 @@ def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(extent, w
         lo_raw = b.readfirstlane(b.global_load(b.get_param("lo"), blk, I32))
         if not wide:
             s = b._assume_range(s, ge=-limit, lt=limit)
-        lo_end = runtime_value_of(b._assume_range(lo_raw, ge=-limit, lt=limit))
+        lo_end = b._assume_range(lo_raw, ge=-limit, lt=limit)
         lane = b.land(b.thread_id_x(), _c(b, extent - 1))
         return [emit_bound_check(b, b.add(s, lane), lo_end, None)]
 
@@ -523,8 +538,8 @@ def _uniform(b: IRBuilder, name: str) -> Value:
 
 
 def _stated(b: IRBuilder, value: Value, lo: int, hi: int):
-    """``value`` behind a marker stating ``lo <= value < hi``, as its ``RuntimeValue``."""
-    return runtime_value_of(b._assume_range(value, ge=lo, lt=hi))
+    """``value`` behind a marker stating ``lo <= value < hi``: a runtime end with stated facts."""
+    return b._assume_range(value, ge=lo, lt=hi)
 
 
 def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():

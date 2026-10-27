@@ -11,8 +11,6 @@ per-wave and per-lane parts, and proving each part's range, is this module's job
   value, derived from how it was computed.
 - ``split_coordinate(b, value)`` -- the value as an ``AffineCoord``: a constant, wave-uniform parts
   and one per-lane part, each with its ``value_facts``.
-- ``runtime_value_of(value)`` -- the ``RuntimeValue`` an envelope marker states; the one
-  constructor of a ``RuntimeValue`` from IR.
 - ``leaf_varying_within_workgroup(b, value)`` -- the first leaf that may differ between the waves
   of a workgroup, or ``None``.
 
@@ -21,6 +19,12 @@ rule set is closed and unknown is a fact, never an abort: a leaf or op outside t
 whose precondition fails) contributes ``UNBOUNDED`` with ``Congruence(1, 0)``, and the rows
 combine as usual, so ``x * 128`` is a multiple of 128 whatever ``x`` was computed from. Interval
 arithmetic assumes no i32 wrap, exactly as the ``nsw`` flags the lowering emits let LLVM assume.
+
+Stated facts enter through ``rocke.core.facts.stated_facts_of`` only: a kernel parameter's
+declared facts (``KernelLauncher.from_artifact`` checks them) and a range marker's (its writer
+checked them). A runtime end -- a loop stop over a kernel parameter or a marker result, or a
+marker bound over a Value with stated facts (``has_stated_facts``), plus constants -- is kept as
+a ``_RuntimeEnd`` over that value, so a range below it is proven by identity.
 
 A value is wave-uniform only when LLVM's uniformity analysis is known to prove it: block ids,
 kernel parameters, ``readfirstlane`` results, the counter of a loop with uniform bounds, a range
@@ -46,15 +50,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rocke.core.ir import I32, Op, Value, assume_range_bound_operands
+from rocke.core.facts import has_stated_facts, stated_facts_of
+from rocke.core.ir import I32, I64, Op, Value, marker_facts
+from rocke.core.value_sources import ASSUME_RANGE_OP
 
 from .ranges import (
     UNBOUNDED,
     AffineCoord,
     Congruence,
     Interval,
-    RuntimeValue,
     UniformPart,
+    _RuntimeEnd,
 )
 
 if TYPE_CHECKING:
@@ -63,7 +69,6 @@ if TYPE_CHECKING:
 __all__ = [
     "WORKGROUP_SIZE_RECORD",
     "leaf_varying_within_workgroup",
-    "runtime_value_of",
     "split_coordinate",
     "value_facts",
 ]
@@ -129,32 +134,6 @@ def split_coordinate(b: IRBuilder, value: Value | int) -> AffineCoord:
     return _Splitter(b, _FactWalk(b, value)).split(value)
 
 
-def runtime_value_of(value: Value | int) -> RuntimeValue | None:
-    """The ``RuntimeValue`` an envelope marker states, or ``None`` when ``value`` is not one's
-    result.
-
-    An envelope marker is an ``assume_range`` marker with two int ends. The object is built from
-    the marker's STATED facts -- exactly what its producer put in the object it returned -- never
-    from what the walk derives, so it is looser than the derived range, never wrong, and shares
-    the ``Value`` an identity proof keys on.
-    """
-    op = _defining_op(value)
-    if (
-        op is None
-        or op.name != "arith.assume_range"
-        or len(op.operands) != 1
-        or "ge" not in op.attrs
-        or "lt" not in op.attrs
-    ):
-        return None
-    return RuntimeValue(
-        value,
-        0,
-        Interval(op.attrs["ge"], op.attrs["lt"]),
-        Congruence(op.attrs.get("multiple_of", 1), op.attrs.get("residue", 0)),
-    )
-
-
 def leaf_varying_within_workgroup(b: IRBuilder, value: Value | int) -> Value | None:
     """``None`` when ``value`` is the same in every wave of the workgroup; else the first leaf
     (depth first, in operand order) that may differ.
@@ -211,9 +190,14 @@ def _defining_op(value: Value | int) -> Op | None:
     return value.op if isinstance(value, Value) else None
 
 
-def _is_param(b: IRBuilder, value: Value) -> bool:
-    return value.op is None and any(
-        b.get_param(p.name) is value for p in b.kernel.params
+def _is_runtime_end_leaf(value: Value | int) -> bool:
+    """Whether a loop stop can be a runtime end over ``value``: a kernel parameter, which
+    proves a counter below it by identity even when its declaration states no facts, or a
+    range marker's result."""
+    if not isinstance(value, Value):
+        return False
+    return value.param is not None or (
+        value.op is not None and value.op.name == ASSUME_RANGE_OP
     )
 
 
@@ -271,29 +255,41 @@ class _FactWalk:
         r, _ = self.facts(value)
         return r.lo if _is_exact(r) else None
 
-    def runtime_end(self, marker: Op) -> RuntimeValue:
-        """A marker's runtime end ``lt + lt_plus`` (its ``lt`` operand), rebuilt from that
-        operand's marker."""
-        _, lt = assume_range_bound_operands(marker)
-        end = runtime_value_of(lt)
-        if end is None:
+    def runtime_end(self, marker: Op) -> _RuntimeEnd:
+        """A marker's runtime end ``lt + lt_plus`` over its ``lt`` operand, whose own numbers
+        come from that operand's stated facts."""
+        end = marker_facts(marker).upper
+        if not has_stated_facts(end.bound):
             raise ValueError(
                 f"IR range walk: the marker on {marker.operands[0]} states an end over "
-                f"{lt}, which is not a runtime value's marker result -- a runtime end is "
-                "the .value of a RuntimeValue (from runtime_value)"
+                f"{end.bound}, which has no stated facts -- a runtime end is a kernel "
+                "parameter or a Value gpu_checked_value returned"
             )
-        return end._shifted(marker.attrs.get("lt_plus", 0))
+        return _RuntimeEnd(end.bound, end.plus)
 
     def _derive(self, value: Value) -> Facts:
         op = value.op
         if op is None:
-            return _UNKNOWN  # a kernel parameter or another value with no defining op
+            if value.param is not None and value.type in (I32, I64):
+                return self._parameter(value)
+            return _UNKNOWN  # a value with no defining op that is not a parameter
         if op.name == "scf.for":
             return self._loop_counter(value)
         rule = _RANGE_RULES.get(op.name)
         return _UNKNOWN if rule is None else rule(self, op)
 
     # -- leaves ----------------------------------------------------------------------------
+
+    def _parameter(self, value: Value) -> Facts:
+        """A kernel parameter: the range and residue its declaration states (an ``eq`` length
+        is its constant)."""
+        facts = stated_facts_of(value)
+        if facts.lower is not None and facts.lower == facts.upper:
+            return _constant_facts(facts.lower)
+        upper = None if facts.upper is None else facts.upper + 1
+        return Interval(facts.lower, upper), Congruence(
+            facts.multiple_of, facts.residue
+        )
 
     def _constant(self, op: Op) -> Facts:
         c = op.attrs.get("value")
@@ -347,11 +343,12 @@ class _FactWalk:
         counter = Interval(lo, h)  # a runtime end: never runs when its envelope says so
         return (never_runs if counter.within(None, lo + 1) else counter), congruence
 
-    def _runtime_stop(self, stop: Value) -> RuntimeValue | None:
-        """``runtime_value_of(v).shifted(c)`` when ``stop`` is an envelope-marker result ``v``
-        with exact constants added or subtracted (summed into ``c``), else ``None``."""
+    def _runtime_stop(self, stop: Value) -> _RuntimeEnd | None:
+        """The end ``v + c`` when ``stop`` is a kernel parameter or a marker result ``v``
+        (:func:`_is_runtime_end_leaf`) with exact constants added or subtracted (summed into
+        ``c``), else ``None``."""
         c = 0
-        while (base := runtime_value_of(stop)) is None:
+        while not _is_runtime_end_leaf(stop):
             op = _defining_op(stop)
             if (
                 op is None
@@ -367,21 +364,32 @@ class _FactWalk:
                 c, stop = c + kx, y
             else:
                 return None
-        return base._shifted(c)
+        return _RuntimeEnd(stop, c)
 
     def _marker(self, op: Op) -> Facts:
         """An ``assume_range`` marker: the operand's facts narrowed by the stated ones."""
         x_range, x_congruence = self.facts(op.operands[0])
-        attrs = op.attrs
-        # A ``ge`` operand is not read: dropping a stated lower end only loosens the range.
-        _, lt_operand = assume_range_bound_operands(op)
-        hi = attrs.get("lt") if lt_operand is None else self.runtime_end(op)
-        stated = Interval(attrs.get("ge"), hi)
-        multiple_of, residue = attrs.get("multiple_of", 1), attrs.get("residue", 0)
+        stated = marker_facts(op)
+        lo = hi = None
+        if stated.lower is not None:
+            # A Value lower end gives its number: it needs no identity proof.
+            lo = (
+                stated_facts_of(op.result).lower
+                if isinstance(stated.lower.bound, Value)
+                else stated.lower.bound
+            )
+        if stated.upper is not None:
+            hi = (
+                self.runtime_end(op)
+                if isinstance(stated.upper.bound, Value)
+                else stated.upper.bound
+            )
         congruence = (
-            Congruence(multiple_of, residue) if multiple_of > 1 else x_congruence
+            Congruence(stated.multiple_of, stated.residue)
+            if stated.multiple_of > 1
+            else x_congruence
         )
-        return x_range.intersect(stated).snapped(congruence), congruence
+        return x_range.intersect(Interval(lo, hi)).snapped(congruence), congruence
 
     # -- arithmetic --------------------------------------------------------------------------
 
@@ -465,7 +473,7 @@ _RANGE_RULES = {
     "gpu.thread_id": _FactWalk._thread_id,
     "gpu.block_id": _FactWalk._block_id,
     "tile.readfirstlane": _FactWalk._readfirstlane,
-    "arith.assume_range": _FactWalk._marker,
+    ASSUME_RANGE_OP: _FactWalk._marker,
     "arith.add": _FactWalk._add,
     "arith.sub": _FactWalk._sub,
     "arith.mul": _FactWalk._mul,
@@ -538,7 +546,7 @@ class _Splitter:
     def _derive_uniform(self, value: Value) -> bool:
         op = value.op
         if op is None:
-            return _is_param(self._b, value)
+            return value.param is not None
         if op.name in ("arith.constant", "gpu.block_id", "tile.readfirstlane"):
             return True
         if op.name == "scf.for":
@@ -546,7 +554,7 @@ class _Splitter:
             return loop is not None and all(
                 self.is_uniform(v) for v in loop.operands[:3]
             )
-        if op.name == "arith.assume_range":
+        if op.name == ASSUME_RANGE_OP:
             return self.is_uniform(op.operands[0])
         if op.name in _PURE_ARITH_OPS:
             return bool(op.operands) and all(self.is_uniform(v) for v in op.operands)
@@ -580,13 +588,13 @@ def _varying_leaf_of(
 ) -> Value | None:
     op = value.op
     if op is None:
-        return None if _is_param(b, value) else value
+        return None if value.param is not None else value
     if op.name in ("arith.constant", "gpu.block_id"):
         return None
     if op.name == "scf.for":
         loop = _loop_of_counter(value)
         return value if loop is None else _first_of(b, loop.operands[:3], seen)
-    if op.name in ("arith.assume_range", "tile.readfirstlane") or (
+    if op.name in (ASSUME_RANGE_OP, "tile.readfirstlane") or (
         op.name in _PURE_ARITH_OPS and op.operands
     ):
         return _first_of(b, op.operands, seen)
