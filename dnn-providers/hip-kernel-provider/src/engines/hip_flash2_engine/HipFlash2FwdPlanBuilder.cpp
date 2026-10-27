@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -26,6 +27,49 @@ namespace hip_flash2_engine
 
 using namespace hip_kernel_provider_common;
 using namespace hipdnn_flatbuffers_sdk;
+
+namespace
+{
+
+// Per-tensor device-pointer alignment (bytes) the forward kernels need from the DECLARED
+// alignment. The backend rejects, at execute, any pointer that is not a multiple of the declared
+// alignment, and a declared alignment A only guarantees ptr % A == 0, so a need N is covered
+// exactly when N divides A. Each need is a single constant so an exact-placement probe can
+// confirm or relax it in one place.
+//
+// Q: loaded straight from global memory with rocWMMA load_matrix_sync of a 16x16x16 fp16
+//    matrix_b fragment (HipFlash2FwdPlan.hip:112, HipFlash2FwdPlanVariant.hip:166); each lane
+//    reads 4 contiguous fp16 = 8 bytes through rocWMMA's vector load [INFERENCE: rocWMMA's
+//    vector type is 8-byte aligned].
+// K, V: the variant kernels stage K/V through 16-byte half8 loads
+//    (HipFlash2FwdPlanVariant.hip:216-217) only when `vec_ok` holds, which tests ptr_k and ptr_v
+//    for 16-byte alignment at run time (HipFlash2FwdPlanVariant.hip:195-196) and otherwise takes
+//    a scalar fp16 path (HipFlash2FwdPlanVariant.hip:275-276); the legacy kernel reads K/V as
+//    scalar fp16 (HipFlash2FwdPlan.hip:151). The need is therefore the fp16 element size.
+// O: stored as 4 scalar fp16 per fragment row (HipFlash2FwdPlanVariant.hip:399,
+//    HipFlash2FwdPlan.hip:254), which the compiler may fuse into one 8-byte store; the lane
+//    footprint of 4 fp16 is used as the need. UNCONFIRMED: the scalar source alone would need
+//    only the 2-byte element size.
+constexpr int64_t K_Q_ALIGNMENT_BYTES = 8;
+constexpr int64_t K_KV_ALIGNMENT_BYTES = 2;
+constexpr int64_t K_O_ALIGNMENT_BYTES = 8;
+
+// True when `tensor`'s declared alignment guarantees `needBytes`-byte alignment.
+bool declaredAlignmentCovers(const data_objects::TensorAttributes& tensor, int64_t needBytes)
+{
+    const int64_t declared = tensor.alignment();
+    return needBytes > 0 && declared > 0 && declared % needBytes == 0;
+}
+
+std::string alignmentDeclineMessage(const char* name,
+                                    const data_objects::TensorAttributes& tensor,
+                                    int64_t needBytes)
+{
+    return std::string{name} + " tensor declares alignment " + std::to_string(tensor.alignment())
+           + " bytes, but the kernel needs " + std::to_string(needBytes) + "-byte aligned pointers";
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // isApplicable
@@ -170,6 +214,17 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
                                "V head_dim stride must be 1 (non-contiguous not supported)");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->strides()->Get(3) != 1,
                                "O head_dim stride must be 1 (non-contiguous not supported)");
+
+    // The backend rejects execute-time pointers that violate the declared alignment, so decline
+    // when a tensor declares less than the kernel needs (see the constants above).
+    HIP_KERNEL_RETURN_FALSE_IF(!declaredAlignmentCovers(*qTensor, K_Q_ALIGNMENT_BYTES),
+                               alignmentDeclineMessage("Q", *qTensor, K_Q_ALIGNMENT_BYTES));
+    HIP_KERNEL_RETURN_FALSE_IF(!declaredAlignmentCovers(*kTensor, K_KV_ALIGNMENT_BYTES),
+                               alignmentDeclineMessage("K", *kTensor, K_KV_ALIGNMENT_BYTES));
+    HIP_KERNEL_RETURN_FALSE_IF(!declaredAlignmentCovers(*vTensor, K_KV_ALIGNMENT_BYTES),
+                               alignmentDeclineMessage("V", *vTensor, K_KV_ALIGNMENT_BYTES));
+    HIP_KERNEL_RETURN_FALSE_IF(!declaredAlignmentCovers(*oTensor, K_O_ALIGNMENT_BYTES),
+                               alignmentDeclineMessage("O", *oTensor, K_O_ALIGNMENT_BYTES));
 
     return true;
 }

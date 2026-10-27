@@ -16,8 +16,13 @@
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 #include "tests/utilities/RaggedGraphTestUtils.hpp"
 
+#include <flatbuffers/flatbuffers.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+#include <memory>
+#include <vector>
 
 namespace hip_flash2_engine
 {
@@ -330,6 +335,140 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsRaggedTensors)
         base, [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
             return _builder.isApplicable(_handle, graph);
         });
+}
+
+// Re-serializes a graph with the declared alignment (bytes) of the tensor `uid` replaced.
+flatbuffers::DetachedBuffer
+    withDeclaredAlignment(const void* graphBuffer, int64_t uid, int64_t alignment)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
+    for(auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == uid)
+        {
+            tensor->alignment = alignment;
+        }
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    return builder.Release();
+}
+
+// A tensor of the graph and the alignment (bytes) its kernel needs from the declared value.
+struct AlignmentRole
+{
+    const char* name;
+    int64_t uid;
+    int64_t needBytes;
+};
+
+// Q, K, V and O of the fp16 forward graph used by the declared-alignment tests.
+std::vector<AlignmentRole> flash2AlignmentRoles(const flatbuffers::FlatBufferBuilder& graph)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+        graph.GetBufferPointer(), graph.GetSize());
+    const auto& attrs = wrapper.getNodeWrapper(0)
+                            .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    // Needs: Q 8 bytes (rocWMMA fragment load of 4 fp16 per lane), K and V 2 bytes (the kernel
+    // falls back to scalar fp16 loads unless its own run-time 16-byte check passes), O 8 bytes.
+    return {{"q", attrs.q_tensor_uid(), 8},
+            {"k", attrs.k_tensor_uid(), 2},
+            {"v", attrs.v_tensor_uid(), 2},
+            {"o", attrs.o_tensor_uid(), 8}};
+}
+
+// Bug caught: a tensor declaring less alignment than the kernel's loads and stores need is
+// accepted (the backend then rejects the pointer at execute, or the kernel reads misaligned), a
+// declared alignment equal to the need or a larger multiple is wrongly declined, or a declared
+// alignment that is not a multiple of the need passes a `>=` style comparison. Each tensor is
+// declared at half its need, at its need, at twice its need, at 1.5x its need, and at 1 and 0
+// bytes, one tensor at a time; the default-16 graph stays accepted.
+TEST_F(TestHipFlash2FwdPlanBuilder, DeclaredAlignmentOfEachTensorIsHonored)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto valid = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+
+    const auto accepts = [&](int64_t uid, int64_t alignment) {
+        const auto buffer = withDeclaredAlignment(valid.GetBufferPointer(), uid, alignment);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(buffer.data(),
+                                                                               buffer.size());
+        return _builder.isApplicable(_handle, graph);
+    };
+
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseline(
+            valid.GetBufferPointer(), valid.GetSize());
+        EXPECT_TRUE(_builder.isApplicable(_handle, baseline))
+            << "the graph with default alignment must be accepted";
+    }
+
+    for(const auto& role : flash2AlignmentRoles(valid))
+    {
+        EXPECT_TRUE(accepts(role.uid, role.needBytes))
+            << role.name << " declaring exactly its need (" << role.needBytes
+            << " bytes) was declined";
+        EXPECT_TRUE(accepts(role.uid, role.needBytes * 2))
+            << role.name << " declaring twice its need was declined";
+        EXPECT_FALSE(accepts(role.uid, role.needBytes / 2))
+            << role.name << " declaring half its need was accepted";
+        EXPECT_FALSE(accepts(role.uid, role.needBytes + role.needBytes / 2))
+            << role.name << " declaring a non-multiple of its need was accepted";
+        EXPECT_FALSE(accepts(role.uid, 1)) << role.name << " declaring 1 byte was accepted";
+        EXPECT_FALSE(accepts(role.uid, 0)) << role.name << " declaring 0 bytes was accepted";
+    }
+}
+
+// Bug caught: K and V are held to a 16-byte vector-load need although the kernel takes a scalar
+// path when they are not 16-byte aligned, so a graph declaring K and V at the fp16 element size
+// (with Q and O at their needs) is declined instead of served by the scalar path.
+TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsKeyValueDeclaredAtElementSize)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto valid = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+
+    const auto roles = flash2AlignmentRoles(valid);
+    const auto kNarrowed = withDeclaredAlignment(valid.GetBufferPointer(), roles[1].uid, 2);
+    const auto kvNarrowed = withDeclaredAlignment(kNarrowed.data(), roles[2].uid, 2);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(kvNarrowed.data(),
+                                                                           kvNarrowed.size());
+    EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
 using asm_sdpa_engine::DeprecatedCausalMaskCase;

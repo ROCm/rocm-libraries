@@ -20,6 +20,15 @@ Correctness: 9/9 shapes PASS, MaxErr < 0.002 vs CPU FP32 reference (gfx942).
 > with a newer toolchain and is substantially faster on the D=128 path (D=64 unchanged).
 > Re-measure before release.
 
+## Declared tensor alignment
+
+The backend rejects any device pointer that is not a multiple of its tensor's declared
+alignment (`TensorAttributes::alignment()`, default 16), so `isApplicable` declines a graph whose
+declared alignment does not cover what the kernel needs: Q 8 bytes (rocWMMA fragment loads), O
+8 bytes (conservative; the stores are scalar fp16 in the source), K and V 2 bytes (the kernel
+takes a scalar path unless its own run-time check finds K/V 16-byte aligned). The constants live
+in `HipFlash2FwdPlanBuilder.cpp`.
+
 ## Build
 
 Enable with the CMake option (off by default):
