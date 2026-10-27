@@ -132,7 +132,7 @@ values = {"A": A, "B": B, "C": C, "M": M, "N": N, "K": K}
 launcher(values, config=LaunchConfig(
     stream=0,                     # 0 -> resolve to torch current stream
     grid=(grid_x, grid_y, grid_z),
-    block=(block_size, 1, 1),
+    block=(block_size, 1, 1),     # default None -> (64, 1, 1)
     shared_bytes=0,
     fence=True,                   # default; HIP-event sync after launch
 ))

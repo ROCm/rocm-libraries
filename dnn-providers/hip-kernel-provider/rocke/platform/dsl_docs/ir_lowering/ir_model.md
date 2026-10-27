@@ -79,7 +79,12 @@ KernelDef(name, params, body, attrs)
 
 Kernel attributes consumed by lowering:
 
-- `max_workgroup_size` (int, default 256) — emitted as `"amdgpu-flat-work-group-size"="64,N"`.
+- `max_workgroup_size` (int, default 256) -- an upper bound on the launch block size, emitted as
+  `"amdgpu-flat-work-group-size"="64,N"`.
+- `workgroup_size` (int) -- the exact launch block size. It lowers exactly as `max_workgroup_size` of the same
+  value does: both engines read the block size through one accessor (`KernelDef.max_workgroup_size`,
+  `rocke_kernel_max_workgroup_size`), which returns `workgroup_size` when it is set. A kernel sets at most one of
+  the two; both verifiers refuse a kernel that sets both.
 - `waves_per_eu` (int or `(lo, hi)` tuple) — emitted as `"amdgpu-waves-per-eu"`.
 
 ## IRBuilder API

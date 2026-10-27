@@ -1125,7 +1125,15 @@ class KernelDef:
         gets baked into the AMDGPU kernel attributes
         (`amdgpu-flat-work-group-size="64,N"`); launching with more
         than N threads/block triggers a HIP `unspecified launch
-        failure`. Defaults to 256 for legacy kernels."""
+        failure`.
+
+        A kernel states its block size in one of two attrs, never both (the
+        verifier refuses both): ``workgroup_size`` is the exact block size the
+        kernel must be launched with, and ``max_workgroup_size`` an upper bound
+        it may be launched below. Either one is the bound returned here, so the
+        two lower to the same bytes. Defaults to 256 for legacy kernels."""
+        if "workgroup_size" in self.attrs:
+            return int(self.attrs["workgroup_size"])
         return int(self.attrs.get("max_workgroup_size", 256))
 
     @property

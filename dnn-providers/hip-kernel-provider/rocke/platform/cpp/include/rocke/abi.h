@@ -97,8 +97,10 @@ extern "C" {
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
  * 3: the scf_if_else instruction (converging runtime if/else, scf.if_else);
- *    older engines reject it as an unknown instruction op. */
-#define ROCKE_RECIPE_ABI 3
+ *    older engines reject it as an unknown instruction op.
+ * 4: the workgroup_size kernel attr (the exact launch block size); an older
+ *    lowerer ignores it and sizes the kernel for max_workgroup_size instead. */
+#define ROCKE_RECIPE_ABI 4
 
 /* The values the LOADED library was compiled with. A caller compares these
  * against the ROCKE_* macros it was itself compiled with; they differ exactly
