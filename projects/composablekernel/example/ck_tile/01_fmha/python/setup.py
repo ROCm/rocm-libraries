@@ -82,6 +82,8 @@ class FmhaBuildExtension(BuildExtension):
             str(kernel_dir),
             "-G",
             "Ninja",
+            # Discard receipts forced into the cache by earlier Python builds.
+            "-UFMHA_*_CODEGEN_RECEIPT",
             "-DCMAKE_BUILD_TYPE=Release",
             f"-DCMAKE_CXX_COMPILER={compiler}",
             f"-DCMAKE_HIP_COMPILER={compiler}",
@@ -179,7 +181,7 @@ class FmhaSdist(sdist):
 setup(
     name="ck-tile-fmha",
     version="0.1.0",
-    description="CK Tile FMHA PyTorch bindings with a FlashAttention-compatible API",
+    description="CK Tile FMHA PyTorch bindings",
     long_description=(PACKAGE_ROOT / "README.md").read_text(),
     long_description_content_type="text/markdown",
     packages=find_packages(include=["ck_tile_fmha", "ck_tile_fmha.*"]),

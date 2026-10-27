@@ -1237,7 +1237,7 @@ def get_bwd_blobs(
             # Flash attention integration
             if receipt == 2:
                 cond = dtype in ["fp16", "bf16"]
-                cond &= bias in ["no", "alibi"] or (mode == "batch" and bias == "bias")
+                cond &= bias in ["no", "alibi"]
                 cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
                 cond &= dpad == dvpad
                 if not cond:
@@ -1256,6 +1256,15 @@ def get_bwd_blobs(
                 cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
                 cond &= dpad == dvpad
                 cond &= deterministic == "f"
+                if not cond:
+                    continue
+            # CK Tile Python API
+            elif receipt == 5:
+                # CK Tile Python pads equal Q/V head dimensions to multiples of 8.
+                cond = dtype in ["fp16", "bf16"] and hdim <= 256
+                cond &= bias in ["no", "alibi"] or (mode == "batch" and bias == "bias")
+                cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
+                cond &= dpad == dvpad and dpad in [0, 8]
                 if not cond:
                     continue
             # Aiter (mha_bwd) integration

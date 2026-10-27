@@ -2169,9 +2169,7 @@ def get_product(receipt: int) -> Product:
         def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
             cond = problem_ctx.dtype in ["fp16", "bf16"]
             cond &= kernel_ctx.pipeline.F_vlayout == "row"
-            cond &= kernel_ctx.pipeline.F_bias in ["no", "alibi"] or (
-                problem_ctx.mode == "batch" and kernel_ctx.pipeline.F_bias == "bias"
-            )
+            cond &= kernel_ctx.pipeline.F_bias in ["no", "alibi"]
             cond &= kernel_ctx.pipeline.F_qscale == "no"
             cond &= kernel_ctx.pipeline.F_skip == "f"
             cond &= kernel_ctx.pipeline.F_sink == "f"
@@ -2206,6 +2204,25 @@ def get_product(receipt: int) -> Product:
             return cond
 
         return Product(name="PyTorch integration", rule=fit)
+    # CK Tile Python API
+    elif receipt == 5:
+
+        def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
+            pipeline = kernel_ctx.pipeline
+            cond = problem_ctx.dtype in ["fp16", "bf16"]
+            cond &= problem_ctx.hdim == problem_ctx.hdim_v <= 256
+            cond &= pipeline.F_vlayout == "row"
+            cond &= pipeline.F_bias in ["no", "alibi"] or (
+                problem_ctx.mode == "batch" and pipeline.F_bias == "bias"
+            )
+            cond &= pipeline.F_lse == "t"
+            cond &= pipeline.F_logits == "f"
+            cond &= pipeline.F_qscale == "no"
+            cond &= pipeline.F_skip == "f"
+            cond &= pipeline.F_sink == "f"
+            return cond
+
+        return Product(name="CK Tile Python API", rule=fit)
     # Aiter(mha_fwd) integration
     elif receipt == 100:
 

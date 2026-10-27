@@ -1,6 +1,6 @@
 # CK Tile FMHA Python
 
-`ck_tile_fmha` provides a FlashAttention-compatible Python API backed by CK Tile.
+`ck_tile_fmha` provides PyTorch bindings for CK Tile FMHA kernels.
 It supports FP16/BF16 fixed-length and variable-length attention, packed inputs,
 forward/backward, MHA/GQA/MQA, causal/local masks, ALiBi, dropout, deterministic
 backward, and KV-cache operations, subject to CK backend restrictions.
@@ -23,8 +23,8 @@ GPU_ARCHS=gfx1250 MAX_JOBS=64 python -m pip install --no-build-isolation '.[test
 
 `GPU_ARCHS` defaults to the detected GPU; set it for cross-compilation.
 `CK_ROOT` selects an alternate CK checkout. The build uses the C++ example's
-architecture-specific kernels, including deterministic backward and fixed-length
-bias support.
+architecture-specific kernels with receipt 5, which generates only the variants
+needed by the current Python API, including bias and deterministic backward.
 
 ## Development and incremental builds
 
