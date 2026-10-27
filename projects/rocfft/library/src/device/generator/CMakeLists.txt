@@ -22,10 +22,10 @@
 
 add_library( generator OBJECT generator.cpp fftgenerator.cpp )
 rocfft_add_coverage_flags( generator )
-target_link_libraries( generator hip::device )
+target_link_libraries( generator PRIVATE hip::host )
 
 add_executable( stockham_gen stockham_gen.cpp )
-target_link_libraries( stockham_gen PRIVATE generator )
+target_link_libraries( stockham_gen PRIVATE generator hip::host)
 
 foreach( target stockham_gen generator )
   set_target_properties( ${target} PROPERTIES
