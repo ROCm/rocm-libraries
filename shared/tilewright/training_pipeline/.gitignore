@@ -1,0 +1,12 @@
+# Run outputs: bench logs, datasets, models and reports carry measured
+# performance numbers.
+runs/
+
+# Model bundles and model files belong in run outputs or in the Tilewright
+# directories of hipBLASLt's library logic, never in this directory.
+*.pt
+*.bin
+
+__pycache__/
+*.pyc
+.pytest_cache/

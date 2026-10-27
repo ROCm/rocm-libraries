@@ -1,0 +1,265 @@
+# BF16 GEMM (bf16 in and out, f32 compute), NT layout, on gfx950, with the
+# kernel pool of the Origami library alone: the settings this library's
+# Origami-only model trains with. Catalog v3 with the planner, co-tenant
+# execution contexts, the audit set and the final retrain; the pooled_ft
+# recipe with targeted pseudo-negatives, the trained-key gate, served
+# candidates, the cascade and a whitelist tier. The one command (--mode full)
+# builds the audit set (audit.dir, under TILEWRIGHT_AUDIT_ROOT) before its
+# first round. Host values stay out of this file: a run config kept outside
+# the repository lists the host's devices (runtime.devices, and
+# runtime.exclude_gpus for GPUs a run must not use), pins stage 7's CPUs
+# (stage07.cpus), names hipBLASLt builds other than the bench root's, and
+# lists any stage08 evaluation sets. Before any round, every kernel of a
+# hazard class runs alone (`hazards`) and the correctness gate checks every
+# kernel of the pool. Stages the trained model only (deploy.apply_patch:
+# false). README.md documents every key.
+config_id: gfx950_bbs_nt_origami_v3
+arch: gfx950
+
+hipblaslt:
+  a_type: bf16_r
+  b_type: bf16_r
+  c_type: bf16_r
+  d_type: bf16_r
+  scale_type: f32_r
+  compute_type: c_f32_r
+  transA: N
+  transB: T
+  library_stem: TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Ailk_Bjlk_Cijk_Dijk_ID75a0_gfx950
+
+library:
+  # The kernel pool is the Origami library alone, the Prediction table of
+  # the library file (a file without one is refused): the kernels Origami
+  # ranks, in table order.
+  kind: origami
+
+runtime:
+  devices: [0]
+  rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
+
+seed:
+  # The production recipe's budget, with full.total_rounds: round 0's
+  # shapes per cell and each active round's new shapes per leaf.
+  target_per_cell: 400
+  shapes_per_cell: 150
+  # A leaf the previous round's stage04b retrained (below the bar, or for
+  # a held-out collapse) draws twice shapes_per_cell, and a leaf draws half
+  # as many again as its new shapes hold with K above 32768; no leaf draws
+  # fewer than shapes_per_cell (README *Weak cells and very large K
+  # (stage01)*).
+  weak_cell_factor: 2.0
+  large_k_factor: 1.5
+  seed: 42
+  n_strata: 2
+
+bench:
+  # Near-winners are read again (stage03b) in the default band.
+  rebench:
+    enabled: true
+  blocks_per_gpu: 50
+  # Times a kernel only when its single cold call is within 1/0.45 of the
+  # fastest (README.md, Bench timing).
+  skip_slow_solution_ratio: 0.45
+  # Every explicit kernel list in a seeded per-GEMM shuffle, and a
+  # sacrificial first kernel on screened lines.
+  kernel_order: shuffled
+  order_seed: 42
+  sacrificial_kernel: true
+  # Sustained finalists of power-capped GEMMs (stage 3.7) off.
+  sustained:
+    enabled: false
+  # Adaptive timing is always on: each kernel is timed until the relative
+  # standard error of its mean is below noise_threshold (times in ms).
+  adaptive:
+    warmup_time: 1.0
+    sample_time: 0.5
+    measure_time: 1.5
+    max_measure_time: 8.0
+    min_iters: 3
+    max_iters: 0
+    noise_threshold: 0.05
+    stability_threshold: 0.05
+    stability_window: 32
+    stability_interval: 16
+
+planner:
+  enabled: true
+  mode: planned
+  seed_per_cell: 8
+  ranker: neighbors
+  neighbors_k: 4
+  # Longer than the TN configs' lists: with the non-temporal rule off every
+  # kernel of the pool is feasible, and a round-0 list ranks from a few seed
+  # benches per cell, so a short one leaves out kernels close to the winner.
+  # stage02 scores round 0's lists on the seed benches and warns below
+  # planner.recall_min_ceiling, naming the top_k that reaches it.
+  top_k: 96
+  families_top_f: 4
+  family_variants: 0
+  explore_random_k: 16
+  min_coverage: 2
+  max_list: 512
+  seed: 42
+
+contexts:
+  # Co-tenant CU budgets as shares of the bench device's CUs, resolved
+  # when the run starts (inside a compute partition, shares of the
+  # partition's CUs): three quarters, half, a quarter and an eighth, each
+  # on a tenth of a cell's shapes, and no held-out budget. Each resolves to
+  # a whole multiple of a 32-CU granule, at least one, so the smallest
+  # trained budget is one granule, one XCD's worth of CUs, and every
+  # compute-partition size of the device is also a trained budget: the
+  # models train and serve CU budgets from one granule up to the whole
+  # device. enabled: false turns the eighth off for its bench time, which
+  # grows as the CUs shrink. A share the device has no budget for, or that
+  # meets another's budget, is left out, and the run says which. Turning
+  # the eighth on or off, or running on another CU count or partition,
+  # changes the contexts the audit set is bound to: point audit.dir at a
+  # new one (a run refuses a set built with others).
+  list:
+    - {cu_budget: 0}
+    - {cu_fraction: 0.75, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.25, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.125, cotenant: true, fraction: 0.1, enabled: true}
+  holdout: []
+  seed: 42
+  replan: true
+
+train:
+  workers: 16
+  # The usable CPUs shared among the workers.
+  threads_per_worker: 0
+  device: cpu
+  eval_sample_frac: 1.0
+  catalog: v3
+  whitelist: none
+  smart_k: 0
+  cascade_k: 16
+  stage1_recall_weight: 0.1
+  served_candidates: true
+  # A whitelist tier of this many view keys per cell, chosen after training;
+  # scripts/build_whitelist_tier.py builds it again, or removes it, without
+  # retraining.
+  whitelist_tier_k: 32
+  # The non-temporal rule serves a kernel with a non-temporal A hint only with
+  # A transposed, and one with a B hint only with B not transposed. Off for
+  # this layout: in NT the rule would never serve a kernel with a non-temporal
+  # hint outside its family-wise refinement. Off, every kernel of the pool can
+  # be listed, trained on and served.
+  non_temporal_rule: false
+  non_temporal_family_rule: false
+  # Serve only kernels whose view key has training rows.
+  trained_key_gate: true
+  # Targeted pseudo-negatives: each planned training GEMM's loss gets up to
+  # 16 keys no training GEMM of its cell measured, at twice the winner's
+  # latency and a tenth of a target's weight.
+  pseudo_negatives: targeted
+  unmeasured_samples: 16
+  unmeasured_margin: 1.0
+  unmeasured_weight: 0.1
+  # Repeated measurements of one (GEMM, kernel) merge by their median.
+  repeat_aggregation: median
+  # One student over every cell, distilled from one LightGBM teacher, then
+  # fine-tuned per cell.
+  recipe: pooled_ft
+  pooled_epochs: 12
+  pooled_batch_gemms: 64
+  pooled_lr: 0.002
+  pooled_eval_points: 24
+  fine_tune_epochs: 12
+  fine_tune_lr: 0.001
+  pooled_threads: 32
+  # No min_cu_fraction: the models declare CU shares down to the smallest
+  # one they trained on the bench device, and no lower.
+  schedules: [default]
+  min_cell_gemms: 30
+  off_list_sel_eff: auto
+  off_list_fallback: 0.83
+
+validate:
+  sel_eff_threshold: 0.95
+  min_cell_gemms: 20
+  split_floor: 0.83
+  split_min_improvement: 0.02
+  split_after_attempts: 1
+  # Cells do not split: a cell below the bar is retrained on every round's
+  # data. The split keys above act only with a max_split_depth above 0.
+  max_split_depth: 0
+  structural_split_min_octaves: 0.0
+
+full:
+  # The production recipe's rounds, then the final retrain of every cell on
+  # every round's data, shipped only when the audit set finds it not worse.
+  # The key is not pinned: a run whose audit set still climbs goes on with
+  # more rounds, and a final retrain of them, when the same command runs
+  # with a larger one.
+  total_rounds: 8
+  final_retrain:
+    enabled: true
+    gate: not-worse
+
+gate:
+  # A bundle the per-cell gate keeps out for findings in at most
+  # repair_max_cells (3) base cells ships with those cells repaired, a tier
+  # key of the cell's own network, else the cell's subtree from the bundle
+  # the run ships, once the repaired bundle passes every gate again; above
+  # that it stays out whole.
+  repair: true
+
+deploy:
+  target_sel_eff: 0.95
+  on_final_round: true
+  stop_when_target_reached: false
+  weight_dtype: int8
+  # Stage only: no checkout receives the model.
+  rocm_libraries_to_deploy: null
+  apply_patch: false
+  build_after_apply: false
+  build_jobs: null
+
+correctness:
+  # Every kernel of the pool through the exact harness (tools/errmap.cpp)
+  # before round 0; it runs bf16 and f32 data.
+  enabled: true
+  lists: []
+
+hazards:
+  # Every kernel of the pool's hazard classes runs alone before any round
+  # (README.md, Hazard canary).
+  enabled: true
+
+audit:
+  dir: ${TILEWRIGHT_AUDIT_ROOT}/gfx950_bbs_nt_origami_v3
+  build: before
+  # Sized to compare models on the same GEMMs, such as the shipped model,
+  # Origami and a new one: shapes_per_cell GEMMs per base cell exclusive and
+  # shapes_per_context per cell in each CU budget, benched over the pool.
+  shapes_per_cell: 8
+  shapes_per_context: 2
+  seed: 4242
+  v2: rounds
+  # The official exclusive number is the sustained composite, for GEMMs that
+  # run at the device's power limit, with protocol v2's beside it.
+  sustained: true
+  official: sustained
+
+stage07:
+  # Selection time and pick parity on held-out audit GEMMs in a hipBLASLt
+  # build whose TensileLite serves MLREC_v3 models and their blocklist
+  # sidecar (the bench root's, built with tilewright), serving the staged
+  # model from a copy of the bench library directory.
+  build_dir: ${TILEWRIGHT_BENCH_ROOT}/projects/hipblaslt/build/release
+  parity_sample_trained: 0
+  parity_sample_audit: 300
+  bench_yamls: []
+
+stage08:
+  # Evaluation sets are host data: a run config lists them (report only; no
+  # stage trains, selects or tunes on them).
+  datasets: []
+
+report:
+  # Origami's numbers on the same GEMMs, as a reference: they never enter a
+  # decision.
+  origami_reference: true

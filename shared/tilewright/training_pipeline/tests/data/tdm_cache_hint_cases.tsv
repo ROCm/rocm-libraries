@@ -1,0 +1,17 @@
+# Cache hints of operands A and B as the engine gets them. The tensor data mover loads the operands
+# of the TDMInst bit mask a solution name spells (`_TDMI<n>_`; bit 0 A, bit 1 B), and a loaded
+# operand has cache hint 0; any other operand has TensileLite's: 4 for TemporalHint 1 or 3 when the
+# kernel has temporal hints, else its NonTemporal field. tests/test_dat.py reads these cases with
+# lib/dat.py, and TensileLite's PredictionLibrary_test.cpp with TilewrightRanker::makeConfig.
+# name has_temporal_hint temporal_hint_a temporal_hint_b non_temporal_a non_temporal_b tdm_inst cache_hint_a cache_hint_b
+Cijk_Alik_Bljk_BBS_BH_MT128x128x64_MI16x16x1_NTA0_NTB0_TDMI3_TDMIM0_THn1_THA1_THB1_THD0_WGM8 1 1 1 0 0 3 0 0
+Cijk_Alik_Bljk_BBS_BH_MT128x128x64_MI16x16x1_NTA0_NTB0_TDMI1_TDMIM0_THn1_THA3_THB1_THD0_WGM8 1 3 1 0 0 1 0 4
+Cijk_Alik_Bljk_BBS_BH_MT128x128x64_MI16x16x1_NTA0_NTB0_TDMI2_TDMIM0_THn1_THA3_THB1_THD0_WGM8 1 3 1 0 0 2 4 0
+Cijk_Alik_Bljk_BBS_BH_MT128x128x64_MI16x16x1_NTA0_NTB0_TDMI0_TDMIM0_THn1_THA1_THB3_THD0_WGM8 1 1 3 0 0 0 4 4
+Cijk_Alik_Bljk_BBS_BH_MT128x128x64_MI16x16x1_NTA0_NTB0_TDMI3_TDMIM0_THn1_THA2_THB2_THD0_WGM8 1 2 2 0 0 3 0 0
+Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_TDMIM3_THA1_THB1_WGM8 1 1 1 0 0 0 4 4
+Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_THA1_THB3_TDMI3 1 1 3 0 0 3 0 0
+Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_NTA4_NTB2_TDMI1_WGM8 0 0 0 4 2 1 0 2
+Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x1_NTA4_NTB2_TDMI2_WGM8 0 0 0 4 2 2 4 0
+Cijk_Alik_Bljk_BBS_BH_MT128x128x64_MI16x16x1_NTA4_NTB0_WGM8 0 0 0 4 0 0 4 0
+Cijk_Alik_Bljk_F8BS_MX_MT256x256x128_MI16x16x1_NTA4_NTB2_TDMI3_TDMIM3_THAn1_THB5_THD1_WGM8 1 -1 5 4 2 3 0 0

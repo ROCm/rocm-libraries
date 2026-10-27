@@ -1,0 +1,251 @@
+# BF16 GEMM (bf16 in and out, fp32 compute), TN layout, on gfx1250: a
+# sanity run, not a training recipe. The one command runs every stage (the
+# hazard canary when the pool holds a kernel of a hazard class, the
+# correctness gate, the audit set, the production recipe's rounds, the
+# final retrain, stage 7) on the smallest budgets that still let a cell
+# train, be evaluated and split, so that a new host or partition shows it
+# goes through every round before a production run spends its GPU-days.
+# Its model is not one to ship. The library is the one hipBLASLt loads
+# from Tensile/library/gfx1250 for a device that reports gfx1250. That is
+# every device of ASIC revision other than 0; a revision-0 device loads
+# gfx1250v0, or gfx1250-strict with HSA_DISABLE_GFX12_STRICT=0, and no
+# config here trains for it.
+# This config is for the device class of hipBLASLt's gfx1250_192cu logic
+# subtree (a device that reports gfx1250 and loads the same library
+# file); gfx1250_bbs_tn_sanity.yaml is the same run for the class of its
+# gfx1250 subtree. Each class has an audit set of its own. Neither holds
+# a device value: a run reads the CU count, LDS, L2 and XCD count from the
+# bench device when it starts, and preflight checks that its KFD node and
+# HIP report the same ones; a run config kept outside the repository lists
+# the host's devices and pins any device value in a `hardware:` block.
+# Stages the trained model only (deploy.apply_patch: false). README.md's
+# "First run on a new device" lists what to measure on a new host, and
+# its "Running the gfx1250 configs" the build and the command.
+config_id: gfx1250_192cu_bbs_tn_sanity
+arch: gfx1250
+
+hipblaslt:
+  a_type: bf16_r
+  b_type: bf16_r
+  c_type: bf16_r
+  d_type: bf16_r
+  scale_type: f32_r
+  compute_type: c_f32_r
+  scaleA: 0
+  scaleB: 0
+  transA: T
+  transB: N
+  library_stem: TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1250
+
+library:
+  # The kernel pool is the Origami library alone, the Prediction table of
+  # the library file (a file without one is refused).
+  kind: origami
+
+runtime:
+  devices: [0]
+  rocm_libraries_root: ${TILEWRIGHT_BENCH_ROOT}
+
+seed:
+  # A sanity budget, far below the production recipe's: round 0's shapes
+  # per cell over every cell of the grid, and each active round's new
+  # shapes per leaf.
+  target_per_cell: 4
+  shapes_per_cell: 2
+  # A leaf the previous round's stage04b retrained (below the bar, or for
+  # a held-out collapse) draws twice shapes_per_cell, and a leaf draws half
+  # as many again as its new shapes hold with K above 32768; no leaf draws
+  # fewer than shapes_per_cell (README *Weak cells and very large K
+  # (stage01)*).
+  weak_cell_factor: 2.0
+  large_k_factor: 1.5
+  seed: 42
+  n_strata: 2
+
+bench:
+  # Few bench processes per round: each one loads the library first.
+  blocks_per_gpu: 4
+  # Lines with an operand of this many GiB or more are benched last, in
+  # blocks of their own.
+  heavy_operand_gib: 4
+  warmup_pass: false
+  # Budget for a bench process's first output (library load), then for the
+  # gap between outputs; a silent bench is killed and the line it hung in
+  # quarantined.
+  startup_grace_s: 2400
+  stall_timeout_s: 600
+  # Times a kernel only when its single cold call is within 1/0.45 of the
+  # fastest: the gfx950 configs' screen of planned lines. Check on the host
+  # that it keeps every kernel close to the winner (README.md, First run on
+  # a new device).
+  skip_slow_solution_ratio: 0.45
+  rotating_mb: 512
+  rotating_target_blocks: 16
+  kernel_order: shuffled
+  order_seed: 42
+  sacrificial_kernel: true
+  # The near-winners of a GEMM are read again, as the gfx1250 training
+  # configs read them.
+  rebench:
+    enabled: true
+    tolerance: 0.15
+    fast_below_us: 100
+    fast_runs: 2
+    runs: 1
+    slow_runs: 1
+  sustained:
+    enabled: false
+  # Adaptive timing is always on (times in ms).
+  adaptive:
+    warmup_time: 1.0
+    sample_time: 0.5
+    measure_time: 1.5
+    max_measure_time: 8.0
+    min_iters: 3
+    max_iters: 0
+    noise_threshold: 0.05
+    stability_threshold: 0.05
+    stability_window: 32
+    stability_interval: 16
+
+planner:
+  enabled: true
+  mode: planned
+  # One exhaustive seed per cell, which also covers every kernel once, and
+  # short planned lists.
+  seed_per_cell: 1
+  ranker: neighbors
+  neighbors_k: 2
+  top_k: 32
+  families_top_f: 2
+  family_variants: 0
+  explore_random_k: 4
+  min_coverage: 1
+  max_list: 128
+  seed: 42
+
+contexts:
+  # CU budgets as fractions of the bench device's CUs (inside a compute
+  # partition, of the partition's), resolved to whole multiples of a
+  # 32-WGP granule when the run starts: half and an eighth of the device
+  # beside the whole of it, so that the model declares CU budgets from an
+  # eighth of the device, or one granule where an eighth is less, to all of
+  # it, as the training configs' models do, with two co-tenant benches per
+  # round instead of their four. On a device of two granules both fractions
+  # resolve to one budget and the run says it left the eighth out; a device
+  # of one granule has no budget below its CU count, so a run there leaves
+  # both out and trains the exclusive context alone. A run on another CU
+  # count or partition resolves other budgets than the audit set was built
+  # with: point audit.dir at a new one.
+  list:
+    - {cu_budget: 0}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.125, cotenant: true, fraction: 0.15}
+  holdout: []
+  seed: 42
+  replan: true
+
+train:
+  workers: 16
+  threads_per_worker: 0
+  device: cpu
+  eval_sample_frac: 1.0
+  catalog: v3
+  whitelist: none
+  smart_k: 0
+  cascade_k: 16
+  stage1_recall_weight: 0.1
+  served_candidates: true
+  non_temporal_rule: false
+  non_temporal_family_rule: false
+  trained_key_gate: true
+  pseudo_negatives: targeted
+  unmeasured_samples: 16
+  unmeasured_margin: 1.0
+  unmeasured_weight: 0.1
+  repeat_aggregation: median
+  # The training recipe of the gfx1250 training configs, on the sanity
+  # budget's GEMMs.
+  recipe: pooled_ft
+  pooled_epochs: 12
+  pooled_batch_gemms: 64
+  pooled_lr: 0.002
+  pooled_eval_points: 24
+  fine_tune_epochs: 12
+  fine_tune_lr: 0.001
+  pooled_threads: 32
+  # No min_cu_fraction: the models declare CU budgets down to the
+  # smallest one they trained, the eighth's on the bench device.
+  schedules: [default]
+  min_cell_gemms: 2
+  off_list_sel_eff: auto
+  off_list_fallback: 0.83
+
+validate:
+  # One held-out GEMM evaluates a leaf; a leaf below the bar splits once a
+  # retrain has not lifted it, at most one level deep, which bounds the
+  # leaves and so each round's shapes.
+  sel_eff_threshold: 0.95
+  min_cell_gemms: 1
+  split_floor: 0.83
+  split_min_improvement: 0.02
+  split_after_attempts: 1
+  # The training configs do not split (max_split_depth 0); a sanity run
+  # keeps one level so that it still exercises the split code.
+  max_split_depth: 1
+  structural_split_min_octaves: 0.0
+
+full:
+  # The production recipe's rounds, then the final retrain.
+  total_rounds: 8
+  final_retrain:
+    enabled: true
+    gate: not-worse
+
+gate:
+  # A bundle the per-cell gate keeps out for findings in at most
+  # repair_max_cells (3) base cells ships with those cells repaired, a tier
+  # key of the cell's own network, else the cell's subtree from the bundle
+  # the run ships, once the repaired bundle passes every gate again; above
+  # that it stays out whole.
+  repair: true
+
+audit:
+  dir: ${TILEWRIGHT_AUDIT_ROOT}/gfx1250_192cu_bbs_tn_sanity
+  build: before
+  v2: rounds
+  sustained: false
+  official: v2
+  shapes_per_cell: 2
+  shapes_per_context: 1
+  seed: 4242
+
+deploy:
+  target_sel_eff: 0.95
+  on_final_round: true
+  stop_when_target_reached: false
+  weight_dtype: int8
+  rocm_libraries_to_deploy: ${TILEWRIGHT_DEPLOY_ROOT}
+  targets: [gfx1250]
+  apply_patch: false
+  build_after_apply: false
+  build_jobs: null
+
+correctness:
+  # The exact harness (tools/errmap.cpp) runs bf16 and f32 data.
+  enabled: true
+
+hazards:
+  enabled: true
+
+stage07:
+  build_dir: ${TILEWRIGHT_BENCH_ROOT}/projects/hipblaslt/build/release
+  parity_sample_trained: 0
+  parity_sample_audit: 16
+  bench_yamls: []
+
+stage08:
+  datasets: []
+
+report:
+  origami_reference: true
