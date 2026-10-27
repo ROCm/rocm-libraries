@@ -77,7 +77,7 @@ On Cray systems also pass ``-DROCFFT_CRAY_MPI_ENABLE=ON`` and link the GTL libra
 build; that is the default.
 
 The optional RCCL transpose backend was introduced in rocFFT 1.0.39 (ROCm 10.0) for
-single-process plans; multi-process support was added in a later release. Enable it
+single-process plans; multi-process support was added in rocFFT 1.0.42 (ROCm 10.3). Enable it
 with ``-DROCFFT_RCCL_ENABLE=ON``. CMake must be able to ``find_package(rccl)`` from
 the same ROCm prefix used to compile rocFFT (typically ``$ROCM_PATH/lib/cmake``).
 
