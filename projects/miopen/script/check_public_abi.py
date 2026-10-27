@@ -742,13 +742,13 @@ def read_tracked_source(
 
     CI checks out only the subtrees a PR touches, so a file this check compares
     can be missing from the working tree yet still be part of the commit under
-    test (the provider's files for a MIOpen-only PR, MIOpen's for a
-    provider-only PR). Skipping on "not on disk" alone would let the gate go
-    green on exactly the drift it exists to catch, so a missing file counts as
-    absent only once git confirms the commit does not track it. Then this
-    returns None, and the caller skips the check, recording the cause in
-    ``reasons``. If git says the commit *does* track the file but cannot produce
-    it, that is a broken checkout and this raises AbiError.
+    test (the provider's files for a MIOpen-only PR). Skipping on "not on disk"
+    alone would let the gate go green on exactly the drift it exists to catch,
+    so a missing file counts as absent only once git confirms the commit does
+    not track it. Then this returns None, and the caller skips the check,
+    recording the cause in ``reasons``. If git says the commit *does* track the
+    file but cannot produce it, that is a broken checkout and this raises
+    AbiError.
     """
     if path.is_file():
         return path.read_text(encoding="utf-8")
@@ -1375,13 +1375,11 @@ def cmd_check_headers(args) -> int:
         args.provider_api, PROVIDER_API_RELPATH, "MiopenApi.hpp"
     )
 
-    # A checkout without projects/miopen (a provider-only PR, whose pre-commit
-    # lane materializes only the projects its diff touches) has nothing to
-    # compare the provider against, which is not a finding. Reaching here means
-    # git confirmed the commit does not carry the file; a checkout that carries
-    # it but cannot produce it has already failed hard above. Absence is never
-    # drift itself, since drift is a content mismatch between files that are all
-    # part of the commit.
+    # Without MIOpen's own sources there is nothing to compare the provider
+    # against, so this is a skip, not a failure. Reaching here means git
+    # confirmed the commit does not carry the file; one it carries but cannot
+    # produce has already failed hard above. A missing file is not drift: drift
+    # is a content mismatch between files the commit carries.
     miopen_sources = {
         f"{miopen_rel}/src/private/wrapper.cpp": wrapper_source,
         f"{miopen_rel}/src/convolution_api.cpp": range_defs_source,

@@ -27,7 +27,8 @@ parse error, or the wrong clang-format.
 
 To give an entry point custom behaviour, move its stub from
 wrapper_passthrough.cpp into wrapper.cpp, edit it, and rerun this script; it
-skips every entry point wrapper.cpp already defines.
+skips every entry point wrapper.cpp already defines, but refuses one whose stub
+signature differs from miopen.h.
 
 wrapper.cpp also holds the stubs of the wrapper's own functions, declared in
 include_wrapper/miopen/hipdnn_forwarding.h instead of miopen.h. Only a flag-on
@@ -61,8 +62,10 @@ from check_public_abi import (
     TYPE_TAIL_KEYWORDS,
     AbiError,
     drop_top_level_const,
+    parse_prototype,
     parse_wrapper,
     read_tracked_source,
+    render_signature,
     split_params,
     squash,
 )
@@ -461,6 +464,10 @@ def hand_written_stubs(
 
     ``wrapper_only`` names the functions declared in hipdnn_forwarding.h, whose
     stubs are hand-written by definition.
+
+    A stub whose signature differs from miopen.h is refused. Only a flag-on
+    build compiles wrapper.cpp, so otherwise the mismatch would surface there,
+    long after the miopen.h change merged.
     """
     protos, _forwards, _dispatches = parse_wrapper(wrapper_source)
     # parse_wrapper cannot see a body that contains a nested block. Leaving such
@@ -481,7 +488,34 @@ def hand_written_stubs(
             "wrapper.cpp defines entry points that neither miopen.h nor"
             " hipdnn_forwarding.h declares: " + ", ".join(unknown)
         )
+    mismatched = []
+    for entry in entries:
+        if entry.name not in protos:
+            continue
+        expected = stub_signature(entry)
+        if protos[entry.name] != expected:
+            mismatched.append(
+                f"  {entry.name}\n"
+                f"      miopen.h:{entry.line}: {render_signature(expected)}\n"
+                f"      wrapper.cpp: {render_signature(protos[entry.name])}"
+            )
+    if mismatched:
+        raise AbiError(
+            "hand-written stubs in wrapper.cpp do not match miopen.h. The generator"
+            " does not write these, so edit each stub to match:\n"
+            + "\n".join(mismatched)
+        )
     return set(protos)
+
+
+def stub_signature(entry: EntryPoint) -> tuple[str, ...]:
+    """``entry`` reduced the way parse_wrapper reduces a stub, so the two compare.
+
+    Parameter names, default arguments and a top-level const drop out: none of
+    them changes the type.
+    """
+    params = ", ".join(p.definition_text() for p in entry.params)
+    return parse_prototype(f"{entry.ret} {entry.name}({params})", "miopen.h")[1]
 
 
 def check_dispatchable(entries: list[EntryPoint], hand_written: set[str]) -> None:

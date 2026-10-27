@@ -114,6 +114,12 @@ repos:
         language_version: python3
         exclude: *opted_out_but_scanned
 
+  # MIOpen's generated wrapper sources need exactly this version
+  # (projects/miopen/script/generate_wrapper_sources.py refuses others). A bump
+  # must regenerate them in the same PR, update the clang-format pins of the
+  # miopen-wrapper-sources hooks below, and wait for a MIOpen CI image that has
+  # it. MIOpen's hooks skip PRs that leave projects/miopen alone, so nothing
+  # else catches a missed step.
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.4
     hooks:
@@ -234,13 +240,25 @@ repos:
         args: [--multiline]
         files: ^projects/hipblaslt/.*conftest\.py$
 
+      # CI checks out only the directories a PR touches, so a PR that changes
+      # only .pre-commit-config.yaml or a provider file has no projects/miopen,
+      # scripts included. The two checks below skip there rather than fail that
+      # PR; MIOpen's component CI job, which provider changes also trigger,
+      # still runs both on the full tree. The skip is Python, not bash, so the
+      # hooks run on Windows too.
+      #
       # What the generator below cannot replace: the few hand-written stubs in
       # wrapper.cpp, the wrapper-only functions (hipdnn_forwarding.h, their list
       # and their stubs), and the provider's hand-written declarations of the
       # GetWorkSpaceSizeRange entry points.
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency
-        entry: python projects/miopen/script/check_public_abi.py check-headers
+        entry: >-
+          python -c "import os, subprocess, sys;
+          script = 'projects/miopen/script/check_public_abi.py';
+          present = os.path.isfile(script);
+          present or print('SKIP - projects/miopen is not checked out');
+          sys.exit(subprocess.call([sys.executable, script, 'check-headers']) if present else 0)"
         language: python
         files: ^(projects/miopen/(include_wrapper/miopen/hipdnn_forwarding\.h|src/(private/wrapper\.cpp|convolution_api\.cpp)|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi\.hpp)$
         pass_filenames: false
@@ -254,7 +272,12 @@ repos:
       # the generator fails loudly if they disagree.
       - id: miopen-wrapper-sources
         name: MIOpen wrapper sources match miopen.h
-        entry: python projects/miopen/script/generate_wrapper_sources.py --check
+        entry: >-
+          python -c "import os, subprocess, sys;
+          script = 'projects/miopen/script/generate_wrapper_sources.py';
+          present = os.path.isfile(script);
+          present or print('SKIP - projects/miopen is not checked out');
+          sys.exit(subprocess.call([sys.executable, script, '--check']) if present else 0)"
         language: python
         additional_dependencies: ["clang-format==18.1.4"]
         files: ^(\.pre-commit-config\.yaml|projects/miopen/(\.clang-format|include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|script/(generate_wrapper_sources|check_public_abi)\.py|src/private/(wrapper|wrapper_passthrough)\.cpp|src/private/(miopen_impl|miopen_private_rename)\.h)|dnn-providers/miopen-provider/(\.clang-format|MiopenApiPrivateRename\.hpp))$

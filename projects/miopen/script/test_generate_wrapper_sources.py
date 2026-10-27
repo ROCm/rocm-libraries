@@ -363,6 +363,50 @@ def test_a_hand_written_stub_for_an_unknown_name_is_rejected():
         gen.hand_written_stubs(WRAPPER_WITH_ONE_STUB, entries)
 
 
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        entry("miopenDestroy", "int handle"),
+        entry("miopenDestroy", ret="int"),
+        entry("miopenDestroy", "miopenHandle_t handle, int extra"),
+        entry("miopenDestroy", "void"),
+    ],
+)
+def test_a_hand_written_stub_that_disagrees_with_miopen_h_is_rejected(declaration):
+    with pytest.raises(abi.AbiError, match="miopenDestroy"):
+        gen.hand_written_stubs(WRAPPER_WITH_ONE_STUB, parse(declaration))
+
+
+def test_a_signature_mismatch_names_the_line_and_both_signatures():
+    entries = parse(entry("miopenCreate"), entry("miopenDestroy", "int handle"))
+    with pytest.raises(abi.AbiError) as error:
+        gen.hand_written_stubs(WRAPPER_WITH_ONE_STUB, entries)
+    message = str(error.value)
+    assert "miopen.h:8: miopenStatus_t(int)" in message
+    assert "wrapper.cpp: miopenStatus_t(miopenHandle_t)" in message
+    assert "miopenCreate" not in message
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        "miopenHandle_t h",
+        "const miopenHandle_t handle",
+        "miopenHandle_t handle = nullptr",
+    ],
+)
+def test_a_stub_may_differ_from_miopen_h_where_the_type_does_not(params):
+    entries = parse(entry("miopenDestroy", params))
+    assert gen.hand_written_stubs(WRAPPER_WITH_ONE_STUB, entries) == {"miopenDestroy"}
+
+
+def test_a_const_below_the_top_level_is_part_of_the_type():
+    stub = WRAPPER_WITH_ONE_STUB.replace("miopenHandle_t handle", "void* handle")
+    entries = parse(entry("miopenDestroy", "const void* handle"))
+    with pytest.raises(abi.AbiError, match="miopenDestroy"):
+        gen.hand_written_stubs(stub, entries)
+
+
 def test_a_stub_body_with_a_nested_block_is_rejected_rather_than_missed():
     """parse_wrapper cannot see such a stub; leaving it out would duplicate it."""
     wrapper = """
@@ -770,6 +814,26 @@ def test_a_changed_signature_in_miopen_h_fails_the_check_in_the_declaration_and_
     assert "miopenCreate(int* handle)" in out
 
 
+def test_a_changed_signature_under_a_hand_written_stub_exits_2_and_writes_nothing(
+    tree, capsys
+):
+    assert tree.run() == 0
+    written = {rel: tree.path(rel).read_bytes() for rel in GENERATED}
+    public = tree.miopen / "include/miopen/miopen.h"
+    public.write_text(
+        public.read_text(encoding="utf-8").replace(
+            entry("miopenDestroy"), entry("miopenDestroy", "int handle")
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert tree.run("--check") == 2
+    assert "miopenDestroy" in capsys.readouterr().err
+    assert tree.run() == 2
+    assert {rel: tree.path(rel).read_bytes() for rel in GENERATED} == written
+
+
 def test_a_missing_generated_file_fails_the_check(tree, capsys):
     assert tree.run() == 0
     tree.path(GENERATED[2]).unlink()
@@ -888,7 +952,7 @@ def test_a_tree_without_the_provider_skips_it_unless_it_is_required(
 def test_a_provider_only_change_is_compared_against_miopen_as_committed(
     tmp_path, monkeypatch, capsys
 ):
-    """The pre-commit lane materializes only the projects a PR touches."""
+    """MIOpen inputs missing from disk but tracked at HEAD are read from git."""
     tree = Tree(tmp_path)
     assert tree.run() == 0
     tracked = {
