@@ -532,9 +532,61 @@ TEST(IndexRangeCpp, SizeBoundaries) {
     EXPECT_EQ(IndexRange::all(0).count(), 0);
     const IndexRange range(1, 7, 2);
     EXPECT_EQ(range.start(), 1);
-    EXPECT_EQ(range.end(), 7);
+    EXPECT_EQ(range.stop(), 7);
     EXPECT_EQ(range.stride(), 2);
-    EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
+    EXPECT_THROW(primeIndexRange(
+                     {.logicalElements = 2, .allocatedElements = maximum, .requestedElements = 1}),
+                 std::runtime_error);
+}
+
+template <typename T>
+constexpr bool acceptsBracedTriple = requires(void (*sink)(T)) { sink({1, 2, 3}); };
+
+TEST(IndexRangeCpp, IteratesAndComparesByValue) {
+    static_assert(std::ranges::forward_range<IndexRange>);
+    static_assert(acceptsBracedTriple<std::vector<size_t>>);
+    static_assert(!acceptsBracedTriple<IndexRange>);
+    std::vector<size_t> iterated;
+    for (size_t index : IndexRange(1, 8, 3)) iterated.push_back(index);
+    EXPECT_EQ(iterated, (std::vector<size_t>{1, 4, 7}));
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    const IndexRange nearLimit(maximum - 2, maximum, 2);
+    EXPECT_EQ(std::vector<size_t>(nearLimit.begin(), nearLimit.end()),
+              (std::vector<size_t>{maximum - 2}));
+    EXPECT_EQ(IndexRange(1, 7, 2), IndexRange(1, 7, 2));
+    EXPECT_NE(IndexRange(1, 7, 2), IndexRange(1, 8, 2));
+}
+
+TEST(ShapeVisitationCpp, WholeShapesBracedOrdersAndCoordinateOnlyCallbacks) {
+    const Shape shape{2, 3};
+    std::vector<std::vector<size_t>> lastFastest, firstFastest, explicitOrder;
+    shape.forEachCoordinateLastDimensionFastest([&](std::span<const size_t> coordinates) {
+        lastFastest.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    shape.forEachCoordinate({1, 0}, [&](std::span<const size_t> coordinates) {
+        firstFastest.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    EXPECT_EQ(lastFastest,
+              (std::vector<std::vector<size_t>>{{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2}}));
+    EXPECT_EQ(firstFastest,
+              (std::vector<std::vector<size_t>>{{0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 2}, {1, 2}}));
+    std::vector<size_t> indices;
+    shape.forEachCoordinate(IndexRange(1, 9, 2), {1, 0},
+                            [&](size_t index, std::span<const size_t> coordinates) {
+                                indices.push_back(index);
+                                explicitOrder.emplace_back(coordinates.begin(), coordinates.end());
+                            });
+    shape.forEachCoordinate(
+        std::vector<size_t>{4}, {1, 0},
+        [&](size_t index, std::span<const size_t>) { indices.push_back(index); });
+    EXPECT_EQ(indices, (std::vector<size_t>{1, 3, 5, 4}));
+    EXPECT_EQ(explicitOrder, (std::vector<std::vector<size_t>>{{1, 0}, {1, 1}, {1, 2}}));
+    EXPECT_EQ(shape.linearIndex(std::array<size_t, 2>{1, 2}, {1, 0}), 5);
+    EXPECT_EQ(shape.coordinates(5, {1, 0}), (std::vector<size_t>{1, 2}));
+    size_t calls = 0;
+    EXPECT_THROW(shape.forEachCoordinate({0, 0}, [&](std::span<const size_t>) { ++calls; }),
+                 std::runtime_error);
+    EXPECT_EQ(calls, 0);
 }
 
 TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
