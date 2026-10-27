@@ -60,7 +60,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
-    binary_search_seq_idx_iters,
+    binary_search_seq_idx_trip_count,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     wave64_reduce_max as _wave64_reduce_max,
@@ -107,6 +107,9 @@ class UnifiedAttention3DTiledSpec:
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
     RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ()
+    # The cu_q search derives its trip count from the num_seqs kernarg, so
+    # num_seqs never reaches the IR and one binary serves every batch.
+    RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
 
     head_size: int
     block_size: int
@@ -233,10 +236,6 @@ class UnifiedAttention3DTiledSpec:
     @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
-
-    @property
-    def binary_search_iters(self) -> int:
-        return binary_search_seq_idx_iters(self.num_seqs)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -469,7 +468,7 @@ def build_unified_attention_3d_tiled(
             q_block_global_idx,
             num_seqs_p,
             block_q=BLOCK_Q,
-            iterations=spec.binary_search_iters,
+            iterations=binary_search_seq_idx_trip_count(b, num_seqs_p),
         )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))

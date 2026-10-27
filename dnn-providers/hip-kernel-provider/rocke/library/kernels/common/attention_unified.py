@@ -1653,10 +1653,11 @@ def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
 def _binary_search_iters(problem: UnifiedAttentionProblem, *, floor: int = 1) -> int:
     """Trip count of the seq_idx binary search the tiled kernels bake into IR.
 
-    Every tiled spec class derives ``binary_search_iters`` from ``spec.num_seqs``
-    through the same ``binary_search_seq_idx_iters`` (gfx1250 3D with a floor of
-    32). It is the only way ``num_seqs`` reaches emitted IR, so the tiled cache
-    keys carry this bucket instead of the raw batch count.
+    Every tiled spec class that bakes the search derives ``binary_search_iters``
+    from ``spec.num_seqs`` through the same ``binary_search_seq_idx_iters``
+    (gfx1250 3D with a floor of 32). It is the only way ``num_seqs`` reaches
+    emitted IR, so the tiled cache keys carry this bucket instead of the raw batch
+    count. A body that searches at runtime (``_searches_at_runtime``) bakes neither.
     """
     return binary_search_seq_idx_iters(problem.num_seqs, floor=floor)
 
@@ -1699,7 +1700,8 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     ``max_seqlen_k``). A raw field compiles one binary per value; a selector
     missing from the key lets two shapes that build different kernels share
     one cache slot. ``num_seqs`` reaches IR only through
-    ``_binary_search_iters``. Launch values that scale with the shape (the
+    ``_binary_search_iters``, and not at all in a body that searches at runtime
+    (``_searches_at_runtime``). Launch values that scale with the shape (the
     grid) are keyed separately through ``_shape_key``. When adding a
     selector to ``_tiled_spec_from_problem``, add its resolved output here;
     ``test_attention_tiled_cache_key.py`` sweeps the selector thresholds and
@@ -1715,7 +1717,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     return (
         "tiled",
         arch,
-        _binary_search_iters(problem),
+        None if _searches_at_runtime(arch, "2d") else _binary_search_iters(problem),
         problem.num_query_heads,
         problem.num_kv_heads,
         problem.head_size,
@@ -4060,9 +4062,10 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     with the shape are keyed separately through ``_shape_key``.
     """
     decode_grid = _use_decode_grid(problem, arch)
-    if decode_grid:
-        # One CTA per sequence: the segment kernel indexes sequences directly
-        # and emits no search, so batch sizes in different buckets share it.
+    if decode_grid or _searches_at_runtime(arch, "3d"):
+        # The decode grid indexes sequences directly and emits no search; a
+        # runtime search reads the batch from num_seqs. Either way batch sizes
+        # in different buckets share the kernel.
         search_iters = None
     elif arch == "gfx1250":
         search_iters = _binary_search_iters(problem, floor=BINARY_SEARCH_FALLBACK_ITERS)
@@ -4127,6 +4130,22 @@ def _runtime_kernarg_fields(spec_cls) -> Tuple[str, ...]:
     declaring none bakes those fields into its IR.
     """
     return tuple(getattr(spec_cls, "RUNTIME_KERNARG_FIELDS", ()))
+
+
+_SEARCHES_AT_RUNTIME: Dict[Tuple[str, str], bool] = {}
+
+
+def _searches_at_runtime(arch: str, path: str) -> bool:
+    """True when the tiled ``path`` ("2d" or "3d") body for ``arch`` derives its cu_q
+    search trip count from the num_seqs kernarg (``RUNTIME_SEARCH_ITERS``), so
+    num_seqs never reaches its IR. Memoized: the cache keys call it per launch."""
+    key = (arch, path)
+    if key not in _SEARCHES_AT_RUNTIME:
+        spec_cls = (_tiled_2d_impl(arch) if path == "2d" else _tiled_3d_impl(arch))[0]
+        _SEARCHES_AT_RUNTIME[key] = bool(
+            getattr(spec_cls, "RUNTIME_SEARCH_ITERS", False)
+        )
+    return _SEARCHES_AT_RUNTIME[key]
 
 
 def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:

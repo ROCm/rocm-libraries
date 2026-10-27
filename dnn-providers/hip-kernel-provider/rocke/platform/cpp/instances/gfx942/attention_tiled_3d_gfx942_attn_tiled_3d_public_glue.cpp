@@ -8,7 +8,7 @@
  * SCOPE (this TU only):
  *   - The two by-value spec structs' _default() / _validate() (__post_init__)
  *     and every @property accessor (num_queries_per_kv, block_m=16, block_q,
- *     tile_size, dtype_ir, binary_search_iters, kernel_name via
+ *     tile_size, dtype_ir, kernel_name via
  *     kernel_name_join).  (Python lines 91-172, 977-999.)
  *   - supports_tiled_3d coverage gate (pure host predicate, static reasons).
  *     (Python lines 175-231.)
@@ -40,7 +40,6 @@
  * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
  * fallback reason strings mirror the Python text byte-for-byte.
  */
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -241,25 +240,6 @@ const rocke_type_t*
         return rocke_f16();
     }
     return rocke_bf16();
-}
-
-int rocke_unified_attention_3d_tiled_spec_binary_search_iters(
-    const rocke_unified_attention_3d_tiled_spec_t* s)
-{
-    double v;
-    int r;
-    if(s == NULL)
-    {
-        return -1;
-    }
-    if(s->num_seqs <= 0)
-    {
-        return 32;
-    }
-    /* max(1, ceil(log2(num_seqs + 1))) */
-    v = ceil(log2((double)(s->num_seqs + 1)));
-    r = (int)v;
-    return r < 1 ? 1 : r;
 }
 
 int rocke_unified_attention_3d_tiled_spec_kernel_name(
@@ -669,7 +649,6 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D_MFMA_N;
 
     out->THREADS = 64;
-    out->binary_search_iters = rocke_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
     if(out->PV_N_TILES < 0 || out->PV_N_TILES > 16)
     {

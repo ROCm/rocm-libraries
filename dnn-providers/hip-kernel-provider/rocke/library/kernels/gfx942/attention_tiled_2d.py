@@ -58,7 +58,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
-    binary_search_seq_idx_iters,
+    binary_search_seq_idx_trip_count,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -165,6 +165,9 @@ class UnifiedAttention2DTiledSpec:
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
     RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ()
+    # The cu_q search derives its trip count from the num_seqs kernarg, so
+    # num_seqs never reaches the IR and one binary serves every batch.
+    RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
 
     head_size: int
     block_size: int
@@ -965,15 +968,6 @@ class UnifiedAttention2DTiledSpec:
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
 
-    @property
-    def binary_search_iters(self) -> int:
-        # AITER/Triton uses a true while-loop binary search. Our IR currently
-        # lowers this as a fixed-trip scf.for, so specialize the trip count to
-        # the known problem batch size instead of always paying 32 iterations.
-        # Falls back to 32 for direct unit-test specs that do not provide
-        # `num_seqs`.
-        return binary_search_seq_idx_iters(self.num_seqs)
-
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -1601,7 +1595,7 @@ def build_unified_attention_2d_tiled(
         q_block_global_idx,
         num_seqs_p,
         block_q=BLOCK_Q,
-        iterations=spec.binary_search_iters,
+        iterations=binary_search_seq_idx_trip_count(b, num_seqs_p),
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
@@ -5834,7 +5828,6 @@ def _build_gfx942_4warp_gqa_lean(
     NK = HD // K
     NDdim = HD // 32
     NKpv = BN // K
-    ITERS = spec.binary_search_iters
 
     b = IRBuilder(spec.kernel_name() + "_4wgqa")
     b.kernel.attrs["max_workgroup_size"] = 256  # 4 wave64 warps
@@ -5887,7 +5880,14 @@ def _build_gfx942_4warp_gqa_lean(
     gqb = b.block_id_y()  # grid.y = total_q_blocks (BLOCK_M=128)
 
     # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
-    sid = binary_search_seq_idx(b, CUQ, gqb, num_seqs_p, block_q=128, iterations=ITERS)
+    sid = binary_search_seq_idx(
+        b,
+        CUQ,
+        gqb,
+        num_seqs_p,
+        block_q=128,
+        iterations=binary_search_seq_idx_trip_count(b, num_seqs_p),
+    )
     cu_q_start = b.global_load_i32(CUQ, sid)
     cu_q_stop = b.global_load_i32(CUQ, b.add(sid, b.const_i32(1)))
     qlen = b.sub(cu_q_stop, cu_q_start)
@@ -6101,7 +6101,6 @@ def build_gfx942_4warp_gqa(
         BN * HD
     ) // 256  # V-fill: elements per thread (256 = 4 wave64 threads)
     v_fill_nloads = v_fill_epw // 8  # 8-wide (dwordx4) loads per thread
-    ITERS = spec.binary_search_iters
     from ..common.attention_unified import gfx942_gqa_fold_eligible
 
     # GQA head-fold is the DEFAULT for the qualifying cohort (D128, GQA 4:1, sliding-
@@ -6186,7 +6185,12 @@ def build_gfx942_4warp_gqa(
 
     # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
     sid = binary_search_seq_idx(
-        b, CUQ, gqb, num_seqs_p, block_q=TOKBLK, iterations=ITERS
+        b,
+        CUQ,
+        gqb,
+        num_seqs_p,
+        block_q=TOKBLK,
+        iterations=binary_search_seq_idx_trip_count(b, num_seqs_p),
     )
     cu_q_start = b.global_load_i32(CUQ, sid)
     cu_q_stop = b.global_load_i32(CUQ, b.add(sid, b.const_i32(1)))

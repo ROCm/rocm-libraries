@@ -427,14 +427,25 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- seq lookup + Q-block geometry (lines 1390-1409) ---- */
-    ctx->seq_idx
-        = rocke_binary_search_seq_idx(b,
-                                      ctx->cu_q,
-                                      ctx->q_block_global_idx,
-                                      ctx->num_seqs_p,
-                                      BLOCK_Q,
-                                      rocke_attention_tiled_2d_spec_binary_search_iters(spec),
-                                      false);
+    if(rocke_a2d_streq(arch, "gfx942"))
+    {
+        rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
+        ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
+            b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
+    }
+    else
+    {
+        /* This body also stands in for the gfx950 Python builder (the fastKV
+         * register-P twin), which still bakes the trip count. */
+        ctx->seq_idx
+            = rocke_binary_search_seq_idx(b,
+                                          ctx->cu_q,
+                                          ctx->q_block_global_idx,
+                                          ctx->num_seqs_p,
+                                          BLOCK_Q,
+                                          rocke_attention_tiled_2d_spec_binary_search_iters(spec),
+                                          false);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);

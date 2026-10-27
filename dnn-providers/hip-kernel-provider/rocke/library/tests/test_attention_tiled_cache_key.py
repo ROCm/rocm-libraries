@@ -19,7 +19,8 @@ Layers:
     different keys; shapes that resolve to the same outputs share a key and
     lower to byte-identical IR.
   * Launch geometry: the grid caches still separate batch counts.
-  * ``_binary_search_iters`` mirrors every spec class's ``binary_search_iters``.
+  * ``_binary_search_iters`` mirrors every spec class that bakes the search;
+    gfx942 searches at runtime, so its batch sizes share a binary.
 
 No GPU required.
 """
@@ -82,10 +83,12 @@ def routing_env(monkeypatch):
 
 def _norm_spec(spec):
     """Spec identity as the emitter sees it: ``num_seqs`` only reaches IR
-    through ``binary_search_iters``, which the 3D decode grid does not emit."""
+    through ``binary_search_iters``, which the 3D decode grid does not emit and
+    a runtime-search body (``RUNTIME_SEARCH_ITERS``) does not bake."""
     fields = dataclasses.asdict(spec)
     fields.pop("num_seqs")
-    if not getattr(spec, "use_decode_grid", False):
+    bakes_search = not getattr(type(spec), "RUNTIME_SEARCH_ITERS", False)
+    if bakes_search and not getattr(spec, "use_decode_grid", False):
         fields["binary_search_iters"] = spec.binary_search_iters
     return fields
 
@@ -272,7 +275,8 @@ def _assert_split(key_fn, built_fn, a, b, field, arch):
     assert key_fn(a, arch) != key_fn(b, arch)
 
 
-@pytest.mark.parametrize("arch", ("gfx942", "gfx950", "gfx1250"))
+# gfx942 searches at runtime, so its buckets share a binary (_SHARED_PAIRS).
+@pytest.mark.parametrize("arch", ("gfx950", "gfx1250"))
 def test_search_bucket_edge_splits_2d_key(routing_env, arch):
     # num_seqs 3 and 4 fall in different log2 search buckets (2 vs 3 iterations).
     # d64 GQA-8 (+ fp8 K/V on gfx1250): a geometry every arch's tiled 2D supports.
@@ -293,7 +297,7 @@ def test_search_bucket_edge_splits_2d_key(routing_env, arch):
     assert _lower_2d(a, arch, "llvm22") != _lower_2d(b, arch, "llvm22")
 
 
-@pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
+@pytest.mark.parametrize("arch", ("gfx950",))
 def test_search_bucket_edge_splits_3d_key(routing_env, arch):
     # Two query tokens per sequence, so the launch takes the searching prefill
     # grid rather than the decode grid.
@@ -424,6 +428,36 @@ _D128_DECODE = dict(
     dtype="bf16",
 )
 
+_D256_4WARP = dict(
+    num_query_heads=16,
+    num_kv_heads=2,
+    head_size=256,
+    block_size=16,
+    max_seqlen_q=4096,
+    max_seqlen_k=4096,
+    dtype="bf16",
+)
+_D128_FOLD = dict(
+    num_query_heads=32,
+    num_kv_heads=8,
+    head_size=128,
+    block_size=16,
+    max_seqlen_q=8192,
+    max_seqlen_k=8192,
+    sliding_window=4096,
+    dtype="bf16",
+)
+# Two query tokens per sequence: the 3D searching grid, not the decode grid.
+_D128_TWO_TOKENS = dict(
+    num_query_heads=32,
+    num_kv_heads=8,
+    head_size=128,
+    block_size=16,
+    max_seqlen_q=2,
+    max_seqlen_k=8192,
+    dtype="bf16",
+)
+
 # (id, arch, path, problem_a, problem_b). Each pair resolves to the same
 # selector outputs, so the pair must share one binary.
 _SHARED_PAIRS = [
@@ -472,6 +506,48 @@ _SHARED_PAIRS = [
             P(total_q=64, num_seqs=64, **_D128_DECODE),
         )
         for arch in ("gfx942", "gfx950")
+    ),
+    # gfx942 reads the search trip count from num_seqs at runtime, so batch
+    # sizes several log2 buckets apart share a binary on every builder route.
+    (
+        "gfx942-2d-ns3-vs-ns9",
+        "gfx942",
+        "2d",
+        P(
+            total_q=3 * 1024,
+            num_seqs=3,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **_D64_GQA8,
+        ),
+        P(
+            total_q=9 * 1024,
+            num_seqs=9,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            **_D64_GQA8,
+        ),
+    ),
+    (
+        "gfx942-2d-4warp-ns2-vs-ns9",
+        "gfx942",
+        "2d",
+        P(total_q=2 * 4096, num_seqs=2, **_D256_4WARP),
+        P(total_q=9 * 4096, num_seqs=9, **_D256_4WARP),
+    ),
+    (
+        "gfx942-2d-4warp-fold-ns2-vs-ns9",
+        "gfx942",
+        "2d",
+        P(total_q=2 * 8192, num_seqs=2, **_D128_FOLD),
+        P(total_q=9 * 8192, num_seqs=9, **_D128_FOLD),
+    ),
+    (
+        "gfx942-3d-prefill-ns3-vs-ns9",
+        "gfx942",
+        "3d",
+        P(total_q=6, num_seqs=3, **_D128_TWO_TOKENS),
+        P(total_q=18, num_seqs=9, **_D128_TWO_TOKENS),
     ),
     # gfx1250 3D floors the search at 32 iterations, so ns 3 and 4 share a
     # binary even though they sit in different log2 buckets.
@@ -535,10 +611,9 @@ def test_launch_meta_separates_num_seqs_under_one_key(routing_env):
 # ---------------------------------------------------------------------------
 
 
-# (spec class, floor). gfx1250 3D floors the search at 32 iterations.
+# (spec class, floor) for every class that bakes the search. gfx1250 3D floors
+# it at 32 iterations.
 _SPEC_CLASSES = (
-    (Gfx942Spec2D, 1),
-    (Gfx942Spec3D, 1),
     (Gfx950Spec2D, 1),
     (Gfx950Spec3D, 1),
     (Gfx1250Spec2D, 1),
@@ -567,3 +642,58 @@ def test_binary_search_iters_mirrors_spec(spec_cls, floor, num_seqs):
         dtype="bf16",
     )
     assert au._binary_search_iters(problem, floor=floor) == spec.binary_search_iters
+
+
+@pytest.mark.parametrize("spec_cls", (Gfx942Spec2D, Gfx942Spec3D))
+def test_gfx942_specs_search_at_runtime(spec_cls):
+    assert spec_cls.RUNTIME_SEARCH_ITERS
+    assert not hasattr(spec_cls, "binary_search_iters")
+    arch, path = "gfx942", "2d" if spec_cls is Gfx942Spec2D else "3d"
+    assert au._searches_at_runtime(arch, path)
+    assert not au._searches_at_runtime("gfx950", path)
+
+
+def _trip_count(num_seqs: int) -> int:
+    """``binary_search_seq_idx_trip_count`` on the host: the exponent of the
+    round-to-nearest f32 conversion LLVM's ``sitofp`` performs."""
+    np = pytest.importorskip("numpy")
+    bits = int(
+        np.array([num_seqs], dtype=np.int32).astype(np.float32).view(np.int32)[0]
+    )
+    return max((bits >> 23) - 126, 1)
+
+
+_BATCHES = sorted(
+    {n for n in range(1, 4097)}
+    | {(1 << k) + d for k in range(12, 31) for d in (-1, 0, 1)}
+    | {(1 << 24) + d for d in range(-8, 9)}
+    | {(1 << 31) - 1}
+)
+
+
+def test_runtime_trip_count_covers_every_batch():
+    # The search needs bit_length(num_seqs) iterations. Exact below 2**24; past
+    # it the conversion may round up to the next power of two, adding one
+    # iteration the done guard makes a no-op.
+    for n in _BATCHES:
+        trip = _trip_count(n)
+        if n < 1 << 24:
+            assert (
+                trip
+                == n.bit_length()
+                == au._binary_search_iters(
+                    P(
+                        total_q=n,
+                        num_seqs=n,
+                        num_query_heads=8,
+                        num_kv_heads=8,
+                        head_size=128,
+                        block_size=16,
+                        max_seqlen_q=1,
+                        max_seqlen_k=1,
+                        dtype="bf16",
+                    )
+                )
+            ), n
+        else:
+            assert n.bit_length() <= trip <= n.bit_length() + 1, n
