@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Generated. Regenerate with HIPBLASLT_UPDATE_RR_PREDICATE_MANIFEST=1, and review the diff:
 # a change here is a change to which problems these kernels accept.
 RR_GEMM_TN_BF6_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_128x128x128_UR_2:

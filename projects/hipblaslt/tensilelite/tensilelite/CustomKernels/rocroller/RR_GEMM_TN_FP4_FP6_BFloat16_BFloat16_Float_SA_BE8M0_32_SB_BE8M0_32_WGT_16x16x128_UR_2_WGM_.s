@@ -1,4 +1,5 @@
-
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950:sramecc+"
 .set .amdgcn.next_free_vgpr, 0
