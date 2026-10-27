@@ -36,8 +36,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added new `hipcub::DeviceFind::FindIf`.
 * Added new `hipcub::DeviceTransform::Transform` N->M API.
 * Feature parity with CCCL/CUB 3.3.0.
-* Added new `hipcub::DeviceFind::{Lower,Upper}Bound`.
 * Feature parity with CCCL/CUB 3.3.1.
+* Added new `hipcub::DeviceFind::{Lower,Upper}Bound`.
 
 ### Changed
 
@@ -46,7 +46,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * `::hipcub::extents` now points to `::hip::std::extents` from libhipcxx for rocPRIM's backend.
 * Removed deprecated `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
 * Fixed handling of invalid inputs ($\leq 0$) in `hipcub::GridEvenShare::DispatchInit()`, which now sets all relevant members to 0 when any of the inputs is invalid.
-* Changed `CCCL_MINIMUM_VERSION` to `3.3.0` to align with CUB.
+* Changed `CCCL_MINIMUM_VERSION` to `3.3.1` to align with CUB.
 * Fixed `hipcub::DeviceTransform::*` support for non-copyable `EnvT` types.
 
 ### Removed
