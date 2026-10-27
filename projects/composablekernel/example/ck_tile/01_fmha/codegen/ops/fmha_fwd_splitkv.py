@@ -1155,6 +1155,41 @@ def write_fwd_splitkv_api(api_pool: FmhaFwdSplitKVApiPool, autogen_dir: Path) ->
     update_file(autogen_dir / FMHA_FWD_SPLITKV_API_FILENAME, api_pool.api)
 
 
+# The dispatch entry of one split-KV kernel; bn1comb is the tile of its combine.
+def get_fwd_splitkv_api_trait(
+    kernel: FmhaFwdSplitKVKernel, bn1comb: int
+) -> FmhaFwdSplitKVApiTrait:
+    return FmhaFwdSplitKVApiTrait(
+        arch=kernel.F_arch,
+        pipeline_tag=kernel.F_pipeline.tag,
+        hdim=kernel.F_hdim,
+        dtype=kernel.F_dtype,
+        mode=kernel.F_mode,
+        bm0=kernel.F_tile.F_bm0,
+        bn0=kernel.F_tile.F_bn0,
+        bk0=kernel.F_tile.F_bk0,
+        bn1=kernel.F_tile.F_bn1,
+        bk1=kernel.F_tile.F_bk1,
+        bk0max=kernel.F_tile.F_bk0max,
+        vlayout=kernel.F_pipeline.F_vlayout,
+        logits=kernel.F_pipeline.F_logits,
+        mask=kernel.F_pipeline.F_mask,
+        bias=kernel.F_pipeline.F_bias,
+        lse=kernel.F_pipeline.F_lse,
+        squant=kernel.F_pipeline.F_squant,
+        pagedkv=kernel.F_pipeline.F_pagedkv,
+        sink=kernel.F_pipeline.F_sink,
+        spad=kernel.F_pipeline.F_spad,
+        skpad=kernel.F_pipeline.F_skpad,
+        dpad=kernel.F_pipeline.F_dpad,
+        dvpad=kernel.F_pipeline.F_dvpad,
+        bn1comb=bn1comb,
+        constraint=str(kernel.F_tile.F_constraint),
+        page_shorter_than_tile=kernel.F_tile.F_page_shorter_than_tile,
+        occupancy=int(kernel.F_tile.F_occupancy),
+    )
+
+
 def write_blobs(
     targets: List[str],
     output_dir: Path,
@@ -1196,35 +1231,7 @@ def write_blobs(
         )
         combine_kernel = combine_ks[0]
         api_pool.register_traits(
-            FmhaFwdSplitKVApiTrait(
-                arch=kernel.F_arch,
-                pipeline_tag=kernel.F_pipeline.tag,
-                hdim=kernel.F_hdim,
-                dtype=kernel.F_dtype,
-                mode=kernel.F_mode,
-                bm0=kernel.F_tile.F_bm0,
-                bn0=kernel.F_tile.F_bn0,
-                bk0=kernel.F_tile.F_bk0,
-                bn1=kernel.F_tile.F_bn1,
-                bk1=kernel.F_tile.F_bk1,
-                bk0max=kernel.F_tile.F_bk0max,
-                vlayout=kernel.F_pipeline.F_vlayout,
-                logits=kernel.F_pipeline.F_logits,
-                mask=kernel.F_pipeline.F_mask,
-                bias=kernel.F_pipeline.F_bias,
-                lse=kernel.F_pipeline.F_lse,
-                squant=kernel.F_pipeline.F_squant,
-                pagedkv=kernel.F_pipeline.F_pagedkv,
-                sink=kernel.F_pipeline.F_sink,
-                spad=kernel.F_pipeline.F_spad,
-                skpad=kernel.F_pipeline.F_skpad,
-                dpad=kernel.F_pipeline.F_dpad,
-                dvpad=kernel.F_pipeline.F_dvpad,
-                bn1comb=combine_kernel.F_tile.F_bn1,
-                constraint=str(kernel.F_tile.F_constraint),
-                page_shorter_than_tile=kernel.F_tile.F_page_shorter_than_tile,
-                occupancy=int(kernel.F_tile.F_occupancy),
-            )
+            get_fwd_splitkv_api_trait(kernel, combine_kernel.F_tile.F_bn1)
         )
     write_fwd_splitkv_api(api_pool, output_dir)
 

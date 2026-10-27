@@ -151,7 +151,7 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kMergeNumHeadGroupsSeqLenQ_ = false,
           index_t kBlockPerCu_             = -1, /* overwrite occupancy if not -1 */
           bool kHasSink_                   = false,
-          /* page block shorter than kN0, so a K/V tile straddles two pages */
+          /* enables merging a K/V tile that straddles two page blocks */
           bool kPageShorterThanTile_ = false>
 struct TileFmhaFwdSplitKVTraits
 {

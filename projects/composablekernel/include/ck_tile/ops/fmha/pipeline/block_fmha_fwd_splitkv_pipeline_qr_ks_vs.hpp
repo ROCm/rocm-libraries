@@ -406,8 +406,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         static_assert(2 <= k0_loops);
         static_assert(1 <= k1_loops);
         // The cross-page merge covers the K tile and the V prefetch. The V loads
-        // inside the k1 loop of stage 3 are not merged, so it must not run.
-        static_assert(!kPageShorterThanTile || k1_loops == 1,
+        // inside the k1 loop of stage 3 are not merged; kN0 == kK1 leaves it empty.
+        static_assert(!kPageShorterThanTile || kN0 == kK1,
                       "the cross-page merge requires kN0 == kK1");
         do
         {
