@@ -76,8 +76,9 @@ extern "C" {
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_invalid_pointer if \p Y, or \p X is invalid.
  *  \retval rocsparse_status_invalid_value if the dimensions of \p Y are not the transposed dimensions
- *          of \p X, or if the batch count of \p X or \p alpha is neither the batch count of \p Y nor
- *          one with a zero batch stride.
+ *          of \p X, or if the batch count of \p X or \p alpha is not valid. The batch count of \p X
+ *          must be equal to the batch count of \p Y, or be 1 with a batch stride of 0. The same rule
+ *          applies to \p alpha when it is not null.
  *  \retval rocsparse_status_not_implemented if \p X, \p Y and \p alpha do not all have the same
  *          data type (mixed precision).
  *  \par Example
