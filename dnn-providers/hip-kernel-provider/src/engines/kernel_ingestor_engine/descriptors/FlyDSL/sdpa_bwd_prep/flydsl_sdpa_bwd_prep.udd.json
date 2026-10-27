@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "a7fff0ca-d569-586d-9863-736a3d2300f1",
+  "name": "flydsl sdpa_bwd_prep dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch"
+}

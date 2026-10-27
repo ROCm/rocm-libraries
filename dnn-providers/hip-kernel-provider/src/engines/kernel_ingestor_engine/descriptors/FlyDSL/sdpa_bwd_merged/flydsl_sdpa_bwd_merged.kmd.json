@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "id": "331def97-6b65-540e-abda-13651841e429",
+  "name": "flydsl sdpa_bwd_merged variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "dropout",
+      "type": "int"
+    },
+    {
+      "name": "padded",
+      "type": "int"
+    },
+    {
+      "name": "hints",
+      "type": "int"
+    },
+    {
+      "name": "floor",
+      "type": "string"
+    },
+    {
+      "name": "dform",
+      "type": "string"
+    },
+    {
+      "name": "num_waves",
+      "type": "int"
+    },
+    {
+      "name": "mfma_rows",
+      "type": "int"
+    },
+    {
+      "name": "dkv_shards",
+      "type": "int"
+    },
+    {
+      "name": "role_order",
+      "type": "string"
+    },
+    {
+      "name": "store_db",
+      "type": "int"
+    },
+    {
+      "name": "gqa_pack",
+      "type": "int"
+    },
+    {
+      "name": "reduce_symbol",
+      "type": "string"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "block_kv",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    }
+  ]
+}
