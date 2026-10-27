@@ -1,0 +1,170 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_3_8_112_112_bfp16_ncdhw_normalized_dim_count1_20d920",
+          "1_3_8_112_112_bfp16_ncdhw_normalized_dim_count1_7a9f47",
+          "1_3_8_112_112_bfp16_ndhwc_normalized_dim_count1_22d483",
+          "1_3_8_112_112_bfp16_ndhwc_normalized_dim_count1_3d7703",
+          "1_3_8_112_112_fp16_ncdhw_normalized_dim_count1_7130b8",
+          "1_3_8_112_112_fp16_ncdhw_normalized_dim_count1_913d07",
+          "1_3_8_112_112_fp16_ndhwc_normalized_dim_count1_7daea6",
+          "1_3_8_112_112_fp16_ndhwc_normalized_dim_count1_b5e5dd",
+          "1_3_8_112_112_fp32_ncdhw_normalized_dim_count1_074e50",
+          "1_3_8_112_112_fp32_ncdhw_normalized_dim_count1_6da6bd",
+          "1_3_8_112_112_fp32_ncdhw_normalized_dim_count1_814594",
+          "1_3_8_112_112_fp32_ndhwc_normalized_dim_count1_d3c9c5",
+          "1_3_8_112_112_fp32_ndhwc_normalized_dim_count1_ee502d",
+          "1_3_8_112_112_fp32_ndhwc_normalized_dim_count1_f1093b",
+          "32_1_14_14_14_bfp16_ncdhw_normalized_dim_count1_b7fa20",
+          "32_1_14_14_14_bfp16_ncdhw_normalized_dim_count1_bcb863",
+          "32_1_14_14_14_bfp16_ndhwc_normalized_dim_count1_985ff9",
+          "32_1_14_14_14_bfp16_ndhwc_normalized_dim_count1_d547c3",
+          "32_1_14_14_14_fp16_ncdhw_normalized_dim_count1_60c064",
+          "32_1_14_14_14_fp16_ncdhw_normalized_dim_count1_70b078",
+          "32_1_14_14_14_fp16_ndhwc_normalized_dim_count1_07545a",
+          "32_1_14_14_14_fp16_ndhwc_normalized_dim_count1_4fabaf",
+          "32_1_14_14_14_fp32_ncdhw_normalized_dim_count1_22b8ed",
+          "32_1_14_14_14_fp32_ncdhw_normalized_dim_count1_481e13",
+          "32_1_14_14_14_fp32_ncdhw_normalized_dim_count1_ddd42b",
+          "32_1_14_14_14_fp32_ndhwc_normalized_dim_count1_49eec4",
+          "32_1_14_14_14_fp32_ndhwc_normalized_dim_count1_75b399",
+          "32_1_14_14_14_fp32_ndhwc_normalized_dim_count1_f5f065",
+          "32_32_2_2_3_bfp16_ncdhw_normalized_dim_count1_9c10b2",
+          "32_32_2_2_3_bfp16_ncdhw_normalized_dim_count1_ba66b3",
+          "32_32_2_2_3_bfp16_ndhwc_normalized_dim_count1_707a15",
+          "32_32_2_2_3_bfp16_ndhwc_normalized_dim_count1_afc2d1",
+          "32_32_2_2_3_fp16_ncdhw_normalized_dim_count1_43c4b1",
+          "32_32_2_2_3_fp16_ncdhw_normalized_dim_count1_d0ef33",
+          "32_32_2_2_3_fp16_ndhwc_normalized_dim_count1_64bb95",
+          "32_32_2_2_3_fp16_ndhwc_normalized_dim_count1_df01fd",
+          "32_32_2_2_3_fp32_ncdhw_normalized_dim_count1_5511fe",
+          "32_32_2_2_3_fp32_ncdhw_normalized_dim_count1_7cd2ea",
+          "32_32_2_2_3_fp32_ncdhw_normalized_dim_count1_fab196",
+          "32_32_2_2_3_fp32_ndhwc_normalized_dim_count1_0cfb36",
+          "32_32_2_2_3_fp32_ndhwc_normalized_dim_count1_4f1ed3",
+          "32_32_2_2_3_fp32_ndhwc_normalized_dim_count1_7a4a39",
+          "32_32_4_2_2_bfp16_ncdhw_normalized_dim_count1_4527b0",
+          "32_32_4_2_2_bfp16_ncdhw_normalized_dim_count1_5d1c6b",
+          "32_32_4_2_2_bfp16_ndhwc_normalized_dim_count1_30f02f",
+          "32_32_4_2_2_bfp16_ndhwc_normalized_dim_count1_953e1d",
+          "32_32_4_2_2_fp16_ncdhw_normalized_dim_count1_309367",
+          "32_32_4_2_2_fp16_ncdhw_normalized_dim_count1_7f0dd9",
+          "32_32_4_2_2_fp16_ndhwc_normalized_dim_count1_cda8ca",
+          "32_32_4_2_2_fp16_ndhwc_normalized_dim_count1_ed29ea",
+          "32_32_4_2_2_fp32_ncdhw_normalized_dim_count1_31c663",
+          "32_32_4_2_2_fp32_ncdhw_normalized_dim_count1_417f24",
+          "32_32_4_2_2_fp32_ncdhw_normalized_dim_count1_a0a1ac",
+          "32_32_4_2_2_fp32_ndhwc_normalized_dim_count1_41d2f9",
+          "32_32_4_2_2_fp32_ndhwc_normalized_dim_count1_9a927f",
+          "32_32_4_2_2_fp32_ndhwc_normalized_dim_count1_a954ac",
+          "32_32_4_6_11_bfp16_ncdhw_normalized_dim_count1_4d34b0",
+          "32_32_4_6_11_bfp16_ncdhw_normalized_dim_count1_6d5231",
+          "32_32_4_6_11_bfp16_ndhwc_normalized_dim_count1_c7021b",
+          "32_32_4_6_11_bfp16_ndhwc_normalized_dim_count1_cd9ffa",
+          "32_32_4_6_11_fp16_ncdhw_normalized_dim_count1_4b03c3",
+          "32_32_4_6_11_fp16_ncdhw_normalized_dim_count1_5e285b",
+          "32_32_4_6_11_fp16_ndhwc_normalized_dim_count1_428f3b",
+          "32_32_4_6_11_fp16_ndhwc_normalized_dim_count1_72f739",
+          "32_32_4_6_11_fp32_ncdhw_normalized_dim_count1_4befbb",
+          "32_32_4_6_11_fp32_ncdhw_normalized_dim_count1_c9cef7",
+          "32_32_4_6_11_fp32_ncdhw_normalized_dim_count1_ff35fd",
+          "32_32_4_6_11_fp32_ndhwc_normalized_dim_count1_4b4c75",
+          "32_32_4_6_11_fp32_ndhwc_normalized_dim_count1_5ee059",
+          "32_32_4_6_11_fp32_ndhwc_normalized_dim_count1_a11023",
+          "32_32_6_4_12_bfp16_ncdhw_normalized_dim_count1_159f7b",
+          "32_32_6_4_12_bfp16_ncdhw_normalized_dim_count1_404428",
+          "32_32_6_4_12_bfp16_ndhwc_normalized_dim_count1_a02d16",
+          "32_32_6_4_12_bfp16_ndhwc_normalized_dim_count1_efc902",
+          "32_32_6_4_12_fp16_ncdhw_normalized_dim_count1_3e5617",
+          "32_32_6_4_12_fp16_ncdhw_normalized_dim_count1_d0e84e",
+          "32_32_6_4_12_fp16_ndhwc_normalized_dim_count1_cba25c",
+          "32_32_6_4_12_fp16_ndhwc_normalized_dim_count1_d4baf3",
+          "32_32_6_4_12_fp32_ncdhw_normalized_dim_count1_6df4f4",
+          "32_32_6_4_12_fp32_ncdhw_normalized_dim_count1_796ade",
+          "32_32_6_4_12_fp32_ncdhw_normalized_dim_count1_d3f097",
+          "32_32_6_4_12_fp32_ndhwc_normalized_dim_count1_3d4b09",
+          "32_32_6_4_12_fp32_ndhwc_normalized_dim_count1_516672",
+          "32_32_6_4_12_fp32_ndhwc_normalized_dim_count1_789d99",
+          "32_32_6_6_6_bfp16_ncdhw_normalized_dim_count1_d3fde4",
+          "32_32_6_6_6_bfp16_ncdhw_normalized_dim_count1_e35b3a",
+          "32_32_6_6_6_bfp16_ndhwc_normalized_dim_count1_1bb12e",
+          "32_32_6_6_6_bfp16_ndhwc_normalized_dim_count1_66b440",
+          "32_32_6_6_6_fp16_ncdhw_normalized_dim_count1_6d5938",
+          "32_32_6_6_6_fp16_ncdhw_normalized_dim_count1_bff1c9",
+          "32_32_6_6_6_fp16_ndhwc_normalized_dim_count1_45ef52",
+          "32_32_6_6_6_fp16_ndhwc_normalized_dim_count1_9b27c4",
+          "32_32_6_6_6_fp32_ncdhw_normalized_dim_count1_2a327c",
+          "32_32_6_6_6_fp32_ncdhw_normalized_dim_count1_d9fc27",
+          "32_32_6_6_6_fp32_ncdhw_normalized_dim_count1_f4fa67",
+          "32_32_6_6_6_fp32_ndhwc_normalized_dim_count1_97f619",
+          "32_32_6_6_6_fp32_ndhwc_normalized_dim_count1_b1be2c",
+          "32_32_6_6_6_fp32_ndhwc_normalized_dim_count1_e120e3"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count3_9e7e52",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count2_fa25d4",
+          "2_2_3_2_fp16_nchw_normalized_dim_count1_cdab79",
+          "2_2_3_2_fp32_nhwc_normalized_dim_count2_bc5b90",
+          "2_5_2_2_2_bfp16_ncdhw_normalized_dim_count4_06435d",
+          "32_4_4_256_bfp16_nchw_normalized_dim_count3_97e5e5",
+          "32_4_4_256_bfp16_nchw_normalized_dim_count3_9e3e58",
+          "32_4_4_256_bfp16_nhwc_normalized_dim_count3_1812b5",
+          "32_4_4_256_bfp16_nhwc_normalized_dim_count3_88b8fc",
+          "32_4_4_256_fp16_nchw_normalized_dim_count3_6fc8f9",
+          "32_4_4_256_fp16_nchw_normalized_dim_count3_7c1af0",
+          "32_4_4_256_fp16_nhwc_normalized_dim_count3_a1d80d",
+          "32_4_4_256_fp16_nhwc_normalized_dim_count3_f3a3de",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3_31d03d",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3_5a2c61",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3_6ee2ed",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3_55f12a",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3_5f558c",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3_9efd9b"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

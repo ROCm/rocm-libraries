@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -72,13 +72,13 @@ DECLARE_UNITTEST(TestReverseDispatchImplicit);
 template <typename Vector>
 void TestReverseCopySimple()
 {
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION >= 80000 && THRUST_GCC_VERSION < 100000
+#if THRUST_COMPILER(GCC, >=, 8) && THRUST_COMPILER(GCC, <, 10)
 
   if (typeid(Vector) == typeid(thrust::host_vector<custom_numeric>))
   {
     KNOWN_FAILURE // WAR NVBug 2481122
   }
-#endif
+#endif // THRUST_COMPILER(GCC, >=, 8) && THRUST_COMPILER(GCC, <, 10)
 
   using Iterator = typename Vector::iterator;
 

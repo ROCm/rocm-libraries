@@ -57,6 +57,7 @@ Kernel-shape abstractions (GEMM / conv / attention infrastructure):
  - `DirectEpilogue` - per-lane vector global stores
  - `CShuffleEpilogue` - LDS-staged wide-vector global stores
  - `compile_kernel` - one-shot IR -> LLVM IR -> HSACO pipeline
+ - `compile_module` - several kernels (`KernelModule`) -> ONE HSACO
  - `make_gemm_manifest` - the standard manifest.json schema
  - `make_conv_manifest` - manifest schema for convolution kernels
 
@@ -101,6 +102,7 @@ from .autotune import (
     spec_replace,
 )
 from .attention import (
+    BINARY_SEARCH_FALLBACK_ITERS,
     Attention2DConfig,
     Attention3DConfig,
     OnlineSoftmaxState,
@@ -108,6 +110,7 @@ from .attention import (
     apply_softcap_log2,
     apply_softcap_scalar,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     apply_attention_mask,
     causal_mask,
     mfma_16x16x16_for_dtype,
@@ -122,7 +125,13 @@ from .attention import (
     wave_reduce_stages,
     wave_reduce_sum,
 )
-from .compile import KernelArtifact, compile_kernel
+from .compile import (
+    KernelArtifact,
+    KernelModule,
+    ModuleArtifact,
+    compile_kernel,
+    compile_module,
+)
 from .mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -220,7 +229,9 @@ from .grid import (
     chiplet_aware_super_tile_dynamic,
     chiplet_transform_chunked,
     chiplet_transform_chunked_dynamic,
+    chiplet_transform_chunked_runtime,
     python_chiplet_transform_chunked,
+    python_chiplet_transform_chunked_runtime,
     python_super_tile_swizzle,
     super_tile_swizzle,
     super_tile_swizzle_dynamic,
@@ -346,13 +357,18 @@ from .scan import (
 )
 from .schedule import SchedulePolicy
 from .streamk import (
+    StreamKIterArgs,
+    StreamKIterPartition,
     StreamKPartition,
     StreamKReductionStrategy,
     compute_streamk_grid_size,
     emit_streamk_decode,
-    emit_streamk_partial_load_accumulate,
-    emit_streamk_partial_store,
+    emit_streamk_iter_range,
+    emit_streamk_sk_start_iter,
+    streamk_end_iter,
+    streamk_iter_partition,
     streamk_num_macro_tiles,
+    streamk_start_iter,
 )
 from .spec import (
     IOSpecRule,
@@ -415,7 +431,9 @@ __all__ = [
     "PagedKvDescriptor",
     "apply_softcap_log2",
     "apply_softcap_scalar",
+    "BINARY_SEARCH_FALLBACK_ITERS",
     "binary_search_seq_idx",
+    "binary_search_seq_idx_iters",
     "apply_attention_mask",
     "causal_mask",
     # MFMA GEMM inner helper
@@ -463,7 +481,9 @@ __all__ = [
     "chiplet_aware_super_tile_dynamic",
     "chiplet_transform_chunked",
     "chiplet_transform_chunked_dynamic",
+    "chiplet_transform_chunked_runtime",
     "python_chiplet_transform_chunked",
+    "python_chiplet_transform_chunked_runtime",
     "python_super_tile_swizzle",
     "super_tile_swizzle",
     "super_tile_swizzle_dynamic",
@@ -530,7 +550,10 @@ __all__ = [
     "run_fusion_validation_matrix",
     # Compile
     "KernelArtifact",
+    "KernelModule",
+    "ModuleArtifact",
     "compile_kernel",
+    "compile_module",
     # Manifest
     "MANIFEST_SCHEMA",
     "attention_args_signature",
@@ -611,12 +634,17 @@ __all__ = [
     "load_sorted_topk_weight",
     "scatter_token_offset",
     # StreamK partitioner ( StreamK GEMM)
+    "StreamKIterArgs",
+    "StreamKIterPartition",
     "StreamKPartition",
     "StreamKReductionStrategy",
     "compute_streamk_grid_size",
     "emit_streamk_decode",
-    "emit_streamk_partial_load_accumulate",
-    "emit_streamk_partial_store",
+    "emit_streamk_iter_range",
+    "emit_streamk_sk_start_iter",
+    "streamk_end_iter",
+    "streamk_iter_partition",
+    "streamk_start_iter",
     "mfma_attention_bwd_dot_do_o_inner_body",
     "mfma_attention_bwd_dq_dk_dv_inner_body",
     "streamk_num_macro_tiles",

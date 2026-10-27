@@ -6,6 +6,7 @@ import argparse
 from geko.constants import SUPPORTED_ARCH
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_configure
+from geko.utils import ensure_tensile_importable
 
 
 def main() -> None:
@@ -105,6 +106,9 @@ def main() -> None:
 
     args = parser.parse_args()
     hipblaslt_path = resolve_hipblaslt_path(explicit=args.hipblaslt, anchor=__file__)
+    # Bind this run to the hipBLASLt clone named on the command line, not to
+    # whatever PYTHONPATH the shell happens to export.
+    ensure_tensile_importable(hipblaslt_path)
 
     run_configure(
         hipblaslt_path,

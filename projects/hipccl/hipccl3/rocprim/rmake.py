@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-""" Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+""" Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 Manage build and installation"""
 
 import re
@@ -21,7 +21,7 @@ def parse_args():
     Checks build arguments
     """)
 
-    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1150,gfx1151,gfx1200,gfx1201'
+    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1150,gfx1151,gfx1170,gfx1171,gfx1200,gfx1201'
 
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Generate Debug build (default: False)')

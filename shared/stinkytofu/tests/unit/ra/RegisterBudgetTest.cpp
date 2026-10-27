@@ -1,31 +1,15 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 using namespace stinkytofu;
@@ -54,6 +38,47 @@ class RegisterBudgetTest : public ::testing::Test {
 };
 
 }  // namespace
+
+TEST_F(RegisterBudgetTest, NextEvenBaseSitsOnTheFirstFreeEvenIndex) {
+    mov(/*dst=*/7, /*src=*/3);
+    EXPECT_EQ(highestRegisterCount(*func, RegType::S), 8u);
+    EXPECT_EQ(nextEvenRegisterBase(*func, RegType::S), 8u);
+
+    mov(/*dst=*/8, /*src=*/0);
+    EXPECT_EQ(highestRegisterCount(*func, RegType::S), 9u);
+    EXPECT_EQ(nextEvenRegisterBase(*func, RegType::S), 10u);
+}
+
+TEST_F(RegisterBudgetTest, AReusableBlockEndsInsideWhatTheKernelAlreadyDeclares) {
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, 32);
+    mov(/*dst=*/57, /*src=*/0);
+    EXPECT_EQ(highestRegisterCount(*func, RegType::S), 58u);
+
+    // A pair lands on s[56:57] and a pair-plus-scratch on s[54:56]: both end at
+    // the 58 already declared, so neither costs a register.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/2), 56u);
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3), 54u);
+
+    // Capping at the pair above stacks a second block clear of the first.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3, /*limit=*/56), 52u);
+}
+
+TEST_F(RegisterBudgetTest, NothingIsReusableWhenNoBlockIsProvablyFree) {
+    mov(/*dst=*/57, /*src=*/0);
+
+    // No published dispatch line, and unpublished cannot read as zero: s[54:56]
+    // may be preloaded kernargs the kernel reads but never names, so the caller
+    // has to stay above everything instead.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3), std::nullopt);
+    EXPECT_EQ(nextEvenRegisterBase(*func, RegType::S), 58u);
+
+    // Published, but the whole range sits in the prefix the dispatch fills.
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, 58);
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3), std::nullopt);
+
+    // No room for the block at all.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3, /*limit=*/2), std::nullopt);
+}
 
 TEST_F(RegisterBudgetTest, CountsOnePastTheHighestIndexUsed) {
     mov(/*dst=*/7, /*src=*/3);
@@ -99,4 +124,38 @@ TEST_F(RegisterBudgetTest, NoPreloadMeansNoKernargPointerToAccountFor) {
     // numSgprPreload of 0 suppresses the .amdhsa_user_sgpr_count line entirely,
     // so there is no +2 to carry either.
     EXPECT_EQ(requiredSgprCount(*func, /*numSgprPreload=*/0, {1, 1, 1}), 3u);
+}
+
+TEST(SettledDispatchFilledSgprCountTest, TheLineIsThePreloadedFloorOrNothingAtAll) {
+    EXPECT_EQ(settledDispatchFilledSgprCount(/*numSgprPreload=*/27, {1, 1, 1}), 32u);
+
+    // With no preload the floor above drops the kernarg segment pointer, which
+    // requiredSgprCount can absorb and a pin boundary cannot: reading 3 when the
+    // pointer does take s[0:1] would free s3 and s4, which the dispatch wrote.
+    EXPECT_EQ(settledDispatchFilledSgprCount(/*numSgprPreload=*/0, {1, 1, 1}), std::nullopt);
+}
+
+TEST(DispatchFilledVgprCountTest, PackingDecidesTheCountRatherThanTheField) {
+    // The field counts enabled dimensions. On a packed target they share v0, so
+    // every value of it means one register.
+    for (int workItem = -1; workItem <= 2; ++workItem) {
+        EXPECT_EQ(dispatchFilledVgprCount(workItem, /*packedWorkitemId=*/true), 1u)
+            << "workItem=" << workItem;
+    }
+
+    // Unpacked, one register per dimension from v0 up, the field counting the
+    // extras -- so x alone is 0 and reaches v0.
+    EXPECT_EQ(dispatchFilledVgprCount(/*vgprWorkItem=*/-1, /*packedWorkitemId=*/false), 1u);
+    EXPECT_EQ(dispatchFilledVgprCount(/*vgprWorkItem=*/0, /*packedWorkitemId=*/false), 1u);
+    EXPECT_EQ(dispatchFilledVgprCount(/*vgprWorkItem=*/2, /*packedWorkitemId=*/false), 3u);
+}
+
+TEST(SettledDispatchFilledVgprCountTest, APackedTargetFillsV0AloneAndAnUnknownOneNothing) {
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    EXPECT_EQ(settledDispatchFilledVgprCount(kRaTestArch), 1u);
+
+    // An id past the end of what this build registered. Nothing is known about
+    // its packing, so the line is unsettled and every vector live-in stays
+    // pinned -- the same direction of caution as a missing scalar boundary.
+    EXPECT_EQ(settledDispatchFilledVgprCount(static_cast<GfxArchID>(1u << 20)), std::nullopt);
 }

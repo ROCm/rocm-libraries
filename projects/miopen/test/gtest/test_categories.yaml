@@ -150,6 +150,7 @@ test_categories:
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
+      - "Full/GPU_UnitTestConvSolverGemmFwdRestIntMaxOverflowFwd_I8*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"

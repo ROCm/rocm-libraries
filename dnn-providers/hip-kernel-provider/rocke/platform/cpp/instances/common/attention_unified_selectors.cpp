@@ -256,7 +256,8 @@ static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p
 }
 
 /* Python: _enable_i64_kv_addr(problem). Switch to i64 addressing when the paged
- * KV-cache exceeds 2 GiB (i32 buffer voffset overflows and silently corrupts).
+ * KV-cache exceeds the i32 buffer range. The K/V buffer resources are bounded at
+ * num_records=0x7FFF0000, so loads at or past that offset read zeros.
  * num_kv_blocks==0 means unknown size -> assume small / fast i32 path. */
 static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
 {
@@ -268,7 +269,7 @@ static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
     uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
                             * (uint64_t)p->head_size * (uint64_t)elem_bytes;
     uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
-    return cache_bytes > 0x80000000ULL; /* 2^31 bytes */
+    return cache_bytes > 0x7FFF0000ULL; /* Python _I32_KV_BUFFER_BYTES */
 }
 
 /* Python: _d256_gfx950_cohort(problem). */
@@ -1017,16 +1018,8 @@ rocke_attention_tiled_2d_spec_t
                                && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
 
     s.use_register_pv = enable_register_pv(p);
-    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr -- fires when the paged KV
-     * cache exceeds 2 GiB (num_kv_blocks * block_stride > 0x80000000). */
-    if(p->num_kv_blocks > 0)
-    {
-        uint64_t elem_bytes = p->use_fp8 ? 1u : 2u;
-        uint64_t block_stride = (uint64_t)p->block_size * (uint64_t)p->num_kv_heads
-                                * (uint64_t)p->head_size * elem_bytes;
-        uint64_t cache_bytes = (uint64_t)p->num_kv_blocks * block_stride;
-        s.use_i64_kv_addr = (cache_bytes > 0x80000000ULL);
-    }
+    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr. */
+    s.use_i64_kv_addr = enable_i64_kv_addr(p);
 
     /* k_single_buffer: mirrors Python _enable_k_single_buffer -- d128 small-tile
      * cohort AND the geometry invariant block_m <= tile_size, DERIVED from the

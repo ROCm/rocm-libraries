@@ -69,8 +69,10 @@ extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
 // A second entry point that no descriptor names. It exists so this translation unit
 // compiles to one code object carrying two symbols, which is the only way two symbols can
 // share a toc_key -- the subject of TestKpackKernelLoader.TwoSymbolsResolveAgainstOneModule,
-// which resolves both against a single key and asserts they came from one module.
-// Deleting it as dead code deletes that test's only evidence.
+// which resolves both against a single key and asserts they came from one module, and of
+// TestLaunchKernelDefinitionKpack, which lists it as the second launch of a two-launch kernel
+// (it takes the same ten arguments, so ConvFwd's recorded list stands in for its own).
+// Deleting it as dead code deletes both tests' only evidence.
 //
 // It must stay undescribed: a descriptor of its own would pack it under a second toc_key
 // and into a second blob, which is the case the test exists to rule out.

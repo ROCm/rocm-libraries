@@ -1,6 +1,9 @@
 # RFC 0018: The UMD's Criteria: Applicability over the Engine's Binding
 
 - Contributors: Brian Harrison
+- **Status**: In progress
+- **Status notes**: The UMD ships in its native-only form: `version`, `id`, `name`, `scope`, and `match_symbol`, parsed in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp` (#10606, #10850). The declarative `criteria`, `kernel_fields`, and `allow_override_shape` fields are not built. The expression language ships as a standalone SDK library (`JsonExpression.hpp`, #11632), and the UMD loader does not use it yet.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 > Follow-up to [RFC 0017 (Universal Kernel Descriptors)](0017_UniversalKernelDescriptor.md),
 > covering the "UMD + applicability" row of its follow-up series
@@ -249,11 +252,17 @@ pack ships remains the author's responsibility.
 
 ## 4. The Shared Expression Language
 
+The expression language is a header-only SDK library:
+`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/JsonExpression.hpp` and `jsonexpr/`, documented in
+[`docs/JsonExpression.md`](../JsonExpression.md). It implements the operators this RFC uses,
+including `in`, `divisible`, `present`, `not_present`, three-valued `and`/`or`, and the layout
+aliases of [A.4](#a4-stride_order-values-and-layout-aliases). Not yet built: the descriptor loader
+does not compile any UMD, UDD, or UHD field with it.
+
 A UMD's `criteria` field is a single `Bool`-rooted expression in the **descriptor expression
-language**. That language is a deferred follow-up, reserved as RFC 0019, which is why the series
-numbering steps from this document to
-[RFC 0020](0020_UniversalEngineDescriptor.md) with a gap. It is not restated here. Until it is
-written,
+language**. The language has no RFC number of its own
+([RFC 0019](0019_UniversalHeuristicDescriptor.md) is the Universal Heuristic Descriptor). It is not
+restated here. Until it is written,
 [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)
 is the interim authority for its operator vocabulary. The semantics this document leans on are
 stated locally in [Appendix A.2](#a2-variable-references-and-resolution) and
@@ -364,6 +373,15 @@ then N, which is NHWC.
 
 ## 6. The Native-Matcher Escape Hatch
 
+The native criterion is the only UMD form that is built. The loader resolves `match_symbol` by
+`scope` (`DescriptorLoader.hpp`, `KernelIngestorStateManager.hpp`). A `graph` UMD names a
+`GraphCriterionFn` in `GraphCriterionRegistry`. A `kernel` UMD names a `KernelMatcherFn` in
+`KernelMatcherRegistry`, with signature
+`(const MatchContext&, const BoundTokens&, const KernelDefinition&)`. Both types are in
+`NativeRegistry.hpp`. An example is `hipkernel.gfx950_attention_dense.kernel_match`, named by
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/kernel_dtype_matches_graph.umd.json`.
+`kernel_fields` is not yet built.
+
 Some checks cannot be stated with the built-in operators: they need real C++. The expression
 language has no extension point for them. There is no custom operation, no namespaced operator key,
 and no predicate registry the criteria tree resolves against. An operation key the vocabulary does
@@ -469,6 +487,13 @@ follow-up, as in RFC 0017 §5.
 ---
 
 ## 8. The Matcher: Compilation, Indexing, and Caching
+
+Not yet built. No criteria compiler, root-opcode index, or `$kernel.*` memoization exists. Each
+engine's `KernelIngestorStateManager` caches its catalog on `CatalogKey` (`MatchContext.hpp`): the
+graph id and the device id. The key has no descriptor-inventory generation. The gfx942
+`attention_dense` figures in this section (2,710 kernels and the figures derived from them) are
+design estimates; no gfx942 `attention_dense` descriptors ship. The shipped attention catalogs are
+`hipkernel:Gfx950AttentionDense` (840 kernels) and `hipkernel:Gfx1151WmmaAttention`.
 
 Both halves are authored as text and compiled once into in-memory structures. The pattern's
 compilation, and the root-opcode index that prunes engines before any pattern runs, belong to the
@@ -576,17 +601,18 @@ for the ahead-of-time (AOT) path: it is a pack property gated at selection
 
 ## 9. Arbitration
 
-Today the first applicable plan builder wins, which is a documented latent bug when more than one
-matches (`HipMlopsEngine.cpp:34`). Descriptor-driven matching makes overlap explicit and resolves it
-deterministically, reusing the rule from RFC 0017 §5:
+In the hand-written mlops engine, the first applicable plan builder wins, which is a documented
+latent bug when more than one matches (`HipMlopsEngine.cpp:71`). Descriptor-driven matching makes
+overlap explicit and resolves it deterministically, reusing the rule from RFC 0017 §5.
+`IKernelHeuristic::rank()` (`IKernelHeuristic.hpp`) implements this order. A NaN score ranks last.
 
 1. When several UKDs match a graph, the engine's **heuristic** (the UHD) ranks them and the
    top-scored kernel wins.
 2. Ties break by explicit **`priority`** on the UKD.
-3. Remaining ties break by the descriptor's stable **`id`**, compared as raw bytes, and the conflict
-   is logged to the warning log so an unintended overlap is visible. That byte order carries no
-   meaning; it is chosen for being stable across runs, load orders, and machines, not because a lower
-   id is better.
+3. Remaining ties break by the descriptor's stable **`id`**, compared as raw bytes. That byte order
+   carries no meaning; it is chosen for being stable across runs, load orders, and machines, not
+   because a lower id is better. Not yet built: logging the tie to the warning log so an
+   unintended overlap is visible.
 
 **Tier 3 is written as a last resort, and a constant-score engine promotes it to the primary
 selector.** Each tier only discriminates if its input varies. A UHD scoring on one axis that the
@@ -654,8 +680,10 @@ arbitrated here at all. That is ordinary engine selection, which hipDNN owns and
 - **The graph's floor.** This is an existing mechanism, not a new one. hipDNN already computes the
   minimum engine-plugin API version a graph requires from the optional features it uses, and stamps
   it into the serialized graph (`min_required_engine_api_version`). Override shapes
-  ([RFC 0008](0008_OverridableTensorShapesDesign.md)) raise it to `1.1`, and runtime pass-by-value
-  tensors ([RFC 0016](0016_RuntimePassByValueTensors.md)) to `1.2`. The engine reads that field
+  ([RFC 0008](0008_OverridableTensorShapesDesign.md)) raise it to `1.1`, runtime pass-by-value
+  tensors ([RFC 0016](0016_RuntimePassByValueTensors.md)) to `1.2`, ragged tensors
+  ([RFC 0014](0014_RaggedTensors.md)) and non-default tensor alignment to `1.3`, and a ragged offset
+  multiplier to `1.4` (`computeMinimumEnginePluginApiVersion()` in `PluginVersionConstants.hpp`). The engine reads that field
   rather than deriving a second floor of its own. A graph carrying no stamp reads as the `1.0`
   baseline.
 - **Additive evolution.** New layout aliases and new bound fields are additive within `v1` where
@@ -711,6 +739,9 @@ untrusted or simply malformed. All three must be bounded and must fail closed ra
 
 ## 12. Observability and Diagnostics
 
+Only `HIPDNN_DISABLE_ENGINES` (`DescriptorLoader.hpp`) is built. `HIPDNN_DISABLE_KDPS` and
+`HIPDNN_DISABLE_UKDS` are not yet built.
+
 Because matching is data-driven, it is inspectable. The provider surfaces:
 
 - **A why-not trace, in two stages.** Matching declines in one of two places, and the trace says
@@ -741,8 +772,8 @@ authoring (agent-driven skills that build and check descriptors from intent) as 
 descriptors are a good fit for it: the schema of [Appendix A](#appendix-a-schema-reference) and the
 compile-time checks of A.5 are exactly what such a tool validates against.
 
-A matcher is also affected by the runtime opt-outs RFC 0017 §10 defines: `HIPDNN_DISABLE_ENGINES`,
-`HIPDNN_DISABLE_KDPS`, and `HIPDNN_DISABLE_UKDS`. Disabling a kernel carries a risk specific to
+A matcher is also affected by the runtime opt-outs RFC 0017 §10 defines: `HIPDNN_DISABLE_ENGINES`
+(built), and `HIPDNN_DISABLE_KDPS` and `HIPDNN_DISABLE_UKDS` (not yet built). Disabling a kernel carries a risk specific to
 shared matchers. A matcher is written around the kernel set it was meant to cover, so excluding one
 of those kernels can leave that matcher no longer correct. The engine then over-claims applicability
 for cases it no longer serves. The option is provided with that risk stated.
@@ -757,7 +788,7 @@ descriptor-backed kernel runs through the generic engine as an ordinary engine, 
 same graphs everything else consumes. The plugin-agnostic integration harness
 ([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) therefore validates it against the CPU reference
 ([RFC 0001](0001_CpuGraphExecutorDesign.md)), using the golden-reference tolerance chain
-([RFC 0011](0011_GoldenReferenceValidation.md)).
+([RFC 0011](0011_BundleTestFramework.md)).
 
 Matcher-specific coverage:
 
@@ -800,11 +831,14 @@ Matcher-specific coverage:
 
 ## 14. Migration
 
+Not yet built. No hand-written engine is converted. The descriptor engines that ship, for example
+`hipkernel:Gfx950AttentionDense`, are new engines beside the hand-written ones.
+
 Migration follows RFC 0017 §14. No engine is converted until a descriptor-backed kernel runs end to
 end. A hand-written engine and its descriptor-backed replacement coexist until the generic one
 reaches parity on the graphs that engine covers, at which point the hand-written code is retired.
 
-The **SDPA-forward** `isApplicable` (`SdpaFwdPlanBuilder.cpp:169`) is the first conversion. It
+The **SDPA-forward** `isApplicable` (`SdpaFwdPlanBuilder.cpp:234`) is the first conversion. It
 exercises nearly the whole vocabulary (opcode, attribute gates, optional-operand absence, rank, dtype
 relations, and cross-tensor dim relations) in one node, with its two non-declarative gates in the
 paired native matcher. It splits cleanly: the single `sdpa_fwd` node and its operands are the
@@ -819,7 +853,7 @@ lowering. The kernel-table lookups dissolve into the KDP as described in
 ## 15. Worked Example: SDPA Forward
 
 The SDPA-forward check collapses into one UED pattern, one UMD, and one native matcher. Compare it to
-the hand-written builder (`SdpaFwdPlanBuilder.cpp:169-317`). The node-shape gates become the engine's
+the hand-written builder (`SdpaFwdPlanBuilder.cpp:234-480`). The node-shape gates become the engine's
 pattern, and each remaining C++ gate becomes a criteria sub-expression. Only the one genuinely
 non-declarative gate, mask self-consistency, stays in C++. It stays as a native matcher the pack
 lists beside the criteria, not as criteria themselves ([§6](#6-the-native-matcher-escape-hatch)).
@@ -860,7 +894,7 @@ pin them per candidate. The pack's matcher then constrains what that pattern bou
     {"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]},
     {"==": ["$sdpa_fwd.alibi_mask", false]},
     {"==": ["$sdpa_fwd.padding_mask", false]},
-    {"or": [{"not_present": ["$sdpa_fwd.generate_stats"]}, {"==": ["$sdpa_fwd.generate_stats", false]}]},
+    // generate_stats is allowed; causal + stats is declined by the native matcher
     // unsupported optional operands declined together; `not_present` always evaluates,
     // unlike a field read on an absent operand
     {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]},
@@ -877,17 +911,18 @@ Mapping to the hand-written code:
 
 | Hand-written (`SdpaFwdPlanBuilder.cpp`) | Where it lands |
 |---|---|
-| `getDeviceString` gfx942/gfx950 (:188) | pack `arch` property (KDP), gated at selection |
-| `nodeWrappers().size() != 1` (:199) | UMD `{"==": ["$graph.node_count", 1]}` |
-| `attributesType() != SdpaAttributes` (:200) | UED pattern node matching `sdpa_fwd` |
-| dropout / alibi / padding / stats gates (:208-235) | UMD `$sdpa_fwd.*` criteria |
-| `attn_mask` / `page_table_*` absent (:214-220) | UED optional operands + one UMD `{"not_present": [...]}` over all three |
-| rank == 4 (:252-263) | UMD `{"==": ["$q.rank", 4]}`, one per bound tensor |
-| `q == k == v` dtype (:265-271) | UMD `{"==": ["$k.dtype", "$q.dtype"]}` |
-| `k.dims[1] == v.dims[1]` head count (:272-276) | UMD `{"==": ["$v.dims[1]", "$k.dims[1]"]}` |
-| head dim, enforced implicitly by a registry miss (`key.empty()`, :309) | UMD `{"==": ["$q.dims[3]", "$kernel.head_size"]}`, stated explicitly |
-| `getMaskType` throw-on-contradiction (:293) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
-| `getKernelNameKey` table lookup (:301) | dissolves into the KDP's Launch ([§6](#6-the-native-matcher-escape-hatch)) |
+| `getDeviceString` gfx942/gfx950 (:253-256) | pack `arch` property (KDP), gated at selection |
+| `nodeWrappers().size() != 1` (:264) | UMD `{"==": ["$graph.node_count", 1]}` |
+| `attributesType() != SdpaAttributes` (:265-267) | UED pattern node matching `sdpa_fwd` |
+| dropout / alibi / padding gates (:273-278) | UMD `$sdpa_fwd.*` criteria |
+| `attn_mask` / `page_table_*` absent (:279-285) | UED optional operands + one UMD `{"not_present": [...]}` over all three |
+| rank == 4 (:316-327) | UMD `{"==": ["$q.rank", 4]}`, one per bound tensor |
+| `q == k == v` dtype (:373-378) | UMD `{"==": ["$k.dtype", "$q.dtype"]}` |
+| `k.dims[1] == v.dims[1]` head count (:380-384) | UMD `{"==": ["$v.dims[1]", "$k.dims[1]"]}` |
+| head dim, enforced implicitly by a registry miss (`key.empty()`, :472) | UMD `{"==": ["$q.dims[3]", "$kernel.head_size"]}`, stated explicitly |
+| `getMaskType` throw-on-contradiction (:448), causal mask with `generate_stats` (:459-461) | native matcher ([§6](#6-the-native-matcher-escape-hatch)) |
+| `getKernelNameKey` table lookup (:463) | dissolves into the KDP's Launch ([§6](#6-the-native-matcher-escape-hatch)) |
+| override shapes (:244), `FLOAT` compute type (:269), pass-by-value scale tensor (:289-298), `mma_core_mode` (:300), FP8 descales (:409-441), uint32 byte strides (:475-477) | not mapped in this example |
 
 The split is visible in the two columns: everything about *which graph* is the engine's, and
 everything about *whether this kernel takes it* is the pack's. The engine publishes the bound symbols
@@ -1111,7 +1146,7 @@ The design borrows established ideas; none is a dependency. These informed the m
 - **Stride-order layout:** layout represented as a per-logical-dimension stride-rank array, lower
   meaning faster-varying, since tensors carry no layout enum ([§5](#5-layout-and-stride-order-criteria)).
 - **Native criterion:** the pack-scoped escape hatch, for logic the built-in operators cannot state.
-  It is a `GraphCriterionFn` named by a UMD's `match_symbol`, which the ingestor conjoins with the
+  It is a `GraphCriterionFn` (or, at `kernel` scope, a `KernelMatcherFn`) named by a UMD's `match_symbol`, which the ingestor conjoins with the
   pack's other matchers. It **reads** the engine's binding and returns a verdict, and it lives beside
   the expression language, never inside it ([§6](#6-the-native-matcher-escape-hatch)).
 - **Native match:** the engine-scoped counterpart, a `GraphMatchFn` named by the UED's
@@ -1148,11 +1183,16 @@ its criteria are evaluated over.
 
 ### A.1 The UMD descriptor object
 
+Not yet built: `allow_override_shape`, `criteria`, and `kernel_fields`. `parseMatchDescriptor()` in
+`DescriptorLoader.hpp` accepts only `version`, `id`, `name`, `scope`, and `match_symbol`, all
+required, and refuses the other keys as unknown. It accepts UMD version `1.0`. A key that starts
+with `x-` or `_`, or the key `provenance`, is warned about and ignored.
+
 | Field | Type | Required | Default | Rule |
 |---|---|---|---|---|
 | `id` | string (UUID) | yes | — | A UUID; stable, globally unique identity ([§10](#10-serialization-and-versioning)) |
 | `name` | string | yes | — | Diagnostics only; not semantic |
-| `version` | string | no | `"1.0"` | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**. A differing `major`, or a `minor` newer than the runtime's, is refused. An older minor always loads ([§10](#10-serialization-and-versioning)) |
+| `version` | string | yes | — | Matcher format version, `<major>.<minor>`, gated at load as a **ceiling**. A differing `major`, or a `minor` newer than the runtime's, is refused. An older minor always loads ([§10](#10-serialization-and-versioning)) |
 | `allow_override_shape` | bool | no | `false` | The matcher's opt-in to accepting a graph that enables execute-time override shapes. When `false`, such a graph is declined before the criteria run. This is the matcher's own gate. It is distinct from `$graph.is_override_shape_enabled`, which reports the graph's state ([§2](#2-the-symbol-table-criteria-read), [RFC 0020 § 6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)). A prebuilt kernel that bakes its shape leaves this at the default. It does not restate the condition as a criterion |
 | `criteria` | Expr | see below | — | A single expression whose static type is `Bool` (A.3) |
 | `scope` | `"graph"` \| `"kernel"` | yes | — | Which inputs the criteria read, and so what a failure prunes. A `graph` scope is evaluated once per `(graph, device)` and disqualifies every kernel in the pack. A `kernel` scope also reads `$kernel.*` and disqualifies only the candidate ([§8](#8-the-matcher-compilation-indexing-and-caching)). Scope is declared rather than inferred, so the pruning level is a stated contract. It is not a consequence of which tokens an expression happens to name |
@@ -1268,6 +1308,10 @@ per-axis stride reads of §5 instead of any alias.
 
 ### A.5 Compile-time validation (normative)
 
+Not yet built: checks 3, 3n, 5, and 6, which need `criteria` or `kernel_fields`. Checks 1, 2 (for
+`scope`), and 4 run. An unregistered `match_symbol` drops the whole descriptor set of that engine,
+not only the UMD (`loadValidatedDescriptorSets()` in `DescriptorLoader.hpp`).
+
 A UMD MUST pass every check below to compile. A failure refuses the descriptor with a diagnostic,
 and on the drop-in path quarantines it ([§8](#8-the-matcher-compilation-indexing-and-caching),
 [§11](#11-security-and-hostile-input)). The checks fall into two groups, because a UMD's references
@@ -1277,8 +1321,8 @@ the UED ([§2](#2-the-symbol-table-criteria-read)).
 
 **The UMD alone:**
 
-1. `id` is a well-formed UUID, and only the keys of A.1 appear at the top level. `version`, when
-   present, is a well-formed `<major>.<minor>` string the runtime can honor: same `major`, and a
+1. `id` is a well-formed UUID, and only the keys of A.1 appear at the top level. `version` is a
+   well-formed `<major>.<minor>` string the runtime can honor: same `major`, and a
    `minor` no newer than the runtime's ([§10](#10-serialization-and-versioning)).
 2. `scope` is `"graph"` or `"kernel"`, and exactly one of `criteria` and `match_symbol` is
    present (A.1).

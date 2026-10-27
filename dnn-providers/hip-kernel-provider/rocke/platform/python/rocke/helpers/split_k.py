@@ -30,6 +30,8 @@ import math
 import os
 from dataclasses import dataclass
 
+from .spec import ceil_div
+
 # gfx950 (MI350X) compute-unit count: 8 XCDs * 32 CUs. This is the number of
 # CTAs needed to give every CU one resident block; the heuristic targets it as
 # the grid "fill" point. Other CDNA arches differ but the decode regime (grid in
@@ -111,10 +113,6 @@ class SplitKDecision:
     base_grid: int
     target_ctas: int
     reason: str
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (int(a) + int(b) - 1) // int(b)
 
 
 def _largest_valid_split_k(K: int, tile_k: int, cap: int) -> int:
@@ -209,8 +207,8 @@ def select_split_k(
     env = os.environ if env is None else env
     mode, forced = _parse_env_override(env)
 
-    m_tiles = _ceil_div(M, tile_m)
-    n_tiles = _ceil_div(N, tile_n)
+    m_tiles = ceil_div(int(M), int(tile_m))
+    n_tiles = ceil_div(int(N), int(tile_n))
     base_grid = m_tiles * n_tiles * max(1, int(batch))
     max_split = max(1, K // tile_k)
 
@@ -272,6 +270,10 @@ def select_split_k_wgrad(
 ) -> SplitKDecision:
     """Pick a split-K degree for a wgrad GEMM, mirroring CK's formula.
 
+    Conv callers resolve split-K through a resolver that uses the split-K cost
+    model (:mod:`rocke.helpers.split_k_planner`) where an arch has one and falls
+    back to this function where it does not.
+
     CK's ``calculate_optimal_k_batch`` (``split_k_utils.hpp``) computes::
 
         grid_size    = ceil(M / tile_m) * ceil(N / tile_n)   [* batch, but batch=1 for wgrad]
@@ -289,10 +291,9 @@ def select_split_k_wgrad(
 
     ``groups`` selects between two branches.
 
-    ``groups <= 1`` (the default, and every dgrad caller) takes the legacy
-    expression above, unchanged. That is deliberate: this function is shared
-    with :mod:`conv_implicit_gemm_dgrad`, whose grouped shapes reach it through
-    the benchmark driver with ``--split-k -1``. Keeping the ungrouped answer
+    ``groups <= 1`` (the default, and every dgrad resolution) takes the legacy
+    expression above, unchanged. That is deliberate: dgrad resolves through
+    this function too, without ``groups``. Keeping the ungrouped answer
     bit-for-bit means a grouped-wgrad retune cannot perturb dgrad.
 
     ``groups > 1`` corrects two things the CK formula gets wrong for a grouped
@@ -324,8 +325,8 @@ def select_split_k_wgrad(
     num_cus = _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
     max_capacity = waves_per_cu * num_cus
 
-    m_tiles = _ceil_div(wg_M, tile_m)
-    n_tiles = _ceil_div(wg_N, tile_n)
+    m_tiles = ceil_div(int(wg_M), int(tile_m))
+    n_tiles = ceil_div(int(wg_N), int(tile_n))
     base_grid = m_tiles * n_tiles
 
     if base_grid <= 0:

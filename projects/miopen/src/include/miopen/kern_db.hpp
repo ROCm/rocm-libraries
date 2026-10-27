@@ -86,6 +86,7 @@ public:
     template <typename T>
     bool RemoveRecordUnsafe(const T& problem_config)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(filename.empty())
             return true;
         auto del_query =
@@ -108,37 +109,46 @@ public:
     {
         if(filename.empty())
             return {};
-        // Where clause with inserted values defeats the purpose of a prepraed statement
-        auto select_query = "SELECT kernel_blob, kernel_hash, uncompressed_size FROM " +
-                            T::table_name() + " WHERE " + problem_config.Where() + ";";
-        auto stmt = SQLite::Statement{sql, select_query};
-        // only one result field
-        // assert one row
-        auto rc = stmt.Step(sql);
-        if(rc == SQLITE_ROW)
+
+        // Lock only around the SQLite query so that bz2 decompression and MD5
+        // checking can run concurrently across threads.
+        std::vector<char> compressed_blob;
+        std::string md5_hash;
+        int64_t uncompressed_size = 0;
         {
-            auto compressed_blob                 = stmt.ColumnBlob(0);
-            auto md5_hash                        = stmt.ColumnText(1);
-            auto uncompressed_size               = stmt.ColumnInt64(2);
-            std::vector<char>& decompressed_blob = compressed_blob;
-            if(uncompressed_size != 0)
+            const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
+            // Where clause with inserted values defeats the purpose of a prepared statement
+            auto select_query = "SELECT kernel_blob, kernel_hash, uncompressed_size FROM " +
+                                T::table_name() + " WHERE " + problem_config.Where() + ";";
+            auto stmt = SQLite::Statement{sql, select_query};
+            auto rc   = stmt.Step(sql);
+            if(rc == SQLITE_ROW)
             {
-                decompressed_blob = decompress_fn(compressed_blob, uncompressed_size);
+                compressed_blob   = stmt.ColumnBlob(0);
+                md5_hash          = stmt.ColumnText(1);
+                uncompressed_size = stmt.ColumnInt64(2);
             }
-            auto new_md5 = md5(decompressed_blob);
-            if(new_md5 != md5_hash)
-                MIOPEN_THROW(miopenStatusInternalError, "Possible database corruption");
-            return decompressed_blob;
+            else if(rc == SQLITE_DONE)
+            {
+                return {};
+            }
+            else
+            {
+                MIOPEN_THROW(miopenStatusInternalError, sql.ErrorMessage());
+                return {};
+            }
         }
-        else if(rc == SQLITE_DONE)
+
+        // Decompression and MD5 verification run outside the lock.
+        std::vector<char>& decompressed_blob = compressed_blob;
+        if(uncompressed_size != 0)
         {
-            return {};
+            decompressed_blob = decompress_fn(compressed_blob, uncompressed_size);
         }
-        else
-        {
-            MIOPEN_THROW(miopenStatusInternalError, sql.ErrorMessage());
-        }
-        return {};
+        auto new_md5 = md5(decompressed_blob);
+        if(new_md5 != md5_hash)
+            MIOPEN_THROW(miopenStatusInternalError, "Possible database corruption");
+        return decompressed_blob;
     }
 
     template <typename T>
@@ -146,14 +156,19 @@ public:
     {
         if(filename.empty())
             return false;
-        auto insert_query = "INSERT OR REPLACE INTO " + T::table_name() +
-                            "(kernel_name, kernel_args, kernel_blob, kernel_hash, "
-                            "uncompressed_size) VALUES(?, ?, ?, ?, ?);";
+
+        // Compression and MD5 run outside the lock.
         auto md5_sum           = md5(problem_config.kernel_blob);
         auto uncompressed_size = problem_config.kernel_blob.size();
         bool success           = false;
         auto compressed_blob   = compress_fn(problem_config.kernel_blob, &success);
-        auto stmt              = SQLite::Statement{sql, insert_query};
+
+        // Lock only around the SQLite insert.
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
+        auto insert_query = "INSERT OR REPLACE INTO " + T::table_name() +
+                            "(kernel_name, kernel_args, kernel_blob, kernel_hash, "
+                            "uncompressed_size) VALUES(?, ?, ?, ?, ?);";
+        auto stmt = SQLite::Statement{sql, insert_query};
         stmt.BindPath(1, problem_config.kernel_name);
         stmt.BindText(2, problem_config.kernel_args);
         if(!success)

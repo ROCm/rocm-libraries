@@ -1,10 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-/**
- * @file logging_bridge.h
- * @brief Best-effort cuDNN logging env to hipDNN logging env bridge.
- */
+// Internal: maps cuDNN FE logging env vars to hipDNN logging env vars (best effort).
 
 #pragma once
 

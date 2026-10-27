@@ -248,6 +248,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uTnqMT2Y2bw
   SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_SAV_MT64x16x32_MI16x16x16x1_SN_1LDSB0_GRVW2_GSU1_LPA4_LPB4_LRVW4_NEPBS2_PLR3_SPO1_TT1_16_VAW2_WG64_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true

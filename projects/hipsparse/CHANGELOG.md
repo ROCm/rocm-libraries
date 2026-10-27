@@ -4,6 +4,20 @@ Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 
+## (Unreleased) hipSPARSE
+
+### Changed
+* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+* GoogleTest must be installed before building the clients. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* `install.sh -d` no longer configures and installs the `deps` directory.
+* The 19 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/hipsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `HIPSPARSE_TEST_MIRROR`. The `--matrices-dir` options of `install.sh` and `rmake.py` still download missing matrices.
+
+### Removed
+* Removed the no-op `deps` CMake project and the unused `deps/external-gtest.cmake`.
+
+### Resolved issues
+* Fixed an integer overflow in `hipsparseXcsr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion.
+
 ## hipSPARSE 4.8.0 for ROCm 10.1
 
 ### Added

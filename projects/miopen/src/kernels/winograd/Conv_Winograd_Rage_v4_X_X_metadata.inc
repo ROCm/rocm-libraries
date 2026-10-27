@@ -99,7 +99,7 @@ amdhsa.kernels:
 .endm
 
 .macro kernel_end kernel_name:req
-.if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0)
+.if ((.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 0) || (.amdgcn.gfx_generation_number == 11 && .amdgcn.gfx_generation_minor == 7))
 .balignl 256, 0xBF9F0000
 .else
 .align 256
@@ -173,6 +173,29 @@ __fp16_overflow = 0
     .amdhsa_wavefront_size32                 0
     .amdhsa_workgroup_processor_mode         0
     .amdhsa_round_robin_scheduling           0
+    .amdhsa_forward_progress                 0
+    .amdhsa_memory_ordered                   0
+    .amdhsa_float_round_mode_32              __float_round_mode_32
+    .amdhsa_float_round_mode_16_64           __float_round_mode_16_64
+    .amdhsa_float_denorm_mode_32             __float_denorm_mode_32
+    .amdhsa_float_denorm_mode_16_64          __float_denorm_mode_16_64
+    .amdhsa_fp16_overflow                    __fp16_overflow
+.end_amdhsa_kernel
+.elseif (.amdgcn.gfx_generation_number == 11 && .amdgcn.gfx_generation_minor == 7)
+.amdhsa_kernel \arg_kernel_name
+    .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
+    .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
+    .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
+    .amdhsa_system_sgpr_workgroup_id_x       __sgpr_workgroup_id_x
+    .amdhsa_system_sgpr_workgroup_id_y       __sgpr_workgroup_id_y
+    .amdhsa_system_sgpr_workgroup_id_z       __sgpr_workgroup_id_z
+    .amdhsa_system_sgpr_workgroup_info       __sgpr_workgroup_info
+    .amdhsa_system_vgpr_workitem_id          __vgpr_workitem_id
+    .amdhsa_reserve_vcc                      __reserve_vcc
+    .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
+    .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
+    .amdhsa_wavefront_size32                 0
+    .amdhsa_workgroup_processor_mode         0
     .amdhsa_forward_progress                 0
     .amdhsa_memory_ordered                   0
     .amdhsa_float_round_mode_32              __float_round_mode_32

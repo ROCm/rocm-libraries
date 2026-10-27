@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_r2_streamk_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16BiIiZbLwRdoRP8hRLwxqKwd3xRAxTovvnUyh7Pd8Ul0=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16cLCK4QtIgdDFRTvei2aYdZJgPac3CUxF9X3UCDBqA3k=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16gxvPdtXXPO-x0VItBvzWZRiElzgzv3B44GrFqFPJdIE=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16u41zrWyxPFi7pt30SctSTSMk76g__Czt2frfXkxOgtM=',
+      'err': 0,
+    }),
+  ])
+# ---

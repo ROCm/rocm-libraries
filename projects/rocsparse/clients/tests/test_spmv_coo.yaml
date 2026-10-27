@@ -452,3 +452,6 @@ Tests:
   function: spmv_coo_extra
   host_memory_gb: 1
   device_memory_gb: 90
+  # gfx1151 reports shared system memory as device memory, which passes the
+  # memory guard, but hipMalloc cannot reliably provide 64 GiB there.
+  skip_hardware: gfx1151

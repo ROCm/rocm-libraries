@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "b24b6ed6-14cb-40fe-9f6c-fcb065086edd",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.verify_multi_launch.kernel_match"
+}

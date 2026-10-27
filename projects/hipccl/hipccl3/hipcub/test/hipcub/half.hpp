@@ -1,6 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2023, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,7 +39,11 @@
 #include <stdint.h>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
     #include <cuda_fp16.h>
+#else
+    #include <rocprim/type_traits.hpp>
 #endif
 
 #include <cstring>
@@ -50,6 +55,29 @@
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 
+struct half_t;
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+
+namespace cuda
+{
+namespace std
+{
+template<>
+struct is_floating_point<half_t> : true_type
+{};
+
+template<>
+class numeric_limits<half_t>
+{
+public:
+    static constexpr bool is_specialized = true;
+};
+
+} // namespace std
+} // namespace cuda
+
+#endif // __HIP_PLATFORM_NVIDIA__
 
 /******************************************************************************
  * half_t
@@ -75,18 +103,20 @@ struct half_t
         *this = half_t(float(a));
     }
 
-    /// Constructor from std::size_t
-    __host__ __device__ __forceinline__ half_t(std::size_t a)
+    /// Constructor from size_t
+    __host__ __device__ __forceinline__
+    half_t(size_t a)
     {
         *this = half_t(float(a));
     }
 
     /// Constructor from unsigned long long int
     template<typename T,
-             typename = typename std::enable_if<
-                 std::is_same<T, unsigned long long int>::value
-                 && (!std::is_same<std::size_t, unsigned long long int>::value)>::type>
-    __host__ __device__ __forceinline__ half_t(T a)
+             typename
+             = typename std::enable_if<std::is_same_v<T, unsigned long long int>
+                                       && (!std::is_same_v<size_t, unsigned long long int>)>::type>
+    __host__ __device__ __forceinline__
+    half_t(T a)
     {
         *this = half_t(float(a));
     }
@@ -198,7 +228,7 @@ struct half_t
                 f = (0xff << 23) | (sign << 31);    //  inf
             }
         }
-        static_assert(sizeof(float) == sizeof(std::uint32_t), "4-byte size check");
+        static_assert(sizeof(float) == sizeof(uint32_t), "4-byte size check");
         float ret{};
         std::memcpy(&ret, &f, sizeof(float));
         return ret;
@@ -331,25 +361,10 @@ inline std::ostream& operator<<(std::ostream &out, const half_t &x)
  * Traits overloads
  ******************************************************************************/
 
-template <>
-struct hipcub::FpLimits<half_t>
-{
-    static __host__ __device__ __forceinline__ half_t Max() { return half_t::max(); }
-
-    static __host__ __device__ __forceinline__ half_t Lowest() { return half_t::lowest(); }
-};
-
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_PUSH
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-#endif
-template <> struct hipcub::NumericTraits<half_t> : hipcub::BaseTraits<FLOATING_POINT, true, false, unsigned short, half_t> {};
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_POP
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-#endif
+template<>
+struct hipcub::NumericTraits<half_t>
+    : hipcub::BaseTraits<hipcub::FLOATING_POINT, true, unsigned short, half_t>
+{};
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop

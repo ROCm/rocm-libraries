@@ -154,6 +154,26 @@ typedef struct rocke_conv_build_ctx
     const char* arch; /* `arch` (NULL-normalised)      */
     const rocke_conv_build_overrides_t* ov; /* override callbacks (may NULL) */
     const rocke_conv_problem_t* p; /* &spec->problem (alias `p`)    */
+    /* ---- group merging (Gm) ---- *
+     * `p` stays the TRUE per-group problem, and so do the AOT kernargs: the
+     * host packs them from the tensors, which do not merge. `p_load` is the
+     * problem the *tile* covers -- spec.merged_problem, i.e. `p` with groups
+     * divided by group_merge -- and is only read host-side (store width).
+     * Merging is depthwise-only, so the merged per-group channel run is
+     * exactly Gm: the kernel folds it in as the build-time constants c_gm /
+     * c_gm_mask / c_gm_shift. Mirrors the Python builder's `merged` block. */
+    rocke_conv_problem_t merged_problem; /* spec.merged_problem (by value)    */
+    const rocke_conv_problem_t* p_load; /* &merged_problem (alias `p_load`)  */
+    int group_merge; /* spec.group_merge (>= 1)           */
+    int group_merge_log2; /* log2(group_merge); 0 when Gm == 1 */
+    bool merged; /* group_merge > 1                   */
+    /* Python `grouped = p.groups > 1 or merged`: an AOT merged binary serves
+     * every group count Gm divides, so the build-time count cannot elide the
+     * block_id_z group decode even when Gm == groups. */
+    bool grouped;
+    rocke_value_t* c_gm; /* const_i32(Gm); NULL unmerged      */
+    rocke_value_t* c_gm_mask; /* const_i32(Gm - 1); NULL unmerged  */
+    rocke_value_t* c_gm_shift; /* const_i32(log2 Gm); NULL unmerged */
     const rocke_archtarget_t* target; /* ArchTarget.from_gfx(arch)     */
     const rocke_mmaop_t* op; /* _resolve_conv_op(spec, arch)  */
     const rocke_mfma_atom_t* atom; /* spec.atom (NULL on WMMA path) */
@@ -324,7 +344,7 @@ typedef struct rocke_conv_build_ctx
     /* ---- common geometry constants (SSA) ---- */
     rocke_value_t* c0; /* const_i32(0)         */
     rocke_value_t* c_block_k; /* const_i32(block_k)  */
-    rocke_value_t* c_K_gemm; /* const_i32(p.K_gemm)  */
+    rocke_value_t* c_K_gemm; /* p_K_gemm, or p_K_gemm * c_gm under merge */
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- */
     rocke_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
@@ -335,6 +355,13 @@ typedef struct rocke_conv_build_ctx
      * k_out_group_base = b.mul(group_idx, kpg)  (absolute output-filter base for B/D) */
     rocke_value_t* group_idx;
     rocke_value_t* k_out_group_base;
+
+    /* ---- wgrad stream-K state (NULL off the stream-K path) ---- *
+     * wgrad_c_kpg       = b.const_i32(kpg)  (grouped dY k_out fold, Python c_kpg)
+     * wgrad_replica_sel = linear CTA index hashed into the workspace replica in
+     *                     place of block_id_z (Python replica_sel). */
+    rocke_value_t* wgrad_c_kpg;
+    rocke_value_t* wgrad_replica_sel;
 
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
@@ -360,6 +387,11 @@ typedef struct rocke_conv_build_ctx
     /* ---- global -> LDS coalesced copy plan ---- */
     int threads; /* spec.block_size           */
     int load_vec; /* _choose_load_vec(spec)    */
+    /* Python carries _def_vec_a and _def_vec_b separately; they are equal here
+     * because default_vector_sizes derives both from cpg -- except under merge,
+     * where B is forced scalar (the merged B tile is 1/Gm dense and the diagonal
+     * mask is per-element, which a vector load cannot express). */
+    int load_vec_b; /* load_vec, or 1 under merge */
 
     /* ---- coordinate-transform descriptors ---- */
     rocke_tensor_descriptor_t* A_desc; /* make_a_descriptor(p, decompose_m); NULL if pointwise */
@@ -517,7 +549,7 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_neg_pW;
     rocke_value_t* split_ystep; /* dH * A_stride_hi */
     rocke_value_t* split_xstep; /* dW * A_stride_wi */
-    rocke_value_t* split_group_base; /* group_idx * cpg, NULL when ungrouped */
+    rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
 } rocke_conv_build_ctx_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend
@@ -560,8 +592,14 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
 
 /* The default sync-path load width: rocke_conv_choose_load_vec clamped by the
  * per-group channel count (Python _sync_load_vecs without an explicit
- * vector_size_*). 0 when the tile admits no width. */
+ * vector_size_*). Reads the *merged* problem, so under group_merge the A run is
+ * Gm wide. 0 when the tile admits no width. */
 int rocke_conv_default_load_vec(const rocke_implicit_gemm_conv_spec_t* spec);
+
+/* The B counterpart: rocke_conv_default_load_vec, except 1 under group_merge
+ * (the merged B tile is 1/Gm dense and its diagonal mask is per-element, which
+ * a vector load cannot express). */
+int rocke_conv_default_load_vec_b(const rocke_implicit_gemm_conv_spec_t* spec);
 
 /* _emit_mfma(b, atom, a, bv, c): atom.emit MFMA dispatch. */
 rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
@@ -633,6 +671,22 @@ rocke_value_t* rocke_conv_b_descriptor(rocke_ir_builder_t* b,
                                        rocke_value_t* col,
                                        rocke_value_t** out_valid,
                                        void* ctx_user);
+
+/* b_descriptor for group_merge > 1: splits k_gemm into (y, x, g_k) with g_k
+ * innermost and ANDs the diagonal predicate g_k == g_n onto the load's valid.
+ * Installed into ctx->b_descriptor_fn by the build glue, so both loader legs
+ * pick it up. Same rocke_loads_descriptor_fn contract.
+ *
+ * Mirrors Python b_descriptor_merged (conv_implicit_gemm.py). Putting the mask
+ * on the *weight* load rather than the store is what keeps the output store
+ * dense: an invalid element takes the buffer descriptor's OOB sentinel and
+ * reads back as hardware zero, so the redundant MAC is a no-op and no memory
+ * traffic is issued. */
+rocke_value_t* rocke_conv_b_descriptor_merged(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_valid,
+                                              void* ctx_user);
 
 /* ----- load / compute closures (ctx-driven) ----- */
 

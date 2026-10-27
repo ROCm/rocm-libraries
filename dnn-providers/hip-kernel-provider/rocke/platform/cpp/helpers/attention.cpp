@@ -181,6 +181,24 @@ rocke_value_t* rocke_warp_xor_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v
 
 /* ------------------------------------------------------ fp8 in-register dequant */
 
+rocke_value_t* rocke_decode_fp8e4m3fn_to_f32(rocke_ir_builder_t* b, rocke_value_t* byte)
+{
+    rocke_value_t* bits = rocke_b_zext(b, byte, rocke_i32());
+    rocke_value_t* magnitude = rocke_b_land(b, bits, rocke_b_const_i32(b, 0x7F));
+    rocke_value_t* sign_byte = rocke_b_land(b, bits, rocke_b_const_i32(b, 0x80));
+    rocke_value_t* sign = rocke_b_shl(b, sign_byte, rocke_b_const_i32(b, 24));
+    rocke_value_t* shifted = rocke_b_shl(b, magnitude, rocke_b_const_i32(b, 20));
+    rocke_value_t* normal = rocke_b_add(b, shifted, rocke_b_const_i32(b, 120 << 23));
+    rocke_value_t* subnormal_f = rocke_b_sitofp_f32(b, magnitude);
+    rocke_value_t* subnormal = rocke_b_fmul(b, subnormal_f, rocke_b_const_f32(b, 0.001953125));
+    rocke_value_t* is_subnormal = rocke_b_cmp_lt(b, magnitude, rocke_b_const_i32(b, 8));
+    rocke_value_t* result
+        = rocke_b_select(b, is_subnormal, rocke_b_bitcast(b, subnormal, rocke_i32()), normal);
+    rocke_value_t* is_nan = rocke_b_cmp_eq(b, magnitude, rocke_b_const_i32(b, 0x7F));
+    result = rocke_b_select(b, is_nan, rocke_b_const_i32(b, 0x7FC00000), result);
+    return rocke_b_bitcast(b, rocke_b_lor(b, result, sign), rocke_f32());
+}
+
 rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
                                             rocke_value_t* fp8_vec,
                                             rocke_value_t* scale,

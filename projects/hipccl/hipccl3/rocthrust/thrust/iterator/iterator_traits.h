@@ -39,48 +39,174 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
-#  include <cuda/std/iterator>
-#else // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
-#  include <iterator>
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#include <thrust/iterator/detail/device_system_tag.h>
+#include <thrust/iterator/detail/iterator_category_to_system.h>
+#include <thrust/iterator/detail/iterator_category_to_traversal.h>
+#include <thrust/iterator/iterator_categories.h>
+
+#include _THRUST_STD_INCLUDE(iterator)
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+#else
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \p iterator_traits is a type trait class that provides a uniform
- *  interface for querying the properties of iterators at compile-time.
- */
+namespace detail
+{
+// the following iterator helpers are not named it_value_t etc, like the C++20 facilities, because they are defined in
+// terms of C++17 iterator_traits and not the new C++20 indirectly_readable trait etc. This allows them to detect nested
+// value_type, difference_type and reference aliases, which the new C+20 traits do not consider (they only consider
+// specializations of iterator_traits). Also, a value_type of void remains supported (needed by some output iterators).
+
+template <typename It>
+using it_value_t = typename _THRUST_STD::iterator_traits<It>::value_type;
+
+template <typename It>
+using it_reference_t = typename _THRUST_STD::iterator_traits<It>::reference;
+
+template <typename It>
+using it_difference_t = typename _THRUST_STD::iterator_traits<It>::difference_type;
+
+template <typename It>
+using it_pointer_t = typename _THRUST_STD::iterator_traits<It>::pointer;
+
+// use this whenever you need to lazily evaluate a trait. E.g., as an alternative in replace_if_use_default.
+template <template <typename...> typename Trait, typename... Args>
+struct lazy_trait
+{
+  using type = Trait<Args...>;
+};
+} // namespace detail
+
+//! \p iterator_traits is a type trait class that provides a uniform interface for querying the properties of iterators
+//! at compile-time. You can specialize _THRUST_STD::iterator_traits for your own iterator types if needed.
+//! deprecated [Since 3.0]
 template <typename T>
-struct iterator_traits
-    :
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
-    ::cuda
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
-    ::std::iterator_traits<T>
+using iterator_traits THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits instead") =
+// FIXME(bgruber): switching to _THRUST_STD::iterator_traits<T> breaks some tests, e.g. cub.test.device_merge_sort.lid_1
+#if THRUST_COMPILER(NVRTC)
+  ::cuda
+#endif // THRUST_COMPILER(NVRTC)
+  ::std::iterator_traits<T>;
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
+// value
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::value_type or _THRUST_STD::iter_value_t instead")
+  iterator_value
+{
+#ifndef THRUST_DOXYGEN_INVOKED
+  using type = typename iterator_traits<Iterator>::value_type;
+#endif
+};
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+using iterator_value_t THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::value_type or "
+                                                 "_THRUST_STD::iter_value_t instead") = iterator_value<Iterator>;
+
+// pointer
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+struct THRUST_DEPRECATED iterator_pointer
+{
+#ifndef THRUST_DOXYGEN_INVOKED
+  using type = typename iterator_traits<Iterator>::pointer;
+#endif
+};
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+using iterator_pointer_t THRUST_DEPRECATED = typename iterator_pointer<Iterator>::type;
+
+// reference
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::reference or _THRUST_STD::iter_reference_t "
+                                 "instead") iterator_reference
+{
+#ifndef THRUST_DOXYGEN_INVOKED
+  using type = typename iterator_traits<Iterator>::reference;
+#endif
+};
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+using iterator_reference_t THRUST_DEPRECATED_BECAUSE(
+  "Use _THRUST_STD::iterator_traits<>::reference or "
+  "_THRUST_STD::iter_reference_t instead") = typename iterator_reference<Iterator>::type;
+
+// difference
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::iterator_traits<>::difference_t or _THRUST_STD::iter_difference_t "
+                                 "instead") iterator_difference
+{
+#ifndef THRUST_DOXYGEN_INVOKED
+  using type = typename iterator_traits<Iterator>::difference_type;
+#endif
+};
+
+//! deprecated [Since 3.0]
+template <typename Iterator>
+using iterator_difference_t THRUST_DEPRECATED_BECAUSE(
+  "Use _THRUST_STD::iterator_traits<>::difference_t or "
+  "_THRUST_STD::iter_difference_t instead") = typename iterator_difference<Iterator>::type;
+
+// traversal
+
+template <typename Iterator>
+struct iterator_traversal
+    : detail::iterator_category_to_traversal<typename iterator_traits<Iterator>::iterator_category>
+{};
+
+#ifndef THRUST_DOXYGEN_INVOKED
+template <typename Iterator>
+using iterator_traversal_t = typename iterator_traversal<Iterator>::type;
+#endif
+
+// system
+
+namespace detail
+{
+template <typename Iterator, typename = void>
+struct iterator_system_impl
 {};
 
 template <typename Iterator>
-struct iterator_value;
+struct iterator_system_impl<Iterator, _THRUST_STD::void_t<typename iterator_traits<Iterator>::iterator_category>>
+    : iterator_category_to_system<typename iterator_traits<Iterator>::iterator_category>
+{};
+} // namespace detail
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 template <typename Iterator>
-struct iterator_pointer;
+struct iterator_system : detail::iterator_system_impl<Iterator>
+{};
 
-template <typename Iterator>
-struct iterator_reference;
+// specialize iterator_system for void *, which has no category
+template <>
+struct iterator_system<void*> : iterator_system<int*>
+{};
 
-template <typename Iterator>
-struct iterator_difference;
+template <>
+struct iterator_system<const void*> : iterator_system<const int*>
+{};
 
+#ifndef THRUST_DOXYGEN_INVOKED
 template <typename Iterator>
-struct iterator_traversal;
-
-template <typename Iterator>
-struct iterator_system;
+using iterator_system_t = typename iterator_system<Iterator>::type;
+#endif
 
 THRUST_NAMESPACE_END
 
-#include <thrust/iterator/detail/any_system_tag.h>
-#include <thrust/iterator/detail/device_system_tag.h>
-#include <thrust/iterator/detail/host_system_tag.h>
-#include <thrust/iterator/detail/iterator_traits.inl>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>

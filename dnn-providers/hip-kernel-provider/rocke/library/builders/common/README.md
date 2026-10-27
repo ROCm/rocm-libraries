@@ -59,13 +59,14 @@ All remaining shapes.  Key knob decisions:
 | `use_mfma32_skip_legacy_qreg` | same as `use_transposed_scalar_state` |
 | `use_transposed_mask_once` + `use_transposed_mask_limit` | `(combo AND no-SW) OR _enable_transposed_subflags` |
 | `use_fast_paged_kv_desc` | combo AND no-SW AND bf16 AND `num_query_heads==64` AND `num_kv_heads==8` |
-| `use_register_pv` | `_enable_register_pv`: bf16, no sinks, no SW, no softcap, no alibi, no qq_bias, no fp8 KV, no 32x32 path |
+| `use_register_pv` | `_enable_register_pv`: bf16, no sinks, no SW, no softcap, no alibi, no qq_bias, no additive bias, no fp8 KV, no 32x32 path |
 | `use_early_v_schedule` | `_enable_early_v_schedule` |
 | `use_v_double_buffer` | `_enable_v_double_buffer` (gfx950 spec only; injected via field-presence guard) |
 | `use_sched_barrier` | `_enable_sched_barrier` (gfx950 spec only; field-presence guard) |
 | `use_k_single_buffer` | `_enable_k_single_buffer`: d128 small-tile cohort + env opt-in (gfx950 spec only) |
 | `use_fp8_mfma_qk` | `_enable_fp8_mfma_qk`: decode fp8 path only |
 | `use_i64_kv_addr` | cache size > 2 GiB (see gfx950 README "Paged-cache size" section) |
+| `use_additive_bias` | `problem.use_additive_bias` (gfx950 spec only; passed directly by `_spec_gfx950_generic`) |
 
 ### Tiled-3D dispatch cases
 
@@ -76,10 +77,51 @@ All remaining shapes.  Key knob decisions:
   `use_dtla_prefetch`, `use_ds_tr_reads`, `use_fused_reduce`, `use_dpp_softmax`, …).
 * **gfx942 / gfx950 (default)**: `_num_segments`, `_select_3d_waves_per_eu`,
   `_kv_storage_dtype`, `_gfx942_3d_tile_size_override`,
-  `_enable_gfx942_3d_invariant_hoist`, `_enable_gfx942_3d_wide_kv_load`,
-  `_enable_i64_kv_addr`.
+  `_gfx950_3d_tile_size_override`, `_enable_gfx942_3d_wide_kv_load`,
+  `_enable_i64_kv_addr`, `_use_decode_grid`, `_kv_cache_policy_3d`,
+  `_kv_lds_swizzle_3d`, `_wave_page_id_load_3d`; on gfx950 only,
+  `use_additive_bias` from the problem.
 
 ### Knob reference
+
+Every knob a selector resolves must also reach the launcher cache key
+(`_tiled_cache_key` / `_tiled_3d_cache_key` in
+[`attention_unified.py`](../../kernels/common/attention_unified.py)): add the
+selector's resolved output there when you wire it. The key is computed per launch
+without building the spec, so a missing entry lets two shapes that build different
+kernels share one cached binary.
+[`test_attention_tiled_cache_key.py`](../../tests/test_attention_tiled_cache_key.py)
+fails when key equality and built-spec equality disagree.
+
+Tiled-3D knobs (gfx942 and gfx950 split-KV segment kernel) come first; the
+Knob Catalog in `platform/dsl_docs/optimization/optimization_runbook.md`
+(§12.1.K2) lists them with the other 3D fields.
+
+**`kv_cache_policy`** (3D) — Cache policy of the K/V copies, by the same names
+as the 2D field. `_kv_cache_policy_3d` picks `"stream"` (non-temporal) when every
+sequence decodes: each K/V byte is read once, so caching it only evicts other
+data. The fp8 K/V loader keeps `"all"`; the gfx942 wide loader takes `"all"` or
+`"stream"`.
+
+**`use_kv_lds_swizzle`** (3D) — Stores each K/V LDS row's 16-byte chunks
+XOR-permuted by the row, which spreads the QK and PV reads over the LDS banks.
+The copies fetch permuted source chunks, so the tiles need no padding. fp16/bf16
+K/V, paged or strided. Selected by `_kv_lds_swizzle_3d`.
+
+**`use_wave_page_id_load`** (3D) — The wave loads the segment's page-table
+entries 64 at a time, one per lane, and each tile reads its page ids from those
+registers, so no page-table load sits on the KV loop's critical path. Paged
+fp16/bf16 K/V. Selected by `_wave_page_id_load_3d`; the decode split rule in
+`_num_segments` assumes it where both apply.
+
+**`use_decode_grid`** (3D) — One CTA per sequence along grid x when every
+sequence has one query token, instead of the prefill upper bound and a search
+over `query_start_len`. Derived from the problem by `_use_decode_grid`, not a
+tuning knob; it stays a spec field because the binary and the launch grid differ.
+
+**`tile_size_override`** (gfx950 3D) — A multiple of the page size: each loop
+iteration gathers several pages. `_gfx950_3d_tile_size_override` uses it for
+decode with too few CTAs to fill the device, together with the K/V LDS swizzle.
 
 **`use_transposed_half_local_pv`** — Rewrites the PV phase of the transposed
 32x32 kernel so each 32-lane warp-half reads only the P rows it owns,
@@ -131,3 +173,42 @@ is issued *after* the PV-wait barrier to avoid the WAR race that single-buffer
 naively introduces.  Gfx950 only; see the gfx950 attention
 [README](../gfx950/attention/README.md) "Single-batch d128" section for measured
 results.
+
+**`use_additive_bias`** — Feature flag, not a perf lever.  Adds a float32
+additive bias to the scaled QK scores before the online softmax, on both the
+2D tiled and 3D split-KV kernels:
+`S[q, k] += bias[seq*batch_stride + q_head*head_stride + q_local*sq_stride + k]`,
+where `q_head` is the *query* head (GQA-correct), `q_local` is the query
+position within its sequence, and `k` is the absolute key position (Sk stride
+is 1).  Like ALiBi/QQ bias it is added after the softcap, so the score is
+`softcap(QK * scale) + bias`.  A stride of 0 broadcasts that dimension, so `[B,H,Sq,Sk]`,
+`[1,H,Sq,Sk]`, `[B,1,Sq,Sk]` and `[1,1,Sq,Sk]` layouts are all supported, and
+`sq_stride` may exceed `max_seqlen_k` for a padded row.  The bias load is
+predicated on the same row/causal mask as the score: masked lanes (padding rows,
+tail columns) load element 0 instead of an out-of-range index, and the value is
+discarded.  Gfx950 spec only (field-presence guard);
+`supports_native_unified_attention_tiled` / `_3d_tiled` reject it on other
+arches.  Default OFF: the bias pointer and its three strides are appended to the
+end of the kernel ABI only when ON (kernel name gains an `addb` token), so the
+non-bias IR is unchanged.  On 2D the bias is emitted only on the 16x16 path and
+the plain transposed 32x32 path: `__post_init__` rejects it together with
+`use_transposed_mask_limit`, `use_transposed_invariant_hoist`,
+`use_transposed_mask_once`, the non-transposed 32x32 path,
+`use_grouped_kv2_softmax` and `use_register_pv`, and the selector keeps those
+knobs off when `problem.use_additive_bias` is set.
+Enabled by `UnifiedAttentionProblem.use_additive_bias`; the tensor and strides
+are passed to `run_unified_attention_torch(additive_bias=...,
+additive_bias_batch_stride=..., additive_bias_head_stride=...,
+additive_bias_sq_stride=...)`.  The entry point validates these before launch:
+the tensor must be present iff the flag is on, float32 and contiguous along Sk;
+`additive_bias_sq_stride` has no default when bias is on and must be `0`
+(broadcast over Sq, e.g. a `[B,1,1,Sk]` key-padding bias) or `>= max_seqlen_k`.
+The kernels address the bias with i32 element indices and i32 strides, so each
+stride must be in `[0, 2**31)` and the largest index a launch can read
+(`(num_seqs-1)*batch_stride + (H_q-1)*head_stride + (max_seqlen_q-1)*sq_stride
++ max_seqlen_k-1`) must be below `2**31` (8 GiB of f32); larger layouts raise
+`NotImplementedError` instead of wrapping into an out-of-bounds read.
+Broadcasting a dimension (stride 0) shrinks the index; i64 bias addressing is a
+follow-up.  That same index must also lie inside the tensor's storage (past its
+storage offset), so strides that do not match the tensor raise `ValueError`.  Python engine only for now (no C engine mirror yet).  Numeric coverage:
+[test_attention_additive_bias_gfx950_numeric.py](../../tests/test_attention_additive_bias_gfx950_numeric.py).

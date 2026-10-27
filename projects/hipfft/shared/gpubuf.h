@@ -31,6 +31,8 @@
 #include <string>
 #include <vector>
 
+#ifndef ROCFFT_BUILD_INTERNAL
+
 struct DEVICEBUF_MEM_USAGE : public std::runtime_error
 {
     using std::runtime_error::runtime_error;
@@ -190,146 +192,167 @@ private:
     }
 };
 
-// Simple RAII class for GPU buffers.  T is the type of pointer that
-// data() returns
-template <class T = void>
-class gpubuf_t
+#endif
+
+#ifdef ROCFFT_BUILD_INTERNAL
+// Put the internal version of gpubuf_t in a different namespace -
+// the intention is for only one to be used in any module, but defend
+// against ODR violations if both are used simultaneously.
+inline namespace rocfft_internal
 {
-public:
-    gpubuf_t() {}
-    // buffers are movable but not copyable
-    gpubuf_t(gpubuf_t&& other)
-    {
-        std::swap(buf, other.buf);
-        std::swap(owned, other.owned);
-        std::swap(bsize, other.bsize);
-        std::swap(device, other.device);
-        std::swap(is_managed_memory, other.is_managed_memory);
-    }
-    gpubuf_t& operator=(gpubuf_t&& other)
-    {
-        std::swap(buf, other.buf);
-        std::swap(owned, other.owned);
-        std::swap(bsize, other.bsize);
-        std::swap(device, other.device);
-        std::swap(is_managed_memory, other.is_managed_memory);
-        return *this;
-    }
-    gpubuf_t(const gpubuf_t&) = delete;
-    gpubuf_t& operator=(const gpubuf_t&) = delete;
+#endif
 
-    static gpubuf_t make_nonowned(T* p, size_t size_bytes = 0)
+    // Simple RAII class for GPU buffers.  T is the type of pointer that
+    // data() returns
+    template <class T = void>
+    class gpubuf_t
     {
-        gpubuf_t ret;
-        ret.owned             = false;
-        ret.buf               = p;
-        ret.bsize             = size_bytes;
-        ret.is_managed_memory = false; // irrelevant if not owned
-        return ret;
-    }
+    public:
+        gpubuf_t() {}
+        // buffers are movable but not copyable
+        gpubuf_t(gpubuf_t&& other)
+        {
+            std::swap(buf, other.buf);
+            std::swap(owned, other.owned);
+            std::swap(bsize, other.bsize);
+            std::swap(device, other.device);
+            std::swap(is_managed_memory, other.is_managed_memory);
+        }
+        gpubuf_t& operator=(gpubuf_t&& other)
+        {
+            std::swap(buf, other.buf);
+            std::swap(owned, other.owned);
+            std::swap(bsize, other.bsize);
+            std::swap(device, other.device);
+            std::swap(is_managed_memory, other.is_managed_memory);
+            return *this;
+        }
+        gpubuf_t(const gpubuf_t&) = delete;
+        gpubuf_t& operator=(const gpubuf_t&) = delete;
 
-    ~gpubuf_t()
-    {
-        free();
-    }
-
-    static bool use_alloc_managed()
-    {
-        return std::getenv("ROCFFT_MALLOC_MANAGED");
-    }
-
-    hipError_t alloc(const size_t size, bool make_it_shared = false)
-    {
-        free();
-        // remember the device that was current as of alloc, so we can
-        // free on the correct device
-        auto ret = hipGetDevice(&device);
-        if(ret != hipSuccess)
+        static gpubuf_t make_nonowned(T* p, size_t size_bytes = 0)
+        {
+            gpubuf_t ret;
+            ret.owned             = false;
+            ret.buf               = p;
+            ret.bsize             = size_bytes;
+            ret.is_managed_memory = false; // irrelevant if not owned
             return ret;
-
-        if(size > device_memory_accountant::singleton().get_usable_bytes(device))
-        {
-            std::stringstream msg;
-            msg << "Unauthorized device allocation (device ID: " << device << ").\n"
-                << "\tRequested size is " << byte_size_to_str(size) << "\n"
-                << device_memory_accountant::singleton().get_details(device);
-            throw DEVICEBUF_MEM_USAGE{msg.str()};
         }
 
-        bsize             = size;
-        is_managed_memory = use_alloc_managed() || make_it_shared;
-        ret = is_managed_memory ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
-        if(ret != hipSuccess)
+        ~gpubuf_t()
         {
-            buf   = nullptr;
-            bsize = 0;
+            free();
         }
 
-        device_memory_accountant::singleton().record_used_bytes(bsize, device);
-
-        return ret;
-    }
-
-    size_t size() const
-    {
-        return bsize;
-    }
-
-    void free()
-    {
-        if(buf != nullptr)
+        static bool use_alloc_managed()
         {
-            if(owned)
+            return std::getenv("ROCFFT_MALLOC_MANAGED");
+        }
+
+        hipError_t alloc(const size_t size, bool make_it_shared = false)
+        {
+            free();
+            // remember the device that was current as of alloc, so we can
+            // free on the correct device
+            auto ret = hipGetDevice(&device);
+            if(ret != hipSuccess)
+                return ret;
+
+#ifndef ROCFFT_BUILD_INTERNAL
+            if(size > device_memory_accountant::singleton().get_usable_bytes(device))
             {
-                // free on the device we allocated on
-                rocfft_scoped_device dev(device);
-                (void)hipFree(buf);
-                device_memory_accountant::singleton().release_used_bytes(bsize, device);
+                std::stringstream msg;
+                msg << "Unauthorized device allocation (device ID: " << device << ").\n"
+                    << "\tRequested size is " << byte_size_to_str(size) << "\n"
+                    << device_memory_accountant::singleton().get_details(device);
+                throw DEVICEBUF_MEM_USAGE{msg.str()};
             }
-            buf   = nullptr;
-            bsize = 0;
+#endif
+
+            bsize             = size;
+            is_managed_memory = use_alloc_managed() || make_it_shared;
+            ret = is_managed_memory ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
+            if(ret != hipSuccess)
+            {
+                buf   = nullptr;
+                bsize = 0;
+            }
+
+#ifndef ROCFFT_BUILD_INTERNAL
+            device_memory_accountant::singleton().record_used_bytes(bsize, device);
+#endif
+
+            return ret;
         }
-        owned = true;
-    }
 
-    // return a pointer to the allocated memory, offset by the
-    // specified number of bytes
-    T* data_offset(size_t offset_bytes = 0) const
-    {
-        void* ptr = static_cast<char*>(buf) + offset_bytes;
-        return static_cast<T*>(ptr);
-    }
+        size_t size() const
+        {
+            return bsize;
+        }
 
-    T* data() const
-    {
-        return static_cast<T*>(buf);
-    }
+        void free()
+        {
+            if(buf != nullptr)
+            {
+                if(owned)
+                {
+                    // free on the device we allocated on
+                    rocfft_scoped_device dev(device);
+                    (void)hipFree(buf);
+#ifndef ROCFFT_BUILD_INTERNAL
+                    device_memory_accountant::singleton().release_used_bytes(bsize, device);
+#endif
+                }
+                buf   = nullptr;
+                bsize = 0;
+            }
+            owned = true;
+        }
 
-    // equality/bool tests
-    bool operator==(std::nullptr_t n) const
-    {
-        return buf == n;
-    }
-    bool operator!=(std::nullptr_t n) const
-    {
-        return buf != n;
-    }
-    operator bool() const
-    {
-        return buf;
-    }
+        // return a pointer to the allocated memory, offset by the
+        // specified number of bytes
+        T* data_offset(size_t offset_bytes = 0) const
+        {
+            void* ptr = static_cast<char*>(buf) + offset_bytes;
+            return static_cast<T*>(ptr);
+        }
 
-private:
-    // The GPU buffer
-    void* buf = nullptr;
-    // whether this object owns the 'buf' pointer (and hence needs to
-    // free it)
-    bool   owned             = true;
-    bool   is_managed_memory = false;
-    size_t bsize             = 0;
-    int    device            = 0;
-};
+        T* data() const
+        {
+            return static_cast<T*>(buf);
+        }
 
-// default gpubuf that gives out void* pointers
-typedef gpubuf_t<> gpubuf;
+        // equality/bool tests
+        bool operator==(std::nullptr_t n) const
+        {
+            return buf == n;
+        }
+        bool operator!=(std::nullptr_t n) const
+        {
+            return buf != n;
+        }
+        operator bool() const
+        {
+            return buf;
+        }
+
+    private:
+        // The GPU buffer
+        void* buf = nullptr;
+        // whether this object owns the 'buf' pointer (and hence needs to
+        // free it)
+        bool   owned             = true;
+        bool   is_managed_memory = false;
+        size_t bsize             = 0;
+        int    device            = 0;
+    };
+
+    // default gpubuf that gives out void* pointers
+    typedef gpubuf_t<> gpubuf;
+
+#ifdef ROCFFT_BUILD_INTERNAL
+}
+#endif
+
 #endif

@@ -38,13 +38,33 @@ test_categories:
     description: "Current hipDNN unit-check coverage"
     test_patterns:
       - "hipdnn_test_name_validation"
-      - "hipdnn_cache_key_codegen_tests"
+      - "hipdnn_schema_codegen_tests"
       - "hipdnn_data_sdk_tests"
       - "hipdnn_flatbuffers_sdk_tests"
       - "hipdnn_backend_tests"
       - "hipdnn_frontend_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
+      - "hipdnn_bench_tests"
+      - "hipdnn_corpus_gen_tests"
+      - "hipdnn_corpus_gen_frontend_tests"
+      # Build tree only: pytest suites registered by tools/CMakeLists.txt with the
+      # kernel ingestor, absent from the installed CTestTestfile.cmake.
+      - "uhd_gen_tests"
+      - "uhd_gen_dataset_tests"
+      - "mine_shapes_tests"
+      - "uhd_skill_scripts_tests"
+      # Build tree only: CMake driver scripts (tools/cmake/CliExitStatus.cmake)
+      # checking hipdnn_corpus_gen's and hipdnn_bench's exit status for their arguments;
+      # not installed.
+      - "hipdnn_corpus_gen_cli_.*"
+      - "hipdnn_bench_cli_.*"
+      # Build tree only, registered only with HIPDNN_ENABLE_TOOLING_TESTS=ON; see
+      # tools/CMakeLists.txt.
+      - "hipdnn_descriptor_generator_pytest"
+      - "hipdnn_ingestor_generator_pytest"
+      # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
+      - "hipdnn_gpu_generic_targets_.*"
 
   integration:
     description: "Current hipDNN integration-check coverage"
@@ -53,8 +73,13 @@ test_categories:
       - "hipdnn_public_backend_tests"
       - "hipdnn_backend_logging_shutdown_tests"
       - "hipdnn_public_frontend_tests"
-      # Build tree only: these two smoke tests run CMake driver scripts rather than
+      # Build tree only: these smoke tests run CMake driver scripts rather than
       # installed gtest binaries, so they are absent from the installed
       # CTestTestfile.cmake. See tools/CMakeLists.txt.
       - "hipdnn_list_engines_smoke"
       - "hipdnn_validate_descriptors_smoke"
+      - "hipdnn_validate_descriptors_smoke_multi_launch"
+      - "hipdnn_validate_descriptors_l2_static_order"
+      - "hipdnn_validate_descriptors_l2_dynamic_features"
+      - "hipdnn_validate_descriptors_l1_static_order"
+      - "hipdnn_validate_descriptors_l1_native"

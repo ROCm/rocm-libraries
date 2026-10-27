@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/nv_target.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/system/cpp/vector.h>
 
@@ -134,7 +133,7 @@ struct my_allocator_with_custom_destroy
 
   THRUST_HOST_DEVICE void destroy(T*) noexcept
   {
-    NV_IF_TARGET(NV_IS_HOST, (g_state = true;));
+    _THRUST_IF_TARGET(_THRUST_IS_HOST, (g_state = true;));
   }
 
   value_type* allocate(std::ptrdiff_t n)

@@ -38,6 +38,7 @@
 #include "handle.hpp"
 #include "tuple_helper.hpp"
 #include <atomic>
+#include <string>
 
 // Struct to represent tensile problem, algo, solution index.
 typedef struct
@@ -67,6 +68,18 @@ inline constexpr bool rocblas_tensile_index(rocblas_int solution_index)
 {
     // coverted to negative 1 based as rocblas index
     return solution_index < -c_rocblas_solutions_reserved;
+}
+
+/*****************************************************************************
+ * Decide whether a bare filename names a Tensile library file, for the      *
+ * "list available files" diagnostic emitted when the requested library is   *
+ * missing. lazy_load selects the lazy-loading naming scheme                 *
+ * (TensileLibrary_lazy*) vs the per-arch scheme (TensileLibrary_gfx*).      *
+ *****************************************************************************/
+inline bool rocblas_tensile_is_library_filename(const std::string& filename, bool lazy_load)
+{
+    const char* prefix = lazy_load ? "TensileLibrary_lazy" : "TensileLibrary_gfx";
+    return filename.rfind(prefix, 0) == 0;
 }
 
 /********************************************************************

@@ -131,7 +131,7 @@ class AllocationSetup {
         : rules_(std::move(rules)),
           intervals_(computeSSALiveIntervals(function)),
           target_(AsmTargetRegisters::forFunction(function)),
-          constraints_(AllocationConstraints::build(function, target_, rules_)),
+          constraints_(markAndBuild(function, target_, rules_)),
           loops_(detectLoops(function)),
           ruleIntervals_(applyEarlyClobber(function, intervals_, rules_)),
           scope_(buildScope(constraints_, ruleIntervals_, allocate, region)),
@@ -161,6 +161,14 @@ class AllocationSetup {
     }
 
    private:
+    /// Stamps before building, the order allocateRegisters() uses, so a test
+    /// sees the pipeline's classification rather than the all-pinned reading.
+    static AllocationConstraints markAndBuild(Function& function, const AsmTargetRegisters& target,
+                                              const AllocationRules& rules) {
+        markUndefinedLiveIns(function, target);
+        return AllocationConstraints::build(function, target, rules);
+    }
+
     static AllocationScope buildScope(const AllocationConstraints& constraints,
                                       const SSALiveIntervals& intervals, RegClassSet allocate,
                                       const RegionOptions& region) {

@@ -90,12 +90,25 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
  * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
  * (best first). If every candidate is rejected, returns a ranking of the rejected configs
  * (max latency) instead of throwing.
+ *
+ * Non-temporal availability is read from each config
+ * (config_t::non_temporal_a_available / non_temporal_b_available). Call
+ * memoize_non_temporal_availability() once when the candidate list is built.
  * @throws std::runtime_error if @p configs is empty.
  */
 ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
                                               model_t model = model_t::gemm);
+
+/**
+ * @brief Record per-macro-tile non-temporal availability on each config.
+ *
+ * A non-temporal read (cache hint 4) counts only for configs with the same
+ * mt.m, mt.n, and mt.k. Call once when @p configs is assembled. rank_configs()
+ * then loads the two bools and does not rebuild this map.
+ */
+ORIGAMI_EXPORT void memoize_non_temporal_availability(std::vector<config_t>& configs);
 
 /**
  * @brief Select best configuration based only on M, N, K dimensions with default settings.

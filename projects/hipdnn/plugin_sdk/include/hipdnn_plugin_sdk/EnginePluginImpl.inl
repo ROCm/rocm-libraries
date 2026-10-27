@@ -84,9 +84,9 @@
 
 #include <hip/hip_runtime.h>
 
+#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
@@ -283,8 +283,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
         else if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
         {
             // The ordinary answer for a container that supplies no name for this engine.
-            HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << apiName
-                                                           << "] engineId=" << engineId);
+            HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << apiName << "] engineId=" << engineId);
         }
         else
         {
@@ -293,8 +292,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
             // hipdnnPluginGetLastErrorString would serve a stale message from an unrelated
             // earlier failure.
             hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
-                containerStatus,
-                "getEngineName failed for engine ID " + std::to_string(engineId));
+                containerStatus, "getEngineName failed for engine ID " + std::to_string(engineId));
         }
     });
 
@@ -374,8 +372,8 @@ hipdnnPluginStatus_t
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+            opGraph->ptr, opGraph->size);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*typedHandle, opGraphWrapper);
 
@@ -415,12 +413,76 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle
 
         auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
         auto& engineManager = typedHandle->getEngineManager();
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(opGraph->ptr,
-                                                                           opGraph->size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraphWrapper(
+            opGraph->ptr, opGraph->size);
 
         engineManager.getEngineDetails(*typedHandle, opGraphWrapper, engineId, *engineDetails);
 
         LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
+    });
+}
+
+hipdnnPluginStatus_t
+    hipdnnEnginePluginEnumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                          const hipdnnPluginConstData_t* engineConfig,
+                                          const hipdnnPluginConstData_t* opGraph,
+                                          uint64_t offset,
+                                          uint64_t limit,
+                                          hipdnnPluginConstData_t* engineDetails)
+{
+    return hipdnn_plugin_sdk::tryCatch([&] {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+        hipdnn_plugin_sdk::throwIfNull(engineConfig);
+        hipdnn_plugin_sdk::throwIfNull(opGraph);
+        hipdnn_plugin_sdk::throwIfNull(engineDetails);
+        *engineDetails = {nullptr, 0};
+        auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(opGraph->ptr,
+                                                                               opGraph->size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+            engineConfig->ptr, engineConfig->size);
+        typedHandle->getEngineManager().enumerateCandidates(
+            *typedHandle, graph, config, offset, limit, *engineDetails);
+    });
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginGetPrediction(hipdnnEnginePluginHandle_t handle,
+                                                     const hipdnnPluginConstData_t* engineConfig,
+                                                     const hipdnnPluginConstData_t* opGraph,
+                                                     hipdnnEnginePredictionKind_t kind,
+                                                     int32_t evaluate,
+                                                     hipdnnPluginConstData_t* prediction)
+{
+    return hipdnn_plugin_sdk::tryCatch([&] {
+        hipdnn_plugin_sdk::throwIfNull(prediction);
+        *prediction = {nullptr, 0};
+        hipdnn_plugin_sdk::throwIfNull(handle);
+        hipdnn_plugin_sdk::throwIfNull(engineConfig);
+        hipdnn_plugin_sdk::throwIfNull(opGraph);
+        if(evaluate != 0 && evaluate != 1)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Prediction evaluate must be zero or one");
+        }
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(opGraph->ptr,
+                                                                               opGraph->size);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+            engineConfig->ptr, engineConfig->size);
+        if(!graph.isValid() || !config.isValid())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Prediction requires a valid graph and config");
+        }
+        auto* typedHandle = static_cast<HIPDNN_PLUGIN_HANDLE_TYPE*>(handle);
+        const auto result = typedHandle->getEngineManager().getPrediction(
+            *typedHandle, graph, config, kind, evaluate != 0);
+        flatbuffers::FlatBufferBuilder builder;
+        builder.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EnginePrediction::Pack(builder, &result));
+        auto buffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
+        const hipdnnPluginConstData_t data{buffer->data(), buffer->size()};
+        typedHandle->storeEngineDetailsDetachedBuffer(data.ptr, std::move(buffer));
+        *prediction = data;
     });
 }
 

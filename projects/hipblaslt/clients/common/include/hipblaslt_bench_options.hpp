@@ -9,8 +9,12 @@
 #include <cstdint>
 #include <string>
 
-// Process-wide CLI knobs that hipblaslt-bench forwards into the matmul
-// descriptor without going through the YAML-backed Arguments struct.
+// Process-wide CLI knobs that hipblaslt-bench reads directly instead of through
+// the YAML-backed Arguments struct.
+//
+// cotenant_cus is the workgroup count of a busy kernel kept resident on a separate
+// stream during timed runs (0 disables it); cotenant_max_occupancy caps its
+// workgroups per CU through LDS reservation.
 //
 // sm_count_target maps to HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET and
 // streamk_tile_scheduling_mode maps to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT
@@ -23,6 +27,8 @@
 // as {0=off, 1=on} and follows the same convention.
 namespace hipblaslt_bench_options
 {
+    int32_t&     cotenant_cus();
+    int32_t&     cotenant_max_occupancy();
     int32_t&     sm_count_target();
     int32_t&     streamk_tile_scheduling_mode();
     std::string& streamk_tile_scheduling_mode_str();

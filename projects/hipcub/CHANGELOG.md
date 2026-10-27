@@ -2,6 +2,17 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB 4.7.1 for ROCm 10.2
+
+### Fixed
+
+* Memory leak in device_reduce unit test.
+* Incorrect benchmark measurements for block_run_length_encode and block_histogram.
+
+### Upcoming changes
+
+* This project location will be deprecated in ROCm 10.3.  See the new hipCCL project folder at https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl.
+
 ## hipCUB 4.7.0 for ROCm 10.1
 
 ### Changed

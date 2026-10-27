@@ -1,0 +1,36 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block config_constructor -%}
+    rocprim::run_length_encode_config<
+        rocprim::reduce_by_key_config<
+            {{ config.block_size_x }},
+            {{ config.ipt }},
+            rocprim::block_load_method::block_load_transpose,
+            rocprim::block_load_method::block_load_direct,
+            rocprim::block_scan_algorithm::using_warp_scan
+        >,
+        rocprim::default_config
+    >
+{%- endblock %}
+
+{% block type_definitions %}
+    using key_type = {{ key_type }};
+{% endblock %}
+
+{% block benchmark_type %}
+{% endblock %}
+
+{% block benchmark_queue %}
+    executor.queue<device_run_length_encode_benchmark<key_type, 10, config>>();
+    executor.queue<device_run_length_encode_benchmark<key_type, 1000, config>>();
+{% endblock %}
+
+{% block get_time %}
+    double out = 0;
+    double n = 0;
+    for(const double & x : executor.get_all_bytes_per_second()){
+        out += (1000 * primbench::GiB) / x;
+        n++;
+    }
+    return out / n;
+{% endblock %}

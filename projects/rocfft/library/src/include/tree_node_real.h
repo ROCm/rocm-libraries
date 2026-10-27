@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ protected:
     void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
 
 public:
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -66,7 +66,7 @@ public:
     // 3D Even can possibly set this
     bool try_fuse_pre_post_processing = false;
 
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -86,7 +86,7 @@ class Real2DEvenNode : public InternalNode
         REAL_2D_SINGLE, // 2D_SINGLE with pre/post processing
     };
 
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -126,7 +126,7 @@ class Real3DEvenNode : public InternalNode
         TR_PAIRS // RTRTRT Real2C, or TRTRTR for C2Real
     };
 
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -223,7 +223,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override{};
 
 public:
-    bool UseOutputLengthForPadding() override
+    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }
@@ -277,7 +277,7 @@ protected:
 
 public:
     std::vector<size_t> CollapsibleDims() override;
-    bool                UseOutputLengthForPadding() override
+    bool                OutputLengthMatchesOutStride() const override
     {
         return true;
     }

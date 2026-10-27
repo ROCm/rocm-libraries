@@ -94,6 +94,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
+from ..core.ir import check_cluster_dims
 from .hip_module import Runtime
 from .packing import compile_packer
 from .torch_interop import resolve_stream
@@ -111,6 +112,7 @@ __all__ = [
     "make_kernel",
     "no_fence",
     "release_retained_for_stream",
+    "retain_for_stream",
     "synchronize_and_release",
     "time_launches",
 ]
@@ -220,6 +222,14 @@ class LaunchConfig:
     of the per-call value.
     """
 
+    cluster: Optional[Tuple[int, int, int]] = None
+    """Workgroup-cluster shape ``(x, y, z)`` for this launch.
+
+    ``None`` uses the launcher's compiled ``cluster_dims`` (a plain launch
+    when it has none). A value must equal the compiled shape when there is
+    one; ``grid`` must be a multiple of it in every dimension.
+    """
+
 
 @dataclass(frozen=True)
 class StreamConfig:
@@ -314,6 +324,15 @@ def _runtime() -> Runtime:
     return _HIP_RUNTIME
 
 
+def retain_for_stream(stream: int, *objects: Any) -> None:
+    """Retain asynchronously used resources until the stream's explicit drain.
+
+    Use for non-kernel resources such as graph owners. Retention is required
+    even if their Python owner is discarded before the queued replay completes.
+    """
+    _runtime().retain_for_stream(int(stream), *objects)
+
+
 def release_retained_for_stream(stream: int = 0) -> None:
     """Drop retained args/tensors for a stream after external synchronization.
 
@@ -403,6 +422,9 @@ class KernelLauncher:
     a downstream `torch.cuda.Event.synchronize()`) is responsible
     for observing the output. This matches Triton's launch semantics
     and lets a benchmarking harness do its own event-based timing.
+
+    ``cluster_dims`` is the kernel's compiled cluster shape (the IR kernel
+    attr, also recorded in the manifest). When set, every launch uses it.
     """
 
     def __init__(
@@ -412,11 +434,15 @@ class KernelLauncher:
         kernel_name: str,
         signature: Sequence[Mapping[str, Any]],
         cache_key: Optional[Tuple] = None,
+        cluster_dims: Optional[Sequence[int]] = None,
     ) -> None:
         self._hsaco = hsaco
         self._kernel_name = kernel_name
         self._signature = list(signature)
         self._cache_key = cache_key
+        self._cluster_dims = (
+            None if cluster_dims is None else check_cluster_dims(cluster_dims)
+        )
         rt = _runtime()
         self._module = rt.load_module(hsaco)
         self._fn = self._module.get_function(kernel_name)
@@ -437,6 +463,21 @@ class KernelLauncher:
     def signature(self) -> Sequence[Mapping[str, Any]]:
         return tuple(self._signature)
 
+    @property
+    def cluster_dims(self) -> Optional[Tuple[int, int, int]]:
+        return self._cluster_dims
+
+    def _resolve_cluster(self, config: LaunchConfig) -> Optional[Tuple[int, int, int]]:
+        if config.cluster is None:
+            return self._cluster_dims
+        cluster = check_cluster_dims(config.cluster)
+        if self._cluster_dims is not None and cluster != self._cluster_dims:
+            raise ValueError(
+                f"{self._kernel_name}: launch cluster {cluster} does not match "
+                f"the kernel's cluster_dims {self._cluster_dims}"
+            )
+        return cluster
+
     def __call__(
         self,
         values: Mapping[str, Any],
@@ -444,6 +485,7 @@ class KernelLauncher:
         config: LaunchConfig,
     ) -> LaunchSummary:
         rt = _runtime()
+        cluster = self._resolve_cluster(config)
         args = self._packer(values)
         stream = resolve_stream(config.stream)
         fence = _resolved_fence(config.fence)
@@ -465,6 +507,7 @@ class KernelLauncher:
                 args,
                 shared_bytes=config.shared_bytes,
                 stream=stream,
+                cluster=cluster,
             )
             return LaunchSummary(launches=1)
 
@@ -486,9 +529,41 @@ class KernelLauncher:
             shared_bytes=config.shared_bytes,
             stream=stream,
             record_event=False,
+            cluster=cluster,
         )
         rt.retain_for_stream(stream, *values.values())
         return LaunchSummary(launches=1)
+
+    def bind(
+        self,
+        values: Mapping[str, Any],
+        *,
+        config: LaunchConfig,
+    ) -> Callable[[], None]:
+        """Pack ``values`` once; return a zero-argument asynchronous launch.
+
+        The callable enqueues the kernel with exactly these arguments on
+        ``config``'s stream and returns -- no packing, no stream lookup,
+        no fence. Hand it to :func:`time_launches`: a timed loop of
+        ``launcher(values, config=...)`` pays the Python packing on every
+        launch, and for a kernel shorter than that the loop times the
+        host. The callable keeps ``values`` alive for as long as it
+        lives; drain the stream before dropping it.
+        """
+        launch = _runtime().prepare_launch(
+            self._fn,
+            config.grid,
+            config.block,
+            self._packer(values),
+            shared_bytes=config.shared_bytes,
+            stream=resolve_stream(config.stream),
+        )
+        keep = tuple(values.values())
+
+        def run(_keep=keep) -> None:
+            launch()
+
+        return run
 
     def __repr__(self) -> str:
         key_str = f", cache_key={self._cache_key!r}" if self._cache_key else ""
@@ -748,30 +823,72 @@ def time_launches(
     ``hipEventSynchronize`` is the single drain point that bounds
     the elapsed-time measurement. After timing, the bucket retained
     for ``stream`` is reaped via :meth:`Runtime.wait_stream`.
+
+    The device is drained on every exit, not only on success: when
+    ``fn`` (or the timing itself) raises, the launches already queued
+    are waited for before the exception propagates, so a caller may
+    free the buffers ``fn`` uses as soon as this returns or raises.
+    See :func:`_drain_after_failure`.
     """
     rt = _runtime()
     resolved = resolve_stream(stream)
-    with no_fence():
-        for _ in range(int(warmup)):
-            fn()
-        rt.sync()
-        e0 = rt.event()
-        e1 = rt.event()
-        try:
-            e0.record(stream=resolved)
-            for _ in range(int(iters)):
+    try:
+        with no_fence():
+            for _ in range(int(warmup)):
                 fn()
-            e1.record(stream=resolved)
-            e1.synchronize()
-            ms = e0.elapsed_to(e1) / int(iters)
-        finally:
-            # Destroy both events even if ``fn`` raised mid-loop, so a failed
-            # timing run does not leak two HIP events.
-            e0.destroy()
-            e1.destroy()
+            rt.sync()
+            e0 = rt.event()
+            e1 = rt.event()
+            try:
+                e0.record(stream=resolved)
+                for _ in range(int(iters)):
+                    fn()
+                e1.record(stream=resolved)
+                e1.synchronize()
+                ms = e0.elapsed_to(e1) / int(iters)
+            finally:
+                # Destroy both events even if ``fn`` raised mid-loop, so a
+                # failed timing run does not leak two HIP events.
+                e0.destroy()
+                e1.destroy()
+    except Exception as exc:
+        _drain_after_failure(rt, exc)
+        raise
     # Drain the per-launch events accumulated during the timed loop.
     rt.wait_stream(resolved)
     return ms
+
+
+def _drain_after_failure(rt: Runtime, exc: BaseException) -> None:
+    """Drain the device after a timing loop raised, before ``exc`` propagates.
+
+    The launches queued before the failure were fire-and-forget
+    (:func:`no_fence`), so without this drain the caller's handler could
+    free a buffer -- a workspace, a sub-GEMM table, an output -- that a
+    queued kernel still reads or writes. The drain is device-wide
+    (:meth:`Runtime.sync`): on an error path its cost does not matter,
+    and it also covers work queued off the timed stream. It releases the
+    retained launch refs as well, which the success path does through
+    :meth:`Runtime.wait_stream`.
+
+    A drain that fails is not raised. The exception the caller sees stays
+    ``exc``, the one that names the launch that went wrong; the drain
+    fails when the device holds an error (typically a faulted kernel)
+    that later HIP calls report too, so the caller still meets it at its
+    next call. Where Python supports exception notes (3.11+), the drain
+    failure is attached to ``exc`` as one.
+
+    Callers invoke this for :class:`Exception` only, not for
+    ``KeyboardInterrupt``: an interrupt usually means a kernel hangs, and
+    the drain would then block for good in a ctypes call that cannot be
+    interrupted.
+    """
+    try:
+        rt.sync()
+    except Exception as drain_exc:  # noqa: BLE001 - reported on ``exc`` instead
+        add_note = getattr(exc, "add_note", None)
+        if add_note is not None:
+            add_note(f"draining the device after this error also failed: {drain_exc}")
 
 
 # ---------------------------------------------------------------------
@@ -950,41 +1067,50 @@ def _timing_loop(
     event-bracketed measurement (default; matches CK Tile's
     ``gpu_timer``) and a CPU-side :func:`time.perf_counter` window
     between :meth:`Runtime.wait_stream` syncs.
+
+    As in :func:`time_launches`, the device is drained before an
+    exception from a callable (or the timing) propagates.
     """
     rt = _runtime()
     resolved_stream = resolve_stream(int(s.stream_id))
     cold = max(0, int(s.cold_niters))
     iters = max(1, int(s.nrepeat))
 
-    with no_fence():
-        for _ in range(cold):
-            for c in callables:
-                c(s)
+    try:
+        with no_fence():
+            for _ in range(cold):
+                for c in callables:
+                    c(s)
 
-        if s.is_gpu_timer:
-            # Drain any pending warmup work so the start event marks
-            # the first timed launch's submission, not warmup
-            # completion.
-            rt.wait_stream(resolved_stream)
-            e0 = rt.event()
-            e1 = rt.event()
-            e0.record(stream=resolved_stream)
-            for _ in range(iters):
-                for c in callables:
-                    c(s)
-            e1.record(stream=resolved_stream)
-            e1.synchronize()
-            ms_total = e0.elapsed_to(e1)
-            e0.destroy()
-            e1.destroy()
-        else:
-            rt.wait_stream(resolved_stream)
-            t0 = _time.perf_counter()
-            for _ in range(iters):
-                for c in callables:
-                    c(s)
-            rt.wait_stream(resolved_stream)
-            ms_total = (_time.perf_counter() - t0) * 1000.0
+            if s.is_gpu_timer:
+                # Drain any pending warmup work so the start event marks
+                # the first timed launch's submission, not warmup
+                # completion.
+                rt.wait_stream(resolved_stream)
+                e0 = rt.event()
+                e1 = rt.event()
+                try:
+                    e0.record(stream=resolved_stream)
+                    for _ in range(iters):
+                        for c in callables:
+                            c(s)
+                    e1.record(stream=resolved_stream)
+                    e1.synchronize()
+                    ms_total = e0.elapsed_to(e1)
+                finally:
+                    e0.destroy()
+                    e1.destroy()
+            else:
+                rt.wait_stream(resolved_stream)
+                t0 = _time.perf_counter()
+                for _ in range(iters):
+                    for c in callables:
+                        c(s)
+                rt.wait_stream(resolved_stream)
+                ms_total = (_time.perf_counter() - t0) * 1000.0
+    except Exception as exc:
+        _drain_after_failure(rt, exc)
+        raise
 
     # Final drain: the timed-loop body ran under :func:`no_fence`
     # which does not retain per-launch events, so the

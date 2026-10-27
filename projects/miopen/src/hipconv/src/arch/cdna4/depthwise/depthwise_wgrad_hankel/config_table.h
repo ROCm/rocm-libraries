@@ -24,13 +24,16 @@ constexpr int BLOCK_C8      = BLOCK_C / 8;
 // q_tiles counts output columns in units of the 4-wide MFMA contraction, block_q() below.
 struct Config
 {
-    int q_tiles         = 8;
-    int kh              = 3;
-    int kw              = 3;
-    int rows_per_chunk  = 32;
-    int stage_depth     = 2;
-    int stride          = 1;
-    bool narrow_c       = false;
+    int q_tiles        = 8;
+    int kh             = 3;
+    int kw             = 3;
+    int rows_per_chunk = 32;
+    int stage_depth    = 2;
+    int stride         = 1;
+    // Channels a lane moves per access, which also names the staging path: 8 is the wide
+    // path's uint4 and anything narrower goes register-to-LDS. Channels are contiguous
+    // inside a pixel, so an access fits exactly when the count divides C.
+    int chan_vec        = 8;
     Direction direction = Direction::Wgrad;
 
     constexpr int block_q() const { return q_tiles * MFMA_K; }
@@ -103,28 +106,89 @@ constexpr Config configs[] = {
     {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stride = 2},
     {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 16, .stride = 2},
     {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stride = 2},
-    // Narrow-C families, at the chunk-ladder ends only; each entry is an instantiation.
-    // A narrow row lives in registers until it is written out, hence stage_depth 1.
-    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 1, .narrow_c = true},
-    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .narrow_c = true},
-    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .narrow_c = true},
+    // Narrow-C families, at the chunk-ladder ends only. stage_depth 1 leads because the
+    // depth-2 buffer spills to scratch until the row loop is unrolled by DEPTH, and
+    // chan_vec 1 leads to avoid full-grid regressions; wider accesses remain tuning options.
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 1, .chan_vec = 2},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 4},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 2, .chan_vec = 2},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 32, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .rows_per_chunk = 8, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 32, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 5, .kw = 5, .rows_per_chunk = 8, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 32, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 7, .kw = 7, .rows_per_chunk = 8, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 32, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 9, .kw = 9, .rows_per_chunk = 8, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 32, .stage_depth = 2, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 1, .stride = 2, .chan_vec = 1},
+    {.q_tiles = 4, .kh = 11, .kw = 11, .rows_per_chunk = 8, .stage_depth = 2, .stride = 2, .chan_vec = 1},
 };
 // clang-format on
 

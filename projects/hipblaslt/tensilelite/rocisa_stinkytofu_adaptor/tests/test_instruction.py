@@ -195,6 +195,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     VMinI32,
     VMed3I32,
     VMed3F32,
+    VMaximumMinimumF32,
     VNotB32,
     VPrngB32,
     VRndneF32,
@@ -1690,6 +1691,7 @@ _VECTOR_MINMAX = [
 _VECTOR_TERNARY_MISC = [
     (VMed3I32, "v_med3_i32", InstType.INST_I32),
     (VMed3F32, "v_med3_f32", InstType.INST_F32),
+    (VMaximumMinimumF32, "v_maximumminimum_f32", InstType.INST_F32),
     (VLShiftLeftOrB32, "v_lshl_or_b32", InstType.INST_B32),
 ]
 

@@ -45,6 +45,14 @@ inline std::vector<std::string> buildSdpaDefines(SdpaSoftmaxProbabilityMode prob
     return defines;
 }
 
+// Puts a type in a non-deduced context so a template parameter is never deduced from
+// the argument (a literal nullptr mask still compiles, a wrong-dtype mask does not).
+template <typename T>
+struct NonDeduced
+{
+    using type = T;
+};
+
 } // namespace detail
 
 class GpuFpReferenceSdpa
@@ -60,23 +68,31 @@ public:
     //
     // Takes non-const references because deviceData() may trigger host→device sync.
     // attnMask is non-const for the same reason (uploading it needs deviceData()).
+    //
+    // The mask dtype is MaskDataType, independent of ComputeDataType (float, half or
+    // bfloat16; the kernel converts to float on read). It is passed to the kernel as
+    // -DMASK_TYPE after the buildSdpaDefines set (Q/K/V/O/COMPUTE_TYPE/probability mode).
+    // The mask parameter is non-deduced: name MaskDataType when passing a non-float mask.
     template <class QDataType,
               class KDataType = QDataType,
               class VDataType = QDataType,
               class ODataType = QDataType,
-              class ComputeDataType = float>
-    static void fprop(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                      hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-                      hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-                      hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                      std::optional<float> attnScaleValue = std::nullopt,
-                      hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask = nullptr,
-                      int64_t leftBound = -1,
-                      int64_t rightBound = -1,
-                      bool topLeftAlignment = true,
-                      hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                      SdpaSoftmaxProbabilityMode probabilityMode
-                      = SdpaSoftmaxProbabilityMode::FLOAT)
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
+    static void fprop(
+        hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+        hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        std::optional<float> attnScaleValue = std::nullopt,
+        hipdnn_data_sdk::utilities::TensorBase<typename detail::NonDeduced<MaskDataType>::type>*
+            attnMask
+        = nullptr,
+        int64_t leftBound = -1,
+        int64_t rightBound = -1,
+        bool topLeftAlignment = true,
+        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+        SdpaSoftmaxProbabilityMode probabilityMode = SdpaSoftmaxProbabilityMode::FLOAT)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 
@@ -95,6 +111,8 @@ public:
         auto defines
             = detail::buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
                 probabilityMode);
+        defines.emplace_back(std::string("-DMASK_TYPE=")
+                             + detail::HipRtcTypeName<MaskDataType>::VALUE);
 
         const void* maskPtr = nullptr;
         std::vector<int64_t> maskDims;

@@ -320,14 +320,16 @@ void rocke_sage_mfma_prologue(rocke_sage_mfma_ctx_t* ctx);
 void rocke_sage_mfma_fold_scales(rocke_sage_mfma_ctx_t* ctx);
 
 /* extra_score_transform closure _k_block_scale_transform (lines 534-553):
- * (b, score, kt, row_in_atom) -> score * k_scale[k_block_idx(kt)]. Used only on
- * the per_block k_scale path; `user` is the rocke_sage_mfma_ctx_t*. Matches the
+ * (b, score, kt, row_in_atom, query_pos, key_pos) -> score * k_scale[k_block_idx(kt)].
+ * The positions are unused here; `user` is the rocke_sage_mfma_ctx_t*. Matches the
  * rocke_attn_score_transform_fn signature so it is passed straight into
  * rocke_mfma_attn_params_t.extra_score_transform. */
 rocke_value_t* rocke_sage_mfma_k_block_scale_transform(rocke_ir_builder_t* b,
                                                        rocke_value_t* score_log2,
                                                        rocke_value_t* kt,
                                                        int row_in_atom,
+                                                       rocke_value_t* query_pos,
+                                                       rocke_value_t* key_pos,
                                                        void* user);
 
 /* Body + epilogue (lines 557-591): resolve causal_ctx / kv_dtype; populate a

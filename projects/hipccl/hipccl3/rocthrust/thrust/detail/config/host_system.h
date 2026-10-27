@@ -16,6 +16,16 @@
 
 #pragma once
 
+// Internal config header that is only included through thrust/detail/config/config.h
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 // reserve 0 for undefined
 #define THRUST_HOST_SYSTEM_CPP 1
 #define THRUST_HOST_SYSTEM_OMP 2
@@ -24,10 +34,6 @@
 #ifndef THRUST_HOST_SYSTEM
 #  define THRUST_HOST_SYSTEM THRUST_HOST_SYSTEM_CPP
 #endif // THRUST_HOST_SYSTEM
-
-#ifdef THRUST_HOST_BACKEND
-#  error THRUST_HOST_BACKEND is no longer supported; use THRUST_HOST_SYSTEM instead.
-#endif // THRUST_HOST_BACKEND
 
 #if THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP
 #  define __THRUST_HOST_SYSTEM_NAMESPACE cpp

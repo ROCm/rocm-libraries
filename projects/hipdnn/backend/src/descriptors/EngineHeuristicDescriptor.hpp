@@ -4,9 +4,11 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "BackendDescriptor.hpp"
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
 namespace hipdnn_backend
 {
@@ -24,6 +26,8 @@ private:
     std::shared_ptr<const GraphDescriptor> _graph;
     std::vector<int64_t> _engineIds;
     hipdnnBackendHeurMode_t _heuristicMode = HIPDNN_HEUR_MODE_FALLBACK;
+    std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>>
+        _engineConfigs;
     bool _heuristicModeSet = false;
     bool _findFirst = false;
 
@@ -33,8 +37,16 @@ private:
     std::vector<int64_t> _policyOrder; // descriptor-level policy IDs
     bool _policyOrderSet = false;
 
+    // RFC 0019 §11.4 ranking metric: the attribute as set (empty = unset/default) and the
+    // effective metric resolved at finalize (env > attribute > default).
+    std::string _rankingMetric;
+    std::string _effectiveRankingMetric;
+
     // Resolve policy order from descriptor/handle/env/default
     std::vector<int64_t> resolveHeuristicPolicyOrder();
+
+    // Resolve the ranking metric from env/descriptor/default; throws for an unregistered one
+    std::string resolveRankingMetric() const;
 
     // Ensure policy slots match orderedPolicyIds
     void syncPolicySlots(const std::vector<int64_t>& orderedPolicyIds);
@@ -79,6 +91,10 @@ private:
                         int64_t requestedElementCount,
                         int64_t* elementCount,
                         void* arrayOfElements) const;
+
+    void setRankingMetric(hipdnnBackendAttributeType_t attributeType,
+                          int64_t elementCount,
+                          const void* arrayOfElements);
 
 public:
     void finalize() override;

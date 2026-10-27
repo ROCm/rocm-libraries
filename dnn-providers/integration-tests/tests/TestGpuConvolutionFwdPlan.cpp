@@ -19,6 +19,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
+#include "RaggedGraphTestUtils.hpp"
 #include "harness/gpu-graph-executor/detail/GpuConvolutionFwdPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuConvolutionFwdSignatureKey.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -118,6 +119,47 @@ TEST(TestGpuConvolutionFwdPlanBuilder, IsApplicable)
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(W_UID);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
+}
+
+// No GPU plan builder reads ragged offsets, so each rejects ragged tensors, not only SDPA.
+TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t W_UID = 11;
+    constexpr int64_t Y_UID = 12;
+
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+
+    auto graphBuilder = createConvFwdGraph(X_UID,
+                                           W_UID,
+                                           Y_UID,
+                                           xDims,
+                                           wDims,
+                                           yDims,
+                                           generateStrides(xDims),
+                                           generateStrides(wDims),
+                                           generateStrides(yDims),
+                                           {0, 0},
+                                           {1, 1},
+                                           {1, 1},
+                                           DataType::FLOAT);
+
+    const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 // ============================================================================

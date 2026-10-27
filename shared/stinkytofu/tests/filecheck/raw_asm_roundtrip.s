@@ -7,12 +7,13 @@
 # 3. .set directives with UNDEF values do not clobber previously resolved
 #    symbols: symbolic registers must resolve to the same numeric indices
 #    as in the source.
+# 4. gfx1250 stays wave32 without the reserved wave-size selector directive.
 #
 # CHECK: .amdhsa_kernel Cijk_Alik_Bljk
 # CHECK: .amdhsa_next_free_vgpr 1022
 # CHECK: .amdhsa_next_free_sgpr 67
 # CHECK: .amdhsa_group_segment_fixed_size 262144
-# CHECK: .amdhsa_wavefront_size32 1
+# CHECK-NOT: .amdhsa_wavefront_size32
 # CHECK: .end_amdhsa_kernel
 #
 # Regression: the kernel-level YAML entry "  - .name: <kernelName>" sits
@@ -23,6 +24,7 @@
 # .args: the first argument is Gemm info, not the kernel name.
 # CHECK:      .args:
 # CHECK-NEXT: - .name:{{.*}}Gemm info
+# CHECK:      .wavefront_size:{{ *}}32
 #
 # Regression: SignatureCodeMeta::toString() ends its emission with
 # "<kernelName>:\n", so the signature header itself provides the kernel
@@ -55,7 +57,6 @@
   .amdhsa_next_free_vgpr 1022 // vgprs
   .amdhsa_next_free_sgpr 67 // sgprs
   .amdhsa_group_segment_fixed_size 262144 // lds bytes
-  .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_system_sgpr_workgroup_id_x 1
   .amdhsa_system_sgpr_workgroup_id_y 1

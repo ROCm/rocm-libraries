@@ -1,0 +1,65 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,report,apply --remarks --print-output 2>&1
+#
+# The bottom-bank conflict, and how unbankable=auto (the default) gets past it.
+#
+# A WMMA scale field cannot select a VGPR bank, so a scale value must sit at or
+# below v255. ProducerPinMatrix pins every matrix operand that has a bank slot
+# to the register the producer gave it, and here those pins fill v0..v247 for
+# the whole function. What is left of the bank, v248..v255, is exactly what the
+# producer used for the ten scale values:
+#
+#   - %s1..%s6 at v248..v253, live from the top to the filler WMMAs at the end
+#   - A and C at v254, B and D at v255, in a path: A overlaps B, B overlaps C,
+#     C overlaps D, and nothing else overlaps
+#
+# Allocating them places the scale values before anything else that may move,
+# heaviest first by uses over length, each at the lowest register free for its
+# whole life, and with no eviction. D and A are the heaviest of the path and do
+# not overlap, so they share one register; B overlaps A and takes another; C
+# overlaps B and D and takes a third. Three registers for the path leave five
+# for six values that are live throughout, so one of those is refused. The
+# producer fits the path in two, and holding the scale values where it put them
+# keeps that, so auto colours the function on its second attempt. The report
+# says why it needed one.
+#
+# allocation_unbankable_bank0_allocate_test.stir runs the same kernel under
+# unbankable=allocate alone, which refuses it.
+#
+# CHECK: unbankable[auto held v248:255]
+# CHECK-NEXT: held them because the allocate attempt was refused: no v register at or below index 255 is free for
+# CHECK: coloured {{[0-9]+}} value(s) with greedy-compact
+# CHECK-LABEL: @allocation_unbankable_bank0_conflict
+# CHECK-NOT: NotAllocated
+
+st.func @allocation_unbankable_bank0_conflict() {
+^entry:
+  v248 = "st.v_mov_b32"(0)
+  v249 = "st.v_mov_b32"(0)
+  v250 = "st.v_mov_b32"(0)
+  v251 = "st.v_mov_b32"(0)
+  v252 = "st.v_mov_b32"(0)
+  v253 = "st.v_mov_b32"(0)
+  v254 = "st.v_mov_b32"(0)
+  v255 = "st.v_mov_b32"(0)
+  v[768:775] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v254, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[776:783] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v254, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[784:791] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v254, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[792:799] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v254, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v254 = "st.v_mov_b32"(0)
+  v[800:807] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v255, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[808:815] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v255, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v255 = "st.v_mov_b32"(0)
+  v[816:823] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v254, v255) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[824:831] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v255, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[832:839] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v255, v248) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[512:519] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[0:15], v[16:31], 0, v248, v249) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[520:527] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[32:47], v[48:63], 0, v250, v251) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[528:535] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[64:79], v[80:95], 0, v252, v253) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[536:543] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[96:111], v[112:127], 0, v248, v249) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[544:551] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[128:143], v[144:159], 0, v250, v251) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[552:559] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[160:175], v[176:191], 0, v252, v253) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[560:567] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[192:207], v[208:223], 0, v248, v249) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[568:575] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[224:239], v[600:615], 0, v250, v251) { mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" } }
+  v[576:583] = "st.v_wmma_f32_16x16x32_bf16"(v[240:247], v[616:623], v[624:631])
+  "st.s_endpgm"()
+}

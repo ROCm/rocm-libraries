@@ -1,0 +1,85 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# gfx1250 non-StreamK ClusterDim=[2,4] MXFP8 TN config with a non-power-of-2
+# MacroTile1 (MT256x176, the AIHPBLAS-5043 tuning kernel). N=3072 gives 18 N-tiles,
+# so the grid is padded to 20 and the multicast mask is reduced; that reduction
+# ceil-divides SizeJ by MT1=176 with a magic-number multiply whose SGPR scratch
+# must not alias the decoded wg_x SGPR the A-side mask is shifted by.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+- - OperationType: GEMM
+    Batched: true
+    BiasDataTypeList: []
+    ComputeDataType: 0
+    DataType: 15
+    DestDataType: 15
+    HighPrecisionAccumulate: true
+    MXBlockA: 32
+    MXBlockB: 32
+    TransposeA: true
+    TransposeB: false
+  - InitialSolutionParameters:
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - ActivationFuncCall: [false]
+    - AssertSummationElementMultiple: [32]
+    - ClusterDim: [[2, 4]]
+    - ClusterLocalRead: [0]
+    - DepthU: [256]
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalReadVectorWidthB: [1]
+    - GlobalSplitU: [-1]
+    - InitCIterWmma: [1]
+    - LDSTrInst: [true]
+    - LdsBlockSizePerPadA: [1024]
+    - LdsBlockSizePerPadB: [256]
+    - LdsBlockSizePerPadMXSA: [0]
+    - LdsBlockSizePerPadMXSB: [0]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadA: [16]
+    - LdsPadB: [16]
+    - LdsPadMXSA: [0]
+    - LdsPadMXSB: [0]
+    - LocalReadVectorWidthA: [16]
+    - LocalReadVectorWidthB: [16]
+    - MXLoadInst: [TDM]
+    - MXScaleFormat: [InMemorySwizzle]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [0]
+    - MinGRIncPerMfma: [1]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - StoreVectorWidth: [4]
+    - SwInstructionPrefetch: [-1]
+    - TDMInst: [3]
+    - TemporalHintB: [1]
+    - ThreadTile: [[1, 1]]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - VectorWidthA: [4]
+    - VectorWidthB: [1]
+    - WavefrontSize: [32]
+    - WorkGroupMapping: [-2]
+    - Groups:
+      - - MatrixInstruction: [16, 16, 128, 1, 1, 4, 11, 4, 1]
+          WorkGroup: [64, 2, 1]
+          MIArchVgpr: true
+    BenchmarkJoinParameters:
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [4096, 3072, 1, 4096]
+    - BiasTypeArgs: []

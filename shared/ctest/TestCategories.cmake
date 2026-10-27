@@ -392,7 +392,8 @@ function(apply_ctest_category_labels yaml_file)
         list(APPEND python_args ${install_test_file})
     endif()
     if(ARG_EXPLICIT_TESTS)
-        list(JOIN ARG_EXPLICIT_TESTS ";" explicit_tests)
+        # Keep the names in one argv element when python_args is expanded below.
+        string(REPLACE ";" "\\;" explicit_tests "${ARG_EXPLICIT_TESTS}")
         list(APPEND python_args --explicit-tests "${explicit_tests}")
     endif()
 

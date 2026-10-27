@@ -1,6 +1,7 @@
 import dataclasses
 import hashlib
 import inspect
+import traceback
 import typing
 from importlib import import_module
 from pathlib import Path
@@ -34,6 +35,53 @@ def _is_union(origin):
 # are held byte-identical by rocKE's own gate (tools/check_byte_identity.py), so
 # this is about provenance being true, not about the bytes differing.
 _BACKEND = "python"
+
+# `kernel_source.target` vocabulary for a rocke UKD. "native" compiles for the
+# shard arch itself; "generic" compiles for the LLVM generic processor
+# (gfx11-generic, gfx12-generic, ...) that rocKE maps the shard arch to, so one
+# code object serves every member of the family. The shard stays concrete
+# either way: only the processor the object is built for changes.
+ROCKE_TARGET_NATIVE = "native"
+ROCKE_TARGET_GENERIC = "generic"
+ROCKE_TARGETS = (ROCKE_TARGET_NATIVE, ROCKE_TARGET_GENERIC)
+
+
+def _generic_arch_for(arch):
+    """rocKE's generic processor for a concrete arch, or None if it has none.
+
+    Behind a function, like `_load_compiler`, so the hip-only path never imports
+    rocke and tests can substitute the mapping.
+    """
+    try:
+        from rocke.core.arch import generic_arch_from_target_id
+    except Exception as exc:
+        raise HkpPackError(
+            f"kernel_source.target '{ROCKE_TARGET_GENERIC}' needs rocke's "
+            f"generic-target map, which is not importable: {exc}"
+        ) from exc
+    return generic_arch_from_target_id(arch)
+
+
+def rocke_compile_arch(arch, target=ROCKE_TARGET_NATIVE):
+    """The processor a rocke UKD packed into the `arch` shard is compiled for.
+
+    "native" is the shard arch. "generic" is the shard arch's LLVM generic
+    processor, and a shard arch without one is a hard error rather than a quiet
+    native fallback: the descriptor asked for an object that runs family-wide.
+    """
+    if target == ROCKE_TARGET_NATIVE:
+        return arch
+    if target == ROCKE_TARGET_GENERIC:
+        generic = _generic_arch_for(arch)
+        if not generic:
+            raise HkpPackError(
+                f"kernel_source.target '{ROCKE_TARGET_GENERIC}' requested for shard "
+                f"arch '{arch}', which has no LLVM generic processor target"
+            )
+        return generic
+    raise HkpPackError(
+        f"kernel_source.target '{target}' is not one of {list(ROCKE_TARGETS)}"
+    )
 
 
 def _reset_backend_audit():
@@ -142,18 +190,20 @@ def build_spec(cls, data):
     return cls(**kwargs)
 
 
-def rocke_variant_key(source, builder, spec):
-    """Stable input hash over (source, builder, spec) for a rocke variant.
+def rocke_variant_key(source, builder, spec, target=ROCKE_TARGET_NATIVE):
+    """Stable input hash over (source, builder, spec[, target]) for a rocke variant.
 
-    Keyed on all three: two rocke UKDs sharing source+spec but naming different
+    Keyed on all of them: two rocke UKDs sharing source+spec but naming different
     builders produce different kernels and must not collapse to one blob, so the
-    builder is part of the key. The nested spec dict hashes deterministically
-    (sort_keys) regardless of key order.
+    builder is part of the key; likewise a generic and a native compile of one
+    spec are different objects. The default "native" target is left out of the
+    payload so native keys stay what they were before targets existed. The
+    nested spec dict hashes deterministically (sort_keys) regardless of key order.
     """
-    return _hash_payload(
-        Path(source).stem,
-        {"source": source, "builder": builder, "spec": spec},
-    )
+    payload = {"source": source, "builder": builder, "spec": spec}
+    if target != ROCKE_TARGET_NATIVE:
+        payload["target"] = target
+    return _hash_payload(Path(source).stem, payload)
 
 
 def _resolve_spec_class(module, builder_fn):
@@ -241,6 +291,17 @@ def _load_compiler():
     return compile_kernel, ComgrError
 
 
+def _load_module_compiler():
+    """Lazy handle for rocke's multi-kernel module type and its compile entrypoint.
+
+    Separate from `_load_compiler` so a stub single-kernel compiler need not
+    model modules; consulted only to recognise a builder's `KernelModule`.
+    """
+    from rocke.helpers import KernelModule, compile_module
+
+    return KernelModule, compile_module
+
+
 def _resolved_comgr_path():
     """Best-effort path of the comgr the rocke loader resolved, for diagnostics.
 
@@ -262,28 +323,69 @@ def _module_from_source(source):
 
 
 # Builders whose validation predicate is not derivable from the builder name.
-# The tiled family is the largest kernel group in the corpus and none of its
-# predicates follow the naming convention, so name derivation alone reaches
-# fewer than half of all builders (measured: 14 of 30).
+# The tiled ``supports_tiled_2d``/``3d`` are keyword-only, so these builders use the
+# spec-first ``supports_tiled_*_spec`` wrappers in the gfx942/gfx950 modules. The
+# reduce and fastkv-register-P tiled builders and all gfx1250 tiled builders have no
+# spec-first predicate, so ``_check_support_predicate`` refuses to pack them.
 _PREDICATE_ALIASES = {
-    "build_unified_attention_2d_tiled": "supports_tiled_2d",
-    "build_gfx942_4warp_gqa": "supports_tiled_2d",
-    "build_unified_attention_3d_tiled": "supports_tiled_3d",
-    "build_unified_attention_reduce_tiled": "supports_tiled_3d",
-    "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d",
+    "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
+    "build_gfx942_4warp_gqa": "supports_gfx942_4warp_gqa_spec",
+    "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
 }
 
 
+def _predicate_accepts(predicate, spec_cls):
+    """True if `predicate(spec, arch=...)` is a call it takes, with its first
+    parameter annotated with `spec_cls` or a base.
+
+    String annotations that cannot be resolved compare by class name.
+    Unannotated or keyword-only first parameters do not match, nor does a
+    predicate needing more than the spec and arch (e.g. a problem).
+    """
+    try:
+        params = list(inspect.signature(predicate).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if not params or params[0].kind not in (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ):
+        return False
+    first = params[0]
+    if any(
+        p.default is inspect.Parameter.empty
+        and p.name != "arch"
+        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+        for p in params[1:]
+    ):
+        return False
+    try:
+        ann = typing.get_type_hints(predicate).get(first.name, first.annotation)
+    except Exception:
+        ann = first.annotation
+    if isinstance(ann, str):
+        return ann.strip("'\"").rsplit(".", 1)[-1] in {
+            c.__name__ for c in spec_cls.__mro__
+        }
+    return isinstance(ann, type) and issubclass(spec_cls, ann)
+
+
 def _resolve_support_predicate(module, builder):
-    """Find a builder's validation predicate: is_valid_spec, derived, or alias."""
+    """Find the builder's validation predicate: alias, derived, then is_valid*.
+
+    A candidate counts only if its first parameter is annotated with the
+    builder's spec class; one module often holds several builders and several
+    predicates, each written for one spec class.
+    """
+    spec_cls = _resolve_spec_class(module, getattr(module, builder))
     derived = (
         "supports_" + builder[len("build_") :] if builder.startswith("build_") else None
     )
-    for name in ("is_valid_spec", derived, _PREDICATE_ALIASES.get(builder)):
-        if not name:
-            continue
-        fn = getattr(module, name, None)
-        if callable(fn):
+    names = [_PREDICATE_ALIASES.get(builder), derived]
+    names += [n for n in vars(module) if n.startswith("is_valid")]
+    for name in names:
+        fn = getattr(module, name, None) if name else None
+        if callable(fn) and _predicate_accepts(fn, spec_cls):
             return name, fn
     return None, None
 
@@ -295,43 +397,55 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     builder itself, so an out-of-envelope spec reaches codegen unchecked and
     fails late (or worse, succeeds and ships something untested).
 
-    Only spec-shaped predicates can be called generically. The tiled family's
-    `supports_tiled_2d/3d` take their parameters individually as keyword-only
-    arguments with no spec object at all, so there is nothing to pass them from a
-    spec instance; those are skipped rather than guessed at. Coverage is
-    therefore partial by construction -- roughly 14 of 30 builders by name, and
-    the kwargs-only predicates stay out of reach absent an upstream signature
-    change. Partial and honest beats a fabricated mapping of spec fields onto
-    positional kwargs, which would silently validate the wrong thing.
+    Only spec-first predicates can be called generically (see
+    `_PREDICATE_ALIASES`). A builder with no resolvable predicate cannot be
+    validated, so the pack refuses it rather than ship the spec unchecked.
+
+    Exception policy: a predicate that raises has no verdict on the spec, and the
+    builder does not re-check every rule a predicate enforces (some only fail much
+    later, or never), so the pack fails rather than ship the spec unvalidated.
+      - A TypeError at bind time, before the body runs, means the packer called the
+        predicate wrongly.
+      - Any exception from the body is reported with the predicate's name and the
+        file:line it was raised at.
+
+    To distinguish "bad call" from "bad body", we bind the arguments first with
+    inspect.Signature.bind, and only then invoke the predicate.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
-        return
+        raise HkpPackError(
+            f"builder '{builder}' in module {getattr(module, '__name__', module)} "
+            f"has no support predicate that takes its spec, so the spec cannot be "
+            f"validated @ {arch}; the module needs the _PREDICATE_ALIASES target, "
+            f"`supports_{builder.removeprefix('build_')}` or an `is_valid*` callable "
+            f"whose first positional parameter is annotated with the builder's spec "
+            f"class (or a base) and that requires no other parameter than `arch`"
+        )
 
-    try:
-        params = inspect.signature(predicate).parameters
-    except (TypeError, ValueError):
-        return
-
-    ordered = list(params.values())
-    if not ordered:
-        return
-    first = ordered[0]
-    if first.kind not in (
-        inspect.Parameter.POSITIONAL_ONLY,
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-    ):
-        # kwargs-only predicate: not callable from a spec instance.
-        return
-
+    params = inspect.signature(predicate).parameters
     kwargs = {"arch": arch} if "arch" in params else {}
+
+    # Phase 1: argument binding.  A TypeError here means the call is wrong
+    # (e.g. positional-only arch passed as keyword), not that the spec is bad.
+    try:
+        inspect.signature(predicate).bind(spec_obj, **kwargs)
+    except TypeError as exc:
+        raise HkpPackError(
+            f"support predicate {name} for builder '{builder}' @ {arch} "
+            f"could not be called with the given spec: {exc}"
+        ) from exc
+
+    # Phase 2: invocation.  Whatever the body raises, the predicate has no verdict.
     try:
         verdict = predicate(spec_obj, **kwargs)
-    except Exception:
-        # A predicate that cannot run must not block packing: it is a
-        # pre-flight check, and the builder itself remains the real gate.
-        return
-
+    except Exception as exc:
+        where = traceback.extract_tb(exc.__traceback__)[-1]
+        raise HkpPackError(
+            f"support predicate {name} for builder '{builder}' @ {arch} raised "
+            f"{type(exc).__name__} at {Path(where.filename).name}:{where.lineno}: "
+            f"{exc}"
+        ) from exc
     ok, reason = verdict if isinstance(verdict, tuple) else (verdict, "")
     if not ok:
         raise HkpPackError(
@@ -341,9 +455,22 @@ def _check_support_predicate(module, builder, spec_obj, arch):
 
 
 def compile_rocke_variant(
-    source, builder, spec, arch, out_dir, requests=None, origins=None
+    source,
+    builder,
+    spec,
+    arch,
+    out_dir,
+    requests=None,
+    origins=None,
+    target=ROCKE_TARGET_NATIVE,
+    tolerate_missing=False,
 ):
     """Compile one variant, returning (code object, captured symbol, observations).
+
+    A binding naming an attribute the spec lacks raises, unless `tolerate_missing`:
+    then it is recorded as unreported and the consumer decides what that means (a
+    single-launch kernel must report every field, a launch of a `sources` kernel
+    need not).
 
     Imports the builder module named by `source` — a dotted module path resolved
     through the importable `kernels` package, never a file path under the source
@@ -352,7 +479,17 @@ def compile_rocke_variant(
     rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
+
+    A builder may instead return a `rocke.helpers.KernelModule` (a primary kernel
+    plus role-keyed companions), lowered via `compile_module` into one code
+    object. The captured symbol is then the primary's, and the observations gain
+    `companions`: `{role: symbol}`; a KernelDef build records no such key.
+
+    `arch` is the shard the object is packed for; `target` (the UKD's
+    `kernel_source.target`) decides the processor it is compiled for, which the
+    support predicate, the builder and comgr all receive. See `rocke_compile_arch`.
     """
+    compile_arch = rocke_compile_arch(arch, target)
     dotted = _module_from_source(source)
     try:
         module = import_module(dotted)
@@ -378,18 +515,24 @@ def compile_rocke_variant(
     except Exception as exc:
         raise HkpPackError(f"invalid spec for {spec_cls.__name__}: {exc}") from exc
 
-    _check_support_predicate(module, builder, spec_obj, arch)
+    _check_support_predicate(module, builder, spec_obj, compile_arch)
     # Observed BEFORE the builder runs, on the object `builder_fn` is about to be
     # handed: reading the same attributes afterwards would observe whatever the
     # builder left behind.
     origins = origins if origins is not None else OriginObserver()
-    observations = observe(spec_obj, builder_fn, requests or {}, origins)
+    observations = observe(
+        spec_obj,
+        builder_fn,
+        requests or {},
+        origins,
+        tolerate_missing=tolerate_missing,
+    )
 
     try:
-        kernel = builder_fn(spec_obj, arch=arch)
+        kernel = builder_fn(spec_obj, arch=compile_arch)
     except NotImplementedError as exc:
         raise HkpPackError(
-            f"arch not supported by builder '{builder}' @ {arch}: {exc}"
+            f"arch not supported by builder '{builder}' @ {compile_arch}: {exc}"
         ) from exc
     except Exception as exc:
         raise HkpPackError(
@@ -397,27 +540,48 @@ def compile_rocke_variant(
         ) from exc
 
     compile_kernel, ComgrError = _load_compiler()
+    KernelModule, compile_module = _load_module_compiler()
+    is_module = isinstance(kernel, KernelModule)
+    if is_module:
+        compile_kernel = compile_module
     _reset_backend_audit()
     try:
         artifact = compile_kernel(
-            kernel, arch=arch, capture_ir_text=False, backend=_BACKEND
+            kernel, arch=compile_arch, capture_ir_text=False, backend=_BACKEND
         )
     except ComgrError as exc:
         raise HkpPackError(
-            f"comgr compile failed for {source} @ {arch}: {exc} "
+            f"comgr compile failed for {source} @ {compile_arch}: {exc} "
             f"(comgr loaded from {_resolved_comgr_path()}; set ROCKE_COMGR_LIB "
             "to override)"
         ) from exc
-    _assert_no_backend_fallback(source, builder, arch)
+    except ValueError as exc:
+        # compile_module raises ValueError from target resolution and per-kernel
+        # lowering as well as from its link-option check; report it as it is.
+        if not is_module:
+            raise
+        raise HkpPackError(
+            f"compiling the kernels of '{builder}' @ {compile_arch} into one code "
+            f"object failed: {exc}"
+        ) from exc
+    _assert_no_backend_fallback(source, builder, compile_arch)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    co_path = out_dir / f"{rocke_variant_key(source, builder, spec)}.co"
+    co_path = out_dir / f"{rocke_variant_key(source, builder, spec, target)}.co"
     co_path.write_bytes(artifact.hsaco)
     origins.stable()
-    # The arch, captured symbol and code object identify which compile these
+    # The shard arch, captured symbol and code object identify which compile these
     # observations came from; a reader binds all three to the shipped descriptor.
+    # `compile_target` is the processor the object was built for -- the shard
+    # arch itself, or its generic family -- and is bound to the shipped
+    # provenance's own `compile_target`.
     observations["arch"] = arch
+    observations["compile_target"] = compile_arch
     observations["symbol"] = artifact.kernel_name
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
+    if is_module:
+        # Only a module records companions, so a single-kernel compile's
+        # evidence -- and the descriptor digest binding it -- is unchanged.
+        observations["companions"] = dict(artifact.companion_names)
     return co_path, artifact.kernel_name, observations

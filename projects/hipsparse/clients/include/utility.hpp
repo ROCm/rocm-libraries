@@ -7614,11 +7614,13 @@ extern "C" {
 void query_version(char* version);
 
 /* ============================================================================================ */
-/*  device query and print out their ID and name */
-int query_device_property();
+/*  device query and print out their ID and name.
+    Writes the device count and returns the HIP status.
+    A property-query failure is fatal only for device_id. */
+hipError_t query_device_property(int* device_count, int device_id);
 
-/*  set current device to device_id */
-void set_device(int device_id);
+/*  set current device to device_id; returns the HIP status */
+hipError_t set_device(int device_id);
 
 /* ============================================================================================ */
 /*  timing: HIP only provides very limited timers function clock() and not general;

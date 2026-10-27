@@ -322,7 +322,8 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
     }
 
     // Step 2: Filter engines by workspace size
-    // Use a generous limit: allow any engine with workspace <= 256 MB
+    // Use a generous limit: allow any engine with workspace <= 256 MB. The estimate covers the
+    // priming configuration, so it can exceed what a plain plan uses.
     const int64_t workspaceLimit = int64_t{256} * 1024 * 1024;
     std::vector<EngineConfigInfo> filteredConfigs;
     for(const auto& cfg : configs)

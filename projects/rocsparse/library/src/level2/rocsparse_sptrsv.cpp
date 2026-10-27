@@ -21,9 +21,6 @@
  *
  * ************************************************************************ */
 
-#include <map>
-#include <sstream>
-
 #include "internal/generic/rocsparse_sptrsv.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_enum_utils.hpp"
@@ -79,10 +76,8 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsv_input value)
     case rocsparse_sptrsv_input_scalar_datatype:
     case rocsparse_sptrsv_input_compute_datatype:
     case rocsparse_sptrsv_input_analysis_policy:
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     case rocsparse_sptrsv_input_solve_mode:
     case rocsparse_sptrsv_input_diagonal_modifier:
-#endif
     {
         return false;
     }
@@ -180,7 +175,6 @@ try
         return rocsparse_status_success;
     }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     case rocsparse_sptrsv_input_solve_mode:
     {
         ROCSPARSE_CHECKARG(4,
@@ -214,7 +208,6 @@ try
         sptrsv_descr->set_diagonal_modifier(diagonal_modifier);
         return rocsparse_status_success;
     }
-#endif
 
     case rocsparse_sptrsv_input_compute_datatype:
     {
@@ -348,10 +341,6 @@ try
         }
         case rocsparse_format_ell:
         {
-#ifndef ROCSPARSE_WITH_ELL_TRSV
-            // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             auto ellsv_info = sptrsv_descr->get_ellsv_info();
             if(ellsv_info != nullptr)
             {
@@ -359,7 +348,6 @@ try
                 exact_pivot    = ellsv_info->get_singularity_numeric_exact();
             }
             break;
-#endif
         }
         case rocsparse_format_bell:
         case rocsparse_format_sell:
@@ -415,14 +403,9 @@ try
         }
         case rocsparse_format_ell:
         {
-#ifndef ROCSPARSE_WITH_ELL_TRSV
-            // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             auto ellsv_info = sptrsv_descr->get_ellsv_info();
             status = rocsparse::ellsv_zero_pivot(handle, ellsv_info, rocsparse_indextype_i64, data);
             break;
-#endif
         }
         case rocsparse_format_bsr:
         case rocsparse_format_bell:
@@ -495,14 +478,9 @@ namespace rocsparse
 
             case rocsparse_format_ell:
             {
-#ifndef ROCSPARSE_WITH_ELL_TRSV
-                // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_analysis_buffer_size(
                     handle, operation, A, buffer_size_in_bytes));
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_bsr:
@@ -545,14 +523,9 @@ namespace rocsparse
 
             case rocsparse_format_ell:
             {
-#ifndef ROCSPARSE_WITH_ELL_TRSV
-                // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve_buffer_size(
                     handle, operation, A, x, y, buffer_size_in_bytes));
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_bsr:
@@ -810,10 +783,6 @@ namespace rocsparse
             }
             case rocsparse_format_ell:
             {
-#ifndef ROCSPARSE_WITH_ELL_TRSV
-                // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 rocsparse_ellsv_info ellsv_info{};
                 switch(analysis_policy)
                 {
@@ -852,7 +821,6 @@ namespace rocsparse
                 }
 
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_bsr:
@@ -888,7 +856,6 @@ namespace rocsparse
             const rocsparse_datatype alpha_datatype = sptrsv_descr->get_compute_datatype();
             sptrsv_descr->m_batch_count             = dnvec_descr_y->batch_count;
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             if(sptrsv_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
             {
                 const int64_t                     batch_count = dnvec_descr_y->batch_count;
@@ -955,7 +922,6 @@ namespace rocsparse
                 }
                 }
             }
-#endif
 
             switch(format)
             {
@@ -1012,10 +978,6 @@ namespace rocsparse
 
             case rocsparse_format_ell:
             {
-#ifndef ROCSPARSE_WITH_ELL_TRSV
-                // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve(handle,
                                                                  operation,
                                                                  alpha_datatype,
@@ -1029,7 +991,6 @@ namespace rocsparse
                                                                  buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_bsr:

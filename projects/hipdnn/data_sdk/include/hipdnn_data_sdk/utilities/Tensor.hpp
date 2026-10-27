@@ -85,6 +85,21 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 // Forward declarations
 class ITensor;
 
+namespace detail
+{
+
+inline int64_t raggedSeqExtent(const std::vector<int64_t>& rowOffsets, int64_t seqStride, int64_t b)
+{
+    if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
+    {
+        return 0;
+    }
+    const auto bIdx = static_cast<size_t>(b);
+    return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+}
+
+} // namespace detail
+
 /**
  * @brief Snapshot of the state a ragged tensor iterator needs to traverse its buffer.
  *
@@ -97,6 +112,43 @@ struct RaggedIterationInfo
     std::vector<int64_t> rowOffsets;
     int seqAxis;
     int64_t seqStride;
+
+    /**
+     * @brief Number of sequence rows stored for batch `b`.
+     *
+     * @param b Batch index.
+     * @return `(rowOffsets[b+1] - rowOffsets[b]) / seqStride`, or 0 when `b` is outside
+     *         `[0, B)`.
+     */
+    int64_t seqExtent(int64_t b) const
+    {
+        return detail::raggedSeqExtent(rowOffsets, seqStride, b);
+    }
+
+    /**
+     * @brief Whether a logical index lies past its batch's stored sequence rows.
+     *
+     * Out-of-block positions have no storage of their own: they alias another batch's
+     * rows or run past the end of the buffer, so they must not be dereferenced.
+     *
+     * @param indices Full logical index; `indices[0]` is the batch.
+     * @return True if `indices[seqAxis] >= seqExtent(indices[0])`.
+     */
+    bool isOutOfBlock(const std::vector<int64_t>& indices) const
+    {
+        return indices[static_cast<size_t>(seqAxis)] >= seqExtent(indices[0]);
+    }
+
+    bool operator==(const RaggedIterationInfo& other) const
+    {
+        return rowOffsets == other.rowOffsets && seqAxis == other.seqAxis
+               && seqStride == other.seqStride;
+    }
+
+    bool operator!=(const RaggedIterationInfo& other) const
+    {
+        return !(*this == other);
+    }
 };
 
 template <bool IsConst = false>
@@ -418,15 +470,9 @@ public:
             return static_cast<int64_t>(rowOffsets.size()) - 1;
         }
 
-        // Per-batch sequence extent: number of sequence rows in batch b.
         int64_t seqExtent(int64_t b) const
         {
-            if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
-            {
-                return 0;
-            }
-            const auto bIdx = static_cast<size_t>(b);
-            return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
+            return detail::raggedSeqExtent(rowOffsets, seqStride, b);
         }
     };
 

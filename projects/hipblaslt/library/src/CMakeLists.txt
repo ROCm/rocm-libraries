@@ -8,6 +8,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/auxiliary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/exceptions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/hipblaslt_ostream.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/hipblaslt_type_strings.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt_internal.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt-ext-op-internal.hpp"
 
@@ -27,6 +28,8 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/status.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tuple_helper.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tensile_host.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tensile_type_map.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/TuningCacheStore.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/UserDrivenTuningParser.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/utility.hpp"
 

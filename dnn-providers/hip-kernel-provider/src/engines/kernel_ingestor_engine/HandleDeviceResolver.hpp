@@ -77,11 +77,16 @@ public:
                     + hipGetErrorString(status));
         }
 
-        // HIP's fields narrow to the ingestor's `$device.*` namespace.
+        // Memory facts tell apart boards that share an arch and CU count (e.g. MI300X,
+        // MI325X, MI308X), which a UHD trained on a merged corpus needs.
         hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
         resolved.gcnArchName = properties.gcnArchName;
         resolved.warpSize = properties.warpSize;
         resolved.multiProcessorCount = properties.multiProcessorCount;
+        resolved.totalGlobalMem = properties.totalGlobalMem;
+        resolved.memoryBusWidth = properties.memoryBusWidth;
+        resolved.memoryClockRate = properties.memoryClockRate;
+        resolved.sharedMemPerBlock = properties.sharedMemPerBlock;
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }

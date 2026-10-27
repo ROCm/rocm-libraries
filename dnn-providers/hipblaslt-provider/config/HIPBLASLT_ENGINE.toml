@@ -28,7 +28,7 @@ version = 1
 # ref=4.5, threshold becomes 0.11) with ~75% margin, and covers the
 # smaller 0.03125-at-ref=2.0625 case with ~95% margin.
 [[tolerance_overrides]]
-filters = ["Smoke/IntegrationGpuMatmulBiasActivBf16.Correctness/*", "quick_MatmulPointwise_Variant3.*bfp16*swish*"]
+filters = ["*_MatmulPointwise_Variant3.*bfp16*swish*"]
 atol = 0.02
 rtol = 0.02
 
@@ -41,18 +41,3 @@ rtol = 0.02
 #   filters: array of GTest globs matched against the full GTest name
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
-
-# ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns 0
-# algorithms on gfx12 (gfx1200, gfx1201, gfx1250, ...) for FP16 with
-# transA=T, transB=T, and a bias-fused epilogue (BIAS, RELU_BIAS,
-# GELU_BIAS, SWISH_BIAS_EXT, CLAMP_BIAS_EXT). Every neighboring cell (no
-# bias, BF16/FP32 with bias, FP16 with any other transpose pair) returns
-# at least one algorithm.
-#
-# Replaces the same-arch carve-out previously enforced at runtime by
-# IS_HIPBLASLT_GFX12_FP16_TT_BIAS / shouldSkipOnEngineConfigResult in
-# dnn-providers/hipblaslt-provider/integration_tests/TestWorkarounds.hpp.
-[[test_skips]]
-archs   = ["gfx12"]
-filters = ["*MatmulBias*Fp16*"]
-reason  = "ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns no algorithms for FP16 with transA=T, transB=T and any bias-fused epilogue on gfx12"

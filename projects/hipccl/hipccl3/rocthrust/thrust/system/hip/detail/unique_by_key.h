@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,12 +37,11 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/minmax.h>
 #  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
@@ -101,7 +100,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
   BinaryPred binary_pred)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = typename iterator_traits<KeyInputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<KeyInputIt>;
 
   size_type num_items       = static_cast<size_type>(thrust::distance(keys_first, keys_last));
   size_t temp_storage_bytes = 0;
@@ -198,7 +197,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
     {
       return detail::unique_by_key(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -213,7 +212,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
 #  else
   return workaround::seq(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
@@ -229,7 +228,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
   KeyOutputIt keys_result,
   ValOutputIt values_result)
 {
-  using key_type = typename iterator_traits<KeyInputIt>::value_type;
+  using key_type = thrust::detail::it_value_t<KeyInputIt>;
   return hip_rocprim::unique_by_key_copy(
     policy, keys_first, keys_last, values_first, keys_result, values_result, equal_to<key_type>());
 }
@@ -255,7 +254,7 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
       return hip_rocprim::unique_by_key_copy(
         policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<KeyInputIt, ValInputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -267,7 +266,7 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);
 #  else
   return workaround::seq(policy, keys_first, keys_last, values_first, binary_pred);
@@ -278,7 +277,7 @@ template <class Derived, class KeyInputIt, class ValInputIt>
 pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE
 unique_by_key(execution_policy<Derived>& policy, KeyInputIt keys_first, KeyInputIt keys_last, ValInputIt values_first)
 {
-  using key_type = typename iterator_traits<KeyInputIt>::value_type;
+  using key_type = thrust::detail::it_value_t<KeyInputIt>;
   return hip_rocprim::unique_by_key(policy, keys_first, keys_last, values_first, equal_to<key_type>());
 }
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -84,7 +84,7 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 // D->D copy requires HIP compiler
 
 THRUST_EXEC_CHECK_DISABLE
@@ -100,7 +100,7 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     {
       return result = __copy::device_to_device(system, first, last, result);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result)
     {
@@ -108,7 +108,7 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(system, first, last, result);
 #  else
   return workaround::seq(system, first, last, result);
@@ -128,7 +128,7 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     {
       return result = __copy::device_to_device(system, first, thrust::next(first, n), result);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
     {
@@ -136,7 +136,7 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(system, first, n, result);
 #  else
   return workaround::seq(system, first, n, result);

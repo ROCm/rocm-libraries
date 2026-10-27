@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
 #include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
@@ -116,79 +117,6 @@ struct tuple_not_binary_predicate
 
   mutable Predicate pred;
 };
-
-template <typename Generator>
-struct host_generate_functor
-{
-  using result_type = void;
-
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE host_generate_functor(Generator g)
-      : gen(g)
-  {}
-
-  // operator() does not take an lvalue reference because some iterators
-  // produce temporary proxy references when dereferenced. for example,
-  // consider the temporary tuple of references produced by zip_iterator.
-  // such temporaries cannot bind to an lvalue reference.
-  //
-  // to WAR this, accept a const reference (which is bindable to a temporary),
-  // and const_cast in the implementation.
-  //
-  // XXX change to an rvalue reference upon c++0x (which either a named variable
-  //     or temporary can bind to)
-  template <typename T>
-  THRUST_HOST void operator()(const T& x)
-  {
-    // we have to be naughty and const_cast this to get it to work
-    T& lvalue = const_cast<T&>(x);
-
-    // this assigns correctly whether x is a true reference or proxy
-    lvalue = gen();
-  }
-
-  Generator gen;
-};
-
-template <typename Generator>
-struct device_generate_functor
-{
-  using result_type = void;
-
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE device_generate_functor(Generator g)
-      : gen(g)
-  {}
-
-  // operator() does not take an lvalue reference because some iterators
-  // produce temporary proxy references when dereferenced. for example,
-  // consider the temporary tuple of references produced by zip_iterator.
-  // such temporaries cannot bind to an lvalue reference.
-  //
-  // to WAR this, accept a const reference (which is bindable to a temporary),
-  // and const_cast in the implementation.
-  //
-  // XXX change to an rvalue reference upon c++0x (which either a named variable
-  //     or temporary can bind to)
-  template <typename T>
-  THRUST_HOST_DEVICE void operator()(const T& x)
-  {
-    // we have to be naughty and const_cast this to get it to work
-    T& lvalue = const_cast<T&>(x);
-
-    // this assigns correctly whether x is a true reference or proxy
-    lvalue = gen();
-  }
-
-  Generator gen;
-};
-
-template <typename System, typename Generator>
-struct generate_functor
-    : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
-                              thrust::detail::identity_<host_generate_functor<Generator>>,
-                              thrust::detail::identity_<device_generate_functor<Generator>>>
-{};
 
 template <typename T>
 struct is_non_const_reference

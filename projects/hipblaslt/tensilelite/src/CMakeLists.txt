@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     add_subdirectory(llvm)
 else()
     add_subdirectory(msgpack)
@@ -30,3 +30,10 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Utils.cpp"
 )
+
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    target_sources(tensilelite-host
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/LocalKernelLibrary.cpp"
+    )
+endif()

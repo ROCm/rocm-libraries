@@ -1,0 +1,112 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "",
+  "nodes": [
+    {
+      "attributes": {
+        "alibi_mask": false,
+        "attn_scale_value": "${case.attributes.attributes__attn_scale_value}",
+        "causal_mask": "${case.attributes.attributes__causal_mask}",
+        "causal_mask_bottom_right": false,
+        "diagonal_alignment": "${case.attributes.attributes__diagonal_alignment}",
+        "dropout_probability": null,
+        "generate_stats": null,
+        "implementation": "AUTO",
+        "left_bound": null,
+        "max_seq_len_kv": null,
+        "mma_core_mode": "unset",
+        "padding_mask": false,
+        "right_bound": "${case.attributes.attributes__right_bound}"
+      },
+      "compute_data_type": "float",
+      "inputs": {
+        "attn_mask_tensor_uid": null,
+        "block_mask_tensor_uid": null,
+        "descale_k_tensor_uid": null,
+        "descale_q_tensor_uid": null,
+        "descale_s_tensor_uid": null,
+        "descale_v_tensor_uid": null,
+        "dropout_mask_tensor_uid": null,
+        "dropout_scale_tensor_uid": null,
+        "k_tensor_uid": 0,
+        "offset_tensor_uid": null,
+        "page_table_k_tensor_uid": null,
+        "page_table_v_tensor_uid": null,
+        "q_tensor_uid": 1,
+        "scale_o_tensor_uid": null,
+        "scale_s_tensor_uid": null,
+        "scale_tensor_uid": null,
+        "seed_tensor_uid": null,
+        "seq_len_kv_tensor_uid": null,
+        "seq_len_q_tensor_uid": null,
+        "sink_token_tensor_uid": null,
+        "v_tensor_uid": 3
+      },
+      "name": "SdpaFwd_0",
+      "outputs": {
+        "amax_o_tensor_uid": null,
+        "amax_s_tensor_uid": null,
+        "max_tensor_uid": null,
+        "o_tensor_uid": 2,
+        "rng_dump_tensor_uid": null,
+        "stats_tensor_uid": null,
+        "sum_exp_tensor_uid": null
+      },
+      "type": "SdpaAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "K",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Q",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "SdpaFwd_0::O",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "V",
+      "ragged_offset_multiplier": 1,
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    }
+  ]
+}

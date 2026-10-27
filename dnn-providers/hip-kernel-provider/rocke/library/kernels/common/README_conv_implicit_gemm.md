@@ -233,6 +233,13 @@ the K loop across CTAs (similar to split-K but without the atomic reduction
 overhead), potentially delivering better utilisation for small or irregular
 shapes.
 
+This has landed for **wgrad** (`streamk` on `WgradConvSpec`; see
+`README_conv_implicit_gemm_wgrad.md`), where the lopsided `K_wg = N*Ho*Wo`
+reduction makes it most valuable. The forward direction still maps one CTA per
+output tile; the partitioner (`rocke.helpers.streamk.StreamKIterPartition`) and
+the flag-based fixups are family-agnostic, so porting them here is wiring rather
+than new machinery.
+
 ### Wider vector loads for A
 
 The A descriptor emits one element offset per thread per load. Enabling vector

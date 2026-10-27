@@ -191,3 +191,38 @@ def test_exact_comparison_detects_one_bf16_step_and_shape_mismatch():
         check_result(expected + 2**-7, expected, exact=True)
     with pytest.raises(AssertionError, match="shape"):
         check_result(expected.ravel(), expected, exact=True)
+
+
+@pytest.mark.parametrize("dtype_c", ["bf16", "fp16"])
+@pytest.mark.parametrize("k", [64, 128, 256])
+def test_shared_reference_preserves_gfx950_e8m0_fixtures(dtype_c, k):
+    from rocke.examples.common import scaled_gemm_reference as shared
+    from rocke.examples.gfx950.gemm import block_scaled_gemm_verify as gfx950
+    from rocke.instances.gfx950.block_scaled_gemm import (
+        BlockScaledGemmSpec as Gfx950Spec,
+    )
+
+    assert make_case_inputs is gfx950.make_case_inputs is shared.make_case_inputs
+    assert reference_result is gfx950.reference_result is shared.reference_result
+    spec = Gfx950Spec("shared_reference", 32, 64, k, dtype_c=dtype_c)
+    a, b, sa, sb = make_case_inputs(spec, "mixed")
+    assert sa.shape == (32, k // 32) and sb.shape == (k // 32, 64)
+    assert sa.dtype == sb.dtype == np.uint8
+    assert sa.min() >= 125 and sa.max() <= 130
+    assert sb.min() >= 125 and sb.max() <= 130
+    expected = (a.astype(np.float64) * np.repeat(decode_e8m0(sa), 32, axis=1)) @ (
+        b.astype(np.float64) * np.repeat(decode_e8m0(sb.T), 32, axis=1)
+    ).T
+    expected = expected.astype(shared._output_dtype(dtype_c)).astype(np.float32)
+    got = reference_result(
+        a,
+        b,
+        sa,
+        sb,
+        32,
+        native=True,
+        dtype_a=spec.dtype_a,
+        dtype_b=spec.dtype_b,
+        dtype_c=dtype_c,
+    )
+    np.testing.assert_array_equal(got, expected)

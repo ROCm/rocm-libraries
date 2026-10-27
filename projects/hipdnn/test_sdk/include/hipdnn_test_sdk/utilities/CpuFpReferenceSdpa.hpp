@@ -18,6 +18,14 @@
 namespace hipdnn_test_sdk::utilities
 {
 
+// Non-deduced context: the mask element type comes from explicit template arguments only,
+// so a literal nullptr mask compiles and a wrong-dtype mask pointer is a compile error.
+template <class T>
+struct NonDeduced
+{
+    using type = T;
+};
+
 class CpuFpReferenceSdpa
 {
 public:
@@ -58,13 +66,15 @@ public:
               class KDataType,
               class VDataType,
               class ODataType,
-              class ComputeDataType = float>
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
     static void forward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
                         const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
                         const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
                         hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
                         std::optional<float> attnScaleValue = std::nullopt,
-                        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
+                        const hipdnn_data_sdk::utilities::TensorBase<
+                            typename NonDeduced<MaskDataType>::type>* attnMask
                         = nullptr,
                         int64_t leftBound = -1,
                         int64_t rightBound = -1,
@@ -305,36 +315,40 @@ public:
               class KDataType,
               class VDataType,
               class ODataType,
-              class ComputeDataType = float>
-    static void forward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                        const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-                        const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-                        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                        std::optional<float> attnScaleValue,
-                        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask,
-                        bool causalMask,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
+    static void forward(
+        const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+        const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        std::optional<float> attnScaleValue,
+        const hipdnn_data_sdk::utilities::TensorBase<typename NonDeduced<MaskDataType>::type>*
+            attnMask,
+        bool causalMask,
+        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
     {
         const int64_t leftBound = -1;
         const int64_t rightBound = (causalMask) ? 0 : -1;
         const bool topLeftAlignment = true;
 
-        forward(q,
-                k,
-                v,
-                o,
-                attnScaleValue,
-                attnMask,
-                leftBound,
-                rightBound,
-                topLeftAlignment,
-                lse,
-                descaleQ,
-                descaleK,
-                descaleV);
+        forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskDataType>(
+            q,
+            k,
+            v,
+            o,
+            attnScaleValue,
+            attnMask,
+            leftBound,
+            rightBound,
+            topLeftAlignment,
+            lse,
+            descaleQ,
+            descaleK,
+            descaleV);
     }
 
     /// SDPA backward convenience overload: accepts a simple causalMask flag.
@@ -348,38 +362,50 @@ public:
               class DQDataType,
               class DKDataType,
               class DVDataType,
-              class ComputeDataType = float>
-    static void backward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                         const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-                         const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-                         const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                         const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
-                         hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
-                         hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
-                         hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
-                         std::optional<float> attnScaleValue,
-                         const hipdnn_data_sdk::utilities::TensorBase<float>* lse,
-                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask,
-                         bool causalMask)
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
+    static void backward(
+        const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+        const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+        const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+        const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+        const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+        hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+        hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+        hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+        std::optional<float> attnScaleValue,
+        const hipdnn_data_sdk::utilities::TensorBase<float>* lse,
+        const hipdnn_data_sdk::utilities::TensorBase<typename NonDeduced<MaskDataType>::type>*
+            attnMask,
+        bool causalMask)
     {
         const int64_t leftBound = -1;
         const int64_t rightBound = (causalMask) ? 0 : -1;
         const bool topLeftAlignment = true;
 
-        backward(q,
-                 k,
-                 v,
-                 o,
-                 dO,
-                 dQ,
-                 dK,
-                 dV,
-                 attnScaleValue,
-                 lse,
-                 attnMask,
-                 leftBound,
-                 rightBound,
-                 topLeftAlignment);
+        backward<QDataType,
+                 KDataType,
+                 VDataType,
+                 ODataType,
+                 DODataType,
+                 DQDataType,
+                 DKDataType,
+                 DVDataType,
+                 ComputeDataType,
+                 MaskDataType>(q,
+                               k,
+                               v,
+                               o,
+                               dO,
+                               dQ,
+                               dK,
+                               dV,
+                               attnScaleValue,
+                               lse,
+                               attnMask,
+                               leftBound,
+                               rightBound,
+                               topLeftAlignment);
     }
 
     /// SDPA backward: computes dQ, dK, dV from upstream gradient dO
@@ -416,7 +442,8 @@ public:
               class DQDataType,
               class DKDataType,
               class DVDataType,
-              class ComputeDataType = float>
+              class ComputeDataType = float,
+              class MaskDataType = ComputeDataType>
     static void backward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
                          const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
                          const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
@@ -427,7 +454,8 @@ public:
                          hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
                          std::optional<float> attnScaleValue = std::nullopt,
                          const hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
+                         const hipdnn_data_sdk::utilities::TensorBase<
+                             typename NonDeduced<MaskDataType>::type>* attnMask
                          = nullptr,
                          int64_t leftBound = -1,
                          int64_t rightBound = -1,

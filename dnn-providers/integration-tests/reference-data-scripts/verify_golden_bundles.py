@@ -17,6 +17,13 @@ ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
 
+MIN_TIERED_BUNDLE_SEGMENTS = 6
+
+ADVISORY_LAYOUT_ERROR = (
+    "cannot derive advisory path; expected "
+    "{Tier}/{Operation}/{Layout}/{DataType}/[{Variant}/...]/{Name}/{Name}.json"
+)
+
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{case\.([A-Za-z0-9_.]+)\}$")
 TEMPLATE_TENSOR_FIELDS = ("dims", "strides", "data_type")
@@ -57,6 +64,8 @@ DTYPE_BYTE_SIZE = {
     "fp8_e4m3_fnuz": 1,
     "fp8_e5m2_fnuz": 1,
 }
+
+RAGGED_OFFSET_FORMATS = {"int32": "<i", "int64": "<q"}
 
 FLOAT_DTYPES = {
     "float",
@@ -360,6 +369,113 @@ def find_nonfinite_index(dtype_key: str, data: bytes) -> int | None:
     return None
 
 
+def find_infinite_index(dtype_key: str, data: bytes) -> int | None:
+    if dtype_key in {"float", "float32", "fp32"}:
+        for index, (value,) in enumerate(struct.iter_unpack("<f", data)):
+            if math.isinf(value):
+                return index
+        return None
+
+    if dtype_key in {"double", "float64", "fp64"}:
+        for index, (value,) in enumerate(struct.iter_unpack("<d", data)):
+            if math.isinf(value):
+                return index
+        return None
+
+    if dtype_key in {"half", "float16", "fp16"}:
+        for index, (word,) in enumerate(struct.iter_unpack("<H", data)):
+            if ((word >> 10) & 0x1F) == 0x1F and (word & 0x3FF) == 0:
+                return index
+        return None
+
+    if dtype_key in {"bfloat16", "bf16", "bfp16"}:
+        for index, (word,) in enumerate(struct.iter_unpack("<H", data)):
+            if ((word >> 7) & 0xFF) == 0xFF and (word & 0x7F) == 0:
+                return index
+        return None
+
+    return None
+
+
+def read_last_ragged_offset(offset_path: Path, offset_format: str) -> int:
+    data = offset_path.read_bytes()
+    width = struct.calcsize(offset_format)
+    if not data or len(data) % width != 0:
+        raise ValueError(
+            f"offset tensor has {len(data)} bytes, not a non-empty multiple of {width}"
+        )
+    (last_offset,) = struct.unpack_from(offset_format, data, len(data) - width)
+    return last_offset
+
+
+def report_missing_tensor_file(
+    tensor_path: Path,
+    uid: int,
+    bundle_has_manifest: bool,
+    require_data: bool,
+    result: VerificationResult,
+) -> None:
+    if not bundle_has_manifest:
+        return
+    if require_data:
+        result.error(tensor_path, f"missing tensor file; expected {tensor_path}", uid)
+    else:
+        result.warning(
+            tensor_path,
+            "tensor data not pulled locally; expected "
+            f"{tensor_path} (run `dvc pull` or pass --require-data "
+            "to enforce in CI)",
+            uid,
+        )
+
+
+def ragged_element_count(
+    tensor_spec: dict[str, object],
+    tensor_specs: dict[int, dict[str, object]],
+    tensor_path_for: Callable[[int], Path],
+    bundle_has_manifest: bool,
+    require_data: bool,
+    uid: int,
+    result: VerificationResult,
+) -> int | None:
+    """Packed element count offsets[-1] * multiplier (RFC 0014), or None if unknown."""
+    offset_uid = tensor_spec["ragged_offset_tensor_uid"]
+    offset_spec = tensor_specs.get(offset_uid)
+    if offset_spec is None:
+        result.error(
+            tensor_path_for(uid),
+            f"ragged_offset_tensor_uid {offset_uid} is not a declared tensor",
+            uid,
+        )
+        return None
+
+    offset_data_type = offset_spec["data_type"]
+    offset_format = RAGGED_OFFSET_FORMATS.get(offset_data_type.lower())
+    if offset_format is None:
+        result.error(
+            tensor_path_for(uid),
+            f"ragged offset tensor uid {offset_uid} has data_type "
+            f"'{offset_data_type}'; expected int32 or int64",
+            uid,
+        )
+        return None
+
+    offset_path = tensor_path_for(offset_uid)
+    if not offset_path.exists():
+        report_missing_tensor_file(
+            offset_path, offset_uid, bundle_has_manifest, require_data, result
+        )
+        return None
+
+    try:
+        last_offset = read_last_ragged_offset(offset_path, offset_format)
+    except (OSError, ValueError) as error:
+        result.error(offset_path, f"could not read ragged offsets: {error}", offset_uid)
+        return None
+
+    return last_offset * tensor_spec.get("ragged_offset_multiplier", 1)
+
+
 def sanitize_gtest_name(value: str) -> str:
     sanitized: list[str] = []
     for character in value:
@@ -398,21 +514,9 @@ def validate_tensor_payloads(
             continue
 
         if not tensor_path.exists():
-            if bundle_has_manifest:
-                if require_data:
-                    result.error(
-                        tensor_path,
-                        f"missing tensor file; expected {tensor_path}",
-                        uid,
-                    )
-                else:
-                    result.warning(
-                        tensor_path,
-                        "tensor data not pulled locally; expected "
-                        f"{tensor_path} (run `dvc pull` or pass --require-data "
-                        "to enforce in CI)",
-                        uid,
-                    )
+            report_missing_tensor_file(
+                tensor_path, uid, bundle_has_manifest, require_data, result
+            )
             continue
 
         try:
@@ -421,13 +525,31 @@ def validate_tensor_payloads(
             result.error(tensor_path, f"could not stat tensor file: {error}", uid)
             continue
 
-        expected_size = element_space(dims, strides) * element_size
+        is_ragged = tensor_spec.get("ragged_offset_tensor_uid") is not None
+        if is_ragged:
+            element_count = ragged_element_count(
+                tensor_spec,
+                tensor_specs,
+                tensor_path_for,
+                bundle_has_manifest,
+                require_data,
+                uid,
+                result,
+            )
+            if element_count is None:
+                continue
+            size_basis = f"ragged element count={element_count}"
+        else:
+            element_count = element_space(dims, strides)
+            size_basis = f"element_space={element_count}"
+
+        expected_size = element_count * element_size
         if actual_size != expected_size:
             result.error(
                 tensor_path,
                 "file has "
                 f"{actual_size} bytes but graph expects {expected_size} bytes "
-                f"(element_space={element_space(dims, strides)}, element_size={element_size})",
+                f"({size_basis}, element_size={element_size})",
                 uid,
             )
             continue
@@ -441,9 +563,22 @@ def validate_tensor_payloads(
             result.error(tensor_path, f"could not read tensor file: {error}", uid)
             continue
 
+        is_output = uid in output_tensor_uids
+        if is_ragged and is_output:
+            # Ragged outputs carry the NaN sentinel in in-block pad rows
+            # (RFC 0014 §4.11.4), so only Inf is a defect there.
+            bad_index = find_infinite_index(dtype_key, data)
+            if bad_index is not None:
+                result.error(
+                    tensor_path,
+                    f"ragged output tensor contains Inf at element index {bad_index}",
+                    uid,
+                )
+            continue
+
         bad_index = find_nonfinite_index(dtype_key, data)
         if bad_index is not None:
-            tensor_role = "output" if uid in output_tensor_uids else "input"
+            tensor_role = "output" if is_output else "input"
             result.error(
                 tensor_path,
                 f"{tensor_role} tensor contains NaN/Inf at element index {bad_index}",
@@ -459,41 +594,43 @@ def derive_advisory(
         return None
 
     parts = path.parts
+    # Scan backwards from the deepest position the minimal layout allows: variant and
+    # bundle directories may be named after a tier, and so may an enclosing directory.
+    last_possible_tier_index = len(parts) - MIN_TIERED_BUNDLE_SEGMENTS
     tier_index = next(
-        (index for index, part in enumerate(parts) if part in ALLOWED_TIERS), None
+        (
+            index
+            for index in range(last_possible_tier_index, -1, -1)
+            if parts[index] in ALLOWED_TIERS
+        ),
+        None,
     )
+
+    if tier_index is None and any(part in ALLOWED_TIERS for part in parts[:-1]):
+        result.error(path, ADVISORY_LAYOUT_ERROR)
+        return None
 
     if tier_index is None:
         result.warning(
             path,
-            f"no tier directory found; using default tier '{default_tier}' for advisory output",
+            f"no tier directory found; using default tier '{default_tier}' for advisory"
+            " output, and any variant directories cannot be recovered",
         )
         if len(parts) < 5:
-            result.error(
-                path,
-                "cannot derive advisory path; expected {Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json",
-            )
+            result.error(path, ADVISORY_LAYOUT_ERROR)
             return None
         tier = default_tier
-        operation, layout, data_type, name, file_name = parts[-5:]
+        bundle_parts = parts[-5:]
     else:
-        trailing_parts = parts[tier_index:]
-        if len(trailing_parts) < 6:
-            result.error(
-                path,
-                "cannot derive advisory path; expected {Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json",
-            )
-            return None
-        tier, operation, layout, data_type, name, file_name = trailing_parts[:6]
+        tier = parts[tier_index]
+        bundle_parts = parts[tier_index + 1 :]
 
-    if file_name != f"{name}.json":
-        result.error(path, "graph files must be named <BundleName>/<BundleName>.json")
-        return None
+    operation, layout, data_type = bundle_parts[:3]
+    *variants, name, _ = bundle_parts[3:]
 
-    canonical_path = f"{tier}/{operation}/{layout}/{data_type}/{name}/"
-    test_suite = sanitize_gtest_name(
-        "_".join((tier, operation, layout, data_type, name))
-    )
+    suite_segments = (tier, operation, layout, data_type, *variants, name)
+    canonical_path = "/".join(suite_segments) + "/"
+    test_suite = sanitize_gtest_name("_".join(suite_segments))
     test_case = sanitize_gtest_name(name)
     return Advisory(
         path, canonical_path, test_suite, test_case, f"{test_suite}.{test_case}"
@@ -605,6 +742,17 @@ def validate_graph_bundle(
         if not isinstance(data_type, str):
             result.error(path, "data_type is required and must be a string", uid)
 
+        ragged_offset_uid = tensor.get("ragged_offset_tensor_uid")
+        ragged_fields_valid = True
+        if ragged_offset_uid is not None and not is_integer(ragged_offset_uid):
+            result.error(path, "ragged_offset_tensor_uid must be an integer", uid)
+            ragged_fields_valid = False
+
+        ragged_offset_multiplier = tensor.get("ragged_offset_multiplier", 1)
+        if not is_integer(ragged_offset_multiplier) or ragged_offset_multiplier < 1:
+            result.error(path, "ragged_offset_multiplier must be an integer >= 1", uid)
+            ragged_fields_valid = False
+
         if uid is None:
             continue
 
@@ -612,13 +760,20 @@ def validate_graph_bundle(
             result.error(path, "duplicate tensor uid declared", uid)
             continue
 
-        if dims is None or strides is None or not isinstance(data_type, str):
+        if (
+            dims is None
+            or strides is None
+            or not isinstance(data_type, str)
+            or not ragged_fields_valid
+        ):
             continue
 
         tensor_specs[uid] = {
             "dims": dims,
             "strides": strides,
             "data_type": data_type,
+            "ragged_offset_tensor_uid": ragged_offset_uid,
+            "ragged_offset_multiplier": ragged_offset_multiplier,
         }
 
     bundle_has_manifest = bundle_has_tensor_manifest(path)

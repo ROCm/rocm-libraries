@@ -80,7 +80,9 @@ namespace rocwmma
                             || deviceArch == Base::DeviceInfo::GFX1150
                             || deviceArch == Base::DeviceInfo::GFX1151
                             || deviceArch == Base::DeviceInfo::GFX1152
-                            || deviceArch == Base::DeviceInfo::GFX1153);
+                            || deviceArch == Base::DeviceInfo::GFX1153
+                            || deviceArch == Base::DeviceInfo::GFX1170
+                            || deviceArch == Base::DeviceInfo::GFX1171);
 
             bool isGfx12 = (deviceArch == Base::DeviceInfo::GFX1200)
                            || (deviceArch == Base::DeviceInfo::GFX1201)

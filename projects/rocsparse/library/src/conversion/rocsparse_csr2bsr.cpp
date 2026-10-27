@@ -26,38 +26,39 @@
 #include "rocsparse_calculate_nnz.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csr2bsr.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "csr2bsr_device.h"
 
 namespace rocsparse
 {
-#define launch_csr2bsr_wavefront_per_row_multipass_kernel(blocksize, wfsize, blockdim)        \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                       \
-        (rocsparse::csr2bsr_wavefront_per_row_multipass_kernel<blocksize, wfsize, blockdim>), \
-        dim3((mb - 1) / (blocksize / wfsize) + 1),                                            \
-        dim3(blocksize),                                                                      \
-        0,                                                                                    \
-        stream,                                                                               \
-        dir,                                                                                  \
-        m,                                                                                    \
-        n,                                                                                    \
-        mb,                                                                                   \
-        nb,                                                                                   \
-        block_dim,                                                                            \
-        csr_descr->base,                                                                      \
-        csr_val,                                                                              \
-        csr_row_ptr,                                                                          \
-        csr_col_ind,                                                                          \
-        bsr_descr->base,                                                                      \
-        bsr_val,                                                                              \
-        bsr_row_ptr,                                                                          \
+#define launch_csr2bsr_wavefront_per_row_multipass_kernel(blocksize, wfsize, blockdim)            \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                           \
+        (rocsparse::csr2bsr_wavefront_per_row_multipass_kernel<blocksize, wfsize, blockdim>),     \
+        dim3(rocsparse::get_grid_size_x(handle, (mb - 1) / (blocksize / wfsize) + 1, blocksize)), \
+        dim3(blocksize),                                                                          \
+        0,                                                                                        \
+        stream,                                                                                   \
+        dir,                                                                                      \
+        m,                                                                                        \
+        n,                                                                                        \
+        mb,                                                                                       \
+        nb,                                                                                       \
+        block_dim,                                                                                \
+        csr_descr->base,                                                                          \
+        csr_val,                                                                                  \
+        csr_row_ptr,                                                                              \
+        csr_col_ind,                                                                              \
+        bsr_descr->base,                                                                          \
+        bsr_val,                                                                                  \
+        bsr_row_ptr,                                                                              \
         bsr_col_ind);
 
 #define launch_csr2bsr_block_per_row_multipass_kernel(blocksize, blockdim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::csr2bsr_block_per_row_multipass_kernel<blocksize, blockdim>), \
-        dim3(mb),                                                                 \
+        dim3(rocsparse::get_grid_size_x(handle, mb, blocksize)),                  \
         dim3(blocksize),                                                          \
         0,                                                                        \
         stream,                                                                   \
@@ -217,33 +218,41 @@ rocsparse_status rocsparse::csr2bsr_core(rocsparse_handle          handle,
     }
     else if(block_dim <= 64 && !std::is_same<T, rocsparse_double_complex>())
     {
-        rocsparse::csr2bsr_64_launcher(handle,
-                                       dir,
-                                       m,
-                                       n,
-                                       mb,
-                                       nb,
-                                       csr_descr,
-                                       csr_val,
-                                       csr_row_ptr,
-                                       csr_col_ind,
-                                       block_dim,
-                                       bsr_descr,
-                                       bsr_val,
-                                       bsr_row_ptr,
-                                       bsr_col_ind);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_64_launcher(handle,
+                                                                 dir,
+                                                                 m,
+                                                                 n,
+                                                                 mb,
+                                                                 nb,
+                                                                 csr_descr,
+                                                                 csr_val,
+                                                                 csr_row_ptr,
+                                                                 csr_col_ind,
+                                                                 block_dim,
+                                                                 bsr_descr,
+                                                                 bsr_val,
+                                                                 bsr_row_ptr,
+                                                                 bsr_col_ind));
     }
     else
     {
         // Use a blocksize of 32 to handle each block row
         static constexpr J block_size       = 32;
         J                  rows_per_segment = (block_dim + block_size - 1) / block_size;
+        // The kernel keeps one scratch segment per launched block.
+        const uint32_t grid_x = rocsparse::get_grid_size_x(handle, mb, block_size);
+        const int64_t  mb64   = static_cast<int64_t>(mb);
+        const int64_t  segments
+            = (static_cast<int64_t>(grid_x) < mb64) ? static_cast<int64_t>(grid_x) : mb64;
 
         size_t buffer_size = 0;
-        buffer_size += ((sizeof(I) * mb * block_size * rows_per_segment * 2 - 1) / 256 + 1) * 256;
-        buffer_size += ((sizeof(J) * mb * block_size * rows_per_segment - 1) / 256 + 1) * 256;
         buffer_size
-            += sizeof(T) * ((size_t(mb) * block_size * rows_per_segment - 1) / 256 + 1) * 256;
+            += ((sizeof(I) * size_t(segments) * block_size * rows_per_segment * 2 - 1) / 256 + 1)
+               * 256;
+        buffer_size
+            += ((sizeof(J) * size_t(segments) * block_size * rows_per_segment - 1) / 256 + 1) * 256;
+        buffer_size
+            += sizeof(T) * ((size_t(segments) * block_size * rows_per_segment - 1) / 256 + 1) * 256;
 
         bool  temp_alloc       = false;
         void* temp_storage_ptr = nullptr;
@@ -261,13 +270,14 @@ rocsparse_status rocsparse::csr2bsr_core(rocsparse_handle          handle,
 
         char* ptr   = reinterpret_cast<char*>(temp_storage_ptr);
         I*    temp1 = reinterpret_cast<I*>(ptr);
-        ptr += ((sizeof(I) * mb * block_size * 2 * rows_per_segment - 1) / 256 + 1) * 256;
+        ptr += ((sizeof(I) * size_t(segments) * block_size * 2 * rows_per_segment - 1) / 256 + 1)
+               * 256;
         J* temp2 = reinterpret_cast<J*>(ptr);
-        ptr += ((sizeof(J) * mb * block_size * rows_per_segment - 1) / 256 + 1) * 256;
+        ptr += ((sizeof(J) * size_t(segments) * block_size * rows_per_segment - 1) / 256 + 1) * 256;
         T* temp3 = reinterpret_cast<T*>(ptr);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2bsr_65_inf_kernel<block_size>),
-                                           dim3(mb),
+                                           dim3(grid_x),
                                            dim3(block_size),
                                            0,
                                            handle->stream,

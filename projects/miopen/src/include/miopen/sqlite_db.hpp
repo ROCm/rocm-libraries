@@ -20,6 +20,8 @@
 #include "sqlite3.h"
 #include <mutex>
 
+#include <map>
+#include <memory>
 #include <string>
 #include <optional>
 #include <unordered_map>
@@ -265,7 +267,8 @@ public:
         }
     }
 
-    static Derived& GetCached(const fs::path& path, bool is_system);
+    static Derived& GetCached(DbKinds db_kind, const fs::path& path, bool is_system);
+    static void EvictCached(const fs::path& path, bool is_system);
     // TODO: Fix this for the overhead of having fields per record
 
     inline auto CheckTableColumns(const std::string& tableName,
@@ -350,24 +353,64 @@ public:
     /// behind IsUserDbDisabled() is flipped between constructions. Always false for the system
     /// databases, which the user-db switch does not govern.
     const bool disable_file_io;
+
+    /// Per-instance mutex that guards SQLite operations when the instance is shared via GetCached.
+    /// Recursive so that call chains (e.g. LoadUnsafe → FindRecordUnsafe) can re-lock safely.
+    mutable std::recursive_mutex instance_mutex;
 };
 
+/// Cached instances are stored for process lifetime (static storage).
+/// Thread-safe: a static mutex guards the map, and a per-instance mutex (see instance_mutex)
+/// guards individual operations once instances are shared across threads.
+/// Keyed by (path, is_system) so that read-only and read-write connections are not conflated.
+
+namespace detail {
 template <typename Derived>
-Derived& SQLiteBase<Derived>::GetCached(const fs::path& path, bool is_system)
+struct CacheStorage
 {
+    using Key = std::pair<fs::path, bool>;
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
     static std::mutex mutex;
-    const std::lock_guard<std::mutex> lock{mutex};
-
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static auto instances = std::map<fs::path, Derived>{};
-    const auto it         = instances.find(path);
+    static std::map<Key, std::unique_ptr<Derived>> instances;
+};
+template <typename Derived>
+// NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
+std::mutex CacheStorage<Derived>::mutex;
+template <typename Derived>
+// NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
+std::map<typename CacheStorage<Derived>::Key, std::unique_ptr<Derived>>
+    CacheStorage<Derived>::instances;
+} // namespace detail
 
-    if(it != instances.end())
-        return it->second;
+template <typename Derived>
+Derived& SQLiteBase<Derived>::GetCached(DbKinds db_kind, const fs::path& path, bool is_system)
+{
+    using Storage = detail::CacheStorage<Derived>;
+    using Key     = typename Storage::Key;
 
-    instances.emplace(path, Derived{path, is_system});
-    return instances.at(path);
+    const std::lock_guard<std::mutex> lock{Storage::mutex};
+
+    const Key key{path, is_system};
+    const auto it = Storage::instances.find(key);
+
+    if(it != Storage::instances.end())
+        return *it->second;
+
+    return *Storage::instances.emplace(key, std::make_unique<Derived>(db_kind, path, is_system))
+                .first->second;
+}
+
+/// Evict a cached instance. Closes the underlying connection so that temporary files
+/// can be deleted on platforms where open files cannot be removed (Windows).
+template <typename Derived>
+void SQLiteBase<Derived>::EvictCached(const fs::path& path, bool is_system)
+{
+    using Storage = detail::CacheStorage<Derived>;
+    using Key     = typename Storage::Key;
+
+    const std::lock_guard<std::mutex> lock{Storage::mutex};
+    Storage::instances.erase(Key{path, is_system});
 }
 
 class SQLitePerfDb : public SQLiteBase<SQLitePerfDb>
@@ -380,6 +423,7 @@ public:
     template <class T>
     inline void InsertConfig(const T& prob_desc)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         std::string clause;
         std::vector<std::string> vals;
         std::tie(clause, vals) = prob_desc.InsertQuery();
@@ -396,6 +440,7 @@ public:
     template <class T>
     inline std::string GetConfigIDs(const T& prob_desc)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         std::string clause;
         std::vector<std::string> vals;
         std::tie(clause, vals) = prob_desc.WhereClause();
@@ -421,6 +466,7 @@ public:
     template <typename T>
     inline std::optional<DbRecord> FindRecordUnsafe(const T& problem_config)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(dbInvalid)
             return {};
 
@@ -490,6 +536,7 @@ public:
     template <class T>
     inline bool RemoveUnsafe(const T& problem_config, const std::string& id)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(dbInvalid)
             return false;
         std::string clause;
@@ -523,6 +570,7 @@ public:
     inline std::optional<DbRecord>
     UpdateUnsafe(const T& problem_config, const std::string& id, const V& values)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(dbInvalid)
             return {};
         // UPSERT the value
@@ -576,6 +624,7 @@ public:
     template <class T, class V>
     inline bool StoreRecordUnsafe(const T& problem_config, const std::string& id, const V& values)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(dbInvalid)
             return false;
         return bool(UpdateUnsafe(problem_config, id, values));
@@ -587,6 +636,7 @@ public:
     template <class T>
     inline bool ClearRecordUnsafe(const T& problem_config)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(dbInvalid)
             return true;
         std::string clause;
@@ -619,6 +669,7 @@ public:
     template <class T, class V>
     inline bool LoadUnsafe(const T& problem_config, const std::string& id, V& values)
     {
+        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(dbInvalid)
             return false;
         const auto record = FindRecordUnsafe(problem_config);

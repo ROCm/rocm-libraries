@@ -241,6 +241,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uTnqNGAGtuo
   SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT32x32x64_MI16x16x16x1_SN_MIWT1_1_WG32_4_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -371,6 +372,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 1
 - SolutionIndex: 1
+  SolutionUID: 0uTnqNGAzwrn
   SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT16x16x64_MI16x16x16x1_SN_MIWT1_1_WG16_2_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
@@ -501,6 +503,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 1
 - SolutionIndex: 2
+  SolutionUID: 0uTnqNGAW20R
   SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT32x16x64_MI16x16x16x1_SN_MIWT1_1_WG32_2_1
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true

@@ -1,0 +1,211 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# dot2 / WaveSplitK (GEMV-style) kernels on gfx11 wave32: bf16 and fp16, TN/NN/TT,
+# 16- and 32-lane K split (the latter crosses DPP rows), wide K-contiguous loads.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  Device: 0
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  SleepPercent: 50
+BenchmarkProblems:
+  ########################################
+  # TN bf16 - K-contiguous A and B, wide global reads
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [1, 4]
+          - [2, 4]
+        - WorkGroup:
+          - [2, 1, 32]
+          - [8, 1, 16]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256, 512]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1, 8]
+        - GlobalReadVectorWidthB: [1, 8]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0, 32]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [111, 3, 1, 1111]
+          - Exact: [128, 4, 1, 640]
+          - Exact: [37, 2, 1, 4097]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: Relu]
+  ########################################
+  # TN fp16
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 4]
+        - WorkGroup:
+          - [2, 1, 32]
+          - [8, 1, 16]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [512]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [32]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [111, 3, 1, 1111]
+          - Exact: [37, 2, 1, 4097]
+  ########################################
+  # NN / TT bf16 - free-dim-contiguous operand, narrow reads only
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+        - WorkGroup:
+          - [64, 1, 1]
+          - [2, 2, 32]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1, 1]
+        - GlobalReadVectorWidthB: [-1, 1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [32]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [111, 111, 1, 1111]
+          - Exact: [128, 128, 1, 640]
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+        - WorkGroup:
+          - [1, 64, 1]
+          - [2, 2, 32]
+        - WaveSplitK: [true]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [-1, 1]
+        - GlobalReadVectorWidthB: [-1, 1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [32]
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 1, 1, 1]
+          - Exact: [111, 111, 1, 1111]
+          - Exact: [128, 128, 1, 640]

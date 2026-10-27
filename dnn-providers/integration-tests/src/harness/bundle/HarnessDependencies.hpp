@@ -11,6 +11,7 @@
 #include "harness/bundle/ISupportClaimObserver.hpp"
 #include "harness/bundle/IVerificationReporter.hpp"
 #include "harness/bundle/ProductionPolicy.hpp"
+#include "harness/input-init/FillInputs.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -28,14 +29,21 @@ struct HarnessDependencies
     std::shared_ptr<IReferenceExecutors> referenceExecutors;
     std::shared_ptr<ISupportClaimObserver> claimObserver;
     std::shared_ptr<IVerificationReporter> reporter;
+    /// Generates large inputs on the device. It owns the rocRAND generator, which costs
+    /// more to create than most tests spend filling, so one is shared by every test of a
+    /// run and its lifetime belongs to whoever created it, not to a test. Null means
+    /// every input is filled on the host.
+    std::shared_ptr<DeviceInputFiller> deviceFiller;
     HarnessPolicy policy;
 };
 
 /// The real collaborators, with the process-wide reference-executor pool.
+/// `deviceFiller` is the run's shared device input filler; null fills on the host.
 ///
 /// Defined in HarnessDependencies.cpp, which the unit-test binary deliberately does
 /// not compile: calling this from a unit test is a link error rather than a test
 /// that quietly needs a GPU.
-HarnessDependencies productionDependencies(TensorPlacement placement);
+HarnessDependencies productionDependencies(TensorPlacement placement,
+                                           std::shared_ptr<DeviceInputFiller> deviceFiller);
 
 } // namespace hipdnn_integration_tests::bundle

@@ -67,7 +67,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spmat_scale_uniform">Uniform Precisions</caption>
 *  <tr><th>alpha / A / C
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r

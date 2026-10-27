@@ -17,10 +17,13 @@ namespace hipdnn_integration_tests::bundle
 //
 //   Unverifiable — expected coverage gap (no golden data, no reference can run
 //                  the op, inputs could not be filled, ...). The engine was
-//                  not accused; we simply had no oracle. Quiet but listed.
-//   RefError     — a reference executor that CAN run the op threw at runtime
-//                  (case C) and the harness fell through to keep verifying the
-//                  engine. This is a reference bug and must be loud.
+//                  not accused; we simply had no oracle. Listed; a bundle the
+//                  engine ran but no oracle could check also FAILs.
+//   RefError     — a reference that was expected to be usable broke: it could
+//                  not be created, threw while checking applicability, or threw
+//                  from execute() on an op it accepted (case C). The chain moves
+//                  on to the next reference if there is one; if this was the last
+//                  one tried, the bundle FAILs. A reference bug; must be loud.
 enum class UnverifiableSeverity
 {
     UNVERIFIABLE,
@@ -30,7 +33,9 @@ enum class UnverifiableSeverity
 // Process-wide collector of bundles that ended a run without a verdict. Mirrors
 // SupportMatrixCollector: a thread-safe singleton populated during test execution
 // and printed once after RUN_ALL_TESTS(). Records do not affect the GTest exit
-// code — an unverifiable bundle SKIPs; this report is the visible trail.
+// code — the test carries its own verdict, and this report is the trail. Most
+// unverifiable bundles SKIP. Two kinds FAIL: one the engine ran but no oracle
+// could check, and one whose last reference errored.
 class UnverifiableBundleReport
 {
 public:

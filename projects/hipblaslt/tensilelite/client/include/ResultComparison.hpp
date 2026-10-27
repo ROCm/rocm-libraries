@@ -123,10 +123,11 @@ namespace TensileLite
 
             void report()
             {
-                if(m_errors && m_printReport)
+                if(m_errors)
                 {
-                    std::cout << "Found " << m_errors << " incorrect values in " << m_values
-                              << " total values compared." << std::endl;
+                    if(m_printReport)
+                        std::cout << "Found " << m_errors << " incorrect values in " << m_values
+                                  << " total values compared." << std::endl;
                     m_failed = true;
                 }
                 m_errors  = 0;
@@ -188,10 +189,11 @@ namespace TensileLite
 
             void report()
             {
-                if(m_errors && m_printReport)
+                if(m_errors)
                 {
-                    std::cout << "Found " << m_errors << " incorrect values in " << m_values
-                              << " total values compared." << std::endl;
+                    if(m_printReport)
+                        std::cout << "Found " << m_errors << " incorrect values in " << m_values
+                                  << " total values compared." << std::endl;
                     m_failed = true;
                 }
             }

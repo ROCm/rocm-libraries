@@ -27,7 +27,6 @@
   .amdhsa_next_free_vgpr 1022 // vgprs
   .amdhsa_next_free_sgpr 67 // sgprs
   .amdhsa_group_segment_fixed_size 262144 // lds bytes
-  .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_system_sgpr_workgroup_id_x 1
   .amdhsa_system_sgpr_workgroup_id_y 1

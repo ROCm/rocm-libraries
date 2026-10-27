@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,11 +19,18 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/nv_target.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_deduction.h>
 
+#include _THRUST_STD_INCLUDE(type_traits)
+
 #include <limits>
-#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -33,16 +40,19 @@ template <typename Integer>
 THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
 {
   Integer result;
-  NV_IF_TARGET(NV_IS_DEVICE,
-               (result = ::__clz(x);),
-               (int num_bits = 8 * sizeof(Integer); int num_bits_minus_one = num_bits - 1; result = num_bits;
-                for (int i = num_bits_minus_one; i >= 0; --i) {
-                  if ((Integer(1) << i) & x)
-                  {
-                    result = num_bits_minus_one - i;
-                    break;
-                  }
-                }));
+
+  _THRUST_IF_TARGET(
+    _THRUST_IS_DEVICE,
+    (result = ::__clz(x);),
+    (int num_bits = 8 * sizeof(Integer); int num_bits_minus_one = num_bits - 1; result = num_bits;
+     for (int i = num_bits_minus_one; i >= 0; --i) {
+       if ((Integer(1) << i) & x)
+       {
+         result = num_bits_minus_one - i;
+         break;
+       }
+     }));
+
   return result;
 }
 

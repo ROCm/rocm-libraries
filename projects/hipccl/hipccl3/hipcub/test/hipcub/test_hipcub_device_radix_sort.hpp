@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -82,9 +82,8 @@ public:
 TYPED_TEST_SUITE_P(HipcubDeviceRadixSort);
 
 template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value) HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-    -> std::enable_if_t<hipcub::NumericTraits<T>::CATEGORY == hipcub::FLOATING_POINT,
-                        std::vector<T>> HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+auto generate_key_input(size_t size, unsigned int seed_value)
+    -> std::enable_if_t<_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
 {
     auto result = test_utils::get_random_data<T>(size,
                                                  test_utils::numeric_limits<T>::min(),
@@ -95,9 +94,8 @@ auto generate_key_input(size_t size, unsigned int seed_value) HIPCUB_CLANG_SUPPR
 }
 
 template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value) HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-    -> std::enable_if_t<hipcub::NumericTraits<T>::CATEGORY != hipcub::FLOATING_POINT,
-                        std::vector<T>> HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+auto generate_key_input(size_t size, unsigned int seed_value)
+    -> std::enable_if_t<!_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
 {
     using inner_t = typename test_utils::inner_type<T>::type;
     return test_utils::get_random_data<T>(size,
@@ -1229,12 +1227,18 @@ inline void sort_keys_over_4g()
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                                 = uint8_t;
+    using key_type                                 = uint32_t;
     constexpr unsigned int start_bit               = 0;
     constexpr unsigned int end_bit                 = 8ull * sizeof(key_type);
     constexpr hipStream_t  stream                  = 0;
-    constexpr size_t       size                    = (1ull << 32) + 32;
-    constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
+
+    constexpr size_t total_bytes = (1ull << 32) + 32;
+    static_assert(total_bytes > (1ull << 32), "must be over 4 GiB");
+    static_assert(total_bytes % sizeof(key_type) == 0,
+                  "total_bytes must be divisible by sizeof(key_type)");
+
+    constexpr size_t size                    = total_bytes / sizeof(key_type);
+    constexpr size_t number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
     assert(std::is_unsigned<key_type>::value);
     hipDeviceProp_t dev_prop;
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
@@ -1265,8 +1269,8 @@ inline void sort_keys_over_4g()
 
     std::vector<key_type> keys_input
         = test_utils::get_random_data<key_type>(size,
-                                                std::numeric_limits<key_type>::min(),
-                                                std::numeric_limits<key_type>::max(),
+                                                _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                _HIPCUB_STD::numeric_limits<key_type>::max(),
                                                 seed_value);
 
     //generate histogram of the randomly generated values
@@ -1320,7 +1324,7 @@ inline void sort_keys_over_4g()
                         hipMemcpyDeviceToHost));
 
     size_t counter = 0;
-    for(size_t i = 0; i <= std::numeric_limits<key_type>::max(); ++i)
+    for(size_t i = 0; i <= _HIPCUB_STD::numeric_limits<key_type>::max(); ++i)
     {
         for(size_t j = 0; j < histogram[i]; ++j)
         {
@@ -1358,6 +1362,14 @@ inline void sort_keys_large_sizes()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        // Avoid sizes the CUB backend can't handle
+#ifdef __HIP_PLATFORM_NVIDIA__
+        if(size > static_cast<size_t>(::cuda::std::numeric_limits<int>::max()))
+        {
+            continue;
+        }
+#endif // __HIP_PLATFORM_NVIDIA__
+
         // Generate data
         std::vector<key_type> keys_input;
         try
@@ -1372,6 +1384,10 @@ inline void sort_keys_large_sizes()
 
         key_type* d_keys;
         HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
+
+        key_type* d_keys_out;
+        HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_keys_out, size * sizeof(key_type)));
+
         HIP_CHECK(
             hipMemcpy(d_keys, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
 
@@ -1380,7 +1396,7 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
                                                temporary_storage_bytes,
                                                d_keys,
-                                               d_keys,
+                                               d_keys_out,
                                                size,
                                                start_bit,
                                                end_bit,
@@ -1394,7 +1410,7 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
                                                temporary_storage_bytes,
                                                d_keys,
-                                               d_keys,
+                                               d_keys_out,
                                                size,
                                                start_bit,
                                                end_bit,
@@ -1403,23 +1419,16 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(hipFree(d_temporary_storage));
 
         std::vector<key_type> keys_output(size);
-        try
-        {
-            keys_output.resize(size);
-        }
-        catch(const std::bad_alloc& e)
-        {
-            HIP_CHECK(hipFree(d_keys));
-            continue;
-        }
+        HIP_CHECK(hipMemcpy(keys_output.data(),
+                            d_keys_out,
+                            size * sizeof(key_type),
+                            hipMemcpyDeviceToHost));
 
-        HIP_CHECK(
-            hipMemcpy(keys_output.data(), d_keys, size * sizeof(key_type), hipMemcpyDeviceToHost));
-
+        HIP_CHECK(hipFree(d_keys_out));
         HIP_CHECK(hipFree(d_keys));
 
         // Check if output values are as expected
-        const size_t unique_keys    = size_t(std::numeric_limits<key_type>::max()) + 1;
+        const size_t unique_keys    = size_t(_HIPCUB_STD::numeric_limits<key_type>::max()) + 1;
         const size_t segment_length = test_utils::ceiling_div(size, unique_keys);
         const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
         for(size_t i = 0; i < size; i += 4321)

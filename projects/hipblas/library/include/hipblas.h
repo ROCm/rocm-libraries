@@ -382,7 +382,13 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasSetMathMode(hipblasHandle_t handle, hipbla
 /*! \brief Get hipblas math mode */
 HIPBLAS_EXPORT hipblasStatus_t hipblasGetMathMode(hipblasHandle_t handle, hipblasMath_t* mode);
 
-/*! \brief Set hipblas workspace to user-owned device buffer */
+/*! \brief Set hipblas workspace to user-owned device buffer
+
+    With the rocBLAS backend, a non-null workspace with a nonzero size is used as-is and is never
+    resized. A call that needs more, such as trsmBatched with a large ``batchCount``, returns
+    ``HIPBLAS_STATUS_ALLOC_FAILED``. Passing nullptr or a size of 0 returns the handle to
+    rocBLAS-managed memory, which grows as needed.
+*/
 HIPBLAS_EXPORT hipblasStatus_t hipblasSetWorkspace(hipblasHandle_t handle,
                                                    void*           workspace,
                                                    size_t          workspaceSizeInBytes);

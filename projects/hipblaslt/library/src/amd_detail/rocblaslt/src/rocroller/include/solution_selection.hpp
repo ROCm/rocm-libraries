@@ -173,3 +173,9 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA,
  */
 std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     const KernelType& kernelType, const RocblasltContractionProblem& prob, int requestedAlgoCount);
+
+// Shared with the rocRoller codegen path. Defined next to chooseSolutionIndexParameters
+// so a build that does not link rocRoller still classifies a problem the same way.
+rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type);
+rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_type type);
+KernelType          genKernelType(const RocblasltContractionProblem& prob);

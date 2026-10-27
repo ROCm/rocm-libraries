@@ -129,7 +129,7 @@ struct min_kernel
     static constexpr const char* name = "min";
 
     static constexpr hipError_t (*kernel)(
-        void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
+        void*, size_t&, T*, T*, _HIPCUB_STD::int64_t, OffsetType*, OffsetType*, hipStream_t)
         = &hipcub::DeviceSegmentedReduce::Min;
 };
 
@@ -139,7 +139,7 @@ struct sum_kernel
     static constexpr const char* name = "sum";
 
     static constexpr hipError_t (*kernel)(
-        void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
+        void*, size_t&, T*, T*, _HIPCUB_STD::int64_t, OffsetType*, OffsetType*, hipStream_t)
         = &hipcub::DeviceSegmentedReduce::Sum;
 };
 
@@ -153,18 +153,19 @@ struct argmin_kernel
     static constexpr const char* name = "argmin";
 
     static constexpr hipError_t (*kernel)(
-        void*, size_t&, T*, KeyValue*, int, OffsetType*, OffsetType*, hipStream_t)
+        void*, size_t&, T*, KeyValue*,
+        _HIPCUB_STD::int64_t, OffsetType*, OffsetType*, hipStream_t)
         = &hipcub::DeviceSegmentedReduce::ArgMin;
 };
 
 template<typename T, size_t DesiredSegments>
-struct Benchmark<T, hipcub::Min, DesiredSegments>
+struct Benchmark<T, benchmark_utils::minimum, DesiredSegments>
 {
     using type = reduce_benchmark<T, T, min_kernel<T>, DesiredSegments>;
 };
 
 template<typename T, size_t DesiredSegments>
-struct Benchmark<T, hipcub::Sum, DesiredSegments>
+struct Benchmark<T, benchmark_utils::plus, DesiredSegments>
 {
     using type = reduce_benchmark<T, T, sum_kernel<T>, DesiredSegments>;
 };
@@ -194,11 +195,11 @@ struct Benchmark<T, hipcub::ArgMin, DesiredSegments>
 
 void add_benchmarks(primbench::executor& executor)
 {
-    CREATE_BENCHMARKS(hipcub::Sum);
-    BENCHMARK_TYPE(custom_double2, hipcub::Sum);
-    CREATE_BENCHMARKS(hipcub::Min);
+    CREATE_BENCHMARKS(benchmark_utils::plus);
+    BENCHMARK_TYPE(custom_double2, benchmark_utils::plus);
+    CREATE_BENCHMARKS(benchmark_utils::minimum);
 #ifdef HIPCUB_ROCPRIM_API
-    BENCHMARK_TYPE(custom_double2, hipcub::Min);
+    BENCHMARK_TYPE(custom_double2, benchmark_utils::minimum);
 #endif
     CREATE_BENCHMARKS(hipcub::ArgMin);
 #ifdef HIPCUB_ROCPRIM_API

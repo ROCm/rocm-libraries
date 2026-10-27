@@ -20,6 +20,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <atomic>
+#include <set>
+#include <thread>
+
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
@@ -170,6 +174,126 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
         const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
         EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())
             << "no engine for descriptor set '" << set.engine.name << "'";
+    }
+}
+
+TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngine)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    const auto expectEveryIngestorEngine = [&sets](Container& container, const char* which) {
+        const auto engineIds = container.getEngineManager().getAllEngineIds();
+        for(const auto& set : sets)
+        {
+            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+            EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
+                << which << " Container has no engine for descriptor set '" << set.engine.name
+                << "'";
+        }
+    };
+
+    // `earlier` takes whatever state managers are still in their slots, discovery's or a
+    // rediscovery's, so these two are on the rebuild path whatever ran before.
+    {
+        const Container earlier;
+    }
+    Container afterDestroyed;
+    expectEveryIngestorEngine(afterDestroyed, "the after-destroyed");
+    Container whileAlive;
+    expectEveryIngestorEngine(whileAlive, "the while-alive");
+}
+
+// The slot tests below refill the slots first: whichever test constructs the process's
+// first Container takes what discovery built, and shuffling moves that test around.
+
+TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+
+    // The schema id is what a manager exposes of the set it was built from, so a slot
+    // serving another set's manager shows up only between sets whose schemas differ.
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    for(const auto& set : sets)
+    {
+        schemaIds.insert(set.schema.id);
+    }
+    ASSERT_GE(schemaIds.size(), 2U)
+        << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
+
+    rediscoverStateManagersForTesting();
+
+    for(const auto& set : sets)
+    {
+        const auto stateManager = takeDiscoveredStateManager(set.engine.id);
+        ASSERT_NE(stateManager.get(), nullptr)
+            << "no state manager handed off for descriptor set '" << set.engine.name << "'";
+        EXPECT_EQ(stateManager->metadataSchema().id, set.schema.id)
+            << "the id of '" << set.engine.name << "' took the state manager of another set";
+        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
+            << "'" << set.engine.name << "' handed out a second state manager";
+    }
+}
+
+TEST(TestContainer, ConcurrentTakesOfOneDiscoveredStateManagerHandItOutOnce)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    const auto& engineId = sets.front().engine.id;
+    rediscoverStateManagersForTesting();
+
+    constexpr size_t THREAD_COUNT = 8;
+    std::atomic<bool> start{false};
+    std::atomic<size_t> handedOut{0};
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
+    {
+        threads.emplace_back([&start, &handedOut, &engineId] {
+            while(!start.load())
+            {
+                std::this_thread::yield();
+            }
+            if(takeDiscoveredStateManager(engineId) != nullptr)
+            {
+                ++handedOut;
+            }
+        });
+    }
+    start.store(true);
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(handedOut.load(), 1U);
+}
+
+TEST(TestContainer, TheFirstContainerAfterRediscoveryTakesEveryDiscoveredStateManager)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    rediscoverStateManagersForTesting();
+
+    {
+        const Container container;
+    }
+
+    // A slot still full means that Container built the set's state manager a second time.
+    for(const auto& set : sets)
+    {
+        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
+            << "the Container did not take the state manager discovered for '" << set.engine.name
+            << "'";
     }
 }
 

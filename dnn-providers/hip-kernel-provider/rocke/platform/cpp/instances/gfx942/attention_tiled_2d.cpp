@@ -525,8 +525,8 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
-    if(!(rocke_streq(s->kv_cache_policy, "all") || rocke_streq(s->kv_cache_policy, "global")
-         || rocke_streq(s->kv_cache_policy, "stream") || rocke_streq(s->kv_cache_policy, "nt")))
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(s->kv_cache_policy, &kv_cache_bits))
     {
         rocke_attn2d_set_err(
             b, ROCKE_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");

@@ -1,0 +1,175 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# GlobalSplitU Complete Coverage
+# GlobalSplitU: [1, 2, 4, 8, ...] - Split summation into sections
+# GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel", "AtomicDest"]
+# GlobalSplitUCoalesced: [False, True] - Coalesced access pattern
+# GlobalSplitUWorkGroupMappingRoundRobin: [False, True] - Round-robin WG mapping
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # GlobalSplitU with different split values
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [1, 2, 4, 8]  # TEST different split values
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]  # Larger K for splitting
+          - Exact: [256, 256, 1, 512]
+          - Exact: [512, 512, 1, 1024]
+          - Range: [ [128], [128], [1], [256, 64, 512] ]  # K-sweep
+
+  # GlobalSplitUAlgorithm - all algorithms
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [4]
+        - GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel"]  # TEST all algorithms
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 256]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 1, 1024]
+
+  # GlobalSplitUCoalesced
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [4]
+        - GlobalSplitUCoalesced: [False, True]  # TEST coalesced access
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 1, 1024]
+          - Range: [ [64, 64, 256], [64, 64, 256], [1], [256, 128, 512] ]
+
+  # GlobalSplitUWorkGroupMappingRoundRobin
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [4]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [False, True]  # TEST round-robin
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 1, 1024]
+          - Range: [ [128], [128], [1], [256, 128, 1024] ]
+
+  # Combined GSU features
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [2, 4]
+        - GlobalSplitUAlgorithm: ["SingleBuffer", "MultipleBuffer"]
+        - GlobalSplitUCoalesced: [True]
+        - GlobalSplitUWorkGroupMappingRoundRobin: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 1024]
+          - Exact: [512, 512, 1, 2048]
+          - Range: [ [256], [256], [1], [512, 256, 2048] ]

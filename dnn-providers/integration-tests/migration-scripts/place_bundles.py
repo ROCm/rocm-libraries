@@ -41,22 +41,25 @@ from bundle_utils import (
     NODE_STRUCTURAL,
     TENSOR_ALWAYS,
     TENSOR_IF_VARIES,
-    TIER_MAP,
     TOP_LEVEL_IF_VARIES,
     ambiguous_attr_keys,
     assign_case_ids,
     canon,
     canonical_uid_map_by_name,
+    capture_reference_source,
+    capture_suite_case,
     derive_operation,
     expand,
     infer_layout,
     node_attr_items,
     raw_node_attrs,
+    read_capture_sidecar,
     remap_graph,
     remap_meta_inputs,
     sanitize,
     skeleton_hash,
     tensors_by_uid,
+    tier_for_suite,
 )
 
 
@@ -118,16 +121,10 @@ def discover_captures(capture_dir: Path) -> list[CapturedCase]:
         return cases
 
     for graph_path in sorted(capture_dir.rglob("*.json")):
-        if graph_path.name.endswith(".meta.json"):
+        found = capture_suite_case(graph_path, capture_dir)
+        if found is None:
             continue
-
-        case_dir = graph_path.parent
-        case_name = case_dir.name
-        if graph_path.stem != case_name:
-            continue
-
-        suite_rel = case_dir.parent.relative_to(capture_dir)
-        suite_name = str(suite_rel)
+        suite_name, case_name = found
 
         try:
             with open(graph_path) as f:
@@ -136,16 +133,13 @@ def discover_captures(capture_dir: Path) -> list[CapturedCase]:
             print(f"  WARN: bad graph {graph_path}: {e}", file=sys.stderr)
             continue
 
-        meta_path = case_dir / f"{case_name}.meta.json"
-        meta = {"format_version": 1}
-        if meta_path.exists():
-            try:
-                with open(meta_path) as f:
-                    meta = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"  WARN: bad meta {meta_path}: {e}", file=sys.stderr)
+        meta_path, meta, err = read_capture_sidecar(graph_path)
+        if err is not None:
+            print(f"  WARN: bad meta {meta_path}: {err}", file=sys.stderr)
+        if meta is None:
+            meta = {"format_version": 1}
 
-        tier = TIER_MAP.get(suite_rel.parts[0], "quick") if suite_rel.parts else "quick"
+        tier = tier_for_suite(suite_name)
 
         cases.append(
             CapturedCase(
@@ -244,7 +238,7 @@ def detect_and_build(bucket: Bucket):
 
         meta = dict(c.meta)
         meta.setdefault("format_version", 1)
-        meta["reference_source"] = f"c++ integration suite: {c.suite}.{c.case_name}"
+        meta["reference_source"] = capture_reference_source(c.suite, c.case_name)
 
         sweep_cases.append(
             {"id": None, "values": values, "metadata": meta, "_origin": c}
@@ -366,9 +360,7 @@ def write_standalone(target: Path, case: CapturedCase, reason: str, dry_run: boo
             f.write("\n")
         meta = dict(case.meta)
         meta.setdefault("format_version", 1)
-        meta["reference_source"] = (
-            f"c++ integration suite: {case.suite}.{case.case_name}"
-        )
+        meta["reference_source"] = capture_reference_source(case.suite, case.case_name)
         meta["standalone_reason"] = reason
         with open(out_dir / f"{bundle_name}.meta.json", "w") as f:
             json.dump(meta, f, indent=2)

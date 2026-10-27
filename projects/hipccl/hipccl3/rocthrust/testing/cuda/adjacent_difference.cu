@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -113,9 +113,9 @@ DECLARE_UNITTEST(TestAdjacentDifferenceCudaStreams);
 struct detect_wrong_difference
 {
   using difference_type   = void;
-  using value_type        = void;
+  using value_type        = long long;
   using pointer           = void;
-  using reference         = void;
+  using reference         = detect_wrong_difference;
   using iterator_category = ::cuda::std::output_iterator_tag;
 
   bool* flag;

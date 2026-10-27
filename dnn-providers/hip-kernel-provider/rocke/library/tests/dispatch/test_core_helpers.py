@@ -139,10 +139,11 @@ def test_gemm_request_hashing_uses_the_core_normalizer():
     (
         ("dispatch.attention.generic", "_selector_matches"),
         ("dispatch.attention.gfx1250", "_selector_matches"),
-        ("dispatch.attention.gfx942", "_selector_matches"),
-        ("dispatch.attention.gfx950", "_selector_matches"),
+        ("dispatch.attention.gfx942_unified", "_selector_matches"),
+        ("dispatch.attention.gfx950_unified", "_selector_matches"),
         ("dispatch.kda.gfx942", "_selector_matches"),
         ("dispatch.kda.gfx950", "_selector_matches"),
+        ("dispatch.mla.gfx942", "_selector_matches"),
         ("dispatch.grouped_convolution", "selector_matches"),
         ("rocke.dispatch.families.moe", "selector_matches"),
         ("rocke.dispatch.families.norm", "selector_matches"),

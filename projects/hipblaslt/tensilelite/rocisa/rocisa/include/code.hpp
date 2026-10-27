@@ -1434,7 +1434,7 @@ namespace rocisa
                     + " // sgprs\n";
             kStr += kdIndent + ".amdhsa_group_segment_fixed_size " + std::to_string(groupSegSize)
                     + " // lds bytes\n";
-            if(capOrDefault(getArchCaps(), "HasWave32"))
+            if(capOrDefault(getArchCaps(), "HasWavefrontSize32Directive"))
             {
                 if(kernel().wavefront == 32)
                 {

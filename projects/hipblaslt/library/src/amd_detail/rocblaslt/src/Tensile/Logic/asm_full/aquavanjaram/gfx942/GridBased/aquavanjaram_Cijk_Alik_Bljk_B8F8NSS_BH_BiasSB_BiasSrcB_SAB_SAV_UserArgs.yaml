@@ -243,6 +243,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2w66uJBNw
   SolutionNameMin: Cijk_Alik_Bljk_B8F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_MT16x16x32_MI16x16x32x1_SN_1LDSB0_EPS0_MIWT1_1_PGR2_SS0_SVW4_WG16_4_1
   ActivationFuncCall: false
   AssignedDerivedParameters: true
@@ -371,6 +372,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 3
 - SolutionIndex: 1
+  SolutionUID: 0uR2w66utTPn
   SolutionNameMin: Cijk_Alik_Bljk_B8F8NSS_BH_BiasSB_BiasSrcB_SAB_SAV_MT16x16x64_MI16x16x32x1_SN_1LDSB1_EPS1_MIWT1_1_PGR1_SS1_SVW1_WG16_4_1
   1LDSBuffer: 1
   ActivationFuncCall: false

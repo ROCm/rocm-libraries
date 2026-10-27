@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "b374b5a4-d900-49f5-bd81-968933c9295d",
+  "name": "VerifyMultiLaunch variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "seqlen_q",
+      "type": "int",
+      "default_value": 1
+    }
+  ]
+}

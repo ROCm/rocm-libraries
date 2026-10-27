@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "id": "kmd-solo",
+  "id": "17fd20dc-1faf-5e2b-ac45-b610aa4ce4c4",
   "name": "Solo metadata",
   "fields": [
     { "name": "dtype", "type": "string" },

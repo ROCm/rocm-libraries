@@ -28,7 +28,7 @@
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_plugin_sdk/version.h>
+#include <hipdnn_plugin_sdk/version_number.h>
 
 struct HipdnnEnginePluginHandle
 {

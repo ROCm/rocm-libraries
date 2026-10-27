@@ -160,6 +160,14 @@ typedef struct rocke_implicit_gemm_conv_spec
     bool k0_k1_split; /* default false */
     int groups; /* default 1     */
 
+    /* Merged groups: fold `group_merge` conv groups into a single GEMM so the
+     * per-group channel count the vector-width picker sees becomes group_merge
+     * rather than 1. Depthwise only -- see rocke_conv_fwd_group_merge_available
+     * for the full admission rule. Default 1 is inert: every merged-aware site
+     * reduces to the unmerged expression, and no extra IR is emitted, so the
+     * default path stays byte-identical. */
+    int group_merge; /* default 1     */
+
     /* #8624 vector-sizes-as-args: per-operand load/store vector widths
      * (elements). has_* false => Python None => auto-select (choose_load_vec /
      * CShuffleEpilogue.from_grid default). When set they override the per-A/B
@@ -211,6 +219,38 @@ int rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(const rocke_implicit_gemm_con
 
 /* spec.mfmas_per_warp_n: tile_n / (warp_n * warp_tile_n). */
 int rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(const rocke_implicit_gemm_conv_spec_t* s);
+
+/* spec.merged_problem: the problem the *tile* covers. Folds `group_merge` conv
+ * groups into one by dividing `groups`, so the merged cpg/kpg become
+ * cpg*Gm / kpg*Gm. Writes through `out` (never NULL). At group_merge <= 1 this
+ * is a plain copy of spec->problem, which is what keeps the default inert.
+ *
+ * Mirrors Python ImplicitGemmConvSpec.merged_problem. Callers hold the result
+ * by value; the conv build ctx stores it once and exposes it as ctx->p_load. */
+void rocke_implicit_gemm_conv_spec_merged_problem(const rocke_implicit_gemm_conv_spec_t* s,
+                                                  rocke_conv_problem_t* out);
+
+/* spec.grid_M / grid_N_gemm / grid_K_gemm / grid_groups -- the merged-aware
+ * launch dims. grid_groups is the conv-group count actually launched
+ * (gridDim.z), i.e. groups / group_merge. Each equals its unmerged counterpart
+ * at group_merge 1. */
+int rocke_implicit_gemm_conv_spec_grid_m(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_implicit_gemm_conv_spec_grid_n_gemm(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_implicit_gemm_conv_spec_grid_k_gemm(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spec_t* s);
+
+/* The single admission gate for spec.group_merge, called from BOTH
+ * rocke_implicit_gemm_conv_spec_validate and
+ * rocke_implicit_gemm_conv_is_valid_spec so the dispatcher cannot hand the
+ * builder a spec the builder then rejects. Returns true when the degree is
+ * admissible (including the inert default of 1); on false writes the reason.
+ *
+ * Mirrors Python fwd_group_merge_available. `arch` is accepted for signature
+ * parity with the Python gate and is currently unused. */
+bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                          const char* arch,
+                                          char* reason,
+                                          size_t reason_cap);
 
 /* spec.kernel_name() -> NUL-terminated into out (capacity out_cap). Returns
  * ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

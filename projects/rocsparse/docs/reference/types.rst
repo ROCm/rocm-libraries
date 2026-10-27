@@ -139,4 +139,9 @@ rocsparse_spgeam_descr
 ----------------------
 
 .. doxygentypedef:: rocsparse_spgeam_descr
+
+rocsparse_spsort_descr
+----------------------
+
+.. doxygentypedef:: rocsparse_spsort_descr
 		    

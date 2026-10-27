@@ -1,0 +1,45 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Minimal CPU-only code-generation input for a persistent (Stream-K) kernel that
+# loads A and B DirectToLds with PrefetchGlobalRead=2 and an extra LDS buffer
+# (DtlPlusLdsBuf), so it does not use one-buffer scheduling. This is the
+# configuration implicated by ROCM-32152 and ROCM-32277.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  Device: 0
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 4, 1, 1, 4, 2, 2, 2]
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [1]
+        - DirectToLds: [1]
+        - DtlPlusLdsBuf: [1]
+        - 1LDSBuffer: [0]
+        - StreamK: [3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 256, 1, 128]

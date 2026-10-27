@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,7 @@ namespace rocsparse
                                            I       N,
                                            I       K,
                                            int64_t nnz,
+                                           int64_t nblocks,
                                            int64_t batch_count,
                                            int64_t batch_stride_A,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -65,31 +66,40 @@ namespace rocsparse
 
         if(alpha != static_cast<T>(0))
         {
-            for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+            // grid.y carries the dense column panel index (WF_SIZE columns each)
+            // and is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to
+            // cover the "main" columns [0, N - N % WF_SIZE) when the panel count
+            // exceeds the cap. The remainder columns are handled separately.
+            // Unsigned, so the last step past n cannot wrap; same width as the index, so no
+            // 64-bit counter stays live in the kernel.
+            using U = std::make_unsigned_t<I>;
+            for(U colB_panel = WF_SIZE * hipBlockIdx_y; colB_panel + WF_SIZE <= static_cast<U>(N);
+                colB_panel += WF_SIZE * hipGridDim_y)
             {
-                rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
-                    conj_A,
-                    conj_B,
-                    M,
-                    N,
-                    K,
-                    nnz,
-                    batch_stride_A,
-                    alpha,
-                    row_block_red,
-                    val_block_red,
-                    coo_row_ind,
-                    coo_col_ind,
-                    coo_val,
-                    dense_B,
-                    ldb,
-                    batch_stride_B,
-                    dense_C,
-                    ldc,
-                    batch_stride_C,
-                    order_C,
-                    idx_base,
-                    batch);
+                for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+                {
+                    rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
+                        conj_A,
+                        conj_B,
+                        M,
+                        N,
+                        K,
+                        nnz,
+                        nblocks,
+                        alpha,
+                        load_pointer(row_block_red, batch, nblocks),
+                        load_pointer(val_block_red, batch, nblocks * N),
+                        load_pointer(coo_row_ind, batch, batch_stride_A),
+                        load_pointer(coo_col_ind, batch, batch_stride_A),
+                        load_pointer(coo_val, batch, batch_stride_A),
+                        load_pointer(dense_B, batch, batch_stride_B),
+                        ldb,
+                        load_pointer(dense_C, batch, batch_stride_C),
+                        ldc,
+                        order_C,
+                        idx_base,
+                        static_cast<I>(colB_panel));
+                }
             }
         }
     }
@@ -111,6 +121,7 @@ namespace rocsparse
                                                 I       N,
                                                 I       K,
                                                 int64_t nnz,
+                                                int64_t nblocks,
                                                 int64_t batch_count,
                                                 int64_t batch_stride_A,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -144,22 +155,19 @@ namespace rocsparse
                     N,
                     K,
                     nnz,
-                    batch_stride_A,
+                    nblocks,
                     alpha,
-                    row_block_red,
-                    val_block_red,
-                    coo_row_ind,
-                    coo_col_ind,
-                    coo_val,
-                    dense_B,
+                    load_pointer(row_block_red, batch, nblocks),
+                    load_pointer(val_block_red, batch, nblocks * N),
+                    load_pointer(coo_row_ind, batch, batch_stride_A),
+                    load_pointer(coo_col_ind, batch, batch_stride_A),
+                    load_pointer(coo_val, batch, batch_stride_A),
+                    load_pointer(dense_B, batch, batch_stride_B),
                     ldb,
-                    batch_stride_B,
-                    dense_C,
+                    load_pointer(dense_C, batch, batch_stride_C),
                     ldc,
-                    batch_stride_C,
                     order_C,
-                    idx_base,
-                    batch);
+                    idx_base);
             }
         }
     }
@@ -174,6 +182,7 @@ namespace rocsparse
             I       N,                                                                 \
             I       K,                                                                 \
             int64_t nnz,                                                               \
+            int64_t nblocks,                                                           \
             int64_t batch_count,                                                       \
             int64_t batch_stride_A,                                                    \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                             \
@@ -202,6 +211,7 @@ namespace rocsparse
             I       N,                                                                      \
             I       K,                                                                      \
             int64_t nnz,                                                                    \
+            int64_t nblocks,                                                                \
             int64_t batch_count,                                                            \
             int64_t batch_stride_A,                                                         \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                                  \

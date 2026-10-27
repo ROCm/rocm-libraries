@@ -30,15 +30,17 @@ import numpy as np
 import pytest
 
 from rocke.core.ir import I32, IRBuilder, Value
+from rocke.helpers.magic_division import (
+    calculate_magic_numbers,
+    do_magic_division,
+    do_magic_division_dynamic,
+)
 from rocke.helpers.transforms import (
     CoordVar,
     DynamicTensorDescriptor,
     EmbedDynamic,
     PadDynamic,
     UnmergeMagicDynamic,
-    calculate_magic_numbers,
-    do_magic_division,
-    do_magic_division_dynamic,
     embed_dynamic,
     pad_dynamic,
     unmerge_magic_dynamic,

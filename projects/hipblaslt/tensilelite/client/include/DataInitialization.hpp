@@ -32,6 +32,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
+#include "DeviceContext.hpp"
 #include "Rotating.hpp"
 
 #include <mxDataGen.hpp>
@@ -913,6 +914,7 @@ namespace TensileLite
                    && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
                                                          m_currentSolution))
                 {
+                    ScopedDevice device(m_deviceId);
                     initializeMXData(*m_currentGemmProblem);
                     copyValidToGPUBuffer(*m_currentGemmProblem);
                     copyInputs(m_gpuPtrs,
@@ -965,13 +967,12 @@ namespace TensileLite
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
             {
                 m_numRunsInSolution++;
             }
@@ -989,15 +990,14 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
             }
 
@@ -1069,6 +1069,12 @@ namespace TensileLite
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
             void initializeMXData(ContractionProblemGemm const& problem);
+
+            void initNonMXSideWithMXGenerator(int                     dataTensorEnum,
+                                              int                     scaleTensorEnum,
+                                              TensorDescriptor const& dataDesc,
+                                              bool                    transposed,
+                                              bool                    isMatrixA);
 
             // True when swizzled MX scales depend on the solution.
             bool needsSolutionDependentMXPreswizzle(
@@ -1176,10 +1182,17 @@ namespace TensileLite
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
 
+            int m_deviceId = 0;
+
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
+            /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
+            /// for A/B, MX or not (non-MX A/B must be FP8/BF8). 0: initArray for A/B, MX or not, with
+            /// MX scales from init-mx-a/b (MX FP8/BF8/FP4 data). 1 and 0 give F8 and MXF8
+            /// runs identical A/B bytes.
+            int m_mxDataGenerator = -1;
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
@@ -3116,7 +3129,7 @@ namespace TensileLite
         inline Float4x2 DataInitialization::getTrigValue<Float4x2>(int idx, bool useCos, bool useAbs)
         {
             float val0 = getTrigValue<float>(idx, useCos, useAbs);
-            float val1 = getTrigValue<float>(idx, useCos, useAbs);
+            float val1 = getTrigValue<float>(idx + 1, useCos, useAbs);
             return Float4x2(val0, val1);
         }
 #endif // !_WIN32

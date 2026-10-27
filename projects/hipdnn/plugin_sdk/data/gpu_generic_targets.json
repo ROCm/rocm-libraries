@@ -1,0 +1,13 @@
+{
+  "$comment": "Membership of LLVM AMDGPU generic processors; the C++ constexpr table is generated from this file at CMake time and the packer reads it at pack time. Edit this file, never a copy.",
+  "schemaVersion": 1,
+  "source": {
+    "document": "llvm/docs/AMDGPUUsage.rst, 'AMDGPU Generic Processors' table",
+    "revision": "https://github.com/ROCm/llvm-project/blob/998a696feca902c689c53383e48d29494f9edba7/llvm/docs/AMDGPUUsage.rst#L606-L711",
+    "pinnedBy": "compiler/amd-llvm submodule of ROCm/TheRock main at 4bed01044 (the compiler TheRock builds hipDNN with); packer exercised with TheRock e8958f6709fa (run 37549184513) compiler: AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git 7667f52dd687899256a3285ab0bce3c53bc73394)"
+  },
+  "generics": {
+    "gfx11-generic": ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"],
+    "gfx12-generic": ["gfx1200", "gfx1201"]
+  }
+}

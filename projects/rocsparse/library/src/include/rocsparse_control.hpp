@@ -28,6 +28,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_hip.hpp"
 #include "rocsparse_message.hpp"
+#include <exception>
 #include <iostream>
 
 /*******************************************************************************

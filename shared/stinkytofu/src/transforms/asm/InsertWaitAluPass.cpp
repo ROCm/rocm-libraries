@@ -1018,6 +1018,31 @@ class WaitcntBrackets {
         return out;
     }
 
+    // One op of `op`'s kind that touches no VGPR, counted the way the walk counts it.
+    void countBareOp(WaitAluHideOp op) {
+        if (op == WaitAluHideOp::Wmma) {
+            vaPipeUB[PIPE_XDL] += xdlInc;
+            vaUB += xdlInc;
+            noteIssue(PIPE_XDL, xdlInc);
+            return;
+        }
+        ++vmUB;
+        if (op != WaitAluHideOp::Tex) ++vmFifoUB[FIFO_LDS];
+        if (op != WaitAluHideOp::Lds) ++vmFifoUB[FIFO_TEX];
+    }
+
+    // Take `o`'s latched WMMA form, if it has one.
+    void copyFormFrom(const WaitcntBrackets& o) {
+        xdlInc = o.xdlInc;
+        xdlHideXdl = o.xdlHideXdl;
+        xdlHideCsmacc = o.xdlHideCsmacc;
+        xdlIncSeen = o.xdlIncSeen;
+        xdlFormMixed = o.xdlFormMixed;
+    }
+    bool formLatched() const {
+        return xdlIncSeen;
+    }
+
    private:
     static unsigned vaPipeSum(const std::array<unsigned, NUM_VA_PIPE>& a) {
         unsigned n = 0;
@@ -1573,6 +1598,60 @@ WaitAluNeed WaitAluTracker::query(const StinkyInstruction& inst) const {
     if (!isNoWait(wait, CT_VA_VDST)) need.vaVdst = static_cast<int>(wait.get(CT_VA_VDST));
     if (!isNoWait(wait, CT_VM_VSRC)) need.vmVsrc = static_cast<int>(wait.get(CT_VM_VSRC));
     return need;
+}
+
+// The most `op`s any hide of the arch needs; past it, more of them hide nothing.
+static int maxHideOps(const WaitAluContext& ctx, WaitAluHideOp op) {
+    if (ctx.waitHide == nullptr) return 0;
+    const HWModel::WaitHide& wh = *ctx.waitHide;
+    if (op == WaitAluHideOp::Wmma) {
+        int n = 0;
+        for (const auto& form : wh.forms) n = std::max({n, form.xdlVaVdst, form.csmaccVaVdst});
+        return n;
+    }
+    const int lds = op == WaitAluHideOp::Tex ? 0 : wh.vmVsrcLds;
+    const int tex = op == WaitAluHideOp::Lds ? 0 : wh.vmVsrcTex;
+    return std::max({lds, tex, 0});
+}
+
+// Latch `formWmma`'s form on `sb` the way the walk would on its first issue, if `sb` has none.
+static void latchFormIfUnset(WaitcntBrackets& sb, const StinkyInstruction* formWmma) {
+    if (sb.formLatched() || formWmma == nullptr) return;
+    if (classifyEvent(*formWmma) != EV_VGPR_XDL_WRITE) return;
+    sb.latchXdlForm(*formWmma, hasMatrixScalePair(*formWmma) ? 2u : 1u);
+}
+
+// Bare ops of `op`'s kind issued on a copy of `start` until `inst` no longer needs the counter
+// they hide; -1 past the arch's largest hide count. `formWmma` as in latchFormIfUnset.
+static int countUntilFree(const WaitcntBrackets& start, const StinkyInstruction& inst,
+                          const WaitAluContext& ctx, const VGPRHalfKeyer& keyer, WaitAluHideOp op,
+                          const StinkyInstruction* formWmma) {
+    if (isPseudoInst(&inst) || isWaitAluInst(inst) || isCall(inst)) return 0;
+    const CounterType c = op == WaitAluHideOp::Wmma ? CT_VA_VDST : CT_VM_VSRC;
+    if (isNoWait(computeWaitForInst(inst, start, keyer), c)) return 0;
+    WaitcntBrackets sb = start;
+    latchFormIfUnset(sb, formWmma);
+    const int maxOps = maxHideOps(ctx, op);
+    for (int n = 1; n <= maxOps; ++n) {
+        sb.countBareOp(op);
+        if (isNoWait(computeWaitForInst(inst, sb, keyer), c)) return n;
+    }
+    return -1;
+}
+
+int WaitAluTracker::untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
+                              const StinkyInstruction* formWmma) const {
+    return countUntilFree(impl_->sb, inst, impl_->ctx, impl_->keyer, op, formWmma);
+}
+
+int WaitAluTracker::requiredGap(const StinkyInstruction& producer,
+                                const StinkyInstruction& consumer, WaitAluHideOp op,
+                                const StinkyInstruction* formWmma) const {
+    WaitcntBrackets sb(impl_->ctx);
+    if (impl_->sb.formLatched()) sb.copyFormFrom(impl_->sb);
+    latchFormIfUnset(sb, formWmma);
+    stepInstruction(sb, producer, impl_->keyer);
+    return countUntilFree(sb, consumer, impl_->ctx, impl_->keyer, op, nullptr);
 }
 
 void WaitAluTracker::commit(const StinkyInstruction& inst) {

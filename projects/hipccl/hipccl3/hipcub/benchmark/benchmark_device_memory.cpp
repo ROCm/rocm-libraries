@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -81,12 +81,12 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
         (void)storage;
         (void)global_mem_output;
 
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             input[i]                       = input[i] + 666;
             constexpr unsigned int repeats = 30;
-#pragma unroll
+            _CCCL_PRAGMA_UNROLL_FULL()
             for(unsigned int j = 0; j < repeats; j++)
             {
                 input[i] = input[i] * (input[j % ItemsPerThread]);
@@ -113,7 +113,7 @@ struct operation<block_scan, T, ItemsPerThread, BlockSize>
 
         // sync before re-using shared memory from load
         __syncthreads();
-        block_scan_type(storage).InclusiveScan(input, input, hipcub::Sum());
+        block_scan_type(storage).InclusiveScan(input, input, benchmark_utils::plus{});
     }
 };
 
@@ -134,7 +134,7 @@ struct operation<atomics_no_collision, T, ItemsPerThread, BlockSize>
 
         const unsigned int index
             = threadIdx.x * ItemsPerThread + blockIdx.x * blockDim.x * ItemsPerThread;
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -159,7 +159,7 @@ struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
 
         const unsigned int index
             = (threadIdx.x % warpSize) * ItemsPerThread + blockIdx.x * blockDim.x * ItemsPerThread;
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -183,7 +183,7 @@ struct operation<atomics_inter_block_collision, T, ItemsPerThread, BlockSize>
         (void)input;
 
         const unsigned int index = threadIdx.x * ItemsPerThread;
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));

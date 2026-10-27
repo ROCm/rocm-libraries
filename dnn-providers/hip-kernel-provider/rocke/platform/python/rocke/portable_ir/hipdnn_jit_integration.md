@@ -926,12 +926,21 @@ bool        rocke_launch_plan_geometry(const rocke_launch_plan_t*,
                                        rocke_launch_dims_t* grid,
                                        rocke_launch_dims_t* block,
                                        unsigned* lds_bytes);
+bool        rocke_launch_plan_cluster(const rocke_launch_plan_t*,
+                                      rocke_launch_dims_t* cluster);
 int         rocke_launch_plan_num_args(const rocke_launch_plan_t*);
 const rocke_arg_desc_t* rocke_launch_plan_arg(const rocke_launch_plan_t*, int i);
 unsigned    rocke_launch_plan_kernarg_size(const rocke_launch_plan_t*);
 ```
 
 Choices worth calling out, in the same spirit as §3.3a:
+
+**The cluster shape comes from the kernel, not the `launch` block.** A gfx1250
+kernel built with a `cluster_dims` attr has that shape compiled into its code
+object, and a launch with any other shape is wrong. `..._cluster` therefore
+reads the attr off the kernel the recipe built, so it cannot disagree with it,
+and returns `false` for a kernel without one. Building the plan refuses a shape
+outside the hardware limits and a grid that is not a whole number of clusters.
 
 **Absence is reported, not defaulted.** A recipe with no `launch` block returns
 `false` from `..._geometry` rather than a 1×1×1 grid. A recipe recorded before

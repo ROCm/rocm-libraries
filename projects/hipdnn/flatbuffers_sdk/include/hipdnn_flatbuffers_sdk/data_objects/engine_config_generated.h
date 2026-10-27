@@ -151,6 +151,7 @@ struct EngineConfigT : public ::flatbuffers::NativeTable {
   typedef EngineConfig TableType;
   int64_t engine_id = 0;
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>> knobs{};
+  std::string ranking_metric{};
   EngineConfigT() = default;
   EngineConfigT(const EngineConfigT &o);
   EngineConfigT(EngineConfigT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -162,7 +163,8 @@ struct EngineConfig FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef EngineConfigBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ENGINE_ID = 4,
-    VT_KNOBS = 6
+    VT_KNOBS = 6,
+    VT_RANKING_METRIC = 8
   };
   int64_t engine_id() const {
     return GetField<int64_t>(VT_ENGINE_ID, 0);
@@ -176,12 +178,20 @@ struct EngineConfig FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *mutable_knobs() {
     return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *>(VT_KNOBS);
   }
+  const ::flatbuffers::String *ranking_metric() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_RANKING_METRIC);
+  }
+  ::flatbuffers::String *mutable_ranking_metric() {
+    return GetPointer<::flatbuffers::String *>(VT_RANKING_METRIC);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_ENGINE_ID, 8) &&
            VerifyOffset(verifier, VT_KNOBS) &&
            verifier.VerifyVector(knobs()) &&
            verifier.VerifyVectorOfTables(knobs()) &&
+           VerifyOffset(verifier, VT_RANKING_METRIC) &&
+           verifier.VerifyString(ranking_metric()) &&
            verifier.EndTable();
   }
   EngineConfigT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -199,6 +209,9 @@ struct EngineConfigBuilder {
   void add_knobs(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>> knobs) {
     fbb_.AddOffset(EngineConfig::VT_KNOBS, knobs);
   }
+  void add_ranking_metric(::flatbuffers::Offset<::flatbuffers::String> ranking_metric) {
+    fbb_.AddOffset(EngineConfig::VT_RANKING_METRIC, ranking_metric);
+  }
   explicit EngineConfigBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -213,9 +226,11 @@ struct EngineConfigBuilder {
 inline ::flatbuffers::Offset<EngineConfig> CreateEngineConfig(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     int64_t engine_id = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>> knobs = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>> knobs = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> ranking_metric = 0) {
   EngineConfigBuilder builder_(_fbb);
   builder_.add_engine_id(engine_id);
+  builder_.add_ranking_metric(ranking_metric);
   builder_.add_knobs(knobs);
   return builder_.Finish();
 }
@@ -223,12 +238,15 @@ inline ::flatbuffers::Offset<EngineConfig> CreateEngineConfig(
 inline ::flatbuffers::Offset<EngineConfig> CreateEngineConfigDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     int64_t engine_id = 0,
-    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *knobs = nullptr) {
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *knobs = nullptr,
+    const char *ranking_metric = nullptr) {
   auto knobs__ = knobs ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>(*knobs) : 0;
+  auto ranking_metric__ = ranking_metric ? _fbb.CreateString(ranking_metric) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
       _fbb,
       engine_id,
-      knobs__);
+      knobs__,
+      ranking_metric__);
 }
 
 ::flatbuffers::Offset<EngineConfig> CreateEngineConfig(::flatbuffers::FlatBufferBuilder &_fbb, const EngineConfigT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -281,7 +299,8 @@ inline ::flatbuffers::Offset<KnobSetting> CreateKnobSetting(::flatbuffers::FlatB
 inline bool operator==(const EngineConfigT &lhs, const EngineConfigT &rhs) {
   return
       (lhs.engine_id == rhs.engine_id) &&
-      (lhs.knobs.size() == rhs.knobs.size() && std::equal(lhs.knobs.cbegin(), lhs.knobs.cend(), rhs.knobs.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> const &b) { return (a == b) || (a && b && *a == *b); }));
+      (lhs.knobs.size() == rhs.knobs.size() && std::equal(lhs.knobs.cbegin(), lhs.knobs.cend(), rhs.knobs.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.ranking_metric == rhs.ranking_metric);
 }
 
 inline bool operator!=(const EngineConfigT &lhs, const EngineConfigT &rhs) {
@@ -290,7 +309,8 @@ inline bool operator!=(const EngineConfigT &lhs, const EngineConfigT &rhs) {
 
 
 inline EngineConfigT::EngineConfigT(const EngineConfigT &o)
-      : engine_id(o.engine_id) {
+      : engine_id(o.engine_id),
+        ranking_metric(o.ranking_metric) {
   knobs.reserve(o.knobs.size());
   for (const auto &knobs_ : o.knobs) { knobs.emplace_back((knobs_) ? new hipdnn_flatbuffers_sdk::data_objects::KnobSettingT(*knobs_) : nullptr); }
 }
@@ -298,6 +318,7 @@ inline EngineConfigT::EngineConfigT(const EngineConfigT &o)
 inline EngineConfigT &EngineConfigT::operator=(EngineConfigT o) FLATBUFFERS_NOEXCEPT {
   std::swap(engine_id, o.engine_id);
   std::swap(knobs, o.knobs);
+  std::swap(ranking_metric, o.ranking_metric);
   return *this;
 }
 
@@ -312,6 +333,7 @@ inline void EngineConfig::UnPackTo(EngineConfigT *_o, const ::flatbuffers::resol
   (void)_resolver;
   { auto _e = engine_id(); _o->engine_id = _e; }
   { auto _e = knobs(); if (_e) { _o->knobs.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->knobs[_i]) { _e->Get(_i)->UnPackTo(_o->knobs[_i].get(), _resolver); } else { _o->knobs[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->knobs.resize(0); } }
+  { auto _e = ranking_metric(); if (_e) _o->ranking_metric = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<EngineConfig> EngineConfig::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineConfigT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -324,10 +346,12 @@ inline ::flatbuffers::Offset<EngineConfig> CreateEngineConfig(::flatbuffers::Fla
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EngineConfigT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _engine_id = _o->engine_id;
   auto _knobs = _o->knobs.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> (_o->knobs.size(), [](size_t i, _VectorArgs *__va) { return CreateKnobSetting(*__va->__fbb, __va->__o->knobs[i].get(), __va->__rehasher); }, &_va ) : 0;
+  auto _ranking_metric = _o->ranking_metric.empty() ? 0 : _fbb.CreateString(_o->ranking_metric);
   return hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
       _fbb,
       _engine_id,
-      _knobs);
+      _knobs,
+      _ranking_metric);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::EngineConfig *GetEngineConfig(const void *buf) {

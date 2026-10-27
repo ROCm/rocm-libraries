@@ -77,7 +77,11 @@ struct SdpaFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
 };
 
-template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
+template <typename QDataType,
+          typename KDataType,
+          typename VDataType,
+          typename ODataType,
+          typename Mask = float>
 class SdpaFwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -107,10 +111,10 @@ public:
         auto shallowOTensor
             = createShallowTensor<ODataType>(_params.oTensor, variantPack.at(_params.oTensor.uid));
 
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowAttnMaskTensor;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowAttnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
-            shallowAttnMaskTensor = createShallowTensor<float>(
+            shallowAttnMaskTensor = createShallowTensor<Mask>(
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
@@ -150,20 +154,21 @@ public:
                 _params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
-        utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
-            *shallowQTensor,
-            *shallowKTensor,
-            *shallowVTensor,
-            *shallowOTensor,
-            effectiveScale,
-            shallowAttnMaskTensor.get(),
-            _params.leftBound,
-            _params.rightBound,
-            _params.topLeftAlignment,
-            shallowLseTensor.get(),
-            shallowDescaleQ.get(),
-            shallowDescaleK.get(),
-            shallowDescaleV.get());
+        utilities::CpuFpReferenceSdpa::
+            forward<QDataType, KDataType, VDataType, ODataType, float, Mask>(
+                *shallowQTensor,
+                *shallowKTensor,
+                *shallowVTensor,
+                *shallowOTensor,
+                effectiveScale,
+                shallowAttnMaskTensor.get(),
+                _params.leftBound,
+                _params.rightBound,
+                _params.topLeftAlignment,
+                shallowLseTensor.get(),
+                shallowDescaleQ.get(),
+                shallowDescaleK.get(),
+                shallowDescaleV.get());
     }
 
 private:
@@ -173,7 +178,9 @@ private:
 template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
-          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum>
+          hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
+          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
 class SdpaFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -181,6 +188,7 @@ public:
     using KDataType = utilities::DataTypeToNative<KDataTypeEnum>;
     using VDataType = utilities::DataTypeToNative<VDataTypeEnum>;
     using ODataType = utilities::DataTypeToNative<ODataTypeEnum>;
+    using MaskType = utilities::MaskDataTypeToNative<MaskDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
@@ -203,6 +211,26 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->v_tensor_uid(), VDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->o_tensor_uid(), ODataTypeEnum);
+
+        // The builder's mask dtype must match the graph: UNSET builds only mask-free graphs,
+        // every other builder only graphs whose mask tensor has exactly that dtype.
+        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+        {
+            if(nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
+            {
+                return false;
+            }
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
+        }
 
         // Unsupported mask modes
         if(nodeAttributes->alibi_mask() || nodeAttributes->padding_mask())
@@ -338,7 +366,7 @@ public:
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaFwdPlan");
 
-        return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType>>(
+        return std::make_unique<SdpaFwdPlan<QDataType, KDataType, VDataType, ODataType, MaskType>>(
             SdpaFwdParams(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                           *tensorMap.at(nodeAttributes->k_tensor_uid()),
                           *tensorMap.at(nodeAttributes->v_tensor_uid()),

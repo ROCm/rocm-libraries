@@ -1,0 +1,50 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_14598d",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_345a23"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE_DETERMINISTIC": [
+      {
+        "cases": [
+          "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_14598d",
+          "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_345a23"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

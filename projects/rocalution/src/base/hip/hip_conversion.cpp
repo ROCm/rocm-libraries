@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -75,8 +75,7 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         return true;
     }
@@ -114,8 +113,7 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         return true;
     }
@@ -311,9 +309,8 @@ namespace rocalution
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Synchronize stream to make sure, result is available on the host
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             hipStreamSynchronize(HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Limit ELL size to 5 times CSR nnz
         if(dst->max_row > 5 * (nnz / nrow))
@@ -458,29 +455,27 @@ namespace rocalution
         char*  rocprim_buffer = NULL;
 
         // Get reduction buffer size
-        DISCARD_HIP_ERROR(rocprim::reduce(rocprim_buffer,
-                                          rocprim_size,
-                                          diag_idx,
-                                          d_num_diag,
-                                          0,
-                                          nrow + ncol,
-                                          rocprim::plus<IndexType>(),
-                                          stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         diag_idx,
+                                         d_num_diag,
+                                         0,
+                                         nrow + ncol,
+                                         rocprim::plus<IndexType>(),
+                                         stream));
 
         // Allocate rocprim buffer
         allocate_hip(rocprim_size, &rocprim_buffer);
 
         // Do reduction
-        DISCARD_HIP_ERROR(rocprim::reduce(rocprim_buffer,
-                                          rocprim_size,
-                                          diag_idx,
-                                          d_num_diag,
-                                          0,
-                                          nrow + ncol,
-                                          rocprim::plus<IndexType>(),
-                                          stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         diag_idx,
+                                         d_num_diag,
+                                         0,
+                                         nrow + ncol,
+                                         rocprim::plus<IndexType>(),
+                                         stream));
 
         // Clear rocprim buffer
         free_hip(&rocprim_buffer);
@@ -516,30 +511,28 @@ namespace rocalution
         rocprim_size   = 0;
 
         // Obtain rocprim buffer size
-        DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                  rocprim_size,
-                                                  diag_idx,
-                                                  work,
-                                                  0,
-                                                  nrow + ncol,
-                                                  rocprim::plus<IndexType>(),
-                                                  stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                 rocprim_size,
+                                                 diag_idx,
+                                                 work,
+                                                 0,
+                                                 nrow + ncol,
+                                                 rocprim::plus<IndexType>(),
+                                                 stream));
 
         // Allocate rocprim buffer
         rocprim_buffer = NULL;
         allocate_hip(rocprim_size, &rocprim_buffer);
 
         // Do inclusive sum
-        DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                  rocprim_size,
-                                                  diag_idx,
-                                                  work,
-                                                  0,
-                                                  nrow + ncol,
-                                                  rocprim::plus<IndexType>(),
-                                                  stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                 rocprim_size,
+                                                 diag_idx,
+                                                 work,
+                                                 0,
+                                                 nrow + ncol,
+                                                 rocprim::plus<IndexType>(),
+                                                 stream));
 
         // Clear rocprim buffer
         free_hip(&rocprim_buffer);
@@ -623,29 +616,27 @@ namespace rocalution
             char*  rocprim_buffer = NULL;
 
             // Obtain rocprim buffer size
-            DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                      rocprim_size,
-                                                      coo_row_nnz,
-                                                      coo_row_nnz,
-                                                      0,
-                                                      nrow + 1,
-                                                      rocprim::plus<PointerType>(),
-                                                      stream));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                     rocprim_size,
+                                                     coo_row_nnz,
+                                                     coo_row_nnz,
+                                                     0,
+                                                     nrow + 1,
+                                                     rocprim::plus<PointerType>(),
+                                                     stream));
 
             // Allocate rocprim buffer
             allocate_hip(rocprim_size, &rocprim_buffer);
 
             // Do exclusive sum
-            DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                      rocprim_size,
-                                                      coo_row_nnz,
-                                                      coo_row_nnz,
-                                                      0,
-                                                      nrow + 1,
-                                                      rocprim::plus<PointerType>(),
-                                                      stream));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                     rocprim_size,
+                                                     coo_row_nnz,
+                                                     coo_row_nnz,
+                                                     0,
+                                                     nrow + 1,
+                                                     rocprim::plus<PointerType>(),
+                                                     stream));
 
             // Clear rocprim buffer
             free_hip(&rocprim_buffer);
@@ -761,8 +752,7 @@ namespace rocalution
         }
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         return true;
     }
@@ -884,8 +874,7 @@ namespace rocalution
         }
 
         // Sync memcopy
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *nnz_csr = nnz_total;
 

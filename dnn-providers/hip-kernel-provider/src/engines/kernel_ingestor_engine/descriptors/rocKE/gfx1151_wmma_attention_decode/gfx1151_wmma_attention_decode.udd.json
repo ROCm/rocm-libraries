@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "c13ee592-ca28-4cc2-9fda-df07788789ef",
+  "name": "Gfx1151WmmaAttentionDecode dispatch",
+  "dispatch_symbol": "hipkernel.gfx1151_wmma_attention_decode.dispatch"
+}

@@ -223,6 +223,33 @@ class TestTensorFieldParsing:
         in_1 = next(tf for tf in pointwise_config.tensor_fields if tf.name == "in_1")
         assert in_1.required is False
 
+    def test_work_data_dependent_is_per_field(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        flags = {tf.name: tf.work_data_dependent for tf in config.tensor_fields}
+        assert flags["first_token_offset"] is True
+        # Unflagged fields default to False.
+        assert flags["token_index"] is False
+        assert flags["token"] is False
+
+    def test_tensor_array_work_data_dependent(self, tmp_path):
+        config_file = tmp_path / "op.yaml"
+        config_file.write_text(
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            "  has_compute_data_type: false\n"
+            "  tensor_array_fields:\n"
+            '    - name: "offsets"\n'
+            '      fbs_field: "offsets_tensor_uid"\n'
+            '      attr_name: "HIPDNN_ATTR_TEST_OFFSETS"\n'
+            "      work_data_dependent: true\n"
+        )
+        config = load_config(config_file)
+        assert config.tensor_array_fields[0].work_data_dependent is True
+        assert config.work_data_dependent_fields == ["offsets_tensor_uid"]
+
 
 class TestDataFieldParsing:
     """Verify data fields are parsed with correct types and attributes."""
@@ -1299,3 +1326,22 @@ class TestLoadConfigErrors:
         msg = str(excinfo.value)
         assert "mode_sentinel" in msg
         assert "sometimes" in msg
+
+    def test_non_boolean_work_data_dependent_is_rejected(self, tmp_path):
+        """A quoted ``"false"`` is truthy; accepting it would annotate the field."""
+        config_file = tmp_path / "bad_work.yaml"
+        config_file.write_text(
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            "  has_compute_data_type: false\n"
+            "  tensor_fields:\n"
+            '    - name: "x"\n'
+            '      fbs_field: "x_tensor_uid"\n'
+            '      attr_suffix: "X"\n'
+            '      work_data_dependent: "false"\n'
+        )
+        with pytest.raises(ConfigError, match="work_data_dependent"):
+            load_config(config_file)

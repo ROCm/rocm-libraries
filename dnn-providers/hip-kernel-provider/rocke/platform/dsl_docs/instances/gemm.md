@@ -369,15 +369,16 @@ pieces the v2 body composes.
 
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa
-block carries one 8-bit unbiased E8M0 scale. v1 supports fp8 and bf8
+block carries one 8-bit biased E8M0 scale (bias 127). v1 supports fp8 and bf8
 mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
 matching unpack helpers as v2.
 
 The decode chain
 (:func:`rocke.helpers.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.apply_mx_scale`) handles the NaN / zero
-sentinels (E8M0 ``e == 0`` and ``e == 255``) by returning ``0.0``,
-matching the AMDGPU MX MFMA hardware path's denormal flush.
+:func:`rocke.helpers.apply_mx_scale`) follows the OCP MX spec: the
+E8M0 byte is an unsigned biased exponent, codes 0..254 decode to
+exactly ``2^(code - 127)`` (code 0 is the f32 subnormal ``2^-127``)
+and code 255 decodes to NaN.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:

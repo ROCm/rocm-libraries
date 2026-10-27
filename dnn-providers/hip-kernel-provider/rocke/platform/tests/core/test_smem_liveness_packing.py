@@ -47,7 +47,7 @@ def _use(*vals: Value) -> Op:
 def _lowerer(*ops: Op) -> _Lowerer:
     body = Region(label="body", ops=list(ops))
     kernel = KernelDef(name="k", params=[], body=body)
-    low = _Lowerer(kernel)
+    low = _Lowerer(kernel, arch="gfx950")
     low._collect_smem(body)
     return low
 

@@ -26,6 +26,7 @@
 #define TESTING_SPGEMM_CSR_HPP
 
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -58,8 +59,7 @@ void testing_spgemm_csr_bad_arg(const Arguments& argus)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSpGEMMAlg_t alg       = HIPSPARSE_SPGEMM_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<spgemm_struct> unique_ptr_descr(new spgemm_struct);
     hipsparseSpGEMMDescr_t         descr = unique_ptr_descr->descr;
@@ -354,8 +354,7 @@ void testing_spgemm_csr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handles
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<spgemm_struct> unique_ptr_descr(new spgemm_struct);
     hipsparseSpGEMMDescr_t         descr = unique_ptr_descr->descr;

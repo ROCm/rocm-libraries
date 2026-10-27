@@ -228,6 +228,15 @@ bool rocke_conv_coalesced_load_ok(const char* operand,
                                   char* reason,
                                   size_t reason_cap);
 
+/* vector_width_reason((operand, vector_size, dtype), ...), one operand per
+ * call: an explicit width (has_vec) must keep one per-lane access within
+ * 16 bytes (8 x 16-bit or 4 x fp32). An unset width is derived from the
+ * per-dtype default ladder and always fits. Returns true if it fits;
+ * otherwise writes the Python reason text into `reason` (if non-NULL) and
+ * returns false. A NULL dtype is the "fp16" default. */
+bool rocke_conv_vector_width_ok(
+    const char* operand, bool has_vec, int vec, const char* dtype, char* reason, size_t reason_cap);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

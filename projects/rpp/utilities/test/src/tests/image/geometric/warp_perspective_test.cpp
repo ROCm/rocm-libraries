@@ -1,0 +1,134 @@
+/*
+MIT License
+
+Copyright (c) 2026 Advanced Micro Devices, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#include <gtest/gtest.h>
+#include <rpp/rpp.h>
+
+#include <array>
+#include <string>
+#include <vector>
+
+#include "framework/backend_memory.hpp"
+#include "framework/compare.hpp"
+#include "framework/config_param.hpp"
+#include "framework/dtype.hpp"
+#include "framework/skip_list.hpp"
+#include "framework/tensor_setup.hpp"
+#include "framework/tolerance.hpp"
+#include "reference/warp_perspective_ref.hpp"
+
+using namespace rpptest;
+
+namespace {
+
+std::string interp_token(RpptInterpolationType i) {
+    return i == NEAREST_NEIGHBOR ? "NN" : "BILINEAR";
+}
+
+// A row-major 3x3 destination->source matrix. The perspective row is kept at {0,0,1} so the source
+// coordinate is invariant to the undocumented mapping-origin convention; w != 1 is not covered.
+struct WarpPerspectiveParams {
+    std::array<float, 9> m;
+    RpptInterpolationType interp;
+    std::string tag;
+    std::string name() const {
+        return tag + "_" + interp_token(interp);
+    }
+};
+
+// NN copies texels verbatim; bilinear allows rounding error only. Not loosened for the known kernel
+// defects: HOST bilinear reads the last column/row one texel short, I8 out-of-bounds fill is 0
+// rather than -128, and partial ROIs ignore the ROI origin (with HIP placement also diverging).
+double warp_perspective_tolerance(DType dt, RpptInterpolationType interp) {
+    if (interp == NEAREST_NEIGHBOR) return 0.0;
+    return kRoundingTolerance(dt);
+}
+
+template <typename T>
+void run_warp_perspective(const TestConfig& cfg, const WarpPerspectiveParams& op) {
+    RpptDesc srcDesc = make_src_descriptor(cfg);  // RPP takes a non-const ptr
+    RpptDesc dstDesc = make_dst_descriptor(cfg);
+    const std::size_t count = element_count(srcDesc);
+    const std::size_t bytes = byte_size(srcDesc, cfg.dtype);
+
+    PinnedArray<Rpp32f> persp(cfg.backend, cfg.size.n * 9);
+    PinnedArray<RpptROI> roi(cfg.backend, cfg.size.n);
+    const std::vector<RpptROI> roiVec = make_roi(srcDesc, cfg.roi);
+    for (Rpp32u i = 0; i < cfg.size.n; ++i) {
+        for (int k = 0; k < 9; ++k) persp[i * 9 + k] = op.m[k];
+        roi[i] = roiVec[i];
+    }
+
+    std::vector<T> input(count), golden(count), actual(count);
+    fill_input<T>(input.data(), count, cfg.dtype);
+    golden = input;
+    warp_perspective_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                                  roi.data(), XYWH, persp.data(), op.interp);
+
+    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
+    src.write(input.data(), bytes);
+    dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
+
+    RppHandle handle(cfg.backend, cfg.size.n);
+    ASSERT_EQ(rppt_warp_perspective(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, persp.data(),
+                                    op.interp, roi.data(), XYWH, handle.get(), cfg.backend),
+              RPP_SUCCESS);
+
+    handle.sync();  // drain the op's stream before copying results back
+    dst.read(actual.data(), bytes);
+
+    // Uses the test's own ROI copy: HIP rewrites the op's ROI to LTRB in place.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
+                               warp_perspective_tolerance(cfg.dtype, op.interp)));
+}
+
+}  // namespace
+
+// Full name:
+// Image_Geometric/WarpPerspectiveTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Matrix>_<Interp>
+class WarpPerspectiveTest : public SkipListTest<WithParams<WarpPerspectiveParams>> {};
+
+TEST_P(WarpPerspectiveTest, Correctness) {
+    const auto& p = GetParam();
+    dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
+        p.cfg.dtype, [&](auto tag) { run_warp_perspective<Element<decltype(tag)>>(p.cfg, p.op); });
+}
+
+// halfshift exercises the bilinear blend.
+INSTANTIATE_TEST_SUITE_P(
+    Image_Geometric, WarpPerspectiveTest,
+    ::testing::ValuesIn(with_params<WarpPerspectiveParams>(
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {{Layout::PKD3, Layout::PKD3},
+                      {Layout::PLN3, Layout::PLN3},
+                      {Layout::PLN1, Layout::PLN1},
+                      {Layout::PKD3, Layout::PLN3},
+                      {Layout::PLN3, Layout::PKD3}},
+                     {Roi::Full, Roi::Partial}, {presets::kDefaultSize, presets::kTailWidthSize}),
+        {WarpPerspectiveParams{{1, 0, 0, 0, 1, 0, 0, 0, 1}, NEAREST_NEIGHBOR, "identity"},
+         WarpPerspectiveParams{{1, 0, 0, 0, 1, 0, 0, 0, 1}, BILINEAR, "identity"},
+         WarpPerspectiveParams{{1, 0, 5, 0, 1, -3, 0, 0, 1}, NEAREST_NEIGHBOR, "shift"},
+         WarpPerspectiveParams{{1, 0, 5, 0, 1, -3, 0, 0, 1}, BILINEAR, "shift"},
+         WarpPerspectiveParams{{1, 0, 5.5f, 0, 1, -2.5f, 0, 0, 1}, BILINEAR, "halfshift"}})),
+    op_config_name<WarpPerspectiveParams>);

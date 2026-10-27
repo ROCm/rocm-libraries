@@ -1,0 +1,82 @@
+{
+  "claims": {
+    "HIPBLASLT_ENGINE": [
+      {
+        "cases": [
+          "2_3_16_128_bfp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_41500e",
+          "2_3_16_128_bfp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_49b8a0",
+          "2_3_16_128_bfp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_b2408c",
+          "2_3_16_128_bfp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_f7ae52",
+          "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0_norhi_2ca414",
+          "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0_norhi_a30dd3",
+          "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0p1_rhi0p5_01c025",
+          "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0p1_rhi0p5_634067",
+          "2_3_16_128_bfp16_nchw_operationrelu_fwd_rlo0p1_rhi0p5_eecb26",
+          "2_3_16_128_bfp16_nchw_operationswish_fwd_norlo_norhi_271748",
+          "2_3_16_128_bfp16_nchw_operationswish_fwd_norlo_norhi_2afa52",
+          "2_3_16_128_fp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_28333f",
+          "2_3_16_128_fp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_52b8c9",
+          "2_3_16_128_fp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_726f82",
+          "2_3_16_128_fp16_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_84b4e2",
+          "2_3_16_128_fp16_nchw_operationrelu_fwd_rlo0_norhi_2c03c8",
+          "2_3_16_128_fp16_nchw_operationrelu_fwd_rlo0_norhi_311b39",
+          "2_3_16_128_fp16_nchw_operationrelu_fwd_rlo0_norhi_709f2a",
+          "2_3_16_128_fp16_nchw_operationrelu_fwd_rlo0p1_rhi0p5_08bf35",
+          "2_3_16_128_fp16_nchw_operationrelu_fwd_rlo0p1_rhi0p5_210259",
+          "2_3_16_128_fp16_nchw_operationrelu_fwd_rlo0p1_rhi0p5_f21b69",
+          "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_1af0ed",
+          "2_3_16_128_fp16_nchw_operationswish_fwd_norlo_norhi_9236c1",
+          "2_3_16_128_fp32_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_c752ba",
+          "2_3_16_128_fp32_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_e3b2be",
+          "2_3_16_128_fp32_nchw_operationgelu_approx_tanh_fwd_norlo_norhi_f2e572",
+          "2_3_16_128_fp32_nchw_operationrelu_fwd_rlo0_norhi_0c7245",
+          "2_3_16_128_fp32_nchw_operationrelu_fwd_rlo0_norhi_1677cc",
+          "2_3_16_128_fp32_nchw_operationrelu_fwd_rlo0_norhi_c37bd9",
+          "2_3_16_128_fp32_nchw_operationrelu_fwd_rlo0p1_rhi0p5_59ca13",
+          "2_3_16_128_fp32_nchw_operationrelu_fwd_rlo0p1_rhi0p5_6b9fcf",
+          "2_3_16_128_fp32_nchw_operationrelu_fwd_rlo0p1_rhi0p5_bcfc13",
+          "2_3_16_128_fp32_nchw_operationswish_fwd_norlo_norhi_7b8d38",
+          "2_3_16_128_fp32_nchw_operationswish_fwd_norlo_norhi_930d07",
+          "2_3_16_128_fp32_nchw_operationswish_fwd_norlo_norhi_e919fb",
+          "3_16_128_bfp16_ncl_operationrelu_fwd_rlo0_norhi_142025",
+          "3_16_128_bfp16_ncl_operationrelu_fwd_rlo0p1_rhi0p5_7acc80",
+          "3_16_128_bfp16_ncl_operationrelu_fwd_rlo0p1_rhi0p5_ccb512",
+          "3_16_128_bfp16_ncl_operationswish_fwd_norlo_norhi_ef8883",
+          "3_16_128_fp16_ncl_operationrelu_fwd_rlo0p1_rhi0p5_168c54",
+          "3_16_128_fp16_ncl_operationrelu_fwd_rlo0p1_rhi0p5_a34c2b",
+          "3_16_128_fp16_ncl_operationswish_fwd_norlo_norhi_7a9dd2",
+          "3_16_128_fp16_ncl_operationswish_fwd_norlo_norhi_b50f24",
+          "3_16_128_fp32_ncl_operationrelu_fwd_rlo0_norhi_979dd9",
+          "3_16_128_fp32_ncl_operationrelu_fwd_rlo0p1_rhi0p5_d7a37a",
+          "3_16_128_fp32_ncl_operationswish_fwd_norlo_norhi_64304b",
+          "3_16_128_fp32_ncl_operationswish_fwd_norlo_norhi_cebf7a"
+        ],
+        "support": {
+          "gfx1101": [
+            "linux",
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

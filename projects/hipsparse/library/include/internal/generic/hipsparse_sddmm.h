@@ -219,7 +219,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  \p hipsparseSDDMM supports different algorithms, which can provide better performance for different matrices.
 *
 *  <table>
-*  <caption id="sddmm_algorithms">Algorithms</caption>
 *  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SDDMM_ALG_DEFAULT</td>
 *  </table>
@@ -229,7 +228,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="sddmm_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_16F
 *  <tr><td>HIP_R_32F
@@ -240,7 +238,6 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="sddmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B     <th>C         <th>compute_type
 *  <tr><td>HIP_R_16F <td>HIP_R_32F <td>HIP_R_32F
 *  <tr><td>HIP_R_16F <td>HIP_R_16F <td>HIP_R_32F

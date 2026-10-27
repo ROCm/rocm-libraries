@@ -133,7 +133,6 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spgeam_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
@@ -143,7 +142,6 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \par Uniform Index Types:
 *  <table>
-*  <caption id="spgeam_csr_uniform_indextype">CSR Uniform Index Types</caption>
 *  <tr><th>CSR Row offset                 <th>CSR Column indices
 *  <tr><td>rocsparse_indextype_i32</td>   <td>rocsparse_indextype_i32</td>
 *  <tr><td>rocsparse_indextype_i64</td>   <td>rocsparse_indextype_i64</td>
@@ -151,7 +149,6 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \par Mixed Index Types:
 *  <table>
-*  <caption id="spgeam_csr_mixed_indextype">CSR Mixed Index Types</caption>
 *  <tr><th>CSR Row offset                 <th>CSR Column indices
 *  <tr><td>rocsparse_indextype_i64</td>   <td>rocsparse_indextype_i32</td>
 *  </table>

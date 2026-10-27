@@ -141,4 +141,18 @@ TEST(TestToleranceResolver, UnknownOpOutputOpTolerance)
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 
+// ── ResampleFwd: per-dtype table, not the 1e-3 fallback ─────────────────────
+// fp32 1e-5, fp16 1e-3, bf16 1e-2 (resample::getTolerance<T>()). Unmapped, every
+// dtype resolved to the 1e-3 fallback: fp32 100x too loose, bf16 10x too tight.
+
+TEST(TestToleranceResolver, ResampleFwdUsesPerDtypeTolerance)
+{
+    EXPECT_FLOAT_EQ(tol::toleranceForNode(NodeAttributes::ResampleFwdAttributes, DataType::FLOAT),
+                    1e-5f);
+    EXPECT_FLOAT_EQ(tol::toleranceForNode(NodeAttributes::ResampleFwdAttributes, DataType::HALF),
+                    1e-3f);
+    EXPECT_FLOAT_EQ(
+        tol::toleranceForNode(NodeAttributes::ResampleFwdAttributes, DataType::BFLOAT16), 1e-2f);
+}
+
 // NOLINTEND(readability-identifier-naming)

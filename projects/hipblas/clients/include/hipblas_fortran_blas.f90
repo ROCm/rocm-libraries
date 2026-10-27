@@ -12797,7 +12797,7 @@ end function hipblasGemmStridedBatchedExWithFlagsFortran
 
 ! syrkEx
 function hipblasSyrkExFortran(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
-                                beta, c, c_type, ldc) &
+                                beta, c, c_type, ldc, compute_type) &
     bind(c, name='hipblasSyrkExFortran')
     use iso_c_binding
     use hipblas_enums
@@ -12816,9 +12816,10 @@ function hipblasSyrkExFortran(handle, uplo, transA, n, k, alpha, a, a_type, lda,
     type(c_ptr), value :: c
     integer(kind(HIP_R_16F)), value :: c_type
     integer(c_int), value :: ldc
-            hipblasSyrkExFortran = &
+    integer(kind(HIP_R_16F)), value :: compute_type
+        hipblasSyrkExFortran = &
         hipblasSyrkEx(handle, uplo, transA, n, k, alpha, &
-                        a, a_type, lda, beta, c, c_type, ldc)
+                        a, a_type, lda, beta, c, c_type, ldc, compute_type)
 end function hipblasSyrkExFortran
 
 ! herkEx

@@ -13,7 +13,8 @@ namespace hipdnn_gpu_ref
 // MIOpen's aggregate relative-RMS check,
 //   sqrt(sum((ref - impl)^2)) / (sqrt(n) * max(max|ref|, max|impl|)) <= relativeTolerance,
 // failing on any NaN/Inf. The sums are reduced on the device, so only four numbers
-// come back to the host. Supports both packed and strided tensors.
+// come back to the host. Supports both packed and strided tensors; allClose() throws
+// std::invalid_argument for ragged tensors.
 //
 // Takes the same tolerance the CPU validator does, rounded through T the same way, so
 // the two agree on a verdict wherever they run.

@@ -118,7 +118,6 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spvv_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -128,7 +127,6 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *
 *  \par Mixed Precisions:
 *  <table>
-*  <caption id="spvv_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y     <th>compute_type
 *  <tr><td>HIP_R_8I  <td>HIP_R_32I
 *  <tr><td>HIP_R_8I  <td>HIP_R_32F

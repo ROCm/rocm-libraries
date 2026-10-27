@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -26,6 +27,17 @@ protected:
     EnginePlugin();
 
 public:
+    /**
+     * @brief Returns the plugin's API version parsed into a structured
+     *        `Version` object, or `std::nullopt` if the version string is
+     *        malformed.
+     *
+     * The version string is read and parsed once, at plugin load. Plugin
+     * managers validate this at load time and reject malformed plugin API
+     * versions before dispatch.
+     */
+    virtual std::optional<hipdnn_data_sdk::utilities::Version> parsedApiVersion() const;
+
     // Functions that don't require a handle (called first)
     virtual std::vector<int64_t> getAllEngineIds() const;
 
@@ -63,6 +75,21 @@ public:
                                   int64_t engineId,
                                   const hipdnnPluginConstData_t* opGraph,
                                   hipdnnPluginConstData_t* engineDetails) const;
+    virtual void enumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                     const hipdnnPluginConstData_t* engineConfig,
+                                     const hipdnnPluginConstData_t* opGraph,
+                                     uint64_t offset,
+                                     uint64_t limit,
+                                     hipdnnPluginConstData_t* engineDetails) const;
+    /// Returns false when the optional prediction capability is unavailable. Output follows
+    /// the engine-details allocation protocol. The requested metric is engineConfig's
+    /// ranking_metric; EnginePluginResourceManager validates the response.
+    virtual bool getPrediction(hipdnnEnginePluginHandle_t handle,
+                               const hipdnnPluginConstData_t* engineConfig,
+                               const hipdnnPluginConstData_t* opGraph,
+                               hipdnnEnginePredictionKind_t kind,
+                               bool evaluate,
+                               hipdnnPluginConstData_t* prediction) const;
     virtual size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const hipdnnPluginConstData_t* opGraph) const;
@@ -139,6 +166,12 @@ public:
         return HIPDNN_PLUGIN_TYPE_ENGINE;
     }
 
+protected:
+    // Parses a raw plugin API version string. Logs a warning naming the plugin
+    // and returns std::nullopt when the string is malformed.
+    static std::optional<hipdnn_data_sdk::utilities::Version>
+        parseApiVersion(std::string_view rawVersion, const std::string& pluginName);
+
 private:
     void resolveSymbols();
 
@@ -147,6 +180,9 @@ private:
 #endif
 
     mutable std::vector<int64_t> _allEngineIds;
+
+    // Set once by the SharedLibrary constructor; empty for mock construction.
+    std::optional<hipdnn_data_sdk::utilities::Version> _parsedApiVersion;
 
     hipdnnPluginStatus_t (*_funcGetAllEngineIds)(int64_t*, uint32_t, uint32_t*);
     hipdnnPluginStatus_t (*_funcCreateHandle)(hipdnnEnginePluginHandle_t*);
@@ -158,6 +194,20 @@ private:
                                                   int64_t,
                                                   const hipdnnPluginConstData_t*,
                                                   hipdnnPluginConstData_t*);
+    hipdnnPluginStatus_t (*_funcEnumerateCandidates)(hipdnnEnginePluginHandle_t,
+                                                     const hipdnnPluginConstData_t*,
+                                                     const hipdnnPluginConstData_t*,
+                                                     uint64_t,
+                                                     uint64_t,
+                                                     hipdnnPluginConstData_t*)
+        = nullptr;
+    hipdnnPluginStatus_t (*_funcGetPrediction)(hipdnnEnginePluginHandle_t,
+                                               const hipdnnPluginConstData_t*,
+                                               const hipdnnPluginConstData_t*,
+                                               hipdnnEnginePredictionKind_t,
+                                               int32_t,
+                                               hipdnnPluginConstData_t*)
+        = nullptr;
     hipdnnPluginStatus_t (*_funcDestroyEngineDetails)(hipdnnEnginePluginHandle_t,
                                                       hipdnnPluginConstData_t*);
     hipdnnPluginStatus_t (*_funcGetWorkspaceSize)(hipdnnEnginePluginHandle_t,

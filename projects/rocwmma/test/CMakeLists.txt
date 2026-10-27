@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -114,6 +114,8 @@ endif()
 set(ROCWMMA_TEST_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 set(ROCWMMA_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp
                                 ${CMAKE_CURRENT_SOURCE_DIR}/rocwmma_gtest_main.cpp)
+
+include(cmake/ShareTestSources.cmake)
 
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"

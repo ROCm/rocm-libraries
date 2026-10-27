@@ -27,6 +27,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgeam.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -67,7 +68,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 32>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -86,7 +90,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 32>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -115,7 +122,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 64>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -134,7 +144,10 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 64>),
-                    dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                    dim3(rocsparse::get_grid_size_x(
+                        handle,
+                        (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1,
+                        CSRGEAM_DIM)),
                     dim3(CSRGEAM_DIM),
                     0,
                     stream,
@@ -301,7 +314,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 32>),
-                dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 32) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -319,7 +333,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_nnz_multipass_device<CSRGEAM_DIM, 64>),
-                dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(m) - 1) / (CSRGEAM_DIM / 64) + 1, CSRGEAM_DIM)),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -372,14 +387,15 @@ namespace rocsparse
 
         // Checks the exclusive scan for integer overflow. If overflow detected, sets the
         // last entry in csr_row_ptr_C to -1
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrgeam_check_row_ptr<256>),
-                                           dim3(((m + 1) - 1) / 256 + 1),
-                                           dim3(256),
-                                           0,
-                                           stream,
-                                           m,
-                                           csr_row_ptr_C,
-                                           descr_C->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgeam_check_row_ptr<256>),
+            dim3(rocsparse::get_grid_size_x(handle, static_cast<int64_t>(m) / 256 + 1, 256)),
+            dim3(256),
+            0,
+            stream,
+            m,
+            csr_row_ptr_C,
+            descr_C->base);
 
         // Extract the number of non-zero elements of C
         if(handle->pointer_mode == rocsparse_pointer_mode_host || called_from_spgeam)

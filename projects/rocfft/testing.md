@@ -89,9 +89,13 @@ expensive array format validation tests run in `rocfft-test` under the GoogleTes
 #### Bitwise reproducibility tests
 
 rocFFT tests bitwise reproducibility by hashing each output and re-running the suite to confirm that
-the hashes match. The hash is SHA-256. The implementation is in the rocFFT repository; tests do not
-use `std::hash`, which is not stable across runs.  Bitwise reproducibility requires the same rocFFT
-version, the same ROCm compiler, runtime, and driver, and the same GPU model.
+the hashes match. Each element's raw IEEE-754 bits are mixed with its logical position (batch index
+times elements per batch, plus the row-major index) using a fixed splitmix64 finalizer, and the
+results are summed. The fingerprint therefore does not depend on how the buffer is split across
+threads or on strides and padding, but it does change when elements move. The implementation is in
+`shared/fft_hash.h`; tests do not use `std::hash`, which is not stable across compilers, standard
+libraries, or processes. Bitwise reproducibility requires the same rocFFT version, the same ROCm
+compiler, runtime, and driver, and the same GPU model.
 
 
 #### Memory canary tests

@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 #include <hipsparse/hipsparse.h>
 
+#include "arg_check.hpp"
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"
 
@@ -44,6 +45,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
+            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
             throw(status);
         }
     }
@@ -54,13 +56,21 @@ public:
         const hipsparseStatus_t status = hipsparseCreate(&this->handle);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
+            std::cerr << "hipsparseCreate failed: " << hipsparseGetErrorName(status) << std::endl;
             throw(status);
         }
     }
     ~hipsparseLocalHandle_t()
     {
-        hipsparseDestroy(this->handle);
+        const hipsparseStatus_t status = hipsparseDestroy(this->handle);
+        if(status != HIPSPARSE_STATUS_SUCCESS)
+        {
+            verify_hipsparse_status_success(status, "ERROR: hipsparseLocalHandle_t destructor");
+        }
     }
+
+    hipsparseLocalHandle_t(const hipsparseLocalHandle_t&) = delete;
+    hipsparseLocalHandle_t& operator=(const hipsparseLocalHandle_t&) = delete;
 
     // Allow hipsparseLocalHandle_t to be used anywhere hipsparseHandle_t is expected
     operator hipsparseHandle_t&()
@@ -146,5 +156,10 @@ private:
     bool        capture_started;
     bool        graph_testing;
 };
+
+// Exact match for the wrapper, so this beats the implicit conversion to
+// hipsparseHandle_t. A leftover hipsparseDestroy(wrapper) is a compile error
+// instead of destroying the descriptor twice.
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalHandle_t&) = delete;
 
 #endif // HIPSPARSE_LOCAL_HANDLE_HPP

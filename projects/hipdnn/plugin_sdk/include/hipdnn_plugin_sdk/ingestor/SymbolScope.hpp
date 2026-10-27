@@ -9,8 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 namespace hipdnn_plugin_sdk::ingestor
 {
 

@@ -70,6 +70,9 @@ When **enabled**:
 - First execution is significantly slower (seconds to minutes)
 - Subsequent executions use the cached optimal solver
 - Provides best performance for production workloads
+- Convolution plans without a `global.workspace_size_limit` use the range maximum across solvers
+  (the knob's maximum), so every solver can be benchmarked. This can be far larger than the
+  default (hundreds of MB for large problems); set `global.workspace_size_limit` to cap it.
 
 **Caching**:
 - Benchmark results are cached in MIOpen's performance database
@@ -129,10 +132,13 @@ Setting this knob to a value lower than the maximum:
 - **May reduce performance** if optimal solvers require more workspace
 - **Useful for memory-constrained systems** where total GPU memory is limited
 
-Setting this knob to the maximum (or not setting it):
+Setting this knob to the maximum, or not setting it while `global.benchmarking` is enabled:
 - **Allows all solvers** to be considered
 - **Provides best performance**
 - **Uses more GPU memory**
+
+Not setting this knob while `global.benchmarking` is disabled uses the workspace MIOpen reports
+for the problem, which can be smaller than the maximum.
 
 **Important Notes**:
 

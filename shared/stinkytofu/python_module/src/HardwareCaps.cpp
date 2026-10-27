@@ -302,6 +302,9 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
 
     rv["CMPXWritesSGPR"] = checkMajorNotIn(v[0], {10, 11, 12});
     rv["HasWave32"] = checkMajorIn(v[0], {10, 11, 12});
+    // GFX12.5 always uses wave32 and reserves the descriptor's wave-size selector.
+    // Keep this separate from HasWave32, as in rocisa hardware_caps.hpp.
+    rv["HasWavefrontSize32Directive"] = rv["HasWave32"] && !(v[0] == 12 && v[1] == 5);
     rv["HasSchedMode"] = checkMajorIn(v[0], {12});
     rv["HasAccCD"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});

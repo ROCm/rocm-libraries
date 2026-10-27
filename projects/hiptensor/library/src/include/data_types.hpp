@@ -213,11 +213,11 @@ namespace hiptensor
     static constexpr auto HipTensorDataType_v = HipTensorDataType<T>::value;
 
     // Get data size in bytes from id
-    HIPTENSOR_EXPORT uint32_t hiptensorDataTypeSize(hiptensorDataType_t id);
+    uint32_t hiptensorDataTypeSize(hiptensorDataType_t id);
 
     // Convert hiptensorDataType_t to hiptensorComputeDescriptor_t
-    HIPTENSOR_EXPORT hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
-    HIPTENSOR_EXPORT                              std::optional<hiptensorDataType_t>
+    hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
+    std::optional<hiptensorDataType_t>
         convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType);
 
     // Read a single value from void pointer, casted to T
@@ -227,15 +227,14 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id);
 
-    HIPTENSOR_EXPORT void
-        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
+    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
 
-    HIPTENSOR_EXPORT std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
-    HIPTENSOR_EXPORT std::string hipTypeToString(hiptensorDataType_t hipType);
-    HIPTENSOR_EXPORT std::string opTypeToString(hiptensorOperator_t opType);
-    HIPTENSOR_EXPORT std::string algoTypeToString(hiptensorAlgo_t algoType);
-    HIPTENSOR_EXPORT std::string logLevelToString(hiptensorLogLevel_t);
-    HIPTENSOR_EXPORT std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);
+    std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
+    std::string hipTypeToString(hiptensorDataType_t hipType);
+    std::string opTypeToString(hiptensorOperator_t opType);
+    std::string algoTypeToString(hiptensorAlgo_t algoType);
+    std::string logLevelToString(hiptensorLogLevel_t);
+    std::string workSizePrefToString(hiptensorWorksizePreference_t workSize);
 } // namespace hiptensor
 
 bool operator==(hiptensorDataType_t hipType, hiptensorComputeDescriptor_t computeType);

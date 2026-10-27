@@ -186,10 +186,10 @@ namespace rocsparse_clients
     template <typename... P>
     inline bool current_arch_from(P... p)
     {
-        int             dev;
-        hipDeviceProp_t prop;
-        std::ignore = hipGetDevice(&dev);
-        std::ignore = hipGetDeviceProperties(&prop, dev);
+        int             dev = 0;
+        hipDeviceProp_t prop{};
+        CHECK_HIP_THROW_ERROR(hipGetDevice(&dev));
+        CHECK_HIP_THROW_ERROR(hipGetDeviceProperties(&prop, dev));
         return rocsparse_clients::archname_from(prop.gcnArchName, std::forward<P>(p)...);
     }
 }

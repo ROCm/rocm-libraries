@@ -32,17 +32,11 @@ set_property(TARGET example-cpp-basic PROPERTY CXX_STANDARD 11)
 
 foreach(exe example-c-basic;example-cpp-basic;)
 
-  # External header includes included as SYSTEM files
-  target_include_directories(${exe}
-    SYSTEM PRIVATE
-      $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
-  )
-
   target_include_directories(${exe} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
   target_link_libraries(${exe} PRIVATE roc::hipsolver)
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+  if(NOT USE_CUDA)
     target_link_libraries(${exe} PRIVATE hip::host)
 
     if(CUSTOM_TARGET)
@@ -51,12 +45,11 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
 
   else()
     target_compile_definitions(${exe} PRIVATE __HIP_PLATFORM_NVIDIA__)
-
+    target_link_libraries(${exe} PRIVATE hip::host)
     target_include_directories(${exe}
       PRIVATE
         $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
     )
-
     target_link_libraries(${exe} PRIVATE ${CUDA_LIBRARIES})
   endif()
 

@@ -29,7 +29,7 @@
 namespace hiptensor
 {
     // Get data size in bytes from id
-    HIPTENSOR_EXPORT uint32_t hiptensorDataTypeSize(hiptensorDataType_t id)
+    uint32_t hiptensorDataTypeSize(hiptensorDataType_t id)
     {
         switch(id)
         {
@@ -102,8 +102,8 @@ namespace hiptensor
         }
     }
 
-    HIPTENSOR_EXPORT std::optional<hiptensorDataType_t>
-                     convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
+    std::optional<hiptensorDataType_t>
+        convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
     {
         switch(computeType)
         {
@@ -167,8 +167,7 @@ namespace hiptensor
     }
     // @endcond
 
-    HIPTENSOR_EXPORT void
-        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
+    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
     {
         switch(id)
         {
@@ -262,7 +261,7 @@ namespace hiptensor
         }
     }
 
-    HIPTENSOR_EXPORT std::string opTypeToString(hiptensorOperator_t opType)
+    std::string opTypeToString(hiptensorOperator_t opType)
     {
         switch(opType)
         {
@@ -327,7 +326,7 @@ namespace hiptensor
         }
     }
 
-    HIPTENSOR_EXPORT std::string algoTypeToString(hiptensorAlgo_t algoType)
+    std::string algoTypeToString(hiptensorAlgo_t algoType)
     {
         switch(algoType)
         {
@@ -342,7 +341,7 @@ namespace hiptensor
         }
     }
 
-    HIPTENSOR_EXPORT std::string logLevelToString(hiptensorLogLevel_t logLevel)
+    std::string logLevelToString(hiptensorLogLevel_t logLevel)
     {
         switch(logLevel)
         {
@@ -363,7 +362,7 @@ namespace hiptensor
         }
     }
 
-    HIPTENSOR_EXPORT std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
+    std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
     {
         switch(workSize)
         {

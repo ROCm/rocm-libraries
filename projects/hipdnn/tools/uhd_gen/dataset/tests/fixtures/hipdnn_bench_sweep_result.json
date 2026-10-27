@@ -1,0 +1,18 @@
+{
+  "candidate_id": "kernel-a",
+  "knob_settings": {"tile_m": 32},
+  "kernel_features": {"kernel.tile_m": 32},
+  "rank": 0,
+  "succeeded": true,
+  "is_valid": true,
+  "numerically_valid": true,
+  "validation": "agrees_with_catalog: 2 of 2 cross-checked candidates that wrote their output produced it",
+  "skip_reason": "",
+  "min_time_ms": 2.0,
+  "avg_time_ms": 2.75,
+  "robust_time_ms": 2.5,
+  "stddev_ms": 0.125,
+  "iterations": 40,
+  "converged": true,
+  "workspace_bytes": 0
+}

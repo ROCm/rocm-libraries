@@ -49,6 +49,8 @@ namespace hiptensor
             GFX1151          = 0x1151,
             GFX1152          = 0x1152,
             GFX1153          = 0x1153,
+            GFX1170          = 0x1170,
+            GFX1171          = 0x1171,
             GFX1200          = 0x1200,
             GFX1201          = 0x1201,
             GFX1250          = 0x1250,

@@ -145,12 +145,13 @@ std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
-    const auto dev_name = ctx.GetStream().GetDeviceName();
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const auto dev_name  = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11  = StartsWith(dev_name, "gfx110") || StartsWith(dev_name, "gfx115");
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx12  = StartsWith(dev_name, "gfx12");
 
     auto* ranked_p = &ranked_gemm_3d_grp_wrw;
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
         ranked_p = &ranked_gemm_3d_grp_wrw_navi;
 
     const auto ranked_1st_applicable = *ranked_p;
@@ -235,6 +236,11 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
         {
             return false;
         }
+        // InitValidKernels seeds the first config (index 0, split_k 1, kernel_id); emit it. Falling
+        // through would step past it -- the non-deterministic loop advances split_k 1 -> 2 and the
+        // deterministic branch advances the index -- dropping (valid_kernels[0], split_k 1) from
+        // the search, which GenericSearch offers as a candidate via FillValidKernels.
+        return true;
     }
 
     const bool is_deterministic = problem.GetConv().attribute.deterministic;
@@ -242,13 +248,14 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
     // Deterministic mode: only iterate over kernels (index), split_k is always 1
     if(is_deterministic)
     {
-        if(!NextLinear(0, valid_kernels.size() - 1, index))
+        if((index + 1) < static_cast<int>(valid_kernels.size()))
         {
-            return false; // All kernels exhausted
+            ++index;
+            split_k   = 1;
+            kernel_id = valid_kernels[index] + "+1";
+            return true;
         }
-        split_k   = 1;
-        kernel_id = valid_kernels[index] + "+1";
-        return true;
+        return false; // All kernels exhausted
     }
 
     // General (non-deterministic) mode: iterate over both split_k and kernels

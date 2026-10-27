@@ -18,12 +18,21 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/detail/temporary_array.h>
-#include <thrust/system/tbb/detail/execution_policy.h>
-#include <thrust/merge.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/binary_search.h>
 #include <thrust/detail/seq.h>
+#include <thrust/detail/temporary_array.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/merge.h>
+#include <thrust/system/tbb/detail/execution_policy.h>
+
 #include <tbb/parallel_for.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -36,10 +45,7 @@ namespace detail
 namespace merge_detail
 {
 
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakOrdering>
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename StrictWeakOrdering>
 struct range
 {
   InputIterator1 first1, last1;
@@ -48,20 +54,30 @@ struct range
   StrictWeakOrdering comp;
   size_t grain_size;
 
-  range(InputIterator1 first1, InputIterator1 last1,
-        InputIterator2 first2, InputIterator2 last2,
+  range(InputIterator1 first1,
+        InputIterator1 last1,
+        InputIterator2 first2,
+        InputIterator2 last2,
         OutputIterator result,
         StrictWeakOrdering comp,
         size_t grain_size = 1024)
-    : first1(first1), last1(last1),
-      first2(first2), last2(last2),
-      result(result), comp(comp), grain_size(grain_size)
+      : first1(first1)
+      , last1(last1)
+      , first2(first2)
+      , last2(last2)
+      , result(result)
+      , comp(comp)
+      , grain_size(grain_size)
   {}
 
   range(range& r, ::tbb::split)
-    : first1(r.first1), last1(r.last1),
-      first2(r.first2), last2(r.last2),
-      result(r.result), comp(r.comp), grain_size(r.grain_size)
+      : first1(r.first1)
+      , last1(r.last1)
+      , first2(r.first2)
+      , last2(r.last2)
+      , result(r.result)
+      , comp(r.comp)
+      , grain_size(r.grain_size)
   {
     // we can assume n1 and n2 are not both 0
     size_t n1 = thrust::distance(first1, last1);
@@ -91,12 +107,12 @@ struct range
     result += thrust::distance(r.first1, mid1) + thrust::distance(r.first2, mid2);
   }
 
-  bool empty(void) const
+  bool empty() const
   {
     return (first1 == last1) && (first2 == last2);
   }
 
-  bool is_divisible(void) const
+  bool is_divisible() const
   {
     return static_cast<size_t>(thrust::distance(first1, last1) + thrust::distance(first2, last2)) > grain_size;
   }
@@ -107,11 +123,7 @@ struct body
   template <typename Range>
   void operator()(Range& r) const
   {
-    thrust::merge(thrust::seq,
-                  r.first1, r.last1,
-                  r.first2, r.last2,
-                  r.result,
-                  r.comp);
+    thrust::merge(thrust::seq, r.first1, r.last1, r.first2, r.last2, r.result, r.comp);
   }
 };
 
@@ -120,13 +132,13 @@ struct body
 namespace merge_by_key_detail
 {
 
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename InputIterator4,
-         typename OutputIterator1,
-         typename OutputIterator2,
-         typename StrictWeakOrdering>
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename InputIterator4,
+          typename OutputIterator1,
+          typename OutputIterator2,
+          typename StrictWeakOrdering>
 struct range
 {
   InputIterator1 keys_first1, keys_last1;
@@ -138,29 +150,39 @@ struct range
   StrictWeakOrdering comp;
   size_t grain_size;
 
-  range(InputIterator1 keys_first1, InputIterator1 keys_last1,
-        InputIterator2 keys_first2, InputIterator2 keys_last2,
+  range(InputIterator1 keys_first1,
+        InputIterator1 keys_last1,
+        InputIterator2 keys_first2,
+        InputIterator2 keys_last2,
         InputIterator3 values_first1,
         InputIterator4 values_first2,
         OutputIterator1 keys_result,
         OutputIterator2 values_result,
         StrictWeakOrdering comp,
         size_t grain_size = 1024)
-    : keys_first1(keys_first1), keys_last1(keys_last1),
-      keys_first2(keys_first2), keys_last2(keys_last2),
-      values_first1(values_first1),
-      values_first2(values_first2),
-      keys_result(keys_result), values_result(values_result),
-      comp(comp), grain_size(grain_size)
+      : keys_first1(keys_first1)
+      , keys_last1(keys_last1)
+      , keys_first2(keys_first2)
+      , keys_last2(keys_last2)
+      , values_first1(values_first1)
+      , values_first2(values_first2)
+      , keys_result(keys_result)
+      , values_result(values_result)
+      , comp(comp)
+      , grain_size(grain_size)
   {}
 
   range(range& r, ::tbb::split)
-    : keys_first1(r.keys_first1), keys_last1(r.keys_last1),
-      keys_first2(r.keys_first2), keys_last2(r.keys_last2),
-      values_first1(r.values_first1),
-      values_first2(r.values_first2),
-      keys_result(r.keys_result), values_result(r.values_result),
-      comp(r.comp), grain_size(r.grain_size)
+      : keys_first1(r.keys_first1)
+      , keys_last1(r.keys_last1)
+      , keys_first2(r.keys_first2)
+      , keys_last2(r.keys_last2)
+      , values_first1(r.values_first1)
+      , values_first2(r.values_first2)
+      , keys_result(r.keys_result)
+      , values_result(r.values_result)
+      , comp(r.comp)
+      , grain_size(r.grain_size)
   {
     // we can assume n1 and n2 are not both 0
     size_t n1 = thrust::distance(keys_first1, keys_last1);
@@ -184,7 +206,8 @@ struct range
     r.keys_last1 = mid1;
     r.keys_last2 = mid2;
 
-    // set second range to [mid1, keys_last1), [mid2, keys_last2), keys_result + (mid1 - keys_first1) + (mid2 - keys_first2), values_result + (mid1 - keys_first1) + (mid2 - keys_first2)
+    // set second range to [mid1, keys_last1), [mid2, keys_last2), keys_result + (mid1 - keys_first1) + (mid2 -
+    // keys_first2), values_result + (mid1 - keys_first1) + (mid2 - keys_first2)
     keys_first1 = mid1;
     keys_first2 = mid2;
     values_first1 += thrust::distance(r.keys_first1, mid1);
@@ -193,14 +216,15 @@ struct range
     values_result += thrust::distance(r.keys_first1, mid1) + thrust::distance(r.keys_first2, mid2);
   }
 
-  bool empty(void) const
+  bool empty() const
   {
     return (keys_first1 == keys_last1) && (keys_first2 == keys_last2);
   }
 
-  bool is_divisible(void) const
+  bool is_divisible() const
   {
-    return static_cast<size_t>(thrust::distance(keys_first1, keys_last1) + thrust::distance(keys_first2, keys_last2)) > grain_size;
+    return static_cast<size_t>(thrust::distance(keys_first1, keys_last1) + thrust::distance(keys_first2, keys_last2))
+         > grain_size;
   }
 };
 
@@ -209,37 +233,40 @@ struct body
   template <typename Range>
   void operator()(Range& r) const
   {
-    thrust::merge_by_key(thrust::seq,
-                         r.keys_first1, r.keys_last1,
-                         r.keys_first2, r.keys_last2,
-                         r.values_first1,
-                         r.values_first2,
-                         r.keys_result,
-                         r.values_result,
-                         r.comp);
+    thrust::merge_by_key(
+      thrust::seq,
+      r.keys_first1,
+      r.keys_last1,
+      r.keys_first2,
+      r.keys_last2,
+      r.values_first1,
+      r.values_first2,
+      r.keys_result,
+      r.values_result,
+      r.comp);
   }
 };
 
 } // end namespace merge_by_key_detail
 
-
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename OutputIterator,
-         typename StrictWeakOrdering>
-OutputIterator merge(execution_policy<DerivedPolicy> &,
-                     InputIterator1 first1,
-                     InputIterator1 last1,
-                     InputIterator2 first2,
-                     InputIterator2 last2,
-                     OutputIterator result,
-                     StrictWeakOrdering comp)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator,
+          typename StrictWeakOrdering>
+OutputIterator
+merge(execution_policy<DerivedPolicy>&,
+      InputIterator1 first1,
+      InputIterator1 last1,
+      InputIterator2 first2,
+      InputIterator2 last2,
+      OutputIterator result,
+      StrictWeakOrdering comp)
 {
   using Range = typename merge_detail::range<InputIterator1, InputIterator2, OutputIterator, StrictWeakOrdering>;
   using Body  = merge_detail::body;
   Range range(first1, last1, first2, last2, result, comp);
-  Body  body;
+  Body body;
 
   ::tbb::parallel_for(range, body);
 
@@ -256,17 +283,17 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename StrictWeakOrdering>
-thrust::pair<OutputIterator1,OutputIterator2>
-  merge_by_key(execution_policy<DerivedPolicy> &,
-               InputIterator1 keys_first1,
-               InputIterator1 keys_last1,
-               InputIterator2 keys_first2,
-               InputIterator2 keys_last2,
-               InputIterator3 values_first3,
-               InputIterator4 values_first4,
-               OutputIterator1 keys_result,
-               OutputIterator2 values_result,
-               StrictWeakOrdering comp)
+thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(
+  execution_policy<DerivedPolicy>&,
+  InputIterator1 keys_first1,
+  InputIterator1 keys_last1,
+  InputIterator2 keys_first2,
+  InputIterator2 keys_last2,
+  InputIterator3 values_first3,
+  InputIterator4 values_first4,
+  OutputIterator1 keys_result,
+  OutputIterator2 values_result,
+  StrictWeakOrdering comp)
 {
   using Range = typename merge_by_key_detail::range<
     InputIterator1,
@@ -278,15 +305,16 @@ thrust::pair<OutputIterator1,OutputIterator2>
     StrictWeakOrdering>;
   using Body = merge_by_key_detail::body;
 
-  Range range(keys_first1, keys_last1, keys_first2, keys_last2, values_first3, values_first4, keys_result, values_result, comp);
-  Body  body;
+  Range range(
+    keys_first1, keys_last1, keys_first2, keys_last2, values_first3, values_first4, keys_result, values_result, comp);
+  Body body;
 
   ::tbb::parallel_for(range, body);
 
-  thrust::advance(keys_result,   thrust::distance(keys_first1, keys_last1) + thrust::distance(keys_first2, keys_last2));
+  thrust::advance(keys_result, thrust::distance(keys_first1, keys_last1) + thrust::distance(keys_first2, keys_last2));
   thrust::advance(values_result, thrust::distance(keys_first1, keys_last1) + thrust::distance(keys_first2, keys_last2));
 
-  return thrust::make_pair(keys_result,values_result);
+  return thrust::make_pair(keys_result, values_result);
 }
 
 } // end namespace detail

@@ -74,6 +74,17 @@ you can enable verbose error messages for the two backend systems used to perfor
 These can be used in conjunction with ``ROCBLAS_LAYER=8`` for a better understanding of an error,
 or even with a success status to understand why a backend was not used.
 
+Verbose error messages
+======================
+
+Some functions can print more detail when they return an error status. For example, when a
+fixed-size workspace is too small for ``trsm``, the message includes the required and available
+workspace sizes. To enable these messages, set:
+
+.. code-block:: shell
+
+   export ROCBLAS_VERBOSE_ERROR=1
+
 
 rocTX support in rocBLAS
 ========================

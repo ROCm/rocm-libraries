@@ -12,6 +12,14 @@ between the two callers.
 from pathlib import Path
 
 
+def default_lib_dirs(script_dir):
+    """Return the lib*/ directories of the install prefix.
+
+    The scripts install to <prefix>/bin/miopen_wrapper_tests/, two levels below it.
+    """
+    return sorted(script_dir.parent.parent.glob("lib*"))
+
+
 def find_library(lib_dirs, stem):
     """Return the one versioned shared object for `stem`, or (None, reason).
 

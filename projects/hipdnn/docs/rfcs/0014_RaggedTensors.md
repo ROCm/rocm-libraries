@@ -1,7 +1,9 @@
 # hipDNN: Ragged Tensors Design Document
 
 - Contributors: hipDNN maintainers
-- **Status**: Draft
+- **Status**: In progress
+- **Status notes**: Frontend, flatbuffer, backend, plugin-version gate, and data SDK types (`RaggedTensor<T>`, `ShallowRaggedTensor<T>`) shipped (#8834, #11382, #12190). Plan-layer consumption was built in the GPU reference (`GpuSdpaRaggedFwdPlan`, #11532) with ragged SDPA bundles (#12738), not in the CPU reference as §4.10–4.11 describe.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -328,14 +330,15 @@ type) are enforced at SDK construction in
 `seq_lens` validation, where an op cares, lives on that op's
 node-level `validate()`.
 
-**Reported `dims()`.** The primary's `dims()[1]` remains the max
-padded sequence length (`S_max`), matching overridable-shape
-semantics without re-deriving `S_max` from `ragged_offset` at
-runtime.
+**Reported `dims()`.** The primary's sequence dim
+(`dims()[seqAxis]`; `dims()[2]` for SDPA's logical `[B, H, S, D]`)
+remains the max padded sequence length (`S_max`), matching
+overridable-shape semantics without re-deriving `S_max` from
+`ragged_offset` at runtime.
 
 ### 4.3 Flatbuffer schema additions
 
-`tensor_attributes.fbs` gains two appended optional defaulted
+`tensor_attributes.fbs` gains three appended optional defaulted
 fields:
 
 ```
@@ -365,9 +368,10 @@ per-op attribute tables (e.g. `SdpaAttributes` already carries
 
 To ensure that only plugins that have appropriately handled
 ragged tensors process graphs with them present, this also
-requires an `is_ragged_tensor_enabled` boolean to be added to
-the graph, and `computeMinimumPluginApiVersion` to be updated
-to map that boolean to the appropriate version.
+requires the backend to detect ragged tensors in the graph
+(`GraphDescriptor::hasRaggedTensors()`) and
+`computeMinimumEnginePluginApiVersion` to map that flag to
+`K_RAGGED_TENSOR_MIN_API_VERSION` (`"1.3.0"`).
 
 `ragged_offset_multiplier` carries its own floor
 `K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION = "1.4.0"`, which **dominates**
@@ -447,7 +451,7 @@ These apply to both `RaggedTensor<T>` and
    go wrong to this one helper. See
    [§6.3](#63-templating-the-ragged-tensor-types-on-indext) for
    why this is preferred over a templated `IndexT` parameter.
-2. **`dims()[1]` is required to be `S_max`** (the max padded
+2. **`dims()[seqAxis]` is required to be `S_max`** (the max padded
    sequence length). This is a convention the user / graph must
    uphold so the reported geometry matches kernel and
    overridable-shape expectations; the SDK types do not derive or
@@ -489,7 +493,7 @@ These apply to both `RaggedTensor<T>` and
      emits `{b, within-batch…}` indices and delegates the
      per-element offset back to `getIndex`.
 
-     A data hook is used rather than the earlier draft's literal
+     A data hook is used rather than a literal
      `virtual IndexType makeIndex(bool) const` because `IndexType`
      is scoped *inside* `ITensorIterator<IsConst>` and differs for
      the const/non-const iterators, so the non-templated `ITensor`
@@ -506,12 +510,24 @@ These apply to both `RaggedTensor<T>` and
    pack.
 
    **Identifying the ragged (sequence) axis.** The sequence axis is
-   caller-provided at construction (`BSHD_SEQ_AXIS`), not inferred
-   from strides. Only BSHD-packed memory — dims `[B, S, H, D]` with
-   the sequence axis `S` the outermost non-batch axis — is
-   ragged-legal, so each batch occupies one contiguous run.
-   Heads-outermost (BHSD) packing splits a batch's sequence rows
-   across the buffer and is out of scope. With
+   caller-provided at construction (e.g. `SDPA_SEQ_AXIS`), not
+   inferred from strides: with a singleton head or `S_max == 1` the
+   strides alone cannot tell the sequence axis apart from its
+   neighbours.
+
+   Logical dim order is the caller's choice. SDPA tensors keep
+   cuDNN's logical `[B, H, S, D]` dims and pass `SDPA_SEQ_AXIS`
+   (`2`); `BSHD_SEQ_AXIS` (`1`) is for tensors whose dims are
+   physically ordered `[B, S, H, D]`. Ragged offsets on graph tensors
+   are an SDPA feature (as in cuDNN), so the graph-driven construction
+   sites below (plan layer, executor, harness) pass `SDPA_SEQ_AXIS`.
+
+   The *physical* layout, by contrast, is constrained: it must be
+   sequence-outermost within a batch (BSHD packing; for SDPA's
+   logical dims, strides `[S·H·D, D, H·D, 1]`), so each batch
+   occupies one contiguous run. This is enforced at construction by
+   the span rule (item 5). Heads-outermost (BHSD) packing splits a
+   batch's sequence rows across the buffer and is rejected. With
    `seqStride = strides()[seqAxis]`, a batch's per-batch sequence
    extent is
 
@@ -531,7 +547,8 @@ These apply to both `RaggedTensor<T>` and
    runs first so the type-erased `readOffset` helper from item 1
    only ever encounters a supported element size.
 
-   *Structural* (`validateRaggedStructure`):
+   *Structural* (`validateRaggedStructure`, then
+   `validateSequenceOutermostLayout`):
    - `raggedOffset != nullptr`.
    - `raggedOffsetMultiplier >= 1`.
    - `paddedDims` has rank `>= 2`.
@@ -542,6 +559,19 @@ These apply to both `RaggedTensor<T>` and
    - `raggedOffset` has rank 4.
    - `raggedOffset->elementSize() == 4 || raggedOffset->elementSize() == 8`
      (int32 or int64 element type).
+   - the sequence-axis stride is positive (`strides()[seqAxis] > 0`).
+   - every other non-batch stride is non-negative (a zero stride
+     broadcasts).
+   - **span rule:** the physical layout is sequence-outermost within
+     a batch (item 4). One sequence row's footprint over the axes
+     `i ∉ {0, seqAxis}`, `1 + Σ (dims()[i] - 1) * strides()[i]`, must
+     not exceed `strides()[seqAxis]`. The check is skipped when any of
+     those dims is 0 (there are no elements). Size-1 dims add nothing
+     to the footprint, so singleton heads, `D == 1`, and `S_max == 1`
+     are judged exactly. Physical BHSD strides presented as logical
+     `[B, H, S, D]` fail the rule; a padded head stride (footprint
+     smaller than the sequence stride) passes it. The rule does not
+     involve `raggedOffsetMultiplier`.
 
    *Content* (`validateRaggedOffsets`, over the B+1 offset table
    snapshotted at construction): these invariants — which the RFC
@@ -551,7 +581,6 @@ These apply to both `RaggedTensor<T>` and
    - `ragged_offset[0] == 0`.
    - offsets are monotonic non-decreasing
      (`ragged_offset[b+1] >= ragged_offset[b]`).
-   - the sequence-axis stride is positive.
    - each per-batch block is a whole number of sequence rows
      (`(ragged_offset[b+1] - ragged_offset[b]) % seqStride == 0`,
      see item 4).
@@ -615,7 +644,7 @@ class RaggedTensorBase : public TensorBase<T>
 public:
     RaggedTensorBase(std::vector<int64_t>     paddedDims,
                      std::vector<int64_t>     strides,
-                     int                      seqAxis,   // BSHD_SEQ_AXIS
+                     int                      seqAxis,   // e.g. SDPA_SEQ_AXIS
                      std::shared_ptr<ITensor> raggedOffset,
                      std::optional<size_t>    physicalElementCount,
                      int64_t                  raggedOffsetMultiplier = 1);
@@ -632,11 +661,12 @@ protected:
     int64_t getIndexImpl(const std::vector<int64_t>& idx) const override;
     int64_t readOffset(size_t b) const;                       // §4.5 item 1
     void    validateRaggedStructure() const;                  // §4.5 item 5 (structural)
+    void    validateSequenceOutermostLayout() const;          // §4.5 item 5 (span rule)
     void    validateRaggedOffsets(const std::vector<int64_t>&) const; // §4.5 item 5 (content)
 
     std::vector<int64_t>     _paddedDims;
     std::vector<int64_t>     _strides;
-    int                      _seqAxis;               // caller-provided (BSHD_SEQ_AXIS)
+    int                      _seqAxis;               // caller-provided (e.g. SDPA_SEQ_AXIS)
     int64_t                  _seqStride;             // strides[_seqAxis]
     size_t                   _iteratedElementCount;  // ragged_offset[B]
     size_t                   _physicalElementCount;  // == ragged_offset[B]
@@ -659,18 +689,18 @@ public:
     // in device memory).
     RaggedTensor(std::vector<int64_t>     paddedDims,
                  std::vector<int64_t>     strides,
-                 int                      seqAxis,   // BSHD_SEQ_AXIS
+                 int                      seqAxis,   // e.g. SDPA_SEQ_AXIS
                  std::shared_ptr<ITensor> raggedOffset,
                  std::optional<size_t>    physicalElementCount = std::nullopt,
                  int64_t                  raggedOffsetMultiplier = 1);
 
     // ITensor / TensorBase<T> overrides:
-    //   dims()         -> paddedDims                    (dims()[1] == S_max)
+    //   dims()         -> paddedDims                    (dims()[seqAxis] == S_max)
     //   strides()      -> strides
     //   elementSpace() -> physicalElementCount           (allocation size == ragged_offset[B])
     //   elementCount() -> ragged_offset[B]               (iterated elements)
     //   isPacked()     -> false
-    //   getIndexImpl() -> readElementOffset(b) + sq*stride_1 + ...  (ragged addressing)
+    //   getIndexImpl() -> readElementOffset(b) + sq*stride_seqAxis + ...  (ragged addressing)
     //   begin/end      -> RaggedCompositeIndex (selected by the
     //                      iterator from raggedIterationInfo(); walks
     //                      each batch's ragged_offset range)
@@ -708,10 +738,11 @@ it. The primary's T-typed buffer remains mutable as usual via
 **Ragged-aware multi-dim addressing.** `RaggedTensor<T>`
 overrides `getIndexImpl` (the protected virtual from
 [§4.5](#45-data-sdk-shared-elements) item 3) so that a multi-dim
-index `{b, sq, …}` translates to a physical offset using
+index `{b, i_1, …}` (sequence index `sq = i_seqAxis`) translates to a
+physical offset using
 `readElementOffset(b)` (i.e. `ragged_offset[b] * multiplier` widened to
 `int64_t`) as the per-batch base:
-`physical_offset = readElementOffset(b) + inner_product({sq, …}, strides()[1:])`.
+`physical_offset = readElementOffset(b) + inner_product({i_1, …}, strides()[1:])`.
 (The default implementation uses only the padded strides, indexing
 into `b * stride_0 + …` regardless of where batch `b`'s range
 actually starts in the physical buffer.) A bare index `{b}` bases
@@ -750,7 +781,7 @@ qRaggedOffset->fillFromHost(myOffsetsHost);   // user-supplied values
 auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
     qAttr->get_dim(),
     qAttr->get_stride(),
-    utilities::BSHD_SEQ_AXIS,
+    utilities::SDPA_SEQ_AXIS,
     qRaggedOffset);     // implicit upcast Tensor<int32_t> -> ITensor
 
 //    Form (b): pass physicalElementCount explicitly — the user
@@ -758,7 +789,7 @@ auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
 //    the aux read and any device->host sync it would imply:
 //
 //    auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
-//        qAttr->get_dim(), qAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
+//        qAttr->get_dim(), qAttr->get_stride(), utilities::SDPA_SEQ_AXIS,
 //        qRaggedOffset, static_cast<size_t>(myOffsetsHost.back()));
 //
 //    Form (c): a shared token-unit offset aux. When ragged_offset
@@ -768,10 +799,10 @@ auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
 //    each setting its own multiplier (Q and O may differ in H*D):
 //
 //    auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
-//        qAttr->get_dim(), qAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
+//        qAttr->get_dim(), qAttr->get_stride(), utilities::SDPA_SEQ_AXIS,
 //        qoRaggedOffset, std::nullopt, /*raggedOffsetMultiplier=*/qH * qD);
 //    auto oTensor = std::make_shared<utilities::RaggedTensor<float>>(
-//        oAttr->get_dim(), oAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
+//        oAttr->get_dim(), oAttr->get_stride(), utilities::SDPA_SEQ_AXIS,
 //        qoRaggedOffset, std::nullopt, /*raggedOffsetMultiplier=*/oH * oD);
 
 // 3. Wire into variantPack as today — one entry per primary, one
@@ -803,7 +834,7 @@ public:
         void*                    data,
         std::vector<int64_t>     paddedDims,
         std::vector<int64_t>     strides,
-        int                      seqAxis,   // BSHD_SEQ_AXIS
+        int                      seqAxis,   // e.g. SDPA_SEQ_AXIS
         std::shared_ptr<ITensor> raggedOffset,
         std::optional<size_t>    physicalElementCount = std::nullopt,
         int64_t                  raggedOffsetMultiplier = 1);
@@ -896,10 +927,13 @@ scope for this RFC.
 
 ### 4.10 Plan-layer construction and CPU reference impact
 
-> **Status.** The frontend → flatbuffer → backend → data-SDK plumbing
-> above (including `ragged_offset_multiplier`) is landed. The plan-layer
-> and test-harness *consumption* in §4.10–4.11 is forward design, not
-> yet implemented; the sketches below show the intended shape.
+Not yet built. The CPU reference plan layer described in this
+section and in §4.10.1 (including `makeShallowITensor`) does not
+exist. Plan-layer consumption of ragged tensors lives in the GPU
+reference executor: `GpuSdpaRaggedFwdPlan` in
+`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/`
+and `GpuFpReferenceSdpaRagged` in
+`dnn-providers/integration-tests/gpu-ref/`.
 
 The plan's `params` struct caches each ragged tensor's UID, that of
 its `ragged_offset` aux UID, and the primary's
@@ -947,7 +981,7 @@ auto qView = std::make_shared<ShallowRaggedTensor<QType>>(
     variantPack.at(_params.qTensor.uid),
     _params.qTensor.dims,
     _params.qTensor.strides,
-    BSHD_SEQ_AXIS,
+    SDPA_SEQ_AXIS,
     qRaggedOffset,
     std::nullopt,                          // physicalElementCount inferred
     _params.qTensor.raggedOffsetMultiplier);
@@ -1044,7 +1078,7 @@ The new overload's contract:
      `shared_ptr<ITensor>` over the aux.
   4. Single-dispatches on the primary's `attribute.data_type()`
      and allocates
-     `make_unique<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS,
+     `make_unique<RaggedTensor<T>>(dims, strides, SDPA_SEQ_AXIS,
      auxSharedPtr, std::nullopt, attribute.ragged_offset_multiplier())`,
      letting the ctor infer the buffer size as `ragged_offset[B]`
      from the aux and forwarding the primary's multiplier (§4.5 item
@@ -1082,6 +1116,11 @@ harness; the strict requirement check in §4.11.1 ensures this is
 the case.
 
 ### 4.11 Test-harness integration
+
+Not yet built. `PreSuppliedInputs` does not exist. Ragged SDPA
+tests use integration-test bundles that carry `ragged_offset`
+data, for example
+`dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged/`.
 
 #### 4.11.1 Pre-supplied input bundle
 
@@ -1158,7 +1197,7 @@ For each `TensorAttributes`:
   bundle to obtain its `shared_ptr<ITensor>` — the strict check
   in [§4.11.1](#4111-pre-supplied-input-bundle) guarantees its
   presence — and allocate
-  `make_shared<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS,
+  `make_shared<RaggedTensor<T>>(dims, strides, SDPA_SEQ_AXIS,
   raggedOffsetSharedPtr, std::nullopt, attr.ragged_offset_multiplier())`,
   letting the ctor infer the buffer size as `ragged_offset[B]` and
   forwarding the primary's multiplier. The factory does not need to know
@@ -1222,13 +1261,42 @@ algorithmic correctness.
 outputs are seeded with a sentinel value at init time (see
 [§4.11.3](#4113-bundle-init-pass)) rather than randomized. The
 sentinel must be a value the CPU reference cannot legitimately
-produce (NaN for floats; a magic number for ints). After
-execution the validator iterates the full physical buffer;
-positions where the CPU side is bit-equal to the sentinel are
-skipped (the reference didn't write there); other positions use
-the existing tolerance check. This needs one validator overload
-(`allCloseSkipSentinel(cpu, gpu, sentinel, tolerance)`) plus
-the init-time branch already described in §4.11.3.
+produce; for floating-point outputs it is NaN. Golden reference
+data marks the in-block pad rows it leaves undefined the same way.
+
+For ragged tensors, the existing `allClose` validators (and the
+tensor-diff report) apply these rules; dense tensors behave
+exactly as before:
+
+- **Matching ragged layout.** Both tensors must have the same
+  ragged layout (equal `raggedIterationInfo()`: offset table,
+  sequence axis, and sequence stride). A layout mismatch, including
+  ragged vs dense, fails the comparison.
+- **In-block positions only.** The comparison iterates only
+  in-block logical positions — those whose sequence index is below
+  `seqExtent(b)` (§4.5 item 4). Padded logical positions past a
+  batch's extent alias the next batch's rows or lie past the end of
+  the buffer, so they are never read.
+- **NaN-sentinel skip.** For floating-point ragged tensors,
+  positions where the expected (reference) value is NaN, with any
+  payload, are skipped (the reference didn't write there). Other
+  positions use the existing tolerance check. A NaN in a dense
+  reference is still treated as an unwritten element and fails.
+- **Nothing compared is a failure.** If the tensor has in-block
+  elements but none was compared (e.g. the reference wrote only
+  NaN), the comparison fails. A ragged tensor whose per-batch
+  extents are all 0 has no in-block elements and passes.
+
+Skipped positions do not count toward error statistics: the RMS
+validator and the diff report use the number of compared elements.
+Integer ragged outputs get the layout and in-block rules but no
+sentinel skip, so every in-block position is compared (see
+[§7.3](#73-improve-cpu-validation-sentinel-value-handling)).
+
+Ragged comparison is host-only. The device-side validators reject
+ragged tensors, and a comparison that resolves to the device
+validation site reports the ragged output as unsupported there
+(rerun with the CPU validator) rather than comparing it.
 
 Sentinel-skip is the only validation mechanism in this design.
 Because `seq_lens` is not attached to the ragged primary, there
@@ -1417,10 +1485,10 @@ simpler SDK and harness.
 
 ### 6.3 Templating the ragged-tensor types on `IndexT`
 
-An earlier draft of this RFC parameterized both ragged-tensor
+An alternative design parameterizes both ragged-tensor
 types on the aux element type — `RaggedTensor<T, IndexT>` and
 `ShallowRaggedTensor<T, IndexT>` (defaulting to `int32_t`,
-permitting `int64_t`). The aux was then held as
+permitting `int64_t`). The aux is then held as
 `std::shared_ptr<TensorBase<IndexT>>`, with reads going through
 ordinary typed access.
 

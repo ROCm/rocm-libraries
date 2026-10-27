@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -77,10 +78,13 @@ namespace
                           "mi350spx");
     }
 
-    uint32_t emittedSplitK(int16_t compiledGsu, int16_t runtimeGsu)
+    KernelInvocation splitKProbeCall(int16_t        compiledGsu,
+                                     int16_t        runtimeGsu,
+                                     CustomGridSize gridY = CustomGridSize::TilesYGSU)
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SplitK});
+        solution.customKernel.grid.y      = gridY;
         solution.sizeMapping.globalSplitU = compiledGsu;
 
         auto problem = dummyProblem();
@@ -90,7 +94,12 @@ namespace
         ContractionInputs inputs;
         StreamKSettings   sk;
 
-        auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+        return solution.generateCustomCall<false>(problem, inputs, device, sk);
+    }
+
+    uint32_t emittedSplitK(int16_t compiledGsu, int16_t runtimeGsu)
+    {
+        auto invocation = splitKProbeCall(compiledGsu, runtimeGsu);
 
         EXPECT_EQ(invocation.args.size(), sizeof(uint32_t));
         uint32_t splitK = 0;
@@ -141,6 +150,36 @@ TEST(CustomKernelTest, SplitKFallsBackToTheCompiledGsu)
     EXPECT_EQ(emittedSplitK(/*compiled*/ 16, /*runtime*/ 0), 4u);
 }
 
+// A split-K kernel reduces into D only once every GSU slice of a tile has arrived,
+// so TilesYGSU has to launch one row of work groups per slice, following the
+// runtime-effective GSU like the SplitK argument does.
+TEST(CustomKernelTest, TilesYGsuLaunchesEveryGsuSlice)
+{
+    auto const unsplit = splitKProbeCall(/*compiled*/ 1, /*runtime*/ 0).numWorkGroups;
+
+    auto const compiled = splitKProbeCall(/*compiled*/ 16, /*runtime*/ 0).numWorkGroups;
+    EXPECT_EQ(compiled.x, unsplit.x);
+    EXPECT_EQ(compiled.y, 16 * unsplit.y);
+    EXPECT_EQ(compiled.z, unsplit.z);
+
+    EXPECT_EQ(splitKProbeCall(/*compiled*/ 1, /*runtime*/ 4).numWorkGroups.y, 4 * unsplit.y);
+    EXPECT_EQ(splitKProbeCall(/*compiled*/ 0, /*runtime*/ 0).numWorkGroups.y, unsplit.y);
+    EXPECT_EQ(
+        splitKProbeCall(/*compiled*/ 1, /*runtime*/ 0, CustomGridSize::TilesY).numWorkGroups.y,
+        unsplit.y);
+}
+
+// A grid with no GSU term would launch one slice per tile and report success with
+// D unwritten, so a split-K launch on one has to fail instead.
+TEST(CustomKernelTest, GridWithoutGsuTermRejectsSplitK)
+{
+    EXPECT_THROW(splitKProbeCall(/*compiled*/ 16, /*runtime*/ 0, CustomGridSize::TilesY),
+                 std::runtime_error);
+    EXPECT_THROW(splitKProbeCall(/*compiled*/ 1, /*runtime*/ 4, CustomGridSize::TilesY),
+                 std::runtime_error);
+    EXPECT_NO_THROW(splitKProbeCall(/*compiled*/ 1, /*runtime*/ 0, CustomGridSize::TilesY));
+}
+
 // A custom kernel declares alpha and beta as 32-bit slots, so a narrower compute
 // type has to be widened before it is written or every argument after it shifts.
 // KernelArguments only widens an argument spelled exactly "alpha" or "beta".
@@ -164,4 +203,51 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
                 .size(),
             sizeof(float));
     }
+}
+
+namespace
+{
+    // Grid x and ComputeUnits kernarg of a persistent probe kernel.
+    std::pair<size_t, int32_t> computeUnitsLaunch(int smCountTarget, int persistentMaxCUs)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::int32, CustomArgSemantic::ComputeUnits});
+        solution.customKernel.grid
+            = {CustomGridSize::ComputeUnits, CustomGridSize::One, CustomGridSize::One};
+
+        auto problem = dummyProblem();
+        problem.setParams().setSmCountTarget(smCountTarget);
+        auto device             = probeDevice();
+        device.persistentMaxCUs = persistentMaxCUs;
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+
+        auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+        EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+        EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+        EXPECT_EQ(invocation.args.size(), sizeof(int32_t));
+        int32_t cuCount = 0;
+        std::memcpy(&cuCount, invocation.args.data(), sizeof(cuCount));
+        return {invocation.numWorkGroups.x, cuCount};
+    }
+}
+
+// Persistent skinny-GEMM kernels stride by CU count; the launch grid and the
+// ComputeUnits kernarg have to be the same value.
+TEST(CustomKernelTest, ComputeUnitsGridAndArgFollowHardware)
+{
+    constexpr int cus = TensileLite::testing::_SPX_CU;
+    EXPECT_EQ(computeUnitsLaunch(0, 0), std::make_pair(size_t{cus}, int32_t{cus}));
+}
+
+// The SM-count target and persistentMaxCUs cap that value as they cap Tensile's
+// persistent grids, and the tighter cap wins.
+TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
+{
+    constexpr int cus = TensileLite::testing::_SPX_CU;
+    EXPECT_EQ(computeUnitsLaunch(64, 0), std::make_pair(size_t{64}, int32_t{64}));
+    EXPECT_EQ(computeUnitsLaunch(64, 48), std::make_pair(size_t{48}, int32_t{48}));
+    EXPECT_EQ(computeUnitsLaunch(0, 96), std::make_pair(size_t{96}, int32_t{96}));
+    EXPECT_EQ(computeUnitsLaunch(4 * cus, 0), std::make_pair(size_t{cus}, int32_t{cus}));
 }

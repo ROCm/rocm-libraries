@@ -2,11 +2,13 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/helper_rocke.helpers.transforms.h -- C99 port of a SUBSET of
- * rocke/helpers/transforms.py: the CK Tile-style coordinate-transform DAG.
+ * rocke/helpers/transforms.py: the CK Tile-style coordinate-transform DAG,
+ * plus the magic-number division of rocke/helpers/magic_division.py that the
+ * DAG's magic unmerge emits.
  *
  * SCOPE OF THIS PORT (this phase) -- exactly these Python symbols:
- *   calculate_magic_numbers        rocke_calculate_magic_numbers
- *   do_magic_division              rocke_do_magic_division
+ *   magic_division.calculate_magic_numbers  rocke_calculate_magic_numbers
+ *   magic_division.do_magic_division        rocke_do_magic_division
  *   CoordVar                       rocke_coord_var_t
  *   Embed (transform)              rocke_embed() / ROCKE_XFORM_EMBED
  *   PassThrough (via pass_through) rocke_pass_through() / ROCKE_XFORM_PASS_THROUGH
@@ -75,7 +77,7 @@ bool rocke_calculate_magic_numbers(rocke_ir_builder_t* b,
  * Emits `dividend // divisor` via the mul-hi magic sequence:
  *   mult_i32 = (multiplier >= 2**31) ? multiplier - 2**32 : multiplier
  *   tmp      = b.umul_hi_i32(dividend, b.const_i32(mult_i32))
- *   summed   = b.add(tmp, dividend)
+ *   summed   = b.add_nuw(tmp, dividend)
  *   return shift == 0 ? summed : b.lshr(summed, b.const_i32(shift))
  *
  * `dividend` is an i32 SSA value (treated unsigned); the result is the i32

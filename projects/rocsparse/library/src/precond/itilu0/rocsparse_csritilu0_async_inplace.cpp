@@ -34,6 +34,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0_driver.hpp"
 #include "rocsparse_csritilu0x_driver.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_primitives.hpp"
 
 namespace rocsparse
@@ -912,6 +913,21 @@ namespace rocsparse
     };
 
     //
+    // Number of BLOCKSIZE-thread blocks covering target_size. The kernels below
+    // do not grid-stride, so a count the grid.x dispatch cannot run is an error
+    // rather than a silently narrowed launch.
+    //
+    template <uint32_t BLOCKSIZE, typename J>
+    static uint32_t grid_blocks_x(J target_size_)
+    {
+        const int64_t nblocks = rocsparse::ceil_div(target_size_, BLOCKSIZE);
+        THROW_IF_ROCSPARSE_ERROR((nblocks > rocsparse::dispatch_limit_x(BLOCKSIZE))
+                                     ? rocsparse_status_invalid_size
+                                     : rocsparse_status_success);
+        return static_cast<uint32_t>(nblocks);
+    }
+
+    //
     // Calculate the array lptr_end.
     //
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J>
@@ -959,7 +975,7 @@ namespace rocsparse
                                                  hipStream_t stream_,
                                                  P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1017,7 +1033,7 @@ namespace rocsparse
     static void
         kernel_compute_coo_dispatch(J target_size_, int wavefront_size, hipStream_t stream_, P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1077,7 +1093,7 @@ namespace rocsparse
                                                     hipStream_t stream_,
                                                     P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1162,7 +1178,7 @@ namespace rocsparse
                                              hipStream_t stream_,
                                              P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::grid_blocks_x<BLOCKSIZE>(target_size_));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {

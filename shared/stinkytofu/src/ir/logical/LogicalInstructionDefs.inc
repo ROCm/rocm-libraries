@@ -615,6 +615,16 @@
              false,
              "IF_VALU"},
 
+                                    {"VMaximumMinimumF32",
+             "VMaximumMinimumF32",
+             3,
+             true,
+             "Vector MinMax",
+             true,
+             true,
+             false,
+             "IF_VALU"},
+
                                     {"VAndB32",
              "VAndB32",
              2,

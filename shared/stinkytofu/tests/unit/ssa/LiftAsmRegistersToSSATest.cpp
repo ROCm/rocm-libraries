@@ -416,7 +416,11 @@ TEST_F(LiftAsmRegistersToSSATest, RejectsAnalysisPhis) {
     EXPECT_TRUE(contains(error, "analysis PHIs must be removed")) << error;
 }
 
-TEST_F(LiftAsmRegistersToSSATest, RejectsTrue16HalfOperands) {
+TEST_F(LiftAsmRegistersToSSATest, RejectsATrue16HalfWrite) {
+    // Writing one half preserves the other, so the destination is a
+    // read-modify-write and the preserved half has no operand to bind. Until
+    // that read is modelled, the whole DWORD would look freshly defined and the
+    // allocator would be free to move it away from the value it must keep.
     AsmIRBuilder builder(*entry, kArch);
     StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
     mov->addDestReg(StinkyRegister("v", 0, 1));
@@ -425,7 +429,8 @@ TEST_F(LiftAsmRegistersToSSATest, RejectsTrue16HalfOperands) {
         True16Modifiers(HighBitSel::HIGH, HighBitSel::NONE, {HighBitSel::NONE}));
 
     const std::string error = liftError();
-    EXPECT_TRUE(contains(error, "True16 half operands")) << error;
+    EXPECT_TRUE(contains(error, "True16 half write")) << error;
+    EXPECT_TRUE(contains(error, "dst0 is in the lift scope")) << error;
 }
 
 TEST_F(LiftAsmRegistersToSSATest, RejectsOneInstructionDefiningAUnitTwice) {
@@ -684,6 +689,18 @@ StinkyInstruction* createVMovFromSgpr(BasicBlock* bb, int destVgpr, int srcSgpr)
     return mov;
 }
 
+/// `v_mov_b32 v0.h, v1`: a half write on a vector destination, so a scope
+/// decision on the operand carrying the selector is visible on one instruction.
+StinkyInstruction* createVMovWithHalfWrite(BasicBlock* bb) {
+    AsmIRBuilder builder(*bb, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("v", 1, 1));
+    mov->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::HIGH, HighBitSel::NONE, {HighBitSel::NONE}));
+    return mov;
+}
+
 bool anyOfClass(const Function& function, RegType regClass) {
     for (StinkySSAValue* value : function.ssaArena().values()) {
         if (value != nullptr && value->type().regType == regClass) return true;
@@ -733,16 +750,12 @@ TEST_F(LiftAsmRegistersToSSATest, AnOutOfScopeClassIsNotAnError) {
     EXPECT_FALSE(anyOfClass(*func, RegType::V));
 }
 
-TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOutsideTheLiftScopeIsNotAnError) {
-    // The selector names a vector operand and this lift covers only scalars, so
-    // the instruction keeps both registers and its modifier verbatim. Rejecting
-    // it would discard the whole function over an operand nothing touches.
-    AsmIRBuilder builder(*entry, kArch);
-    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
-    mov->addDestReg(StinkyRegister("v", 0, 1));
-    mov->addSrcReg(StinkyRegister("v", 1, 1));
-    mov->addModifier<True16Modifiers>(
-        True16Modifiers(HighBitSel::HIGH, HighBitSel::NONE, {HighBitSel::NONE}));
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfWriteOutsideTheLiftScopeIsNotAnError) {
+    // The selector names a vector destination and this lift covers only scalars,
+    // so the instruction keeps both registers and its modifier verbatim.
+    // Rejecting it would discard the whole function over an operand nothing
+    // touches.
+    StinkyInstruction* mov = createVMovWithHalfWrite(entry);
 
     lift(scopedTo(RegType::S));
 
@@ -751,17 +764,57 @@ TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOutsideTheLiftScopeIsNotAnError) {
     EXPECT_EQ(mov->getModifier<True16Modifiers>()->getDst0(), HighBitSel::HIGH);
 }
 
-TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfOnAnInScopeOperandStillRejects) {
-    // Same scope, but a lifted operand now shares the instruction with the
-    // selector, so the lift cannot leave it physical and must decline. This is
-    // what keeps the guard scoped rather than simply gone.
-    StinkyInstruction* mov = createVMovFromSgpr(entry, /*destVgpr=*/0, /*srcSgpr=*/4);
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfWriteInTheLiftScopeRejects) {
+    // Same instruction, but now the destination carrying the selector is lifted,
+    // so it cannot be left physical and the lift must decline. Paired with the
+    // test above, this is what keeps the guard scoped rather than simply gone.
+    createVMovWithHalfWrite(entry);
+
+    const std::string error = liftError(scopedTo(RegType::V));
+    EXPECT_TRUE(contains(error, "True16 half write")) << error;
+    EXPECT_TRUE(contains(error, "dst0 is in the lift scope")) << error;
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfWriteIsFoundBehindAnUnprintedDestination) {
+    // The selector is indexed by printed position, so a destination the emitter
+    // skips must not consume an index. Here the pseudo register comes first, so
+    // v0 is printed destination 0 and dst0 names it. Counting raw destinations
+    // instead would look at dst1, find no selector, and let a half write through.
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister(RegType::LDS, 0, 1));
+    mov->addDestReg(StinkyRegister("v", 0, 1));
+    mov->addSrcReg(StinkyRegister("v", 1, 1));
     mov->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::HIGH, HighBitSel::NONE, {HighBitSel::NONE}));
+
+    const std::string error = liftError(scopedTo(RegType::V));
+    EXPECT_TRUE(contains(error, "True16 half write")) << error;
+    // Named by its index in getDestRegs(), which the pseudo register shifts to 1.
+    EXPECT_TRUE(contains(error, "dst1 is in the lift scope")) << error;
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ATrue16HalfReadLiftsAsAFullDwordRead) {
+    // `v_cvt_f32_bf16 v12, v32.l` is the shape the bf16 epilogue emits. The
+    // selector picks bits out of the value rather than naming a separate one, so
+    // the operand binds the reaching definition of the whole DWORD and needs no
+    // sub-DWORD unit.
+    StinkyInstruction* def = createVAddInBlock(entry, kArch, /*dest=*/32, /*src0=*/0, /*src1=*/1);
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* cvt = builder.create(getMCIDByUOp(GFX::v_cvt_f32_bf16, kArch));
+    cvt->addDestReg(StinkyRegister("v", 12, 1));
+    cvt->addSrcReg(StinkyRegister("v", 32, 1));
+    cvt->addModifier<True16Modifiers>(
         True16Modifiers(HighBitSel::NONE, HighBitSel::NONE, {HighBitSel::LOW}));
 
-    const std::string error = liftError(scopedTo(RegType::S));
-    EXPECT_TRUE(contains(error, "True16 half operands")) << error;
-    EXPECT_TRUE(contains(error, "src0 is in the lift scope")) << error;
+    lift(scopedTo(RegType::V));
+
+    // One slot, holding the whole-DWORD definition of v32 rather than a value of
+    // its own, and the selector still on the modifier for the emitter to reprint.
+    EXPECT_EQ(ssaSourceUnits(*cvt, 0).size(), 1u);
+    EXPECT_EQ(ssaSourceValue(*cvt, 0), ssaDefinedValue(*def));
+    ASSERT_NE(cvt->getModifier<True16Modifiers>(), nullptr);
+    EXPECT_EQ(cvt->getModifier<True16Modifiers>()->getSrc(0), HighBitSel::LOW);
 }
 
 TEST_F(LiftAsmRegistersToSSATest, AClassTheLifterCannotModelIsStillAnError) {

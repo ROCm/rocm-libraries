@@ -50,6 +50,7 @@ Usage::
     python -m benchmarks.common.calibrate_occupancy compare \
         --pred pred_gfx942.json --measured meas_prefill_gfx942.csv meas_decode_gfx942.csv
 """
+
 from __future__ import annotations
 
 import argparse
@@ -90,8 +91,6 @@ def _dense(arch: str, *, persistent: bool, head_size: int = 128, dtype: str = "b
 
 
 def _tiled(arch: str, *, head_size: int = 128, dtype: str = "fp16"):
-    from unittest import mock
-
     import kernels.common.attention_unified as au
     from kernels import UnifiedAttentionProblem, build_unified_attention_2d_tiled
 
@@ -107,10 +106,9 @@ def _tiled(arch: str, *, head_size: int = 128, dtype: str = "fp16"):
         dtype=dtype,
         sliding_window=0,
     )
-    with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
-        return build_unified_attention_2d_tiled(
-            au._tiled_spec_from_problem(prob), arch=arch
-        )
+    return build_unified_attention_2d_tiled(
+        au._tiled_spec_from_problem(prob, arch), arch=arch
+    )
 
 
 def _scalar(kind: str):

@@ -222,4 +222,89 @@ INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);
 INSTANTIATE(rocsparse_double_complex);
-void testing_coosort_extra(const Arguments& arg) {}
+void testing_coosort_extra(const Arguments& arg)
+{
+    rocsparse_local_handle handle(arg);
+
+    const rocsparse_int nnz = 1048576;
+
+    const rocsparse_int m = nnz;
+    const rocsparse_int n = nnz;
+
+    for(const bool by_row : {true, false})
+    {
+        for(const bool permute : {false, true})
+        {
+            // Entry (i, n - 1 - i), shuffled.
+            host_vector<rocsparse_int> hrow(nnz);
+            host_vector<rocsparse_int> hcol(nnz);
+            for(rocsparse_int i = 0; i < nnz; ++i)
+            {
+                hrow[i] = i;
+                hcol[i] = n - 1 - i;
+            }
+            for(rocsparse_int i = 0; i < nnz; ++i)
+            {
+                const rocsparse_int j = random_generator_exact<rocsparse_int>(0, nnz - 1);
+                std::swap(hrow[i], hrow[j]);
+                std::swap(hcol[i], hcol[j]);
+            }
+            const host_vector<rocsparse_int> hrow_unsorted = hrow;
+            const host_vector<rocsparse_int> hcol_unsorted = hcol;
+
+            // Sorted by row, entry i is (i, n - 1 - i). Sorted by column, it is
+            // (m - 1 - i, i).
+            host_vector<rocsparse_int> hrow_gold(nnz);
+            host_vector<rocsparse_int> hcol_gold(nnz);
+            for(rocsparse_int i = 0; i < nnz; ++i)
+            {
+                hrow_gold[i] = by_row ? i : m - 1 - i;
+                hcol_gold[i] = by_row ? n - 1 - i : i;
+            }
+
+            device_vector<rocsparse_int> drow(hrow);
+            device_vector<rocsparse_int> dcol(hcol);
+            device_vector<rocsparse_int> dperm(nnz);
+
+            size_t buffer_size;
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_coosort_buffer_size(handle, m, n, nnz, drow, dcol, &buffer_size));
+            device_dense_vector<char> dbuffer(buffer_size);
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_identity_permutation(handle, nnz, dperm));
+
+            rocsparse_int* perm = permute ? (rocsparse_int*)dperm : nullptr;
+            if(by_row)
+            {
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_coosort_by_row(handle, m, n, nnz, drow, dcol, perm, (void*)dbuffer));
+            }
+            else
+            {
+                CHECK_ROCSPARSE_ERROR(rocsparse_coosort_by_column(
+                    handle, m, n, nnz, drow, dcol, perm, (void*)dbuffer));
+            }
+
+            hrow.transfer_from(drow);
+            hcol.transfer_from(dcol);
+            hrow_gold.unit_check(hrow);
+            hcol_gold.unit_check(hcol);
+
+            if(permute)
+            {
+                host_vector<rocsparse_int> hperm(nnz);
+                hperm.transfer_from(dperm);
+
+                host_vector<rocsparse_int> hrow_permuted(nnz);
+                host_vector<rocsparse_int> hcol_permuted(nnz);
+                for(rocsparse_int i = 0; i < nnz; ++i)
+                {
+                    hrow_permuted[i] = hrow_unsorted[hperm[i]];
+                    hcol_permuted[i] = hcol_unsorted[hperm[i]];
+                }
+                hrow_gold.unit_check(hrow_permuted);
+                hcol_gold.unit_check(hcol_permuted);
+            }
+        }
+    }
+}

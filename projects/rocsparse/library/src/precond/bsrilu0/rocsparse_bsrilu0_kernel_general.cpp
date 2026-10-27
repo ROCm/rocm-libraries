@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsrilu0_kernel_general.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -43,7 +44,8 @@ namespace rocsparse
                                                      rocsparse_index_base idx_base,
                                                      int32_t              boost,
                                                      double               boost_tol,
-                                                     T                    boost_val)
+                                                     T                    boost_val,
+                                                     int64_t              row_group)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
@@ -51,8 +53,14 @@ namespace rocsparse
         const auto lid = hipThreadIdx_x & (WFSIZE - 1);
         const auto wid = hipThreadIdx_x / WFSIZE;
 
+        //
+        // One group of BLOCKSIZE / WFSIZE consecutive rows, one row per
+        // wavefront. The group is supplied by the caller rather than read from
+        // blockIdx.x, so the wrapper can walk a chunk of groups when the row
+        // count is past what grid.x can express.
+        //
         // Index
-        J idx = blockIdx.x * BLOCKSIZE / WFSIZE + wid;
+        int64_t idx = row_group * (BLOCKSIZE / WFSIZE) + wid;
 
         // Do not run out of bounds
         if(idx >= mb)
@@ -98,7 +106,7 @@ namespace rocsparse
                 }
 
                 // Spin loop until dependency has been resolved
-                (void)rocsparse::spin_loop<SLEEP>(&done_array[bsr_col], __HIP_MEMORY_SCOPE_AGENT);
+                rocsparse::spin_loop<SLEEP>(&done_array[bsr_col], __MEMORY_SCOPE_DEVICE);
 
                 // Make sure dependencies are visible in global memory
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
@@ -256,7 +264,7 @@ namespace rocsparse
         if(lid == 0)
         {
             // First lane writes "we are done" flag
-            __hip_atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            rocsparse::atomic_store(&done_array[row], 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
             if(pivot)
             {
@@ -275,6 +283,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_kernel_general(rocsparse_direction dir,
                                 J                   mb,
+                                int64_t             batch_count,
                                 const I* __restrict__ bsr_row_ptr,
                                 const J* __restrict__ bsr_col_ind,
                                 T*      bsr_val,
@@ -295,7 +304,6 @@ namespace rocsparse
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
                                 bool is_val_host_mode)
     {
-        const auto batch_index = hipBlockIdx_y;
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
             enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
@@ -303,21 +311,46 @@ namespace rocsparse
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_val_host_mode, boost_val);
         const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
-        rocsparse::bsrilu0_device_general<BLOCKSIZE, WFSIZE, SLEEP>(
-            dir,
-            mb,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val + batch_index * bsr_val_stride,
-            bsr_diag_ind,
-            bsr_dim,
-            done_array + batch_index * done_array_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            idx_base,
-            enable_boost,
-            boost_tol,
-            boost_val);
+        //
+        // grid.x is clamped to what the hardware accepts, so this walks a
+        // contiguous chunk of row groups. For every row count that fits on a
+        // device the chunk is exactly one group and the loop runs once.
+        //
+        // No barrier between iterations, and none is needed: this kernel holds
+        // no shared state, so the next group has nothing to race against. Every
+        // scratch location it touches (the done array, the zero-pivot position)
+        // is addressed by the logical row taken from the map, never by
+        // blockIdx.x, so reusing a block across iterations is safe.
+        //
+        const int64_t num_row_groups = (mb - 1) / (BLOCKSIZE / WFSIZE) + 1;
+
+        int64_t first_row_group, last_row_group;
+        rocsparse::grid_x_chunk(
+            num_row_groups, hipGridDim_x, hipBlockIdx_x, first_row_group, last_row_group);
+
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            for(int64_t row_group = first_row_group; row_group < last_row_group; ++row_group)
+            {
+                rocsparse::bsrilu0_device_general<BLOCKSIZE, WFSIZE, SLEEP>(
+                    dir,
+                    mb,
+                    bsr_row_ptr,
+                    bsr_col_ind,
+                    rocsparse::load_pointer(bsr_val, batch_index, bsr_val_stride),
+                    bsr_diag_ind,
+                    bsr_dim,
+                    rocsparse::load_pointer(done_array, batch_index, done_array_stride),
+                    map,
+                    rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                    idx_base,
+                    enable_boost,
+                    boost_tol,
+                    boost_val,
+                    row_group);
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
@@ -344,15 +377,20 @@ namespace rocsparse
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
-        auto          numeric_exact     = bsrilu0_info->get_singularity_numeric_exact();
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
+        auto          numeric_exact = bsrilu0_info->get_singularity_numeric_exact();
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_general<BLOCKSIZE, WFSIZE, SLEEP>),
-            dim3((WFSIZE * A->rows - 1) / BLOCKSIZE + 1, A->batch_count),
+            dim3(rocsparse::get_grid_size_x(
+                     handle, (WFSIZE * A->rows - 1) / BLOCKSIZE + 1, BLOCKSIZE),
+                 rocsparse::get_grid_size_y(handle, A_batch_count)),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
             A->block_dir,
             static_cast<J>(A->rows),
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

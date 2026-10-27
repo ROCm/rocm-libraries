@@ -20,9 +20,14 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from itertools import product
+
+import pytest
+
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.code import Module, KernelBody
-from rocisa.instruction import MacroInstruction
+from rocisa.code import Module, KernelBody, Macro, ValueIf, ValueElseIf, ValueEndif
+from rocisa.container import sgpr
+from rocisa.instruction import MacroInstruction, SMovB32
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 
 
@@ -87,3 +92,62 @@ def test_macro_in_submodule():
     result = _run_pass(body)
     assert ".macro" not in result
     assert "v_mul_hi_u32 v1, v1, s2" in result
+
+
+@pytest.mark.parametrize("a,b", list(product((0, 1), repeat=2)))
+@pytest.mark.parametrize("operator", ["==", "!="])
+def test_macro_conjunction(a, b, operator):
+    macro = Macro("CONJUNCTION", ["a", "b"])
+    macro.add(ValueIf(f"\\a {operator} 1 && \\b {operator} 1"))
+    macro.add(SMovB32(dst=sgpr(0), src=42))
+    macro.add(ValueEndif())
+    body = Module("body")
+    body.add(macro)
+    body.add(MacroInstruction(name="CONJUNCTION", args=[a, b]))
+
+    result = _run_pass(body)
+    expected = (a == 1 and b == 1) if operator == "==" else (a != 1 and b != 1)
+    assert ("s_mov_b32 s0, 42" in result) == expected
+    assert "CONJUNCTION" not in result
+
+
+@pytest.mark.parametrize("a,b,c", list(product((0, 1), repeat=3)))
+def test_macro_three_term_conjunction(a, b, c):
+    macro = Macro("CONJUNCTION", ["a", "b", "c"])
+    macro.add(ValueIf("\\a == 1 && \\b == 1 && \\c == 1"))
+    macro.add(SMovB32(dst=sgpr(0), src=42))
+    macro.add(ValueEndif())
+    body = Module("body")
+    body.add(macro)
+    body.add(MacroInstruction(name="CONJUNCTION", args=[a, b, c]))
+
+    result = _run_pass(body)
+    assert ("s_mov_b32 s0, 42" in result) == bool(a and b and c)
+    assert "CONJUNCTION" not in result
+
+
+@pytest.mark.parametrize(
+    "use_gr,use_plr,expected",
+    [(1, 1, 11), (0, 1, 22), (0, 0, 33), (1, 0, None)],
+)
+def test_custom_schedule_loop_branch(use_gr, use_plr, expected):
+    # CustomSchedule uses these conditions to select different waits for the
+    # main loop, no-global-load loop, and final no-load loop. Ignoring usePLR
+    # selects the no-global-load wait for the final loop and can leave LDS reads
+    # outstanding when their matrix operands are consumed.
+    macro = Macro("LOOP_WAIT", ["useGR=1", "usePLR=1"])
+    macro.add(ValueIf("\\useGR == 1 && \\usePLR == 1"))
+    macro.add(SMovB32(dst=sgpr(0), src=11))
+    macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 1"))
+    macro.add(SMovB32(dst=sgpr(0), src=22))
+    macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 0"))
+    macro.add(SMovB32(dst=sgpr(0), src=33))
+    macro.add(ValueEndif())
+    body = Module("body")
+    body.add(macro)
+    body.add(MacroInstruction(name="LOOP_WAIT", args=[use_gr, use_plr]))
+
+    result = _run_pass(body)
+    moves = [line for line in result.splitlines() if line.startswith("s_mov_b32")]
+    assert moves == ([] if expected is None else [f"s_mov_b32 s0, {expected}"])
+    assert "LOOP_WAIT" not in result

@@ -22,12 +22,15 @@ Functions:
 """
 
 import shutil
+import logging
 import re
 import math
 import yaml
 
 from pathlib import Path
 from typing import List, Sequence, Tuple
+
+logger = logging.getLogger("GEKO")
 
 
 try:
@@ -46,6 +49,8 @@ __all__ = [
     "get_checkpoint_file",
     "estimate_workload",
     "_gpu_targets_from_configs",
+    "record_shape_failure",
+    "shape_failure_count",
 ]
 
 
@@ -102,21 +107,53 @@ def get_build_state(build_dir: str | Path) -> str:
 
     checkpoint = get_checkpoint_file(build_dir)
     if checkpoint is not None:
-        # Resumable only if the checkpoint is the sole remaining content.
-        if all(p == checkpoint for p in build_dir.iterdir()):
+        # Resumable only if the checkpoint is the sole remaining content, except
+        # for .failcount: clean_failed_build deliberately preserves it alongside
+        # the checkpoint, so counting it as content would report every resumable
+        # build as failed.
+        if all(p == checkpoint or p.name == ".failcount" for p in build_dir.iterdir()):
             return "resumable"
 
     return "failed"
 
 
-def list_optimization_configs(tuning_dir: str | Path) -> List[str]:
+def shape_failure_count(build_dir: Path) -> int:
+    """How many times this shape has been attempted and failed.
+
+    Stored as a plain integer in ``<build_dir>/.failcount`` so it survives reboots
+    and separate invocations, which is exactly when it matters.
+    """
+    try:
+        return int((Path(build_dir) / ".failcount").read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def record_shape_failure(build_dir: Path) -> int:
+    """Increment and return this shape's persistent failure count."""
+    build_dir = Path(build_dir)
+    count = shape_failure_count(build_dir) + 1
+    try:
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / ".failcount").write_text(str(count))
+    except OSError:
+        pass
+    return count
+
+
+def list_optimization_configs(
+    tuning_dir: str | Path, max_shape_failures: int = 0
+) -> List[str]:
     """Get all tuning configuration YAML files from a directory.
 
     Args:
         tuning_dir (str | Path): Directory containing tuning configuration files.
+        max_shape_failures (int): Leave out shapes whose ``.failcount`` has reached
+            this; 0 keeps every shape.
 
     Returns:
-        List[str]: List of paths to YAML config files, excluding files with 'config' in name.
+        List[str]: Paths of the YAML configs to run, in file-number order. Files with
+        'config' in the name and configs without MatrixInstruction groups are skipped.
     """
 
     def extract_number(file: Path) -> int:
@@ -126,10 +163,44 @@ def list_optimization_configs(tuning_dir: str | Path) -> List[str]:
 
     tuning_dir = Path(tuning_dir)
     configs = []
+    skipped_no_mi = []
+    retired = []
     for f in sorted(tuning_dir.glob("*.yaml"), key=extract_number):
         if "config" in f.name.lower():
             continue
+        if not _has_matrix_instructions(f):
+            # A config with no MatrixInstruction entries generates no kernels, so
+            # running it occupies a GPU slot to produce nothing and trips the load
+            # balancer ("Could not compute workload ... 'NoneType' object is not
+            # iterable", which reads Groups[0]). Tiny shapes hit this: M=N=6 leaves
+            # nothing after MI filtering, since every MI tile is at least 16x16.
+            skipped_no_mi.append(f.name)
+            continue
+
+        if (
+            max_shape_failures
+            and shape_failure_count(tuning_dir / f"build_{f.stem}") >= max_shape_failures
+        ):
+            # Retire a shape that has already failed. Opt-in (default 0, off):
+            # on a node that degrades over a run, re-attempting a shape that
+            # already failed spends a limited healthy window for no result.
+            #
+            # To re-attempt a retired shape later, delete its .failcount file.
+            retired.append(f.name)
+            continue
         configs.append(str(f))
+
+    if retired:
+        logger.warning(
+            f"Retiring {len(retired)} shape(s) that failed >= {max_shape_failures} "
+            f"times: {', '.join(retired[:5])}" + (" ..." if len(retired) > 5 else "")
+        )
+    if skipped_no_mi:
+        logger.warning(
+            f"Skipping {len(skipped_no_mi)} config(s) with no MatrixInstruction "
+            f"groups (cannot generate kernels): {', '.join(skipped_no_mi[:5])}"
+            + (" ..." if len(skipped_no_mi) > 5 else "")
+        )
     return configs
 
 
@@ -145,6 +216,21 @@ def _gpu_targets_from_configs(config_paths: Sequence[str | Path]) -> str | None:
         except (OSError, yaml.YAMLError, TypeError, AttributeError):
             continue
     return None
+
+
+def _has_matrix_instructions(path: Path) -> bool:
+    """True when a tuning config declares at least one MatrixInstruction.
+
+    Parsed textually rather than with yaml.safe_load: these configs are ~100KB
+    each and this runs over every config at startup, so a substring scan keeps
+    the check cheap. Any read error is reported as True so an unreadable file
+    fails loudly downstream rather than being silently dropped here.
+    """
+    try:
+        with open(path, "r") as handle:
+            return "MatrixInstruction:" in handle.read()
+    except OSError:
+        return True
 
 
 def get_failed_optimizations(tuning_dir: str | Path) -> List[str]:
@@ -191,15 +277,23 @@ def clean_failed_build(build_dir: str | Path) -> None:
     if state != "failed":
         raise ValueError(f"Unsupported build state '{state}' for '{build_dir}'")
 
+    # The failure counter must outlive the build dir it sits in, or shape
+    # retirement can never trigger: every retry cleans the dir and resets the
+    # count to zero.
+    failcount = shape_failure_count(build_dir)
+
     checkpoint = get_checkpoint_file(build_dir)
     if checkpoint is not None:
         for item in list(build_dir.iterdir()):
-            if item == checkpoint:
+            if item == checkpoint or item.name == ".failcount":
                 continue
             shutil.rmtree(item) if item.is_dir() else item.unlink()
         return
 
     shutil.rmtree(build_dir)
+    if failcount:
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / ".failcount").write_text(str(failcount))
 
 
 def clean_failed_builds(tuning_dir: str | Path) -> None:

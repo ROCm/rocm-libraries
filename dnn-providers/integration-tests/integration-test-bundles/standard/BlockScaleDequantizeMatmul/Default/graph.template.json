@@ -1,0 +1,126 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "MxMatmulTest",
+  "nodes": [
+    {
+      "block_size": [
+        32
+      ],
+      "compute_data_type": "float",
+      "inputs": {
+        "scale_tensor_uid": 5,
+        "x_tensor_uid": 3
+      },
+      "is_negative_scale": false,
+      "name": "BlockScaleDequantize_0",
+      "outputs": {
+        "y_tensor_uid": 0
+      },
+      "type": "BlockScaleDequantizeAttributes"
+    },
+    {
+      "block_size": [
+        32,
+        1
+      ],
+      "compute_data_type": "float",
+      "inputs": {
+        "scale_tensor_uid": 6,
+        "x_tensor_uid": 4
+      },
+      "is_negative_scale": false,
+      "name": "BlockScaleDequantize_1",
+      "outputs": {
+        "y_tensor_uid": 1
+      },
+      "type": "BlockScaleDequantizeAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "a_tensor_uid": 0,
+        "b_tensor_uid": 1
+      },
+      "name": "Matmul_2",
+      "outputs": {
+        "c_tensor_uid": 2
+      },
+      "type": "MatmulAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "BlockScaleDequantize_0::Y",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": true
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "BlockScaleDequantize_1::Y",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": true
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Matmul_2::C",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "a",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "b",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "scale_a",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "scale_b",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    }
+  ]
+}

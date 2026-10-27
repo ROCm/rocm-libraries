@@ -293,7 +293,7 @@ either reproduces the data or it does not, so it cannot overfit. It exists becau
 polynomial fits either, but the *generating formula* does, so the recipe carries
 that and regenerates both at replay. `magic_multiplier`/`magic_shift` are now
 intexpr primitives in both VMs; the DSL helper
-(`helpers/transforms.py::calculate_magic_numbers`) stays the single source of
+(`helpers/magic_division.py::calculate_magic_numbers`) stays the single source of
 truth, with `recipe_expand.py` and `recipe_vm.cpp` as tested mirrors.
 
 Ordering is what keeps a candidate library from becoming "fit anything", and it is

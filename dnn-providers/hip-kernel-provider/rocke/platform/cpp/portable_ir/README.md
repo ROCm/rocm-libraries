@@ -116,7 +116,7 @@ engine into `librocke_core.a` — no separate step. For the shared library the
 cmake -S platform -B build -DCMAKE_BUILD_TYPE=Debug && \
   cmake --build build --target rocke_core -j
 c++ -shared -fPIC -Wl,--whole-archive build/librocke_core.a \
-  -Wl,--no-whole-archive -lm -o librocke.so
+  -Wl,--no-whole-archive -lm -ldl -pthread -o librocke.so
 ```
 
 `portable_ir/src/online.py::build_lib()` does exactly this on demand.

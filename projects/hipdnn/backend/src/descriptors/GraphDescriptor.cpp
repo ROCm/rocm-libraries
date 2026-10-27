@@ -708,6 +708,11 @@ bool GraphDescriptor::isRuntimePassByValueEnabled() const
     return _isRuntimePassByValueEnabled;
 }
 
+std::optional<std::array<uint8_t, 16>> GraphDescriptor::getGraphId() const
+{
+    return _graphId;
+}
+
 std::string GraphDescriptor::toString() const
 {
     std::string str = "GraphDescriptor: {handle=";

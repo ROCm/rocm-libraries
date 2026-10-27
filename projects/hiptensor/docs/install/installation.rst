@@ -73,6 +73,7 @@ including the gfx908, gfx90a, gfx942, and gfx950 GPUs (collectively labeled as g
 
 Additionally, hipTensor is supported on AMD RDNA GPUs:
  - gfx11-generic: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152 and gfx1153.
+ - gfx11-7-generic: gfx1170 and gfx1171.
  - gfx12-generic: gfx1200, gfx1201 and gfx1250.
 
 .. note::
@@ -180,7 +181,7 @@ Here are the available options to build the hipTensor library, with or without c
         -   **Default value**
     *   -   ``GPU_TARGETS``
         -   Build the code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx1250-strict``; ``gfx12-generic``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1103``; ``gfx1150``; ``gfx1151``; ``gfx1152``; ``gfx1153``; ``gfx11-generic``; ``gfx1170``; ``gfx1171``; ``gfx11-7-generic``; ``gfx1200``; ``gfx1201``; ``gfx1250``; ``gfx1250-strict``; ``gfx12-generic``
     *   -   ``HIPTENSOR_BUILD_TESTS``
         -   Build the tests
         -   ``ON``
@@ -340,11 +341,11 @@ Executable name                                  Description
 ``complex_scale_contraction_test_m4n4k4``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 8
 ``complex_scale_contraction_test_m5n5k5``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 10
 ``complex_scale_contraction_test_m6n6k6``        Scale contraction test [D = alpha * (A x B)] with complex single and double precision datatypes of rank 12
-``rank2_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 2
-``rank3_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 3
-``rank4_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 4
-``rank5_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 5
-``rank6_elementwise_permute_test``               Permutation test with half and single precision datatypes of rank 6
+``rank2_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 2
+``rank3_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 3
+``rank4_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 4
+``rank5_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 5
+``rank6_elementwise_permute_test``               Permutation test with half, single and double precision datatypes of rank 6
 ``rank2_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 2
 ``rank3_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 3
 ``rank4_elementwise_binary_op_test``             Element-wise binary operation test with half, single, and double precision datatypes of rank 4

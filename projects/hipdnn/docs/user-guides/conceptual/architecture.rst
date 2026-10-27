@@ -21,9 +21,10 @@ The frontend API defines tensors and attaches them to operational nodes on a gra
 The frontend then allocates memory and populates the data used by the graph, which is then dispatched to the selected plugin's engine to run.
 
 Header-only SDKs provide shared utilities and interfaces.
-hipDNN provides three SDKs:
+hipDNN provides four SDKs:
 
-- :ref:`data`: Graph schemas and data structures
+- :ref:`data`: Common types, logging, and the engine name registry
+- :ref:`flatbuffers-sdk`: Graph schemas and serialized data structures
 - :ref:`plugin-sdk`: Plugin API and utilities
 - :ref:`test-sdk`: Testing utilities and CPU reference implementations
 

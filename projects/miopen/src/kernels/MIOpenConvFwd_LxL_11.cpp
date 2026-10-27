@@ -206,6 +206,11 @@ __device__ void Convolve(uint ex_row,
                          const _FLOAT* __restrict__ bot_mem,
                          _FLOAT_ACCUM* pvt_accum)
 {
+    // Threads beyond the output tile produce no output; skip them so their LDS reads do not run
+    // past the end of lcl_mem.
+    if(ex_row >= MLO_OUT_EXTENT1)
+        return;
+
     _FLOAT wei_vals[MLO_N_LCL_OUT_MAPS * MLO_N_FILTER_SPLITS0];
     _FLOAT in_vals[MLO_OUT_PIX_TILE0 + MLO_N_FILTER_SPLITS0 - 1];
 
@@ -502,6 +507,11 @@ __device__ void Convolve2(uint b,
                           const _FLOAT* __restrict__ bot_mem,
                           _FLOAT_ACCUM* pvt_accum)
 {
+    // Threads beyond the output tile (or the per-workgroup batches) produce no output; skip them
+    // so their LDS reads do not run past the end of lcl_mem.
+    if(b >= MLO_N_LCL_BATCHS || ex_row >= MLO_OUT_EXTENT1)
+        return;
+
     _FLOAT wei_vals[MLO_N_LCL_OUT_MAPS * MLO_N_FILTER_SPLITS0];
     _FLOAT in_vals[MLO_OUT_PIX_TILE0 + MLO_N_FILTER_SPLITS0 - 1];
 

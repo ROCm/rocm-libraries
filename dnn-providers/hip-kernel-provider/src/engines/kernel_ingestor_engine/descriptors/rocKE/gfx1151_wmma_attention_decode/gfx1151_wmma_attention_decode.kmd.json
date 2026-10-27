@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "id": "a448d4b8-16ed-4ed8-8a79-c05c4bdb6b9d",
+  "name": "Gfx1151WmmaAttentionDecode variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "kind",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "head_size_v",
+      "type": "int"
+    },
+    {
+      "name": "mask_mode",
+      "type": "string"
+    },
+    {
+      "name": "bias",
+      "type": "string"
+    },
+    {
+      "name": "block_size",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "dv_split",
+      "type": "int"
+    }
+  ]
+}

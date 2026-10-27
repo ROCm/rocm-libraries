@@ -18,32 +18,31 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 // a type which may be assigned any other type
 struct any_assign
 {
-  inline THRUST_HOST_DEVICE any_assign() {}
+  any_assign() = default;
 
   template <typename T>
-  inline THRUST_HOST_DEVICE any_assign(T)
+  THRUST_HOST_DEVICE any_assign(T)
   {}
 
   template <typename T>
-  inline THRUST_HOST_DEVICE any_assign& operator=(T)
+  THRUST_HOST_DEVICE any_assign& operator=(T)
   {
-    if (0)
-    {
-      // trick the compiler into silencing "warning: this expression has no effect"
-      int* x = 0;
-      *x     = 13;
-    } // end if
-
     return *this;
   }
 };
-
 } // namespace detail
 THRUST_NAMESPACE_END

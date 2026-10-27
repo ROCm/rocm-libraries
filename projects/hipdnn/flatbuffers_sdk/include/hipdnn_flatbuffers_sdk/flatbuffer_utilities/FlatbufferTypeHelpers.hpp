@@ -41,4 +41,9 @@ inline std::ostream& operator<<(std::ostream& os, PointwiseMode pointwiseMode)
     return os << EnumNamePointwiseMode(pointwiseMode);
 }
 
+inline std::ostream& operator<<(std::ostream& os, AttentionImplementation implementation)
+{
+    return os << EnumNameAttentionImplementation(implementation);
+}
+
 } // namespace hipdnn_flatbuffers_sdk::data_objects

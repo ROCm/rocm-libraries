@@ -66,3 +66,7 @@ COMGR requires a matching LLVM 23 toolchain. With the C++ extension installed,
 set `ROCKE_BACKEND=both` to compare Python/C++ LLVM before COMGR compilation.
 The HIP verifier invokes the Python HIP lowerer directly. Numerical validation
 requires a matching gfx1250 device, NumPy, and ml_dtypes; it does not need torch.
+
+Additional E4M3/E5M3 scale encodings use the same packed matrix storage.
+See [independent scale formats](SCALE_FORMATS.md) for the accepted combinations
+and the scale-format example.

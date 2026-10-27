@@ -15,7 +15,7 @@ recommended stack pins a recent, consistent ROCm:
 
 | Component | Recommended | Also works |
 |---|---|---|
-| ROCm | **7.2** | 7.0.x (older comgr; see the flavor note in §5) |
+| ROCm | **7.2** | 7.0.x (query the loaded compiler; see §5) |
 | PyTorch | **2.12 (+rocm7.2 build)** | 2.8 (+rocm7.0.2) |
 | Python | **3.12** | 3.10+ |
 | OS | Linux (full GPU support) | Windows (build/lowering + RDNA execution; see §4) |
@@ -28,8 +28,8 @@ recommended stack pins a recent, consistent ROCm:
 | RDNA3.5/4 | Ryzen AI / Radeon | `gfx1151`, `gfx1201` | Linux + Windows (HIP SDK); wave32 |
 
 > **Why the stack matters.** The example READMEs and performance numbers were
-> produced on ROCm 7.2. On an older comgr the generated IR must use the matching
-> *LLVM flavor* (§5), and a few kernels behave differently (e.g. a persistent-
+> produced on ROCm 7.2. The generated IR must match the loaded COMGR compiler’s
+> LLVM version (§5), and a few kernels behave differently (e.g. a persistent-
 > kernel path that hangs older comgr but compiles cleanly on 7.2). For
 > reproducing the documented numbers, use ROCm 7.2 + PyTorch 2.12.
 
@@ -195,7 +195,7 @@ Set these to configure the DSL. On Linux use `export NAME=value`; on Windows use
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = the C++ engine (falls back to Python if `rocke_engine` isn't built); `python` = the native lowerer; `both` = run both and assert byte-identical output (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm22` \| `llvm20` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-detected from PyTorch's bundled ROCm version, then `/opt/rocm`, else `llvm22`. **Set this when running under a venv whose ROCm differs from `/opt/rocm`** — otherwise the flavor can be picked (at import time) from `/opt/rocm` and a newer `comgr` will reject the IR with a `COMPILE_SOURCE_TO_BC` error. With a ROCm 7.2 venv, use `llvm22`. (Importing `torch` before `rocke` also lets auto-detect see the right version.) |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (automatic when unset) | Select the LLVM IR flavor (datalayout/intrinsics). Automatic selection lazily queries the loaded COMGR binary's LLVM version and fails if compiler evidence is unavailable. An explicit flavor supports offline IR emission without loading COMGR; it does not change the compiler consuming the IR. COMGR compilation still requires compiler-version evidence and checks the IR's p8 generation against that compiler. See [Compiler detection and provenance](../reference/env_flags.md#compiler-detection-and-provenance) for library selection and lifetime details. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `ROCKE_BACKEND=cpp` **raise** instead of silently falling back to the Python lowerer when `rocke_engine` is unavailable. Use to guarantee you are exercising the C engine. |
 | `ROCKE_USE_SUDO` | `1` (unset) | The benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
 
@@ -228,7 +228,7 @@ are working on that specific kernel path.
 
 | Symptom | Cause / fix |
 |---|---|
-| `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
+| `do_action(COMPILE_SOURCE_TO_BC): status=1` | Inspect `comgr.loaded_compiler_info().describe()` and the COMGR diagnostic. AUTO uses loaded compiler evidence; do not choose an override from a ROCm release label (§5). |
 | `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocke/platform/python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
 | `cpp` backend silently uses Python | `rocke_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `ROCKE_CPP_STRICT=1` to surface it. |

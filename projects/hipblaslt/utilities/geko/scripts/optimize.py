@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import sys
 
+import geko.device as device
+from geko import logger
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_optimize
-from geko.utils import parse_devices
+from geko.utils import ensure_tensile_importable, parse_devices
 
 
 def main() -> None:
@@ -69,6 +72,40 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--stall_timeout",
+        type=float,
+        default=900.0,
+        help=(
+            "Seconds a worker may go without writing to its tensilelite log before "
+            "it is killed and its GPU slot released. Workers that finish their sweep "
+            "and never exit otherwise hold a GPU indefinitely, which has cost more "
+            "GPU slots than actual hangs. 0 disables."
+        ),
+    )
+    parser.add_argument(
+        "--abort_after_consecutive_failures",
+        type=int,
+        default=8,
+        help=(
+            "Stop the whole run after this many consecutive job failures with no "
+            "success in between. That pattern means the node is unusable (on "
+            "gfx1250, an MES/REMOVE_QUEUE failure leaves unkillable D-state "
+            "processes), and continuing burns the remaining shapes without tuning "
+            "any. 0 disables."
+        ),
+    )
+    parser.add_argument(
+        "--max_shape_failures",
+        type=int,
+        default=0,
+        help=(
+            "Retire a shape after this many failed attempts, tracked in a "
+            ".failcount file under its build dir so the count survives reboots "
+            "and separate invocations. 0 (default) disables retirement and every "
+            "shape is retried. Delete a shape's .failcount to un-retire it."
+        ),
+    )
+    parser.add_argument(
         "--no_retry",
         action="store_true",
         help="Do not retry failed operations",
@@ -91,11 +128,35 @@ def main() -> None:
             "to collect clock frequency telemetry. Off by default."
         ),
     )
+    parser.add_argument(
+        "--skip-gpu-check",
+        dest="skip_gpu_check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the GPU device pre-flight check (verifies at least as many "
+            "GPU devices are visible as requested via --devices). The check "
+            "relies on a device-enumerator tool (amdgpu-arch / "
+            "rocm_agent_enumerator / rocminfo on Linux, hipinfo on Windows) "
+            "being on PATH (e.g. $ROCM_PATH/bin); if none is found the check "
+            "is skipped with a warning rather than blocking."
+        ),
+    )
     args = parser.parse_args()
     devices = parse_devices(args.devices)
+
+    if not args.skip_gpu_check:
+        gpu_check_rc = device.main(len(devices))
+        if gpu_check_rc != 0:
+            logger.error("GPU check failed; aborting.")
+            sys.exit(gpu_check_rc)
+
     hipblaslt_path = resolve_hipblaslt_path(
         explicit=args.hipblaslt, anchor=__file__, require_built=True
     )
+    # Bind this run to the hipBLASLt clone named on the command line, not to
+    # whatever PYTHONPATH the shell happens to export.
+    ensure_tensile_importable(hipblaslt_path)
 
     run_optimize(
         hipblaslt_path,
@@ -108,6 +169,9 @@ def main() -> None:
         retry=not args.no_retry,
         verbose=args.verbose,
         bench_freq=args.bench_freq,
+        stall_timeout=args.stall_timeout,
+        abort_after_consecutive_failures=args.abort_after_consecutive_failures,
+        max_shape_failures=args.max_shape_failures,
     )
 
 

@@ -1,7 +1,8 @@
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc.
  * Unit tests: AsmMovePropagationPass must not copy-propagate into a source tied
- * to a read-write destination, and must still propagate ordinary mov chains.
+ * to a read-write destination, must not erase a mov that seeds a read-write
+ * destination, and must still propagate ordinary mov chains.
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
@@ -147,4 +148,44 @@ TEST_F(AsmMovePropagationPassTest, BothTiedSwapOperandsAreNotPropagated) {
     EXPECT_FALSE(reads(*swap, vgpr(5)));
     EXPECT_FALSE(reads(*swap, vgpr(6)));
     EXPECT_EQ(countMnemonic("v_mov_b32"), 2u);
+}
+
+// v_writelane_b32 writes one lane and keeps the others. rocisa lists its dest only as a dest.
+TEST_F(AsmMovePropagationPassTest, WritelaneDestOnlyKeepsSeedMov) {
+    emit("v_mov_b32", {vgpr(20)}, {sgpr(14)});
+    emit("v_writelane_b32", {vgpr(20)}, {sgpr(14), sgpr(15)});
+
+    runPass();
+
+    EXPECT_EQ(countMnemonic("v_mov_b32"), 1u) << "the mov seeding the other lanes was erased";
+}
+
+// Raw asm lists a tied accumulator only as a dest.
+TEST_F(AsmMovePropagationPassTest, FmacDestOnlyKeepsSeedMov) {
+    emit("v_mov_b32", {vgpr(0)}, {vgpr(5)});
+    emit("v_fmac_f32", {vgpr(0)}, {vgpr(1), vgpr(2)});
+
+    runPass();
+
+    EXPECT_EQ(countMnemonic("v_mov_b32"), 1u) << "the mov seeding the accumulator was erased";
+}
+
+// The mov seeds one register in the middle of a 256-bit read-write accumulator.
+TEST_F(AsmMovePropagationPassTest, SwmmacAccumulatorDestOnlyKeepsSeedMov) {
+    emit("v_mov_b32", {vgpr(3)}, {vgpr(40)});
+    emit("v_swmmac_f32_16x16x64_f16", {vgpr(0, 8)}, {vgpr(8, 8), vgpr(16, 16), vgpr(32)});
+
+    runPass();
+
+    EXPECT_EQ(countMnemonic("v_mov_b32"), 1u) << "the mov seeding the accumulator was erased";
+}
+
+// A plain dest is still a redefinition, so the earlier mov is dead.
+TEST_F(AsmMovePropagationPassTest, PlainRedefinitionStillErasesSeedMov) {
+    emit("v_mov_b32", {vgpr(20)}, {sgpr(14)});
+    emit("v_add_nc_u32", {vgpr(20)}, {vgpr(1), vgpr(2)});
+
+    runPass();
+
+    EXPECT_EQ(countMnemonic("v_mov_b32"), 0u);
 }

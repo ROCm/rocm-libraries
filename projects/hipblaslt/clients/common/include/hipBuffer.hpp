@@ -28,7 +28,12 @@
 
 #include "d_vector.hpp"
 #include "datatype_interface.hpp"
+#include "hip_placement.hpp"
 #include "hipblaslt_ostream.hpp"
+
+#include <memory>
+#include <string>
+#include <utility>
 
 class HipDeviceBuffer : public d_vector_type
 {
@@ -40,16 +45,59 @@ public:
     {
     }
 
+    // Places the buffer across a 4 GiB virtual-address boundary, offset_below bytes after its
+    // start, with poison memory mapped 4 GiB below and above it (see hip_placement.hpp). buf()
+    // is null when placement fails; *why and *unsupported then say why.
+    HipDeviceBuffer(hipDataType  dtype,
+                    std::size_t  numElements,
+                    std::size_t  offset_below,
+                    std::string* why,
+                    bool*        unsupported)
+        : d_vector_type(dtype, numElements, false)
+        , numBytes(realDataTypeSize(dtype) * numElements)
+        , placed(PlacedRegion::create(numBytes, offset_below, dtype, why, unsupported))
+        , buffer(placed ? placed->ptr() : nullptr)
+    {
+    }
+
     ~HipDeviceBuffer()
     {
-        this->device_vector_teardown(static_cast<char*>(buffer));
+        // A placed buffer has no guard pads, and its memory belongs to `placed`.
+        this->device_vector_teardown(placed ? nullptr : static_cast<char*>(buffer));
         buffer = nullptr;
     }
 
     HipDeviceBuffer(const HipDeviceBuffer&)            = delete;
-    HipDeviceBuffer(HipDeviceBuffer&&)                 = default;
     HipDeviceBuffer& operator=(const HipDeviceBuffer&) = delete;
-    HipDeviceBuffer& operator=(HipDeviceBuffer&&)      = default;
+
+    // The moved-from buffer must forget its pointer, or its destructor would check guard pads
+    // in memory it no longer owns, which for a placed buffer is not mapped.
+    HipDeviceBuffer(HipDeviceBuffer&& other) noexcept
+        : d_vector_type(std::move(other))
+        , numBytes(other.numBytes)
+        , placed(std::move(other.placed))
+        , buffer(std::exchange(other.buffer, nullptr))
+    {
+    }
+
+    HipDeviceBuffer& operator=(HipDeviceBuffer&& other) noexcept
+    {
+        if(this != &other)
+        {
+            this->device_vector_teardown(placed ? nullptr : static_cast<char*>(buffer));
+            d_vector_type::operator=(std::move(other));
+            numBytes = other.numBytes;
+            placed   = std::move(other.placed);
+            buffer   = std::exchange(other.buffer, nullptr);
+        }
+        return *this;
+    }
+
+    // The placement of this buffer, or null when it was allocated normally.
+    const PlacedRegion* placement() const
+    {
+        return placed.get();
+    }
 
     void* buf()
     {
@@ -84,8 +132,9 @@ public:
     }
 
 private:
-    std::size_t numBytes;
-    void*       buffer;
+    std::size_t                   numBytes;
+    std::unique_ptr<PlacedRegion> placed;
+    void*                         buffer;
 };
 
 class HipHostBuffer

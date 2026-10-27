@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,12 +37,12 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/detail/alignment.h>
-#  include <thrust/detail/minmax.h>
+#  include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -54,6 +54,10 @@
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
+
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+#    include _THRUST_STD_INCLUDE(iterator)
+#  endif
 
 #  include <cstdint>
 
@@ -166,7 +170,7 @@ template <typename Derived,
           typename ValuesOutputIt,
           typename EqualityOp,
           typename ReductionOp>
-THRUST_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
+THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
   execution_policy<Derived>& policy,
   KeysInputIt keys_first,
   KeysInputIt keys_last,
@@ -178,7 +182,7 @@ THRUST_RUNTIME_FUNCTION pair<KeysOutputIt, ValuesOutputIt> reduce_by_key(
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
 
-  using size_type = typename iterator_traits<KeysInputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<KeysInputIt>;
 
   size_type num_items       = thrust::distance(keys_first, keys_last);
   size_t temp_storage_bytes = 0;
@@ -288,7 +292,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
         policy, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
     }
 
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -311,7 +315,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(
     policy, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
 #  else
@@ -330,9 +334,9 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   ValOutputIt values_output,
   BinaryPred binary_pred)
 {
-  using value_type = typename thrust::detail::eval_if<thrust::detail::is_output_iterator<ValOutputIt>::value,
-                                                      thrust::iterator_value<ValInputIt>,
-                                                      thrust::iterator_value<ValOutputIt>>::type;
+  using value_type = ::internal::If<thrust::detail::is_output_iterator<ValOutputIt>,
+                                    thrust::detail::it_value_t<ValInputIt>,
+                                    thrust::detail::it_value_t<ValOutputIt>>;
   return hip_rocprim::reduce_by_key(
     policy, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, plus<value_type>());
 }
@@ -346,7 +350,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
   KeyOutputIt keys_output,
   ValOutputIt values_output)
 {
-  using KeyT = typename thrust::iterator_value<KeyInputIt>::type;
+  using KeyT = thrust::detail::it_value_t<KeyInputIt>;
   return hip_rocprim::reduce_by_key(
     policy, keys_first, keys_last, values_first, keys_output, values_output, equal_to<KeyT>());
 }

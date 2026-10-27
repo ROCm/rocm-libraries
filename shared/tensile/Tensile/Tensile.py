@@ -319,14 +319,12 @@ def Tensile(userArgs):
         cCompiler,
         assembler,
         offloadBundler,
-        hipconfig,
         deviceEnumerator
     ) = validateToolchain(
         args.CxxCompiler,
         args.CCompiler,
         args.Assembler,
         args.OffloadBundler,
-        ToolchainDefaults.HIP_CONFIG,
         ToolchainDefaults.DEVICE_ENUMERATOR
     )
     params = config.get("GlobalParameters", {})
@@ -334,7 +332,6 @@ def Tensile(userArgs):
     params["CCompiler"] = cCompiler
     params["Assembler"] = assembler
     params["OffloadBundler"] = offloadBundler
-    params["HipConfig"] = hipconfig
     params["ROCmAgentEnumeratorPath"] = deviceEnumerator
     assignGlobalParameters(params, capabilitiesCache)
 

@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "layer_pars.h"
+#include "packed_ops.h"
 #include "weights_layout.h"
 #include "types.h"
 
@@ -21,6 +22,11 @@
 namespace hipconv::cdna4::direct_l1
 {
 
+// Loads MFMA weight-operand tiles from the pre-formatted workspace.
+//
+// tf32 weights arrive pre-split by the transpose launch into two adjacent 1024-byte
+// operand tiles, big then small. Every layout offset is a whole number of tiles, so
+// scaling it by planes maps logical tile T onto stored tile planes*T.
 template <Config cfg, typename datatype_t>
 class WeightsLoader
 {
@@ -35,14 +41,24 @@ class WeightsLoader
     using Layout = WeightsLayout<cfg.kh, cfg.kw, Kwg, 1>;
 
 public:
-    using datatypex8_t = std::conditional_t<std::is_same_v<datatype_t, bf16_t>, bf16x8_t, fp16x8_t>;
+    static constexpr bool is_tf32 = (cfg.elem_bytes == 4);
+
+    // Planes stored per operand tile: 2 for tf32's (big, small) pair, else 1.
+    static constexpr int planes = is_tf32 ? 2 : 1;
+
+    // One plane's fragment, and the operand the mma actually takes.
+    using planex8_t    = std::conditional_t<std::is_same_v<datatype_t, bf16_t>, bf16x8_t, fp16x8_t>;
+    using datatypex8_t = std::conditional_t<is_tf32, bf16_pair_x8, planex8_t>;
 
     // Number of K(16) x C(32) tiles per step, and the per-step k16 extent.
     static constexpr int max_k16        = Kwg / 16;
     static constexpr int tiles_per_step = Kh * (Kwg / 16);
 
-    // 1024 bytes = one K(16) x C(32) f16 operand tile.
+    // 1024 bytes = one K(16) x C(32) f16 operand tile (one plane).
     static constexpr int bytes_per_tile = 1024;
+
+    // Stride between consecutive logical tiles: tf32 interleaves its two planes.
+    static constexpr int tile_pitch = planes * bytes_per_tile;
 
     // K = the partition's K share; k_idx selects the workgroup, wave_k_idx the sub-tensor.
     __device__
@@ -73,14 +89,24 @@ public:
             for(int k16 = 0; k16 < (Kwg / 16); ++k16)
             {
                 const int tile_idx = kh * (Kwg / 16) + k16;
-                const int soff     = base_bytes + tile_idx * bytes_per_tile;
+                const int soff     = base_bytes + tile_idx * tile_pitch;
 
-                Vector raw     = __builtin_amdgcn_raw_buffer_load_b128(rsrc_, lane_off, soff, 0);
-                tiles[kh][k16] = __builtin_bit_cast(datatypex8_t, raw);
+                Vector raw = __builtin_amdgcn_raw_buffer_load_b128(rsrc_, lane_off, soff, 0);
+                if constexpr(is_tf32)
+                {
+                    Vector raw_small = __builtin_amdgcn_raw_buffer_load_b128(
+                        rsrc_, lane_off, soff + bytes_per_tile, 0);
+                    tiles[kh][k16] = datatypex8_t(__builtin_bit_cast(planex8_t, raw),
+                                                  __builtin_bit_cast(planex8_t, raw_small));
+                }
+                else
+                {
+                    tiles[kh][k16] = __builtin_bit_cast(datatypex8_t, raw);
+                }
             }
         }
 
-        cursor_bytes_ = base_bytes + tiles_per_step * bytes_per_tile;
+        cursor_bytes_ = base_bytes + tiles_per_step * tile_pitch;
     }
 
 private:
@@ -88,14 +114,14 @@ private:
     select_base(int K, int C_padded, int k_idx, const datatype_t* weights_global, int wave_k_idx)
     {
         // wave_k_idx selects the sub-tensor, k_idx the workgroup along K within it.
-        const int off = Layout(K, C_padded).wave_group(wave_k_idx).kq(k_idx).offset;
+        const int off = planes * Layout(K, C_padded).wave_group(wave_k_idx).kq(k_idx).offset;
         // off differs between K partitions; readfirstlane pins the descriptor to SGPRs.
         return weights_global + __builtin_amdgcn_readfirstlane(off);
     }
 
     __device__ static int stripe_bytes(int K, int C_padded)
     {
-        return Layout(K, C_padded).strides().kq() * static_cast<int>(sizeof(datatype_t));
+        return planes * Layout(K, C_padded).strides().kq() * static_cast<int>(sizeof(datatype_t));
     }
 
     __amdgpu_buffer_rsrc_t rsrc_;

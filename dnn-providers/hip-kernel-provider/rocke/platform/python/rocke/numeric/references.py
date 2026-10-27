@@ -19,7 +19,7 @@ import numpy as np
 __all__ = ["dense_attention_reference"]
 
 
-def dense_attention_reference(Q, K, V, *, causal: bool, out_dtype=None):
+def dense_attention_reference(Q, K, V, *, causal: bool, scale=None, out_dtype=None):
     """Dense softmax-attention reference (fp32 math).
 
     ``Q``/``K``/``V`` are a single batch of shape
@@ -27,12 +27,20 @@ def dense_attention_reference(Q, K, V, *, causal: bool, out_dtype=None):
     head count -- GQA/MQA expansion (``np.repeat`` over the head axis) is the
     caller's responsibility, as is looping the batch axis.
 
+    ``scale`` multiplies the QK scores before softmax. ``None`` keeps the
+    historical ``scores /= sqrt(head_size)`` arithmetic exactly, so existing
+    callers are byte-unchanged; pass a float to model an arbitrary attention
+    scale (hipDNN supplies its own rather than assuming ``1 / sqrt(d)``).
+
     Returns fp32 unless ``out_dtype`` is given, in which case the result is
     cast to it (e.g. ``np.float16`` to model a dtype-truncated reference).
     """
     d = Q.shape[-1]
     scores = np.einsum("ihd,jhd->ihj", Q.astype(np.float32), K.astype(np.float32))
-    scores /= math.sqrt(d)
+    if scale is None:
+        scores /= math.sqrt(d)
+    else:
+        scores *= scale
     if causal:
         q_pos = np.arange(Q.shape[0])[:, None, None]
         k_pos = np.arange(K.shape[0])[None, None, :]
@@ -42,3 +50,17 @@ def dense_attention_reference(Q, K, V, *, causal: bool, out_dtype=None):
     probs /= probs.sum(axis=-1, keepdims=True)
     out = np.einsum("ihj,jhd->ihd", probs, V.astype(np.float32))
     return out if out_dtype is None else out.astype(out_dtype)
+
+
+from rocke.numeric.sdpa_reference import (  # noqa: E402,F401
+    keep,
+    resolve_diagonal_band,
+    sdpa_reference,
+)
+from rocke.numeric.sdpa_reference import (  # noqa: E402,F401
+    SdpaBwdResult,
+    sdpa_reference_bwd,
+)
+
+__all__ += ["keep", "resolve_diagonal_band", "sdpa_reference"]
+__all__ += ["SdpaBwdResult", "sdpa_reference_bwd"]

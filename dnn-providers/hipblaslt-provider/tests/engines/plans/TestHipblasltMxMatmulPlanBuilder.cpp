@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMxMatmulPlanBuilder.hpp"
 #include "engines/plans/MxArchSupport.hpp"
 
@@ -245,6 +246,7 @@ TYPED_TEST_SUITE(TestGpuHipblasltMxMatmulPlanBuilderDtypes, MxDtypeConfigs, );
 
 TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderDtypes, IsApplicable)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithTypes(TypeParam::X_TYPE, TypeParam::OUT_TYPE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
@@ -277,6 +279,7 @@ TYPED_TEST_SUITE(TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes, MxMixedConfigs,
 
 TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes, IsApplicable)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createMxGraphWithTypes(TypeParam::A_TYPE, DT::HALF, TypeParam::B_TYPE);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_TRUE(this->_builder.isApplicable(this->_handle, graph))
@@ -288,6 +291,7 @@ TYPED_TEST(TestGpuHipblasltMxMatmulPlanBuilderMixedDtypes, IsApplicable)
 // resolved by matching dequant Y outputs to matmul inputs, not by node position.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrder)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph({32, 128},
                                        {1, 32},
                                        {128, 32},
@@ -544,6 +548,30 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsFp8AWithFp6B)
     }
 }
 
+// See WORKAROUND_ISSUE_13715 in TestWorkarounds.hpp. hipBLASLt does have gfx1250 MX
+// kernels for these element types, but only for transA=T, transB=N, while this
+// provider always sends transA=N, transB=T, so every MX graph must be declined.
+// A failure here means hipBLASLt now offers a kernel for the provider's problem;
+// see the issue before enabling MX on gfx1250.
+TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsOnGfx1250)
+{
+    const auto archName = hipdnn_test_sdk::utilities::currentDeviceArch();
+    if(!archMatches(archName, "gfx1250", ArchMatchMode::PREFIX))
+    {
+        GTEST_SKIP() << "gfx1250-only check, running on " << archName;
+    }
+    for(const auto xType : {DT::FP8_E4M3, DT::FP4_E2M1})
+    {
+        for(const auto cType : {DT::BFLOAT16, DT::FLOAT})
+        {
+            auto fb = createMxGraphWithTypes(xType, cType);
+            GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+            EXPECT_FALSE(_builder.isApplicable(_handle, graph))
+                << "x=" << EnumNameDataType(xType) << " out=" << EnumNameDataType(cType);
+        }
+    }
+}
+
 // Matmul node compute data type must be FP32 (mirrors the plain matmul builder)
 TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonFloatComputeType)
 {
@@ -709,6 +737,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleB)
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeValid)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     EXPECT_NO_THROW(_builder.getWorkspaceSize(_handle, graph));
@@ -727,6 +756,7 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, GetWorkspaceSizeThrowsOnInvalidGraph)
 
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, BuildPlanValid)
 {
+    SKIP_IF_WORKAROUND_ISSUE_13715();
     auto fb = createValidMxMatmulGraph();
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     HipdnnEnginePluginExecutionContext ctx;

@@ -15,7 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from miopen_wrapper_libs import resolve_pair
+from miopen_wrapper_libs import default_lib_dirs, resolve_pair
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -83,17 +83,18 @@ def main():
     )
     parser.add_argument(
         "--lib-dir",
-        help="directory holding libMIOpen.so*; defaults to searching lib*/ beside "
-        "this script's parent directory",
+        help="directory holding libMIOpen.so*; defaults to searching lib*/ in the "
+        "install prefix, two directories above this script",
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
+    parser.add_argument(
+        "--known-divergences", default=SCRIPT_DIR / "known_forwarding_divergences.txt"
+    )
     args = parser.parse_args()
 
     gtest = Path(args.gtest).resolve()
 
-    lib_dirs = (
-        [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
-    )
+    lib_dirs = [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR)
     wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
@@ -125,15 +126,15 @@ def main():
         # A replay that dies before writing must not leave an old report behind.
         report.unlink(missing_ok=True)
         reports.append(report)
-        # A database and kernel cache per mode, so the enabled replay cannot reuse
-        # what the disabled one found and compiled.
-        cache = output_dir / f"{mode}_cache"
+        # A find database per mode, so the enabled replay cannot reuse what the
+        # disabled one found. The kernel cache is keyed by source and build options,
+        # so sharing it only saves compile time.
         env = dict(
             os.environ,
             MIOPEN_HIPDNN_FORWARDING=mode,
             LD_LIBRARY_PATH=ld_path,
-            MIOPEN_USER_DB_PATH=str(cache),
-            MIOPEN_CUSTOM_CACHE_DIR=str(cache),
+            MIOPEN_USER_DB_PATH=str(output_dir / f"{mode}_db"),
+            MIOPEN_CUSTOM_CACHE_DIR=str(output_dir / "kernel_cache"),
         )
         ok = replay(
             [
@@ -151,7 +152,15 @@ def main():
     # --newer-than rejects stale reports from an earlier build. sys.executable rather
     # than the shebang, so a lost exec bit fails cleanly.
     ok = run(
-        [sys.executable, args.compare, *reports, "--newer-than", gtest],
+        [
+            sys.executable,
+            args.compare,
+            *reports,
+            "--newer-than",
+            gtest,
+            "--known-divergences",
+            args.known_divergences,
+        ],
         "forwarding parity comparison",
     )
 

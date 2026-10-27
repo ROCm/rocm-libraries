@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,6 @@
 
 #include <hipcub/agent/single_pass_scan_operators.hpp>
 #include <hipcub/config.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -34,7 +33,7 @@
 #include <cstdint>
 #include <numeric>
 
-template<typename K, typename V, typename OpK = hipcub::Sum, typename OpV = hipcub::Sum>
+template<typename K, typename V, typename OpK = test_utils::plus, typename OpV = test_utils::plus>
 struct custom_key_value_pair_op
 {
     using type = hipcub::KeyValuePair<K, V>;
@@ -135,7 +134,7 @@ static void PrefixKernel(TileState tile_state, T* d_input, T* d_output)
 template<typename T,
          typename TileState = hipcub::ScanTileState<T>,
          int BlockSize      = 64,
-         typename ScanOp    = hipcub::Sum>
+         typename ScanOp    = test_utils::plus>
 struct SinglePassScanRunner
 {
     void run(int num_items, T* d_input, T* d_output)
@@ -166,7 +165,7 @@ struct custom_scan_tile_state : hipcub::ScanTileState<T>
 
 template<typename T,
          typename ScanTileState = hipcub::ScanTileState<T>,
-         typename ScanOp        = hipcub::Sum>
+         typename ScanOp        = test_utils::plus>
 struct SinglePassScanParams
 {
     using type            = T;
@@ -272,7 +271,7 @@ static void RunningPrefixKernel(T* d_input, T* d_output)
 
     prefix_type prefix(T(), ScanOp{});
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < num_items; ++i)
     {
         T value            = d_input[i];
@@ -281,7 +280,7 @@ static void RunningPrefixKernel(T* d_input, T* d_output)
     }
 }
 
-template<typename T, int NumItems, typename ScanOp = hipcub::Sum>
+template<typename T, int NumItems, typename ScanOp = test_utils::plus>
 struct RunningPrefixRunner
 {
     void run(T* d_input, T* d_output)

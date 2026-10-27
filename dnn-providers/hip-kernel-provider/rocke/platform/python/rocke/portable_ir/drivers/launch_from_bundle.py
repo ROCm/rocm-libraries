@@ -152,6 +152,7 @@ def main() -> int:
             geom["block"],
             kernargs,
             shared_bytes=geom["lds_bytes"],
+            cluster=plan["cluster"],
         )
         rt.sync()
         rt.memcpy_d2h(

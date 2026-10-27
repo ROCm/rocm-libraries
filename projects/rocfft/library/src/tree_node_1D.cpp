@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -649,7 +649,11 @@ void CC1DNode::AssignParams_internal()
     // performance.  But if dist is 1 then we can reorganize the
     // dimensions so the kernels use the batch dimension as the
     // adjacent one.
-    if(iDist == 1 && oDist == 1 && col2colPlan->obOut == OB_TEMP)
+    //
+    // Fused Bluestein is excluded: its stages' Bluestein strides and dists
+    // are set against the original geometry, which the reshape would break.
+    if(iDist == 1 && oDist == 1 && col2colPlan->obOut == OB_TEMP
+       && typeBlue != BT_MULTI_KERNEL_FUSED)
     {
         // hack the plan to put batch as second dimension since it moves
         // faster than the actual second dimension
@@ -963,21 +967,7 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 
 bool StockhamPP1DNode::CreateDeviceResources()
 {
-    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
-
-    // Create twiddle tables for partial pass along ppOffDim
-    std::tie(twiddles_off_dim, twiddles_off_dim_size)
-        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
-                              GetTwiddleTableLengthLimit(),
-                              precision,
-                              deviceProp,
-                              0,
-                              twd_attach_halfN,
-                              kernelFactorsPP);
-    std::tie(twiddles_pp, twiddles_pp_size)
-        = Repo::GetTwiddlesPP(length[ppOffDim], precision, deviceProp);
-
-    return LeafNode::CreateDeviceResources();
+    return CreatePartialPassDeviceResources(length[ppOffDim]);
 }
 
 std::vector<size_t> StockhamPP1DNode::CollapsibleDims()
@@ -1175,12 +1165,20 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
     gp.wgs_x = wgs;
 
     // Grid arrangement is different than regular SBCC
-    // for improved global memory access patterns.
-    auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
+    // for improved global memory access patterns.  A block covers every
+    // off-dimension point that this kernel's partial pass transforms.
+    auto factor = product(kernelFactorsPP.begin(), kernelFactorsPP.end());
 
     gp.b_x /= factor;
     gp.wgs_x *= factor;
     lds *= factor;
+}
+
+bool SBCCPPNode::CreateDeviceResources()
+{
+    // this node's length is rotated so that its own transform dimension comes
+    // first, which shifts ppOffDim (a plan dimension) one slot to the right
+    return CreatePartialPassDeviceResources(length[(ppOffDim + 1) % length.size()]);
 }
 
 std::vector<size_t> SBCCPPNode::CollapsibleDims()

@@ -178,14 +178,18 @@ protected:
 
     // Returns the index of the rightmost zero bit in the binary expansion of
     // x (Gray code of the current element's index)
+    // If x has no zero bit (x == 2^64 - 1), returns 63: advancing past the end of
+    // the 2^64 period wraps the index to 0, which flips bit 63 of the Gray code.
     // NOTE changing unsigned long long int to unit64_t will cause compile failure on device
     __forceinline__ __device__ __host__
     unsigned int rightmost_zero_bit(unsigned long long int x)
     {
 #if defined(__HIP_DEVICE_COMPILE__)
         unsigned int z = __ffsll(~x);
-        return z ? z - 1 : 0;
+        return z ? z - 1 : 63;
 #else
+        if(x == ~0ull)
+            return 63;
         if(x == 0)
             return 0;
         unsigned long long int y = x;

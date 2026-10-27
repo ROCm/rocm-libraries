@@ -1,0 +1,6 @@
+outs:
+- path: amazon0312.tar.gz
+  remote: sparse-matrices
+  md5: f567e5f5029d052e3004bc69bb3f13f5
+  size: 11303646
+  hash: md5

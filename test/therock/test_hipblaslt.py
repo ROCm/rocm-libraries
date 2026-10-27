@@ -33,7 +33,9 @@ environ_vars["GTEST_SHARD_INDEX"] = str(int(SHARD_INDEX) - 1)
 environ_vars["GTEST_TOTAL_SHARDS"] = str(TOTAL_SHARDS)
 
 if is_asan():
-    environ_vars["HSA_XNACK"] = "1"
+    # Only device ASAN requires XNACK; host ASAN preserves the caller's setting.
+    if "host-asan" not in os.getenv("ARTIFACT_GROUP", ""):
+        environ_vars["HSA_XNACK"] = "1"
     environ_vars["OMP_NUM_THREADS"] = "1"
 
 # ---------------------------------------------------------------------------
@@ -94,6 +96,18 @@ if test_type == "quick":
     test_filter.append("--gtest_filter=*smoke*")
 elif test_type == "quick":
     test_filter.append("--gtest_filter=*quick*")
+
+# The tuning store's tests are a separate binary. They need no GPU and take well
+# under a second, so the first shard runs all of them, without gtest sharding.
+if int(SHARD_INDEX) == 1:
+    store_cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test-tuning-store"]
+    store_env = {
+        name: value
+        for name, value in environ_vars.items()
+        if name not in ("GTEST_SHARD_INDEX", "GTEST_TOTAL_SHARDS")
+    }
+    logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(store_cmd)}")
+    subprocess.run(store_cmd, cwd=THEROCK_DIR, check=True, env=store_env)
 
 cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test"] + test_filter
 

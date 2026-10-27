@@ -42,7 +42,6 @@ struct DeviceCallIn;
 class TreeNode;
 class LeafNode;
 struct GridParam;
-
 // Helper class that handles alignment of kernel arguments
 class RTCKernelArgs
 {

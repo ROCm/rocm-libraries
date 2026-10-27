@@ -193,8 +193,7 @@ namespace rocalution
         this->ncol_ = ncol;
         this->nnz_  = nnz;
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.row_offset = *row_offset;
         this->mat_.col        = *col;
@@ -212,8 +211,7 @@ namespace rocalution
         assert(this->ncol_ >= 0);
         assert(this->nnz_ >= 0);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         // see free_host function for details
         *row_offset = this->mat_.row_offset;
@@ -998,7 +996,7 @@ namespace rocalution
             // Determine maximum
             PtrType* d_max = NULL;
             allocate_hip(1, &d_max);
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(buffer,
                                 size,
                                 d_nnzPerm,
@@ -1007,11 +1005,10 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<PtrType>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(size, &buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(buffer,
                                 size,
                                 d_nnzPerm,
@@ -1020,7 +1017,6 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<PtrType>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&buffer);
             buffer = NULL;
@@ -1030,7 +1026,7 @@ namespace rocalution
             free_hip(&d_max);
 
             // Inclusive sum
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::inclusive_scan(buffer,
                                         size,
                                         d_nnzPerm + 1,
@@ -1038,11 +1034,10 @@ namespace rocalution
                                         this->nrow_,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(size, &buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::inclusive_scan(buffer,
                                         size,
                                         d_nnzPerm + 1,
@@ -1050,7 +1045,6 @@ namespace rocalution
                                         this->nrow_,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&buffer);
             buffer = NULL;
@@ -1327,6 +1321,7 @@ namespace rocalution
                 this->mat_.col,
                 this->mat_info_,
                 &buffer_size);
+            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Buffer is shared with ILU0 and other solve functions
             if(this->mat_buffer_ == NULL)
@@ -2058,10 +2053,13 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // rocsparse overwrites the iteration count, so each solve gets its own
+            int niter = max_iter;
+
             // Solve L
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_none,
@@ -2080,9 +2078,11 @@ namespace rocalution
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Solve U
+            niter = max_iter;
+
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_none,
@@ -2520,10 +2520,13 @@ namespace rocalution
 
             assert(this->nnz_ <= std::numeric_limits<int>::max());
 
+            // rocsparse overwrites the iteration count, so each solve gets its own
+            int niter = max_iter;
+
             // Solve L
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_none,
@@ -2542,9 +2545,11 @@ namespace rocalution
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
             // Solve L^T
+            niter = max_iter;
+
             status
                 = rocsparseTcsritsv_solve(ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle),
-                                          &max_iter,
+                                          &niter,
                                           tol_ptr,
                                           nullptr,
                                           rocsparse_operation_transpose,
@@ -2621,6 +2626,7 @@ namespace rocalution
                                           this->mat_.col,
                                           this->mat_info_,
                                           &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Buffer is shared with ILU0 and other solve functions
         if(this->mat_buffer_ == NULL)
@@ -2928,6 +2934,7 @@ namespace rocalution
             this->mat_.col,
             this->mat_info_itsv_,
             &buffer_size);
+        CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
 
         // Check buffer size
         if(this->mat_buffer_ != NULL && buffer_size > this->mat_buffer_size_)
@@ -3240,7 +3247,7 @@ namespace rocalution
                 = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec_diag);
 
             assert(cast_vec_diag != NULL);
-            assert(cast_vec_diag->size_ >= this->nrow_);
+            assert(cast_vec_diag->size_ >= std::min(this->nrow_, this->ncol_));
 
             int     nrow            = this->nrow_;
             int64_t avg_nnz_per_row = this->nnz_ / nrow;
@@ -3354,7 +3361,7 @@ namespace rocalution
                 = dynamic_cast<HIPAcceleratorVector<ValueType>*>(vec_inv_diag);
 
             assert(cast_vec_inv_diag != NULL);
-            assert(cast_vec_inv_diag->size_ == this->nrow_);
+            assert(cast_vec_inv_diag->size_ >= std::min(this->nrow_, this->ncol_));
 
             int  nrow = this->nrow_;
             dim3 BlockSize(this->local_backend_.HIP_block_size);
@@ -3374,6 +3381,7 @@ namespace rocalution
                                                                             this->mat_.val,
                                                                             cast_vec_inv_diag->vec_,
                                                                             d_detect_zero_diag);
+            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             int detect_zero_diag = 0;
             copy_d2h(1, d_detect_zero_diag, &detect_zero_diag);
@@ -3437,10 +3445,10 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // compute the new nnz by reduction
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     row_nnz,
@@ -3449,11 +3457,10 @@ namespace rocalution
                                     row_size + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     row_nnz,
@@ -3462,7 +3469,6 @@ namespace rocalution
                                     row_size + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -3533,10 +3539,10 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // partial sum row_nnz to obtain row_offset vector
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_L->mat_.row_offset,
@@ -3545,11 +3551,10 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_L->mat_.row_offset,
@@ -3558,7 +3563,6 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -3623,10 +3627,10 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // partial sum row_nnz to obtain row_offset vector
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_L->mat_.row_offset,
@@ -3635,11 +3639,10 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_L->mat_.row_offset,
@@ -3648,7 +3651,6 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -3713,10 +3715,10 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // partial sum row_nnz to obtain row_offset vector
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_U->mat_.row_offset,
@@ -3725,11 +3727,10 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_U->mat_.row_offset,
@@ -3738,7 +3739,6 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -3803,10 +3803,10 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // partial sum row_nnz to obtain row_offset vector
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_U->mat_.row_offset,
@@ -3815,11 +3815,10 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_U->mat_.row_offset,
@@ -3828,7 +3827,6 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -4247,7 +4245,7 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<ValueType>*>(&diag);
 
         assert(cast_diag != NULL);
-        assert(cast_diag->size_ == this->ncol_);
+        assert(cast_diag->size_ == this->nrow_);
 
         if(this->nnz_ > 0)
         {
@@ -4566,27 +4564,25 @@ namespace rocalution
         size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(rocprim::exclusive_scan(NULL,
-                                                  rocprim_size,
-                                                  row_nnz,
-                                                  row_offset,
-                                                  0,
-                                                  nrow + 1,
-                                                  rocprim::plus<PtrType>(),
-                                                  stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(NULL,
+                                                 rocprim_size,
+                                                 row_nnz,
+                                                 row_offset,
+                                                 0,
+                                                 nrow + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(rocprim::exclusive_scan(rocprim_buffer,
-                                                  rocprim_size,
-                                                  row_nnz,
-                                                  row_offset,
-                                                  0,
-                                                  nrow + 1,
-                                                  rocprim::plus<PtrType>(),
-                                                  stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                 rocprim_size,
+                                                 row_nnz,
+                                                 row_offset,
+                                                 0,
+                                                 nrow + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
 
         free_hip(&rocprim_buffer);
         free_hip(&row_nnz);
@@ -4612,8 +4608,7 @@ namespace rocalution
 
         // The compaction reads keep and the old arrays, so it has to finish before any of
         // them are released
-        DISCARD_HIP_ERROR(hipStreamSynchronize(stream));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipStreamSynchronize(stream));
 
         free_hip(&keep);
 
@@ -4664,10 +4659,10 @@ namespace rocalution
                 this->mat_.row_offset, this->mat_.col, this->mat_.val, nrow, drop_off, row_offset);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            size_t rocprim_size;
+            size_t rocprim_size   = 0;
             char*  rocprim_buffer = NULL;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(NULL,
                                         rocprim_size,
                                         row_offset,
@@ -4676,11 +4671,10 @@ namespace rocalution
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         row_offset,
@@ -4689,7 +4683,6 @@ namespace rocalution
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 
@@ -4827,10 +4820,10 @@ namespace rocalution
                 this->mat_.row_offset, this->mat_.col, nrow, idx, cast_vec->vec_, row_offset);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            size_t rocprim_size;
+            size_t rocprim_size   = 0;
             char*  rocprim_buffer = NULL;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(NULL,
                                         rocprim_size,
                                         row_offset,
@@ -4839,11 +4832,10 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         row_offset,
@@ -4852,7 +4844,6 @@ namespace rocalution
                                         this->nrow_,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 
@@ -5132,25 +5123,23 @@ namespace rocalution
         size_t size   = 0;
 
         // Exclusive sum to obtain pointers
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprimTexclusivesum(buffer,
                                  size,
                                  this->mat_.row_offset,
                                  this->mat_.row_offset,
                                  this->nrow_ + 1,
                                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(size, &buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprimTexclusivesum(buffer,
                                  size,
                                  this->mat_.row_offset,
                                  this->mat_.row_offset,
                                  this->nrow_ + 1,
                                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&buffer);
 
@@ -5355,9 +5344,8 @@ namespace rocalution
         int iter = 0;
         while(!hdone)
         {
-            DISCARD_HIP_ERROR(hipMemcpy(
+            CHECK_HIP_STATUS(hipMemcpy(
                 max_tuples, tuples, sizeof(mis_tuple) * this->nrow_, hipMemcpyDeviceToDevice));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             if(avg_nnz_per_row <= 8)
             {
@@ -5488,10 +5476,10 @@ namespace rocalution
         }
 
         // exclusive scan on aggregates array
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_agg->vec_,
@@ -5500,11 +5488,10 @@ namespace rocalution
                                     this->nrow_,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_agg->vec_,
@@ -5513,15 +5500,13 @@ namespace rocalution
                                     this->nrow_,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
         for(int k = 0; k < 2; k++)
         {
-            DISCARD_HIP_ERROR(hipMemcpy(
+            CHECK_HIP_STATUS(hipMemcpy(
                 max_tuples, tuples, sizeof(mis_tuple) * this->nrow_, hipMemcpyDeviceToDevice));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             kernel_csr_amg_update_aggregates<<<
                 GridSize,
@@ -5573,33 +5558,29 @@ namespace rocalution
         allocate_hip(this->nrow_ + 1, &prolong_row_offset);
 
         // rocprim buffer
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
         // Obtain maximum entry in aggregation array
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            cast_agg->vec_,
-                            prolong_row_offset,
-                            -2,
-                            cast_agg->size_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         cast_agg->vec_,
+                                         prolong_row_offset,
+                                         -2,
+                                         cast_agg->size_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            cast_agg->vec_,
-                            prolong_row_offset,
-                            -2,
-                            cast_agg->size_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         cast_agg->vec_,
+                                         prolong_row_offset,
+                                         -2,
+                                         cast_agg->size_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -5618,29 +5599,25 @@ namespace rocalution
             this->nrow_, this->mat_.row_offset, prolong_row_offset + 1);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            prolong_row_offset + 1,
-                            prolong_row_offset,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         prolong_row_offset + 1,
+                                         prolong_row_offset,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            prolong_row_offset + 1,
-                            prolong_row_offset,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         prolong_row_offset + 1,
+                                         prolong_row_offset,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -5948,29 +5925,25 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Obtain maximum row nnz to determine correct map size
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            prolong_row_offset,
-                            prolong_row_offset + this->nrow_,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         prolong_row_offset,
+                                         prolong_row_offset + this->nrow_,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            prolong_row_offset,
-                            prolong_row_offset + this->nrow_,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         prolong_row_offset,
+                                         prolong_row_offset + this->nrow_,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -5978,7 +5951,7 @@ namespace rocalution
         copy_d2h(1, prolong_row_offset + this->nrow_, &max_row_nnz);
 
         // Perform exclusive scan on csr row pointer array
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     prolong_row_offset,
@@ -5987,11 +5960,10 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     prolong_row_offset,
@@ -6000,7 +5972,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
         rocprim_buffer = NULL;
@@ -6364,9 +6335,9 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Perform inclusive scan on csr row pointer array
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::inclusive_scan(nullptr,
                                     rocprim_size,
                                     prolong_row_offset,
@@ -6374,9 +6345,8 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
         allocate_hip(rocprim_size, &rocprim_buffer);
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::inclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     prolong_row_offset,
@@ -6384,7 +6354,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
         free_hip(&rocprim_buffer);
         PtrType prolong_nnz = 0;
         copy_d2h(1, prolong_row_offset + this->nrow_, &prolong_nnz);
@@ -7500,6 +7469,7 @@ namespace rocalution
                     cast_agg->vec_,
                     cast_agg_nodes->vec_);
         }
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
@@ -7528,6 +7498,7 @@ namespace rocalution
             0,
             HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
             this->nrow_, agg_size, global_column_begin, cast_agg->vec_, cast_agg_nodes->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
     }
@@ -7999,9 +7970,9 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Perform inclusive scan on csr row pointer array
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::inclusive_scan(nullptr,
                                     rocprim_size,
                                     prolong_row_offset,
@@ -8009,11 +7980,10 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::inclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     prolong_row_offset,
@@ -8021,7 +7991,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -8139,29 +8108,25 @@ namespace rocalution
         size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset + 1,
-                            cast_pi->mat_.row_offset,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset + 1,
+                                         cast_pi->mat_.row_offset,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset + 1,
-                            cast_pi->mat_.row_offset,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset + 1,
+                                         cast_pi->mat_.row_offset,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         if(global == true)
         {
@@ -8173,7 +8138,7 @@ namespace rocalution
                 this->nrow_, cast_gst->mat_.row_offset, cast_pg->mat_.row_offset + 1);
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
                                 cast_pg->mat_.row_offset + 1,
@@ -8182,7 +8147,6 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         free_hip(&rocprim_buffer);
@@ -8787,33 +8751,29 @@ namespace rocalution
         char*  rocprim_buffer = NULL;
 
         // Determine maximum number of non-zeros per row of internal prolongation matrix
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset,
-                            cast_pi->mat_.row_offset + this->nrow_,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset,
+                                         cast_pi->mat_.row_offset + this->nrow_,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset,
-                            cast_pi->mat_.row_offset + this->nrow_,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset,
+                                         cast_pi->mat_.row_offset + this->nrow_,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         if(global)
         {
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
                                 cast_pg->mat_.row_offset,
@@ -8822,7 +8782,6 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
         free_hip(&rocprim_buffer);
@@ -8837,7 +8796,7 @@ namespace rocalution
         }
 
         // Perform exclusive scan on internal prolongation row offsets
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -8846,11 +8805,10 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -8859,7 +8817,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -8886,7 +8843,7 @@ namespace rocalution
             assert(cast_glo != NULL);
 
             // Perform exclusive scan on ghost prolongation row offsets
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(NULL,
                                         rocprim_size,
                                         cast_pg->mat_.row_offset,
@@ -8895,11 +8852,10 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         cast_pg->mat_.row_offset,
@@ -8908,7 +8864,6 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 
@@ -9624,8 +9579,6 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregates);
         const HIPAcceleratorVector<int64_t>* cast_agg_nodes
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregate_root_nodes);
-        const HIPAcceleratorMatrixCSR<ValueType>* cast_gst
-            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost);
         HIPAcceleratorVector<int>* cast_f2c = dynamic_cast<HIPAcceleratorVector<int>*>(f2c);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pi
             = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong_int);
@@ -9653,7 +9606,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
-            assert(cast_gst != NULL);
+            assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
 
             // Start with fresh P ghost
@@ -9725,8 +9678,6 @@ namespace rocalution
             = dynamic_cast<const HIPAcceleratorVector<int64_t>*>(&aggregate_root_nodes);
         const HIPAcceleratorVector<int>* cast_f2c
             = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2c);
-        const HIPAcceleratorMatrixCSR<ValueType>* cast_gst
-            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pi
             = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong_int);
         HIPAcceleratorMatrixCSR<ValueType>* cast_pg
@@ -9745,7 +9696,7 @@ namespace rocalution
         char*  rocprim_buffer = NULL;
 
         // Perform exclusive scan on internal prolongation row offsets
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -9754,11 +9705,10 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -9767,7 +9717,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -9789,12 +9738,12 @@ namespace rocalution
 
         if(global == true)
         {
-            assert(cast_gst != NULL);
+            assert(dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&ghost) != NULL);
             assert(cast_pg != NULL);
             assert(cast_glo != NULL);
 
             // Perform exclusive scan on ghost prolongation row offsets
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(NULL,
                                         rocprim_size,
                                         cast_pg->mat_.row_offset,
@@ -9803,11 +9752,10 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         cast_pg->mat_.row_offset,
@@ -9816,7 +9764,6 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 
@@ -9928,6 +9875,7 @@ namespace rocalution
                                      0,
                                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
             static_cast<int>(this->nnz_), cast_l2g->vec_, this->mat_.col, gcols);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Append additional global columns from ext
         int* workspace = NULL;
@@ -9938,12 +9886,13 @@ namespace rocalution
                                        0,
                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)>>>(
             ext_nnz, global_col_begin, global_col_end, cast_ext->vec_, workspace);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Exclusive scan
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     workspace,
@@ -9952,11 +9901,10 @@ namespace rocalution
                                     ext_nnz + 1,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     workspace,
@@ -9965,7 +9913,6 @@ namespace rocalution
                                     ext_nnz + 1,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -9980,6 +9927,7 @@ namespace rocalution
             cast_ext->vec_,
             workspace,
             gcols + this->nnz_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         int total_nnz;
         copy_d2h(1, workspace + ext_nnz, &total_nnz);
@@ -10009,7 +9957,7 @@ namespace rocalution
         int* d_nruns = NULL;
         allocate_hip(1, &d_nruns);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::run_length_encode(rocprim_buffer,
                                        rocprim_size,
                                        gcol_sorted.vec_,
@@ -10018,11 +9966,10 @@ namespace rocalution
                                        cast_cmb->vec_,
                                        d_nruns,
                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::run_length_encode(rocprim_buffer,
                                        rocprim_size,
                                        gcol_sorted.vec_,
@@ -10031,7 +9978,6 @@ namespace rocalution
                                        cast_cmb->vec_,
                                        d_nruns,
                                        HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -10051,7 +9997,7 @@ namespace rocalution
         // Prefix sum to get entry points to duplicates
         if(nruns > 0)
         {
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         cast_cmb->vec_,
@@ -10060,11 +10006,10 @@ namespace rocalution
                                         nruns + 1,
                                         rocprim::plus<int>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         cast_cmb->vec_,
@@ -10073,7 +10018,6 @@ namespace rocalution
                                         nruns + 1,
                                         rocprim::plus<int>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
         }
@@ -10101,6 +10045,7 @@ namespace rocalution
             cast_cmb->vec_ + this->nnz_,
             workspace,
             cast_col->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&workspace);
 
@@ -10142,39 +10087,37 @@ namespace rocalution
                                               HIPSTREAM(
                                                   _get_backend_descriptor()->HIP_stream_current)>>>(
             this->nrow_, this->mat_.row_offset, this->mat_.col, int_csr_row_ptr, gst_csr_row_ptr);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Exclusive sum to obtain pointers
-        size_t size;
+        size_t size   = 0;
         char*  buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprimTexclusivesum(buffer,
                                  size,
                                  int_csr_row_ptr,
                                  int_csr_row_ptr,
                                  this->nrow_ + 1,
                                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(size, &buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprimTexclusivesum(buffer,
                                  size,
                                  int_csr_row_ptr,
                                  int_csr_row_ptr,
                                  this->nrow_ + 1,
                                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprimTexclusivesum(buffer,
                                  size,
                                  gst_csr_row_ptr,
                                  gst_csr_row_ptr,
                                  this->nrow_ + 1,
                                  HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&buffer);
 
@@ -10210,6 +10153,7 @@ namespace rocalution
                                                                         gst_csr_row_ptr,
                                                                         gst_csr_col_ind,
                                                                         gst_csr_val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         cast_int->SetDataPtrCSR(
             &int_csr_row_ptr, &int_csr_col_ind, &int_csr_val, int_nnz, this->nrow_, this->nrow_);
@@ -10345,10 +10289,10 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Exclusive sum to obtain offsets
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     this->mat_.row_offset,
@@ -10357,11 +10301,10 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     this->mat_.row_offset,
@@ -10370,7 +10313,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<int>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -10464,12 +10406,13 @@ namespace rocalution
                                                                         cast_col->vec_,
                                                                         int_csr_row_ptr,
                                                                         gst_csr_row_ptr);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Exclusive sum to obtain offsets
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     int_csr_row_ptr,
@@ -10478,11 +10421,10 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     int_csr_row_ptr,
@@ -10491,9 +10433,8 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     gst_csr_row_ptr,
@@ -10502,7 +10443,6 @@ namespace rocalution
                                     nrow + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&rocprim_buffer);
 
@@ -10554,6 +10494,7 @@ namespace rocalution
             gst_workspace,
             cast_glo->vec_,
             gst_csr_val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Clean up
         free_hip(&int_workspace);
@@ -10617,10 +10558,10 @@ namespace rocalution
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             // Find maximum over all rows
-            size_t rocprim_size;
+            size_t rocprim_size   = 0;
             char*  rocprim_buffer = NULL;
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(NULL,
                                 rocprim_size,
                                 csr_row_ptr,
@@ -10629,11 +10570,10 @@ namespace rocalution
                                 nrow,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
                                 csr_row_ptr,
@@ -10642,7 +10582,6 @@ namespace rocalution
                                 nrow,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 
@@ -11265,7 +11204,7 @@ namespace rocalution
             CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             // Obtain actual max nnz per row
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(NULL,
                                 rocprim_size,
                                 csr_row_ptr,
@@ -11274,11 +11213,10 @@ namespace rocalution
                                 nrow,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
                                 csr_row_ptr,
@@ -11287,7 +11225,6 @@ namespace rocalution
                                 nrow,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 
@@ -11295,7 +11232,7 @@ namespace rocalution
             copy_d2h(1, csr_row_ptr + nrow, &max_row_nnz);
 
             // Exclusive sum to obtain new row pointers
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(NULL,
                                         rocprim_size,
                                         csr_row_ptr,
@@ -11304,11 +11241,10 @@ namespace rocalution
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             allocate_hip(rocprim_size, &rocprim_buffer);
 
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         csr_row_ptr,
@@ -11317,7 +11253,6 @@ namespace rocalution
                                         nrow + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             free_hip(&rocprim_buffer);
 

@@ -1,0 +1,72 @@
+# Skip CI Configuration for rocm-libraries
+#
+# This file defines which file patterns can skip TheRock CI.
+# When all changed files match these patterns, CI can be skipped.
+#
+# These patterns extend TheRock's base patterns in
+# build_tools/github_actions/skip-ci-base.toml.
+#
+# Pattern syntax: fnmatch glob patterns (*, ?, [abc])
+# See https://docs.python.org/3/library/fnmatch.html
+#
+# To add platform-specific skips (e.g., skip Windows CI for Linux-only projects),
+# use the [skip_ci.linux] or [skip_ci.windows] sections.
+
+version = 1
+
+[skip_ci]
+# Common patterns that skip CI on all platforms
+common = [
+    # Documentation and metadata files
+    "*.clinerules",
+    "*.cursorrules",
+    "*.mdc",
+    "*.md",
+    "*.rst",
+    "*.rtf",
+    "*.pre-commit-config.*",
+    "*CODEOWNERS",
+    "*LICENSE",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
+    ".github/label*.yml",
+    ".gitignore",
+    "dnn-providers/*/.gitignore",
+    "dnn-providers/*/docs/*",
+    "docs/*",
+    "projects/*/.gitignore",
+    "projects/*/docs/*",
+
+    # Tools are standalone scripts/utilities not part of the build or test pipeline.
+    # Changes here should not trigger CI builds.
+    "projects/hipdnn/tools/*",
+    "shared/*/.gitignore",
+    "shared/*/docs/*",
+
+    # ComposableKernel directories not built by TheRock
+    "projects/composablekernel/Jenkinsfile",
+    "projects/composablekernel/Docker*",
+    "projects/composablekernel/client_example/*",
+    "projects/composablekernel/codegen/*",
+    "projects/composablekernel/dispatcher/*",
+    "projects/composablekernel/example/*",
+    "projects/composablekernel/experimental/*",
+    "projects/composablekernel/profiler/*",
+    "projects/composablekernel/python/*",
+    "projects/composablekernel/rocm_ck/*",
+    "projects/composablekernel/script/*",
+    "projects/composablekernel/test/*",
+    "projects/composablekernel/test_data/*",
+    "projects/composablekernel/tile_engine/*",
+    "projects/composablekernel/tutorial/*",
+    "projects/composablekernel/vars/*",
+    "projects/composablekernel/groovy/*",
+]
+
+# Patterns that skip CI only on Linux (e.g., Windows-only projects)
+linux = []
+
+# Patterns that skip CI only on Windows (e.g., Linux-only projects)
+windows = []

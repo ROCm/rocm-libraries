@@ -288,9 +288,9 @@ flowchart TD
 Key source locations:
 
 - TensileLite activation labels and bodies:
-  `projects/hipblaslt/tensilelite/Tensile/KernelWriterAssembly.py`
+  `projects/hipblaslt/tensilelite/tensilelite/KernelWriterAssembly.py`
 - TensileLite call-site instruction:
-  `projects/hipblaslt/tensilelite/Tensile/Components/GlobalWriteBatch.py`
+  `projects/hipblaslt/tensilelite/tensilelite/Components/GlobalWriteBatch.py`
 - rocisa pass entry point:
   `projects/hipblaslt/tensilelite/rocisa/rocisa/src/pass/pass.cpp`
 - rocisa duplicate activation removal:

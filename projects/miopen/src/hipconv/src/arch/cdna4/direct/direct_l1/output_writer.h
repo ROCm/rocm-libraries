@@ -73,9 +73,18 @@ public:
     static constexpr int kStageRowFp16      = kStageBlocksPerRow * 4; // 64: swizzled row width
     static constexpr int kStageWaveFp16     = 16 * kStageRowFp16; // 1024: one wave's 16-pixel row
     // All waves in the workgroup stage into disjoint slots of one buffer.
-    static constexpr int kStageBufFp16  = cfg.num_waves() * kStageWaveFp16;
-    static constexpr int kNumStageBufs  = 2; // tic/toc
-    static constexpr int stage_lds_fp16 = kNumStageBufs * kStageBufFp16;
+    static constexpr int kStageBufFp16 = cfg.num_waves() * kStageWaveFp16;
+    static constexpr int kNumStageBufs = 2; // tic/toc
+
+    // True when write() routes through the LDS-staged wide store. The narrow register
+    // store ignores the staging pointer, so a config taking it reserves nothing.
+    static constexpr bool stages_output = (Kwg_k16 == 4 || cfg.unfold_n > 1);
+
+    static constexpr int stage_lds_fp16 = stages_output ? kNumStageBufs * kStageBufFp16 : 0;
+
+    // The staged path's LDS swizzle and b64 opcodes are 16-bit only.
+    static_assert(!stages_output || sizeof(datatype_t) == 2,
+                  "the LDS-staged wide store assumes a 2-byte output element");
 
     __device__ OutputWriter(const OutputPars& pars,
                             datatype_t* out,
@@ -91,10 +100,13 @@ public:
         , out_(out)
         // Per-wave staging slot: the global wave id picks a disjoint 1024-fp16 region.
         //
-        // K partitions and waves never alias, so no __syncthreads is needed.
-        , stage_(stage_lds +
-                 __builtin_amdgcn_readfirstlane((wave_k_idx * (cfg.waves_p * cfg.waves_q) + wave) *
-                                                kStageWaveFp16))
+        // K partitions and waves never alias, so no __syncthreads is needed. A config
+        // taking the narrow store reserves nothing and is passed nullptr, which must
+        // not be offset.
+        , stage_(stages_output ? stage_lds + __builtin_amdgcn_readfirstlane(
+                                                 (wave_k_idx * (cfg.waves_p * cfg.waves_q) + wave) *
+                                                 kStageWaveFp16)
+                               : nullptr)
         // readfirstlane pins these wave-uniform bases to SGPRs.
         //
         // Else the threadIdx-derived values stay in VGPRs across the whole loop and
@@ -193,25 +205,32 @@ public:
 private:
     using vec4_t = decltype(packed_convert<datatype_t>(fp32x4_t{}));
 
-    // Raw store-payload type for the buffer_store builtins: vec4_t (4 fp16) = b64.
+    // Raw store-payload types for the buffer_store builtins: a lane's 4-contiguous-K
+    // run is vec4_t, which is 8 bytes (b64) at 2 bytes per channel and 16 (b128) at 4.
     using u32x2_t = __attribute__((ext_vector_type(2))) uint32_t;
+    using u32x4_t = __attribute__((ext_vector_type(4))) uint32_t;
 
     // buffer_store helpers: byte offset = elem_off * sizeof(elem), soffset 0.
-    __device__ void store_b64(int elem_off, vec4_t r) const
+    __device__ void store_vec4(int elem_off, vec4_t r) const
     {
-        __builtin_amdgcn_raw_buffer_store_b64(__builtin_bit_cast(u32x2_t, r),
-                                              out_rsrc_,
-                                              elem_off * static_cast<int>(sizeof(datatype_t)),
-                                              0,
-                                              kStoreCachePolicy);
+        const int byte_off = elem_off * static_cast<int>(sizeof(datatype_t));
+        if constexpr(sizeof(datatype_t) == 4)
+            __builtin_amdgcn_raw_buffer_store_b128(
+                __builtin_bit_cast(u32x4_t, r), out_rsrc_, byte_off, 0, kStoreCachePolicy);
+        else
+            __builtin_amdgcn_raw_buffer_store_b64(
+                __builtin_bit_cast(u32x2_t, r), out_rsrc_, byte_off, 0, kStoreCachePolicy);
     }
-    __device__ void store_b16(int elem_off, datatype_t v) const
+    // One output channel, for the arbitrary-K path's per-channel guarded store.
+    __device__ void store_elem(int elem_off, datatype_t v) const
     {
-        __builtin_amdgcn_raw_buffer_store_b16(__builtin_bit_cast(uint16_t, v),
-                                              out_rsrc_,
-                                              elem_off * static_cast<int>(sizeof(datatype_t)),
-                                              0,
-                                              kStoreCachePolicy);
+        const int byte_off = elem_off * static_cast<int>(sizeof(datatype_t));
+        if constexpr(sizeof(datatype_t) == 4)
+            __builtin_amdgcn_raw_buffer_store_b32(
+                __builtin_bit_cast(uint32_t, v), out_rsrc_, byte_off, 0, kStoreCachePolicy);
+        else
+            __builtin_amdgcn_raw_buffer_store_b16(
+                __builtin_bit_cast(uint16_t, v), out_rsrc_, byte_off, 0, kStoreCachePolicy);
     }
 
     template <int K16>
@@ -273,9 +292,9 @@ private:
 #pragma unroll
                 for(int k16 = 0; k16 < K16; ++k16)
                 {
-                    // One dwordx2: 4 contiguous K = k16*16 + k_bank + {0..3}.
+                    // 4 contiguous K = k16*16 + k_bank + {0..3}.
                     const vec4_t r = packed_convert<datatype_t>(acc[p][q16][k16]);
-                    store_b64(px_off + k16 * 16, r);
+                    store_vec4(px_off + k16 * 16, r);
                 }
             }
         }
@@ -283,8 +302,8 @@ private:
 
     // Narrow store for the wave straddling the real-K boundary (arbitrary-K path).
     //
-    // Same lane mapping as emit(), but each channel goes out as a scalar fp16 guarded
-    // by k_out < K_per_group, so padding is never written. P and Q always
+    // Same lane mapping as emit(), but each channel goes out as one scalar element
+    // guarded by k_out < K_per_group, so padding is never written. P and Q always
     // bounds-checked (this wave is rare; no full-tile fast path). Unfold tiles decode
     // the packed (image, column) here too, using the pre-transpose write-side pixel
     // (q16*16 + q_lane), unlike store_staged's post-transpose read-side index.
@@ -349,7 +368,7 @@ private:
                     {
                         // Channel within the group; skip if it is K-padding.
                         if(lane_k_in_group + k16 * 16 + a < k_real)
-                            store_b16(px_off + k16 * 16 + a, r[a]);
+                            store_elem(px_off + k16 * 16 + a, r[a]);
                     }
                 }
             }
@@ -375,7 +394,7 @@ private:
 
     // LDS-staged wide store, one P-row at a time.
     //
-    // Per row: ds_write_b64 the 4-K runs, ds_read_b64 the transpose, store_b64.
+    // Per row: ds_write_b64 the 4-K runs, ds_read_b64 the transpose, store_vec4.
     // Double-buffered (tic/toc) with the write running one row ahead so its LDS
     // latency overlaps the read. The shared lgkmcnt FIFO orders it: each row issues
     // its read, then the NEXT row's write, then drains only the reads; the next
@@ -473,7 +492,7 @@ private:
                 {
                     const int q_out = wave_q_base_ + pixel;
                     if(p_in && q_out < pars_.Wo)
-                        store_b64(p_base + q_out * Kpp + r_kbase, v[rp]);
+                        store_vec4(p_base + q_out * Kpp + r_kbase, v[rp]);
                 }
                 else
                 {
@@ -488,9 +507,9 @@ private:
                     // img_stride is size_t for the large_tensor overflow guard; unfold
                     // configs are never > 2 GiB, so the image term fits int here.
                     if(p_in && n_in && w_out < pars_.Wo)
-                        store_b64(p_base + static_cast<int>(n_local * img_stride) + w_out * Kpp +
-                                      r_kbase,
-                                  v[rp]);
+                        store_vec4(p_base + static_cast<int>(n_local * img_stride) + w_out * Kpp +
+                                       r_kbase,
+                                   v[rp]);
                 }
             }
         }

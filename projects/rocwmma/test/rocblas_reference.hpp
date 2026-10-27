@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -284,30 +284,30 @@ namespace rocwmma
 
     //! @brief Dispatcher for rocBLAS.
     //! Need to call different interface for f8 validation
-    auto dispatch_rocBLAS(rocblas_handle    handle,
-                          rocblas_operation opA,
-                          rocblas_operation opB,
-                          rocblas_int       m,
-                          rocblas_int       n,
-                          rocblas_int       k,
-                          const void*       alpha,
-                          const void*       a,
-                          rocblas_datatype  a_type,
-                          rocblas_int       lda,
-                          const void*       b,
-                          rocblas_datatype  b_type,
-                          rocblas_int       ldb,
-                          const void*       beta,
-                          const void*       c,
-                          rocblas_datatype  c_type,
-                          rocblas_int       ldc,
-                          void*             d,
-                          rocblas_datatype  d_type,
-                          rocblas_int       ldd,
-                          rocblas_datatype  compute_type,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index,
-                          uint32_t          flags)
+    inline auto dispatch_rocBLAS(rocblas_handle    handle,
+                                 rocblas_operation opA,
+                                 rocblas_operation opB,
+                                 rocblas_int       m,
+                                 rocblas_int       n,
+                                 rocblas_int       k,
+                                 const void*       alpha,
+                                 const void*       a,
+                                 rocblas_datatype  a_type,
+                                 rocblas_int       lda,
+                                 const void*       b,
+                                 rocblas_datatype  b_type,
+                                 rocblas_int       ldb,
+                                 const void*       beta,
+                                 const void*       c,
+                                 rocblas_datatype  c_type,
+                                 rocblas_int       ldc,
+                                 void*             d,
+                                 rocblas_datatype  d_type,
+                                 rocblas_int       ldd,
+                                 rocblas_datatype  compute_type,
+                                 rocblas_gemm_algo algo,
+                                 int32_t           solution_index,
+                                 uint32_t          flags)
     {
 #if defined(ROCBLAS_DATA_TYPE_FLOAT8)
         if(a_type == rocblas_datatype_f8_r || b_type == rocblas_datatype_f8_r

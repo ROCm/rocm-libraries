@@ -14,6 +14,14 @@ registration patterns, not another engine's applicability rules.
 | Native score | `double(const MatchContext&, const BoundTokens&, const KernelDefinition&)` | Rank surviving candidates for `heuristic: native` |
 | Dispatch | `IKernelDispatchHandler<Handle>` | Workspace, owned preparation and exact launch |
 
+A multi-launch pack (descriptors carrying `sources`) overrides `launchNames()` to return
+the launch names of its kernels' `sources` maps, the same set for every kernel; the state
+manager drops a kernel whose set differs. `prepare()` and the launch resolve each launch's
+kernel with `launchKernelDefinition(kernel, name)`, which returns a single-launch
+definition and throws `INVALID_VALUE` for an unknown name or a single-launch kernel. The
+handler owns launch order and the workspace between launches. The declaration is
+provisional until `launches[]` exists. Two names may name one kernel.
+
 Complete reachable placeholders. Zero workspace is valid only when none is needed. A
 native scorer ranks on justified free axes; higher wins. `heuristic: none` means no UHD
 and no score declaration, body, constant or registration. Loading alone cannot prove

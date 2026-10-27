@@ -226,6 +226,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB1_EPS0_GRVWA4_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_MIWT4_4_PGR2_SU32_SUM1_SUS256_SVW4_TLDS2_VWA4_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17dH10
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -429,6 +430,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 1
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT128x128x32_MI16x16x1_SN_LDSB1_EPS1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB256_MIWT4_4_PGR1_SU32_SUM1_SUS256_SVW4_TLDS2_VWA4_VWB4_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17d8Lq
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -632,6 +634,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 2
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_EPS0_GRVWA4_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR1_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17Tvpi
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -835,6 +838,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 3
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_EPS0_GRVWA1_GRVWB1_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR2_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17cMdm
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -1038,6 +1042,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 4
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_EPS0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR2_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17WI16
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -1241,6 +1246,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 5
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_EPS1_GRVWA4_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_MIWT1_1_PGR1_SU32_SUM1_SUS256_SVW1_TLDS2_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17H0Di
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -1444,6 +1450,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 6
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_EPS0_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR1_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16mwsQ
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -1647,6 +1654,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 7
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_EPS0_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR2_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16mupj
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -1850,6 +1858,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 8
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_EPS0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR2_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17Rjer
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -2053,6 +2062,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 9
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_EPS1_GRVWA4_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA128_LBSPPB128_MIWT1_1_PGR1_SU32_SUM1_SUS256_SVW1_TLDS2_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17kvyp
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -2256,6 +2266,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 10
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x32x64_MI16x16x1_SN_LDSB0_EPS1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_PGR1_SU32_SUM1_SUS256_SVW1_TLDS1_VWA1_VWB1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17Z1BN
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -2460,6 +2471,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 11
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT128x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB128_MIWT4_3_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16uMho
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -2668,6 +2680,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 12
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA256_LBSPPB128_MIWT1_1_NLCA1_SS1_SU32_SUM1_SUS256_SVW1_TLDS1_WG16_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17Pcgt
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -2876,6 +2889,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 13
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB256_MIWT1_1_NLCA1_SS1_SU32_SUM1_SUS256_SVW1_TLDS0_WG32_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16y7Da
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -3084,6 +3098,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 14
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT64x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_MIWT1_1_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17dRoH
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -3292,6 +3307,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 15
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT32x16x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA512_LBSPPB128_MIWT1_1_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG32_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16jncs
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -3500,6 +3516,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 16
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_MIWT1_2_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL172Ehu
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -3708,6 +3725,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 17
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_MIWT1_2_NLCA1_SS1_SU32_SUM1_SUS256_SVW1_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17LVjl
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -3916,6 +3934,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 18
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT192x16x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA3072_LBSPPB128_MIWT3_1_NLCA3_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16rWiE
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -4124,6 +4143,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 19
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT64x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_MIWT2_3_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17eMU1
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -4332,6 +4352,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 20
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT64x96x64_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1024_LBSPPB128_MIWT2_3_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17EFuf
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -4540,6 +4561,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 21
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT256x48x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB4_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA4096_LBSPPB128_MIWT4_3_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL179hXf
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -4748,6 +4770,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 22
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT256x32x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA4096_LBSPPB128_MIWT4_2_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16fDVs
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -4956,6 +4979,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 23
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT96x128x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1536_LBSPPB128_MIWT3_4_NLCA3_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16qFnM
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -5164,6 +5188,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 24
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT96x128x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1536_LBSPPB128_MIWT3_4_NLCA3_SS1_SU32_SUM1_SUS256_SVW1_TLDS1_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17RTlw
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -5372,6 +5397,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 25
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT128x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB128_MIWT2_6_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17OJ7R
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -5580,6 +5606,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 26
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT128x96x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB128_MIWT4_3_NLCA1_SS1_SU32_SUM1_SUS256_SVW1_TLDS1_WG32_4_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL16mh2W
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -5788,6 +5815,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 27
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT256x32x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA4096_LBSPPB512_MIWT4_2_NLCA1_SS0_SU32_SUM1_SUS256_SVW8_TLDS0_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17iCKQ
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 1
@@ -5996,6 +6024,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 28
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT128x64x32_MI16x16x1_SN_LDSB0_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA2048_LBSPPB128_MIWT2_4_NLCA1_SS1_SU32_SUM1_SUS256_SVW1_TLDS1_WG64_2_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17A0cW
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1
@@ -6204,6 +6233,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 29
     SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_HAS_UserArgs_MT96x128x32_MI16x16x1_SN_LDSB1_GRVWA8_GRVWB8_GSU1_GSUC0_GSUWGMRR0_K1_LBSPPA1536_LBSPPB128_MIWT6_2_NLCA3_SS1_SU32_SUM1_SUS256_SVW1_TLDS1_WG16_8_1_WGM8_WGMXCC1_WGMXCCGn1
+    SolutionUID: 0uR2wL17Cw8w
     SourceSwap: true
     StaggerU: 32
     StaggerUMapping: 1

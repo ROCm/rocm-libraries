@@ -421,3 +421,10 @@ if not hasStinkyTofuBackend():
     def isMnemonicSupportedByStinkyTofu(mnemonic, version) -> bool:
         # No StinkyTofu to lower through, so nothing here can reject a mnemonic.
         return True
+
+    def parseRegisterAllocationConfig(value):
+        # No StinkyTofu, so no allocation settings to read: only a bare mode parses.
+        if type(value) is int and 0 <= value <= 3:
+            return (str(value), value)
+        raise ValueError(
+            f"register allocation config {value!r} needs rocisa built with StinkyTofu")

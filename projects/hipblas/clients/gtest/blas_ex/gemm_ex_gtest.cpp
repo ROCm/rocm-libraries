@@ -51,14 +51,14 @@ namespace
                     return false;
 
                 // type filters
-                return static_cast<bool>(FILTER<T...>{});
+                return FILTER<T...>::value;
             }
         };
 
         // Filter for which types apply to this suite
         static bool type_filter(const Arguments& arg)
         {
-            return hipblas_simple_dispatch<gemm_ex_template::template type_filter_functor>(arg);
+            return hipblas_gemm_dispatch<gemm_ex_template::template type_filter_functor>(arg);
         }
 
         // Filter for which functions apply to this suite

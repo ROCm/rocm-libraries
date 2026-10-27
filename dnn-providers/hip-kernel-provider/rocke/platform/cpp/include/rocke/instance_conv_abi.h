@@ -68,6 +68,18 @@ bool rocke_conv_arg_names(const char* direction,
                           bool two_stage,
                           rocke_conv_arg_list_t* out);
 
+/* As above, plus wgrad's stream-K variant: `streamk` names the reduction
+ * ("atomic", "workspace", "linear" or "tree") of a stream-K kernel, or is NULL
+ * for a kernel without stream-K. A stream-K list carries the reduction's
+ * buffers after ks_count and then the partition block. Returns false for a
+ * non-wgrad direction, an unknown reduction, or stream-K combined with
+ * two_stage -- the cases conv_arg_names() raises on. */
+bool rocke_conv_arg_names_ex(const char* direction,
+                             bool is_3d,
+                             bool two_stage,
+                             const char* streamk,
+                             rocke_conv_arg_list_t* out);
+
 /* Direct grouped conv ABI ("fwd", "dgrad" or "wgrad"); false for any other
  * direction. */
 bool rocke_conv_direct_arg_names(const char* direction, rocke_conv_arg_list_t* out);

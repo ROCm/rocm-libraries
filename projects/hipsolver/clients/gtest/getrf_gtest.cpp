@@ -148,11 +148,11 @@ class GETRF_COMPAT_NPVT_64 : public GETRF_BASE<API_COMPAT, true, int64_t, size_t
 {
 };
 
-class GETRF_BATCHED : public GETRF_BASE<API_NORMAL, false, int, int>
+class GETRF_BATCHED : public GETRF_BASE<API_NORMAL, false, int, size_t>
 {
 };
 
-class GETRF_NPVT_BATCHED : public GETRF_BASE<API_NORMAL, true, int, int>
+class GETRF_NPVT_BATCHED : public GETRF_BASE<API_NORMAL, true, int, size_t>
 {
 };
 

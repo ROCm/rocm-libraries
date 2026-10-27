@@ -47,7 +47,12 @@ Matmul(a, b) → d
 > B currently returns incorrect results and is rejected as unsupported
 > (originally observed on gfx950; not yet arch-gated pending further testing).
 
-**Hardware support:** Supported on **gfx950** and **gfx1250** only.
+**Hardware support:** Supported on **gfx950** only.
+
+> **Known issue (#13715):** on **gfx1250**, hipBLASLt has MX GEMM kernels only for
+> `transA = T, transB = N`. The layout below reaches hipBLASLt as
+> `transA = N, transB = T` (after the row-major operand swap), so hipBLASLt
+> finds no algorithm and the engine declines every MX graph on gfx1250.
 
 **Graph requirements:** the plugin validates the hipDNN graph
 against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the

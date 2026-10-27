@@ -14,11 +14,6 @@ transform start or when storing output to global memory at the
 transform end.  If specified, these functions are Just-In-Time (JIT)
 compiled to combine them with rocFFT's own device code.
 
-.. note::
-   JIT callbacks cannot currently be used on transforms that
-   have fields or bricks also specified on the same plan description.
-   This support will be added in a future release of rocFFT.
-
 These optional user-defined callback functions can be supplied
 to the library using
 :cpp:func:`rocfft_plan_description_set_load_callback` and
@@ -180,13 +175,6 @@ store callbacks) of the transform.  A transform which does not
 specify a field and brick layout for input (or output) is
 considered to have a single brick for input (or output).
 
-.. note::
-   As JIT callbacks cannot currently be used on transforms that have
-   fields or bricks specified on the plan description, the length of the
-   array of callback data pointers will always be 1 if callback data is
-   specified.
-
-
 Here is an example showing how to pass filtering data to a load
 callback.
 
@@ -228,6 +216,25 @@ callback.
   // parameter.  The callback can then cast that pointer from 'void*' to
   // 'load_callback_data*' and access the filter.
 
+Considerations for multi-device transforms
+------------------------------------------
+
+Multi-device transforms work with input or output that has been
+decomposed into bricks.  JIT callbacks may still be used with such
+plans, though ``buffer`` points to one input brick (for load
+callbacks) or one output brick (for store callbacks).
+
+The ``offset`` provided to any callback counts elements from the
+beginning of the brick being loaded or stored.  On its own,
+``offset`` does not provide information on the location being loaded
+or stored within the global transform.
+
+``callback_data`` points to the corresponding array entry for the
+brick that was specified with
+:cpp:func:`rocfft_execution_info_set_load_callback_data` or
+:cpp:func:`rocfft_execution_info_set_store_callback_data` for load
+and store callbacks, respectively.
+
 Legacy function pointer callbacks (deprecated)
 ----------------------------------------------
 
@@ -243,25 +250,11 @@ functionality will be removed in a future release.
    architecture and :cpp:func:`rocfft_execute` will return an error
    on this architecture if they are specified.
 
-Legacy callback functions are passed as arrays of function pointers, with
-one function per brick in the :ref:`input or output field<input_output_fields>`.  For example, to
-specify a load callback on a transform with 4 input bricks, pass an
-array of 4 function pointers to
-:cpp:func:`rocfft_execution_info_set_load_callback`.  Or, to specify
-a store callback on a transform with 6 output bricks, pass an array of
-6 function pointers to
-:cpp:func:`rocfft_execution_info_set_store_callback`.  The order of
-the function pointers must match the order that the bricks were added
-to the input or output fields with
-:cpp:func:`rocfft_field_add_brick`.  If the input or output field of
-a transform is unspecified, the input or output is considered to have
-one brick.
-
-All functions in an array must perform the same logical operation.
-That is, any function in an array must be substitutable for any other
-function in the array if the data being loaded or stored were moved
-to another brick.  Behavior of the transform is not defined if
-functions in an array do not behave the same.
+Legacy callback functions and their callback data are passed as
+arrays with exactly one entry.  Function pointer callbacks cannot be
+used on transforms that have :ref:`input or output fields<input_output_fields>`
+specified on the plan description: :cpp:func:`rocfft_execute` returns
+``rocfft_status_invalid_arg_value`` in that case.
 
 .. note::
 

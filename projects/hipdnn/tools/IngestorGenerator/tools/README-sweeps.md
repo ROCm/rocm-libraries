@@ -14,10 +14,10 @@ Use the generator venv and absolute paths, independent of the current directory:
 <PY> <GEN>/tools/sweep.py --config <absolute-YAML>
 ```
 
-`<PY>` is `<GEN>/.venv/bin/python`. Start from
-`configs/sweep-isolation.sweep.yaml.example` and set paths, identities and counts from the
-actual experiment. The runner reads safe YAML as data: configuration is never executed,
-commands are argument lists, and there is no environment interpolation.
+`<PY>` is `<GEN>/.venv/bin/python`. Start from `configs/reduction.sweep.yaml.example` and
+set paths, identities and counts from the actual experiment. The runner reads safe YAML as
+data: configuration is never executed, commands are argument lists, and there is no
+environment interpolation.
 
 Prerequisites: the requested GPU on the execution host, a visible writable sweep root,
 readable graph corpora, each current installed provider arm, and a working benchmark
@@ -108,7 +108,7 @@ Each phase pins the benchmark to that engine with `--engine <signed decimal ID>`
 Keep external caller workloads separate from kernel-owner benchmark/published graphs, and
 preserve original corpus/source/graph identities and manifests: a `microbench` path says
 nothing about provenance. Stage actual graph JSON, not the semantic request list
-mining/parity tools consume.
+`mine_shapes.py` emits; owner ground truth from `ground_truth.py graphs` is its own corpus.
 
 Declare every corpus count before measurement; hazard exclusions do not shrink that
 denominator. For attention use the exact names from the miner's
@@ -118,8 +118,7 @@ empty population.
 
 Coverage, numerical correctness and performance answer different questions. Retain served,
 explicitly declined, execution-error, missing and ambiguous outcomes; a missing timing row
-is not a decline. Complete the final runtime outcome join before
-`reconcile_applicability.py --declines` -- see
+is not a decline. Complete the final runtime outcome join before reporting declines -- see
 [workloads.md](../../ai/skills/hipdnn-ingestor-engine/workloads.md) for the join and
 semantic identity contract. Offline reconciliation proves no dispatch.
 
@@ -137,16 +136,27 @@ once per ordered corpus/arm after the timed grid, with
 `--validate <correctness.reference>`, never mixed into timed sampling.
 
 Construct each child's environment afresh from the caller environment, setting the current
-arm's `ROCM_PATH` and `LD_LIBRARY_PATH` prefix without accumulating prior arms. Use
-phase-specific `HIPDNN_CACHE_DIR` and `HIPDNN_LOG_FILE`, `HIPDNN_FORCE_BENCHMARKING=1` for
-timing and `HIPDNN_LOG_LEVEL=info`; correctness has its own cache and logs, and another
-sweep's paths are not shared state.
+arm's `ROCM_PATH` and `LD_LIBRARY_PATH` prefix without accumulating prior arms. Every
+phase attempt, correctness included, gets its own `HIPDNN_CACHE_DIR` and
+`HIPDNN_LOG_FILE`, `HIPDNN_FORCE_BENCHMARKING=1` and `HIPDNN_LOG_LEVEL=info`; another
+sweep's paths are not shared state. A `benchmark.argv` passing a phase option above,
+`--backend`, `--autotune` or `--hipdnn-cache-dir` (the driver owns the rankings' cache) is
+invalid configuration.
 
 Report geometric mean of per-graph ratios and time-weighted
 `sum(baseline time) / sum(arm time)` together, split by corpus provenance and round; a
 geometric mean alone is not a wall-clock saving. Take byte-identical controls from
 descriptor/payload hashes, never from graphs that timed alike: their ratio is the noise
 floor, not an exact 1.000x.
+
+### Autotune rankings
+
+Every attempt benchmarks, so the ingestor ranks the candidates it timed per graph in its
+cache's `winners.jsonl` shards; the driver copies them into `<attempt>/winners/`, hashes
+them into `phase.json`'s `evidence_hashes` and deletes the cache. Times compare only
+within one ranking. For `tools/variant_reduce.py`, a round is every successful timing
+`phase.json` with the same `phase.round`, merged across corpora; a passed correctness
+attempt only tags the variants it served as numerically checked.
 
 ## Phase gates and completion
 

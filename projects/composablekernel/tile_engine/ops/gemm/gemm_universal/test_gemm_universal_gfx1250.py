@@ -49,25 +49,29 @@ gub = _load_builder_module()
 
 DTYPES = ["fp16", "bf16", "fp8", "bf8"]
 LAYOUTS = ["rcr", "rrr", "crr", "ccr"]
-NEW_PIPELINES = ["comp_async", "comp_tdm", "comp_tdm_v2"]
-TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2"]
+NEW_PIPELINES = ["comp_async", "comp_tdm", "comp_tdm_v2", "comp_tdm_pc"]
+TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2", "comp_tdm_pc"]
 GFX1250_LDS = 320 * 1024
 
 # Kernel counts per (dtype, layout) for the full gfx1250 config: total and per
-# new pipeline. Pins the sweep so any config or validator drift is noticed.
+# new pipeline, as (total, comp_async, comp_tdm, comp_tdm_v2, comp_tdm_pc).
+# Pins the sweep so any config or validator drift is noticed.
 # comp_async is rcr-only on gfx1250, so the rrr rows have no comp_async. The
-# pads sweep [false, true]: comp_async keeps only all-True, TDM only all-False,
-# and the legacy pipelines keep all 8 combos.
+# fp16/bf16 comp_async tiles with M+N=320, K=256 exceed LDS once the descriptor
+# padding is added. The pads sweep [false, true]: comp_async keeps only
+# all-True, TDM only all-False, and the legacy pipelines keep all 8 combos.
+# comp_tdm_pc trails comp_tdm because its 4-slot LDS ring (PIPELINE_SMEM_SLOTS)
+# drops the widest tiles, partly offset by it not being wave-count locked.
 FULL_COUNTS = {
-    ("fp16", "rcr"): (27525, 384, 174, 87),
-    ("fp16", "rrr"): (27141, 0, 174, 87),
-    ("bf16", "rcr"): (27525, 384, 174, 87),
-    ("bf16", "rrr"): (27141, 0, 174, 87),
+    ("fp16", "rcr"): (27586, 348, 174, 87, 97),
+    ("fp16", "rrr"): (27238, 0, 174, 87, 97),
+    ("bf16", "rcr"): (27586, 348, 174, 87, 97),
+    ("bf16", "rrr"): (27238, 0, 174, 87, 97),
     # fp8/bf8 comp_async keeps only warp_tile_k=128 (the 16x16x64 set is gated).
-    ("fp8", "rcr"): (46908, 288, 360, 180),
-    ("fp8", "rrr"): (46620, 0, 360, 180),
-    ("bf8", "rcr"): (46908, 288, 360, 180),
-    ("bf8", "rrr"): (46620, 0, 360, 180),
+    ("fp8", "rcr"): (47151, 288, 360, 180, 243),
+    ("fp8", "rrr"): (46863, 0, 360, 180, 243),
+    ("bf8", "rcr"): (47151, 288, 360, 180, 243),
+    ("bf8", "rrr"): (46863, 0, 360, 180, 243),
 }
 
 
@@ -103,10 +107,10 @@ def tearDownModule():
 class TestWarpTileRow(unittest.TestCase):
     def test_matches_dispatcher_arch_specs(self):
         row = WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"]
-        for dtype, tiles in gub.GFX1250_WARP_TILES.items():
-            key = f"{dtype}_{dtype}_fp32"
+        for dtype, tiles in vu.GFX1250_WARP_TILES.items():
+            (key,) = [k for k in row if k.startswith(f"{dtype}_{dtype}_")]
             self.assertEqual(sorted(map(list, tiles)), sorted(row[key]), dtype)
-        self.assertEqual({k.split("_")[0] for k in row}, set(gub.GFX1250_WARP_TILES))
+        self.assertEqual({k.split("_")[0] for k in row}, set(vu.GFX1250_WARP_TILES))
 
     def test_row_not_applied_to_other_arches(self):
         # 32x32x16 is not a gfx1250 WMMA tile but is valid on gfx942/gfx950.
@@ -154,7 +158,7 @@ class _ConfigLintMixin:
         name = k["name"]
         self.assertIn(
             [t["warp_tile_m"], t["warp_tile_n"], t["warp_tile_k"]],
-            list(gub.GFX1250_WARP_TILES[dtype]),
+            list(vu.GFX1250_WARP_TILES[dtype]),
             name,
         )
         self.assertTrue(
@@ -209,7 +213,8 @@ class _ConfigLintMixin:
         if pipeline == "comp_tdm_v2":
             self.assertEqual(t["warp_m"] * t["warp_n"] * t["warp_k"], 4, name)
         if pipeline in NEW_PIPELINES + ["compv4"]:
-            # Double-buffered: two A+B stages must fit in the 320K LDS.
+            # Every staged A+B slot the pipeline holds live must fit in the
+            # 320K LDS. comp_tdm_pc rings 4 slots; the rest double-buffer.
             esz = vu.element_size(dtype)
             a = t["tile_m"] * t["tile_k"] * esz
             b = t["tile_n"] * t["tile_k"] * esz
@@ -217,7 +222,8 @@ class _ConfigLintMixin:
                 layer = max(1, 256 // (t["tile_k"] * esz))
                 a += max(0, t["tile_m"] // layer - 1) * 16
                 b += max(0, t["tile_n"] // layer - 1) * 16
-            self.assertLessEqual(2 * (a + b), GFX1250_LDS, name)
+            slots = vu.PIPELINE_SMEM_SLOTS[pipeline]
+            self.assertLessEqual(slots * (a + b), GFX1250_LDS, name)
 
     def _lint(self, dtype, layout):
         kernels = _kernels("gfx1250", dtype, layout, self.CONFIG)
@@ -244,6 +250,16 @@ class TestCiConfig(_ConfigLintMixin, unittest.TestCase):
                 # comp_async keeps only pads True; TDM keeps only pads False;
                 # comp_async is rcr-only on gfx1250, and fp8/bf8 comp_async
                 # needs warp_tile_k=128, which the CI config (tile_k=64) lacks.
+                #
+                # comp_tdm_pc is deliberately absent from the CI config. That
+                # file is a shared contract with the dispatcher bridge:
+                # TestDispatcherGolden runs dispatcher/codegen/
+                # unified_gemm_codegen.py over it, and the dispatcher has no
+                # comp_tdm_pc entry (codegen_common.PIPELINE_TO_CK,
+                # unified_gemm_codegen.py, kernel_key.hpp Pipeline enum).
+                # Adding it here fails TestDispatcherGolden.setUpClass until
+                # the dispatcher side is wired too. The full config
+                # (default_config_gfx1250.json) has no such coupling.
                 expected = {"comp_tdm": 1, "comp_tdm_v2": 1}
                 if layout[:2] == "rc" and dtype not in ("fp8", "bf8"):
                     expected["comp_async"] = 1
@@ -278,6 +294,7 @@ class TestFullConfig(_ConfigLintMixin, unittest.TestCase):
                         counts["comp_async"],
                         counts["comp_tdm"],
                         counts["comp_tdm_v2"],
+                        counts["comp_tdm_pc"],
                     )
                     self.assertEqual(got, expected, (dtype, layout))
 
@@ -310,7 +327,9 @@ class TestTileEngineGolden(unittest.TestCase):
 
     def test_tdm_with_pad_raises(self):
         for pipeline in TDM_PIPELINES:
-            with self.assertRaisesRegex(ValueError, "TDM bounds-clips"):
+            with self.assertRaisesRegex(
+                ValueError, "padded TDM kernel would duplicate"
+            ):
                 self._instance(pipeline, "tdm", pad=True)
 
     def test_comp_async_non_rc_layout_raises(self):

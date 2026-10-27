@@ -12,6 +12,9 @@ from tempfile import TemporaryDirectory
 
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "verify_golden_bundles.py"
 
+sys.path.insert(0, str(SCRIPT_PATH.parent))
+import verify_golden_bundles  # noqa: E402
+
 
 class TestVerifyGoldenBundlesCli(unittest.TestCase):
     def run_verifier(
@@ -254,6 +257,48 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             )
             self.assertIn(
                 "full_test_name: quick_BatchnormFwdInference_nchw_fp32_Small.Small",
+                completed.stdout,
+            )
+
+    def test_variant_directory_bundle_keeps_variant_in_canonical_path_and_suite(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small"),
+                metadata={"generator": "manual", "reference_source": "manual"},
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "canonical_path: quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small/",
+                completed.stdout,
+            )
+            self.assertIn(
+                "full_test_name: "
+                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+                completed.stdout,
+            )
+
+    def test_tier_named_ancestor_directory_is_excluded_from_suite(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "quick" / "checkout"
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small"),
+                metadata={"generator": "manual", "reference_source": "manual"},
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "full_test_name: "
+                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
                 completed.stdout,
             )
 
@@ -837,6 +882,359 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 "cannot have bundles larger than 2 MiB because they would quickly explode our test artifact sizes",
                 completed.stderr,
             )
+
+    RAGGED_BUNDLE_DIR = Path("quick/SdpaFwd/bshd/fp32/hd2_ragged/Small")
+    RAGGED_LOGICAL_DIMS = (2, 1, 4, 2)
+    RAGGED_BSHD_STRIDES = (8, 2, 2, 1)
+    NON_UNIFORM_OFFSETS = (0, 3, 5)
+
+    def write_ragged_bundle(
+        self,
+        root: Path,
+        *,
+        output_bytes: bytes,
+        output_dtype: str = "float",
+        offsets: tuple[int, ...] | None = None,
+        offset_dtype: str = "int32",
+        offset_uid_in_graph: int = 10,
+        multiplier: int | None = 2,
+        dense_output_bytes: bytes | None = None,
+        write_offset_tensor: bool = True,
+        write_tensor_manifest: bool = False,
+    ) -> Path:
+        """Writes x (uid 0) -> ragged y (uid 1) + dense stats (uid 2), offsets uid 10."""
+        bundle_dir = root / self.RAGGED_BUNDLE_DIR
+        bundle_dir.mkdir(parents=True)
+        name = bundle_dir.name
+        offsets = offsets if offsets is not None else self.NON_UNIFORM_OFFSETS
+
+        ragged_output = {
+            "uid": 1,
+            "dims": list(self.RAGGED_LOGICAL_DIMS),
+            "strides": list(self.RAGGED_BSHD_STRIDES),
+            "data_type": output_dtype,
+            "virtual": False,
+            "ragged_offset_tensor_uid": offset_uid_in_graph,
+        }
+        if multiplier is not None:
+            ragged_output["ragged_offset_multiplier"] = multiplier
+
+        graph = {
+            "nodes": [{"outputs": {"y_tensor_uid": 1, "stats_tensor_uid": 2}}],
+            "tensors": [
+                {
+                    "uid": 0,
+                    "dims": [1],
+                    "strides": [1],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                ragged_output,
+                {
+                    "uid": 2,
+                    "dims": [1],
+                    "strides": [1],
+                    "data_type": "float",
+                    "virtual": False,
+                },
+                {
+                    "uid": 10,
+                    "dims": [len(offsets), 1, 1, 1],
+                    "strides": [1, 1, 1, 1],
+                    "data_type": offset_dtype,
+                    "virtual": False,
+                },
+            ],
+            "io_data_type": output_dtype,
+            "compute_data_type": "float",
+            "intermediate_data_type": "float",
+            "name": "",
+        }
+        graph_path = bundle_dir / f"{name}.json"
+        graph_path.write_text(json.dumps(graph))
+
+        offset_format = "<i" if offset_dtype == "int32" else "<q"
+        payloads = {
+            0: self.default_bytes("float"),
+            1: output_bytes,
+            2: (
+                dense_output_bytes
+                if dense_output_bytes is not None
+                else self.default_bytes("float")
+            ),
+        }
+        if write_offset_tensor:
+            payloads[10] = b"".join(struct.pack(offset_format, o) for o in offsets)
+        for uid, payload in payloads.items():
+            (bundle_dir / f"{name}.tensor{uid}.bin").write_bytes(payload)
+
+        if write_tensor_manifest:
+            (bundle_dir / f"{name}.tensors.dvc").write_text(
+                "outs:\n"
+                + "".join(f"- path: {name}.tensor{uid}.bin\n" for uid in (0, 1, 2, 10))
+            )
+        (bundle_dir / f"{name}.meta.json").write_text(
+            json.dumps({"generator": "manual", "reference_source": "manual"})
+        )
+        return graph_path
+
+    def packed_element_count(self, multiplier: int = 2) -> int:
+        return self.NON_UNIFORM_OFFSETS[-1] * multiplier
+
+    def test_ragged_output_sized_by_non_uniform_offsets_passes(self) -> None:
+        for offset_dtype in ("int32", "int64"):
+            with self.subTest(offset_dtype=offset_dtype):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_ragged_bundle(
+                        root,
+                        output_bytes=self.filled_bytes(
+                            "float", self.packed_element_count()
+                        ),
+                        offset_dtype=offset_dtype,
+                    )
+
+                    completed = self.run_verifier(root)
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_ragged_output_with_padded_size_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            padded_elements = verify_golden_bundles.element_space(
+                self.RAGGED_LOGICAL_DIMS, self.RAGGED_BSHD_STRIDES
+            )
+            self.write_ragged_bundle(
+                root, output_bytes=self.filled_bytes("float", padded_elements)
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 1", completed.stderr)
+            self.assertIn(
+                f"graph expects {self.packed_element_count() * 4} bytes",
+                completed.stderr,
+            )
+
+    def test_ragged_output_missing_multiplier_defaults_to_one(self) -> None:
+        for elements, expected_returncode in (
+            (self.packed_element_count(multiplier=1), 0),
+            (self.packed_element_count(multiplier=2), 1),
+        ):
+            with self.subTest(elements=elements):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_ragged_bundle(
+                        root,
+                        output_bytes=self.filled_bytes("float", elements),
+                        multiplier=None,
+                    )
+
+                    completed = self.run_verifier(root)
+
+                    self.assertEqual(
+                        completed.returncode, expected_returncode, completed.stderr
+                    )
+
+    def test_ragged_output_nan_sentinel_passes(self) -> None:
+        cases = [
+            ("float", struct.pack("<f", float("nan")), self.default_bytes("float")),
+            ("half", struct.pack("<H", 0x7E00), self.default_bytes("half")),
+            ("bfloat16", struct.pack("<H", 0x7FC0), self.default_bytes("bfloat16")),
+        ]
+        for data_type, nan_bytes, finite_bytes in cases:
+            with self.subTest(data_type=data_type):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_ragged_bundle(
+                        root,
+                        output_dtype=data_type,
+                        output_bytes=nan_bytes
+                        + finite_bytes * (self.packed_element_count() - 1),
+                    )
+
+                    completed = self.run_verifier(root)
+
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_ragged_output_inf_fails(self) -> None:
+        cases = [
+            ("float", struct.pack("<f", float("-inf")), self.default_bytes("float")),
+            ("half", struct.pack("<H", 0x7C00), self.default_bytes("half")),
+            ("bfloat16", struct.pack("<H", 0xFF80), self.default_bytes("bfloat16")),
+        ]
+        for data_type, inf_bytes, finite_bytes in cases:
+            with self.subTest(data_type=data_type):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_ragged_bundle(
+                        root,
+                        output_dtype=data_type,
+                        output_bytes=finite_bytes
+                        + inf_bytes
+                        + finite_bytes * (self.packed_element_count() - 2),
+                    )
+
+                    completed = self.run_verifier(root)
+
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertIn("tensor uid 1", completed.stderr)
+                    self.assertIn(
+                        "ragged output tensor contains Inf at element index 1",
+                        completed.stderr,
+                    )
+
+    def test_dense_output_nan_fails_beside_ragged_output(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_ragged_bundle(
+                root,
+                output_bytes=self.filled_bytes("float", self.packed_element_count()),
+                dense_output_bytes=struct.pack("<f", float("nan")),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 2", completed.stderr)
+            self.assertIn("output tensor contains NaN/Inf", completed.stderr)
+
+    def test_ragged_missing_offset_tensor_file(self) -> None:
+        for require_data, expected_returncode in ((False, 0), (True, 1)):
+            with self.subTest(require_data=require_data):
+                with TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self.write_ragged_bundle(
+                        root,
+                        output_bytes=self.filled_bytes(
+                            "float", self.packed_element_count()
+                        ),
+                        write_offset_tensor=False,
+                        write_tensor_manifest=True,
+                    )
+
+                    completed = self.run_verifier(root, require_data=require_data)
+
+                    self.assertEqual(
+                        completed.returncode, expected_returncode, completed.stderr
+                    )
+                    self.assertIn("tensor uid 10", completed.stderr)
+                    self.assertIn(".tensor10.bin", completed.stderr)
+
+    def test_ragged_offset_uid_not_declared_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_ragged_bundle(
+                root,
+                output_bytes=self.filled_bytes("float", self.packed_element_count()),
+                offset_uid_in_graph=42,
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "ragged_offset_tensor_uid 42 is not a declared tensor",
+                completed.stderr,
+            )
+
+    def test_ragged_multiplier_below_one_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_ragged_bundle(
+                root,
+                output_bytes=self.filled_bytes("float", self.packed_element_count()),
+                multiplier=0,
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "ragged_offset_multiplier must be an integer >= 1", completed.stderr
+            )
+
+
+class TestDeriveAdvisory(unittest.TestCase):
+    def derive(self, relative_path: str):
+        result = verify_golden_bundles.VerificationResult()
+        advisory = verify_golden_bundles.derive_advisory(
+            Path(relative_path), result, "quick"
+        )
+        return advisory, result
+
+    def messages(self, result, severity: str) -> list[str]:
+        return [d.message for d in result.diagnostics if d.severity == severity]
+
+    def test_without_tier_uses_default_tier(self) -> None:
+        advisory, result = self.derive("Op/nhwc/fp32/Small/Small.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/Small/")
+        self.assertEqual(advisory.full_test_name, "quick_Op_nhwc_fp32_Small.Small")
+        self.assertEqual(self.messages(result, "error"), [])
+        warnings = self.messages(result, "warning")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("variant directories cannot be recovered", warnings[0])
+
+    def test_without_tier_too_short_is_layout_error(self) -> None:
+        advisory, result = self.derive("nhwc/fp32/Small/Small.json")
+
+        self.assertIsNone(advisory)
+        self.assertEqual(
+            self.messages(result, "error"),
+            [verify_golden_bundles.ADVISORY_LAYOUT_ERROR],
+        )
+
+    def test_with_tier_too_short_is_layout_error(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/Small/Small.json")
+
+        self.assertIsNone(advisory)
+        self.assertEqual(
+            self.messages(result, "error"),
+            [verify_golden_bundles.ADVISORY_LAYOUT_ERROR],
+        )
+
+    def test_multiple_variant_directories_are_kept(self) -> None:
+        advisory, result = self.derive(
+            "standard/Op/bshd/bf16/hd128/causal/Small/Small.json"
+        )
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(
+            advisory.canonical_path, "standard/Op/bshd/bf16/hd128/causal/Small/"
+        )
+        self.assertEqual(
+            advisory.test_suite, "standard_Op_bshd_bf16_hd128_causal_Small"
+        )
+        self.assertEqual(advisory.test_case, "Small")
+        self.assertFalse(result.has_errors())
+
+    def test_variant_named_after_tier_is_kept_as_variant(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/fp32/full/Small/Small.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/full/Small/")
+        self.assertEqual(advisory.test_suite, "quick_Op_nhwc_fp32_full_Small")
+        self.assertFalse(result.has_errors())
+
+    def test_bundle_named_after_tier_is_kept_as_name(self) -> None:
+        advisory, result = self.derive("quick/Op/nhwc/fp32/full/full.json")
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.canonical_path, "quick/Op/nhwc/fp32/full/")
+        self.assertEqual(advisory.test_case, "full")
+        self.assertFalse(result.has_errors())
+
+    def test_tier_named_ancestor_and_variant_anchor_on_bundle_tier(self) -> None:
+        advisory, result = self.derive(
+            "quick/checkout/quick/Op/nhwc/fp32/full/Small/Small.json"
+        )
+
+        self.assertIsNotNone(advisory)
+        self.assertEqual(advisory.full_test_name, "quick_Op_nhwc_fp32_full_Small.Small")
+        self.assertFalse(result.has_errors())
 
 
 if __name__ == "__main__":

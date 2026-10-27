@@ -5,10 +5,12 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
@@ -16,7 +18,7 @@
 /**
  * @file TestDescriptors.cpp
  * @brief Tests for Descriptors.hpp: id formatting/hashing, the MetadataValue/MetadataType
- *        pairing, and the KernelSource tagged union.
+ *        pairing, the descriptor spellings of the enums, and the KernelSource tagged union.
  */
 namespace
 {
@@ -129,6 +131,51 @@ TEST(TestIngestorDescriptors, CarriesTheKpackCoordinates)
     EXPECT_TRUE(source.entryPoint.empty());
 }
 
+TEST(TestIngestorDescriptors, KernelSourceKindNameParsesBackToTheSameKind)
+{
+    const std::vector<std::pair<KernelSourceKind, std::string>> cases{
+        {KernelSourceKind::EMBEDDED_SOURCE, "embedded_source"},
+        {KernelSourceKind::KPACK, "kpack"},
+        {KernelSourceKind::HSACO_FILE, "hsaco_file"},
+        {KernelSourceKind::ROCKE_BUILDER, "rocke_builder"},
+    };
+
+    for(const auto& [kind, name] : cases)
+    {
+        EXPECT_EQ(toString(kind), name);
+        EXPECT_EQ(detail::kernelSourceKindFromString(toString(kind), "the test"), kind) << name;
+    }
+}
+
+TEST(TestIngestorDescriptors, KernelSourceKindNameReportsAValueOutsideTheEnumAsUnknown)
+{
+    EXPECT_EQ(toString(static_cast<KernelSourceKind>(4)), "unknown (4)");
+    EXPECT_EQ(toString(static_cast<KernelSourceKind>(-1)), "unknown (-1)");
+}
+
+TEST(TestIngestorDescriptors, MetadataTypeNameParsesBackToTheSameType)
+{
+    const std::vector<std::pair<MetadataType, std::string>> cases{
+        {MetadataType::BOOL, "bool"},
+        {MetadataType::INT, "int"},
+        {MetadataType::FLOAT, "float"},
+        {MetadataType::STRING, "string"},
+        {MetadataType::INT_LIST, "int_list"},
+    };
+
+    for(const auto& [type, name] : cases)
+    {
+        EXPECT_EQ(toString(type), name);
+        EXPECT_EQ(detail::metadataTypeFromString(toString(type), "the test"), type) << name;
+    }
+}
+
+TEST(TestIngestorDescriptors, MetadataTypeNameReportsAValueOutsideTheEnumAsUnknown)
+{
+    EXPECT_EQ(toString(static_cast<MetadataType>(5)), "unknown (5)");
+    EXPECT_EQ(toString(static_cast<MetadataType>(-1)), "unknown (-1)");
+}
+
 TEST(TestIngestorDescriptors, DescribesAKernelSignatureArgumentByKindWidthAndPosition)
 {
     EXPECT_EQ(describeKernelSignature({}), "(no arguments)");
@@ -143,13 +190,13 @@ TEST(TestIngestorDescriptors, KernelDescriptorOriginDirectoryDefaultsToEmpty)
     EXPECT_TRUE(kernel.originDirectory.empty());
 }
 
-// HeuristicDescriptor: HeuristicKind as data; dispatch is tested in TestKernelHeuristic.cpp.
+// HeuristicDescriptor: UhdAdapter as data; dispatch is tested in TestKernelHeuristic.cpp.
 
-TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToNativeKind)
+TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
 {
     const HeuristicDescriptor descriptor{};
 
-    EXPECT_EQ(descriptor.kind, HeuristicKind::NATIVE);
+    EXPECT_EQ(descriptor.adapter, UhdAdapter::STATIC_ORDER);
 }
 
 } // namespace

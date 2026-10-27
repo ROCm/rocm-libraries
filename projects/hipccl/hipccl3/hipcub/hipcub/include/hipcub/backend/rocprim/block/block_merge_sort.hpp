@@ -1,6 +1,6 @@
 /******************************************************************************
 * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -32,6 +32,7 @@
 #include "../../../config.hpp"
 
 #include "../thread/thread_sort.hpp"
+#include "../util_macro.hpp"
 #include "../util_math.hpp"
 #include "../util_type.hpp"
 
@@ -95,7 +96,7 @@ HIPCUB_DEVICE __forceinline__ void SerialMerge(KeyT *keys_shared,
    KeyT key1 = keys_shared[keys1_beg];
    KeyT key2 = keys_shared[keys2_beg];
 
-#pragma unroll
+   _CCCL_SORT_MAYBE_UNROLL()
    for (int item = 0; item < ITEMS_PER_THREAD; ++item)
    {
        bool p = (keys2_beg < keys2_end) &&
@@ -387,7 +388,7 @@ public:
       //
       KeyT max_key = oob_default;
 
-      #pragma unroll
+      _CCCL_SORT_MAYBE_UNROLL()
       for (int item = WARP_SORT ? 1 : 0; item < ITEMS_PER_THREAD; ++item)
       {
         if (ITEMS_PER_THREAD * static_cast<int>(linear_tid) + item < valid_items)
@@ -411,7 +412,7 @@ public:
     // each thread has sorted keys
     // merge sort keys in shared memory
     //
-    #pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for (int target_merged_threads_number = 2;
          target_merged_threads_number <= NUM_THREADS;
          target_merged_threads_number *= 2)
@@ -423,7 +424,7 @@ public:
 
       // store keys in shmem
       //
-      #pragma unroll
+      _CCCL_PRAGMA_UNROLL_FULL()
       for (int item = 0; item < ITEMS_PER_THREAD; ++item)
       {
         int idx                       = ITEMS_PER_THREAD * linear_tid + item;
@@ -482,7 +483,7 @@ public:
 
         // store keys in shmem
         //
-        #pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for (int item = 0; item < ITEMS_PER_THREAD; ++item)
         {
           int idx = ITEMS_PER_THREAD * linear_tid + item;
@@ -493,7 +494,7 @@ public:
 
         // gather items from shmem
         //
-        #pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for (int item = 0; item < ITEMS_PER_THREAD; ++item)
         {
           items[item] = temp_storage.items_shared[indices[item]];

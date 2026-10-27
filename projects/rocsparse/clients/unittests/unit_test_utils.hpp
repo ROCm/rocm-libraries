@@ -34,9 +34,19 @@
 
 #include "rocsparse.h"
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace rocsparse_ut
 {
@@ -72,6 +82,16 @@ namespace rocsparse_ut
     {
         return rocsparse_datatype_f64_c;
     }
+    template <>
+    inline rocsparse_datatype dt_of<_Float16>()
+    {
+        return rocsparse_datatype_f16_r;
+    }
+    template <>
+    inline rocsparse_datatype dt_of<rocsparse_bfloat16>()
+    {
+        return rocsparse_datatype_bf16_r;
+    }
 
     template <typename I>
     rocsparse_indextype it_of();
@@ -100,6 +120,16 @@ namespace rocsparse_ut
     inline rocsparse_double_complex scalar<rocsparse_double_complex>(float v)
     {
         return rocsparse_double_complex(v, 0.0);
+    }
+    template <>
+    inline _Float16 scalar<_Float16>(float v)
+    {
+        return static_cast<_Float16>(v);
+    }
+    template <>
+    inline rocsparse_bfloat16 scalar<rocsparse_bfloat16>(float v)
+    {
+        return rocsparse_bfloat16(v);
     }
 
     // ----- tiny device buffer RAII ------------------------------------------
@@ -148,7 +178,9 @@ namespace rocsparse_ut
         std::vector<T> host(count);
         if(count > 0 && device_ptr != nullptr)
         {
-            (void)hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            const hipError_t status
+                = hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+            EXPECT_EQ(status, hipSuccess) << hipGetErrorString(status);
         }
         return host;
     }
@@ -222,6 +254,38 @@ namespace rocsparse_ut
         return props.warpSize;
     }
 
+    // True on gfx8 / gfx9, where the rocsparse::wfreduce_* routines are built on
+    // DPP row_shr / row_bcast steps (ROCSPARSE_USE_MOVE_DPP). Those leave the
+    // result only in the TOP lanes of the wavefront: lane wf-1 for
+    // wfreduce_sum / _max / _min, and the last SUB lanes for
+    // wfreduce_partial_sum<WFSIZE, SUB> (the lanes callers read). On every other
+    // architecture the shuffle-based variants return the result in every lane.
+    // ROCSPARSE_USE_MOVE_DPP only exists in the device pass, so the host tests
+    // select the architecture from the device name instead.
+    inline bool device_uses_dpp_wfreduce()
+    {
+        static const bool uses_dpp = [] {
+            int             dev   = 0;
+            hipDeviceProp_t props = {};
+            if(hipGetDevice(&dev) != hipSuccess
+               || hipGetDeviceProperties(&props, dev) != hipSuccess)
+                return false;
+            return std::strncmp(props.gcnArchName, "gfx8", 4) == 0
+                   || std::strncmp(props.gcnArchName, "gfx9", 4) == 0;
+        }();
+
+        return uses_dpp;
+    }
+
+    // First lane of a wavefront of `wf` lanes whose wfreduce_* result is
+    // specified for a reduction leaving `sub` result lanes (sub == 1 for
+    // sum / max / min): lane 0 (every lane) on the shuffle path, lane wf-sub on
+    // the DPP path. Check lanes [first, wf).
+    inline uint32_t wfreduce_first_valid_lane(uint32_t wf, uint32_t sub)
+    {
+        return device_uses_dpp_wfreduce() ? wf - sub : 0;
+    }
+
 #ifdef __HIPCC__
     // ------------------------------------------------------------------------
     // Single-block / single-warp launch helpers
@@ -281,4 +345,74 @@ namespace rocsparse_ut
         return hipErrorInvalidValue;
     }
 #endif // __HIPCC__
+
+    // setenv / unsetenv do not exist on Windows.
+    inline void set_env(const char* name, const char* value)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, value);
+#else
+        (void)::setenv(name, value, 1);
+#endif
+    }
+
+    inline void unset_env(const char* name)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, "");
+#else
+        (void)::unsetenv(name);
+#endif
+    }
+
+    // Sets an environment variable for the lifetime of the object and restores the
+    // previous state afterwards, also when an ASSERT_* returns early.
+    class scoped_env
+    {
+    public:
+        scoped_env(const char* name, const char* value)
+            : m_name(name)
+        {
+            if(const char* old = std::getenv(name))
+            {
+                m_had_old = true;
+                m_old     = old;
+            }
+            set_env(name, value);
+        }
+
+        ~scoped_env()
+        {
+            if(m_had_old)
+            {
+                set_env(m_name.c_str(), m_old.c_str());
+            }
+            else
+            {
+                unset_env(m_name.c_str());
+            }
+        }
+
+        scoped_env(const scoped_env&) = delete;
+        scoped_env& operator=(const scoped_env&) = delete;
+
+    private:
+        std::string m_name;
+        std::string m_old;
+        bool        m_had_old = false;
+    };
+
+    // A file in the system temporary directory (/tmp on Linux). The process id is
+    // part of the name so concurrent runs of the same binary do not collide.
+    inline std::string temp_file_path(const char* name)
+    {
+#ifdef _WIN32
+        const auto pid = static_cast<long>(_getpid());
+#else
+        const auto pid = static_cast<long>(::getpid());
+#endif
+        return (std::filesystem::temp_directory_path()
+                / (std::string(name) + "." + std::to_string(pid)))
+            .string();
+    }
 } // namespace rocsparse_ut

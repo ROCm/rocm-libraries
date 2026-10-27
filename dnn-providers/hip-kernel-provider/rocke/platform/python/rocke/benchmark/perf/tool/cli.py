@@ -148,7 +148,10 @@ def _cmd_occupancy(a: argparse.Namespace) -> int:
             data = f.read()
     except OSError as e:
         raise SystemExit(f"occupancy: cannot read {a.hsaco}: {e}")
-    res = _occupancy.resources(data, a.arch)
+    try:
+        res = _occupancy.resources(data, a.arch)
+    except ValueError as e:
+        raise SystemExit(f"occupancy: {e}")
     if not res:
         raise SystemExit(
             "occupancy: could not read ELF notes "
@@ -159,7 +162,7 @@ def _cmd_occupancy(a: argparse.Namespace) -> int:
     if target and target != requested:
         # The occupancy model follows the binary, so say so rather than letting a
         # stale --arch look like it was honoured. Feature suffixes (e.g. :xnack-)
-        # do not change the family model and are ignored for this comparison.
+        # do not change the processor model and are ignored for this comparison.
         print(
             f"warning: {a.hsaco} is built for {target}, not --arch {a.arch}; "
             f"occupancy computed for {target}",

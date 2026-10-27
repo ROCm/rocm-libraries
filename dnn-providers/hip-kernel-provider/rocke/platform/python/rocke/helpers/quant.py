@@ -184,10 +184,12 @@ def quantize_scalar_f32(
 
     The clamp is redundant for fp8/bf8 (the AMDGPU hardware already
     saturates on conversion), but it's a cheap two-op ``v_med3_f32``
-    that keeps the f32 path interpretable in IR dumps and matches the
-    CK Tile reference's saturation semantics exactly for the i8 path
-    (where ``v_cvt_pk_i16_i32`` does *not* saturate without the
-    explicit clamp).
+    that keeps the f32 path interpretable in IR dumps. For i8 it sets
+    the output range: ``cvt_f32_to_i8_sat`` alone saturates to
+    ``[-128, 127]``, and the clamp narrows that to the symmetric
+    ``[-127, 127]`` of the CK Tile reference. (The i8 path does not use
+    ``v_cvt_pk_i16_i32``; that instruction does saturate, but to the
+    i16 range, so it would not bound an i8 result either.)
 
     ``inv_scale`` is in the *natural* direction (``inv_scale = 1 / scale``
     where ``scale = amax / quant_max``). Pre-computing the reciprocal
@@ -214,8 +216,8 @@ def quantize_scalar_f32(
     # bf8, drop the explicit ``v_med3_f32`` clamp because the AMDGPU
     # ``cvt.pk.fp8.f32`` / ``cvt.pk.bf8.f32`` instructions already
     # saturate the input on conversion. For ``i8`` we keep the clamp:
-    # ``v_cvt_pk_i16_i32`` does not saturate so the explicit
-    # ``smax`` / ``smin`` chain is required for correctness.
+    # it gives the symmetric ``[-127, 127]`` range of the CK Tile
+    # reference, where ``cvt_f32_to_i8_sat`` alone would produce -128.
     if skip_clamp_on_pack and canon in ("fp8e4m3", "bf8e5m2"):
         if canon == "fp8e4m3":
             return b.cvt_f32_to_fp8(scaled)

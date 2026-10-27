@@ -64,9 +64,27 @@ public:
         _dispatcher.handler->launch(handle, *_prepared, deviceBuffers, numDeviceBuffers, workspace);
     }
 
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    const GenericPlan* saveablePlan() const override
+    {
+        return this;
+    }
+
     const KernelDefinition& kernel() const
     {
         return _dispatcher.kernel;
+    }
+
+    /// The dispatch handler that prepared and launches this plan's kernel.
+    const IKernelDispatchHandler<THandle>& handler() const
+    {
+        return *_dispatcher.handler;
+    }
+
+    /// The launch state the handler prepared at plan build.
+    const PreparedDispatch& prepared() const
+    {
+        return *_prepared;
     }
 
 private:

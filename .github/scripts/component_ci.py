@@ -7,6 +7,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - geko=true/false
   - miopen=true/false
   - tensilelite_coverage=true/false
+  - hipblaslt_library_uniqueness=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -44,6 +45,13 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-coverage.yml",
     ],
+    "hipblaslt_library_uniqueness": [
+        "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
+        "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
+        "test_solution_uid_uniqueness.py",
+        "projects/hipblaslt/tensilelite/tox.ini",
+        ".github/workflows/component-ci-library-uniqueness.yml",
+    ],
 }
 
 # Paths that affect every component's CI run: the workflow, this script,
@@ -55,9 +63,9 @@ INFRA_PATHS = [
 ]
 
 
-# detect_changed_components is not shared with therock_configure_ci.py because
-# TheRock uses prefix-based subtree matching (via repos-config.json) while
-# component CI uses fnmatch glob patterns with cross-component triggers
+# detect_changed_components is deliberately separate from TheRock's own change
+# detection: TheRock uses prefix-based subtree matching (via repos-config.json)
+# while component CI uses fnmatch glob patterns with cross-component triggers
 # (e.g. rocisa triggers when stinkytofu changes because it depends on it).
 def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
     results = {}

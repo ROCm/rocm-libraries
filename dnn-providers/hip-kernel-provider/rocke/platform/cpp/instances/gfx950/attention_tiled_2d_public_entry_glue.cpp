@@ -618,16 +618,13 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     const int KV_BYTES = KV_FP8 ? 1 : 2;
     ctx->KV_BYTES = KV_BYTES;
     ctx->kv_io_dtype = KV_FP8 ? rocke_fp8e4m3() : dtype;
-    /* kv_cache_aux: {"all":ALL,"global":GLOBAL,"stream":STREAM,"nt":NT}. The
-     * gfx950 kernel uses the spec's kv_cache_policy for the cache hint. */
-    if(rocke_g950_streq(spec->kv_cache_policy, "all"))
-        ctx->kv_cache_aux = (int)ROCKE_CACHE_ALL;
-    else if(rocke_g950_streq(spec->kv_cache_policy, "global"))
-        ctx->kv_cache_aux = (int)ROCKE_CACHE_GLOBAL;
-    else if(rocke_g950_streq(spec->kv_cache_policy, "stream"))
-        ctx->kv_cache_aux = (int)ROCKE_CACHE_STREAM;
-    else
-        ctx->kv_cache_aux = (int)ROCKE_NON_TEMPORAL;
+    /* kv_cache_aux = cache_policy_from_name(spec.kv_cache_policy). The gfx950
+     * kernel uses the spec's kv_cache_policy for the cache hint. */
+    rocke_cache_policy_t kv_cache_bits;
+    if(!rocke_cache_policy_from_name(spec->kv_cache_policy, &kv_cache_bits))
+        rocke_g950_fail(
+            b, ROCKE_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");
+    ctx->kv_cache_aux = (int)kv_cache_bits;
 
     /* ---- 32x32 umbrella + QK/PV MFMA geometry (Py799-819) ---- */
     const bool USE_MFMA_32X32 = spec->use_mfma_32x32;

@@ -13,15 +13,57 @@ import argparse
 import collections
 import ctypes
 import math
+import shutil
 import struct
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import time_launches
 
-from .bench_v_staging import _find_objdump, _ref_attention
 from .fmha_singlewave import SingleWaveCfg, build_wmma_fmha_singlewave, singlewave_grid
+
+
+def _ref_attention(Q, K, V, *, causal: bool):
+    """Dense attention reference, Q/K/V shape ``(seqlen, heads, head_size)``."""
+    import numpy as np
+
+    d = Q.shape[-1]
+    scores = np.einsum("ihd,jhd->ihj", Q.astype(np.float32), K.astype(np.float32))
+    scores /= math.sqrt(d)
+    if causal:
+        q_pos = np.arange(Q.shape[0])[:, None, None]
+        k_pos = np.arange(K.shape[0])[None, None, :]
+        scores = np.where(k_pos <= q_pos, scores, -1e30)
+    scores -= scores.max(axis=-1, keepdims=True)
+    probs = np.exp(scores)
+    probs /= probs.sum(axis=-1, keepdims=True)
+    out = np.einsum("ihj,jhd->ihd", probs, V.astype(np.float32))
+    return out.astype(np.float16)
+
+
+def _find_objdump() -> str | None:
+    """Locate llvm-objdump (PATH, then the rocm-sdk wheel that ships with the
+    gfx1151 venv). Returns ``None`` if not found -- ISA counts are then skipped
+    rather than failing the benchmark."""
+    for cand in ("llvm-objdump", "llvm-objdump.exe"):
+        hit = shutil.which(cand)
+        if hit:
+            return hit
+    for base in sys.path:
+        p = Path(base)
+        # site-packages/_rocm_sdk_core/lib/llvm/bin/llvm-objdump(.exe)
+        for sub in (
+            "_rocm_sdk_core/lib/llvm/bin",
+            "../_rocm_sdk_core/lib/llvm/bin",
+        ):
+            for name in ("llvm-objdump.exe", "llvm-objdump"):
+                c = p / sub / name
+                if c.exists():
+                    return str(c)
+    return None
 
 
 @dataclass(frozen=True)

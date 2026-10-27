@@ -1,0 +1,84 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  streamk_schedules: [{grid: 128, reduction: tree}]
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941,
+    skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030,
+    skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters: {Architecture: gfx1250, SyncsPerBenchmark: 0, NumElementsToValidate: -1,
+  KernelTime: false, DataInitTypeA: 3, DataInitTypeB: 3, DataInitTypeC: 3, DataInitTypeD: 2,
+  DataInitTypeAlpha: 2, DataInitTypeBeta: 2, ForceGenerateKernel: true, CpuThreads: 8,
+  PrintLevel: 1, NumWarmups: 1, NumBenchmarks: 1, EnqueuesPerSync: 1, PrintSolutionRejectionReason: true}
+BenchmarkProblems:
+  - - &dense_problem {OperationType: GEMM, DataType: b, DestDataType: s, ComputeDataType: s,
+      HighPrecisionAccumulate: true, TransposeA: true, TransposeB: false, UseBeta: true, Batched: true}
+    # Every supported geometry sees ragged peers, batches and a K tail.
+    - BenchmarkCommonParameters: &dense_defaults
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 2, 2]]
+        - DepthU: [64]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ForceDisableShadowInit: [false]
+        - ScheduleIterAlg: [4]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - StreamKFixupTreeReduction: [0]
+        - PrefetchAcrossPersistent: [0]
+      ForkParameters:
+        - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2], [2, 8], [4, 4], [8, 2], [1, 2], [1, 4], [1, 8]]
+      BenchmarkFinalParameters: &ragged_tail
+        - ProblemSizes: [{Exact: [33, 65, 2, 1031]}]
+    # One-axis/two-axis short K, empty K, aligned blocks and profitable small-output splits.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - ClusterDim: [[2, 1], [2, 2], [1, 4]]
+      BenchmarkFinalParameters:
+        - ProblemSizes: [{Exact: [96, 96, 1, 64]}, {Exact: [96, 96, 3, 0]},
+            {Exact: [256, 256, 2, 8192]}, {Exact: [33, 65, 2, 8192]}]
+    # Double prefetch + tree, including an ordinary dense StreamK control.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - ClusterDim: [[1, 1], [2, 1], [2, 2]]
+        - PrefetchGlobalRead: [2]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes: [{Exact: [33, 65, 2, 1031]}, {Exact: [256, 256, 2, 8192]}]
+    # PGR1 folds the one-wave increments; preserve the noncluster control.
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+        - ClusterDim: [[1, 1], [2, 2]]
+        - ForceDisableShadowInit: [true]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters: *ragged_tail
+  # NN gives unequal one-wave K increments: A=8192 bytes, B=128 bytes.
+  - - {<<: *dense_problem, TransposeA: false}
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 1, 1, 1, 1]]
+        - ClusterDim: [[2, 2]]
+        - TransposeLDS: [-1]
+        - LDSTrInst: [true]
+        - PrefetchGlobalRead: [2]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes: [{Exact: [64, 96, 2, 8192]}]
+  # Two-byte final D and four-byte partials distinguish remapped store shifts.
+  - - {<<: *dense_problem, DestDataType: b}
+    - BenchmarkCommonParameters: *dense_defaults
+      ForkParameters:
+        - ClusterDim: [[2, 2]]
+        - ForceDisableShadowInit: [true]
+        - StoreRemapVectorWidth: [4]
+      BenchmarkFinalParameters:
+        - ProblemSizes: [{Exact: [96, 96, 1, 64]}, {Exact: [33, 65, 2, 8192]}]
