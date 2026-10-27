@@ -141,10 +141,9 @@ class SwInstructionPrefetchAbsStaticPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    // xnackReplay defaults to the shipping mode. Before this PR the drain was
-    // unconditional, so a default of false would have moved every pre-existing
-    // case in this file to the xnack- configuration and left the mode that
-    // ships covered by the two XnackDrain_* cases alone.
+    // xnackReplay defaults to the shipping mode. The absolute passes emit no
+    // burst drain in either mode; the XnackReplay{On,Off}_Size36708_NoBurstDrain
+    // cases pin that.
     PassManager makePm(int baseSgpr = 64, bool afterSgprCompact = false, bool xnackReplay = true) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
@@ -495,20 +494,21 @@ TEST_F(SwInstructionPrefetchAbsStaticPassTest, DebugFile_BelowThreshold_NoOpMess
     EXPECT_NE(text.find("32640"), std::string::npos);
 }
 
-// The burst's fixed size feeds the fixed-point that solves N, so dropping the
-// drain is not only four bytes of output: it can change how many prefetches
-// fit. At a pre-insertion total of 36708 the two modes land either side of the
-// P(1) boundary, which pins burstFixedBytes from the outside -- hard-coding it
-// to either 20 or 24 fails one of these two.
-TEST_F(SwInstructionPrefetchAbsStaticPassTest, XnackDrain_Size36708_ModesDiffer) {
+// The burst's fixed size feeds the fixed-point that solves N, so a drain in the
+// burst is not only four bytes of output: it can change how many prefetches
+// fit. At a pre-insertion total of 36708 a 20 B and a 24 B burst land either
+// side of the P(1) boundary. The scalar getpc/add setup already ends any
+// replay group, so neither mode emits a drain and both must solve N with
+// kBurstFixedBytes = 20; a drain or a 24 B burst fails these.
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, XnackReplayOn_Size36708_NoBurstDrain) {
     buildKernelOfSize(bb, arch, 36708);
     auto pm = makePm(64, /*afterSgprCompact=*/false, /*xnackReplay=*/true);
     pm.run(*func);
-    EXPECT_EQ(countSPrefetchInst(*func), 2);
-    EXPECT_EQ(countSWaitXcnt(*func), 1);  // one drain per contiguous burst
+    EXPECT_EQ(countSPrefetchInst(*func), 1);
+    EXPECT_EQ(countSWaitXcnt(*func), 0);
 }
 
-TEST_F(SwInstructionPrefetchAbsStaticPassTest, NoXnackDrain_Size36708_ModesDiffer) {
+TEST_F(SwInstructionPrefetchAbsStaticPassTest, XnackReplayOff_Size36708_NoBurstDrain) {
     buildKernelOfSize(bb, arch, 36708);
     auto pm = makePm(64, /*afterSgprCompact=*/false, /*xnackReplay=*/false);
     pm.run(*func);
