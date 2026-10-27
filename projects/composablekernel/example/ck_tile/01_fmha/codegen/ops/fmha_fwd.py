@@ -1600,26 +1600,36 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             })  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
             # bk0max is the head dim each tile holds. fp8 WMMA has K = 64 or 128 only, so
-            # d32 is the one head dim that takes the padded (dpad/dvpad) path.
+            # d32 is the one head dim that takes the padded (dpad/dvpad) path. Every head dim
+            # pairs a bm0=64 tile below the crossover max_seqlen_q with a bm0=128 fallback;
+            # fp8 uses d128's crossover for all of them until each is measured.
+            m64 = _gfx125_qr_tdm_crossover_constraint((128, 128))
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
+                ( 32,  32) : [FmhaFwdTileSize( 64, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
                               FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
-                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
+                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, m64),
                               FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
-                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8FP32:
+            m64 = _gfx125_qr_tdm_crossover_constraint((128, 128))
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [FmhaFwdTileSize( 64, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
-                ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
-                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
+                ( 32,  32) : [FmhaFwdTileSize( 64, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, m64),
                               FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
-                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
