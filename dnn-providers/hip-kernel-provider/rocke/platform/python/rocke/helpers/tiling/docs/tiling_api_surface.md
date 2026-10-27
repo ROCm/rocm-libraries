@@ -42,8 +42,8 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
 | `make_fragment(tile_desc, dtype)` | realized per-lane registers | no (value filled by verbs) | dtype from the operand |
 | `fill_fragment(b, frag, 0)` | element-wise materialize | yes (b-first) | -- |
-| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c) |
-| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c) |
+| `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False, packed_runs_aligned=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` = a runtime packed origin/bound is on a word group (§5) |
+| `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False, packed_runs_aligned=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c); `packed_runs_aligned` as for `load_fragment` |
 | `TileMma(shape, a,b,c, target, tiling=, style=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits; `style=` picks the operand-layout profile |
 | `Tiling(atom_shape=, order=, mac_prio=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK", mac_prio=0 (setprio off; §5d) |
 | `CanonicalStyle()` / `InterleavedStyle()` | the operand-layout profile (`style=`) | no | default canonical; interleaved = wide free-contiguous loads |
@@ -187,15 +187,21 @@ c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F16)   # C (M, N), N-contigu
 a_td = make_tensor_desc((M_LEN, K_LEN), (K_LEN, 1), BF16)  # bf16 in
 c_td = make_tensor_desc((M_LEN, N_LEN), (N_LEN, 1), F32)   # f32 store (no narrowing cast)
 ```
+The descriptor's dtype is the logical format; the verbs move its storage units and never read the
+pointer's element type. Pass a TF32 tensor as `PtrType(TF32)` (core's convention) and a packed
+sub-byte tensor (fp4, fp6, i4) as `PtrType(I8)`, its bytes packed low bit first; its descriptor is
+still in elements.
 
 ### LDS buffers: a flat allocation, described by its descriptor
 
 An LDS buffer is a flat (rank-1) allocation. Its layout lives in an ordinary `TensorDesc` -- logical
 axes in the convention order, int lengths, int strides -- and nowhere else. Size the buffer from the
-descriptor with core's typed allocation and hand both to the same verbs as global memory:
+descriptor with `lds_allocation` and core's typed allocation, and hand both to the same verbs as
+global memory:
 ```python
 b_lds_td = make_tensor_desc((N, K), (1, N), F16)               # B staged as [K][N], written (N, K)
-smem = b.smem_alloc(b_lds_td.dtype, [b_lds_td.element_span])   # flat, typed, sized in elements
+element, count = lds_allocation(b_lds_td)                      # (F16, element_span) for f16
+smem = b.smem_alloc(element, [count])                          # flat, typed, sized from the descriptor
 store_fragment(b, smem, make_window(b_lds_td, (n0, k0)), b_frag, lane)
 b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lane)
 ```
@@ -205,12 +211,17 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
 - **`TensorDesc.element_span`** is `1 + sum((length - 1) * stride)`: the elements from the first to the
   last element the description can address. Static (int lengths and strides); a negative stride is
   refused. The LDS budget stays a byte count: the span times the element size.
-- **`lds_element_span(td, lds_swizzle)`** is the size to allocate: `element_span`, except that the
-  built-in `lds_swizzle=True` moves an element of the last axis within its 64-element group, so the last
-  row reaches the end of its group. A `(8, 48)` buffer with strides `(64, 1)` spans 496 elements but
-  needs 512 swizzled. A swizzle callable must keep every position inside the descriptor's lengths.
+- **`lds_allocation(td, lds_swizzle)`** is the buffer to allocate, `(element, count)` for
+  `b.smem_alloc(element, [count])`: the dtype's storage element (`rocke.core.storage.storage_dtype`, the
+  rule registers follow too) and the storage elements that hold `lds_element_span(td, lds_swizzle)`
+  elements. That span is `element_span`, except that the built-in `lds_swizzle=True` moves an element
+  of the last axis within its 64-element group, so the last row reaches the end of its group. A
+  `(8, 48)` buffer with strides `(64, 1)` spans 496 elements but needs 512 swizzled. A swizzle callable
+  must keep every position inside the descriptor's lengths.
 - **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
   `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
+- **Packed sub-byte tensors** (fp4, fp6, i4) live in a buffer of i32 words (`lds_allocation`),
+  addressed by the same element index converted to words. A swizzle is refused for them.
 - **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
   divides every stride except the stride-1 axis's, leading axes included (in global memory too): a pad
   or batch stride that is not a multiple of the natural vector narrows the access.
@@ -218,8 +229,8 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   rank-3 `make_tensor_desc((stages, F, K), (K * F, 1, F), dtype)`, written and read with an unswapped
   rank-2 `(F, K)` tile at origin `(stage, f0, k0)`. Derive both operands' stage origins from one stage
   index.
-- **Checks.** Before emitting, the verbs refuse an LDS buffer that is not rank 1, whose element type is
-  not the tensor's dtype, or that holds fewer than `lds_element_span` elements; the built-in
+- **Checks.** Before emitting, the verbs refuse an LDS buffer that is not rank 1, or that is not at
+  least its `lds_allocation` (the same element type, at least that many elements); the built-in
   `lds_swizzle=True` needs the stride-1 axis last and every other stride at least the swizzled row
   (the last length rounded up to 64), so rows cannot overlap (otherwise pad the stride or pass a
   swizzle callable). LDS accesses are
@@ -370,6 +381,19 @@ a_frag = load_fragment(b, a_ptr, make_window(a_td, (m, k)), a_desc, lane)   # fr
 ```
 - dtype lives on the `Fragment` (D16); `store_fragment` casts fragment dtype -> desc dtype
   on the honest path only (identity, or f32->{f16,bf16}); anything else fails fast.
+- `dtype` is the logical format; the registers in `value` are held in `frag.storage_type`, derived
+  from it by one rule (`rocke.core.storage.storage_dtype`): the logical vector `vec<dtype x n>` for
+  every arithmetic dtype, `vec<i32 x n>` for tf32 (it has no arithmetic), and whole i32 words
+  `vec<i32 x n*bits/32>` for a packed sub-byte dtype (fp4, fp6, i4; `n * bits` must be a multiple
+  of 32). A logical `vec<tf32 x n>` is refused with the
+  `b.bitcast` to i32 that fixes it. The verbs move storage units: a packed
+  fragment's registers must form runs of whole 32-bit words along the tensor's stride-1 axis, and the
+  window's origin and a clipped window's bound along that axis must be whole word groups (8 elements
+  for 4 bits, 16 for 6 bits); both are refused otherwise. A compile-time origin or bound is checked.
+  A runtime one cannot be, and a misaligned one would be wrong silently (an origin is rounded down to
+  its group, a bound inside a group leaves the rest of the group unmasked), so the verbs refuse it
+  unless the caller passes `packed_runs_aligned=True` to state that it is a multiple of the group.
+  The flag is refused for any other dtype, whose runtime origins and bounds need no statement.
 - `tile_desc`/`dtype` are read-only; `value` is the one writable field (re-bound each K step:
   `accumulator.value = b.mma(...)` for a single-atom tile -- wave shape == atom shape, one
   `b.mma`; a multi-atom tile goes through `TileMma`). The write and read checks are documented on
@@ -694,5 +718,5 @@ and you can always see the one the MMA object produced.
 | clipping | desc `lengths` (auto zero-pad) | `make_window(tensor, origin, bounds)` |
 | target | -- | `target=`/`arch=` (agnostic) |
 | coherency | default | `coherency=` (reserved) |
-| memory space | global | LDS: `TensorDesc` + flat `smem_alloc(td.dtype, [td.element_span])` |
+| memory space | global | LDS: `TensorDesc` + a flat buffer sized by `lds_allocation(td)` |
 | kind | dense | `sparse`/`scaled` (reserved) |
