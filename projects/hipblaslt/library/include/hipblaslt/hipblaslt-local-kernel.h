@@ -97,6 +97,10 @@ hipblasStatus_t hipblasLtLocalKernelRegister(hipblasLtHandle_t handle,
  *  kernels mapped under the same shape and types, the one mapped last that can
  *  serve the problem wins.
  *
+ *  A usable tuning-file override, including one supplied through
+ *  HIPBLASLT_TUNING_OVERRIDE_FILE, takes priority over this mapping. An
+ *  algorithm passed explicitly to hipblasLtMatmul also keeps its selection.
+ *
  *  @param[in]
  *  handle       Pointer to the allocated hipBLASLt handle.
  *  @param[in]
