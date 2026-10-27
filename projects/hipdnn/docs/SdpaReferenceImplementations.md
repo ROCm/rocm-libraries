@@ -277,3 +277,60 @@ Why it is split this way:
    generator mode plus at least one quick golden bundle, and a mutation check that the new tests fail
    without the feature.
 5. **Docs.** Update the support tables here and in the operation-support documents.
+
+## 7. Future work
+
+Planned, not yet done. The first two are the only checks that do not depend on our own reading of
+cuDNN, so they come first.
+
+### 7.1 More independent evidence
+
+1. **Real cuDNN as an oracle.** Run the same graphs and inputs through cuDNN on NVIDIA hardware via
+   the cuDNN frontend API (hipDNN's cuDNN compatibility layer builds the same graphs) and keep the
+   outputs as golden data, starting with one small bundle per feature. This is the only check
+   that catches a semantic misreading the references and the generators share.
+2. **cuDNN's Python reference code for every feature it covers.** The generators already reproduce
+   `fp8_ref.py` bit for bit and take the block-mask expansion and ALiBi slopes from `fp16_ref.py`.
+   Extend that to masks, padding, dropout and the remaining features `fp16_ref.py` implements, and
+   run it directly as the oracle rather than re-deriving its semantics. It is plain PyTorch and runs
+   on the CPU.
+3. **Randomized differential testing.** A Python harness draws random feature combinations and shapes
+   within the supported surface, computes the expected result in FP64 (PyTorch, or cuDNN's reference
+   code where it applies), and compares both references. This covers feature interactions a fixed list
+   of bundles misses. It belongs in a nightly or comprehensive tier.
+4. **Other public reference implementations.** Cross-check FlexAttention (CPU) for softcap, ALiBi,
+   sliding windows and block masks; FlashAttention's `attention_ref` for window and padding semantics;
+   and vLLM's paged-attention reference. Each is written independently, and together they also check
+   the register's mapping of those frameworks onto cuDNN's semantics.
+
+### 7.2 Stronger checks of the references themselves
+
+5. **FP64 compute mode for the CPU reference.** The pipeline computes in fp32 even for double inputs.
+   A double compute type would give a high-precision oracle and turn the CPU-vs-GPU tolerances into
+   measured error bounds.
+6. **Systematic mutation and coverage runs.** An automated mutation-score run over
+   `CpuFpReferenceSdpa.hpp`, the GPU kernels and the shared plan code (`PlanUtils.hpp`,
+   `RaggedSdpaDensify.hpp`), and branch coverage of the CPU reference, to find code no test reaches.
+   CPU-vs-GPU parity cannot catch a bug in the shared plan code, so it needs these checks most.
+7. **More extreme-value and metamorphic tests.** A constant added to every key's bias leaves O
+   unchanged; permuting the keys (with their values) leaves O unchanged when there is no mask; fp8 saturation; zero-length batches;
+   very long rows (accumulation error growth); `Sq > Skv` with bottom-right alignment.
+8. **A comprehensive tier.** Larger and longer cases than the standard tier, for the GPU reference,
+   run outside per-PR CI.
+
+### 7.3 Open contract questions
+
+- **Graphs the references accept but then fail on.** A few malformed operands are not yet declined by
+  the plans and throw at execute instead: a descale whose shape is neither one element nor
+  `[B, H_kv, 1, 1]`, mis-shaped Max / Sum_exp / stats outputs, `max_seq_len_kv` on a fully ragged graph
+  without paging, a ragged stats tensor on an otherwise dense graph, an explicit dropout mask sized to
+  a paged K's block, and an unknown `diagonal_alignment` value. A mis-shaped dBias passed directly to
+  the CPU backward is not validated either. Each should become a decline (or an up-front check) with a
+  decline test.
+- **`mma_core_mode`** is accepted and ignored. If cuDNN changes P's precision under some modes (for
+  example fp8), the references need either that behaviour or a decline for those values.
+- **Packed page tables** are declined by the frontend although cuDNN accepts them on newer backends.
+- **fp8 softmax scaling over more than 128 keys** matches cuDNN only up to its per-tile quantization
+  (SEM-024); modelling the tiling would make those rows exact.
+- **Not expressible in the graph API yet:** backward Philox dropout, backward sinks and dSink, the fp8
+  backward node and `score_mod` (section 2.4). Each needs reference support when the API adds it.
