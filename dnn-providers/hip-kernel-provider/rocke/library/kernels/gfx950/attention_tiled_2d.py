@@ -500,6 +500,11 @@ class UnifiedAttention2DTiledSpec:
     # to the alignment chosen by ``causal_top_left``. Not combinable with ALiBi /
     # QQ-bias, whose offsets are defined on the causal diagonal.
     right_bound: int = 0
+    # Softmax exponentials (P = exp2(S - m) and alpha = exp2(m_old - m_new)) use
+    # the native single-instruction exp2 with no range-reduction guard. Both
+    # arguments are <= 0, so the guard is dead work: the hardware exp2 already
+    # flushes large negatives to 0. Saves ~5 VALU per exponential.
+    use_exp2_fast: bool = False
 
     def __post_init__(self):
         if type(self.use_additive_bias) is not bool:
@@ -962,6 +967,7 @@ class UnifiedAttention2DTiledSpec:
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
             "qrev" if self.use_qblock_reverse else "",
+            "e2f" if self.use_exp2_fast else "",
         )
 
 
@@ -1534,6 +1540,8 @@ def build_unified_attention_2d_tiled(
     SCHED_BARRIER_MASK = int(spec.sched_barrier_mask)
     # STEP 2 lever: MFMA<->softmax interleave hint (see spec docstring).
     USE_SOFTMAX_INTERLEAVE = bool(spec.use_softmax_mfma_interleave)
+    # Softmax exp2 flavour: native (no range guard) or the guarded intrinsic.
+    _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
     SOFTMAX_INTERLEAVE_MODE = int(spec.softmax_interleave_mode)
     SOFTMAX_INTERLEAVE_GROUPS = int(spec.softmax_interleave_groups)
     if USE_SOFTMAX_INTERLEAVE and USE_SCHED_BARRIER:
@@ -3651,7 +3659,7 @@ def build_unified_attention_2d_tiled(
                 for group_idx in range(len(st_groups)):
                     for n in range(QK_N_TILES):
                         for reg in range(16):
-                            p_t = b.exp2(
+                            p_t = _exp2(
                                 b.fsub(st_scores[(group_idx, n, reg)], st_m_new)
                             )
                             PT32_groups[group_idx][n][reg] = p_t
@@ -3880,7 +3888,7 @@ def build_unified_attention_2d_tiled(
                 row = hoist_row[reg]
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
-                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    p = _exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
                     col = _mfma_32x32_c_col(b, lane, n)
                     b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
                     sum_p = b.fadd(sum_p, p)
@@ -3988,7 +3996,7 @@ def build_unified_attention_2d_tiled(
             for reg in range(REGS_PER_LANE):
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
-                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    p = _exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
                     p_regs_f32[reg][n] = p
                     if not REGISTER_PV:
                         row = hoist_row[reg]
@@ -4008,7 +4016,7 @@ def build_unified_attention_2d_tiled(
 
         # alpha and L update (still per-lane registers; matches FA-2 paper)
         alpha_regs = [
-            b.exp2(b.fsub(m_vals[r], m_new[r])) for r in range(SOFTMAX_STATE_SLOTS)
+            _exp2(b.fsub(m_vals[r], m_new[r])) for r in range(SOFTMAX_STATE_SLOTS)
         ]
         new_l_vals = [
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r])

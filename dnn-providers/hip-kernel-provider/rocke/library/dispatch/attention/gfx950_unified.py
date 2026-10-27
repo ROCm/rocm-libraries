@@ -93,7 +93,7 @@ GFX950_TUNING_VARIANTS = tuple(_variants())
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
     """Fast gfx950 bf16 head_size-256 prefill kernel — 32x32 transposed stack
-    with FA3-style softmax<->MFMA interleave (mode2/g4) + slab-padded K_lds.
+    with half-local PV + slab-padded K_lds.
 
     Registered at priority 5 so it outranks the generic unified_2d candidate
     (priority 10) for the gfx950 bf16 D256 prefill cohort. The registry sorts

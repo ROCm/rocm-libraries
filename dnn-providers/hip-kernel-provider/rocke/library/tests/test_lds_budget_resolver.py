@@ -185,14 +185,17 @@ class TestD256ProductionRouting(unittest.TestCase):
         # The cohort matches the fast-route predicate ...
         self.assertTrue(au._d256_gfx950_fast(problem, "gfx950"))
         spec = au._tiled_spec_from_problem(problem, "gfx950")
-        # ... so the built spec is the 32x32 interleave fast path, not
+        # ... so the built spec is the 32x32 half-local-PV fast path, not
         # register-PV: register-PV is off and the 32x32 stack is on.
         self.assertFalse(spec.use_register_pv)
         self.assertTrue(spec.use_mfma_32x32)
         self.assertTrue(spec.use_transposed_qk_32x32)
-        self.assertTrue(spec.use_softmax_mfma_interleave)
-        self.assertEqual(spec.softmax_interleave_mode, 2)
-        self.assertEqual(spec.softmax_interleave_groups, 4)
+        self.assertTrue(spec.use_transposed_half_local_pv)
+        self.assertFalse(spec.use_softmax_mfma_interleave)
+        # block_size=64 keeps the T=64 / nw=2 geometry (T % block_size == 0).
+        self.assertEqual((spec.num_warps, spec.tile_size), (2, 64))
+        small = au._tiled_spec_from_problem(_d256_bf16_long_prefill(16), "gfx950")
+        self.assertEqual((small.num_warps, small.tile_size), (4, 32))
         # The fast route single-buffers K itself, so the spec fits the cap
         # and the resolver is a strict no-op (register-PV off -> same object).
         self.assertTrue(spec.use_k_single_buffer)

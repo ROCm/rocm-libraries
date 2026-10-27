@@ -314,9 +314,8 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
         right_bound=problem.right_bound,
     )
     if _kau._d256_gfx950_fast(problem, arch):
-        # D256 gfx950 bf16 prefill fast route -- pins the 32x32 transposed + FA3
-        # softmax<->MFMA-interleave codegen constellation on top of the gated
-        # geometry above. Kept behind ``_kau.`` for test-steering (see docstring).
+        # D256 gfx950 bf16 prefill fast route -- pins the 32x32 transposed +
+        # half-local PV codegen constellation on top of the gated geometry above. Kept behind ``_kau.`` for test-steering (see docstring).
         _spec = replace(_spec, **_kau._d256_gfx950_spec_overrides())
     return _spec
 
