@@ -8,10 +8,11 @@
 // generateCustomCall hands an external custom kernel the packed ceil(K/mxBlock)
 // scale pitch only when the problem says customKernelMXScalesArePacked(); the
 // flag defaults to false because the TensileLite benchmark client allocates its
-// scale buffer from the padded descriptor and hands that same buffer over. So
-// hipBLASLt has to turn it on, and if that ever stopped happening the result
-// would be silent numerical corruption -- the padded pitch read against a packed
-// buffer, which is the failure this helper's PR fixed in the other direction.
+// scale buffer from the padded descriptor and hands that same buffer over.
+// A plain Block_32_UE8M0 buffer is packed, so the helper marks it packed.
+// The pre-swizzled Block_32_UE8M0_32_8_EXT buffer is the padded gfx950 layout,
+// so that call leaves the flag false. Dropping the flag on the plain path
+// would hand a kernel the padded pitch of a packed buffer.
 //
 // ConstructTensileProblem and updateTensileProblem, the two functions that set
 // the scales, cannot be driven from here: both live in tensile_host.cpp's
@@ -20,7 +21,7 @@
 // declaration is instead made inseparable from the descriptor it describes, in
 // the helpers below, and this file pins that. Deleting the setup at either call
 // site is caught separately, at compile time, by the -Wunused-variable tripwire
-// around padMXScaleTensorFreeDim in tensile_host.cpp.
+// around gfx950MXScale in tensile_host.cpp.
 //
 // The header is included by relative path, following rocroller_kernel_match_gtest
 // .cpp: putting the library's internal src/include on this target's include path
@@ -114,4 +115,25 @@ TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
     EXPECT_EQ(unpadded.mxsa().strides()[1], 4u);
     EXPECT_EQ(unpadded.mxsb().strides()[1], 4u);
     EXPECT_TRUE(unpadded.customKernelMXScalesArePacked());
+}
+
+// K=96, block 32: ceil(K/32) is 3. Packed keeps 3. Gfx950 rounds it to 8.
+// The pre-swizzled call is the one that must not claim the buffer is packed.
+TEST(HostUnitMXScaleSetup, smoke_PaddingFollowsTheCallerScaleFormat)
+{
+    auto packed = mxProblem(64, 64, 96);
+    rocblaslt::setHostMXScaleA(packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
+    rocblaslt::setHostMXScaleB(packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
+    EXPECT_EQ(packed.mxsa().strides()[1], 3u);
+    EXPECT_EQ(packed.mxsb().strides()[1], 3u);
+    EXPECT_TRUE(packed.customKernelMXScalesArePacked());
+
+    auto preswizzled = mxProblem(64, 64, 96);
+    rocblaslt::setHostMXScaleA(
+        preswizzled, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950, false);
+    rocblaslt::setHostMXScaleB(
+        preswizzled, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950, false);
+    EXPECT_EQ(preswizzled.mxsa().strides()[1], 8u);
+    EXPECT_EQ(preswizzled.mxsb().strides()[1], 8u);
+    EXPECT_FALSE(preswizzled.customKernelMXScalesArePacked());
 }

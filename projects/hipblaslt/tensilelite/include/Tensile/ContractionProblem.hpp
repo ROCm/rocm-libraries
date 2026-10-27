@@ -1420,13 +1420,15 @@ namespace TensileLite
             return m_mxScaleHostPreSwizzle;
         }
 
-        /// True when the MX scale buffers this caller hands to an *external* custom
-        /// kernel are packed with the compact ceil(K/mxBlock) leading dimension,
-        /// even though mxsa()/mxsb() carry the gfx950 padding setMXScaleA/B applies
-        /// for the Tensile-generated HostPreSwizzle kernels.
+        /// True when the MX scale buffer this caller hands to an external custom
+        /// kernel is packed at ceil(K/mxBlock). A plain Block_32_UE8M0 descriptor
+        /// is itself packed, so the flag and the descriptor agree. The flag still
+        /// matters when the descriptor is padded and the buffer is not, which is
+        /// the TensileLite benchmark client and the other block formats.
         ///
-        /// hipBLASLt always sets it: the user's plain Block_32_UE8M0 scale pointer
-        /// is packed. The TensileLite benchmark client sets it when it allocated
+        /// hipBLASLt sets it for a plain Block_32_UE8M0 pointer, and leaves it
+        /// false for Block_32_UE8M0_32_8_EXT, whose buffer is the padded gfx950
+        /// layout. The TensileLite benchmark client sets it when it allocated
         /// the scale buffer with MXScalePadding::Packed, and leaves it false when
         /// it allocated a padded buffer, so the stride always describes the bytes
         /// the caller really handed over.

@@ -2093,6 +2093,29 @@ namespace
             params.setOccupancyProbe(nullptr, 0, 0);
     }
 
+    // On gfx950 the scale format is the layout of the buffer the caller
+    // allocated. Plain Block_32_UE8M0 is packed at ceil(K/32). The
+    // pre-swizzled Block_32_UE8M0_32_8_EXT buffer is the padded gfx950
+    // layout. Other block formats keep that architecture padding, and
+    // gfx1250 keeps its own padding for every format.
+    TensileLite::MXScalePadding mxHostScalePadding(bool                                      gfx950,
+                                                    RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        using SF = RocblasltContractionProblem::ScalingFormat;
+        if(!gfx950)
+            return TensileLite::MXScalePadding::Gfx1250;
+        if(fmt == SF::Block_32_UE8M0)
+            return TensileLite::MXScalePadding::Packed;
+        return TensileLite::MXScalePadding::Gfx950;
+    }
+
+    bool mxHostScaleBufferIsPacked(bool                                      gfx950,
+                                   RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        using SF = RocblasltContractionProblem::ScalingFormat;
+        return !(gfx950 && fmt == SF::Block_32_UE8M0_32_8_EXT);
+    }
+
     /****************************************************************
  * Construct a Tensile Problem from a RocblasltContractionProblem *
  ****************************************************************/
@@ -2298,25 +2321,22 @@ namespace
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         // Tripwire, in the spirit of the -Wswitch one in clients/tests/unit: drop the
-        // MX scale setup below and mxScalePadding goes unused, so this file
-        // stops compiling rather than silently losing the packed-buffer declaration
+        // MX scale setup below and gfx950MXScale goes unused, so this file
+        // stops compiling rather than silently losing the scale-layout choice
         // that setHostMXScaleA/B carry along with the descriptor.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
 #endif
-        const TensileLite::MXScalePadding mxScalePadding
-            = mxScaleTensorNeedsPaddingFreeDim() ? TensileLite::MXScalePadding::Gfx950
-                                                 : TensileLite::MXScalePadding::Gfx1250;
+        const bool gfx950MXScale = mxScaleTensorNeedsPaddingFreeDim();
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 
         // Forward the caller's scale-buffer layout so the MXScaleHostPreSwizzle
-        // predicate can reject solutions built for the other layout. The switches
-        // below deliberately collapse Block_32_UE8M0 and Block_32_UE8M0_32_8_EXT
-        // onto the same descriptor -- the two buffers have identical extents --
-        // so this flag is the only thing that keeps them apart.
+        // predicate can reject solutions built for the other layout. On gfx950
+        // the descriptor follows that layout: plain Block_32_UE8M0 is packed,
+        // and Block_32_UE8M0_32_8_EXT is the padded gfx950 layout.
         tensileProblem.setMXScaleHostPreSwizzle(mxScalesAreHostPreSwizzled(prob));
 
         switch(prob.scaleAType)
@@ -2339,30 +2359,60 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+            rocblaslt::setHostMXScaleA(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2386,30 +2436,60 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
+        case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
+            rocblaslt::setHostMXScaleB(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2465,13 +2545,17 @@ namespace
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-          rocblaslt::setHostMXScaleA(
-              tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+           prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleA(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale, prob.scaleAType),
+                mxHostScaleBufferIsPacked(gfx950MXScale, prob.scaleAType));
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-          rocblaslt::setHostMXScaleB(
-              tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+           prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleB(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale, prob.scaleBType),
+                mxHostScaleBufferIsPacked(gfx950MXScale, prob.scaleBType));
 
         return tensileProblem;
     }
@@ -2632,25 +2716,22 @@ namespace
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
         // Tripwire, in the spirit of the -Wswitch one in clients/tests/unit: drop the
-        // MX scale setup below and mxScalePadding goes unused, so this file
-        // stops compiling rather than silently losing the packed-buffer declaration
+        // MX scale setup below and gfx950MXScale goes unused, so this file
+        // stops compiling rather than silently losing the scale-layout choice
         // that setHostMXScaleA/B carry along with the descriptor.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
 #endif
-        const TensileLite::MXScalePadding mxScalePadding
-            = mxScaleTensorNeedsPaddingFreeDim() ? TensileLite::MXScalePadding::Gfx950
-                                                 : TensileLite::MXScalePadding::Gfx1250;
+        const bool gfx950MXScale = mxScaleTensorNeedsPaddingFreeDim();
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 
         // Forward the caller's scale-buffer layout so the MXScaleHostPreSwizzle
-        // predicate can reject solutions built for the other layout. The switches
-        // below deliberately collapse Block_32_UE8M0 and Block_32_UE8M0_32_8_EXT
-        // onto the same descriptor -- the two buffers have identical extents --
-        // so this flag is the only thing that keeps them apart.
+        // predicate can reject solutions built for the other layout. On gfx950
+        // the descriptor follows that layout: plain Block_32_UE8M0 is packed,
+        // and Block_32_UE8M0_32_8_EXT is the padded gfx950 layout.
         tensileProblem.setMXScaleHostPreSwizzle(mxScalesAreHostPreSwizzled(prob));
 
         switch(prob.scaleAType)
@@ -2673,29 +2754,60 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+            rocblaslt::setHostMXScaleA(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2719,29 +2831,60 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+            rocblaslt::setHostMXScaleB(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::Float8, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 32, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 16, mxScalePadding);
+                tensileProblem, rocisa::DataType::E5M3, 16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                mxHostScaleBufferIsPacked(gfx950MXScale,
+                                          RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2808,14 +2951,18 @@ namespace
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
 
-	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-	    rocblaslt::setHostMXScaleA(
-	        tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
-	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-	    rocblaslt::setHostMXScaleB(
-	        tensileProblem, rocisa::DataType::E8, 32, mxScalePadding);
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+           prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleA(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale, prob.scaleAType),
+                mxHostScaleBufferIsPacked(gfx950MXScale, prob.scaleAType));
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+           prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleB(
+                tensileProblem, rocisa::DataType::E8, 32,
+                mxHostScalePadding(gfx950MXScale, prob.scaleBType),
+                mxHostScaleBufferIsPacked(gfx950MXScale, prob.scaleBType));
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)

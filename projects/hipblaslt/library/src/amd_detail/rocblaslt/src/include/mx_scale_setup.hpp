@@ -6,13 +6,13 @@
 // Attaching an MX block-scale descriptor and declaring the layout of the buffer
 // behind it are one operation, not two.
 //
-// ContractionProblemGemm::setMXScaleA/B pad the descriptor on gfx950 for the
-// Tensile-generated HostPreSwizzle kernels. hipBLASLt's own scale pointer is the
-// user's plain Block_32_UE8M0 buffer, which is packed at ceil(K/mxBlock), so
-// ContractionSolution::generateCustomCall has to hand an external custom kernel
-// the packed pitch rather than the descriptor's padded one -- it asks
-// customKernelMXScalesArePacked(), which defaults to false for the TensileLite
-// benchmark client, whose scale buffer really is the padded one.
+// ContractionProblemGemm::setMXScaleA/B shape the descriptor from the padding
+// mode. On gfx950 a plain Block_32_UE8M0 caller allocated a packed buffer, so
+// the mode is Packed. A Block_32_UE8M0_32_8_EXT caller pre-swizzled into the
+// padded gfx950 layout, so the mode is Gfx950 and scalesArePacked is false.
+// generateCustomCall reads customKernelMXScalesArePacked() when it has to
+// rebuild a stride the descriptor does not already describe. The TensileLite
+// benchmark client leaves that flag false when it allocated the padded buffer.
 //
 // Keeping the two calls paired here is what stops the second one from being
 // dropped on its own: a caller that attaches hipBLASLt's scales gets the
@@ -25,23 +25,27 @@
 
 namespace rocblaslt
 {
-    /// Attach hipBLASLt's MX block scale for A and declare the buffer packed.
+    /// Attach hipBLASLt's MX block scale for A.
+    /// scalesArePacked is false only for the pre-swizzled gfx950 buffer.
     inline void setHostMXScaleA(TensileLite::ContractionProblemGemm& problem,
                                 rocisa::DataType                     mxType,
                                 int                                  mxBlock,
-                                TensileLite::MXScalePadding          padding)
+                                TensileLite::MXScalePadding          padding,
+                                bool                                 scalesArePacked = true)
     {
         problem.setMXScaleA(mxType, mxBlock, {}, padding);
-        problem.setCustomKernelMXScalesArePacked(true);
+        problem.setCustomKernelMXScalesArePacked(scalesArePacked);
     }
 
-    /// Attach hipBLASLt's MX block scale for B and declare the buffer packed.
+    /// Attach hipBLASLt's MX block scale for B.
+    /// scalesArePacked is false only for the pre-swizzled gfx950 buffer.
     inline void setHostMXScaleB(TensileLite::ContractionProblemGemm& problem,
                                 rocisa::DataType                     mxType,
                                 int                                  mxBlock,
-                                TensileLite::MXScalePadding          padding)
+                                TensileLite::MXScalePadding          padding,
+                                bool                                 scalesArePacked = true)
     {
         problem.setMXScaleB(mxType, mxBlock, {}, padding);
-        problem.setCustomKernelMXScalesArePacked(true);
+        problem.setCustomKernelMXScalesArePacked(scalesArePacked);
     }
 }
