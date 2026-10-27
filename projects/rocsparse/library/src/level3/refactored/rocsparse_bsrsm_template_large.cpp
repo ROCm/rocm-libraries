@@ -105,10 +105,8 @@ namespace rocsparse
 // the kernels grid-stride over whatever is left over.
 //
 // bsrsm_solve_grid_size returns at most the get_grid_size_x clamp, rounded down
-// to whole RHS panels, except when mb alone exceeds it: then it returns mb
-// rather than a grid too small to hold one RHS panel, which the kernels cannot
-// stride. Saturate the narrowing so that stays true if mb also exceeds
-// UINT32_MAX, rather than wrapping into a legal looking grid.
+// to whole RHS panels, or the clamp itself when mb alone exceeds it; the WIDE
+// kernels then walk contiguous chunks of the flattened space.
 //
 // The kernels take the WIDE (grid-stride, 64 bit offsets) instantiation only
 // when bsrsm_solve_needs_wide says the narrow one, one block per pair with 32
@@ -142,8 +140,7 @@ namespace rocsparse
         NCOL,                                                                             \
         rocsparse::get_grid_size_x(                                                       \
             handle, rocsparse::bsrsm_num_blocks(mb, nrhs, NCOL), NCOL * M_));             \
-    dim3 bsrsm_blocks(static_cast<uint32_t>(rocsparse::min(                               \
-        bsrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));      \
+    dim3 bsrsm_blocks(static_cast<uint32_t>(bsrsm_grid_x));                               \
     dim3 bsrsm_threads(NCOL* M_);                                                         \
     if(rocsparse::bsrsm_solve_needs_wide(mb, block_dim, nrhs, NCOL, ldimX, bsrsm_grid_x)) \
     {                                                                                     \
