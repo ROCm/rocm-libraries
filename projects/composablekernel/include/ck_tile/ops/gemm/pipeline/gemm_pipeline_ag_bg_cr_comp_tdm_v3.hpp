@@ -442,6 +442,29 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 ALdsTile a_block_tile;
                 BLdsTile b_block_tile;
 
+                // kStreamARows: one A row window per LDS stage, built here, outside the K loop,
+                // like the B windows. Building it per row inside the loop recomputes its origin
+                // (from the wave id) every K tile; the B reads, whose address is ready, are then
+                // issued first and the first WMMA waits behind B reads it does not need.
+                auto a_row_windows = [&]() {
+                    if constexpr(kStreamARows)
+                    {
+                        return generate_tuple(
+                            [&](auto s) {
+                                return make_tile_window(
+                                    a_lds_block_views[s],
+                                    make_tuple(number<a_row_m>{}, number<kSubTileK>{}),
+                                    {0, 0},
+                                    MakeARowDistribution());
+                            },
+                            number<num_lds_buffers>{});
+                    }
+                    else
+                    {
+                        return tuple<>{};
+                    }
+                }();
+
                 // Reads and multiplies the K sub-tiles of LDS stage s and calls arrive() right
                 // after the last LDS read of the stage, so that no read of stage s follows the
                 // arrive (a later read could race with the refill another wave issues after its
@@ -471,15 +494,12 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 load_tile(b_block_tile, b_window);
                             }
                             static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
-                                constexpr auto a_row_distr = MakeARowDistribution();
-                                auto a_row_tile =
-                                    make_static_distributed_tensor<ADataType>(a_row_distr);
-                                load_tile(a_row_tile,
-                                          make_tile_window(
-                                              a_lds_block_views[s],
-                                              make_tuple(number<a_row_m>{}, number<kSubTileK>{}),
-                                              {r.value * a_row_m, i.value * kSubTileK},
-                                              a_row_distr));
+                                auto a_row_tile = make_static_distributed_tensor<ADataType>(
+                                    MakeARowDistribution());
+                                auto a_row_window = a_row_windows[s];
+                                move_tile_window(a_row_window,
+                                                 {r.value * a_row_m, i.value * kSubTileK});
+                                load_tile(a_row_tile, a_row_window);
                                 if constexpr(is_last_sub_tile &&
                                              r.value == BlockGemm::MIterPerWarp - 1)
                                 {
