@@ -28,6 +28,8 @@ else()
 endif()
 target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common)
 # This is the only target whose sources are built against rocRoller's headers.
+# rocroller_interop.hpp is included only from those sources. The ranker does
+# not define this macro and does not include rocRoller.
 target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
 target_include_directories(hipblaslt-rocroller
     PRIVATE

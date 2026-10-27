@@ -520,7 +520,6 @@ _CONFIG_OPTIONAL_COMMON = {
     "search_space": None,
     "MACROTILE_OPT": False,
     "MT_DU": None,
-    "USE_HEURISTICS": False,
     "SIZE_OPTION": 0,
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,
@@ -542,7 +541,17 @@ ENV_UPDATABLE_KEYS = {
 # would otherwise fall back to their defaults. The MX format needs no entry:
 # each row carries it as its hipBLASLt scaleA / scaleB value, which is decoded
 # again when the rows are grouped into GemmConfigs, as for a workload log.
-LIST_FORWARDED_KEYS = ("EPILOGUES", "LIBRARY_TYPE")
+LIST_FORWARDED_KEYS = (
+    "StreamK",
+    "LIBRARY_TYPE", 
+    "MACROTILE_OPT",
+    "MT_DU",
+    "ONE_SIZE_PER_CONFIG",
+    "MI_FILTER",
+    "EPILOGUES", 
+    "CLUSTER",
+    "DUCTILE_VALIDATION_PROFILE",
+)
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
 _CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,23 @@ void testing_backend_init_order(void)
 
     // Stop rocalution platform
     stop_rocalution();
+}
+
+void testing_backend_disable_accelerator_after_stop(void)
+{
+    // Initialize rocalution platform with the accelerator
+    set_device_rocalution(device);
+    disable_accelerator_rocalution(false);
+    init_rocalution();
+    stop_rocalution();
+
+    // Initialize it again without the accelerator
+    disable_accelerator_rocalution(true);
+    init_rocalution();
+
+    // Stop rocalution platform
+    stop_rocalution();
+    disable_accelerator_rocalution(false);
 }
 
 void testing_backend(Arguments argus)

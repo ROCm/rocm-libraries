@@ -115,7 +115,7 @@ The Python engine (`core/lower_llvm.py`) and the C++ engine (`cpp/`) MUST emit t
 change must be made in **both** engines in the same change. Prove it:
 
 ```bash
-python tools/check_byte_identity.py            # build engine fresh + gate (llvm20)
+ROCKE_LLVM_FLAVOR=llvm20 python tools/check_byte_identity.py   # build engine fresh + gate
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
 ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
 ```
@@ -134,10 +134,11 @@ export PYTHONPATH=<rocke/platform>/python                 # then: import rocke
 cmake -S <rocke/platform> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke -j
 
-# relative-path guard + byte-identity gate + pytest; also runs ctest only when
-# --build-root already holds the built C++ test binaries (default temp run skips it)
-python tests/run_all.py                          # guard + gate + pytest
-python tests/run_all.py --build-root /tmp/rocke  # + ctest from the build above
+# Complete developer pre-merge gate. It configures/builds the default build root,
+# runs host/corpus gates and pytest, then runs all registered CTests, including
+# toolchain integrations. Use --build-root to reuse a chosen out-of-tree build.
+python tests/run_all.py
+python tests/run_all.py --build-root /tmp/rocke
 python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
 
@@ -476,7 +477,7 @@ dual-engine vs Python-only split.
 
 | flag | meaning |
 |---|---|
-| `ROCKE_ARCH_DOMAIN` | `warn` (default) \| `off` — warn when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `off` skips the lookup entirely. Any other value raises rather than falling back to `warn`: every way of misspelling this is an attempt to switch the lane *off*, and defaulting would leave it on |
+| `ROCKE_ARCH_DOMAIN` | `error` \| `warn` (default) \| `off` — what both engines do when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `error` refuses the lowering (`ArchDomainError`) unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it; `off` skips the lookup. Any other value raises rather than falling back to the default, because a misspelling is always an attempt to change what the lane does. A wrong measurement is waived per cell, not worked around with this variable; see TESTING.md, the arch-domain gate |
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
@@ -484,3 +485,5 @@ dual-engine vs Python-only split.
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
+| `ROCKE_ONLINE_LIB` / `ROCKE_REPLAY_CLI` | explicit portable-IR shared engine / standalone replay CLI; explicit paths never fall back |
+| `ROCKE_PROVENANCE_MANIFEST` | build-generated expected version/build ID for validating explicit native artifacts in a source-less installed test tree |

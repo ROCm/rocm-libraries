@@ -17,10 +17,29 @@
 # TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
 # suites.
 #
-# These tests carry no Full*/Standard*/
-# Comprehensive* variant, so every tier runs the same coverage -- matching
-# HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
-# tiered coverage yet.
+# Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
+# runs the same coverage. The arch-domain reproducibility gate is intentionally
+# standard-tier: it probes the external LLVM toolchain across the full
+# intrinsic/architecture matrix and does not belong in quick or FFM. It is
+# registered in both build-tree and installed-artifact CTest, so developers and
+# provider CI execute the same logical gate against their respective package data.
+#
+# The pinned GPU reference entries are regex patterns, unlike the other
+# entries here: rocke/platform/CMakeLists.txt registers
+# rocke_<operation>_reference_unit_pytest for each reference operation and
+# rocke_<operation>_gpu_<arch>_pytest for each published architecture, so a
+# new operation or architecture is labeled without an edit here. The
+# patterns match by name shape alone, so any other test registered as
+# rocke_<name>_gpu_gfx<target>_pytest or rocke_<name>_reference_unit_pytest
+# joins these categories too. <name> may use lowercase letters, digits, and
+# underscores, and <target> lowercase letters and digits. The parser takes
+# the regex path on seeing a metacharacter and anchors the pattern at both
+# ends; the build tree evaluates it with CMake's if(MATCHES), so use only
+# syntax CMake and Python share (no \d or {n}).
+# rocke_reference_common_pytest, shared by every operation, stays exact.
+# rocke/platform/tests/test_gpu_references.py checks that each registered
+# pinned reference name still gets the labels of
+# rocke_reference_common_pytest.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
@@ -37,25 +56,27 @@ test_categories:
       - "rocke_opcode_values"
       - "rocke_unsigned_int_ops"
       - "rocke_qk_scale_spec_validate"
+      - "rocke_fp8_scale_conversion_gate"
+      - "rocke_mx_scale_decode"
+      - "rocke_buffer_rsrc_hip"
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_unified_attention_scalar_lower_to_llvm"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
+      - "rocke_differential_golden_ll"
+      - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_pytest"
+      - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
+      - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
-      - "rocke_sdpa_reference_unit_pytest"
-      - "rocke_sdpa_gpu_gfx942_pytest"
-      - "rocke_sdpa_gpu_gfx950_pytest"
-      - "rocke_sdpa_gpu_gfx1151_pytest"
-      - "rocke_sdpa_gpu_gfx1201_pytest"
-      - "rocke_conv_reference_unit_pytest"
-      - "rocke_conv_gpu_gfx942_pytest"
+      - "rocke_[a-z0-9_]+_reference_unit_pytest"
+      - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
     labels:
       - "quick"
       - "pre-commit"
@@ -76,24 +97,35 @@ test_categories:
       - "rocke_opcode_values"
       - "rocke_unsigned_int_ops"
       - "rocke_qk_scale_spec_validate"
+      - "rocke_fp8_scale_conversion_gate"
+      - "rocke_mx_scale_decode"
+      - "rocke_buffer_rsrc_hip"
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_unified_attention_scalar_lower_to_llvm"
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
+      - "rocke_differential_golden_ll"
+      - "rocke_differential_golden_canonical"
       - "rocke_library_conv_pytest"
       - "rocke_library_attention_cpu_pytest"
       - "rocke_library_attention_pytest"
+      - "rocke_library_gdn_pytest"
       - "rocke_library_attention_gpu_pytest"
+      - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
-      - "rocke_sdpa_reference_unit_pytest"
-      - "rocke_sdpa_gpu_gfx942_pytest"
-      - "rocke_sdpa_gpu_gfx950_pytest"
-      - "rocke_sdpa_gpu_gfx1151_pytest"
-      - "rocke_sdpa_gpu_gfx1201_pytest"
-      - "rocke_conv_reference_unit_pytest"
-      - "rocke_conv_gpu_gfx942_pytest"
+      - "rocke_[a-z0-9_]+_reference_unit_pytest"
+      - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
     labels:
       - "ffm-full"
+
+  standard:
+    description: "rocKE generated-artifact reproduction checks"
+    test_patterns:
+      - "rocke_arch_domain_reproducibility"
+    labels:
+      - "host"
+      - "toolchain"
+      - "generated-artifact"

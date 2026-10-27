@@ -31,7 +31,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-S = importlib.import_module("Tensile.SolutionStructs.Solution")
+S = importlib.import_module("tensilelite.SolutionStructs.Solution")
 Solution = S.Solution
 
 
@@ -42,9 +42,9 @@ Solution = S.Solution
 @pytest.fixture(scope="module")
 def gfx950_iim():
     """Single-arch ISA info map for gfx950."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx950")
@@ -53,8 +53,8 @@ def gfx950_iim():
 
 @pytest.fixture(scope="module")
 def gfx950_assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -66,8 +66,8 @@ def _gp_assigned(gfx950_iim):
     """Assign global parameters for gfx950 once per module; restore after."""
     import contextlib
     import copy
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -91,7 +91,7 @@ def _make_gfx950_mx_fp8_solution(iim, assembler, **overrides):
 
     Returns the derived Solution object (or None if rejected).
     """
-    from Tensile.BenchmarkProblems import matrixInstructionToMIParameters
+    from tensilelite.BenchmarkProblems import matrixInstructionToMIParameters
 
     isa = list(iim.keys())[0]
 

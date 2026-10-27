@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Toolchain.Assembly.buildAssemblyCodeObjectFiles``
+"""Characterization tests for ``tensilelite.Toolchain.Assembly.buildAssemblyCodeObjectFiles``
 — the code-object orchestration, driven with stub linker/bundler (no real
 subprocess) and fake kernel dicts."""
 

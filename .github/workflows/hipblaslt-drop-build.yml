@@ -191,6 +191,21 @@ jobs:
             --gemm-a2a-fusion \
             --architecture="$GPU_TARGETS"
 
+      - name: Check ranker dependency files omit rocRoller and fmt
+        # A green build can still compile the ranker against headers under
+        # /opt/rocm. The compiler .d files are the record. rocroller/ in-tree
+        # is not rocRoller/.
+        run: |
+          set -euo pipefail
+          mapfile -t depdirs < <(find projects/hipblaslt/build -type d -name hipblaslt-rocroller-selection.dir)
+          if [ "${#depdirs[@]}" -ne 1 ]; then
+            echo "expected one hipblaslt-rocroller-selection.dir, found ${#depdirs[@]}"
+            printf '%s\n' "${depdirs[@]}"
+            exit 1
+          fi
+          projects/hipblaslt/library/src/amd_detail/rocblaslt/src/check_rocroller_selection_deps.sh \
+            "${depdirs[0]}"
+
       - name: Build hipSPARSELt packages
         working-directory: projects/hipsparselt
         run: |

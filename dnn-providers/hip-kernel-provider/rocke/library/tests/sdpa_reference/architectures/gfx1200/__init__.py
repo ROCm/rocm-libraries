@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx12-generic FP16 WMMA attention independently qualified on gfx1200."""
+"""gfx12-generic FP16 WMMA attention, not yet qualified on gfx1200."""
+
+from reference_common.cases import index_cases
 
 from ...implementations import wmma
 from ...contract import Case
@@ -9,7 +11,7 @@ from ...contract import Case
 NAME = "gfx1200"
 COMPILER_TARGET = "gfx12-generic"
 CASES = wmma.CASES
-CASE_BY_ID = {case.id: case for case in CASES}
+CASE_BY_ID = index_cases(CASES, label="SDPA")
 
 
 def prepare(case: Case, library_root: str) -> wmma.Prepared:

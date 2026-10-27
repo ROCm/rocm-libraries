@@ -25,7 +25,7 @@
 # arbitrary because they are hardware-mandated.  Every field is packed
 # UNMASKED, so an over-range value ORs into its neighbour; keeping the geometry
 # in range is the caller's job (for the A2A path, the launch-time guards in
-# client/src/FusedA2AClient.cpp::runFusedA2A).
+# client/src/FusedA2ARunner.cpp).
 #
 # This encoding is gfx9xx / gfx95x ONLY -- GFX12+ uses a different layout of
 # the same size.

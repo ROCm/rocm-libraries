@@ -27,9 +27,9 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
-**FP64 coverage update.** The f64 entries in §1, §2.5, and §4C reflect the IR
-type, arithmetic, memory, and elementwise/reduce2d support added after the
-original basis snapshot. The §2.4 f64 row retains its stated historical basis.
+**FP64 coverage update.** The f64 entries in §1, §2.5, §4B, and §4C reflect the
+IR type, arithmetic, memory, elementwise/reduce2d, and gfx942 MFMA atom support
+added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
 
 ---
 
@@ -334,34 +334,34 @@ mode. The missing selector and precision contract are described in §2.5.
   criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
-  matrix. The gfx950 atoms exist (`mfma_f32_16x16x128_fp4`,
-  `mfma_f32_16x16x96_fp6`) and the hipBLASLt provider already maps
+  matrix. The gfx950 instructions exist (`mfma_scale_f32_16x16x128_f8f6f4`
+  and `mfma_f32_16x16x128_fp4fp6fp8`) and the hipBLASLt provider already maps
   `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
   the silicon are both ready — but **no rocKE kernel instance ships**.
-- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:251`) decodes a
+- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:252`) decodes a
   packed byte to two f32 via a hand-written 16-entry codebook
-  (`_FP4_CODEBOOK`, `:214-232`) that matches OCP E2M1
+  (`_FP4_CODEBOOK`, `:216-233`) that matches OCP E2M1
   (`±{0, 0.5, 1, 1.5, 2, 3, 4, 6}`). Partial rather than Full because there is no
   scalar `cvt` primitive and no f32→fp4 direction.
 - **`fp6` (E2M3) C3=0 — there is no E2M3 decoder at all.** Despite the name,
-  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:308`) does not implement E2M3;
+  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:315`) does not implement E2M3;
   see the next entry.
 - **`bf6` (E3M2) C3=0 — a decoder exists but is defective and must not be used.**
-  `_FP6_CODEBOOK` (`i4_dequant.py:276-287`) is built as
+  `_FP6_CODEBOOK` (`i4_dequant.py:276-294`) is built as
   `2^(e-3) × (1 + m/4)` over a 3-bit exponent (bias 3) and a 2-bit mantissa, which
   is **E3M2 — i.e. `bf6`, not `fp6`** (CK-Tile is explicit about the split:
   `pk_fp6_t = pk_float6_e2m3_t` and `pk_bf6_t = pk_float6_e3m2_t`,
-  `include/ck_tile/core/numeric/pk_f6.hpp:294-295,300-323`). It carries three
-  independent defects and is scored 0 for that reason:
+  `include/ck_tile/core/numeric/pk_f6.hpp:294-295,300-323`). Its table matches the
+  spec for every code (+0 / -0 at codes 0 / 32, subnormals `2^(1-3) * (m/4)` at
+  exponent field 0), but the entry point carries two independent defects and is
+  scored 0 for that reason:
   1. **Width.** The entry point takes two `i8` operands = 16 bits, but four
      6-bit values need 24. `v2` is silently truncated (its top two bits read as
      zero) and `v3` is always code 0.
-  2. **Zero and subnormal encoding.** Codes 0 and 32 map to `+1.0` and `-1.0`
-     instead of signed zero. Nonzero subnormal codes collapse to signed zero.
-  3. **Naming.** The public symbol says `fp6` while the layout is `bf6`, so a
+  2. **Naming.** The public symbol says `fp6` while the layout is `bf6`, so a
      caller following OCP naming gets the other format with no error.
-  Fixing this needs a signature change (three `i8`, or one `i32`), a corrected
-  codebook, a rename to `unpack_bf6_*`, and a genuine `unpack_fp6_*` for E2M3.
+  Fixing this needs a signature change (three `i8`, or one `i32`), a rename to
+  `unpack_bf6_*`, and a genuine `unpack_fp6_*` for E2M3.
   Tracked outside this document; until then neither format has a usable decode.
 - **`e8m0` C1=0 / C6=2** — a scale operand rather than a type, and
   `cvt_scalef32_pk_*` restricts scales to powers of two; arbitrary scaling needs
@@ -385,19 +385,22 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, and elementwise/reduce2d only.** The IR type,
-  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fmax`/`fmin`/`fcmp`/
-  `select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS memory up to
-  2-element vectors, and HIP lowering are present. Elementwise
+- **`f64` — IR, memory, elementwise/reduce2d, and the gfx942 MFMA atoms.** The IR type,
+  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
+  `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
+  memory up to 2-element vectors, and HIP lowering are present. Elementwise
   (non-transcendental ops) and reduce2d accept f64 with `vec=2`
   ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
-  `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`,
-  `fma`, `fmax3`, `fmin3`, and `vector_fma` reject f64 in both lowerings.
-  `cvt_f32_to_f64` (exact) and `cvt_f64_to_f32` (round to nearest even) are the
-  only conversions; `cast_to_f32` / `cast_f32_to` refuse f64, and there are no
-  direct f16/bf16 conversions, MMA atoms, or atomics. f64 is in the
+  `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3`, and
+  `vector_fma` reject f64 in both lowerings. `exp2_fast` rejects f64 in the
+  LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only
+  f32: the builder rejects any other operand type. `cvt_f32_to_f64` (exact)
+  and `cvt_f64_to_f32` (round to nearest even) are the only conversions;
+  `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
+  conversions or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950 but undeclared (§4C.6).
+  gfx942 declares `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; no GEMM
+  family selects them yet, and gfx90a/gfx950 declare no f64 atom (§4C.6).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -405,7 +408,7 @@ mode. The missing selector and precision contract are described in §2.5.
 
 Every score above is traceable to: compiler `ir.py:43-52`,
 `lower_llvm.py:1093-1129`,
-FP-op guards `lower_llvm.py:2068-2150` (FMA/FABS/FMAX3 accept only f32/f16/bf16;
+FP-op guards `lower_llvm.py:2068-2150` (FMA/FMAX3 accept only f32/f16/bf16, FABS also f64;
 the dtype rejection is at `:2122`);
 helpers `ir.py:838-1170` (casts), `helpers/io.py:48-211,260-315`,
 `helpers/quant.py:58-357`, `helpers/i4_dequant.py`, `helpers/mx_scale.py`;
@@ -444,8 +447,8 @@ bucket the ticket calls out):
 | `sitofp_f32` primitive from `i8/i16` | Primitive accepts i32 only. For signed i8, use [quant.py](../../python/rocke/helpers/quant.py) `dequantize_scalar_to_f32(b, x, scale=b.const_f32(1.0))`; it emits sext + sitofp internally. For signed i16, explicitly sext to i32 first. | [P] |
 | MX scaled cvt (`cvt_scalef32_pk_*`) | E8M0 scale only → **power-of-two scales**; arbitrary scale needs unscaled cvt + `fmul` | [P] |
 | packed store `store_packed_chunk_local` | `n∈{4,8}` only (no `n=2`); `load_vec`/`store_vec` `n∈{2,4,8}` | [P] |
-| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:251`) decodes E2M1 from a 16-entry codebook (`:214-232`) without MFMA, and is correct. | [P] |
-| scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** Do not use `unpack_fp6_bytes_to_quad_f32` for either format; its width, codebook, and naming defects are detailed in [§2.5](#25-score-justifications-why-each-non-3-was-assigned). | [P][C] |
+| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:252`) decodes E2M1 from a 16-entry codebook (`:216-233`) without MFMA, and is correct. | [P] |
+| scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** Do not use `unpack_fp6_bytes_to_quad_f32` for either format; its width and naming defects are detailed in [§2.5](#25-score-justifications-why-each-non-3-was-assigned). | [P][C] |
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 
 Rounding/saturation that **is** present: round-to-nearest-even + saturating
@@ -497,16 +500,15 @@ to gfx1251, so this is not a missing gfx1250 atom.
 
 `core/arch/data/arch_specs.json` is rocKE's architecture SSOT. An atom that is not
 declared there is unusable by any kernel regardless of what the silicon provides.
-The original basis snapshot, with the gfx942 XF32 addition noted below:
+The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
-| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
-| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
+| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, **f64** |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
-| `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `..._16x16x64_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8 (+ fp8 block-scaled) |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |
 | `gfx12-generic` | same as `gfx1201` | f16, bf16 |
 
@@ -555,9 +557,10 @@ Structured sparsity is available on gfx942, gfx950, gfx1201 and gfx1250. The
 catalog declares no sparse atom on any arch, and no family requests one. No dtype
 in §2.4 is blocked on it.
 
-#### 4C.6 f64 matrix is in silicon but undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is an IR type
-(§1), but no f64 MMA atom is declared on those targets.
+#### 4C.6 f64 matrix is in silicon but mostly undeclared
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. gfx942 declares
+`mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; gfx90a and gfx950 declare no
+f64 MMA atom.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set

@@ -93,6 +93,7 @@ operation:
       attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
       required: true
       expected_data_type: "INT32"
+      work_data_dependent: true
     - name: "dweight"
       fbs_field: "dweight_tensor_uid"
       attr_suffix: "DWEIGHT_DESC"

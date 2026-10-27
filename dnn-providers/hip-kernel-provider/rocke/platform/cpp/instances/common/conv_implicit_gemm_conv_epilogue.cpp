@@ -256,7 +256,8 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* bound_n)
 {
     const rocke_conv_problem_t* p = &spec->problem;
-    /* group_merge does not reach here: the gate is MFMA-only (wave_size 64). */
+    /* Under group_merge the caller passes the merged N bound (Gm) as bound_n
+     * and the merged group's k_out base, as for the other epilogues. */
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
     int mfmas_n = rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
     const char* dtype_d = spec->dtype_d;

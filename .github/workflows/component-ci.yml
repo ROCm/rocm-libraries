@@ -37,7 +37,10 @@ jobs:
             .github/actions/ci-env
             .github/scripts/ci_utils.py
             .github/scripts/component_ci.py
+            .github/scripts/tests/test_component_ci_paths.py
           fetch-depth: 2
+      - name: Check literal component CI paths
+        run: python .github/scripts/tests/test_component_ci_paths.py
       - uses: ./.github/actions/ci-env
         id: env
       - name: Detect changed components
@@ -90,13 +93,10 @@ jobs:
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   library-uniqueness:
-    name: "hipBLASLt library uniqueness"
+    name: "hipBLASLt library UID uniqueness"
     needs: changes
     if: needs.changes.outputs.library-uniqueness == 'true'
     uses: ./.github/workflows/component-ci-library-uniqueness.yml
-    with:
-      docker_image: ${{ needs.changes.outputs.docker-image }}
-      linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   component-ci-summary:
     name: "Component CI Summary"

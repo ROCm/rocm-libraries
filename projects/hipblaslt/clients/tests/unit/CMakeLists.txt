@@ -5,6 +5,7 @@
 # standalone hipblaslt-test-hostunit binary below. See README.md for why, for
 # the *HostUnit* selection wiring, and for how to add a new test here.
 set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/allclose_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_setup_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rocroller_kernel_match_gtest.cpp

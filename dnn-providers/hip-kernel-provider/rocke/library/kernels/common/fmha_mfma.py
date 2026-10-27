@@ -210,9 +210,7 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
     ``q_pos_base``, while the global-batched row (``q_tile_local +
     batch_idx * seqlen_q``) addresses Q / O in memory via ``q_tile_base``.
     This makes the causal / sliding-window mask correct for ``batch > 1``
-    (each batch's row 0 is causal position 0, not ``batch_idx * seqlen_q``),
-    matching the gfx1151 adapter
-    :func:`kernels.gfx1151.wmma_fmha_fwd.build_wmma_fmha_fwd`.
+    (each batch's row 0 is causal position 0, not ``batch_idx * seqlen_q``).
 
     ``q_pos_base`` is only threaded for the masked modes
     (``causal`` / ``sliding_window``); for ``mask_mode == "none"`` the

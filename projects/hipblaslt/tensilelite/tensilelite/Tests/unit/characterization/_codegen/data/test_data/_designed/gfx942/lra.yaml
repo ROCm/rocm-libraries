@@ -4,7 +4,7 @@
 ################################################################################
 # LRA tile assignment characterization config for gfx942.
 #
-# Target: Tensile/Components/LraTileAssignment.py
+# Target: tensilelite/Components/LraTileAssignment.py
 # Missing ranges: 78-91 (LraTileAssignmentVALU UseDotInstruction branches)
 #
 # Strategy: Two arm sweep on gfx942.
