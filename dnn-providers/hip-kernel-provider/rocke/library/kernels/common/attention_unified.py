@@ -3771,9 +3771,9 @@ def _gfx942_3d_decode_ctas_per_segment(
 
     Scope as measured: all-decode, fp16/bf16 K/V (paged with 16-token pages, or
     strided), head_size 64 or 128, no sliding window and no explicit
-    ``target_ctas``; at least ``num_cus / 16`` CTAs per segment or fewer than
-    8K KV tokens. Few CTAs at long KV keep the previous counts, which measured
-    as good there.
+    ``target_ctas``. Few CTAs at long KV are in scope too: with the wide
+    split-KV reduce weighted sum, the split cap (128 segments from 8K KV
+    tokens) beats the previous 64 there.
     """
     ctas = problem.num_seqs * problem.num_kv_heads
     if (
@@ -3784,7 +3784,6 @@ def _gfx942_3d_decode_ctas_per_segment(
         and problem.sliding_window == 0
         and int(problem.target_ctas) <= 0
         and _kv_storage_dtype(problem) is None
-        and (ctas * 16 >= problem.num_cus or problem.max_seqlen_k < 8192)
     ):
         return ctas
     return None
