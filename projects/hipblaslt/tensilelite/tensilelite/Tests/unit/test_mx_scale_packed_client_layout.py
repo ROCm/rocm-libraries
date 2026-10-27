@@ -9,11 +9,9 @@ captured kernel (every rocRoller one, for instance) reads the unrounded pitch,
 which is what the hipBLASLt public API specifies and what a production caller
 allocates.
 
-The benchmark client used to allocate the padded layout for everything and hand
-that buffer to a rocRoller kernel, which worked only because it also handed over
-the matching padded stride -- a pairing that never occurs in production. These
-tests lock in the replacement: the decision is made from the kernels in the run,
-and it reaches the client over both the fresh and the cached config-writing path.
+The client chooses the packed or padded layout from the kernels in the run.
+That choice reaches the client through both the fresh config and the cached
+config. These tests check both paths.
 """
 
 import inspect
@@ -152,7 +150,7 @@ def test_cache_reader_surfaces_the_layout_decision(tmp_path):
     LibraryIO.writeYAML(packedPath, {**cacheData, "MXScalesPacked": True})
     assert _readCacheIfValid(packedPath, step, "{path}")["MXScalesPacked"] is True
 
-    # A cache written before this key existed predates the packed layout.
+    # A cache that omits MXScalesPacked is read as not packed.
     legacyPath = str(tmp_path / "legacy.yaml")
     LibraryIO.writeYAML(legacyPath, cacheData)
     assert _readCacheIfValid(legacyPath, step, "{path}")["MXScalesPacked"] is False
