@@ -2,28 +2,28 @@
 # SPDX-License-Identifier: MIT
 """The LoopModel: theta construction, the LoopIR it decodes to, and the registers it derives.
 
-Covers `Tensile.LoopModel` (theta, decoder, loopir, traversal, adapter, checks) and
-`Tensile.Components.LoopModel` (Order, Registers).  A test may lower to GIR to read a derived
+Covers `tensilelite.LoopModel` (theta, decoder, loopir, traversal, adapter, checks) and
+`tensilelite.Components.LoopModel` (Order, Registers).  A test may lower to GIR to read a derived
 fact back, but what it asserts belongs to the model; `test_gir.py` owns the lowering itself.
 """
 
 import pytest
-from Tensile.LoopModel import build_S, derive_S, render
-from Tensile.LoopModel import checks
-from Tensile.LoopModel import adapter
-from Tensile.LoopModel.decoder import decode_theta
-from Tensile.LoopModel.loopir import GLOBAL, REGISTER, SHARED, Axis
-from Tensile.LoopModel.theta import Global, Shared, Trajectory
-from Tensile.Lowering import lower_to_gir
-from Tensile.Lowering.gir.passes import pipeline, run_pipeline
-from Tensile.LoopModel import theta as theta_mod# COPY/READ -- the operand roles `off` keys on
-from Tensile.LoopModel.traversal import presence, presence_axes, summation_names
+from tensilelite.LoopModel import build_S, derive_S, render
+from tensilelite.LoopModel import checks
+from tensilelite.LoopModel import adapter
+from tensilelite.LoopModel.decoder import decode_theta
+from tensilelite.LoopModel.loopir import GLOBAL, REGISTER, SHARED, Axis
+from tensilelite.LoopModel.theta import Global, Shared, Trajectory
+from tensilelite.Lowering import lower_to_gir
+from tensilelite.Lowering.gir.passes import pipeline, run_pipeline
+from tensilelite.LoopModel import theta as theta_mod# COPY/READ -- the operand roles `off` keys on
+from tensilelite.LoopModel.traversal import presence, presence_axes, summation_names
 from dataclasses import fields
 import inspect
 import subprocess
 import sys
-import Tensile.LoopModel.loopir as loopir
-from Tensile.LoopModel import adapter as _adapter
+import tensilelite.LoopModel.loopir as loopir
+from tensilelite.LoopModel import adapter as _adapter
 import ast
 from pathlib import Path
 from types import SimpleNamespace
@@ -139,7 +139,7 @@ def mi_inputs(kernel):
 
 def calculate_registers(kernel):
     """Apply the Solution-owned LoopModel register derivation to a test kernel."""
-    from Tensile.Components.LoopModel import Order, Registers
+    from tensilelite.Components.LoopModel import Order, Registers
 
     calculated = dict(adapter.DEFAULTS)
     calculated.update(kernel)
@@ -225,7 +225,7 @@ def _theta(params):
     `VgprReuseStrategy*` keys.
     """
     import dataclasses as _dc
-    from Tensile.LoopModel.theta import group_labels
+    from tensilelite.LoopModel.theta import group_labels
     params = dict(params)
     parts = {nm: int(params.pop("VgprPartition" + nm, 1) or 1) for nm in ("A", "B")}
     strat = {nm: int(params.pop("VgprReuseStrategy" + nm, 0) or 0) for nm in ("A", "B")}
@@ -323,11 +323,11 @@ def _find_peel(nodes, kind):
 @pytest.mark.parametrize("pgr", [1, 2, 3])
 def test_counted_loop_exit_translates_the_drain_frame_once(pgr):
     """The exit converts each T-relative drain frame without losing its final steady copy."""
-    from Tensile.Lowering.gir.analysis import AnalysisManager
-    from Tensile.Lowering.gir.analyses.frame_hazards import FrameHazards, RAW
-    from Tensile.Lowering.gir.analyses.frame_map import FrameMap
-    from Tensile.Lowering.gir.emit_plan import plan_program
-    from Tensile.Lowering.gir.frame_contract import build_contract
+    from tensilelite.Lowering.gir.analysis import AnalysisManager
+    from tensilelite.Lowering.gir.analyses.frame_hazards import FrameHazards, RAW
+    from tensilelite.Lowering.gir.analyses.frame_map import FrameMap
+    from tensilelite.Lowering.gir.emit_plan import plan_program
+    from tensilelite.Lowering.gir.frame_contract import build_contract
 
     program = build_gir(_theta(dict(BF16_NT_KMN, PrefetchGlobalRead=pgr)))
     frames = AnalysisManager().get(FrameMap(), program)
@@ -372,7 +372,7 @@ def test_counted_loop_exit_translates_the_drain_frame_once(pgr):
 
 def test_readahead_prologue_empty_without_dr():
     """dr=0 (no PLR) -> no read-ahead prologue for any operand."""
-    from Tensile.LoopModel.schedule import preloaded_tiles
+    from tensilelite.LoopModel.schedule import preloaded_tiles
     th = _theta(BF16_NT_KMN_PLR0)
     assert preloaded_tiles(th, th.op("A"), 0) == []
 
@@ -436,7 +436,7 @@ def test_dr_g_anchors_from_the_floor():
     """Anchor the derivation itself, so a future rewrite cannot silently change WHICH operand
     keeps its look-ahead.
     """
-    from Tensile.LoopModel.schedule import prefetch_steps_for
+    from tensilelite.LoopModel.schedule import prefetch_steps_for
     def dr_of(order, dr=1, wt=(2, 2)):
         th = _theta({"MIWaveTile": list(wt), "LoopOrder": order, "PrefetchLocalRead": dr})
         S, _f = build_S(th)
@@ -472,7 +472,7 @@ def test_broadcast_fan_ignores_a_degenerate_mode():
  A hand-built theta can carry one, so the clause is a real guard, not decoration: without it a
  broadcast mode that re-traverses NOTHING would zero `dr_g` and cost the operand its
  look-ahead."""
-    from Tensile.LoopModel.traversal import broadcast_width
+    from tensilelite.LoopModel.traversal import broadcast_width
     import dataclasses
     th = _theta({"MIWaveTile": [2, 2], "LoopOrder": "KMN"})
     A = th.op("A")
@@ -510,7 +510,7 @@ def _prologue_peels(nodes):
 # ===========================================================================
 def test_shared_depth_is_the_buffer_count_not_the_prefetch_depth():
     """S_shared must come from the operand's LDS BUFFER COUNT, never from `delta`."""
-    from Tensile.LoopModel.traversal import lds_buffers
+    from tensilelite.LoopModel.traversal import lds_buffers
     for pgr in (1, 2):
         th = _theta({"MIWaveTile": [2, 2], "DepthU": 64, "PrefetchGlobalRead": pgr,
                      "LoopOrder": "KMN"})
@@ -525,7 +525,7 @@ def test_shared_depth_is_the_buffer_count_not_the_prefetch_depth():
 def test_per_operand_override_defaults_to_the_preset(key, base):
     """`-1` (the default) must reproduce the whole-kernel preset exactly, so adding these knobs
     changes nothing for a caller that does not set them."""
-    from Tensile.LoopModel.traversal import lds_buffers
+    from tensilelite.LoopModel.traversal import lds_buffers
     p = {"MIWaveTile": [2, 2], "DepthU": 64, "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
          "LoopOrder": "KMN"}
     ref = _theta(p)
@@ -546,8 +546,8 @@ def test_lds_buffers_above_the_allocation_is_rejected():
 
 def test_dtv_operand_has_no_shared_ring_depth():
     """A direct global-to-register trajectory has no shared depth."""
-    from Tensile.LoopModel.schedule import build_S
-    from Tensile.LoopModel.traversal import lds_buffers
+    from tensilelite.LoopModel.schedule import build_S
+    from tensilelite.LoopModel.traversal import lds_buffers
     th = _theta({"MIWaveTile": [2, 2], "DepthU": 64, "LoopOrder": "KMN", "DirectToVgprA": True})
     A = th.op("A")
     assert A.trajectory.shared is None
@@ -564,7 +564,7 @@ def test_chunk_reach_is_the_distance_over_the_span():
     `distance = internal_PLR * group_prefetch_unit`; capacity/staging cap the selected PLR rather
     than silently saturating this physical conversion.
     """
-    from Tensile.LoopModel import schedule, traversal
+    from tensilelite.LoopModel import schedule, traversal
     th = adapter.params_to_theta(dict(
         MatrixInstruction=[16, 16, 32, 1], MIWaveTile=[2, 2], DepthU=64, ElemBytes=2,
         LoopOrder="KMN", PrefetchGlobalRead=2, PrefetchLocalRead=1))
@@ -645,7 +645,7 @@ def test_an_operand_BROADCAST_over_the_reduction_does_not_pay_for_it():
     """`free_tiles x k_tiles` multiplies in the THETA-level reduction extent unconditionally, so
  the accumulator -- absent from the reduction by definition -- was counted
  `k_tiles` times over. Presence-derived, with no role test, it is not."""
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     th = _p212_theta()
     k = geometry.k_tiles(th)
     assert k > 1, "this fixture must have >1 reduction substep or the bug is invisible"
@@ -758,7 +758,7 @@ def _kernel(**over):
 
 def _regions_from_kernel(**over):
     """kernel dict -> theta -> GIR, the way kernel generation actually goes."""
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
     prog = build_gir(adapter.params_to_theta(adapter.kernel_to_params(_kernel(**over))))
     return prog.meta.get("unit_regions", {})
 
@@ -772,8 +772,8 @@ def test_the_bridge_CARRIES_TDMSplit_through_to_theta():
 
 def test_a_split_kernel_reaches_EMIT_as_one_copy_per_region_with_a_walk():
     """The end-to-end region-walk property, entered from a KERNEL and not from a params dict."""
-    from Tensile.LoopModel import adapter
-    from Tensile.Lowering.gir.emit_plan import plan_block
+    from tensilelite.LoopModel import adapter
+    from tensilelite.Lowering.gir.emit_plan import plan_block
     prog = build_gir(adapter.params_to_theta(
         adapter.kernel_to_params(_kernel(TDMSplitA=1, TDMSplitB=1))))
     acts = plan_block(prog, "steady")
@@ -791,8 +791,8 @@ def test_the_CHUNK_advance_is_INVARIANT_under_region_splitting():
     `GrIncrementRegions` derived the peel's chunk from the POSITIONAL INDEX of the copy among that
     operand's peel copies -- sound while one copy is one chunk, off by `nregions` once it is not.
     """
-    from Tensile.LoopModel import adapter
-    from Tensile.Lowering.gir.emit_plan import plan_block
+    from tensilelite.LoopModel import adapter
+    from tensilelite.Lowering.gir.emit_plan import plan_block
 
     def advances(split, **over):
         prog = build_gir(adapter.params_to_theta(
@@ -835,7 +835,7 @@ def _mxf8_kernel(order, split):
 
 def _two_tile_fold():
     """The scale read's supplied coverage: `carrier(t) = t // 2`, `slot(t) = t % 2`."""
-    from Tensile.LoopModel.traversal import TransferCoverage
+    from tensilelite.LoopModel.traversal import TransferCoverage
     tile = Axis("tile", 0)
     return TransferCoverage(
         carrier=tile // 2,
@@ -844,9 +844,9 @@ def _two_tile_fold():
 
 
 def _quantum_violations(order, split):
-    from Tensile.LoopModel import adapter
-    from Tensile.Lowering.gir.emit_plan import plan_block
-    from Tensile.Lowering.gir.coverage import plan_coverage
+    from tensilelite.LoopModel import adapter
+    from tensilelite.Lowering.gir.emit_plan import plan_block
+    from tensilelite.Lowering.gir.coverage import plan_coverage
     q = {"MXSA": _two_tile_fold(), "MXSB": _two_tile_fold()}
     prog = build_gir(adapter.params_to_theta(
         adapter.kernel_to_params(_mxf8_kernel(order, split),
@@ -864,8 +864,8 @@ def test_the_quantum_check_still_reports_a_REGISTER_straddle():
     """The half of a straddle that is NOT repairable by a union, and so must still be a violation.
     the union answers the LDS half -- one instruction, several source buffers, name them all.
     """
-    from Tensile.Lowering.gir.emit_plan import EmitAction
-    from Tensile.Lowering.gir.coverage import plan_coverage
+    from tensilelite.Lowering.gir.emit_plan import EmitAction
+    from tensilelite.Lowering.gir.coverage import plan_coverage
 
     def _acts(reg_bufs):
         return [EmitAction(kind="ds_load",
@@ -897,9 +897,9 @@ def test_the_quantum_check_is_clean_on_every_cell():
 
 def test_absorbing_the_spanned_axis_removes_the_straddle_on_the_shipping_path():
     """the actual repair: the axis one instruction SPANS leaves the read hop's traversal."""
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.LoopModel import adapter
-    from Tensile.Lowering.gir.emit_plan import plan_block
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import adapter
+    from tensilelite.Lowering.gir.emit_plan import plan_block
     target = {"ReadVectorElems": {"MXSA": 8, "MXSB": 8},
               "ReadQuantum": {"MXSA": _two_tile_fold(), "MXSB": _two_tile_fold()}}
     for order in ("KMN", "KMKNMN", "KMNKMN", "KMNMNK"):
@@ -930,7 +930,7 @@ def test_an_explicit_W_outside_the_band_is_CLAMPED_not_rejected():
     """/ the repair rule : `multibuffer` REPAIRS an out-of-band width, it does not refuse
     the point.
     """
-    from Tensile.LoopModel import build_S
+    from tensilelite.LoopModel import build_S
     for want, why in ((1, "below the floor -> clamped UP to L_war"),
                       (99, "above R -> clamped DOWN to R")):
         th = _theta(dict(BF16_NT_KMN))
@@ -969,7 +969,7 @@ def _rho_sweep_configs():
 
 
 def test_agent_assignment_is_consistent_across_the_matrix():
-    from Tensile.LoopModel import checks
+    from tensilelite.LoopModel import checks
     cfgs = _rho_sweep_configs()
     assert len(cfgs) > 500, "sweep collapsed to %d configs -- the filter is too strong" % len(cfgs)
     bad = []
@@ -1074,7 +1074,7 @@ def test_agent_assignment_deduplicates_subwave_coverage_without_absorbing_split_
 
 
 def test_agent_assignment_carries_copy_shares_for_every_fusion():
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
 
     class _B1:
         def numBytes(self): return 1
@@ -1105,7 +1105,7 @@ def test_agent_assignment_carries_copy_shares_for_every_fusion():
 
 
 def test_read_assignment_queries_exclude_copy_entries():
-    from Tensile.LoopModel.theta import AgentAssignment, AgentAxisAssignment
+    from tensilelite.LoopModel.theta import AgentAssignment, AgentAxisAssignment
     assignment = AgentAssignment(axis_assignments=(
         AgentAxisAssignment("M_inner", "wave", 2, ("A", "read")),
         AgentAxisAssignment("M_inner", "wave", 2, ("A", "copy"), role="copy"),
@@ -1143,7 +1143,7 @@ def test_the_live_peak_is_measured_per_name_not_per_collapsed_ring(order, plr, e
     """requires the peak "per **name**, not per rotation ring" -- "a direct live-range walk on
  the joint `(free-tile, rotation-slot)` name space". Projecting the free tile modes away makes
  two values that live in DIFFERENT names look like they compete for one."""
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     th = adapter.params_to_theta({"MIWaveTile": [4, 4], "PrefetchLocalRead": plr,
                                     "PrefetchGlobalRead": 2, "LoopOrder": order})
     steps = geometry._inner_steps(th)
@@ -1156,7 +1156,7 @@ def test_the_live_peak_is_measured_per_name_not_per_collapsed_ring(order, plr, e
 
 def test_the_prefetch_lead_in_is_applied_in_the_names_own_sequence():
     """The trap that made the first attempt at the joint-space walk wrong, pinned."""
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     th = adapter.params_to_theta({"MIWaveTile": [4, 4], "PrefetchLocalRead": 1,
                                     "PrefetchGlobalRead": 2, "LoopOrder": "KMN"})
     steps = geometry._inner_steps(th)
@@ -1173,7 +1173,7 @@ def test_the_per_name_floor_is_never_above_the_collapsed_one():
     been running below its true floor -- a the register-width floor race, not a footprint win.  Swept 630 groups
     when the change landed; this pins a representative slice so a future edit to the walk cannot
     quietly cross that line."""
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     import itertools
     for order, plr, mt in itertools.product(("KMN", "KNM", "MNK", "NMK", "MKN", "NKM"),
                                             (0, 1, 2), ([2, 2], [4, 4], [4, 2])):
@@ -1196,7 +1196,7 @@ def test_the_per_name_floor_is_never_above_the_collapsed_one():
 @pytest.mark.parametrize("mi_k,kext", [(32, 2), (16, 4)])
 def test_whole_set_residency_grows_the_unit_not_the_width_floor(mi_k, kext):
     """A full inner K sweep is represented in unit size while L_floor remains one unit."""
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     th = adapter.params_to_theta({"MIWaveTile": [4, 4], "DepthU": 64,
                                     "MatrixInstruction": [16, 16, mi_k, 1, 1, 4, 4, 2, 2],
                                     "PrefetchLocalRead": 0, "PrefetchGlobalRead": 2,
@@ -1215,7 +1215,7 @@ def test_whole_set_residency_grows_the_unit_not_the_width_floor(mi_k, kext):
 
 
 def test_mkn_whole_set_operand_uses_a_larger_unit_not_a_larger_floor():
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     th = adapter.params_to_theta({"MIWaveTile": [4, 4], "PrefetchLocalRead": 0,
                                     "PrefetchGlobalRead": 2, "LoopOrder": "MKN"})
     steps = geometry._inner_steps(th)
@@ -1228,7 +1228,7 @@ def test_mkn_whole_set_operand_uses_a_larger_unit_not_a_larger_floor():
 
 def test_the_walk_satisfies_every_closed_fact_the_paper_commits_to():
     """Unit widths are monotonic in read-ahead and have a one-unit no-prefetch floor."""
-    from Tensile.LoopModel import traversal as geometry
+    from tensilelite.LoopModel import traversal as geometry
     import itertools
     checked = dr0 = 0
     for order, plr, mt, du, mik in itertools.product(
@@ -1287,9 +1287,9 @@ def test_plr_is_honoured_on_every_loop_order(order, broadcast_outer_op):
     """`PrefetchLocalRead` is a PARAMETER and the register width is DERIVED, so the two must be
     made to agree by deriving the schedule -- never by quietly lowering PLR.
     """
-    from Tensile.LoopModel.traversal import reloads_whole_set
-    from Tensile.LoopModel.schedule import prefetch_refusals
-    from Tensile.LoopModel.schedule import derive_S
+    from tensilelite.LoopModel.traversal import reloads_whole_set
+    from tensilelite.LoopModel.schedule import prefetch_refusals
+    from tensilelite.LoopModel.schedule import derive_S
 
     th = _theta({**BF16_NT_KMN, "LoopOrder": order})
     assert prefetch_refusals(th, derive_S(th)) == (), \
@@ -1303,7 +1303,7 @@ def test_plr_is_honoured_on_every_loop_order(order, broadcast_outer_op):
 
 def test_the_plr_state_is_named_in_the_geometry_dump():
     """The dump exposes P, U and requested/cap/realized internal PLR."""
-    from Tensile.LoopModel import render
+    from tensilelite.LoopModel import render
 
     for order in ("KMN", "NKM", "MKN"):
         txt = render.render_geometry(_theta({**BF16_NT_KMN, "LoopOrder": order}))
@@ -1331,11 +1331,11 @@ def _transfer(local_tile, source, destination, where=loopir.TRUE, effect=None):
 
 
 def _lower_theta(theta):
-    from Tensile.LoopModel.checks import validate_loopir
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
-    from Tensile.Lowering.gir.passes import pipeline as gir_pipeline
-    from Tensile.Lowering.gir.passes import run_pipeline
+    from tensilelite.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.Lowering.gir.passes import pipeline as gir_pipeline
+    from tensilelite.Lowering.gir.passes import run_pipeline
 
     decoded = decode_theta(theta)
     assert not validate_loopir(decoded.program, decoded.profile)
@@ -1347,13 +1347,13 @@ def _lower_theta(theta):
 def test_loopir_import_is_theta_independent():
     script = """
 import sys
-import Tensile.LoopModel.loopir
+import tensilelite.LoopModel.loopir
 forbidden = (
-    'Tensile.LoopModel.theta',
-    'Tensile.LoopModel.decoder',
-    'Tensile.LoopModel.emit',
-    'Tensile.LoopModel.ir',
-    'Tensile.LoopModel.schedule',
+    'tensilelite.LoopModel.theta',
+    'tensilelite.LoopModel.decoder',
+    'tensilelite.LoopModel.emit',
+    'tensilelite.LoopModel.ir',
+    'tensilelite.LoopModel.schedule',
 )
 loaded = tuple(name for name in forbidden if name in sys.modules)
 raise SystemExit(repr(loaded) if loaded else 0)
@@ -1497,7 +1497,7 @@ def _raw_points(program, complete_operation, issue_operation):
 def test_expression_analysis_is_stored_on_immutable_values():
     from copy import deepcopy
     import pickle
-    from Tensile.LoopModel.loopir.semantics import _affine
+    from tensilelite.LoopModel.loopir.semantics import _affine
 
     x = loopir.Axis("x", 4)
     y = loopir.Axis("y", 2)
@@ -1574,8 +1574,8 @@ def test_loopir_render_is_local_first_effect_last_with_named_axes():
 
 
 def test_ordinary_schedule_keeps_guards_without_switches():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
 
     decoded = decode_theta(adapter.params_to_theta({
         "MIWaveTile": [2, 2],
@@ -1597,7 +1597,7 @@ def test_loopir_dependence_vocabulary_is_raw_and_war_only():
 
 
 def test_new_loopir_checker_rejects_reordered_phase_markers():
-    from Tensile.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.checks import validate_loopir
 
     tile = loopir.Axis("tile", 1)
     operand = loopir.Operand("A", (tile,))
@@ -1624,7 +1624,7 @@ def test_new_loopir_checker_rejects_reordered_phase_markers():
 
 
 def test_loopir_checker_rejects_noncovering_tensorload_effects():
-    from Tensile.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.checks import validate_loopir
 
     tile = loopir.Axis("tile", 2)
     operand = loopir.Operand("A", (tile,))
@@ -2175,8 +2175,8 @@ def test_removed_first_attempt_values_are_not_public():
 
 
 def test_lowering_directly_converts_order_without_schedule_policy():
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
-    from Tensile.Lowering.gir.nodes import Move
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.Lowering.gir.nodes import Move
 
     program, _wave, load0, load1, reads = _g3_program()
     gir = lower_to_gir(program)
@@ -2195,7 +2195,7 @@ def test_lowering_directly_converts_order_without_schedule_policy():
     )
 
     source = inspect.getsource(__import__(
-        "Tensile.Lowering.loopir_to_gir",
+        "tensilelite.Lowering.loopir_to_gir",
         fromlist=("lower_to_gir",),
     ))
     assert "LoopModel.traversal" not in source
@@ -2205,8 +2205,8 @@ def test_lowering_directly_converts_order_without_schedule_policy():
 
 
 def test_stored_effect_change_removes_derived_edge_and_lowered_dependency():
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
-    from Tensile.Lowering.gir.nodes import Move
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.Lowering.gir.nodes import Move
 
     tile = loopir.Axis("tile", 2)
     a = loopir.Operand("A", (tile,))
@@ -2263,13 +2263,13 @@ def test_stored_effect_change_removes_derived_edge_and_lowered_dependency():
 
 
 def test_theta_pipeline_builds_valid_loopir_gir():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.checks import validate_loopir
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
-    from Tensile.Lowering.gir import check_plan
-    from Tensile.Lowering.gir.passes import pipeline as gir_pipeline
-    from Tensile.Lowering.gir.passes import run_pipeline
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.Lowering.gir import check_plan
+    from tensilelite.Lowering.gir.passes import pipeline as gir_pipeline
+    from tensilelite.Lowering.gir.passes import run_pipeline
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2292,12 +2292,12 @@ def test_theta_pipeline_builds_valid_loopir_gir():
 
 
 def test_dependency_free_lowering_preserves_emitted_gir():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.Lowering.gir.passes import pipeline as gir_pipeline
-    from Tensile.Lowering.gir.passes import run_pipeline
-    from Tensile.Lowering.gir.render import render_gir
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.Lowering.gir.passes import pipeline as gir_pipeline
+    from tensilelite.Lowering.gir.passes import run_pipeline
+    from tensilelite.Lowering.gir.render import render_gir
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2338,9 +2338,9 @@ def test_dependency_free_lowering_preserves_emitted_gir():
 
 
 def test_target_lowering_uses_direct_ledger_not_symbolic_oracle(monkeypatch):
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
-    import Tensile.Lowering.loopir_to_gir as lowering
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
+    import tensilelite.Lowering.loopir_to_gir as lowering
 
     decoded = decode_theta(adapter.params_to_theta({
         "MIWaveTile": [2, 2],
@@ -2371,8 +2371,8 @@ def test_target_lowering_uses_direct_ledger_not_symbolic_oracle(monkeypatch):
 
 
 def test_wave_is_a_program_agent_not_a_loop_or_program_axis():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
 
     decoded = decode_theta(adapter.params_to_theta({
         "MIWaveTile": [2, 2],
@@ -2397,10 +2397,10 @@ def test_wave_is_a_program_agent_not_a_loop_or_program_axis():
 
 
 def test_runtime_iter_is_projected_to_generation_phase_not_discarded():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
-    from Tensile.Lowering.gir.nodes import Move
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.Lowering.gir.nodes import Move
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2430,10 +2430,10 @@ def test_runtime_iter_is_projected_to_generation_phase_not_discarded():
 
 
 def test_post_finalize_read_retiming_requires_profile_refinalization():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.checks import validate_loopir
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
 
     decoded = decode_theta(adapter.params_to_theta({
         "MIWaveTile": [2, 2],
@@ -2468,7 +2468,7 @@ def test_post_finalize_read_retiming_requires_profile_refinalization():
 
 @pytest.mark.parametrize("order", ("KMN", "KNM", "MKN", "MNK", "NKM", "NMK"))
 def test_all_basic_loop_orders_lower_to_valid_gir(order):
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2485,7 +2485,7 @@ def test_all_basic_loop_orders_lower_to_valid_gir(order):
 
 
 def test_tdmsplit_tdmfuse_multiwave_program_lowers_to_valid_gir():
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2506,8 +2506,8 @@ def test_tdmsplit_tdmfuse_multiwave_program_lowers_to_valid_gir():
 
 
 def test_decoder_wires_odd_read_groups_into_tensorload_effects():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import _Decoder
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import _Decoder
 
     params = {
         "MIWaveTile": [6, 2],
@@ -2558,9 +2558,9 @@ def test_decoder_wires_odd_read_groups_into_tensorload_effects():
 
 
 def test_whole_vector_single_wave_keeps_every_tdmsplit_region_live():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.checks import validate_loopir
-    from Tensile.LoopModel.decoder import _Decoder
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.decoder import _Decoder
 
     params = {
         "MIWaveTile": [4, 4],
@@ -2626,8 +2626,8 @@ def test_whole_vector_single_wave_keeps_every_tdmsplit_region_live():
     ),
 )
 def test_vector_width_changes_the_explicit_tdmsplit_effect(width, expected):
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import _Decoder
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import _Decoder
 
     decoder = _Decoder(adapter.params_to_theta({
         "MIWaveTile": [8, 2],
@@ -2672,10 +2672,10 @@ def test_vector_width_changes_the_explicit_tdmsplit_effect(width, expected):
 def test_cached_loopir_text_keeps_target_prefetch_and_vgpr_header():
     from types import SimpleNamespace
 
-    from Tensile.Components.LoopModel.Program import loopModelIrTextCached
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.LoopModel.schedule import build_S
+    from tensilelite.Components.LoopModel.Program import loopModelIrTextCached
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel.schedule import build_S
 
     theta = adapter.params_to_theta({
         "MIWaveTile": [2, 2],
@@ -2721,7 +2721,7 @@ def test_nested_local_and_global_prefetch_lower_to_valid_gir():
 def test_prefetch_split_and_loop_order_gir_matrix(
     split, waves, order, pgr, plr
 ):
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2759,10 +2759,10 @@ def test_prefetch_split_and_loop_order_gir_matrix(
 def test_physical_register_ring_projection_is_materialized_in_loopir(
     ring_overrides, expected_copies
 ):
-    from Tensile.LoopModel import adapter, traversal
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.LoopModel.schedule import build_S
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.LoopModel import adapter, traversal
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel.schedule import build_S
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2796,7 +2796,7 @@ def test_physical_register_ring_projection_is_materialized_in_loopir(
 
 
 def test_ds_load_coverage_is_a_local_transfer_set():
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
 
     iteration = loopir.Param("T")
     tile = loopir.Axis("tile", 4)
@@ -2849,8 +2849,8 @@ def test_ds_load_coverage_is_a_local_transfer_set():
 
 
 def test_mx_read_order_is_explicit_in_loopir_and_lowers_to_valid_gir():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2880,8 +2880,8 @@ def test_mx_read_order_is_explicit_in_loopir_and_lowers_to_valid_gir():
 
 
 def test_mixed_tdmsplit_fused_copy_covers_the_peer_axis_logically():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import decode_theta
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2939,7 +2939,7 @@ def test_mixed_tdmsplit_fused_copy_covers_the_peer_axis_logically():
 def test_target_coverage_inplace_read_order_lowers_to_valid_gir(
     order, prefetch, split
 ):
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2968,7 +2968,7 @@ def test_target_coverage_inplace_read_order_lowers_to_valid_gir(
 
 
 def test_fused_mixed_coverage_drain_order_lowers_to_valid_gir():
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
 
     params = {
         "MIWaveTile": [2, 2],
@@ -2994,8 +2994,8 @@ def test_fused_mixed_coverage_drain_order_lowers_to_valid_gir():
 
 
 def test_multi_axis_tensorload_regions_are_explicit_effect_partitions():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.decoder import _Decoder
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.decoder import _Decoder
 
     params = {
         "MIWaveTile": [2, 2],
@@ -3036,10 +3036,10 @@ def test_multi_axis_tensorload_regions_are_explicit_effect_partitions():
 
 
 def test_split_axis_without_retiming_lowers_as_an_expression():
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel.checks import validate_loopir
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.Lowering.loopir_to_gir import lower_to_gir
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel.checks import validate_loopir
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.Lowering.loopir_to_gir import lower_to_gir
 
     decoded = decode_theta(adapter.params_to_theta({
         "MIWaveTile": [4, 4],
@@ -3099,9 +3099,9 @@ def test_backward_same_iteration_relation_is_kept_conservatively():
 
 
 def test_no_load_loop_is_an_explicit_program_transform():
-    from Tensile.LoopModel import adapter, traversal
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.LoopModel.schedule import build_S
+    from tensilelite.LoopModel import adapter, traversal
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel.schedule import build_S
 
     params = {
         "MIWaveTile": [2, 2],
@@ -3134,7 +3134,7 @@ _AB_FIRST = {"NumWaves": 4, "TDMInst": 3, "MIWaveTile": [2, 2],
 
 def _walk(fuse, loopOrder):
     """The movement steps of the A/B unit as `[(region, members)]`."""
-    from Tensile.LoopModel.decoder import _Decoder
+    from tensilelite.LoopModel.decoder import _Decoder
     th = theta({**BF16_NT_KMN_PLR0, **_AB_FIRST, "TDMFuse": fuse, "LoopOrder": loopOrder})
     key, members, regions = th.movement_units()[0]
     return [(region, [m.name for m in moving])
@@ -3280,8 +3280,8 @@ def test_ulm1_set_table_uses_each_operands_rotation_width():
 
 
 def _valu_alloc(kernel, tc, bpe):
-    from Tensile.Components.LoopModel import Order, Registers
-    from Tensile.Components.LoopModel.Registers import operandValuPuVaVg
+    from tensilelite.Components.LoopModel import Order, Registers
+    from tensilelite.Components.LoopModel.Registers import operandValuPuVaVg
 
     kernel = dict(kernel)
     kernel.setdefault("UseLoopModel", True)
@@ -3313,12 +3313,12 @@ def _valu_alloc(kernel, tc, bpe):
     )
     Order.calculate(kernel)
     Registers.calculate(kernel)
-    from Tensile.LoopModel import adapter
+    from tensilelite.LoopModel import adapter
     theta = adapter.params_to_theta(
         adapter.kernel_to_params(kernel),
         validate_register_depths=False,
     )
-    from Tensile.LoopModel.schedule import BufferDepths
+    from tensilelite.LoopModel.schedule import BufferDepths
     depths = BufferDepths(theta, include_shared=False)
     writer = SimpleNamespace(states=SimpleNamespace(
         bpr=4, packDTVA=False, convDTVA=False, packDTVB=False, convDTVB=False))
@@ -3623,10 +3623,10 @@ def _f8_split_nkm_register_kernel():
 
 
 def test_calculated_f8_split_ring_matches_allocation():
-    from Tensile.Components.LoopModel import Order, Registers
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.LoopModel.schedule import BufferDepths
+    from tensilelite.Components.LoopModel import Order, Registers
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.LoopModel.schedule import BufferDepths
 
     kernel = _f8_split_register_kernel()
     Order.calculate(kernel)
@@ -3641,15 +3641,15 @@ def test_calculated_f8_split_ring_matches_allocation():
 
 
 def test_split_regions_are_flattened_offsets_with_loop_split_refills():
-    from Tensile.Components.LoopModel import Order, Registers
-    from Tensile.LoopModel import adapter
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.LoopModel.schedule import BufferDepths, Schedule, prefetch_refusals
-    from Tensile.Lowering import lower_to_gir
-    from Tensile.Lowering.gir.emit_plan import plan_block
-    from Tensile.Lowering.gir.passes import pipeline, run_pipeline
-    from Tensile.Lowering.gir.verify_dataflow import check_plan
+    from tensilelite.Components.LoopModel import Order, Registers
+    from tensilelite.LoopModel import adapter
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel.schedule import BufferDepths, Schedule, prefetch_refusals
+    from tensilelite.Lowering import lower_to_gir
+    from tensilelite.Lowering.gir.emit_plan import plan_block
+    from tensilelite.Lowering.gir.passes import pipeline, run_pipeline
+    from tensilelite.Lowering.gir.verify_dataflow import check_plan
 
     kernel = _f8_split_nkm_register_kernel()
     Order.calculate(kernel)
@@ -3696,7 +3696,7 @@ def test_split_regions_are_flattened_offsets_with_loop_split_refills():
 
 
 def test_register_owner_calculates_all_eight_operand_parameters():
-    from Tensile.Components.LoopModel import Order, Registers
+    from tensilelite.Components.LoopModel import Order, Registers
 
     kernel = _f8_split_register_kernel()
     kernel.update({
@@ -3725,8 +3725,8 @@ def test_register_owner_calculates_all_eight_operand_parameters():
 
 
 def test_adapter_rejects_calculated_ring_smaller_than_required_depth():
-    from Tensile.Components.LoopModel import Order, Registers
-    from Tensile.LoopModel import adapter
+    from tensilelite.Components.LoopModel import Order, Registers
+    from tensilelite.LoopModel import adapter
 
     kernel = _f8_split_register_kernel(va_b=1)
     Order.calculate(kernel)
@@ -3736,8 +3736,8 @@ def test_adapter_rejects_calculated_ring_smaller_than_required_depth():
 
 
 def test_wio1_clr1_va1_holds_its_complete_two_tile_prefetch_unit():
-    from Tensile.Components.LoopModel import Order, Registers
-    from Tensile.LoopModel import adapter
+    from tensilelite.Components.LoopModel import Order, Registers
+    from tensilelite.LoopModel import adapter
 
     kernel = _f8_split_register_kernel()
     kernel.update(

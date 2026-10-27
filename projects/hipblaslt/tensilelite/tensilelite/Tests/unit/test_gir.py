@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """The GIR lowering: the program built from a decoded theta, and the passes over it.
 
-Covers `Tensile.Lowering` -- `lower_to_gir`, the pass pipeline, the analyses (value placement,
+Covers `tensilelite.Lowering` -- `lower_to_gir`, the pass pipeline, the analyses (value placement,
 region increment), the frame contract, and the dataflow checker.  The theta
 each test starts from is a means; `test_loopmodel.py` owns what the model derives.
 """
@@ -11,24 +11,24 @@ import inspect
 import itertools
 import pytest
 from test_loopmodel import BF16_NT_KMN, calculate_registers, mi_inputs, theta
-from Tensile.LoopModel import adapter
-from Tensile.LoopModel.adapter import kernel_to_params as _kernel_to_params
-from Tensile.LoopModel.decoder import decode_theta
-from Tensile.Lowering.loopir_to_gir import lower_to_gir
-from Tensile.Lowering.gir.passes import pipeline as gir_pipeline
-from Tensile.Lowering.gir.passes import run_pipeline
-from Tensile.Lowering.gir.verify_dataflow import check_plan
-from Tensile.Lowering.gir.analyses.region_increment import walk_violations
-from Tensile.Lowering.gir.analyses.value_placement import (
+from tensilelite.LoopModel import adapter
+from tensilelite.LoopModel.adapter import kernel_to_params as _kernel_to_params
+from tensilelite.LoopModel.decoder import decode_theta
+from tensilelite.Lowering.loopir_to_gir import lower_to_gir
+from tensilelite.Lowering.gir.passes import pipeline as gir_pipeline
+from tensilelite.Lowering.gir.passes import run_pipeline
+from tensilelite.Lowering.gir.verify_dataflow import check_plan
+from tensilelite.Lowering.gir.analyses.region_increment import walk_violations
+from tensilelite.Lowering.gir.analyses.value_placement import (
     RequiredValue, ValuePlacementSolver, BOTTOM, TOP, meet)
-from Tensile.Lowering.gir.nodes import BLOCK_ENTRY, BLOCK_EXIT
-from Tensile.Lowering.gir.nodes import (Program, Block, Mark, Pred, Bound, Goto, CondGoto,
+from tensilelite.Lowering.gir.nodes import BLOCK_ENTRY, BLOCK_EXIT
+from tensilelite.Lowering.gir.nodes import (Program, Block, Mark, Pred, Bound, Goto, CondGoto,
                                         CondChain)
-from Tensile.Lowering.gir.analysis import AnalysisManager
-from Tensile.Lowering.gir.analyses.trip_domains import TripDomains
-from Tensile.Lowering.gir.emit_plan import plan_program
-from Tensile.Lowering.gir.frame_contract import build_contract
-from Tensile.Lowering.gir.nodes import CondChain
+from tensilelite.Lowering.gir.analysis import AnalysisManager
+from tensilelite.Lowering.gir.analyses.trip_domains import TripDomains
+from tensilelite.Lowering.gir.emit_plan import plan_program
+from tensilelite.Lowering.gir.frame_contract import build_contract
+from tensilelite.Lowering.gir.nodes import CondChain
 
 
 # ------------------------------------------------------------------------------------------------
@@ -39,7 +39,7 @@ from Tensile.Lowering.gir.nodes import CondChain
 
 def loopOrder(inner, outer, tdmSplitA, tdmSplitB):
     """The LoopOrder word a TDMSplit pair gives: the WmmaFactors it pins, in WIO/WOO."""
-    from Tensile.Components.LoopModel.Order import forcedFactors, loopOrder as word
+    from tensilelite.Components.LoopModel.Order import forcedFactors, loopOrder as word
     return word(inner, outer,
                 forcedFactors({"TDMSplitA": tdmSplitA, "TDMSplitB": tdmSplitB}))
 
@@ -55,7 +55,7 @@ def build_gir(theta, loop_copies=None):
     program = lower_to_gir(decoded.program, decoded.profile)
     run_pipeline(program, passes=gir_pipeline())
     if loop_copies is not None:
-        from Tensile.Lowering import steady_chain
+        from tensilelite.Lowering import steady_chain
         assert len(steady_chain(program)) == max(1, int(loop_copies))
     return program
 
@@ -97,7 +97,7 @@ def _mxf8(blk=None):
 
 
 def test_k_axis_read_ahead_cap_counts_vg_buffers():
-    from Tensile.Components.LoopModel import Registers
+    from tensilelite.Components.LoopModel import Registers
 
     def cap(kernel, side):
         kernel = dict(kernel)
@@ -201,8 +201,8 @@ def test_loop_copy_count_is_not_a_lowering_input():
 @pytest.mark.parametrize("vg,va,copies", [(-1, -1, 1), (2, 4, 1), (2, 2, 1), (2, 3, 3)])
 def test_loop_copies_are_read_off_the_rings_not_off_a_parameter(vg, va, copies):
     """A ring the trip closes needs one block; `VG=2, VA=3` -- 1.5 buffers -- needs three."""
-    from Tensile.LoopModel.decoder import decode_theta
-    from Tensile.LoopModel.loopir import Let, walk
+    from tensilelite.LoopModel.decoder import decode_theta
+    from tensilelite.LoopModel.loopir import Let, walk
     k = _kernel(_mxf8(), _mi("fp8", (4, 4), (1, 1)), 1, 0, "KMN", 0, 0, 1)
     k["ClusterLocalRead"] = 0
     for side in ("A", "B"):
@@ -219,10 +219,10 @@ def test_loop_copies_are_read_off_the_rings_not_off_a_parameter(vg, va, copies):
 
 
 def test_three_copy_frame_contract_has_backedge_incoming_and_guard_requirements():
-    from Tensile.LoopModel.schedule import BufferDepths
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.Lowering.gir.emit_plan import plan_program
-    from Tensile.Lowering.gir.frame_contract import build_contract
+    from tensilelite.LoopModel.schedule import BufferDepths
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.Lowering.gir.emit_plan import plan_program
+    from tensilelite.Lowering.gir.frame_contract import build_contract
 
     k = _half_plr_kernel("NKM", 1)
     k["SuppressNoLoadLoop"] = True
@@ -292,11 +292,11 @@ def test_deep_b_ring_keeps_full_plr_and_a_complete_three_copy_frame(vg, va, plr)
     The VA6 and VA12 spellings are the same shape at different VG granularity.  Both need three
     steady copies, no drain join, and a frame contract covering every copy edge.
     """
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.LoopModel.schedule import BufferDepths, Schedule
-    from Tensile.Lowering import steady_chain
-    from Tensile.Lowering.gir.emit_plan import plan_program
-    from Tensile.Lowering.gir.frame_contract import build_contract
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.LoopModel.schedule import BufferDepths, Schedule
+    from tensilelite.Lowering import steady_chain
+    from tensilelite.Lowering.gir.emit_plan import plan_program
+    from tensilelite.Lowering.gir.frame_contract import build_contract
 
     k = _kernel(_mxf8(), _mi("fp8", (8, 8), (2, 2)),
                 2, plr, loopOrder(6, 2, 1, 1), 1, 1, 4)
@@ -340,8 +340,8 @@ def test_deep_b_ring_keeps_full_plr_and_a_complete_three_copy_frame(vg, va, plr)
 
 def test_the_covering_invariant_uses_the_derived_steady_period():
     """The calculated steady period covers exactly T."""
-    from Tensile.Lowering.gir.analysis import AnalysisManager
-    from Tensile.Lowering.gir.analyses.loop_shape import (
+    from tensilelite.Lowering.gir.analysis import AnalysisManager
+    from tensilelite.Lowering.gir.analyses.loop_shape import (
         Linear, LoopShape, reduction_coverage_violations)
 
     k = _kernel(_mxf8(), _mi("fp8", (2, 2), (2, 2)), 2, 1, "KMN", 0, 0, 1)
@@ -378,8 +378,8 @@ def test_halfplr_costs_one_and_a_half_buffers_on_the_named_operand(half_plr, hal
 
     And only for the operand the bitmask names: HalfPLR=1 leaves B alone.
     """
-    from Tensile.LoopModel.schedule import BufferDepths
-    from Tensile.LoopModel import traversal as g
+    from tensilelite.LoopModel.schedule import BufferDepths
+    from tensilelite.LoopModel import traversal as g
 
     def regs(k):
         th = adapter.params_to_theta(kernel_to_params(k))
@@ -429,8 +429,8 @@ def test_clr_and_explicit_va_precedence_is_calculated_in_registers():
 
 
 def test_all_inner_forced_clr1_retains_a_large_enough_explicit_va():
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.LoopModel.schedule import BufferDepths, Schedule
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.LoopModel.schedule import BufferDepths, Schedule
 
     def assert_prefetch_is_kept(theta):
         depths = BufferDepths(theta, include_shared=False)
@@ -467,8 +467,8 @@ def test_forced_all_inner_rejects_explicit_va_below_required_rotation():
 
 def test_f8maf2_clra_allocates_the_complete_resident_set():
     """CLR1 A needs four prefetch-unit buffers, not two region slots."""
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.LoopModel.schedule import BufferDepths
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.LoopModel.schedule import BufferDepths
 
     k = _kernel(_mxf8(), _mi("fp8", (8, 8), (2, 2)),
                 2, 4, loopOrder(6, 2, 1, 1), 1, 1, 4)
@@ -492,7 +492,7 @@ def test_f8maf2_clra_allocates_the_complete_resident_set():
 @pytest.mark.parametrize("half_plr", [1, 2, 3])
 def test_halfplr_is_clean_or_refused_never_broken(order, half_plr):
     """The YAML's canonical NKM cell lowers cleanly at a three-copy chain."""
-    from Tensile.Lowering import steady_chain
+    from tensilelite.Lowering import steady_chain
     k = _half_plr_kernel(order, half_plr)
     k["SuppressNoLoadLoop"] = True
     prog = build_gir(adapter.params_to_theta(kernel_to_params(k)), loop_copies=3)
@@ -506,8 +506,8 @@ def test_halfplr_is_clean_or_refused_never_broken(order, half_plr):
 # ---------------------------------------------------------------------------
 def _drain_shape(kernel, loop_copies=1):
     """(drain block labels, steady `covers`, meta peel/drain) for one kernel."""
-    from Tensile.Lowering.gir import analysis as _an
-    from Tensile.Lowering.gir.analyses.loop_shape import LoopShape, reduction_coverage_violations
+    from tensilelite.Lowering.gir import analysis as _an
+    from tensilelite.Lowering.gir.analyses.loop_shape import LoopShape, reduction_coverage_violations
     prog = build_gir(adapter.params_to_theta(kernel_to_params(kernel)), loop_copies=loop_copies)
     loops = _an.AnalysisManager().get(LoopShape(), prog)
     steady = next(lp for lp in loops if lp.header == "steady")
@@ -543,7 +543,7 @@ def test_suppressed_no_load_loop_has_no_drain_and_the_loop_owns_every_chunk(orde
 @pytest.mark.parametrize("half_plr", [1, 2, 3])
 def test_halfplr_lowers_drain_free_over_its_three_copies(half_plr):
     """VG2/VA3 uses per-copy exits, so a partial final unroll still covers all T chunks."""
-    from Tensile.Lowering import steady_chain
+    from tensilelite.Lowering import steady_chain
     k = _half_plr_kernel("NKM", half_plr)
     k["SuppressNoLoadLoop"] = True
     prog = build_gir(adapter.params_to_theta(kernel_to_params(k)), loop_copies=3)
@@ -581,8 +581,8 @@ def _split_half_plr_theta(order, half_plr, sa, sb, wt=(2, 2), clr=0, pgr=2):
 
 def test_the_shallow_half_keeps_a_ring_digit_when_the_region_leads():
     """A TDMSplit-provided half is VG1/VA3 and still retains a physical ring digit."""
-    from Tensile.LoopModel import traversal as g
-    from Tensile.LoopModel.schedule import BufferDepths
+    from tensilelite.LoopModel import traversal as g
+    from tensilelite.LoopModel.schedule import BufferDepths
 
     th = _split_half_plr_theta(loopOrder(1, 1, 1, 0), 1, sa=1, sb=0)
     op, depths = th.op("A"), BufferDepths(th, include_shared=False)
@@ -602,11 +602,11 @@ def test_tdmsplit_consuming_vg_still_builds_the_three_copy_ring(wio, half_plr):
     The ring must have three copies: one steady block would return to the wrong
     half-buffer.
     """
-    from Tensile.LoopModel.schedule import BufferDepths
-    from Tensile.LoopModel import traversal as geometry
-    from Tensile.Lowering import steady_chain
-    from Tensile.Lowering.gir.emit_plan import plan_program
-    from Tensile.Lowering.gir.frame_contract import build_contract
+    from tensilelite.LoopModel.schedule import BufferDepths
+    from tensilelite.LoopModel import traversal as geometry
+    from tensilelite.Lowering import steady_chain
+    from tensilelite.Lowering.gir.emit_plan import plan_program
+    from tensilelite.Lowering.gir.frame_contract import build_contract
 
     theta = _split_half_plr_theta(loopOrder(wio, 1, 1, 1), half_plr, 1, 1)
     shaped = [theta.op(side) for side, bit in (("A", 1), ("B", 2)) if half_plr & bit]
@@ -638,7 +638,7 @@ def test_tdmsplit_consuming_vg_still_builds_the_three_copy_ring(wio, half_plr):
 
 def test_a_loopmodel_refusal_names_the_solution_exactly_once():
     """A bare refusal costs a bisect to place, and saying the name twice is noise."""
-    from Tensile.Components.LoopModel.Theta import loopModelTheta, namingSolution
+    from tensilelite.Components.LoopModel.Theta import loopModelTheta, namingSolution
 
     class _Writer:
         class states:
