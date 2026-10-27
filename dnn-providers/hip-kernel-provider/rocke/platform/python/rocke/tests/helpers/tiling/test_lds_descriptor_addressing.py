@@ -3,8 +3,8 @@
 
 """LDS is addressed through the tensor descriptor's strides.
 
-An LDS buffer is a flat allocation sized from its tensor descriptor,
-``b.smem_alloc(td.dtype, [td.element_span])``, and ``load_fragment`` / ``store_fragment`` give every
+An LDS buffer is a flat allocation sized from its tensor descriptor (``lds_allocation``), and
+``load_fragment`` / ``store_fragment`` give every
 LDS access one element index, ``sum(position * stride)``, exactly as for global memory. These tests
 check:
 
@@ -33,7 +33,19 @@ import pytest
 
 pytest.importorskip("rocke.core.ir", reason="rocke IR substrate required")
 
-from rocke.core.ir import F16, F32, IRBuilder, PtrType
+from rocke.core.ir import (
+    E8M0,
+    F16,
+    F32,
+    FP4E2M1,
+    FP6E2M3,
+    FP8E4M3,
+    I8,
+    I32,
+    TF32,
+    IRBuilder,
+    PtrType,
+)
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers.tiling import (
     InterleavedStyle,
@@ -42,6 +54,7 @@ from rocke.helpers.tiling import (
     cooperative_load_desc,
     cooperative_load_width,
     fill_fragment,
+    lds_allocation,
     lds_element_span,
     lds_read,
     lds_store,
@@ -215,28 +228,30 @@ def _refusal(buffer_shape, buffer_dtype=F16, *, verb="load"):
 def test_a_rank_2_buffer_is_refused() -> None:
     assert _refusal([16, 16]) == (
         "load_fragment: the LDS buffer smem<f16, [16x16]> has rank 2 -- an LDS buffer is flat; its "
-        "layout lives in the tensor descriptor. Allocate smem_alloc(f16, [256])"
+        "layout lives in the tensor descriptor. Allocate it with lds_allocation: "
+        "smem_alloc(f16, [256])"
     )
 
 
 def test_a_buffer_of_another_element_type_is_refused() -> None:
     assert (
         _refusal([256], F32)
-        == "load_fragment: LDS buffer element f32 != tensor dtype f16"
+        == "load_fragment: LDS buffer element f32, expected f16 (the storage element of f16 "
+        "data) -- allocate the buffer with lds_allocation"
     )
 
 
 def test_a_buffer_smaller_than_the_descriptor_span_is_refused() -> None:
     assert _refusal([200]) == (
-        "load_fragment: the LDS tensor spans 256 elements but the buffer holds 200 -- size the "
-        "allocation with lds_element_span"
+        "load_fragment: the LDS tensor spans 256 f16 elements, but the buffer holds 200 -- size "
+        "the allocation with lds_allocation"
     )
 
 
 def test_the_store_verb_runs_the_same_checks() -> None:
     assert _refusal([200], verb="store") == (
-        "store_fragment: the LDS tensor spans 256 elements but the buffer holds 200 -- size the "
-        "allocation with lds_element_span"
+        "store_fragment: the LDS tensor spans 256 f16 elements, but the buffer holds 200 -- size "
+        "the allocation with lds_allocation"
     )
 
 
@@ -286,9 +301,29 @@ def test_lds_element_span_counts_the_builtin_swizzle_reach() -> None:
     assert _PADDED_ROWS.element_span == 496
     assert lds_element_span(_PADDED_ROWS) == 496
     assert lds_element_span(_PADDED_ROWS, True) == 512
+    assert lds_allocation(_PADDED_ROWS, True) == (F16, 512)
     # A row that already fills its 64-element groups reaches no further.
     full_rows = make_tensor_desc((8, 128), (128, 1), F16)
     assert lds_element_span(full_rows, True) == full_rows.element_span == 1024
+
+
+@pytest.mark.parametrize(
+    "dtype,allocation",
+    [
+        (F16, (F16, 1024)),
+        (FP8E4M3, (FP8E4M3, 1024)),
+        (
+            TF32,
+            (I32, 1024),
+        ),  # tf32 has no arithmetic: held as i32 in registers and in LDS
+        (FP4E2M1, (I32, 128)),  # 1024 4-bit elements fill 128 words
+        (FP6E2M3, (I32, 192)),
+        (E8M0, (I8, 1024)),  # a scale encoding has no arithmetic: held as its bytes
+    ],
+)
+def test_lds_allocation_is_the_storage_that_holds_the_span(dtype, allocation) -> None:
+    td = make_tensor_desc((8, 128), (128, 1), dtype)
+    assert lds_allocation(td) == allocation
 
 
 @pytest.mark.parametrize("verb", ["load", "store"])
@@ -305,8 +340,8 @@ def test_a_swizzled_buffer_sized_by_element_span_is_refused(verb) -> None:
             fill_fragment(b, fragment, 0)
             store_fragment(b, lds, window, fragment, tid, lds_swizzle=True)
     assert str(info.value) == (
-        f"{verb}_fragment: the LDS tensor spans 512 elements but the buffer holds 496 -- size the "
-        "allocation with lds_element_span"
+        f"{verb}_fragment: the LDS tensor spans 512 f16 elements, but the buffer holds 496 -- "
+        "size the allocation with lds_allocation"
     )
 
 
