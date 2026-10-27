@@ -62,7 +62,7 @@ st.func @at_p2_k2_buffer_store() {
 }
 
 #--- P(2)=40832: same VMEM group remains open, so xcnt protection is still emitted.
-# CHECK-LABEL: @same_vmem_group_needs_xcnt
+# CHECK-LABEL: function "same_vmem_group_needs_xcnt"
 # CHECK: {{.*}}buffer_load_b32
 # CHECK: {{.*}}total=40824 bytes{{.*}}s_wait_xcnt{{.*}}(0)
 # CHECK: {{.*}}total=40832 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
