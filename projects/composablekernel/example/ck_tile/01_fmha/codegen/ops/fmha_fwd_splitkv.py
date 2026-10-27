@@ -930,11 +930,9 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         if dtype in ["fp16", "bf16"] and hdim == 128:
             # qr_tdm is generated for no bias / no logits soft cap only:
             #   soft cap  the pipeline static_asserts it away
-            #   bias      the BUILD_TESTING instance filter in
-            #             example/ck_tile/01_fmha/CMakeLists.txt keeps only
-            #             *_nbias* split-kv instances in the dispatch api, so
-            #             bias cannot be exercised from the example or the
-            #             gtests and taking it over cannot be validated
+            #   bias      the pipeline static_asserts it away too ("qr_tdm
+            #             split-kv does not implement bias"); the prefill
+            #             qr_tdm does implement it, the split-kv copy does not
             # Like fmha_fwd.py it pads both sequence lengths together and both
             # head dims together; the qr entries padding one side only stay as
             # they are, which is why the dispatch chain still has to put qr_tdm
