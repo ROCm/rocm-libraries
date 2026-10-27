@@ -136,6 +136,41 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
     EXPECT_EQ(tensor->elementSize(), sizeof(bool));
 }
 
+// The bundle harnesses and reference executors build every tensor through this
+// factory, so a serialized data type it does not map makes those graphs unloadable.
+// FP8_E4M3_FNUZ / FP8_E5M2_FNUZ went unmapped for months after they were added to
+// the schema; iterating the generated enum catches the next one.
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorAcceptsEveryDataTypeButUnset)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    for(const auto dataType : EnumValuesDataType())
+    {
+        if(dataType == DataType::UNSET)
+        {
+            EXPECT_THROW(createTensor(dataType, dims, strides), std::runtime_error);
+            continue;
+        }
+        std::unique_ptr<ITensor> tensor;
+        EXPECT_NO_THROW(tensor = createTensor(dataType, dims, strides))
+            << EnumNameDataType(dataType);
+        EXPECT_NE(tensor, nullptr) << EnumNameDataType(dataType);
+    }
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBuildsFnuzTensors)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    auto e4m3 = createTensor(DataType::FP8_E4M3_FNUZ, dims, strides);
+    auto e5m2 = createTensor(DataType::FP8_E5M2_FNUZ, dims, strides);
+
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp8_e4m3_fnuz>*>(e4m3.get()), nullptr);
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp8_e5m2_fnuz>*>(e5m2.get()), nullptr);
+}
+
 TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp4UnpackedByDefault)
 {
     const std::vector<int64_t> dims = {2, 4};
