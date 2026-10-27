@@ -127,7 +127,8 @@ bool valuesCloseFast(Observed observed, Expected expected, const ComparisonOptio
             return options.equalNaNs && std::isnan(observed) && std::isnan(expected);
         if (std::isinf(observed) || std::isinf(expected)) return false;
 
-        const double difference = std::abs(observed - expected);
+        const double difference =
+            std::abs(static_cast<double>(observed) - static_cast<double>(expected));
         const double tolerance =
             options.absoluteTolerance + options.relativeTolerance * std::abs(expected);
         return difference <= tolerance;

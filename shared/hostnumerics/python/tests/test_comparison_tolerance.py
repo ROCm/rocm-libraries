@@ -11,6 +11,28 @@ class ComparisonToleranceTests(unittest.TestCase):  # noqa: F405
         with self.assertRaises(TypeError):
             hv.allclose_comparison_options(1e-8, 1e-5)
 
+    def test_float32_difference_uses_comparison_precision(self):
+        cases = [(1.0, -(2**-25), 1.0), (1.0, -(2**-25), 1.0 + 2**-25)]
+        maximum = float(np.finfo(np.float32).max)
+        cases.append((maximum, -maximum, 2.0 * maximum))
+        for observed, expected, tolerance in cases:
+            difference = abs(observed - expected)
+            for detailed in (False, True):
+                with self.subTest(values=(observed, expected), detailed=detailed):
+                    options = hv.allclose_comparison_options(tolerance, 0.0, False)
+                    options.compute_elementwise_statistics = detailed
+                    options.compute_frobenius = detailed
+                    options.max_reported_mismatches = 0
+                    report = hv.compare(
+                        hv.from_numpy(np.asarray([observed], dtype=np.float32)),
+                        hv.from_numpy(np.asarray([expected], dtype=np.float32)),
+                        options,
+                    )
+                    self.assertEqual(report.passed, difference <= tolerance)
+                    self.assertEqual(report.mismatches, int(difference > tolerance))
+                    if detailed:
+                        self.assertEqual(report.max_absolute_difference, difference)
+
     def test_explicit_relative_norm_policy(self):
         options = hv.ComparisonOptions()
         options.all_close = False
