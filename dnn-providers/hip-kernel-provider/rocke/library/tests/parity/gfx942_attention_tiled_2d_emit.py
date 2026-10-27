@@ -125,8 +125,58 @@ _CONFIGS = {
         tile_size=64,
         use_i64_kv_addr=True,
     ),
-    # --- idx8: head_size=192 MHA prefill selector spec
+    # cfg8-cfg10: other i64 geometries of the per-page K/V loader. cfg8 has four
+    # warps and two 32-token pages per tile, cfg9 one 64-token page per tile,
+    # cfg10 is cfg7 with K copied by global_load_lds.
     8: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=256,
+        num_warps=4,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=64,
+        use_i64_kv_addr=True,
+    ),
+    9: dict(
+        head_size=128,
+        block_size=64,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=256,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=64,
+        use_i64_kv_addr=True,
+    ),
+    10: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=256,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=64,
+        use_i64_kv_addr=True,
+        use_global_load_lds_k=True,
+    ),
+    # --- idx11: head_size=192 MHA prefill selector spec
+    11: dict(
         head_size=192,
         block_size=16,
         num_query_heads=96,
@@ -141,9 +191,9 @@ _CONFIGS = {
         use_register_pv=True,
         tile_size=32,
     ),
-    # --- idx9: head_size=192 MHA prefill on the wide flash geometry (an explicit spec;
+    # --- idx12: head_size=192 MHA prefill on the wide flash geometry (an explicit spec;
     #     the bf16 causal selector now routes D192 to the lean 4-warp body)
-    9: dict(
+    12: dict(
         head_size=192,
         block_size=16,
         num_query_heads=96,

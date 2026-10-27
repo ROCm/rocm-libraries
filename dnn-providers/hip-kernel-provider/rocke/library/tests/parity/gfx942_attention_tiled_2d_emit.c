@@ -129,8 +129,61 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         s->use_i64_kv_addr = true;
         break;
+    case 8: /* i64 K/V, four warps, two pages per tile. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        break;
+    case 9: /* i64 K/V, one page per tile. */
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        break;
+    case 10: /* cfg7 with K copied by global_load_lds. */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 256;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_i64_kv_addr = true;
+        s->use_global_load_lds_k = true;
+        break;
     /* head_size=192 MHA prefill selector spec */
-    case 8:
+    case 11:
         s->head_size = 192;
         s->block_size = 16;
         s->num_query_heads = 96;
@@ -148,7 +201,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         break;
     /* head_size=192 MHA prefill selector spec (wide flash geometry) */
-    case 9:
+    case 12:
         s->head_size = 192;
         s->block_size = 16;
         s->num_query_heads = 96;

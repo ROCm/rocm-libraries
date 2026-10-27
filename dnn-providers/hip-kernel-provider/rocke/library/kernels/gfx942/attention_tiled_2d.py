@@ -334,9 +334,10 @@ class UnifiedAttention2DTiledSpec:
     # voffset, which overflows for paged caches > 2 GiB (~65 K bf16 / ~131 K
     # fp8 blocks) and silently corrupts loads. When True, the per-block
     # ``physical_block`` offset is folded into a 64-bit buffer *base* (small
-    # within-block voffset) so any cache size is addressable. It costs a
-    # per-call ``make_buffer_rsrc`` so the dispatcher only enables it when the
-    # cache actually exceeds the 2 GiB cap (see _enable_i64_kv_addr).
+    # within-block voffset) so any cache size is addressable. The K/V loaders
+    # build one ``make_buffer_rsrc`` per page of a tile; the dispatcher only
+    # enables it when the cache exceeds the i32 buffer range (see
+    # _enable_i64_kv_addr).
     use_i64_kv_addr: bool = False
     # Experimental schedule: issue the current V async copy immediately after
     # the iter-start K drain/barrier, before QK. This gives V the whole QK plus
@@ -2675,18 +2676,21 @@ def build_unified_attention_2d_tiled(
                 ),
             )
 
-    # i64 K/V addressing with whole pages per tile and copies that never cross
-    # a page: load the tile's page ids once and build one buffer resource per
-    # page. Otherwise each copy reloads its page id and waits on it to build
-    # its own resource, and since vmcnt drains in order, those waits also
-    # drain the copies issued before it.
-    PAGE_RSRC_I64 = (
-        I64_KV_ADDR
-        and not FAST_PAGED_KV_DESC
-        and T % BS == 0
-        and (BS * HD) % KV_HALVES_PER_CALL == 0
-    )
+    # i64 K/V addressing: load the tile's page ids once and build one buffer
+    # resource per page. A resource per copy would reload its page id and wait
+    # on it, and since vmcnt drains in order, those waits also drain the copies
+    # issued before it. The non-fast K/V loaders below are i32-only otherwise.
+    PAGE_RSRC_I64 = I64_KV_ADDR and not FAST_PAGED_KV_DESC
     if PAGE_RSRC_I64:
+        # The spec and supports_tiled_2d guarantee both: tile_size is a multiple
+        # of block_size, and a copy (at most 8 warps x 64 lanes x 2 halves) never
+        # exceeds a page (at least 16 x 64 halves), all powers of two. Raised,
+        # not asserted, so python -O cannot emit copies that straddle pages.
+        if T % BS != 0 or (BS * HD) % KV_HALVES_PER_CALL != 0:
+            raise ValueError(
+                f"i64 K/V copies need whole pages per tile and per copy "
+                f"(T={T}, BS={BS}, HD={HD}, halves per copy={KV_HALVES_PER_CALL})"
+            )
         CALLS_PER_PAGE = (BS * HD) // KV_HALVES_PER_CALL
 
         def _tile_pages(
@@ -2766,23 +2770,12 @@ def build_unified_attention_2d_tiled(
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
-                    base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                        b,
-                        "physical_block",
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
-                    k_ptr = b.global_ptr_add(key, base_i64)
-                    k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
-                else:
-                    voff, _ = paged_kv_desc.offset(
-                        b,
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
             if USE_GLOBAL_LOAD_LDS_K:
                 b.global_load_lds(
@@ -2911,24 +2904,12 @@ def build_unified_attention_2d_tiled(
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if I64_KV_ADDR:
-                    base_i64, voff, _ = paged_kv_desc.offset_i64_split(
-                        b,
-                        "physical_block",
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
-                    v_rsrc = b.buffer_rsrc(
-                        b.global_ptr_add(value, base_i64), kv_block_bytes_c
-                    )
-                else:
-                    voff, _ = paged_kv_desc.offset(
-                        b,
-                        tile_idx=kv_tile_idx,
-                        linear_half=linear_half,
-                        kv_head=kv_head_idx,
-                    )
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
             v_dst = b.smem_ptr_add(
                 V_wave_base, b.const_i64(call * V_BYTES_PER_CALL_SWZ)
             )

@@ -242,7 +242,8 @@ Owns: `instances/gfx1250/*`, dispatch seams in
 
 **Phase 1 (functional)**
 
-- **C1.** Dense WMMA FMHA fwd: use `instances/gfx1151/wmma_fmha_fwd.py` as a
+- **C1.** Dense WMMA FMHA fwd: use `instances/gfx1151/wmma_fmha_fwd.py` (since
+  removed; its successor is `kernels/gfx1151/wmma_fmha_fwd_v2.py`) as a
   *structural* wave32-WMMA scaffold for `instances/gfx1250/wmma_attention_fwd.py`,
   but retarget the atom to the probed gfx1250 WMMA op_id (16x16x32) and gfx1250
   fragment maps — not the gfx1151/gfx1201 16x16x16 layout. Fastest route to first
