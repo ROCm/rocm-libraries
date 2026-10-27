@@ -299,3 +299,46 @@ Finally, successful construction and formatting can still end in native
 rejection, for example when the solution requires a different compute-unit
 count. The benchmark can then exit zero with no result and no target dispatch.
 Record that as a native rejection; it provides no execution coverage.
+
+## Sweep solution indices for a fixed time
+
+The packaged sweep runner accepts `--suite-timeout` in seconds. For example,
+this selects original indices 8,000 through 15,999 and runs for up to five
+minutes, including metadata preparation, input conversion and execution:
+
+```sh
+python clients/scripts/rocjitsu/rocjitsu_race_sweep.py \
+  --backend bench --target gfx950 \
+  --rocjitsu /path/to/rocjitsu \
+  --rocjitsu-revision FULL_ROCJITSU_SOURCE_REVISION \
+  --client /path/to/hipblaslt-bench \
+  --library-dir /path/to/library/gfx950 \
+  --hardware-profile /path/to/gfx950-profile.json \
+  --reports /path/to/new-reports-directory \
+  --solution-index-range-begin 8000 --solution-index-range-end 16000 \
+  --suite-timeout 300 --workers 4 --batch-size 32 \
+  --continue-on-failure --recover-unexecuted --run-known-failures
+```
+
+Omit `--solution-index-range-end` to continue toward the catalogue's end.
+`--continue-on-failure` allows later batches to run after a failure;
+`--recover-unexecuted` replays untouched members of aborted batches while
+time remains. Numerical assertions, identity and dispatch checks, and race
+detection stay enabled. Use a benchmark and device library from compatible
+builds, and supply the complete source revision of the emulator.
+
+The deadline stops new work and terminates active processes. Final report
+writing can take additional time. A partial sweep exits unsuccessfully and
+records `suite-timeout`; reaching the requested deadline does not establish
+a solution defect. Retain `summary.json`, `manifest.json`, the generated
+inputs, commands and native logs. The summary's `index_outcomes` uses original
+solution indices and distinguishes completed numerical records, launched
+cases without results, unexecuted cases and unstarted work.
+
+Investigate failures that occurred before the deadline with individual
+replays. Record the input, expected kernel, actual dispatch, diagnostics and
+tool/library revisions. Keep process-level warnings separate from completed
+numerical records until a replay establishes which index produced them.
+Resume from the earliest original index still needing execution or replay;
+batches can finish out of order, so the largest observed index alone is not
+a safe continuation point.
