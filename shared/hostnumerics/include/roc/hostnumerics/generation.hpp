@@ -25,6 +25,9 @@ struct GenerationRecipeSettings {
     // Owned axes from slowest to fastest; empty is valid only for rank zero.
     // Indexed recipes and generateAt use this coordinate-to-index mapping.
     std::vector<size_t> indexOrder;
+
+    // Added to the sampling index without changing coordinates or storage offsets.
+    size_t indexOffset = 0;
 };
 
 struct ConstantGenerationParameters {
@@ -57,6 +60,11 @@ struct NormalGenerationParameters {
     // uses one Box-Muller output per logical index.
     double mean = 0.0;
     double standardDeviation = 1.0;
+};
+
+struct BinomialHalfGenerationParameters {
+    // Number of fair trials, from zero through 64. One counter word supplies the bits.
+    uint32_t trials = 1;
 };
 
 struct DimensionGenerationParameters {
@@ -135,6 +143,7 @@ class GenerationRecipe {
         [[nodiscard]] Component withAbsoluteTransform() const;
         [[nodiscard]] Component withSineTransform() const;
         [[nodiscard]] Component withCosineTransform() const;
+        [[nodiscard]] Component withExp2Transform() const;
 
         [[nodiscard]] Component withAffineValueMapping(
             GenerationAffineValueParameters parameters) const;
@@ -154,6 +163,7 @@ class GenerationRecipe {
             Absolute,
             Sine,
             Cosine,
+            Exp2,
         };
 
         struct ZeroPattern {};
@@ -174,6 +184,9 @@ class GenerationRecipe {
         };
         struct NormalPattern {
             NormalGenerationParameters parameters;
+        };
+        struct BinomialHalfPattern {
+            BinomialHalfGenerationParameters parameters;
         };
         struct SinePattern {};
         struct CosinePattern {};
@@ -217,15 +230,15 @@ class GenerationRecipe {
         using Pattern =
             std::variant<ZeroPattern, ConstantPattern, ChoicePattern, UniformIntegerPattern,
                          AbsoluteUniformIntegerPattern, UniformRealPattern, NormalPattern,
-                         SinePattern, CosinePattern, AbsoluteSinePattern, AbsoluteCosinePattern,
-                         SerialIndexPattern, SerialDimensionPattern, AffineIndexRemainderPattern,
-                         IdentityPattern, CheckerboardUniformIntegerPattern, TypeMaximumPattern,
-                         TypeLowestPattern, TypeDenormalMinimumPattern, TypeDenormalMaximumPattern,
-                         TypeNaNPattern, TypeInfinityPattern, TypeNegativeInfinityPattern,
-                         TypeNegativeZeroPattern, UniformTypeRangePattern,
-                         RandomEncodedExponentPattern, RawConstantPattern, UniformRawIntegerPattern,
-                         UniformFiniteEncodedValuePattern, RandomRawBitsPattern,
-                         RawSerialDimensionPattern>;
+                         BinomialHalfPattern, SinePattern, CosinePattern, AbsoluteSinePattern,
+                         AbsoluteCosinePattern, SerialIndexPattern, SerialDimensionPattern,
+                         AffineIndexRemainderPattern, IdentityPattern,
+                         CheckerboardUniformIntegerPattern, TypeMaximumPattern, TypeLowestPattern,
+                         TypeDenormalMinimumPattern, TypeDenormalMaximumPattern, TypeNaNPattern,
+                         TypeInfinityPattern, TypeNegativeInfinityPattern, TypeNegativeZeroPattern,
+                         UniformTypeRangePattern, RandomEncodedExponentPattern, RawConstantPattern,
+                         UniformRawIntegerPattern, UniformFiniteEncodedValuePattern,
+                         RandomRawBitsPattern, RawSerialDimensionPattern>;
 
         explicit Component(Pattern pattern);
         [[nodiscard]] bool isRaw() const;
@@ -254,6 +267,7 @@ class GenerationRecipe {
         UniformIntegerGenerationParameters parameters);
     [[nodiscard]] static Component uniformReal(UniformRealGenerationParameters parameters);
     [[nodiscard]] static Component normal(NormalGenerationParameters parameters);
+    [[nodiscard]] static Component binomialHalf(BinomialHalfGenerationParameters parameters);
 
     // These evaluate sin(logicalIndex) and cos(logicalIndex), with the logical
     // index interpreted in radians.
@@ -313,6 +327,8 @@ class GenerationRecipe {
                                                     GenerationRecipeSettings settings);
 
     [[nodiscard]] uint64_t seed() const noexcept;
+    [[nodiscard]] size_t indexOffset() const noexcept;
+    [[nodiscard]] GenerationRecipe withIndexOffset(size_t offset) const;
     [[nodiscard]] static GenerationRecipe realOnlyLastDimensionFastest(Component component,
                                                                        uint64_t seed);
     [[nodiscard]] static GenerationRecipe replicatedLastDimensionFastest(Component component,
@@ -373,8 +389,28 @@ void generate(Tensor destination, Generator&& generator) {
         });
 }
 
+template <typename Generator>
+    requires(std::is_invocable_v<Generator&, std::span<const size_t>, size_t> ||
+             std::is_invocable_v<Generator&, std::span<const size_t>>)
+void generate(Tensor destination, Generator&& generator, const ScalarConversionOptions& options) {
+    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t index) {
+        if constexpr (std::is_invocable_v<Generator&, std::span<const size_t>, size_t>)
+            destination.storeFrom(indices, generator(indices, index), options);
+        else
+            destination.storeFrom(indices, generator(indices), options);
+    });
+}
+
 void generate(Tensor destination, const GenerationRecipe& recipe);
 Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe);
 Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe);
 void generateAt(Tensor destination, size_t logicalIndex, const GenerationRecipe& recipe);
+void generate(Tensor destination, const GenerationRecipe& recipe,
+              const ScalarConversionOptions& options);
+Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe,
+                const ScalarConversionOptions& options);
+Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe,
+                const ScalarConversionOptions& options);
+void generateAt(Tensor destination, size_t logicalIndex, const GenerationRecipe& recipe,
+                const ScalarConversionOptions& options);
 }  // namespace roc::hostnumerics

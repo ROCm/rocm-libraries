@@ -117,6 +117,24 @@ on loop order or thread count. Complex Cartesian generation uses an internal
 separation between real and imaginary components, but that implementation
 detail is not part of the caller's seed contract.
 
+`binomialHalf({.trials = n})` counts successes in `n` independent fair trials,
+with `n` from 0 through 64. `withExp2Transform()` maps its result `k` to `2^k`;
+an affine value mapping can then shift the exponent by multiplying by a power
+of two. `withIndexOffset(offset)` adds to the sampling index while preserving
+coordinates and storage addresses. Generation rejects an overflowing sampling
+index before writing the destination.
+
+The `generate` and `generateAt` overloads accepting `ScalarConversionOptions`
+select source precision and overflow behavior for encoded floating storage.
+`FloatingSourcePrecision::Direct` retains the double significand until FP16,
+BF16 or narrower destination rounding. `Float32` preserves the intermediate
+FP32 conversion. `FloatingOverflow::SaturateFinite` maps infinity to the largest
+finite destination value; the default retains each format's existing policy.
+Native FP32/FP64 and complex storage use native conversion independently of
+these encoding options. `E8M0Underflow::FlushBelowFloat32Normal` maps values
+below `2^-126` to raw zero, which decodes as `2^-127` in E8M0. Its default
+`Nearest` uses arithmetic midpoint rounding with an even biased exponent.
+
 Recipes cover constants, uniform and normal distributions, indices,
 trigonometric patterns, type limits, encoded exponents, and raw storage.
 `choice({.values = {...}})` chooses one supplied value for each element;
