@@ -224,8 +224,7 @@ size_t maxNumberSolutions()
 
 // The element format a kernel operand of this type is ranked as.
 //
-// Two jobs, both of which used to be done by the conversion into a generator's
-// enumeration and now have to be done here instead:
+// Two decisions happen here, before the tile map is consulted:
 //
 //  - Fold the spellings that name one kernel operand class onto one of them.
 //    HIP distinguishes 8-bit E4M3 in its finite-and-NaN-only encoding
@@ -236,9 +235,9 @@ size_t maxNumberSolutions()
 //    That value is in no tile-map key, so such a problem is left with no tiles.
 hipDataType normalizeOperandType(hipDataType type)
 {
-    // Compared as integers because a HIP release that predates these formats
-    // declares them as constants rather than enumerators, which is how the rest
-    // of hipBLASLt reads them too (see utility.cpp).
+    // Compared as integers because some HIP headers declare these formats as
+    // constants rather than enumerators, which is how the rest of hipBLASLt
+    // reads them too (see utility.cpp).
     if(static_cast<int>(type) == HIP_R_6F_E2M3)
         return HIP_R_6F_E2M3;
     if(static_cast<int>(type) == HIP_R_6F_E3M2)
