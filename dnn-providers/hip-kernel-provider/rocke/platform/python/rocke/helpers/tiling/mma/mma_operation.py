@@ -25,9 +25,10 @@ __all__ = ["Tiling", "TileMma"]
 class TileMma:
     """A target-resolved wave-tile MMA operation + subtile driver (dense; the M1 surface).
 
-    Author call: ``TileMma((16, 16, 64), a="f16", b="f16", c="f32", target="gfx90a",
-    tiling=Tiling(atom_shape=(16, 16, 16)))``. Resolution + validation happen at construction,
-    fail-fast, with no IR. Calling the instance (``mma(b, a_frag, b_frag, acc)``) walks the atom grid
+    Author call: ``TileMma((16, 16, 64), a=F16, b=F16, c=F32, target="gfx90a",
+    tiling=Tiling(atom_shape=(16, 16, 16)))`` with the dtypes imported from ``rocke.core.ir``
+    (``d=`` names a result dtype other than ``c``; see :class:`TileMmaPlan`). Resolution +
+    validation happen at construction, fail-fast, with no IR. Calling the instance (``mma(b, a_frag, b_frag, acc)``) walks the atom grid
     internally and returns the updated accumulator ``Fragment``. Reach ``.plan`` / ``.driver`` for the
     composed pieces.
     """
@@ -39,6 +40,7 @@ class TileMma:
         a=None,
         b=None,
         c=None,
+        d=None,
         target,
         tiling=None,
         style=None,
@@ -50,6 +52,7 @@ class TileMma:
             a=a,
             b=b,
             c=c,
+            d=d,
             target=target,
             tiling=tiling,
             style=style,
@@ -89,6 +92,22 @@ class TileMma:
     @property
     def target(self):
         return self._plan.target
+
+    @property
+    def a_dtype(self):
+        return self._plan.a_dtype
+
+    @property
+    def b_dtype(self):
+        return self._plan.b_dtype
+
+    @property
+    def c_dtype(self):
+        return self._plan.c_dtype
+
+    @property
+    def d_dtype(self):
+        return self._plan.d_dtype
 
     @property
     def op_id(self):
@@ -142,5 +161,5 @@ class TileMma:
         return (
             f"TileMma(shape={p.shape}, atom={p.atom_shape}, "
             f"a={p.a_dtype!r}, b={p.b_dtype!r}, c={p.c_dtype!r}, "
-            f"target={p.target!r}, op_id={p.op_id!r})"
+            f"d={p.d_dtype!r}, target={p.target!r}, op_id={p.op_id!r})"
         )

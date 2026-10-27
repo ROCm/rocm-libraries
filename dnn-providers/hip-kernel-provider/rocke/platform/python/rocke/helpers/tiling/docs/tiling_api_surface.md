@@ -63,7 +63,9 @@ descriptor).
 The smallest complete kernel body. Everything not stated is resolved from the MMA atom.
 
 ```python
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+from rocke.core.ir import F16, F32   # MMA dtypes are IR types
+
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 
 acc = make_fragment(mma.c_desc, F32)          # desc + dtype -- both defaulted by the MMA object
 fill_fragment(b, acc, 0)
@@ -491,7 +493,9 @@ The demos (`tiling_gemm_{interwave,pipelined,interleaved}_demo.py`) show real, n
 
 ## 6. `TileMma` -- the resolver + subtile driver (where the defaults live)
 
-`TileMma(shape, *, a, b, c, target, tiling=None)`. `shape` is the **wave tile**. Everything
+`TileMma(shape, *, a, b, c, d=None, target, tiling=None)`. `shape` is the **wave tile**; `a`, `b`, `c`
+are IR types from `rocke.core.ir` (`F16`, `F32`, `FP8E4M3`, ...; a dtype string is refused with the constant
+to pass), and `d` is the result dtype, omitted when it equals the accumulator `c`. Everything
 below is resolved for you and is inspectable. The **instruction** catalog is **`traits/data/mma_traits.json`**
 (one row per MMA instruction variant: atom shape + per-operand dtypes; hand-maintained, schema and edit
 procedure in `traits/README.md`; resolved automatically). Its **canonical**
@@ -500,7 +504,9 @@ hand-roll valid non-canonical (interleaved / custom) layouts (canonical is never
 
 ### Default: single MMA, everything resolved from traits
 ```python
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+from rocke.core.ir import BF16, F16, F32
+
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 mma.op_id       # 'mfma_f32_16x16x16f16'   (resolved intrinsic)
 mma.atom_shape  # (16, 16, 16)
 mma.subtiles    # (1, 1, 1)                (single atom)
@@ -512,7 +518,7 @@ mma.c_desc      # TileDesc((16,16), c_layout) -- use for the accumulator Fragmen
 
 ### Override: wave macro-tile -- the object owns the subtile grid
 ```python
-mma = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 32), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)))
 mma.subtiles    # (2, 2, 2)  -> the object walks a 2x2x2 atom grid inside one mma() call
 # author STILL writes one load/mma/store per K-tile; no atom loop.
@@ -520,9 +526,9 @@ mma.subtiles    # (2, 2, 2)  -> the object walks a 2x2x2 atom grid inside one mm
 
 ### Validation is automatic and fail-fast
 ```python
-TileMma((32, 32, 16), a="f16", b="bf16", c="f32", target="gfx90a")   # ValueError: A/B dtypes
-TileMma((13, 16, 16), a="f16", b="f16",  c="f32", target="gfx90a")   # ValueError: no intrinsic
-TileMma((32, 32, 24), a="f16", b="f16",  c="f32", target="gfx90a",
+TileMma((32, 32, 16), a=F16, b=BF16, c=F32, target="gfx90a")   # ValueError: A/B dtypes
+TileMma((13, 16, 16), a=F16, b=F16,  c=F32, target="gfx90a")   # ValueError: no MMA instruction found
+TileMma((32, 32, 24), a=F16, b=F16,  c=F32, target="gfx90a",
         tiling=Tiling(atom_shape=(16,16,16)))   # ValueError: wave K not a multiple of atom K
 ```
 
@@ -534,24 +540,26 @@ TileMma((32, 32, 24), a="f16", b="f16",  c="f32", target="gfx90a",
 
 **Default (None): single MMA -- atom == wave shape.**
 ```python
-TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")   # tiling=None
+from rocke.core.ir import F16, F32
+
+TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")   # tiling=None
 # -> atom_shape == (16,16,16), subtiles == (1,1,1)
 ```
 
 **Override by SHAPE tuple: target-agnostic.** The atom is resolved for the bound target +
 dtypes -- MFMA on CDNA, WMMA on RDNA -- with no author-side gfx branch.
 ```python
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> mfma_f32_16x16x16f16
 # same author code, different target (verified):
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx1201",
+TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx1201",
         tiling=Tiling(atom_shape=(16, 16, 16)))     # op_id -> wmma_f32_16x16x16_f16_w32_gfx12 (wave 32)
 ```
 
 **Override by NAME string: the escape hatch (target-specific by construction).** Pin the
 exact backend intrinsic; validated (exists / runs on target / dtypes match) fail-fast.
 ```python
-TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
         tiling=Tiling(atom_shape="mfma_f32_16x16x16f16"))   # exact op resolved in the backend
 ```
 
@@ -560,7 +568,7 @@ resolve the *native* 32x32 atom (a single MMA), NOT a 2x2 grid of 16x16 atoms. T
 lets you force the small atom either way:
 
 ```python
-TileMma((32, 32, 8), a="f16", b="f16", c="f32", target="gfx90a")     # -> 32x32x8 native, subtiles (1,1,1)
+TileMma((32, 32, 8), a=F16, b=F16, c=F32, target="gfx90a")     # -> 32x32x8 native, subtiles (1,1,1)
 TileMma((32, 32, 16), ..., tiling=Tiling(atom_shape=(16,16,16)))     # -> 16x16 atom, subtiles (2,2,1)
 ```
 
@@ -634,27 +642,29 @@ The same GEMM, adding exactly one override at a time -- the loop body never chan
 `TileMma` construction. Knobs travel as constructor arguments (`shape`, `tiling=`, `style=`).
 
 ```python
+from rocke.core.ir import F16, F32
+
 # (0) DEFAULT: single 16x16x16 atom, f16->f32, MNK order. Say almost nothing.
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")
 
 # (1) BIGGER K per tile: 4 K-subtiles, MMA owns the inner K loop.
-mma = TileMma((16, 16, 64), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((16, 16, 64), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)))
 
 # (2) COOPERATIVE M/N: a 2x2 output grid, MMA walks it internally.
-mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)))
 
 # (3) FULL GRID + iteration order: 2x2x2, K outermost.
-mma = TileMma((32, 32, 32), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 32), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16), order="KNM"))
 
 # (4) PIN THE EXACT INTRINSIC by name (target-specific escape hatch).
-mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape="mfma_f32_16x16x16f16"))
 
 # (5) SWITCH THE OPERAND-LAYOUT PROFILE: wide free-contiguous loads.
-mma = TileMma((32, 32, 16), a="f16", b="f16", c="f32", target="gfx90a",
+mma = TileMma((32, 32, 16), a=F16, b=F16, c=F32, target="gfx90a",
               tiling=Tiling(atom_shape=(16, 16, 16)), style=InterleavedStyle())
 ```
 

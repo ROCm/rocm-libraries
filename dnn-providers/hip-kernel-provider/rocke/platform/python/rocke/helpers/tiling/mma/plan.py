@@ -21,8 +21,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ....core.dtypes import normalize_dtype
+from ....core.ir import Type, dtype_to_ir_type
 from ..encoding import WarpDistributionEncoding
-from ..fragments import TileDesc
+from ..fragments import TileDesc, _fragment_dtype_ok
 from ..traits import MmaTraits, MmaTraitsCatalog, load_mma_traits
 from .styles import CanonicalStyle, LayoutStyle
 from .warp_encoding import canonical_layouts
@@ -35,6 +36,39 @@ __all__ = ["Tiling", "TileMmaPlan"]
 # accumulation is commutative, so every order yields the same (bit-exact) result -- the knob
 # is for schedule/locality, not correctness.
 _SUBTILE_ORDERS = ("MNK", "MKN", "NMK", "NKM", "KMN", "KNM")
+
+
+def _ir_constant_name(dtype: Type) -> str:
+    """The ``rocke.core.ir`` constant an author writes for ``dtype`` (``F16`` for ``f16``): every
+    scalar IR type is exported under its name in upper case."""
+    return f"rocke.core.ir.{dtype.name.upper()}"
+
+
+def _require_scalar_ir_type(role: str, value: object) -> Type:
+    """Return ``value`` when it is a scalar IR type; otherwise raise naming the constant to pass.
+
+    ``role`` is the keyword the value came in (``"a"``, ``"b"``, ``"c"`` or ``"d"``). A dtype string
+    is refused rather than converted, so every MMA dtype the plan holds is the IR type the author
+    wrote.
+    """
+    ok, _ = _fragment_dtype_ok(value)
+    if ok:
+        return value  # type: ignore[return-value]
+    head = f"{role}= must be a scalar IR type such as rocke.core.ir.F16"
+    if isinstance(value, str):
+        try:
+            dtype = dtype_to_ir_type(value)
+        except ValueError:
+            raise ValueError(
+                f"{head}, not the string {value!r} -- rocke.core.ir has no type for "
+                f"{value!r}"
+            ) from None
+        raise ValueError(  # noqa: TRY004 -- every refused dtype argument is a ValueError
+            f"{head}, not the string {value!r} -- pass {_ir_constant_name(dtype)}"
+        )
+    # A composite IR type (vector, pointer, LDS) is shown by its IR spelling, anything else by repr.
+    shown = value.name if isinstance(value, Type) else repr(value)
+    raise ValueError(f"{head} -- got {shown} ({type(value).__name__})")
 
 
 @dataclass(frozen=True)
@@ -90,24 +124,34 @@ class Tiling:
 class TileMmaPlan:
     """A target-resolved wave-tile MMA design (dense; the M1 surface). IR-free.
 
-    ``TileMmaPlan((16, 16, 64), a="f16", b="f16", c="f32", target="gfx90a",
+    ``TileMmaPlan((16, 16, 64), a=F16, b=F16, c=F32, target="gfx90a",
     tiling=Tiling(atom_shape=(16, 16, 16)))`` -- resolution + validation happen here, fail-fast, with
     no IR. Feed the resolved layouts / ``emit_op`` to a :class:`TileMmaDriver` to walk the atom grid.
+
+    ``a``, ``b``, ``c`` and ``d`` are scalar IR types from ``rocke.core.ir`` (``F16``, ``F32``,
+    ``FP8E4M3``, ...): A and B are the operand dtypes, ``c`` the accumulator taken in and ``d`` the
+    result returned. ``d`` omitted means the result has the accumulator's dtype (``d = c``), which
+    is what every accumulate-in-place instruction does. A dtype string is refused with the constant
+    to pass instead.
     """
 
     def __init__(
         self,
         shape: tuple[int, int, int] | None = None,
         *,
-        a: str | None = None,
-        b: str | None = None,
-        c: str | None = None,
+        a: Type | None = None,
+        b: Type | None = None,
+        c: Type | None = None,
+        d: Type | None = None,
         target: str,
         tiling: Tiling | None = None,
         style: LayoutStyle | None = None,
         catalog: MmaTraitsCatalog | None = None,
         atom_override: str | None = None,
     ) -> None:
+        for role, value in (("a", a), ("b", b), ("c", c), ("d", d)):
+            if value is not None:
+                _require_scalar_ir_type(role, value)
         tiling = tiling if tiling is not None else Tiling()
         style = style if style is not None else CanonicalStyle()
         catalog = catalog if catalog is not None else load_mma_traits()
@@ -116,14 +160,14 @@ class TileMmaPlan:
         if atom_override is not None:
             # Name a specific intrinsic and DERIVE its M/N/K + dtypes from the catalog row (target
             # still required, to validate/resolve). `shape`, if given, is the wave tile (a multiple of
-            # the atom); otherwise it IS the atom -- a single MMA. Any a/b/c passed are overridden.
+            # the atom); otherwise it IS the atom -- a single MMA. Any a/b/c/d passed are overridden.
             if tiling.atom_shape is not None:
                 raise ValueError(
                     "specify the atom via atom_override OR tiling.atom_shape, not both"
                 )
             self._traits = self._resolve_atom(catalog, atom_override, target)
             atom_shape = (self._traits.m, self._traits.n, self._traits.k)
-            a, b, c = self._traits.a_dtype, self._traits.b_dtype, self._traits.c_dtype
+            a, b, c, d = self._traits.ir_dtypes()
             shape = tuple(shape) if shape is not None else atom_shape
         else:
             if shape is None:
@@ -140,27 +184,29 @@ class TileMmaPlan:
                     f"MFMA requires matching A/B dtypes -- a={a!r}, b={b!r}"
                 )
             # Resolve the atom + its traits from the knob: explicit intrinsic NAME, atom SHAPE,
-            # or (None) the wave shape itself. Both paths end with a resolved traits row. The
-            # author's dtype strings are kept as given; they are normalised to canonical names
-            # only here, where they meet the catalog.
-            dtypes = tuple(normalize_dtype(name) for name in (a, b, c))
+            # or (None) the wave shape itself. Both paths end with a resolved traits row.
             atom_knob = tiling.atom_shape
             if isinstance(atom_knob, str):
-                self._traits = self._resolve_by_name(catalog, atom_knob, target, dtypes)
+                self._traits = self._resolve_by_name(
+                    catalog, atom_knob, target, a, b, c, d
+                )
                 atom_shape = (self._traits.m, self._traits.n, self._traits.k)
+                d = d if d is not None else self._traits.ir_dtypes()[3]
             else:
                 atom_shape = atom_knob if atom_knob is not None else shape
                 m, n, k = atom_shape
                 self._traits = catalog.select(
                     target=target,
-                    a=dtypes[0],
-                    b=dtypes[1],
-                    c=dtypes[2],
+                    a=a,
+                    b=b,
+                    c=c,
+                    d=d,
                     m=m,
                     n=n,
                     k=k,
                     family="dense",
                 )
+                d = d if d is not None else c
         self._refuse_result_dtype_change(self._traits)
 
         if len(shape) != 3:
@@ -187,6 +233,7 @@ class TileMmaPlan:
         self._a_dtype = a
         self._b_dtype = b
         self._c_dtype = c
+        self._d_dtype = d
         self._target = target
 
         # C-oracle (rev-7 Principle 8): the DERIVED native C the style produces must equal the machine's
@@ -223,23 +270,31 @@ class TileMmaPlan:
         catalog: MmaTraitsCatalog,
         op_id: str,
         target: str,
-        dtypes: tuple[str, str, str],
+        a: Type,
+        b: Type,
+        c: Type,
+        d: Type | None,
     ) -> MmaTraits:
         """Resolve an EXPLICIT intrinsic name (escape hatch) to its traits, validating that it
-        exists, runs on ``target``, and takes the requested canonical A/B/C ``dtypes``.
-        ``catalog.get`` already fails fast for an unknown op_id."""
+        exists, runs on ``target``, and takes the requested A/B/C dtypes (and returns ``d`` when
+        given). ``catalog.get`` already fails fast for an unknown op_id."""
         traits = catalog.get(op_id)
         if not traits.supports(target):
             raise ValueError(
                 f"MMA intrinsic not available on target -- op_id={op_id!r}, "
                 f"target={target!r}, supported={list(traits.supported_targets)}"
             )
-        a, b, c = dtypes
-        if not traits.accepts(a=a, b=b, c=c, d=traits.d_dtype):
+        # The catalog spells dtypes by their canonical core.dtypes names.
+        asked = {
+            role: normalize_dtype(dtype.name)
+            for role, dtype in (("a", a), ("b", b), ("c", c))
+        }
+        asked["d"] = traits.d_dtype if d is None else normalize_dtype(d.name)
+        if not traits.accepts(**asked):
             raise ValueError(
                 f"MMA intrinsic dtype mismatch -- op_id={op_id!r}, intrinsic "
                 f"a/b/c=({traits.a_dtype},{traits.b_dtype},{traits.c_dtype}), "
-                f"requested ({a},{b},{c})"
+                f"requested ({asked['a']},{asked['b']},{asked['c']})"
             )
         return traits
 
@@ -287,16 +342,25 @@ class TileMmaPlan:
         return self._target
 
     @property
-    def a_dtype(self) -> str:
+    def a_dtype(self) -> Type:
+        """The A operand dtype (an IR type)."""
         return self._a_dtype
 
     @property
-    def b_dtype(self) -> str:
+    def b_dtype(self) -> Type:
+        """The B operand dtype (an IR type)."""
         return self._b_dtype
 
     @property
-    def c_dtype(self) -> str:
+    def c_dtype(self) -> Type:
+        """The accumulator dtype the instruction takes in (an IR type)."""
         return self._c_dtype
+
+    @property
+    def d_dtype(self) -> Type:
+        """The result dtype the instruction returns (an IR type); equal to :attr:`c_dtype` for
+        every accumulate-in-place instruction."""
+        return self._d_dtype
 
     @property
     def op_id(self) -> str:
@@ -434,5 +498,5 @@ class TileMmaPlan:
         return (
             f"TileMmaPlan(shape={self._shape}, atom={self._atom_shape}, "
             f"a={self._a_dtype!r}, b={self._b_dtype!r}, c={self._c_dtype!r}, "
-            f"target={self._target!r}, op_id={self.op_id!r})"
+            f"d={self._d_dtype!r}, target={self._target!r}, op_id={self.op_id!r})"
         )

@@ -28,7 +28,7 @@ from math import log2
 from types import SimpleNamespace
 
 from ....core.dtypes import dtype_info
-from ....core.ir import dtype_to_ir_type
+from ....core.ir import Type
 from ..encoding import WarpDistributionEncoding
 from ..register_mapper import RegisterMapper
 from ..transforms import (
@@ -2870,6 +2870,12 @@ def flow_kloop_operand(
     )
 
 
+def mma_input_label(a: Type, b: Type) -> str:
+    """Spell an MMA's input dtypes for a label: the IR type name (``"f16"``) when A and B agree,
+    else ``"<a>/<b>"`` (``"fp8e4m3/bf8e5m2"``)."""
+    return a.name if a == b else f"{a.name}/{b.name}"
+
+
 def flow_wave_mma(mma, **overrides):
     """Workflow 3 -- 'show the wave-tile MMA': the A/B register-file wings feeding the machine-derived C
     (logical body + C register file), with each operand's boxed static distribution (A at A's top-left,
@@ -2963,12 +2969,9 @@ class MmaTee:
         # `a_enc`/`b_enc` override to render a styled operand. C derives by flowing the supplied labels
         # through the refs.
         a_canon, b_canon, c_canon = canonical_layouts(t, mma.subtiles)
-        # Widths and labels come from the row's per-operand dtypes. The C/D fragment is drawn with
-        # the result's (D) width; C and D differ only where the instruction returns another dtype.
-        # Labels are IR type names ("f16", "fp8e4m3"); A and B are spelled "<a>/<b>" when they differ.
-        a_name, b_name, d_name = (
-            dtype_to_ir_type(name).name for name in (t.a_dtype, t.b_dtype, t.d_dtype)
-        )
+        # Widths come from the row's per-operand dtypes; labels from the MMA's IR dtypes. The C/D
+        # fragment is drawn and labelled with the result's (D) dtype; C and D differ only where the
+        # instruction returns another dtype.
         base = dict(
             a_enc=a_canon,
             b_enc=b_canon,
@@ -2980,8 +2983,8 @@ class MmaTee:
             a_dtype_bits=dtype_info(t.a_dtype).encoded_bits,
             b_dtype_bits=dtype_info(t.b_dtype).encoded_bits,
             c_dtype_bits=dtype_info(t.d_dtype).encoded_bits,
-            in_dtype=a_name if a_name == b_name else f"{a_name}/{b_name}",
-            out_dtype=d_name,
+            in_dtype=mma_input_label(mma.a_dtype, mma.b_dtype),
+            out_dtype=mma.d_dtype.name,
             op_id=mma.op_id,
             wave_shape=mma.shape,
         )

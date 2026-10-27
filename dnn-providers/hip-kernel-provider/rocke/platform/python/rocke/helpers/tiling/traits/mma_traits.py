@@ -12,7 +12,9 @@ edit procedure. This module gives the table a typed, validated face:
 - :class:`MmaTraitsCatalog` -- the loaded table, with lookup by name and selection by intent.
 - :func:`load_mma_traits` -- read the JSON into a catalog; any malformed row fails the load.
 
-Operand dtypes are rocke's canonical ``core.dtypes`` names (``fp16``, ``fp8e4m3``, ``i8``, ...).
+A row stores its operand dtypes as rocke's canonical ``core.dtypes`` names (``fp16``, ``fp8e4m3``,
+``i8``, ...); :meth:`MmaTraits.ir_dtypes` gives them as IR types, and
+:meth:`MmaTraitsCatalog.select` takes IR types (``rocke.core.ir.F16``, ...).
 """
 
 from __future__ import annotations
@@ -24,7 +26,8 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from ....core.arch.target import MmaScaleBlockK, MmaScaleDType
-from ....core.dtypes import dtype_info
+from ....core.dtypes import dtype_info, normalize_dtype
+from ....core.ir import Type, dtype_to_ir_type
 
 __all__ = [
     "MmaLayoutParams",
@@ -288,6 +291,13 @@ class MmaTraits:
             and (c, d) == (self.c_dtype, self.d_dtype)
         )
 
+    def ir_dtypes(self) -> tuple[Type, Type, Type, Type]:
+        """The row's (A, B, C, D) dtypes as IR types (``rocke.core.ir.F16``, ...)."""
+        return tuple(  # type: ignore[return-value]
+            dtype_to_ir_type(name)
+            for name in (self.a_dtype, self.b_dtype, self.c_dtype, self.d_dtype)
+        )
+
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> MmaTraits:
         """Build a validated ``MmaTraits`` from one ``mma_traits.json`` row.
@@ -451,22 +461,22 @@ class MmaTraitsCatalog:
         self,
         *,
         target: str,
-        a: str,
-        b: str,
-        c: str,
+        a: Type,
+        b: Type,
+        c: Type,
         m: int,
         n: int,
         k: int,
-        d: str | None = None,
+        d: Type | None = None,
         family: str = "dense",
         scale_block_k: int | None = None,
     ) -> MmaTraits:
         """Select the one instruction for this intent on ``target``.
 
-        ``a``, ``b``, ``c`` and ``d`` are canonical ``core.dtypes`` names; ``d=None`` means the
-        result has the accumulator's dtype (``d = c``). ``scale_block_k`` (the K elements sharing
-        one scale) is required for family ``scaled`` and refused for every other family. Selection
-        keys are unique by a load-time invariant, so at most one row matches.
+        ``a``, ``b``, ``c`` and ``d`` are scalar IR types (``rocke.core.ir.F16``, ...); ``d=None``
+        means the result has the accumulator's dtype (``d = c``). ``scale_block_k`` (the K elements
+        sharing one scale) is required for family ``scaled`` and refused for every other family.
+        Selection keys are unique by a load-time invariant, so at most one row matches.
         """
         if family == "scaled" and scale_block_k is None:
             raise ValueError(
@@ -478,26 +488,55 @@ class MmaTraitsCatalog:
                 f"scale_block_k={scale_block_k!r} applies to family 'scaled' only "
                 f"-- family={family!r}"
             )
-        d = c if d is None else d
+        # The catalog spells dtypes by their canonical core.dtypes names: that is the match key.
+        asked = {
+            role: normalize_dtype(dtype.name)
+            for role, dtype in (
+                ("a", a),
+                ("b", b),
+                ("c", c),
+                ("d", c if d is None else d),
+            )
+        }
         for traits in self.by_op_id.values():
             if (
                 self._is_selectable(traits, target, family)
-                and traits.accepts(a=a, b=b, c=c, d=d)
+                and traits.accepts(**asked)
                 and (traits.m, traits.n, traits.k) == (m, n, k)
                 and _scale_block_k(traits) == scale_block_k
             ):
                 return traits
-        selectable = sorted(
-            t.op_id
-            for t in self.by_op_id.values()
-            if self._is_selectable(t, target, family)
+        query = f"a={a.name}, b={b.name}, c={c.name}"
+        if d is not None:
+            query += f", d={d.name}"
+        query += f", shape={(m, n, k)}, family={family!r}"
+        if scale_block_k is not None:
+            query += f", scale_block_k={scale_block_k}"
+        available = sorted(
+            {
+                _describe_row(t)
+                for t in self.by_op_id.values()
+                if self._is_selectable(t, target, family)
+            }
         )
-        block = "" if scale_block_k is None else f" scale_block_k={scale_block_k}"
+        listed = f" (a x b -> c, MxNxK): {available}" if available else ": none"
         raise ValueError(
-            f"no MMA instruction for target={target!r} a={a!r} b={b!r} c={c!r} d={d!r} "
-            f"shape=({m},{n},{k}) family={family!r}{block} "
-            f"-- selectable on {target!r}: {selectable}"
+            f"no MMA instruction found for {query}, target={target!r} "
+            f"-- available on {target!r}{listed}"
         )
+
+
+def _describe_row(traits: MmaTraits) -> str:
+    """Spell a row's intent for an author: ``'f16 x f16 -> f32, 16x16x16'`` in IR type names, with
+    the result dtype when it differs from the accumulator's and the scale block size of a scaled
+    row."""
+    a, b, c, d = (dtype.name for dtype in traits.ir_dtypes())
+    text = f"{a} x {b} -> {c}"
+    if d != c:
+        text += f" (d={d})"
+    text += f", {traits.m}x{traits.n}x{traits.k}"
+    block_k = _scale_block_k(traits)
+    return text if block_k is None else f"{text}, scale_block_k={block_k}"
 
 
 def _check_unique_selection(rows: list[MmaTraits]) -> None:

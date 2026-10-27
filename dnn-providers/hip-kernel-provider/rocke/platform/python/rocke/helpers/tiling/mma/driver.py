@@ -12,7 +12,6 @@ never instance state -- so the same driver drives every wave-tile call. The fron
 
 from __future__ import annotations
 
-from ....core.ir import dtype_to_ir_type
 from ..fragments import Fragment, TileDesc, fragment_length
 from ..register_mapper import RegisterMapper
 from ..transforms import (
@@ -208,10 +207,8 @@ class TileMmaDriver:
             ("B", b_fragment),
             ("C", accumulator),
         ):
-            want = dtype_to_ir_type(
-                {"A": plan._a_dtype, "B": plan._b_dtype, "C": plan._c_dtype}[name]
-            )
-            if fragment.dtype.name != want.name:
+            want = {"A": plan.a_dtype, "B": plan.b_dtype, "C": plan.c_dtype}[name]
+            if fragment.dtype != want:
                 raise ValueError(
                     f"MMA operand dtype mismatch -- operand={name}, "
                     f"fragment={fragment.dtype.name!r}, expected {want.name!r}"
