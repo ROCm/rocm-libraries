@@ -135,15 +135,18 @@ class TensorDesc:
                     return name, axis, extent
         return None
 
-    def _require_static(self, reader: str) -> None:
-        """Refuse a runtime length or stride for a reader that needs the whole layout at build
-        time (an LDS buffer is sized at build)."""
+    def _require_static_for_lds(self, caller: str) -> None:
+        """Refuse a runtime length or stride when ``caller`` lays this tensor out in LDS and so
+        needs its whole layout at build: the one home of that refusal, for the LDS verbs, the
+        cooperative LDS copies, the built-in swizzle and :attr:`element_span`. ``caller`` opens
+        the message and names what needed the layout."""
         runtime = self._runtime_extent()
         if runtime is not None:
             name, axis, extent = runtime
             raise ValueError(
-                f"{reader} is static -- {name}[{axis}] is a runtime value "
-                f"({value_text(extent)}); LDS tensors are sized at build"
+                f"{caller}: {name}[{axis}] is a runtime value ({value_text(extent)}) -- rocKE "
+                "allocates LDS statically, with a fixed size, so an LDS tensor needs int lengths "
+                "and strides"
             )
 
     @property
@@ -155,7 +158,7 @@ class TensorDesc:
         space after it is not. Static: a runtime length or stride is refused. The LDS verbs' built-in
         swizzle reaches further; size a swizzled buffer with ``lds_element_span``.
         """
-        self._require_static("TensorDesc.element_span")
+        self._require_static_for_lds("TensorDesc.element_span")
         for axis, stride in enumerate(self.strides):
             if stride < 0:
                 raise ValueError(

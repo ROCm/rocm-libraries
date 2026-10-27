@@ -165,8 +165,10 @@ a_td = make_tensor_desc((M, K), (K, 1), F16)   # one K Value: the length and the
   launch and raises `LaunchRefused` naming each failed one. `first_supported([aligned, ragged], args)`
   picks the first kernel that accepts a launch.
 - **The contiguous axis** keeps the int stride 1.
-- **LDS descriptors are static.** An LDS buffer is sized at build: `element_span` refuses a runtime
-  length or stride.
+- **LDS descriptors are static.** rocKE allocates LDS statically, with a fixed size, so an LDS tensor
+  takes int lengths and strides only: `load_fragment` / `store_fragment` on an LDS buffer, the
+  cooperative LDS copies and `element_span` refuse a tensor with a runtime length or stride, all with
+  one message. A runtime window origin is fine.
 - **`check_gemm_shapes`** agrees two runtime extents only when they are one and the same Value; two
   `gpu_checked_value` calls give two different Values, even on one loaded value.
 

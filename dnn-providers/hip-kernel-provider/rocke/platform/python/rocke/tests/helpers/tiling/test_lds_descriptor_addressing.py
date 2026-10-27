@@ -12,7 +12,9 @@ check:
   N-contiguous ``(N, K)`` buffer and a stage of a rank-3 buffer positioned by its origin;
 - each refusal: a buffer that is not flat, holds another element type or is smaller than the
   descriptor's span; the built-in swizzle on a buffer whose stride-1 axis is not last;
-  ``TensorDesc.element_span`` on a negative stride;
+  ``TensorDesc.element_span`` on a negative stride; an LDS tensor with a runtime length or stride
+  (rocKE allocates LDS statically, with a fixed size), refused with one message by the verbs, the
+  cooperative LDS copies and ``element_span``, while a runtime origin is accepted;
 - ``lds_tile_desc``: the convention-order ``(free, K)`` descriptor of a cooperative LDS tile puts every
   element at the same address the buffer-order ``(K, free)`` layout did;
 - the in-tree LDS-staged demos keep their vector LDS accesses;
@@ -33,7 +35,7 @@ import pytest
 
 pytest.importorskip("rocke.core.ir", reason="rocke IR substrate required")
 
-from rocke.core.ir import F16, F32, IRBuilder, PtrType
+from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers.tiling import (
     InterleavedStyle,
@@ -381,6 +383,96 @@ def test_element_span_refuses_a_negative_stride() -> None:
     assert str(info.value) == (
         "TensorDesc.element_span needs non-negative strides -- strides[1]=-1"
     )
+
+
+# ---- an LDS tensor is static ------------------------------------------------------------------------
+
+
+def _static_lds_refusal(reader: str, where: str, name: str) -> str:
+    """The one refusal of a runtime length or stride on an LDS tensor, as ``reader`` gives it."""
+    return (
+        f"{reader}: {where} is a runtime value ({name}) -- rocKE allocates LDS statically, with a "
+        "fixed size, so an LDS tensor needs int lengths and strides"
+    )
+
+
+def _runtime_extent_refusal(
+    runtime_axis: str, verb: str, swizzle: bool
+) -> tuple[str, str]:
+    """Load or store through an LDS buffer whose tensor has one runtime extent -- the length of axis
+    0, or the stride of axis 0 (axis 1 keeps the int stride 1) -- and return the refusal and the
+    runtime value's IR name."""
+    b = IRBuilder("lds_runtime_extent")
+    tid = b.thread_id_x()
+    extent = b.param("S", I32, ge=16, le=4096)
+    if runtime_axis == "length":
+        td = make_tensor_desc((extent, 16), (16, 1), F16)
+    else:
+        td = make_tensor_desc((16, 16), (extent, 1), F16)
+    lds = b.smem_alloc(F16, [4096 * 16], name_hint="lds")
+    window = make_window(td, (0, 0))
+    with pytest.raises(ValueError) as info:
+        if verb == "load":
+            load_fragment(b, lds, window, _TILE_RUN_AXIS1, tid, lds_swizzle=swizzle)
+        else:
+            fragment = make_fragment(_TILE_RUN_AXIS1, F16)
+            fill_fragment(b, fragment, 0)
+            store_fragment(b, lds, window, fragment, tid, lds_swizzle=swizzle)
+    return str(info.value), extent.param.name
+
+
+@pytest.mark.parametrize("swizzle", [False, True])
+@pytest.mark.parametrize("verb", ["load", "store"])
+@pytest.mark.parametrize(
+    "runtime_axis,where", [("length", "lengths[0]"), ("stride", "strides[0]")]
+)
+def test_an_lds_tensor_with_a_runtime_extent_is_refused(
+    runtime_axis, where, verb, swizzle
+) -> None:
+    # Both verbs refuse it with one message, before the buffer checks or the swizzle read the layout.
+    message, name = _runtime_extent_refusal(runtime_axis, verb, swizzle)
+    assert message == _static_lds_refusal(f"{verb}_fragment", where, name)
+
+
+@pytest.mark.parametrize(
+    "runtime_axis,where", [("length", "lengths[0]"), ("stride", "strides[0]")]
+)
+def test_the_cooperative_lds_copies_and_element_span_give_the_same_refusal(
+    runtime_axis, where
+) -> None:
+    b = IRBuilder("lds_runtime_extent_copies")
+    tid = b.thread_id_x()
+    extent = b.param("S", I32, ge=16, le=4096)
+    if runtime_axis == "length":
+        td = make_tensor_desc((extent, 16), (16, 1), F16)
+    else:
+        td = make_tensor_desc((16, 16), (extent, 1), F16)
+    lds = b.smem_alloc(F16, [4096 * 16], name_hint="lds")
+    fragment = make_fragment(_TILE_RUN_AXIS1, F16)
+    fill_fragment(b, fragment, 0)
+    with pytest.raises(ValueError) as stored:
+        lds_store(b, lds, td, (0, 0), fragment, tid, n_lanes=_WAVE)
+    with pytest.raises(ValueError) as read:
+        lds_read(b, lds, td, (0, 0), _TILE_RUN_AXIS1, tid, n_lanes=_WAVE)
+    with pytest.raises(ValueError) as spanned:
+        _ = td.element_span
+    assert str(stored.value) == _static_lds_refusal("cooperative LDS store", where, "S")
+    assert str(read.value) == _static_lds_refusal("cooperative LDS read", where, "S")
+    assert str(spanned.value) == _static_lds_refusal(
+        "TensorDesc.element_span", where, "S"
+    )
+
+
+def test_an_lds_window_at_a_runtime_origin_is_accepted() -> None:
+    # Only the extents are static: a window placed at a runtime stage of a static buffer is fine.
+    b = IRBuilder("lds_runtime_origin")
+    tid = b.thread_id_x()
+    stage = b.param("stage", I32)
+    td = make_tensor_desc((2, 16, 16), (256, 16, 1), F16)
+    lds = b.smem_alloc(td.dtype, [td.element_span], name_hint="lds")
+    window = make_window(td, (stage, 0, 0))
+    fragment = load_fragment(b, lds, window, _TILE_RUN_AXIS1, tid)
+    store_fragment(b, lds, window, fragment, tid)
 
 
 # ---- lds_tile_desc -----------------------------------------------------------------------------------

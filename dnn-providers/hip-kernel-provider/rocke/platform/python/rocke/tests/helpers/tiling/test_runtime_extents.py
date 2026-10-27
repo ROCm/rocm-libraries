@@ -227,14 +227,15 @@ def test_a_runtime_stride_on_the_contiguous_axis_is_refused():
 
 
 def test_element_span_is_static():
-    # An LDS buffer is sized from element_span at build, so a runtime extent has no span.
+    # An LDS buffer is sized from element_span, and rocKE allocates LDS statically, so a runtime
+    # extent has no span.
     b = _builder()
     k = b.param("K", I32, ge=1, le=4096)
     td = make_tensor_desc((16, k), (k, 1), F16)
     with _raises(
         ValueError,
-        "TensorDesc.element_span is static -- lengths[1] is a runtime value (K); LDS tensors are "
-        "sized at build",
+        "TensorDesc.element_span: lengths[1] is a runtime value (K) -- rocKE allocates LDS "
+        "statically, with a fixed size, so an LDS tensor needs int lengths and strides",
     ):
         _ = td.element_span
 
@@ -367,14 +368,17 @@ def test_a_recorded_runtime_stride_is_refused_by_the_address_analyses():
         transaction((ld, 1)).static_strides()
 
 
-def test_a_runtime_extent_on_an_lds_tensor_has_no_span():
+def test_a_runtime_extent_on_an_lds_tensor_is_refused():
+    # rocKE allocates LDS statically, with a fixed size, so the LDS verbs take a static tensor only.
     b = _builder()
     k = b.param("K", I32, ge=1, le=4096)
     td = make_tensor_desc((64, k), (k, 1), F32)
     tile = cooperative_load_desc(64, 16, 1, vw=1)
     lds = b.smem_alloc(F32, [64 * 16])
-    with pytest.raises(
-        ValueError, match=r"^TensorDesc.element_span is static -- lengths\[1\]"
+    with _raises(
+        ValueError,
+        "load_fragment: lengths[1] is a runtime value (K) -- rocKE allocates LDS statically, with "
+        "a fixed size, so an LDS tensor needs int lengths and strides",
     ):
         load_fragment(b, lds, make_window(td, (0, 0)), tile, b.thread_id_x())
 

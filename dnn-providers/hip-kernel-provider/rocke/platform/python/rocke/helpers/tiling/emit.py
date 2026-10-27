@@ -360,7 +360,7 @@ def _swizzled_row_length(tensor: TensorDesc) -> int:
         position (outer = 7)   0..7    8..15   ...  40..47
         swizzled               56..63  48..55  ...  16..23     <- 56..63 lies past the 48
     """
-    tensor._require_static("the built-in LDS swizzle")
+    tensor._require_static_for_lds("the built-in LDS swizzle")
     length = tensor.lengths[-1]
     return -(-length // _SWIZZLE_GROUP) * _SWIZZLE_GROUP
 
@@ -561,8 +561,9 @@ def load_fragment(
     bound-check rule (:func:`~rocke.helpers.tiling.clipping.explain_bounds_checks` reports the same
     decision): a window proven inside the tensor loads unmasked, a checked one masks each access by
     its validity. An LDS buffer is flat (``b.smem_alloc(td.dtype, [lds_element_span(td,
-    lds_swizzle)])``) and the descriptor is its layout: the buffer must be rank 1, hold the tensor's
-    dtype and hold that span (refused otherwise); LDS loads are unclipped.
+    lds_swizzle)])``) and the descriptor is its layout, so it takes int lengths and strides only
+    (rocKE allocates LDS statically, with a fixed size); the buffer must be rank 1, hold the
+    tensor's dtype and hold that span (refused otherwise); LDS loads are unclipped.
     `pad` is the fill of an element outside the tensor: only 0 is implemented, and any other
     value is refused (``NotImplementedError``). `coherency` is reserved: any value but its default
     0 is refused (``NotImplementedError``).
@@ -575,6 +576,7 @@ def load_fragment(
     check_tile_rank("load_fragment", window, tile_desc)
     dtype = window.tensor.dtype
     if is_lds(ptr):
+        window.tensor._require_static_for_lds("load_fragment")
         # A custom swizzle relocates whole units of its granularity (vw_elems), capped + range-
         # checked to [1, natural run]. The built-in bool swizzle preserves its run.
         vw = _swizzle_vw(
@@ -658,6 +660,7 @@ def store_fragment(
         )
 
     if is_lds(ptr):
+        window.tensor._require_static_for_lds("store_fragment")
         # Wide LDS stores when the innermost register run is contiguous (ds_write_b{32,64,128}). A
         # custom swizzle relocates whole units of its granularity (vw_elems) -> the access is
         # capped and range-checked to [1, natural run]. The built-in bool swizzle preserves its run.
