@@ -45,6 +45,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackAlignment.hpp"
 
 /**
  * @file Gfx950AttentionDenseNative.cpp
@@ -107,6 +108,34 @@ constexpr uint32_t HEAD_AXIS = 1;
 constexpr uint32_t SEQ_AXIS = 2;
 constexpr uint32_t HEAD_SIZE_AXIS = 3;
 constexpr uint32_t SDPA_RANK = 4;
+
+/// The byte alignment each operand's DECLARED alignment must guarantee
+/// (TensorAttributes::alignment, RFC 0014; a multiple guarantee, see PackAlignment.hpp).
+/// One constant per operand role, so a probe that proves a looser need changes one line.
+///
+/// Source: rocke/library/kernels/gfx950/attention_dense.py (the same for the default and the
+/// persistent builder).
+///  - Q: every row is read with `global_load_vN(q, addr, dtype, 8, align=16)` -- 8 bf16/fp16
+///    elements, a 16-byte vector at any head size (:967, :1913).
+///  - K, V: the wide gfx950 LDS DMA issues `buffer_load_dwordx4 ... lds` (:26-27, :1799-1801),
+///    and the kernel declares both pointers `align=16` (:804-809, :1762-1767).
+///  - O: the epilogue stores `o_store_width` elements at `align=2*width` (:1686); the default
+///    width is 4, so the stores themselves need only 8 bytes (:254), but the kernel declares
+///    the O pointer `align=16` (:811, :1768-1769), which lets the compiler merge stores to
+///    16 bytes. The declared figure is the one the kernel's contract states, so it is the need
+///    until a probe proves 8 enough.
+/// LSE is not an operand of this engine: graphs that ask for statistics are declined.
+constexpr int64_t QUERY_ALIGN_BYTES = 16;
+constexpr int64_t KEY_VALUE_ALIGN_BYTES = 16;
+constexpr int64_t OUTPUT_ALIGN_BYTES = 16;
+
+/// An operand and the alignment its declared figure must guarantee.
+struct AlignedOperand
+{
+    std::string_view role;
+    const data_objects::TensorAttributes* tensor;
+    int64_t needBytes;
+};
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -454,6 +483,28 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
                                    << describeOperand(role, *tensor)
                                    << " must be a rank-4 (B, H, S, D) tensor with positive "
                                       "extents, not virtual and not pass-by-value");
+            return std::nullopt;
+        }
+    }
+
+    // --- 3b. Declared alignment. The backend rejects, at execute, a pointer that is not a
+    // multiple of the tensor's declared alignment, so only a declaration that guarantees the
+    // kernel's vector accesses may be served: an operand declared below its need would be
+    // handed an address the 16-byte loads and stores can fault on or misread. This engine
+    // takes the graph's tensors as the kernel's pointers (no staging copy), so the
+    // declaration is the only evidence of where the buffer sits.
+    for(const auto& [role, tensor, needBytes] : {AlignedOperand{"Q", q, QUERY_ALIGN_BYTES},
+                                                 AlignedOperand{"K", k, KEY_VALUE_ALIGN_BYTES},
+                                                 AlignedOperand{"V", v, KEY_VALUE_ALIGN_BYTES},
+                                                 AlignedOperand{"O", o, OUTPUT_ALIGN_BYTES}})
+    {
+        if(!pack_alignment::guaranteesAlignment(*tensor, needBytes))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"alignment"}
+                                   << role << " (uid " << tensor->uid() << ") declares "
+                                   << tensor->alignment()
+                                   << "-byte alignment, which does not guarantee the " << needBytes
+                                   << "-byte alignment the kernel's vector accesses need");
             return std::nullopt;
         }
     }

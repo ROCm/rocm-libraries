@@ -65,6 +65,8 @@ constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
 constexpr int64_t EXTRA_UID = 99;
+/// A tensor's default declared alignment in bytes (TensorAttributes::alignment).
+constexpr int64_t DEFAULT_ALIGNMENT = 16;
 
 /// Base shape: bf16, D128, B=2, Hq=Hkv=4, Sq=Skv=256, top-left causal.
 constexpr int64_t BATCH = 2;
@@ -219,6 +221,12 @@ struct GraphSpec
     std::optional<int64_t> raggedUid;
     bool overrideShape = false;
 
+    /// Each operand's declared byte alignment; the default every shipped graph carries.
+    int64_t qAlignment = DEFAULT_ALIGNMENT;
+    int64_t kAlignment = DEFAULT_ALIGNMENT;
+    int64_t vAlignment = DEFAULT_ALIGNMENT;
+    int64_t oAlignment = DEFAULT_ALIGNMENT;
+
     // Mask. Defaults to top-left causal.
     std::optional<int64_t> leftBound = -1;
     std::optional<int64_t> rightBound = 0;
@@ -315,7 +323,8 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const auto tensorFor = [&](int64_t uid,
                                data_objects::DataType dataType,
                                const std::vector<int64_t>* strides,
-                               const std::vector<int64_t>& dims) {
+                               const std::vector<int64_t>& dims,
+                               int64_t alignment) {
         const flatbuffers::Optional<int64_t> raggedOffset
             = spec.raggedUid == uid ? flatbuffers::Optional<int64_t>(EXTRA_UID)
                                     : flatbuffers::nullopt;
@@ -329,28 +338,29 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                           data_objects::TensorValue::NONE,
                                                           0,
                                                           spec.passByValueUid == uid,
-                                                          raggedOffset);
+                                                          raggedOffset,
+                                                          alignment);
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
     if(spec.omitTensorUid != Q_UID)
     {
-        tensors.push_back(tensorFor(Q_UID, spec.dataType, qStridesPtr, qDims));
+        tensors.push_back(tensorFor(Q_UID, spec.dataType, qStridesPtr, qDims, spec.qAlignment));
     }
     if(spec.omitTensorUid != K_UID)
     {
-        tensors.push_back(
-            tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStridesPtr, kDims));
+        tensors.push_back(tensorFor(
+            K_UID, spec.kDataType.value_or(spec.dataType), kStridesPtr, kDims, spec.kAlignment));
     }
     if(spec.omitTensorUid != V_UID)
     {
-        tensors.push_back(
-            tensorFor(V_UID, spec.vDataType.value_or(spec.dataType), vStridesPtr, vDims));
+        tensors.push_back(tensorFor(
+            V_UID, spec.vDataType.value_or(spec.dataType), vStridesPtr, vDims, spec.vAlignment));
     }
     if(spec.omitTensorUid != O_UID)
     {
-        tensors.push_back(
-            tensorFor(O_UID, spec.oDataType.value_or(spec.dataType), oStridesPtr, oDims));
+        tensors.push_back(tensorFor(
+            O_UID, spec.oDataType.value_or(spec.dataType), oStridesPtr, oDims, spec.oAlignment));
     }
 
     const auto attributesFor = [&]() {
@@ -1189,6 +1199,127 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphWithNoSdpaForward
     spec.pointwiseOnly = true;
     const auto decline = loggedDecline(spec);
     EXPECT_TRUE(decline.cause.empty()) << "[" << decline.cause << "]" << decline.detail;
+}
+
+// ---------------------------------------------------------------------------
+// Declared tensor alignment. The backend rejects, at execute, a pointer that is not a
+// multiple of the tensor's declared alignment, and the kernel's 16-byte vector accesses need
+// every operand pointer on 16 bytes (see QUERY_ALIGN_BYTES and its siblings in
+// Gfx950AttentionDenseNative.cpp), so only a declaration that 16 divides may be served.
+// ---------------------------------------------------------------------------
+
+/// One operand of the graph: its role, its uid, and the GraphSpec field holding its
+/// declared alignment.
+struct AlignmentOperand
+{
+    const char* role;
+    int64_t uid;
+    int64_t GraphSpec::*alignment;
+};
+
+const std::vector<AlignmentOperand>& alignmentOperands()
+{
+    static const std::vector<AlignmentOperand> OPERANDS{{"Q", Q_UID, &GraphSpec::qAlignment},
+                                                        {"K", K_UID, &GraphSpec::kAlignment},
+                                                        {"V", V_UID, &GraphSpec::vAlignment},
+                                                        {"O", O_UID, &GraphSpec::oAlignment}};
+    return OPERANDS;
+}
+
+/// The default graph with only @p operand's declared alignment changed to @p bytes.
+GraphSpec withAlignment(const AlignmentOperand& operand, int64_t bytes)
+{
+    GraphSpec spec;
+    spec.*(operand.alignment) = bytes;
+    return spec;
+}
+
+// Bug caught: an operand declared 8-byte aligned is claimed, so the kernel's 16-byte vector
+// accesses see an address the declaration allows to be misaligned.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandDeclaredBelowSixteenBytes)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {1, 2, 4, 8})
+        {
+            EXPECT_FALSE(matchGraph(withAlignment(operand, bytes)).has_value())
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: a threshold above the kernel's need declines the exact boundary, which is the
+// default every shipped graph carries.
+TEST(TestGfx950AttentionDenseGraphMatch, AcceptsEveryOperandDeclaredAtExactlySixteenBytes)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        EXPECT_TRUE(matchGraph(withAlignment(operand, 16)).has_value()) << operand.role;
+    }
+
+    GraphSpec all;
+    all.qAlignment = 16;
+    all.kAlignment = 16;
+    all.vAlignment = 16;
+    all.oAlignment = 16;
+    EXPECT_TRUE(matchGraph(all).has_value());
+}
+
+// Bug caught: an equality test declines a stricter declaration, though a 32-byte aligned
+// address is also 16-byte aligned.
+TEST(TestGfx950AttentionDenseGraphMatch, AcceptsOperandsDeclaredAsMultiplesOfSixteenBytes)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {32, 48, 64, 256})
+        {
+            EXPECT_TRUE(matchGraph(withAlignment(operand, bytes)).has_value())
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: a greater-or-equal comparison accepts a declared 24, which guarantees only 8.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesADeclarationThatSixteenDoesNotDivide)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {24, 40, 72})
+        {
+            EXPECT_FALSE(matchGraph(withAlignment(operand, bytes)).has_value())
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: a zero or negative declaration (never enforced by the backend) is read as a
+// guarantee.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandWithNoPositiveAlignment)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {0, -16})
+        {
+            EXPECT_FALSE(matchGraph(withAlignment(operand, bytes)).has_value())
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: the decline is silent or names no operand, so the caller sees only "No engine
+// configurations available".
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndItsDeclaredAlignmentWhenUnderDeclared)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        const auto decline = loggedDecline(withAlignment(operand, 8));
+        EXPECT_EQ(decline.cause, "alignment") << operand.role << ": " << decline.detail;
+        const std::string expectedOperand
+            = std::string(operand.role) + " (uid " + std::to_string(operand.uid) + ")";
+        EXPECT_NE(decline.detail.find(expectedOperand), std::string::npos) << decline.detail;
+        EXPECT_NE(decline.detail.find("declares 8-byte"), std::string::npos) << decline.detail;
+    }
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)

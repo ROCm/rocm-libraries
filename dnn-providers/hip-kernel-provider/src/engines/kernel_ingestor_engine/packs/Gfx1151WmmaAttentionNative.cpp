@@ -42,6 +42,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackAlignment.hpp"
 
 /**
  * @file Gfx1151WmmaAttentionNative.cpp
@@ -149,6 +150,31 @@ constexpr int64_t HEAD_DIM_GRANULE = 8;
 constexpr int64_t MAX_HEAD_DIM = 256;
 constexpr int64_t ROW_ALIGN_ELEMENTS = 8;
 constexpr uintptr_t ROW_ALIGN_BYTES = 16;
+
+// The byte alignment each operand's DECLARED alignment (TensorAttributes::alignment, RFC 0014,
+// a multiple guarantee; see PackAlignment.hpp) must guarantee. One constant per operand role,
+// so a probe that proves a looser need changes one line. Sources, all in rocke/:
+//  - Q, K, V, O: 16 bytes. The shared prefill body loads every Q/K/V chunk as one 16-byte
+//    `buffer_load_vN(.., I32, 4)` (platform/python/rocke/helpers/rdna_attention.py:355-356,
+//    :401, :408, :431) and the decode kernel loads Q with `global_load_vN(.., 8, align=16)` and
+//    K/V as 8-element chunks (kernels/gfx1151/wmma_fmha_decode.py:908-909, :1165-1166). The
+//    decode kernel declares Q and O `align=16` (:507-518) and stores O at `align=16`
+//    (:1463-1468); only the split-merge kernel stores O at `align=8` (:1689, :1778), so the
+//    single-split path is what sets O's 16. The prefill kernel's ABI declares the four pointers
+//    only `align=2` (wmma_fmha_fwd_v2.py:326) and reaches them through buffer resources, so a
+//    probe may show less is enough there; 16 is the rocKE attention README's contract
+//    ("Rows load as 16-byte vectors ... so data pointers and every outer stride must keep that
+//    alignment", library/dispatch/attention/README.md:462-463) and what the execute-time
+//    requireRowAligned below already enforces.
+//  - LSE: f32, stored one element at a time (`buffer_store_f32`, rdna_attention.py:1000;
+//    `global_store(.., align=4)`, wmma_fmha_decode.py:1487, :1570, :1788): the element size.
+//  - Bias: read from arbitrary element offsets, never a 16-byte multiple, with a Q-dtype
+//    bias's mid-dword start handled in-kernel (rdna_attention.py:631-651, :693-697;
+//    wmma_fmha_decode.py:993-1000): the kernels declare it `align=4` (f32) or `align=2`
+//    (Q dtype) (wmma_fmha_fwd_v2.py:389, wmma_fmha_decode.py:591), so the element size.
+// The decode workspace is not a graph tensor; its 16-byte alignment is checked at execute.
+constexpr int64_t QKVO_ALIGN_BYTES = static_cast<int64_t>(ROW_ALIGN_BYTES);
+constexpr int64_t LSE_ALIGN_BYTES = 4;
 constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
 
 // ---- the rocKE decode host helpers (kernels/gfx1151/wmma_fmha_decode.py), mirrored ----
@@ -548,6 +574,10 @@ std::optional<BiasParameters> biasFor(const MatchContext& context,
     {
         return std::nullopt;
     }
+    if(!pack_alignment::guaranteesAlignment(*tensor, elementBytes))
+    {
+        return std::nullopt;
+    }
     if(!addressFitsI32(*tensor, elementBytes))
     {
         return std::nullopt;
@@ -684,6 +714,16 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
             return std::nullopt;
         }
     }
+    for(const auto* tensor : {q, k, v, o})
+    {
+        // The backend rejects, at execute, a pointer that is not a multiple of the declared
+        // alignment, so an operand declared below the kernels' 16-byte vector accesses cannot
+        // be served: its buffer may sit anywhere the declaration allows.
+        if(!pack_alignment::guaranteesAlignment(*tensor, QKVO_ALIGN_BYTES))
+        {
+            return std::nullopt;
+        }
+    }
 
     const bool writeLse = attributes.generate_stats().value_or(false);
     const data_objects::TensorAttributes* lse = o;
@@ -701,6 +741,10 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
            || lse->dims()->Get(BATCH_AXIS) != p.batch || lse->dims()->Get(HEAD_AXIS) != p.queryHeads
            || lse->dims()->Get(SEQ_AXIS) != p.seqLenQ || lse->dims()->Get(HEAD_SIZE_AXIS) != 1
            || !addressFitsI32(*lse, 4))
+        {
+            return std::nullopt;
+        }
+        if(!pack_alignment::guaranteesAlignment(*lse, LSE_ALIGN_BYTES))
         {
             return std::nullopt;
         }

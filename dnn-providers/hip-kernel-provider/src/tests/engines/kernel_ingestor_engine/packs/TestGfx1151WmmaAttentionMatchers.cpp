@@ -80,6 +80,8 @@ constexpr int64_t LSE_UID = 5;
 constexpr int64_t RAGGED_OFFSET_UID = 6;
 constexpr int64_t SCALE_UID = 7;
 constexpr int64_t BIAS_UID = 8;
+/// A tensor's default declared alignment in bytes (TensorAttributes::alignment).
+constexpr int64_t DEFAULT_ALIGNMENT = 16;
 
 enum class ScaleForm
 {
@@ -150,6 +152,13 @@ struct GraphSpec
     // Elements of padding after each Q row: a row stride that is not a multiple of 8
     // elements leaves rows off the kernels' 16-byte vector alignment.
     int64_t qRowPad = 0;
+    // Each tensor's declared byte alignment; the default every shipped graph carries.
+    int64_t qAlignment = DEFAULT_ALIGNMENT;
+    int64_t kAlignment = DEFAULT_ALIGNMENT;
+    int64_t vAlignment = DEFAULT_ALIGNMENT;
+    int64_t oAlignment = DEFAULT_ALIGNMENT;
+    int64_t lseAlignment = DEFAULT_ALIGNMENT;
+    int64_t biasAlignment = DEFAULT_ALIGNMENT;
 };
 
 // The default device is gfx12: the dispatcher's rule keeps a small-query graph with a
@@ -206,7 +215,8 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const auto tensorFor = [&](int64_t uid,
                                data_objects::DataType dtype,
                                const std::vector<int64_t>& strides,
-                               const std::vector<int64_t>& dims) {
+                               const std::vector<int64_t>& dims,
+                               int64_t alignment = DEFAULT_ALIGNMENT) {
         const ::flatbuffers::Optional<int64_t> ragged
             = spec.raggedOperand == uid ? ::flatbuffers::Optional<int64_t>(RAGGED_OFFSET_UID)
                                         : ::flatbuffers::nullopt;
@@ -220,18 +230,20 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                           data_objects::TensorValue::NONE,
                                                           0,
                                                           false,
-                                                          ragged);
+                                                          ragged,
+                                                          alignment);
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
-        tensorFor(Q_UID, spec.dtype, qStrides, qDims),
-        tensorFor(K_UID, spec.dtype, kStrides, kDims),
-        tensorFor(V_UID, spec.dtype, vStrides, vDims),
-        tensorFor(O_UID, spec.dtype, oStrides, oDims),
+        tensorFor(Q_UID, spec.dtype, qStrides, qDims, spec.qAlignment),
+        tensorFor(K_UID, spec.dtype, kStrides, kDims, spec.kAlignment),
+        tensorFor(V_UID, spec.dtype, vStrides, vDims, spec.vAlignment),
+        tensorFor(O_UID, spec.dtype, oStrides, oDims, spec.oAlignment),
     };
     if(spec.returnLse)
     {
-        tensors.push_back(tensorFor(LSE_UID, spec.lseDtype, lseStrides, lseDims));
+        tensors.push_back(
+            tensorFor(LSE_UID, spec.lseDtype, lseStrides, lseDims, spec.lseAlignment));
     }
     if(spec.raggedOperand.has_value())
     {
@@ -252,7 +264,9 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                        false,
                                                        data_objects::TensorValue::NONE,
                                                        0,
-                                                       spec.bias->passByValue));
+                                                       spec.bias->passByValue,
+                                                       ::flatbuffers::nullopt,
+                                                       spec.biasAlignment));
     }
     const std::vector<int64_t> scalarDims{1};
     switch(spec.scale)
@@ -731,6 +745,191 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRowsOffTheVectorAlignment)
         GraphSpec misaligned = aligned;
         misaligned.qRowPad = 4;
         EXPECT_FALSE(matchGraph(misaligned).has_value()) << "bhsd " << bhsd;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Declared tensor alignment. The backend rejects, at execute, a pointer that is not a
+// multiple of the tensor's declared alignment. Q/K/V/O are read and written as 16-byte
+// vectors (QKVO_ALIGN_BYTES in Gfx1151WmmaAttentionNative.cpp), the LSE one f32 at a time
+// and a bias at its element size, so each is served only by a declaration its need divides.
+// Both engines share one graph matcher, and each is exercised.
+// -----------------------------------------------------------------------------
+
+/// The graph matcher of @p symbols' engine, over @p spec.
+std::optional<BoundTokens> matchGraphFor(const EngineSymbols& symbols, const GraphSpec& spec)
+{
+    const Fixture fixture(spec);
+    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+        std::string(symbols.graphMatcher))(fixture.context());
+}
+
+/// Whether both the prefill and the decode engine match @p spec; false when either declines.
+bool bothEnginesMatch(const GraphSpec& spec)
+{
+    return matchGraphFor(PREFILL_SYMBOLS, spec).has_value()
+           && matchGraphFor(DECODE_SYMBOLS, spec).has_value();
+}
+
+/// Whether neither engine matches @p spec.
+bool neitherEngineMatches(const GraphSpec& spec)
+{
+    return !matchGraphFor(PREFILL_SYMBOLS, spec).has_value()
+           && !matchGraphFor(DECODE_SYMBOLS, spec).has_value();
+}
+
+/// One vector-loaded operand: its role and the GraphSpec field holding its declared alignment.
+struct AlignmentOperand
+{
+    const char* role;
+    int64_t GraphSpec::*alignment;
+};
+
+const std::vector<AlignmentOperand>& alignmentOperands()
+{
+    static const std::vector<AlignmentOperand> OPERANDS{{"Q", &GraphSpec::qAlignment},
+                                                        {"K", &GraphSpec::kAlignment},
+                                                        {"V", &GraphSpec::vAlignment},
+                                                        {"O", &GraphSpec::oAlignment}};
+    return OPERANDS;
+}
+
+/// The default graph with only @p operand's declared alignment changed to @p bytes.
+GraphSpec withAlignment(const AlignmentOperand& operand, int64_t bytes)
+{
+    GraphSpec spec;
+    spec.*(operand.alignment) = bytes;
+    return spec;
+}
+
+// Bug caught: an operand declared 8-byte aligned is claimed, so the kernels' 16-byte vector
+// accesses see an address the declaration allows to be misaligned.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesAnOperandDeclaredBelowSixteenBytes)
+{
+    ASSERT_TRUE(bothEnginesMatch(GraphSpec{}));
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {1, 2, 4, 8})
+        {
+            EXPECT_TRUE(neitherEngineMatches(withAlignment(operand, bytes)))
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: a threshold above the kernels' need declines the exact boundary, which is the
+// default every shipped graph carries.
+TEST(TestGfx1151WmmaAttentionMatchers, AcceptsEveryOperandDeclaredAtExactlySixteenBytes)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        EXPECT_TRUE(bothEnginesMatch(withAlignment(operand, 16))) << operand.role;
+    }
+
+    GraphSpec all;
+    all.qAlignment = 16;
+    all.kAlignment = 16;
+    all.vAlignment = 16;
+    all.oAlignment = 16;
+    EXPECT_TRUE(bothEnginesMatch(all));
+}
+
+// Bug caught: an equality test declines a stricter declaration, though a 32-byte aligned
+// address is also 16-byte aligned.
+TEST(TestGfx1151WmmaAttentionMatchers, AcceptsOperandsDeclaredAsMultiplesOfSixteenBytes)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {32, 48, 64, 256})
+        {
+            EXPECT_TRUE(bothEnginesMatch(withAlignment(operand, bytes)))
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: a greater-or-equal comparison accepts a declared 24, which guarantees only 8.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesADeclarationThatSixteenDoesNotDivide)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {24, 40, 72})
+        {
+            EXPECT_TRUE(neitherEngineMatches(withAlignment(operand, bytes)))
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: a zero or negative declaration (never enforced by the backend) is read as a
+// guarantee.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesAnOperandWithNoPositiveAlignment)
+{
+    for(const auto& operand : alignmentOperands())
+    {
+        for(const int64_t bytes : {0, -16})
+        {
+            EXPECT_TRUE(neitherEngineMatches(withAlignment(operand, bytes)))
+                << operand.role << " declared " << bytes;
+        }
+    }
+}
+
+// Bug caught: the LSE held to the 16-byte vector need (declining a 4-byte declaration the f32
+// stores accept), or not checked at all (accepting a 2-byte declaration under an f32).
+TEST(TestGfx1151WmmaAttentionMatchers, LseNeedsOnlyItsElementAlignment)
+{
+    for(const int64_t bytes : {4, 8, 12, 16, 32})
+    {
+        GraphSpec accepted;
+        accepted.lseAlignment = bytes;
+        EXPECT_TRUE(bothEnginesMatch(accepted)) << "LSE declared " << bytes;
+    }
+    for(const int64_t bytes : {0, 1, 2, 6, -4})
+    {
+        GraphSpec declined;
+        declined.lseAlignment = bytes;
+        EXPECT_TRUE(neitherEngineMatches(declined)) << "LSE declared " << bytes;
+    }
+
+    // A graph that writes no statistics has no LSE tensor to constrain.
+    GraphSpec noLse;
+    noLse.returnLse = false;
+    noLse.lseAlignment = 1;
+    EXPECT_TRUE(bothEnginesMatch(noLse));
+}
+
+// Bug caught: a bias held to the 16-byte vector need (its rows start at any element offset), or
+// not checked at all (accepting a 2-byte declaration under an f32 bias).
+TEST(TestGfx1151WmmaAttentionMatchers, BiasNeedsOnlyItsElementAlignment)
+{
+    // B=2, Hq=8, Sq=33, Sk=65: an f32 bias beside FP16 Q/K/V/O, then a Q-dtype bias.
+    const auto biasGraph = [](data_objects::DataType dtype, int64_t alignment) {
+        GraphSpec spec;
+        spec.bias = packedBias({2, 8, 33, 65}, dtype);
+        spec.biasAlignment = alignment;
+        return spec;
+    };
+
+    for(const int64_t bytes : {4, 8, 16, 64})
+    {
+        EXPECT_TRUE(bothEnginesMatch(biasGraph(data_objects::DataType::FLOAT, bytes)))
+            << "f32 bias declared " << bytes;
+    }
+    for(const int64_t bytes : {0, 1, 2, 6})
+    {
+        EXPECT_TRUE(neitherEngineMatches(biasGraph(data_objects::DataType::FLOAT, bytes)))
+            << "f32 bias declared " << bytes;
+    }
+    for(const int64_t bytes : {2, 4, 16, 64})
+    {
+        EXPECT_TRUE(bothEnginesMatch(biasGraph(data_objects::DataType::HALF, bytes)))
+            << "Q-dtype bias declared " << bytes;
+    }
+    for(const int64_t bytes : {0, 1, 3})
+    {
+        EXPECT_TRUE(neitherEngineMatches(biasGraph(data_objects::DataType::HALF, bytes)))
+            << "Q-dtype bias declared " << bytes;
     }
 }
 
