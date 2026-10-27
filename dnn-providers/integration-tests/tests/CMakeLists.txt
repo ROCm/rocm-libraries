@@ -22,6 +22,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SweepManifestCache.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
+    ../src/harness/reference-validation/BundleReferenceSmokeHarness.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     ../src/harness/reference-validation/GoldenDataPlan.cpp
     ../src/harness/reference-validation/GoldenOutputProbe.cpp
@@ -81,6 +82,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestClaimModeResolution.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
+    TestReferenceSmokeScan.cpp
     TestGoldenDataPlan.cpp
     TestGoldenOutputProbe.cpp
     TestProductionPolicy.cpp
