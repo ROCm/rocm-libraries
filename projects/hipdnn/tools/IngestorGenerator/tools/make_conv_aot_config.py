@@ -79,6 +79,15 @@ PRODUCT_ENGINES = {
 }
 
 
+#: The engine whose native pack implements the packaged catalog. One pack
+#: serves every arch (packs/Gfx950ConvFwdNative.cpp): reading the graph is the
+#: same work on gfx950 and gfx942, and each arch's KDPs are arch-pruned before
+#: the matcher runs, so an engine can only ever be offered its own kernels.
+#: Every other engine over this catalog names these symbols through the UED's
+#: ``native_symbols_from``.
+NATIVE_SYMBOLS_ENGINE = PRODUCT_ENGINE
+
+
 def product_engine(arch: str) -> str:
     """The engine that ships ``arch``'s catalog."""
     try:
@@ -526,8 +535,8 @@ def build_config(
         "knobs": list(ENGINE_KNOBS),
         "heuristic": "native",
     }
-    if engine_name != product_engine(arch):
-        engine["native_symbols_from"] = product_engine(arch)
+    if engine_name != NATIVE_SYMBOLS_ENGINE:
+        engine["native_symbols_from"] = NATIVE_SYMBOLS_ENGINE
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",

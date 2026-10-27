@@ -1,5 +1,20 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+//
+// The native pack of rocKE's packaged forward convolution. It serves three
+// engines:
+//
+//   hipkernel:Gfx950ConvFwd      the gfx950 exact-shape catalog;
+//   hipkernel:Gfx950ConvFwdAot   the gfx950 shape-generic AOT instances;
+//   hipkernel:Gfx942ConvFwdAot   the same AOT instances built for gfx942,
+//                                whose descriptors name the AOT symbols below
+//                                through the UED's `native_symbols_from`.
+//
+// The two AOT engines share every symbol because reading a graph, deciding
+// which instance serves it and launching it are the same work on both
+// architectures; only the binaries differ, and each engine ships its own KDPs
+// declaring its own arch. A shard is arch-pruned before the matcher runs, so
+// an engine is only ever offered the kernels of the device it is running on.
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
@@ -191,11 +206,33 @@ std::optional<MatchedProblem>
     return MatchedProblem{binding, problem, *geometry, dtype, std::move(chunks), false};
 }
 
+/// The architectures this pack's graph matcher reads a convolution for.
+///
+/// Three engines share these symbols: the gfx950 exact-shape engine
+/// hipkernel:Gfx950ConvFwd, the gfx950 AOT engine hipkernel:Gfx950ConvFwdAot
+/// and the gfx942 one hipkernel:Gfx942ConvFwdAot, whose descriptors name these
+/// symbols through `native_symbols_from` (as Gfx1151WmmaAttentionNative.cpp
+/// serves every RDNA shard). Reading the graph is the same work on both
+/// architectures -- it is the kernels that differ, and each engine ships its
+/// own KDPs declaring its own arch. A shard is arch-pruned before the matcher
+/// runs, so on a gfx942 device only the gfx942 catalog reaches this and on a
+/// gfx950 device only the gfx950 ones: widening the check here cannot let an
+/// engine serve a graph with another architecture's binaries.
+constexpr std::array<std::string_view, 2> MATCHED_ARCHES{"gfx950", "gfx942"};
+
+bool archIsMatched(std::string_view gcnArchName)
+{
+    return std::any_of(
+        MATCHED_ARCHES.begin(), MATCHED_ARCHES.end(), [&](std::string_view arch) {
+            return hipdnn_plugin_sdk::archMatches(
+                gcnArchName, arch, hipdnn_plugin_sdk::ArchMatchMode::PREFIX);
+        });
+}
+
 std::optional<MatchedProblem> matchProblem(const MatchContext& context)
 {
     if(!context.graph.isValid() || context.graph.getGraph().is_override_shape_enabled()
-       || !hipdnn_plugin_sdk::archMatches(
-           context.deviceProperties.gcnArchName, "gfx950", hipdnn_plugin_sdk::ArchMatchMode::PREFIX)
+       || !archIsMatched(context.deviceProperties.gcnArchName)
        || context.deviceProperties.warpSize != 64 || context.graph.nodeCount() != 1)
     {
         return std::nullopt;

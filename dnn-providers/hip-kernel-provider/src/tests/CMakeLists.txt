@@ -389,6 +389,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "for gfx950, so its census is not registered.")
     endif()
 
+    # Census for hipkernel:Gfx942ConvFwdAot, the gfx942 catalog of the same AOT
+    # instances. Its descriptors name hipkernel:Gfx950ConvFwdAot's native symbols
+    # (packs/Gfx950ConvFwdNative.cpp serves both), so the census is the only thing
+    # that is per-arch here, and it runs against the gfx942 shard.
+    hkp_gfx942_conv_fwd_aot_available(_hkp_gfx942_conv_fwd_aot)
+    if(_hkp_gfx942_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942ConvFwdAot for "
+            "gfx942, so its census is not registered.")
+    endif()
+
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
     # as two engines: the prefill objects and the split-KV decode objects (the wide-Q
     # prefill and D256 decode geometries differ per family). The census checks each wired

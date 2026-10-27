@@ -1441,13 +1441,13 @@ function(hkp_product_offers_engine out_var engine)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_root_ships_for_gfx950(<out> <root> <engine>)
-#   TRUE when this configuration actually ships <engine> for gfx950 from the pack target
-#   <root>: <root> is wired, gfx950 is among the architectures it was wired for, and what
-#   that pack ships for gfx950 includes <engine>. Same conjuncts, probe and fallback as
-#   hkp_gfx950_attention_dense_available() above, for any root.
+# _hkp_root_ships_for_arch(<out> <root> <engine> <arch>)
+#   TRUE when this configuration actually ships <engine> for <arch> from the pack target
+#   <root>: <root> is wired, <arch> is among the architectures it was wired for, and what
+#   that pack ships for <arch> includes <engine>. Same conjuncts, probe and fallback as
+#   hkp_gfx950_attention_dense_available() above, for any root and any arch.
 # ---------------------------------------------------------------------------
-function(_hkp_root_ships_for_gfx950 out_var root engine)
+function(_hkp_root_ships_for_arch out_var root engine arch)
     set(${out_var} FALSE PARENT_SCOPE)
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
@@ -1456,7 +1456,7 @@ function(_hkp_root_ships_for_gfx950 out_var root engine)
     endif()
 
     get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${root})
-    if(NOT "gfx950" IN_LIST _arches)
+    if(NOT "${arch}" IN_LIST _arches)
         return()
     endif()
 
@@ -1467,10 +1467,20 @@ function(_hkp_root_ships_for_gfx950 out_var root engine)
     endif()
 
     get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${root})
-    _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx950)
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" ${arch})
     if("${engine}" IN_LIST _engines)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_ships_for_gfx950(<out> <root> <engine>)
+#   _hkp_root_ships_for_arch() for gfx950, the arch every caller below this one
+#   asks about.
+# ---------------------------------------------------------------------------
+function(_hkp_root_ships_for_gfx950 out_var root engine)
+    _hkp_root_ships_for_arch(_ships "${root}" "${engine}" gfx950)
+    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1490,6 +1500,18 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_gfx950_conv_fwd_aot_available out_var)
     _hkp_root_ships_for_gfx950(_ships product "hipkernel:Gfx950ConvFwdAot")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx942_conv_fwd_aot_available(<out>)
+#   The same predicate for hipkernel:Gfx942ConvFwdAot, the gfx942 catalog of the
+#   same rocKE AOT instances. It ships its own bundle and names
+#   hipkernel:Gfx950ConvFwdAot's native symbols, so it is available exactly when
+#   the product root packs gfx942 and that pack ships it.
+# ---------------------------------------------------------------------------
+function(hkp_gfx942_conv_fwd_aot_available out_var)
+    _hkp_root_ships_for_arch(_ships product "hipkernel:Gfx942ConvFwdAot" gfx942)
     set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 

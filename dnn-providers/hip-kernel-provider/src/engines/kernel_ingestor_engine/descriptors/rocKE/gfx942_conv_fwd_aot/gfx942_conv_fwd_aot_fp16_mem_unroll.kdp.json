@@ -1,0 +1,267 @@
+{
+  "version": "1.0",
+  "id": "0629ef2e-8799-4d78-8e0c-602a0209b4e2",
+  "name": "hipkernel:gfx942_conv_fwd_aot_fp16_mem_unroll",
+  "matchers": [
+    "f2eb7981-5ea5-4d70-ac42-549b96c5acb8"
+  ],
+  "engine": "ee443b74-4ca9-43f6-b6ce-a6cf5d0a7282",
+  "dispatch": "b13bbb68-987b-404c-bb4a-f30c09db8ac1",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "ee443b74-4ca9-43f6-b6ce-a6cf5d0a7282",
+          "kmd_id": "e2666d6c-39d8-468d-8e2c-9e7677f920cb",
+          "metadata_fields": [
+            "dtype",
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "warp_m",
+            "warp_n",
+            "warp_tile_m",
+            "warp_tile_n",
+            "warp_tile_k",
+            "wave_size",
+            "pipeline",
+            "epilogue",
+            "vector_size_a",
+            "vector_size_b",
+            "vector_size_c",
+            "unroll_k",
+            "async_dma",
+            "async_chunk_a",
+            "async_chunk_b",
+            "grouped",
+            "instance_id",
+            "layout",
+            "kernel_family",
+            "direct_variant",
+            "filter_h",
+            "filter_w",
+            "stride_h",
+            "stride_w",
+            "pad_h",
+            "pad_w",
+            "dilation_h",
+            "dilation_w",
+            "block_w",
+            "block_waves",
+            "block_h",
+            "unroll_rows",
+            "block_q",
+            "block_groups",
+            "double_buffer",
+            "cpg",
+            "kpg",
+            "tile_h",
+            "tile_w",
+            "tile_k_out",
+            "ck",
+            "waves_m",
+            "waves_n",
+            "atom",
+            "swizzle_wgm",
+            "iglp",
+            "waves_per_eu",
+            "group_merge",
+            "split_c"
+          ],
+          "matcher_only_fields": [],
+          "bindings": {
+            "dtype": {
+              "field": "dtype"
+            },
+            "tile_m": {
+              "field": "tile_m"
+            },
+            "tile_n": {
+              "field": "tile_n"
+            },
+            "tile_k": {
+              "field": "tile_k"
+            },
+            "warp_m": {
+              "field": "warp_m"
+            },
+            "warp_n": {
+              "field": "warp_n"
+            },
+            "warp_tile_m": {
+              "field": "warp_tile_m"
+            },
+            "warp_tile_n": {
+              "field": "warp_tile_n"
+            },
+            "warp_tile_k": {
+              "field": "warp_tile_k"
+            },
+            "wave_size": {
+              "field": "wave_size"
+            },
+            "pipeline": {
+              "field": "pipeline"
+            },
+            "epilogue": {
+              "field": "epilogue"
+            },
+            "vector_size_a": {
+              "field": "vector_size_a"
+            },
+            "vector_size_b": {
+              "field": "vector_size_b"
+            },
+            "vector_size_c": {
+              "field": "vector_size_c"
+            },
+            "unroll_k": {
+              "field": "unroll_k"
+            },
+            "async_dma": {
+              "field": "async_dma"
+            },
+            "async_chunk_a": {
+              "field": "async_chunk_a"
+            },
+            "async_chunk_b": {
+              "field": "async_chunk_b"
+            },
+            "grouped": {
+              "field": "grouped"
+            },
+            "instance_id": {
+              "field": "instance_id"
+            },
+            "layout": {
+              "field": "layout"
+            },
+            "kernel_family": {
+              "field": "kernel_family"
+            },
+            "direct_variant": {
+              "field": "direct_variant"
+            },
+            "filter_h": {
+              "field": "filter_h"
+            },
+            "filter_w": {
+              "field": "filter_w"
+            },
+            "stride_h": {
+              "field": "stride_h"
+            },
+            "stride_w": {
+              "field": "stride_w"
+            },
+            "pad_h": {
+              "field": "pad_h"
+            },
+            "pad_w": {
+              "field": "pad_w"
+            },
+            "dilation_h": {
+              "field": "dilation_h"
+            },
+            "dilation_w": {
+              "field": "dilation_w"
+            },
+            "block_w": {
+              "field": "block_w"
+            },
+            "block_waves": {
+              "field": "block_waves"
+            },
+            "block_h": {
+              "field": "block_h"
+            },
+            "unroll_rows": {
+              "field": "unroll_rows"
+            },
+            "block_q": {
+              "field": "block_q"
+            },
+            "block_groups": {
+              "field": "block_groups"
+            },
+            "double_buffer": {
+              "field": "double_buffer"
+            },
+            "cpg": {
+              "field": "cpg"
+            },
+            "kpg": {
+              "field": "kpg"
+            },
+            "tile_h": {
+              "field": "tile_h"
+            },
+            "tile_w": {
+              "field": "tile_w"
+            },
+            "tile_k_out": {
+              "field": "tile_k_out"
+            },
+            "ck": {
+              "field": "ck"
+            },
+            "waves_m": {
+              "field": "waves_m"
+            },
+            "waves_n": {
+              "field": "waves_n"
+            },
+            "atom": {
+              "field": "atom"
+            },
+            "swizzle_wgm": {
+              "field": "swizzle_wgm"
+            },
+            "iglp": {
+              "field": "iglp"
+            },
+            "waves_per_eu": {
+              "field": "waves_per_eu"
+            },
+            "group_merge": {
+              "field": "group_merge"
+            },
+            "split_c": {
+              "field": "split_c"
+            }
+          },
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {"version":"1.0","id":"49b0bb6c-f906-50c4-a048-7fbd1b5eebb0","name":"gfx942_conv_fwd_aot_fp16_0423cfa1f29db04cac87dd3d871bd1a3fc301324","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":256,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"0423cfa1f29db04cac87dd3d871bd1a3fc301324","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":256,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"0423cfa1f29db04cac87dd3d871bd1a3fc301324","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"985082b1-0b55-5263-91dd-877ba6879a38","name":"gfx942_conv_fwd_aot_fp16_07f6d8cd89cbd9bd077f90df65c19205fc4e893c","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"07f6d8cd89cbd9bd077f90df65c19205fc4e893c","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":64,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"07f6d8cd89cbd9bd077f90df65c19205fc4e893c","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"8aca4834-c731-5750-add1-911076195944","name":"gfx942_conv_fwd_aot_fp16_0d3790f91ef8db64a63811c736f4751303afab04","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":4,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"0d3790f91ef8db64a63811c736f4751303afab04","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":4,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"0d3790f91ef8db64a63811c736f4751303afab04","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"5897a641-86b0-5e4d-bb0c-a83602b6e0d7","name":"gfx942_conv_fwd_aot_fp16_16195a70e230cac2b0fba05a3a52eb723d9060da","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":32,"tile_k":64,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":4,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"16195a70e230cac2b0fba05a3a52eb723d9060da","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":32,"tile_k":64,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":4,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"16195a70e230cac2b0fba05a3a52eb723d9060da","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"8d24277b-6263-53fe-aa64-a16fe8b3d5cc","name":"gfx942_conv_fwd_aot_fp16_1b57e694da8870779449d1c0de8634cb40505377","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":32,"tile_k":16,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"1b57e694da8870779449d1c0de8634cb40505377","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":32,"tile_k":16,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"1b57e694da8870779449d1c0de8634cb40505377","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"7bb10bcf-cb0a-53da-af7b-34eb371885ea","name":"gfx942_conv_fwd_aot_fp16_33dd629a2c8cde548e89430033945c38d1b1e364","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":128,"tile_k":64,"warp_m":1,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"33dd629a2c8cde548e89430033945c38d1b1e364","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":128,"tile_k":64,"warp_m":1,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"33dd629a2c8cde548e89430033945c38d1b1e364","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"3c4e8e18-ddb5-5c2a-ad78-0fe3bcd910df","name":"gfx942_conv_fwd_aot_fp16_3aebb88bcc645e8c59dd45039fe7d78a95f724c0","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":16,"tile_k":16,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"default","vector_size_a":1,"vector_size_b":1,"vector_size_c":1,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"3aebb88bcc645e8c59dd45039fe7d78a95f724c0","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":16,"tile_k":16,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"default","vector_size_a":1,"vector_size_b":1,"vector_size_c":1,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"3aebb88bcc645e8c59dd45039fe7d78a95f724c0","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"363603c4-0a29-59d0-af04-fef62e83bd51","name":"gfx942_conv_fwd_aot_fp16_40a9089382f4e89888b33d640dce8bb0ac4322ed","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"40a9089382f4e89888b33d640dce8bb0ac4322ed","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":4,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"40a9089382f4e89888b33d640dce8bb0ac4322ed","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"a3c1c0cc-1c24-5883-841b-a4a4da5453c9","name":"gfx942_conv_fwd_aot_fp16_4b96bcf8461d65efc84afb57123ed17b683d5814","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4b96bcf8461d65efc84afb57123ed17b683d5814","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":8,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"4b96bcf8461d65efc84afb57123ed17b683d5814","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"d36fa476-e42f-5e52-873b-27104e704255","name":"gfx942_conv_fwd_aot_fp16_538182867371de8f9d20f0f10bdc8625c29d0570","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":32,"tile_k":64,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"538182867371de8f9d20f0f10bdc8625c29d0570","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":32,"tile_k":64,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"538182867371de8f9d20f0f10bdc8625c29d0570","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"694ceba9-d9a1-5600-bacb-c526d8d0f79f","name":"gfx942_conv_fwd_aot_fp16_6dbe6f5d92365bb56a9f7057a35c38aabc442ab9","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":64,"tile_k":64,"warp_m":1,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6dbe6f5d92365bb56a9f7057a35c38aabc442ab9","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":64,"tile_k":64,"warp_m":1,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6dbe6f5d92365bb56a9f7057a35c38aabc442ab9","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"9dc3b67b-6c82-5629-948c-7d217633146c","name":"gfx942_conv_fwd_aot_fp16_6f4d83a1f70a3c6df6fb9426b3e4c69e66381aad","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":4,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6f4d83a1f70a3c6df6fb9426b3e4c69e66381aad","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":16,"tile_k":64,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":4,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"6f4d83a1f70a3c6df6fb9426b3e4c69e66381aad","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"f048ae23-7e50-56cd-bb33-4f636a8a844a","name":"gfx942_conv_fwd_aot_fp16_7468da9d9f94bd06437b184e6e9afe44d41b72ef","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"7468da9d9f94bd06437b184e6e9afe44d41b72ef","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":64,"tile_k":64,"warp_m":4,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"7468da9d9f94bd06437b184e6e9afe44d41b72ef","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"05fdc31f-85ab-54fe-b739-4e81cbcc0d5f","name":"gfx942_conv_fwd_aot_fp16_7ddea1487ed7d48da55a63fd61654c09bf126be0","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":16,"tile_k":64,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"7ddea1487ed7d48da55a63fd61654c09bf126be0","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":16,"tile_k":64,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"7ddea1487ed7d48da55a63fd61654c09bf126be0","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"18e482e3-7c8a-5e81-a3f6-b5630d5d0657","name":"gfx942_conv_fwd_aot_fp16_8910b3ac4bb06b06e1e6c9ca87f146bbc2eded30","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":32,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8910b3ac4bb06b06e1e6c9ca87f146bbc2eded30","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":32,"warp_m":2,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"8910b3ac4bb06b06e1e6c9ca87f146bbc2eded30","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"5654267f-5f73-5b17-9b17-66b839d2b9a8","name":"gfx942_conv_fwd_aot_fp16_9d4d4b4d02a5c4f6ef822d3ef921118c59ece44c","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":128,"tile_n":256,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9d4d4b4d02a5c4f6ef822d3ef921118c59ece44c","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":128,"tile_n":256,"tile_k":32,"warp_m":2,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"9d4d4b4d02a5c4f6ef822d3ef921118c59ece44c","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"d198c907-e511-529a-917a-bfbada52aa62","name":"gfx942_conv_fwd_aot_fp16_accf096fa667d136fde1306446ef61a7c292e9ca","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"accf096fa667d136fde1306446ef61a7c292e9ca","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"accf096fa667d136fde1306446ef61a7c292e9ca","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"6e870114-f7fe-5a4f-be5b-a2395c0ec232","name":"gfx942_conv_fwd_aot_fp16_db399023ac8a1453caa2fcd3d964404c2e29f181","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":16,"tile_k":64,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":4,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"db399023ac8a1453caa2fcd3d964404c2e29f181","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":16,"tile_k":64,"warp_m":1,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":4,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"db399023ac8a1453caa2fcd3d964404c2e29f181","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"5770ca3a-7496-5ea4-8824-226da5417e1c","name":"gfx942_conv_fwd_aot_fp16_e50bafe4682af1901a6b618cf0f680e9caf3171e","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":64,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"e50bafe4682af1901a6b618cf0f680e9caf3171e","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":64,"warp_m":1,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":8,"vector_size_b":8,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"e50bafe4682af1901a6b618cf0f680e9caf3171e","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"59b73eb5-0816-564b-bb64-178b155439c3","name":"gfx942_conv_fwd_aot_fp16_f6c056ecc148c70ac99952271806014f6a05dc13","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":16,"tile_n":64,"tile_k":64,"warp_m":1,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"f6c056ecc148c70ac99952271806014f6a05dc13","layout":"NHWC"}},"metadata":{"dtype":"fp16","tile_m":16,"tile_n":64,"tile_k":64,"warp_m":1,"warp_n":4,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":1,"vector_size_b":1,"vector_size_c":8,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"f6c056ecc148c70ac99952271806014f6a05dc13","layout":"NHWC"},"priority":0},
+    {"version":"1.0","id":"1d61fff0-a054-505b-8535-458f26524c7d","name":"gfx942_conv_fwd_aot_merged_fp16_2b8c0b954a34df78ea5564cbacc23cf5c572845f","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"2b8c0b954a34df78ea5564cbacc23cf5c572845f","layout":"NHWC","group_merge":4}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"2b8c0b954a34df78ea5564cbacc23cf5c572845f","layout":"NHWC","group_merge":4},"priority":0},
+    {"version":"1.0","id":"2ca18cee-ebb5-5ccf-87ca-85c2d5603558","name":"gfx942_conv_fwd_aot_merged_fp16_538fc27b8ce9964825acd2df261c4ae3d23ac0c9","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"538fc27b8ce9964825acd2df261c4ae3d23ac0c9","layout":"NHWC","group_merge":8}},"metadata":{"dtype":"fp16","tile_m":64,"tile_n":16,"tile_k":64,"warp_m":4,"warp_n":1,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"538fc27b8ce9964825acd2df261c4ae3d23ac0c9","layout":"NHWC","group_merge":8},"priority":0},
+    {"version":"1.0","id":"6647159d-b865-5c9e-8321-7302e17d78ce","name":"gfx942_conv_fwd_aot_merged_fp16_c39fbaab88c4cb8be2e09420fa686dccf4ae120a","kernel_source":{"kind":"rocke","source":"builders/common/convolution_forward.py","builder":"build_gfx950_conv_fwd_aot","spec":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"c39fbaab88c4cb8be2e09420fa686dccf4ae120a","layout":"NHWC","group_merge":4}},"metadata":{"dtype":"fp16","tile_m":32,"tile_n":32,"tile_k":64,"warp_m":2,"warp_n":2,"warp_tile_m":16,"warp_tile_n":16,"warp_tile_k":16,"wave_size":64,"pipeline":"mem","epilogue":"cshuffle","vector_size_a":0,"vector_size_b":0,"vector_size_c":0,"unroll_k":1,"async_dma":0,"async_chunk_a":0,"async_chunk_b":0,"grouped":1,"instance_id":"c39fbaab88c4cb8be2e09420fa686dccf4ae120a","layout":"NHWC","group_merge":4},"priority":0}
+  ],
+  "arch": [
+    "gfx942"
+  ]
+}
