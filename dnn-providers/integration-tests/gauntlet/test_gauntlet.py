@@ -572,6 +572,180 @@ def test_gfx950_dense_space_obeys_the_rocke_rules():
 
 
 # --------------------------------------------------------------------------
+# S13 phase 1: the domain axis and the late-axis mechanism
+# --------------------------------------------------------------------------
+
+DOMAINS = ["default", "narrow", "wide", "positive", "constant"]
+# kind, lo, hi, value of the fill recipe a domain renders for a primary data operand
+DOMAIN_TABLE = {
+    "default": ("free", -1, 1, 0),
+    "narrow": ("free", -0.01, 0.01, 0),
+    "wide": ("free", -8, 8, 0),
+    "positive": ("free", 0.25, 4, 0),
+    "constant": ("fixed", 0.5, 0.5, 0.5),
+}
+# the tensors (by template name) whose fill the domain axis drives, per space
+PRIMARY_OPERANDS = {
+    "Batchnorm/Default": ["X"],
+    "BatchnormBackward/Default": ["x", "dy"],
+    "BatchnormInference/Default": ["X"],
+    "Layernorm/Default": ["x"],
+    "LayernormBackward/Default": ["X", "dY"],
+    "RMSNorm/Default": ["x"],
+    "RMSNormBackward/Default": ["x", "dy"],
+    "ResampleFwd/Default": ["X"],
+    "SdpaFwd/Default": ["Q", "K", "V"],
+    "SdpaFwd/Gfx950Dense": ["Q", "K", "V"],
+}
+# sha256 over seeds 0..299 of the pre-existing axes' draws, taken before the domain axis existed
+OLD_SHAPE_DIGESTS = {
+    "RMSNorm/Default": "7ff3fe8bdf5afd4845a1bf5e631466fe1cb0bfd55a4056059dae694deed4b8f3",
+    "SdpaFwd/Default": "13171199efa5647432d6ed13745de2cdcb3925fb5b0589e15f457a4fb6b95302",
+    "SdpaFwd/Gfx950Dense": "69623b2107c84d79090cab4630861813954bf838689cb9ae32950835d7e8340c",
+}
+
+
+def test_every_shipped_space_has_its_primary_operands_listed():
+    assert sorted(PRIMARY_OPERANDS) == SPACE_IDS
+    assert sorted(OLD_SHAPE_DIGESTS) == [
+        "RMSNorm/Default", "SdpaFwd/Default", "SdpaFwd/Gfx950Dense",
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_domain_is_the_last_axis_with_the_five_values(space_id):
+    # bug caught: a domain axis in the middle shifts the draws of the axes after it, and a
+    # misspelled value is never rendered by the derive chain
+    sp = space_by_id(space_id)
+    assert list(sp.axes)[-1] == "domain"
+    assert sp.axes["domain"].values == DOMAINS
+    drawn = {sampler.sample(sp, seed).axis_values["domain"] for seed in range(200)}
+    assert drawn == set(DOMAINS)
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
+    # bug caught: a domain that reaches the wrong uid, drops a leaf, or overrides the
+    # tuned ranges of the saved statistics or of the default domain
+    sp = space_by_id(space_id)
+    template = json.loads(sp.template_path.read_text())
+    uid_of = {t["name"]: str(t["uid"]) for t in template["tensors"]}
+    primary = [uid_of[name] for name in PRIMARY_OPERANDS[space_id]]
+    quick = json.loads((sp.template_path.parent / "sweep.json").read_text())["cases"]
+    sample = sampler.sample(sp, 11)
+    rendered = {}
+    for domain, (kind, lo, hi, value) in DOMAIN_TABLE.items():
+        case = sp.render(sp.derive_env(dict(sample.axis_values, domain=domain)))
+        assert case["metadata"]["purpose"] == "probe"
+        inputs = rendered[domain] = case["metadata"]["inputs"]
+        for uid in primary:
+            leaf = inputs[uid]
+            if domain == "default":
+                tuned = {
+                    (e["lo"], e["hi"])
+                    for c in quick
+                    if (e := (c["metadata"].get("inputs") or {}).get(uid))
+                    and e["kind"] == "free"
+                }
+                if tuned:
+                    # the default domain keeps the range the quick sweep tunes for this uid
+                    # (the quick files hold the float32 spelling of 0.1 and the like)
+                    assert any(
+                        leaf["lo"] == pytest.approx(t_lo, rel=1e-6)
+                        and leaf["hi"] == pytest.approx(t_hi, rel=1e-6)
+                        for t_lo, t_hi in tuned
+                    ), (uid, leaf, tuned)
+                    lo, hi = leaf["lo"], leaf["hi"]
+            assert leaf == {"kind": kind, "lo": lo, "hi": hi, "value": value}, (
+                space_id, domain, uid, leaf,
+            )  # fmt: skip
+    others = {
+        domain: {u: e for u, e in inputs.items() if u not in primary}
+        for domain, inputs in rendered.items()
+    }
+    assert all(o == others["default"] for o in others.values()), others
+    assert all(set(primary) <= set(i) for i in rendered.values())
+
+
+@pytest.mark.parametrize("space_id", sorted(OLD_SHAPE_DIGESTS))
+def test_the_domain_axis_keeps_the_shapes_that_recorded_seeds_fix(space_id):
+    # bug caught: an appended axis drawn from the shared generator shifts every later draw
+    # after a retry, so seeds recorded before the domain axis would fix other shapes
+    sp = space_by_id(space_id)
+    old = [name for name in sp.axes if name != "domain"]
+    digest = hashlib.sha256()
+    for seed in range(300):
+        drawn = sampler.sample(sp, seed).axis_values
+        digest.update(
+            json.dumps(
+                {name: drawn[name] for name in old},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+    assert digest.hexdigest() == OLD_SHAPE_DIGESTS[space_id]
+
+
+def test_a_late_axis_does_not_move_the_draws_of_other_axes_across_retries(tmp_path):
+    # bug caught: a late axis drawn from the shared generator shifts the following draws
+    # once a constraint rejects an attempt
+    base = {
+        "a": {"values": [1, 2, 3]},
+        "n": {"range": [1, 100], "boundaries": [1, 100]},
+    }
+
+    def drawn(axes, seed):
+        sp = space_lib.load_space(write_space(tmp_path, axes=axes))
+        s = sampler.sample(sp, seed)
+        return (s.axis_values["a"], s.axis_values["n"]), s.attempts
+
+    seeds = range(200)
+    plain = {s: drawn(base, s) for s in seeds}
+    assert any(attempts > 1 for _, attempts in plain.values()), "no seed retried"
+    late = {**base, "z": {"values": [1, 2, 3], "late": True}}
+    eager = {**base, "z": {"values": [1, 2, 3]}}
+    assert {s: drawn(late, s) for s in seeds} == plain
+    # the control: the same axis without `late` does move later draws of retried seeds
+    assert {s: drawn(eager, s) for s in seeds} != plain
+
+
+def test_a_late_axis_is_deterministic_per_seed_and_takes_every_value(tmp_path):
+    # bug caught: a late stream that ignores the seed or the attempt draws one value always
+    axes = {
+        "a": {"values": [1, 2, 3]},
+        "n": {"range": [1, 100], "boundaries": [1, 100]},
+        "z": {"values": [1, 2, 3, 4], "late": True},
+    }
+    sp = space_lib.load_space(write_space(tmp_path, axes=axes, constraints=[]))
+    first = [sampler.sample(sp, seed).axis_values["z"] for seed in range(100)]
+    assert first == [sampler.sample(sp, seed).axis_values["z"] for seed in range(100)]
+    assert set(first) == {1, 2, 3, 4}
+
+
+def test_a_non_late_axis_after_a_late_axis_is_a_load_error(tmp_path):
+    # bug caught: an eager axis behind a late one would still draw from the shared generator
+    axes = {"a": {"values": [1], "late": True}, "n": {"values": [2]}}
+    with pytest.raises(
+        space_lib.SpaceError, match=r"Toy/Default.*'n'.*late axes come last"
+    ):
+        space_lib.load_space(
+            write_space(tmp_path, axes=axes, derive={}, constraints=[])
+        )
+
+
+@pytest.mark.parametrize("late", ["yes", 1, None, [True]])
+def test_late_must_be_a_bool(tmp_path, late):
+    # bug caught: a truthy string or number silently marking an axis late
+    axes = {"a": {"values": [1, 2]}, "z": {"values": [1], "late": late}}
+    with pytest.raises(
+        space_lib.SpaceError, match=r"Toy/Default.*'z'.*'late' must be true or false"
+    ):
+        space_lib.load_space(
+            write_space(tmp_path, axes=axes, derive={}, constraints=[])
+        )
+
+
+# --------------------------------------------------------------------------
 # Driver fixtures
 # --------------------------------------------------------------------------
 
@@ -1668,6 +1842,12 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
         t["uid"] for t in repro["sweep_row"]["values"]["tensors"]
     ]
     assert new["metadata"]["seed"] == repro["data_seed"]  # the same seed
+    # the fill recipes survive the failure folder and the freeze: a frozen regression that
+    # lost metadata.inputs would run the harness default fill and no longer reproduce
+    recipes = repro["sweep_row"]["metadata"]["inputs"]
+    meta = json.loads((folder / f"{case}.meta.json").read_text())
+    assert meta["inputs"] == recipes
+    assert new["metadata"]["inputs"] == recipes
     assert new["metadata"]["purpose"] == "regression"
     assert (
         space_id in new["metadata"]["reference_source"]

@@ -15,7 +15,8 @@
     "d3":       {"range": [1, 8], "boundaries": [1, 2, 4]},
     "h":        {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
     "w":        {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
-    "k":        {"values": [1, 2, 3, 4]}
+    "k":        {"values": [1, 2, 3, 4]},
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant"]}
   },
   "derive": {
     "s_dtype": "p_dtype",
@@ -49,7 +50,11 @@
     "ss_n":    "sc * sd * sh * sw",
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
-    "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]"
+    "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the frontend keeps scale batch dim 1 (LayernormBackwardNode.hpp:108 batchDimCount = ndim - normalized_dim_count must leave the one-padded scale dims 1) and the quick sweeps use normalized_dim_count <= ndim - 1; SUPPORT_MATRIX_OVERVIEW.md op-layernormbackward lists norm:all_dims as used by no test graph"},
@@ -71,6 +76,12 @@
         {"uid": 8, "dims": "${dims_p}", "strides": "${stride_p}", "data_type": "${p_dtype}"}
       ]
     },
-    "metadata": {"purpose": "probe"}
+    "metadata": {
+      "purpose": "probe",
+      "inputs": {
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
+        "4": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+      }
+    }
   }
 }

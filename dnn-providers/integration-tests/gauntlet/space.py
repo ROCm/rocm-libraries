@@ -29,6 +29,10 @@ Space file layout::
       "case":        {"values": {...}, "metadata": {"purpose": "probe"}}
     }
 
+An axis may carry ``"late": true``: it was added after seeds had been recorded against the
+space, and the sampler draws it from a stream of its own so the earlier axes keep their draws.
+Late axes come last.
+
 In ``case``, a string that starts with ``${`` and ends with ``}`` is replaced by the value
 of the expression between them, keeping its JSON type; every other string is copied.
 """
@@ -266,14 +270,20 @@ def _render_case(node, env):
 
 
 class Axis:
-    """One sampled axis: a ``values`` list, or an integer ``range`` with ``boundaries``."""
+    """One sampled axis: a ``values`` list, or an integer ``range`` with ``boundaries``.
 
-    def __init__(self, name, values=None, lo=None, hi=None, boundaries=()):
+    A ``late`` axis was added to a space after seeds had been recorded against it. The sampler
+    draws it from a stream of its own, so the draws of every earlier axis, and so the shape a
+    shape seed fixes, stay exactly what they were (see ``sampler.sample``).
+    """
+
+    def __init__(self, name, values=None, lo=None, hi=None, boundaries=(), late=False):
         self.name = name
         self.values = values
         self.lo = lo
         self.hi = hi
         self.boundaries = tuple(boundaries)
+        self.late = late
 
     @property
     def is_range(self):
@@ -394,11 +404,14 @@ def _load_axis(space_name, name, decl, reserved):
         raise SpaceError(f"space '{space_name}': {where}: name is reserved")
     if not isinstance(decl, dict):
         raise SpaceError(f"space '{space_name}': {where}: must be an object")
-    unknown = set(decl) - {"values", "range", "boundaries"}
+    unknown = set(decl) - {"values", "range", "boundaries", "late"}
     if unknown:
         raise SpaceError(
             f"space '{space_name}': {where}: unknown keys {sorted(unknown)}"
         )
+    late = decl.get("late", False)
+    if not isinstance(late, bool):
+        raise SpaceError(f"space '{space_name}': {where}: 'late' must be true or false")
     if ("values" in decl) == ("range" in decl):
         raise SpaceError(
             f"space '{space_name}': {where}: needs exactly one of 'values' or 'range'"
@@ -413,7 +426,7 @@ def _load_axis(space_name, name, decl, reserved):
             raise SpaceError(
                 f"space '{space_name}': {where}: 'values' must be a non-empty list"
             )
-        return Axis(name, values=values)
+        return Axis(name, values=values, late=late)
     rng = decl["range"]
     ints = (
         isinstance(rng, list)
@@ -432,7 +445,7 @@ def _load_axis(space_name, name, decl, reserved):
         raise SpaceError(
             f"space '{space_name}': {where}: 'boundaries' must be integers inside the range {rng}"
         )
-    return Axis(name, lo=rng[0], hi=rng[1], boundaries=boundaries)
+    return Axis(name, lo=rng[0], hi=rng[1], boundaries=boundaries, late=late)
 
 
 def load_space(path):
@@ -489,7 +502,13 @@ def load_space(path):
     if not isinstance(axes, dict) or not axes:
         raise SpaceError(f"space '{space_name}': 'axes' must be a non-empty object")
     for axis_name, axis_decl in axes.items():
-        space.axes[axis_name] = _load_axis(space_name, axis_name, axis_decl, reserved)
+        axis = _load_axis(space_name, axis_name, axis_decl, reserved)
+        if space.axes and not axis.late and next(reversed(space.axes.values())).late:
+            raise SpaceError(
+                f"space '{space_name}': axis '{axis_name}' follows a 'late' axis but is not"
+                " late itself; late axes come last"
+            )
+        space.axes[axis_name] = axis
 
     known = set(space.axes)
     derive = decl.get("derive", {})

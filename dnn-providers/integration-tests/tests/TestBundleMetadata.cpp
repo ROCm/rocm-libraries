@@ -632,6 +632,81 @@ TEST(TestParseBundleMetadataJson, PurposeParsesInASweepCase)
     EXPECT_EQ(*meta.purpose, CasePurpose::REGRESSION);
 }
 
+// Bug caught: a typo in `validator` or `placement` silently running a case without the
+// grading or the placement it was written for.
+TEST(TestParseBundleMetadataJson, ValidatorAndPlacementDefaultWhenAbsent)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1})"));
+    EXPECT_EQ(meta.validator, CaseValidator::DEFAULT);
+    EXPECT_EQ(meta.placement, CasePlacement::DEFAULT);
+    EXPECT_FALSE(meta.placementUid.has_value());
+}
+
+TEST(TestParseBundleMetadataJson, ValidatorAndPlacementParseEachValue)
+{
+    const auto nonfinite = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "validator": "match_nonfinite"})"));
+    EXPECT_EQ(nonfinite.validator, CaseValidator::MATCH_NONFINITE);
+
+    const auto exact = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "placement": "exact"})"));
+    EXPECT_EQ(exact.placement, CasePlacement::EXACT);
+    EXPECT_FALSE(exact.placementUid.has_value());
+
+    const auto under = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 1, "placement": "under", "placement_uid": 4})"));
+    EXPECT_EQ(under.placement, CasePlacement::UNDER);
+    ASSERT_TRUE(under.placementUid.has_value());
+    EXPECT_EQ(*under.placementUid, 4);
+
+    const auto explicitDefaults = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 1, "validator": "default", "placement": "default"})"));
+    EXPECT_EQ(explicitDefaults.validator, CaseValidator::DEFAULT);
+    EXPECT_EQ(explicitDefaults.placement, CasePlacement::DEFAULT);
+}
+
+TEST(TestParseBundleMetadataJson, UnknownOrMistypedValidatorAndPlacementThrow)
+{
+    for(const auto* text : {R"({"format_version": 1, "validator": "match_nonfinit"})",
+                            R"({"format_version": 1, "validator": "MATCH_NONFINITE"})",
+                            R"({"format_version": 1, "validator": 1})",
+                            R"({"format_version": 1, "validator": null})",
+                            R"({"format_version": 1, "placement": "exacts"})",
+                            R"({"format_version": 1, "placement": "Exact"})",
+                            R"({"format_version": 1, "placement": true})",
+                            R"({"format_version": 1, "placement": "exact", "placement_uid": "x"})",
+                            R"({"format_version": 1, "placement": "under", "placement_uid": 1.5})"})
+    {
+        EXPECT_THROW(parseBundleMetadataJson(nlohmann::json::parse(text), "case_0"),
+                     BundleMetadataError)
+            << text;
+    }
+}
+
+// Bug caught: "under" without a target tensor has nothing to misalign, and a stray uid on
+// another placement would be silently ignored.
+TEST(TestParseBundleMetadataJson, PlacementUidIsRequiredExactlyForUnder)
+{
+    EXPECT_THROW(parseBundleMetadataJson(
+                     nlohmann::json::parse(R"({"format_version": 1, "placement": "under"})")),
+                 BundleMetadataError);
+    EXPECT_THROW(parseBundleMetadataJson(nlohmann::json::parse(
+                     R"({"format_version": 1, "placement": "exact", "placement_uid": 4})")),
+                 BundleMetadataError);
+    EXPECT_THROW(parseBundleMetadataJson(
+                     nlohmann::json::parse(R"({"format_version": 1, "placement_uid": 4})")),
+                 BundleMetadataError);
+}
+
+TEST(TestParseBundleMetadataJson, ValidatorAndPlacementSpellingIsExact)
+{
+    EXPECT_STREQ(toString(CaseValidator::DEFAULT), "default");
+    EXPECT_STREQ(toString(CaseValidator::MATCH_NONFINITE), "match_nonfinite");
+    EXPECT_STREQ(toString(CasePlacement::DEFAULT), "default");
+    EXPECT_STREQ(toString(CasePlacement::EXACT), "exact");
+    EXPECT_STREQ(toString(CasePlacement::UNDER), "under");
+}
+
 TEST(TestLoadBundleMetadata, ErrorNamesTheMetaJsonFile)
 {
     const TempBundle bundle(R"({"format_version": 2})");

@@ -598,6 +598,71 @@ TEST_F(TestOutcomeReport, ConfirmedClaimThatPassesIsPass)
 }
 
 // ---------------------------------------------------------------------------
+// What the case asked for rides on the finished record
+// ---------------------------------------------------------------------------
+
+// Bug caught: a run whose recipes never reached the harness looks identical to one whose
+// recipes did, so a domain axis cannot be observed on a passing case.
+TEST_F(TestOutcomeReport, FinishedRecordCarriesTheFillRecipesTheCaseSet)
+{
+    const auto tagged = bundle();
+    tagged->metadata.inputs = std::unordered_map<int64_t, nlohmann::json>{
+        {0, nlohmann::json{{"kind", "free"}, {"lo", -2.0}, {"hi", 3.0}}},
+        {1, nlohmann::json{{"kind", "fixed"}, {"value", 0.5}}}};
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    const auto& inputs = onlyFinished().identity.inputs;
+    ASSERT_TRUE(inputs.is_object()) << inputs.dump();
+    EXPECT_EQ(inputs.at("0").at("kind"), "free");
+    EXPECT_FLOAT_EQ(inputs.at("0").at("lo").get<float>(), -2.0f);
+    EXPECT_FLOAT_EQ(inputs.at("0").at("hi").get<float>(), 3.0f);
+    EXPECT_EQ(inputs.at("1").at("kind"), "fixed");
+    EXPECT_FLOAT_EQ(inputs.at("1").at("value").get<float>(), 0.5f);
+}
+
+// Bug caught: a record that drops the case's grading or placement, or claims one it did not
+// ask for, so a placement or validator run cannot be told from a default one.
+TEST_F(TestOutcomeReport, FinishedRecordCarriesValidatorAndPlacement)
+{
+    const auto tagged = bundle();
+    tagged->metadata.validator = CaseValidator::MATCH_NONFINITE;
+    tagged->metadata.placement = CasePlacement::EXACT;
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, tagged, &results);
+
+    const auto& identity = onlyFinished().identity;
+    EXPECT_EQ(identity.validator, "match_nonfinite");
+    EXPECT_EQ(identity.placement, "exact");
+    EXPECT_FALSE(identity.placementUid.has_value());
+}
+
+// Bug caught: defaults reported as something else, or a recipe record invented for a case
+// that set no recipes.
+TEST_F(TestOutcomeReport, FinishedRecordNamesTheDefaultsWhenTheCaseSetNothing)
+{
+    engineWrites(_mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(hostPolicy()),
+                                                 makeEngineUnderTest());
+    ::testing::TestPartResultArray results;
+    drive(harness, bundle(), &results);
+
+    const auto& identity = onlyFinished().identity;
+    EXPECT_EQ(identity.validator, "default");
+    EXPECT_EQ(identity.placement, "default");
+    EXPECT_FALSE(identity.placementUid.has_value());
+    EXPECT_FALSE(identity.inputs.is_object()) << identity.inputs.dump();
+}
+
+// ---------------------------------------------------------------------------
 // Synthetic tests: a bundle that failed to load still owes the report its two records
 // ---------------------------------------------------------------------------
 

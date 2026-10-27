@@ -15,7 +15,8 @@
     "d3":       {"range": [1, 8], "boundaries": [1, 2, 4]},
     "h":        {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
     "w":        {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
-    "k":        {"values": [1, 2, 3, 4]}
+    "k":        {"values": [1, 2, 3, 4]},
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant"]}
   },
   "derive": {
     "d":       "d3 if ndim == 5 else 1",
@@ -48,7 +49,11 @@
     "ss_n":    "sc * sd * sh * sw",
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
-    "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]"
+    "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes: scale dim 0 must be 1 and the normalized suffix must start after it (detail/Utilities.hpp:323 validateScaleNormalizedShape, called from RMSNormBackwardNode.hpp:87)"},
@@ -69,7 +74,11 @@
     },
     "metadata": {
       "purpose": "probe",
-      "inputs": {"4": {"kind": "free", "lo": 0.8999999761581421, "hi": 1.5}}
+      "inputs": {
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
+        "4": {"kind": "free", "lo": 0.8999999761581421, "hi": 1.5},
+        "6": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+      }
     }
   }
 }

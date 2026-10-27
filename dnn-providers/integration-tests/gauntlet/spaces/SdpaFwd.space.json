@@ -14,7 +14,8 @@
     "skv":    {"range": [1, 2048], "boundaries": [1, 64, 128, 256, 512, 1024]},
     "dqk":    {"values": [128, 192]},
     "causal": {"values": [false, true]},
-    "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]}
+    "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]},
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant"], "late": true}
   },
   "derive": {
     "hq":       "hkv * group",
@@ -26,7 +27,11 @@
     "stride_q": "[sq*hq*dqk, dqk, hq*dqk, 1] if layout == 'bshd' else [hq*sq*dqk, sq*dqk, dqk, 1]",
     "stride_k": "[skv*hkv*dqk, dqk, hkv*dqk, 1] if layout == 'bshd' else [hkv*skv*dqk, skv*dqk, dqk, 1]",
     "stride_v": "[skv*hkv*dv, dv, hkv*dv, 1] if layout == 'bshd' else [hkv*skv*dv, skv*dv, dv, 1]",
-    "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]"
+    "stride_o": "[sq*hq*dv, dv, hq*dv, 1] if layout == 'bshd' else [hq*sq*dv, sq*dv, dv, 1]",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0"
   },
   "constraints": [
     {"rule": "not causal or sq <= skv", "reason": "bottom-right causal mask needs sq <= skv"},
@@ -47,6 +52,13 @@
         "attributes__right_bound": "${0 if causal else None}"
       }
     },
-    "metadata": {"purpose": "probe"}
+    "metadata": {
+      "purpose": "probe",
+      "inputs": {
+        "0": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
+        "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+      }
+    }
   }
 }

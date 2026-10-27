@@ -3,10 +3,13 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
@@ -55,6 +58,15 @@ struct CaseIdentity
     std::string arch;
     std::string platform;
     std::optional<CasePurpose> purpose;
+    /// How the case asked to be graded and placed (`metadata.validator`, `metadata.placement`),
+    /// spelled as the metadata spells them. Empty when the identity was not built from a bundle's
+    /// metadata (a bundle that failed to load), and then left out of the record.
+    std::string validator;
+    std::string placement;
+    std::optional<int64_t> placementUid;
+    /// The fill recipes the harness parsed from `metadata.inputs`, keyed by tensor uid; null
+    /// when the case sets none. Lets a passing run show that its recipe reached the harness.
+    nlohmann::json inputs;
 };
 
 /// What one case ended with: the identity plus the classified outcome and the facts

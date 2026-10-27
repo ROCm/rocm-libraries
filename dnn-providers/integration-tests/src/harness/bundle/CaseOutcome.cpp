@@ -181,6 +181,22 @@ std::string finishedRecordJson(const CaseOutcomeRecord& record)
     {
         json["purpose"] = toString(*record.identity.purpose);
     }
+    if(!record.identity.validator.empty())
+    {
+        json["validator"] = record.identity.validator;
+    }
+    if(!record.identity.placement.empty())
+    {
+        json["placement"] = record.identity.placement;
+    }
+    if(record.identity.placementUid.has_value())
+    {
+        json["placement_uid"] = *record.identity.placementUid;
+    }
+    if(record.identity.inputs.is_object() && !record.identity.inputs.empty())
+    {
+        json["inputs"] = record.identity.inputs;
+    }
     json["outcome"] = toString(record.outcome);
     json["stage"] = toString(record.stage);
     json["depth"] = toString(record.depth);

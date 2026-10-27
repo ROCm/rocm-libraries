@@ -11,6 +11,10 @@ block into a row in ``sweep.json``'s own ``{id, values, metadata}`` format.
 
 The data seed is separate. By default it is derived from the shape seed; it becomes the
 case's ``metadata.seed``, which the harness uses for input fills.
+
+An axis marked ``late`` in its space draws from a stream of its own (the shape seed, the
+attempt and the axis name), so axes added to a space later do not shift the shapes that seeds
+recorded earlier fix. ``sample()`` draws every other axis from the one seeded generator.
 """
 
 import hashlib
@@ -96,7 +100,16 @@ def sample(space, shape_seed, data_seed=None, max_attempts=DEFAULT_MAX_ATTEMPTS)
     rng = random.Random(shape_seed)
     rejected = {}
     for attempt in range(1, max_attempts + 1):
-        axis_values = {name: axis.draw(rng) for name, axis in space.axes.items()}
+        axis_values = {
+            name: axis.draw(
+                # A late axis has a stream per (shape seed, attempt, axis) of its own, so adding
+                # one never moves a draw of the axes before it, retries included.
+                random.Random(f"gauntlet-late-axis:{shape_seed}:{attempt}:{name}")
+                if axis.late
+                else rng
+            )
+            for name, axis in space.axes.items()
+        }
         env = space.derive_env(axis_values)
         violated = space.first_violation(env)
         if violated is not None:

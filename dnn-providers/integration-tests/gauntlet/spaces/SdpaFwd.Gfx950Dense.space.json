@@ -14,7 +14,8 @@
     "skv_mode": {"values": ["same", "independent"]},
     "skv_n":    {"range": [1, 64], "boundaries": [1, 2, 4, 8, 16, 64]},
     "causal":   {"values": [false, true]},
-    "scale":    {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0]}
+    "scale":    {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0]},
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant"], "late": true}
   },
   "derive": {
     "heads":     "heads_d64 if d == 64 else heads_d128",
@@ -25,7 +26,11 @@
     "dims_q":    "[b, hq, sq, d]",
     "dims_kv":   "[b, hkv, skv, d]",
     "stride_q":  "[sq*hq*d, d, hq*d, 1]",
-    "stride_kv": "[skv*hkv*d, d, hkv*d, 1]"
+    "stride_kv": "[skv*hkv*d, d, hkv*d, 1]",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
+    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
+    "dom_value": "0.5 if domain == 'constant' else 0"
   },
   "constraints": [
     {"rule": "hq % hkv == 0", "reason": "GQA: query heads must be a multiple of kv heads"},
@@ -47,6 +52,13 @@
         "attributes__right_bound": "${0 if causal else None}"
       }
     },
-    "metadata": {"purpose": "probe"}
+    "metadata": {
+      "purpose": "probe",
+      "inputs": {
+        "0": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
+        "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+      }
+    }
   }
 }

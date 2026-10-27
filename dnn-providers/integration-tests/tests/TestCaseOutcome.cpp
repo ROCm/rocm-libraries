@@ -320,6 +320,50 @@ TEST(TestCaseOutcome, FinishedRecordOmitsPurposeWhenUnset)
     EXPECT_FALSE(json.contains("purpose"));
 }
 
+// Bug caught: a finished record that drops what the case asked for, so a placement, validator
+// or domain run cannot be told from a default one in the report.
+TEST(TestCaseOutcome, FinishedRecordCarriesValidatorPlacementAndRecipes)
+{
+    auto identity = makeIdentity();
+    identity.validator = "match_nonfinite";
+    identity.placement = "under";
+    identity.placementUid = 7;
+    identity.inputs = nlohmann::json{{"2", {{"kind", "zeros"}}}};
+
+    const auto record = makeUnexercisedRecord(identity, OutcomeStage::SETUP, "r");
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_EQ(json.at("validator"), "match_nonfinite");
+    EXPECT_EQ(json.at("placement"), "under");
+    EXPECT_EQ(json.at("placement_uid"), 7);
+    EXPECT_EQ(json.at("inputs").at("2").at("kind"), "zeros");
+}
+
+// Bug caught: empty placeholders written as if they were the case's choice (an identity built
+// without a bundle, such as a load failure, knows none of them).
+TEST(TestCaseOutcome, FinishedRecordOmitsWhatTheIdentityDoesNotKnow)
+{
+    const auto record = makeUnexercisedRecord(makeIdentity(), OutcomeStage::SETUP, "no bundle");
+    const auto json = nlohmann::json::parse(finishedRecordJson(record));
+    EXPECT_FALSE(json.contains("validator"));
+    EXPECT_FALSE(json.contains("placement"));
+    EXPECT_FALSE(json.contains("placement_uid"));
+    EXPECT_FALSE(json.contains("inputs"));
+}
+
+// Bug caught: the started record growing the fields only the finished record owns.
+TEST(TestCaseOutcome, StartedRecordNeverCarriesWhatTheCaseAskedFor)
+{
+    auto identity = makeIdentity();
+    identity.validator = "match_nonfinite";
+    identity.placement = "exact";
+    identity.inputs = nlohmann::json{{"2", {{"kind", "zeros"}}}};
+
+    const auto json = nlohmann::json::parse(startedRecordJson(identity));
+    EXPECT_FALSE(json.contains("validator"));
+    EXPECT_FALSE(json.contains("placement"));
+    EXPECT_FALSE(json.contains("inputs"));
+}
+
 TEST(TestCaseOutcome, EachOutcomeHasItsRfcSpelling)
 {
     EXPECT_STREQ(toString(CaseOutcome::PASS), "PASS");

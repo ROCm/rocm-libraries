@@ -55,6 +55,50 @@ inline const char* toString(CasePurpose purpose)
     }
 }
 
+/// How a case's float outputs are graded beyond the per-tensor tolerance (RFC 0023 §8).
+enum class CaseValidator
+{
+    DEFAULT, ///< the tolerance resolved for each tensor, unchanged
+    MATCH_NONFINITE ///< non-finite positions must match by position; finite ones use the tolerance
+};
+
+inline const char* toString(CaseValidator validator)
+{
+    switch(validator)
+    {
+    case CaseValidator::DEFAULT:
+        return "default";
+    case CaseValidator::MATCH_NONFINITE:
+        return "match_nonfinite";
+    default:
+        return "unknown";
+    }
+}
+
+/// Where the engine run's device pointers sit relative to the declared tensor alignment N
+/// (RFC 0023 §8). Only the engine run is placed; a reference run never is.
+enum class CasePlacement
+{
+    DEFAULT, ///< wherever the allocator put them
+    EXACT, ///< every device pointer aligned to N but not 2N
+    UNDER ///< the pointer of `placement_uid` aligned below N, so the backend must reject it
+};
+
+inline const char* toString(CasePlacement placement)
+{
+    switch(placement)
+    {
+    case CasePlacement::DEFAULT:
+        return "default";
+    case CasePlacement::EXACT:
+        return "exact";
+    case CasePlacement::UNDER:
+        return "under";
+    default:
+        return "unknown";
+    }
+}
+
 /// Metadata read from a {Name}.meta.json companion file alongside a golden
 /// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
 ///
@@ -80,12 +124,17 @@ struct BundleMetadata
     std::optional<CasePurpose> purpose;
     std::optional<int64_t> minimumVramMb;
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
+    CaseValidator validator = CaseValidator::DEFAULT;
+    CasePlacement placement = CasePlacement::DEFAULT;
+    /// The tensor `placement: "under"` misaligns. Set exactly when placement is UNDER.
+    std::optional<int64_t> placementUid;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 };
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
-/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level` or `purpose`,
-/// a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
+/// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`, `purpose`,
+/// `validator` or `placement`, a `placement` of "under" without `placement_uid` (or the uid
+/// without "under"), a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
 /// valid JSON. An authoring error,
 /// never a "metadata not recorded" case, so it must not degrade to defaults.
 class BundleMetadataError : public std::runtime_error
@@ -99,7 +148,8 @@ public:
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
 /// `format_version`, carries an unsupported format version, has an invalid
-/// `enforcement_level` or `purpose`, or has an `inputs` key that is not a tensor UID.
+/// `enforcement_level`, `purpose`, `validator` or `placement`, a placement/placement_uid
+/// mismatch, or has an `inputs` key that is not a tensor UID.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -217,6 +267,67 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
         {
             throw BundleMetadataError(where + " has invalid purpose \"" + purpose + "\"");
         }
+    }
+
+    // validator and placement: absent leaves the default. Present but unknown throws, so a
+    // typo cannot silently run a case without the grading or the placement it was written for.
+    if(json.contains("validator"))
+    {
+        if(!json["validator"].is_string())
+        {
+            throw BundleMetadataError(where + " has invalid validator (not a string)");
+        }
+
+        const auto validator = json["validator"].get<std::string>();
+        if(validator == "match_nonfinite")
+        {
+            meta.validator = CaseValidator::MATCH_NONFINITE;
+        }
+        else if(validator != "default")
+        {
+            throw BundleMetadataError(where + " has invalid validator \"" + validator + "\"");
+        }
+    }
+
+    if(json.contains("placement"))
+    {
+        if(!json["placement"].is_string())
+        {
+            throw BundleMetadataError(where + " has invalid placement (not a string)");
+        }
+
+        const auto placement = json["placement"].get<std::string>();
+        if(placement == "exact")
+        {
+            meta.placement = CasePlacement::EXACT;
+        }
+        else if(placement == "under")
+        {
+            meta.placement = CasePlacement::UNDER;
+        }
+        else if(placement != "default")
+        {
+            throw BundleMetadataError(where + " has invalid placement \"" + placement + "\"");
+        }
+    }
+
+    if(json.contains("placement_uid"))
+    {
+        if(!json["placement_uid"].is_number_integer())
+        {
+            throw BundleMetadataError(where + " has invalid placement_uid (not an integer)");
+        }
+        meta.placementUid = json["placement_uid"].get<int64_t>();
+    }
+
+    if(meta.placement == CasePlacement::UNDER && !meta.placementUid.has_value())
+    {
+        throw BundleMetadataError(where + " has placement \"under\" but no placement_uid");
+    }
+    if(meta.placement != CasePlacement::UNDER && meta.placementUid.has_value())
+    {
+        throw BundleMetadataError(where
+                                  + " has placement_uid, which only placement \"under\" uses");
     }
 
     if(json.contains("inputs") && json["inputs"].is_object())

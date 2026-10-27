@@ -323,7 +323,15 @@ private:
         identity.platform = _deps.policy.platform;
         if(_bundle != nullptr)
         {
-            identity.purpose = _bundle->metadata.purpose;
+            const BundleMetadata& meta = _bundle->metadata;
+            identity.purpose = meta.purpose;
+            identity.validator = toString(meta.validator);
+            identity.placement = toString(meta.placement);
+            identity.placementUid = meta.placementUid;
+            if(meta.inputs.has_value())
+            {
+                identity.inputs = _inputFillRecipes.toJson();
+            }
         }
         return identity;
     }
