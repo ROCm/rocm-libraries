@@ -11,29 +11,45 @@ from types import ModuleType
 from typing import Protocol
 
 
-def _load_solution_id_gen() -> ModuleType:
-    """Load SolutionIdGen without importing ``tensilelite.Common``.
-
-    ``tensilelite.Common`` imports rocisa. Geko's uniqueness retry only needs
-    the UID codec and the line rewriter.
+def _solution_id_gen_path(hipblaslt_path: str | Path) -> Path:
+    """Return ``SolutionIdGen.py`` inside the hipBLASLt checkout for this run.
 
     Args:
-        None.
+        hipblaslt_path: hipBLASLt checkout root already used by this Geko run.
 
     Returns:
-        The loaded ``SolutionIdGen`` module.
+        Path to ``tensilelite/tensilelite/Common/SolutionIdGen.py``.
 
     Raises:
-        FileNotFoundError: If ``SolutionIdGen.py`` is missing.
-        ImportError: If the module spec or loader cannot be created.
+        None.
     """
-    module_path = (
-        Path(__file__).resolve().parents[4]
+    return (
+        Path(hipblaslt_path)
         / "tensilelite"
         / "tensilelite"
         / "Common"
         / "SolutionIdGen.py"
     )
+
+
+def _load_solution_id_gen(hipblaslt_path: str | Path) -> ModuleType:
+    """Load SolutionIdGen without importing ``tensilelite.Common``.
+
+    ``tensilelite.Common`` imports rocisa. Geko's uniqueness retry only needs
+    the UID codec and the line rewriter. The file is taken from the hipBLASLt
+    checkout passed into the run, not from the installed Geko package location.
+
+    Args:
+        hipblaslt_path: hipBLASLt checkout root already used by this Geko run.
+
+    Returns:
+        The loaded ``SolutionIdGen`` module.
+
+    Raises:
+        FileNotFoundError: If ``SolutionIdGen.py`` is missing from that checkout.
+        ImportError: If the module spec or loader cannot be created.
+    """
+    module_path = _solution_id_gen_path(hipblaslt_path)
     if not module_path.is_file():
         raise FileNotFoundError(f"SolutionIdGen.py not found: {module_path}")
     spec = importlib.util.spec_from_file_location("geko_solution_id_gen", module_path)
@@ -50,7 +66,10 @@ class _SolutionLibrary(Protocol):
     solutions: list[dict]
 
 
-def assign_fresh_solution_uids(libraries: list[_SolutionLibrary]) -> int:
+def assign_fresh_solution_uids(
+    libraries: list[_SolutionLibrary],
+    hipblaslt_path: str | Path,
+) -> int:
     """Give every solution a new UID before writing ``full_libs`` or ``final_libs``.
 
     The source UID is dropped, including a UID copied from an Origami solution.
@@ -61,12 +80,13 @@ def assign_fresh_solution_uids(libraries: list[_SolutionLibrary]) -> int:
     Args:
         libraries: Libraries updated in place. Each solution dict loses
             ``SolutionUID`` and receives a new canonical value.
+        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
 
     Returns:
         Number of solutions assigned a new UID.
 
     Raises:
-        FileNotFoundError: If ``SolutionIdGen.py`` cannot be located.
+        FileNotFoundError: If ``SolutionIdGen.py`` is missing from that checkout.
         ImportError: If ``SolutionIdGen.py`` cannot be loaded.
         RuntimeError: If a unique SolutionUID cannot be drawn.
         ValueError: If UID generation overflows the 40-bit timestamp.
@@ -74,7 +94,7 @@ def assign_fresh_solution_uids(libraries: list[_SolutionLibrary]) -> int:
     solutions = [solution for library in libraries for solution in library.solutions]
     if not solutions:
         return 0
-    claim_solution_uid = _load_solution_id_gen().claim_solution_uid
+    claim_solution_uid = _load_solution_id_gen(hipblaslt_path).claim_solution_uid
     seen: set[str] = set()
     for solution in solutions:
         solution.pop("SolutionUID", None)
@@ -82,22 +102,23 @@ def assign_fresh_solution_uids(libraries: list[_SolutionLibrary]) -> int:
     return len(solutions)
 
 
-def uniquify_generated_logic(paths: list[Path]) -> int:
+def uniquify_generated_logic(paths: list[Path], hipblaslt_path: str | Path) -> int:
     """Make SolutionUIDs unique across logic files from one Geko run.
 
     Args:
         paths: ``3_LibraryLogic`` YAML files written by the Tensile jobs in
             this generation. Other architectures are not read.
+        hipblaslt_path: hipBLASLt checkout root that contains ``SolutionIdGen.py``.
 
     Returns:
         Number of UID lines rewritten.
 
     Raises:
-        FileNotFoundError: If ``SolutionIdGen.py`` cannot be located.
+        FileNotFoundError: If ``SolutionIdGen.py`` is missing from that checkout.
         RuntimeError: If a replacement UID cannot be drawn.
         OSError: If a logic file cannot be read or written.
     """
     if not paths:
         return 0
-    solution_id_gen = _load_solution_id_gen()
+    solution_id_gen = _load_solution_id_gen(hipblaslt_path)
     return solution_id_gen.rewrite_colliding_solution_uids(list(paths))

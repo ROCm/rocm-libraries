@@ -336,14 +336,20 @@ def run_search(
 
     if res is not None:
         logger.info("Creating remapped libraries...")
-        library.from_dataframe(res, lib_dir, type_override="Equality").dump(final_output_dir)
+        library.from_dataframe(
+            res,
+            lib_dir,
+            type_override="Equality",
+            hipblaslt_path=hipblaslt_path,
+        ).dump(final_output_dir)
         logger.info(f"Final remapped library available in: '{final_output_dir}'")
 
     logger.info("Creating full optimized libraries...")
     library.from_full_dataframe(
         full_df, lib_dir, 
         match_table_path,
-        type_override="Equality"
+        type_override="Equality",
+        hipblaslt_path=hipblaslt_path,
     ).dump(full_output_dir)
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
@@ -599,7 +605,11 @@ def run_optimize(
     if n_completed == 0:
         raise ValueError(f"No GEMMs completed out of {n_gemms} in {input_dir}")
 
-    merged_libs = library.merge_solutions(input_dir, epilogues=True)
+    merged_libs = library.merge_solutions(
+        input_dir,
+        epilogues=True,
+        hipblaslt_path=hipblaslt_path,
+    )
 
     if lib_dir.is_dir():
         shutil.rmtree(lib_dir)
@@ -639,7 +649,12 @@ def run_optimize(
 
     if res is not None:
         logger.info("Creating optimized libraries...")
-        library.from_dataframe(res, lib_dir, type_override="Equality").dump(final_output_dir)
+        library.from_dataframe(
+            res,
+            lib_dir,
+            type_override="Equality",
+            hipblaslt_path=hipblaslt_path,
+        ).dump(final_output_dir)
         logger.info(f"Final optimized library available in: '{final_output_dir}'")
 
     logger.info("Creating full optimized libraries...")
@@ -648,7 +663,8 @@ def run_optimize(
         full_df, 
         lib_dir,
         match_table_path,
-        type_override="Equality"
+        type_override="Equality",
+        hipblaslt_path=hipblaslt_path,
     ).dump(full_output_dir)
     logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
