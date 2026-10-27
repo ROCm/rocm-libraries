@@ -3224,38 +3224,18 @@ namespace TensileLite
         auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
         auto const&  descriptorB = sparseB ? problem.compressed() : problem.b();
 
-        // MX scale strides for external custom kernels.
+        // StrideScaleA0/B0 is the row stride of the scale buffer the caller
+        // actually passes. mxsa()/mxsb() describe gfx950's padded layout, so a
+        // caller whose buffer is packed takes the stride from the unpadded
+        // shape. With K=96 and a block of 32, a packed row holds 3 scales and
+        // the stride is 3, while the padded descriptor says 8.
         //
-        // problem.mxsa()/mxsb() carry the gfx950 padding applied by
-        // ContractionProblemGemm::setMXScaleA/B: the K-block dim is rounded up to a
-        // multiple of 8 and the free dim to a multiple of 32.  That padded descriptor
-        // is what the Tensile-*generated* kernels are built against (singleCallArgs),
-        // but externally captured kernels -- rocRoller, aiter, triton -- index the
-        // caller's scale buffer with the compact ceil(K/mxBlock) leading dimension.
-        // Handing them the padded value makes every scale row past the first resolve
-        // to the wrong bytes (and overruns the buffer) whenever
-        // ceil(K/mxBlock) % 8 != 0.  Rebuild packed strides from the unpadded shape.
-        //
-        // The generated kernels are unaffected either way: on gfx950 they are all
-        // UseSubtileImpl + HostPreSwizzle and overwrite this pitch in their prologue
-        // with roundUp(ceil(K/mxBlock),8)*32 recomputed from SizesSum, so they never
-        // read the value the host puts here.  They do still use StrideScale{A,B}1
-        // (the batch stride), which is left on the padded descriptor on purpose.
-        //
-        // Deliberately NOT gated on the pre-swizzled scale format.  The only
-        // pre-swizzled custom kernel that declares these slots is the aiter
-        // BpreShuffle family, which is not referenced by any shipped logic, and
-        // hipBLASLt's other launcher for it already passes k/32
-        // (rocblaslt/src/rocroller/custom_kernels.cpp) -- so compact makes the two
-        // launchers agree rather than diverge.  Open for PR review: if a
-        // pre-swizzled custom kernel ever ships through this path, revisit.
-        //
-        // It IS gated on the caller: only a caller whose scale buffer really is
-        // packed may take this path.  hipBLASLt hands the custom kernel the user's
-        // raw Block_32_UE8M0 pointer, which is packed; the TensileLite benchmark
-        // client allocates the scale buffer from the padded descriptor itself and
-        // hands that same buffer over, so for it the descriptor is the truth and
-        // the compact value would mis-address every odd scale row.
+        // customKernelMXScalesArePacked() names that caller. hipBLASLt sets it
+        // for a plain Block_32_UE8M0 pointer. The TensileLite benchmark client
+        // leaves it false when it allocated the padded buffer, and then the
+        // descriptor stride is already the one the kernel must use.
+        // StrideScaleA1/B1, the batch stride, follows the same rule. No shipped
+        // rocRoller kernel reads it, and those kernels run a single batch.
         auto scaleStrideFor = [&](TensorDescriptor const& scaleDesc,
                                   TensorDescriptor const& dataDesc,
                                   size_t                  boundIdx,
@@ -3423,8 +3403,15 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsa().strides()[descriptorStrideAB + 1]
-                        : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1");
+                    size_t batchStride = problem.customKernelMXScalesArePacked()
+                        ? scaleStrideFor(problem.mxsa(),
+                                         problem.a(),
+                                         problem.boundIndices()[0].a,
+                                         problem.mxBlockA(),
+                                         descriptorStrideAB + 1)
+                        : (usesDataParallelArgsV1
+                               ? problem.mxsa().strides()[descriptorStrideAB + 1]
+                               : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1"));
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
                 }
@@ -3440,8 +3427,15 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride = usesDataParallelArgsV1 ? problem.mxsb().strides()[descriptorStrideAB + 1]
-                        : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1");
+                    size_t batchStride = problem.customKernelMXScalesArePacked()
+                        ? scaleStrideFor(problem.mxsb(),
+                                         problem.b(),
+                                         problem.boundIndices()[0].b,
+                                         problem.mxBlockB(),
+                                         descriptorStrideAB + 1)
+                        : (usesDataParallelArgsV1
+                               ? problem.mxsb().strides()[descriptorStrideAB + 1]
+                               : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1"));
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
                 }
