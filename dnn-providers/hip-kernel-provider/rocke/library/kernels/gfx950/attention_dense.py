@@ -2424,18 +2424,33 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             p_vals = [[None] * 16 for _ in range(N_SUB)]
             it = iter(slots)
             out = list(o_acc_in)
+            # Row sum as one scalar chain that lags the exps by a PV step: each
+            # add consumes exps issued at least one MFMA earlier, and a single
+            # chain stays scalar (a pairwise tree is packed into <2 x f32> adds
+            # that wait on the most recent exps and on in-flight MFMAs).
+            l_acc = [None]
+            pending = []
+
+            def _accumulate(vals):
+                for v in vals:
+                    l_acc[0] = v if l_acc[0] is None else b.fadd(l_acc[0], v)
+
             for dt, kk_step in PV_STEPS:
                 out[dt] = mfma_32x32x16_for_dtype(
                     b, dtype, read_v(dt, kk_step, vbuf), p_packs[kk_step], out[dt]
                 )
                 n_emit = 0
+                fresh = []
                 for _ in range(EXP_PER):
                     slot = next(it, None)
                     if slot is None:
                         break
                     nsub, i = slot
                     p_vals[nsub][i] = _exp2(exp_arg(s_reg[nsub][i], m_new, neg_m))
+                    fresh.append(p_vals[nsub][i])
                     n_emit += 1
+                _accumulate(pending)
+                pending = fresh
                 if SCHED_GROUP:
                     b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
                     b.sched_group_barrier(MFMA, 1, 0)
@@ -2444,7 +2459,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             for slot in it:
                 nsub, i = slot
                 p_vals[nsub][i] = _exp2(exp_arg(s_reg[nsub][i], m_new, neg_m))
-            l_tile = half_reduce(row_sum(p_vals), b.fadd)
+                pending.append(p_vals[nsub][i])
+            _accumulate(pending)
+            l_tile = half_reduce(l_acc[0], b.fadd)
             return out, p_vals, l_tile
 
         _rs_ctr = [0]
