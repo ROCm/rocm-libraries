@@ -146,28 +146,30 @@ class Layout {
         return Layout(shape, std::move(strides), 0);
     }
 
-    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(const Shape& shape) {
-        return getContiguousLayout(shape, Permutation::identity(shape.rank()));
+    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayout(
+        const Shape& shape, std::initializer_list<size_t> order) {
+        return getContiguousLayout(shape, std::span<const size_t>(order.begin(), order.size()));
     }
 
-    // Throwing forms of getContiguousLayout. The default order is C order, an
-    // alias of contiguousLastDimensionFastest; the explicit names make the
-    // first/last-fastest pair available without an order argument.
-    static Layout contiguous(const Shape& shape, const Permutation& order) {
+    static detail::Expected<Layout, detail::LayoutFailure> getContiguousLayoutLastDimensionFastest(
+        const Shape& shape) {
+        return getContiguousLayout(shape, shape.indexOrderLastDimensionFastest());
+    }
+
+    // Throwing forms of getContiguousLayout.
+    static Layout contiguous(const Shape& shape, std::span<const size_t> order) {
         auto result = getContiguousLayout(shape, order);
         if (!result) throw std::runtime_error(result.error().message());
         return std::move(*result);
     }
 
-    static Layout contiguous(const Shape& shape) {
-        auto result = getContiguousLayout(shape);
-        if (!result) throw std::runtime_error(result.error().message());
-        return std::move(*result);
+    static Layout contiguous(const Shape& shape, std::initializer_list<size_t> order) {
+        return contiguous(shape, std::span<const size_t>(order.begin(), order.size()));
     }
 
     // For a matrix this is row-major/C-order: the last dimension has unit stride.
     static Layout contiguousLastDimensionFastest(const Shape& shape) {
-        return contiguous(shape);
+        return contiguous(shape, shape.indexOrderLastDimensionFastest());
     }
 
     // For a matrix this is column-major/Fortran-order: the first dimension has unit stride.
