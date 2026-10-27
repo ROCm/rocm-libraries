@@ -71,7 +71,7 @@ namespace rocsparse
                                         const I*                  csr_row_ptr,
                                         const rocsparse_mat_descr ell_descr,
                                         J*                        ell_width,
-                                        rocsparse_pointer_mode    pointer_mode);
+                                        rocsparse_pointer_mode    ell_width_pointer_mode);
     template <typename J>
     rocsparse_status csr2ell_width_quickreturn(rocsparse_handle          handle,
                                                int64_t                   m,
@@ -79,7 +79,7 @@ namespace rocsparse
                                                const void*               csr_row_ptr,
                                                const rocsparse_mat_descr ell_descr,
                                                J*                        ell_width,
-                                               rocsparse_pointer_mode    pointer_mode);
+                                               rocsparse_pointer_mode    ell_width_pointer_mode);
 
     template <typename... P>
     rocsparse_status csr2ell_width_template(P&&... p)

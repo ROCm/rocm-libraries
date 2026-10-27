@@ -211,7 +211,7 @@ rocsparse_status rocsparse::ell2csr_nnz_quickreturn(rocsparse_handle          ha
                                                     const rocsparse_mat_descr csr_descr,
                                                     I*                        csr_row_ptr,
                                                     I*                        csr_nnz,
-                                                    rocsparse_pointer_mode    pointer_mode)
+                                                    rocsparse_pointer_mode    csr_nnz_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -219,7 +219,7 @@ rocsparse_status rocsparse::ell2csr_nnz_quickreturn(rocsparse_handle          ha
     {
         if(csr_nnz != nullptr)
         {
-            if(pointer_mode == rocsparse_pointer_mode_device)
+            if(csr_nnz_pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
                     rocsparse_hipMemsetAsync(csr_nnz, 0, sizeof(I), handle->stream));
@@ -251,7 +251,7 @@ rocsparse_status rocsparse::ell2csr_nnz_checkarg(rocsparse_handle          handl
                                                  const rocsparse_mat_descr csr_descr,
                                                  I*                        csr_row_ptr,
                                                  I*                        csr_nnz,
-                                                 rocsparse_pointer_mode    pointer_mode)
+                                                 rocsparse_pointer_mode    csr_nnz_pointer_mode)
 
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -291,7 +291,7 @@ rocsparse_status rocsparse::ell2csr_nnz_checkarg(rocsparse_handle          handl
                                                                        csr_descr,
                                                                        csr_row_ptr,
                                                                        csr_nnz,
-                                                                       pointer_mode);
+                                                                       csr_nnz_pointer_mode);
 
     if(status != rocsparse_status_continue)
     {
@@ -312,7 +312,7 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
                                              const rocsparse_mat_descr csr_descr,
                                              I*                        csr_row_ptr,
                                              I*                        csr_nnz,
-                                             rocsparse_pointer_mode    pointer_mode)
+                                             rocsparse_pointer_mode    csr_nnz_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -363,7 +363,7 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
     // Extract and adjust nnz
     if(csr_descr->base == rocsparse_index_base_one)
     {
-        if(pointer_mode == rocsparse_pointer_mode_device)
+        if(csr_nnz_pointer_mode == rocsparse_pointer_mode_device)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
@@ -384,7 +384,7 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
     }
     else
     {
-        if(pointer_mode == rocsparse_pointer_mode_device)
+        if(csr_nnz_pointer_mode == rocsparse_pointer_mode_device)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 csr_nnz, csr_row_ptr + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
@@ -415,7 +415,7 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
         const rocsparse_mat_descr csr_descr,                            \
         I*                        csr_row_ptr,                          \
         I*                        csr_nnz,                              \
-        rocsparse_pointer_mode    pointer_mode);                           \
+        rocsparse_pointer_mode    csr_nnz_pointer_mode);                   \
     template rocsparse_status rocsparse::ell2csr_nnz_core<I, J>(        \
         rocsparse_handle          handle,                               \
         J                         m,                                    \
@@ -426,7 +426,7 @@ rocsparse_status rocsparse::ell2csr_nnz_core(rocsparse_handle          handle,
         const rocsparse_mat_descr csr_descr,                            \
         I*                        csr_row_ptr,                          \
         I*                        csr_nnz,                              \
-        rocsparse_pointer_mode    pointer_mode)
+        rocsparse_pointer_mode    csr_nnz_pointer_mode)
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);

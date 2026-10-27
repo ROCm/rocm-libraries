@@ -34,11 +34,11 @@ rocsparse_status rocsparse::gcsr2ell_width(rocsparse_handle          handle,
                                            rocsparse_indextype       csr_row_ptr_indextype,
                                            const void*               csr_row_ptr,
                                            const rocsparse_mat_descr ell_descr,
-                                           int64_t*                  ell_width)
+                                           int64_t*                  ell_width,
+                                           rocsparse_pointer_mode    ell_width_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // ell_width is a host variable. The scalar pointer mode is host, not the handle's.
     switch(csr_row_ptr_indextype)
     {
     // LCOV_EXCL_START
@@ -48,19 +48,19 @@ rocsparse_status rocsparse::gcsr2ell_width(rocsparse_handle          handle,
     }
     // LCOV_EXCL_STOP
 
-#define CASE(VAL, TYPE)                                                                            \
-    case VAL:                                                                                      \
-    {                                                                                              \
-        TYPE local_ell_width;                                                                      \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2ell_width_template(handle,                        \
-                                                                    (TYPE)m,                       \
-                                                                    csr_descr,                     \
-                                                                    (const TYPE*)csr_row_ptr,      \
-                                                                    ell_descr,                     \
-                                                                    &local_ell_width,              \
-                                                                    rocsparse_pointer_mode_host)); \
-        ell_width[0] = local_ell_width;                                                            \
-        return rocsparse_status_success;                                                           \
+#define CASE(VAL, TYPE)                                                                       \
+    case VAL:                                                                                 \
+    {                                                                                         \
+        TYPE local_ell_width;                                                                 \
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2ell_width_template(handle,                   \
+                                                                    (TYPE)m,                  \
+                                                                    csr_descr,                \
+                                                                    (const TYPE*)csr_row_ptr, \
+                                                                    ell_descr,                \
+                                                                    &local_ell_width,         \
+                                                                    ell_width_pointer_mode)); \
+        ell_width[0] = local_ell_width;                                                       \
+        return rocsparse_status_success;                                                      \
     }
 
         CASE(rocsparse_indextype_i32, int32_t);
@@ -259,7 +259,8 @@ rocsparse_status rocsparse::spmat_csr2ell_width(rocsparse_handle            hand
                                                         source->row_type,
                                                         source->const_row_data,
                                                         target->descr,
-                                                        out_ell_width));
+                                                        out_ell_width,
+                                                        rocsparse_pointer_mode_host));
 
     return rocsparse_status_success;
 }

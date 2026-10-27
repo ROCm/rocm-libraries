@@ -87,7 +87,7 @@ namespace rocsparse
                                              const rocsparse_mat_descr bsr_descr,
                                              I*                        bsr_row_ptr,
                                              I*                        bsr_nnz,
-                                             rocsparse_pointer_mode    pointer_mode);
+                                             rocsparse_pointer_mode    bsr_nnz_pointer_mode);
 
     template <typename I, typename J>
     rocsparse_status csr2bsr_nnz_core(rocsparse_handle          handle,
@@ -101,7 +101,7 @@ namespace rocsparse
                                       const rocsparse_mat_descr bsr_descr,
                                       I*                        bsr_row_ptr,
                                       I*                        bsr_nnz,
-                                      rocsparse_pointer_mode    pointer_mode);
+                                      rocsparse_pointer_mode    bsr_nnz_pointer_mode);
 
     template <typename... P>
     rocsparse_status csr2bsr_nnz_template(P&&... p)

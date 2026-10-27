@@ -86,7 +86,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
                                                     const rocsparse_mat_descr bsr_descr,
                                                     I*                        bsr_row_ptr,
                                                     I*                        bsr_nnz,
-                                                    rocsparse_pointer_mode    pointer_mode)
+                                                    rocsparse_pointer_mode    bsr_nnz_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -94,7 +94,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
     {
         if(bsr_nnz != nullptr)
         {
-            if(pointer_mode == rocsparse_pointer_mode_device)
+            if(bsr_nnz_pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
                     rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
@@ -121,18 +121,19 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
 namespace rocsparse
 {
     template <typename I, typename J>
-    static rocsparse_status csr2bsr_nnz_checkarg(rocsparse_handle          handle, //0
-                                                 rocsparse_direction       dir, //1
-                                                 J                         m, //2
-                                                 J                         n, //3
-                                                 const rocsparse_mat_descr csr_descr, //4
-                                                 const I*                  csr_row_ptr, //5
-                                                 const J*                  csr_col_ind, //6
-                                                 J                         block_dim, //7
-                                                 const rocsparse_mat_descr bsr_descr, //8
-                                                 I*                        bsr_row_ptr, //9
-                                                 I*                        bsr_nnz, //10
-                                                 rocsparse_pointer_mode    pointer_mode) //11
+    static rocsparse_status
+        csr2bsr_nnz_checkarg(rocsparse_handle          handle, //0
+                             rocsparse_direction       dir, //1
+                             J                         m, //2
+                             J                         n, //3
+                             const rocsparse_mat_descr csr_descr, //4
+                             const I*                  csr_row_ptr, //5
+                             const J*                  csr_col_ind, //6
+                             J                         block_dim, //7
+                             const rocsparse_mat_descr bsr_descr, //8
+                             I*                        bsr_row_ptr, //9
+                             I*                        bsr_nnz, //10
+                             rocsparse_pointer_mode    bsr_nnz_pointer_mode) // ignored
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -154,7 +155,7 @@ namespace rocsparse
                                                                            bsr_descr,
                                                                            bsr_row_ptr,
                                                                            bsr_nnz,
-                                                                           pointer_mode);
+                                                                           bsr_nnz_pointer_mode);
         if(status != rocsparse_status_continue)
         {
             RETURN_IF_ROCSPARSE_ERROR(status);
@@ -208,7 +209,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
                                              const rocsparse_mat_descr bsr_descr,
                                              I*                        bsr_row_ptr,
                                              I*                        bsr_nnz,
-                                             rocsparse_pointer_mode    pointer_mode)
+                                             rocsparse_pointer_mode    bsr_nnz_pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -237,7 +238,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     {
         if(bsr_nnz != nullptr)
         {
-            if(pointer_mode == rocsparse_pointer_mode_device)
+            if(bsr_nnz_pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
                     rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
@@ -280,7 +281,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     // If block dimension is one then BSR is equal to CSR
     if(block_dim == 1)
     {
-        if(pointer_mode == rocsparse_pointer_mode_device)
+        if(bsr_nnz_pointer_mode == rocsparse_pointer_mode_device)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csr2bsr_nnz_block_dim_equals_one_kernel<256, I, J>),
                                                dim3(m / 256 + 1),
@@ -438,7 +439,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     }
 
     // Compute bsr_nnz
-    if(pointer_mode == rocsparse_pointer_mode_device)
+    if(bsr_nnz_pointer_mode == rocsparse_pointer_mode_device)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(csr2bsr_nnz_compute_nnz_total_kernel<1>,
                                            dim3(1),
@@ -465,32 +466,33 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     return rocsparse_status_success;
 }
 
-#define INSTANTIATE(I, J)                                                                        \
-    template rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,      \
-                                                          rocsparse_direction       dir,         \
-                                                          J                         m,           \
-                                                          J                         n,           \
-                                                          const rocsparse_mat_descr csr_descr,   \
-                                                          const I*                  csr_row_ptr, \
-                                                          const J*                  csr_col_ind, \
-                                                          J                         block_dim,   \
-                                                          const rocsparse_mat_descr bsr_descr,   \
-                                                          I*                        bsr_row_ptr, \
-                                                          I*                        bsr_nnz,     \
-                                                          rocsparse_pointer_mode    pointer_mode);  \
-    template rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(                                \
-        rocsparse_handle          handle,                                                        \
-        rocsparse_direction       dir,                                                           \
-        J                         m,                                                             \
-        J                         n,                                                             \
-        const rocsparse_mat_descr csr_descr,                                                     \
-        const I*                  csr_row_ptr,                                                   \
-        const J*                  csr_col_ind,                                                   \
-        J                         block_dim,                                                     \
-        const rocsparse_mat_descr bsr_descr,                                                     \
-        I*                        bsr_row_ptr,                                                   \
-        I*                        bsr_nnz,                                                       \
-        rocsparse_pointer_mode    pointer_mode)
+#define INSTANTIATE(I, J)                                         \
+    template rocsparse_status rocsparse::csr2bsr_nnz_core(        \
+        rocsparse_handle          handle,                         \
+        rocsparse_direction       dir,                            \
+        J                         m,                              \
+        J                         n,                              \
+        const rocsparse_mat_descr csr_descr,                      \
+        const I*                  csr_row_ptr,                    \
+        const J*                  csr_col_ind,                    \
+        J                         block_dim,                      \
+        const rocsparse_mat_descr bsr_descr,                      \
+        I*                        bsr_row_ptr,                    \
+        I*                        bsr_nnz,                        \
+        rocsparse_pointer_mode    bsr_nnz_pointer_mode);             \
+    template rocsparse_status rocsparse::csr2bsr_nnz_quickreturn( \
+        rocsparse_handle          handle,                         \
+        rocsparse_direction       dir,                            \
+        J                         m,                              \
+        J                         n,                              \
+        const rocsparse_mat_descr csr_descr,                      \
+        const I*                  csr_row_ptr,                    \
+        const J*                  csr_col_ind,                    \
+        J                         block_dim,                      \
+        const rocsparse_mat_descr bsr_descr,                      \
+        I*                        bsr_row_ptr,                    \
+        I*                        bsr_nnz,                        \
+        rocsparse_pointer_mode    bsr_nnz_pointer_mode)
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);
