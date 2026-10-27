@@ -74,6 +74,38 @@ struct DigitExtractorAdopter
 };
 } // namespace detail
 
+enum RadixRankAlgorithm
+{
+    RADIX_RANK_BASIC,
+    RADIX_RANK_MEMOIZE,
+    RADIX_RANK_MATCH,
+    RADIX_RANK_MATCH_EARLY_COUNTS_ANY,
+    RADIX_RANK_MATCH_EARLY_COUNTS_ATOMIC_OR
+};
+
+inline ::std::ostream& operator<<(::std::ostream& os, RadixRankAlgorithm algo)
+{
+    switch(algo)
+    {
+        case RADIX_RANK_BASIC: return os << "RADIX_RANK_BASIC";
+        case RADIX_RANK_MEMOIZE: return os << "RADIX_RANK_MEMOIZE";
+        case RADIX_RANK_MATCH: return os << "RADIX_RANK_MATCH";
+        case RADIX_RANK_MATCH_EARLY_COUNTS_ANY: return os << "RADIX_RANK_MATCH_EARLY_COUNTS_ANY";
+        case RADIX_RANK_MATCH_EARLY_COUNTS_ATOMIC_OR:
+            return os << "RADIX_RANK_MATCH_EARLY_COUNTS_ATOMIC_OR";
+        default: return os << "<unknown RadixRankAlgorithm: " << static_cast<int>(algo) << ">";
+    }
+}
+
+/** Empty callback implementation */
+template<int BINS_PER_THREAD>
+struct BlockRadixRankEmptyCallback
+{
+    HIPCUB_DEVICE
+    HIPCUB_FORCEINLINE void operator()(int (&)[BINS_PER_THREAD])
+    {}
+};
+
 /**
  * \brief BlockRadixRank provides operations for ranking unsigned integer types within a CUDA thread block.
  * \ingroup BlockModule

@@ -36,6 +36,7 @@
 
 #include <rocprim/block/block_store.hpp> // IWYU pragma: export
 
+#include <ostream>
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -66,6 +67,22 @@ enum BlockStoreAlgorithm
     BLOCK_STORE_WARP_TRANSPOSE_TIMESLICED
         = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_warp_transpose)
 };
+
+inline ::std::ostream& operator<<(::std::ostream& os, BlockStoreAlgorithm algo)
+{
+    switch(algo)
+    {
+        case BLOCK_STORE_DIRECT: return os << "BLOCK_STORE_DIRECT";
+        case BLOCK_STORE_STRIPED: return os << "BLOCK_STORE_STRIPED";
+        case BLOCK_STORE_VECTORIZE: return os << "BLOCK_STORE_VECTORIZE";
+        case BLOCK_STORE_TRANSPOSE: return os << "BLOCK_STORE_TRANSPOSE";
+        case BLOCK_STORE_WARP_TRANSPOSE: return os << "BLOCK_STORE_WARP_TRANSPOSE";
+        // Note: for rocPRIM backend this is a duplicate of BLOCK_STORE_WARP_TRANSPOSE
+        // case BLOCK_STORE_WARP_TRANSPOSE_TIMESLICED:
+        //     return os << "BLOCK_STORE_WARP_TRANSPOSE_TIMESLICED";
+        default: return os << "<unknown BlockStoreAlgorithm: " << static_cast<int>(algo) << ">";
+    }
+}
 
 template<typename T,
          int                 BlockDimX,

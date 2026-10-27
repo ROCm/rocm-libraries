@@ -32,6 +32,7 @@
 
 #include "../../../config.hpp"
 
+#include <ostream>
 #include <type_traits>
 
 #include <rocprim/block/block_reduce.hpp> // IWYU pragma: export
@@ -51,13 +52,31 @@ namespace detail
 
 enum BlockReduceAlgorithm
 {
-    BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-        = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::raking_reduce_commutative_only),
+    BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY = detail::to_BlockReduceAlgorithm_enum(
+        ::rocprim::block_reduce_algorithm::raking_reduce_commutative_only),
     BLOCK_REDUCE_RAKING
-        = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::raking_reduce),
+    = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::raking_reduce),
     BLOCK_REDUCE_WARP_REDUCTIONS
-        = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::using_warp_reduce)
+    = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::using_warp_reduce),
+    BLOCK_REDUCE_WARP_REDUCTIONS_NONDETERMINISTIC
+    = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::using_warp_reduce)
 };
+
+inline ::std::ostream& operator<<(::std::ostream& os, const BlockReduceAlgorithm& alg)
+{
+    switch(alg)
+    {
+        case BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY:
+            return os << "BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY";
+        case BlockReduceAlgorithm::BLOCK_REDUCE_RAKING: return os << "BLOCK_REDUCE_RAKING";
+        case BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS:
+            return os << "BLOCK_REDUCE_WARP_REDUCTIONS";
+        // Note: for rocPRIM backend this is a duplicate of BLOCK_REDUCE_WARP_REDUCTIONS
+        // case BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS_NONDETERMINISTIC:
+        //   return os << "BLOCK_REDUCE_WARP_REDUCTIONS_NONDETERMINISTIC";
+        default: return os << "<unknown BlockReduceAlgorithm: " << static_cast<int>(alg) << ">";
+    }
+}
 
 template<typename T,
          int                  BlockDimX,
