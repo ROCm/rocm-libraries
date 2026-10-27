@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Fused Swish/SiLU GEMM with auxiliary pre-activation output, with or without bias, enabled by `HIPBLASLT_EPILOGUE_SWISH_AUX_EXT` and `HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT`.
 * Device scalar alpha on gfx1250 through
   `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
   `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
