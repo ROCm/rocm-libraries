@@ -29,7 +29,9 @@ Geometry (the recipe's spec axes) has the argument names of :mod:`.ew`: ``opA [o
 thread space counts vectors: ``n_in``, ``e0`` and its magic pair ``m0, s0`` are those of
 ``e0 / vec``, the other values are unchanged.
 
-``vec > 1`` (real kernels): D's stride of mode 0 is 1; a tensor marked in ``unit`` has stride 1 in
+``vec > 1`` (real kernels; the ``math`` rows only with every input a vector, and the recipe
+files carry only that class of them, each input's math programs applied in a loop over the
+``vec`` values): D's stride of mode 0 is 1; a tensor marked in ``unit`` has stride 1 in
 mode 0 and is accessed with vector loads, the others with ``vec`` scalar loads ``s<T>0`` apart.
 The caller guarantees ``e0 % vec == 0``, ``lim0 % vec == 0`` (arity 1), that the strides of modes
 ``1..7`` of the vector tensors (and D) are multiples of ``vec`` and that their pointers are aligned
@@ -47,17 +49,6 @@ from rocke.core.ir import IRBuilder, KernelDef
 from .common import (
     DTYPES,
     MAX_RANK,
-    OP_ABS,
-    OP_CONJ,
-    OP_EXP,
-    OP_IDENTITY,
-    OP_LOG,
-    OP_NEG,
-    OP_RCP,
-    OP_RELU,
-    OP_SIGMOID,
-    OP_SQRT,
-    OP_TANH,
     Emit,
     ptr,
 )
@@ -72,7 +63,8 @@ _MAX_VEC = {2: 8, 4: 4, 8: 2}
 @dataclass(frozen=True)
 class EwJitSpec:
     """A kernel class: the generic kernel's row (:class:`EwSpec`), the vector width and which
-    inputs are read with vector loads (``unit``, in ``base.tensors()`` order without D)."""
+    inputs are read with vector loads (``unit``, in ``base.tensors()`` order without D).
+    """
 
     base: EwSpec
     vec: int = 1
@@ -84,6 +76,10 @@ class EwJitSpec:
             raise ValueError("vec must be 1, 2, 4 or 8")
         if self.vec > 1 and self.base.cplx:
             raise ValueError("complex kernels have vec 1")
+        if self.vec > 1 and self.base.math and not all(self.unit):
+            raise ValueError(
+                "math kernels have vector classes only with every input a vector"
+            )
         n_in = len(self.base.tensors()) - 1
         if self.vec == 1 and self.unit:
             raise ValueError("unit flags need vec > 1")
@@ -134,7 +130,7 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
     vec = spec.vec
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = base.block
-    e = Emit(b, base.idx64, base.cdt)
+    e = Emit(b, base.idx64, base.cdt, base.math)
     names = base.tensors()
     dts = {"A": base.a, "B": base.b, "C": base.c, "D": base.d}
     unit = dict(zip(names[:-1], spec.unit)) if vec > 1 else {}
@@ -218,35 +214,6 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
             out += e.load(P[n], o, dt)
         return out
 
-    def unary_vec(vs: List, code) -> List:
-        """Emit.unary over the ``vec`` values of a vector: one uniform branch per operator for
-        the whole vector (the same operator table and results per element)."""
-        one = e.cf(1.0)
-        table = (
-            (OP_SQRT, lambda y: b.sqrt(y)),
-            (OP_RELU, lambda y: b.fmax(y, e.cf(0.0))),
-            (OP_RCP, lambda y: b.fdiv(one, y)),
-            (OP_SIGMOID, lambda y: b.fdiv(one, b.fadd(one, b.exp(b.fneg(y))))),
-            (OP_TANH, lambda y: b.tanh(y)),
-            (OP_EXP, lambda y: b.exp(y)),
-            (OP_LOG, lambda y: b.log(y)),
-            (OP_ABS, lambda y: b.fabs(y)),
-            (OP_NEG, lambda y: b.fneg(y)),
-        )
-
-        def apply(xs: List) -> List:
-            r = list(xs)
-            for op, fn in table:
-                r = e.when(
-                    b.cmp_eq(code, e.c32(op)), r, lambda c, fn=fn: [fn(y) for y in c]
-                )
-            return r
-
-        not_id = b.land(
-            b.cmp_ne(code, e.c32(OP_IDENTITY)), b.cmp_ne(code, e.c32(OP_CONJ))
-        )
-        return e.when(not_id, list(vs), apply)
-
     def store_vec(off, vals: Sequence) -> None:
         dt = base.d
         ty, nb = DTYPES[dt]
@@ -255,7 +222,9 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
         for w in _runs(vec, nb):
             o = off if done == 0 else b.add(off, koff(done))
             p, idx = e._addr(P["D"], o, nb)
-            b.global_store_vN(p, idx, b.vec_pack(outs[done : done + w], ty), w, align=w * nb)
+            b.global_store_vN(
+                p, idx, b.vec_pack(outs[done : done + w], ty), w, align=w * nb
+            )
             done += w
 
     rows = b.scf_for(b.block_id_y(), n_out, ystep, iv_name="row")
@@ -282,7 +251,22 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
         with b.scf_if(ok):
             vals = {}
             ncomp = 2 if base.cplx else vec
-            for n in names[:-1]:
+            if base.math and vec == 1:
+                # every input loaded, then each input's operators (one copy per input)
+                conds, vs = [], []
+                for n in names[:-1]:
+                    cond = nz[n]
+                    if ok_load is not None:
+                        cond = b.land(cond, ok_load)
+                    v = e.when(
+                        cond, [zero], lambda _c, n=n: e.load(P[n], roff[n], dts[n])
+                    )
+                    conds.append(cond)
+                    vs.append(v[0])
+                xs = e.unary_inputs(vs, [OPS[n] for n in names[:-1]])
+                for n, cond, x in zip(names[:-1], conds, xs):
+                    vals[n] = [b.select(cond, b.fmul(S[n][0], x), zero)]
+            for n in names[:-1] if not (base.math and vec == 1) else []:
                 zeros = [zero] * ncomp
                 cond = nz[n]
                 if ok_load is not None:
@@ -301,11 +285,13 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
                     v = list(e.cmul(S[n][0], S[n][1], re_, im_))
                     vals[n] = [b.select(cond, c, zero) for c in v]
                 elif vec == 1:
-                    vals[n] = [b.select(cond, b.fmul(S[n][0], e.unary(v[0], OPS[n])), zero)]
+                    vals[n] = [
+                        b.select(cond, b.fmul(S[n][0], e.unary(v[0], OPS[n])), zero)
+                    ]
                 else:
                     vals[n] = [
                         b.select(cond, b.fmul(S[n][0], x), zero)
-                        for x in unary_vec(v, OPS[n])
+                        for x in e.unary_list(v, OPS[n])
                     ]
             if base.cplx:
                 out = vals["A"]
@@ -346,6 +332,12 @@ def jit_classes(bases: Sequence[EwSpec]) -> List[EwJitSpec]:
     """
     out = []
     for base in bases:
+        if base.math:
+            # the math rows: only the class of every input a vector (the class the JIT takes
+            # by default; their recipes carry the math programs, so they are kept few)
+            n_in = len(base.tensors()) - 1
+            out.append(EwJitSpec(base, jit_vec(base.d), (True,) * n_in))
+            continue
         out.append(EwJitSpec(base))
         if base.cplx:
             continue
@@ -357,12 +349,15 @@ def jit_classes(bases: Sequence[EwSpec]) -> List[EwJitSpec]:
     return out
 
 
-def jit_class_of(base: EwSpec, vals: Dict[str, int]) -> Tuple[EwJitSpec, Dict[str, int], int]:
+def jit_class_of(
+    base: EwSpec, vals: Dict[str, int]
+) -> Tuple[EwJitSpec, Dict[str, int], int]:
     """The class, geometry and thread count of a launch of the generic kernel ``base`` with
     argument values ``vals`` (the rule hipTensor's C++ runtime applies, ``rocke_jit.cpp``
     ``classify``): the output's vector width when D has stride 1 in mode 0, ``e0`` (and ``lim0``)
     are multiples of it and so are the other strides of D and of every input read with vector
-    loads (stride 1 in mode 0); else ``vec`` 1. Buffer alignment is checked at execution."""
+    loads (stride 1 in mode 0); else ``vec`` 1. Buffer alignment is checked at execution.
+    """
     from .common import magic_u31, as_i32_bits
 
     names = base.tensors()
@@ -380,8 +375,8 @@ def jit_class_of(base: EwSpec, vals: Dict[str, int]) -> Tuple[EwJitSpec, Dict[st
                 ok = ok and all(vals[f"s{n}{i}"] % v == 0 for i in range(1, MAX_RANK))
             if n != "D":
                 flags.append(vector)
-        # 64-bit offset rows have vector classes only with every input a vector
-        if ok and not (base.idx64 and not all(flags)):
+        # 64-bit offset rows and math rows have vector classes only with every input a vector
+        if ok and not ((base.idx64 or base.math) and not all(flags)):
             vec, unit = v, tuple(flags)
     spec = EwJitSpec(base, vec, unit)
     geom = {name: int(vals[name]) for name, _ in spec.axes()}
@@ -435,4 +430,3 @@ def recipe_entry(spec: EwJitSpec, arch: str) -> Dict:
         "family": EW_JIT_ABI,
         "recipe": roll_jit_ew(spec),
     }
-

@@ -19,6 +19,10 @@ its limit reads zero instead of A (zero padding of a packed contraction operand)
 Complex kernels (``cplx``, arity 1 or 2): elements are (re, im) pairs, unary operators
 IDENTITY / CONJ, the scalars are complex (``alpha_re``, ``alpha_im``, ...) and arity 2 adds.
 
+Real kernels implement the unary operators of :data:`.common.BASIC_UNARY_OPS`; the ``math`` rows
+(kernel name suffix ``_m``) also those of :data:`.common.MATH_OPS` (trigonometric, hyperbolic,
+their inverses, floor, ceil), so the kernels without them keep their size and registers.
+
 Kernel ABI ``hiptensor-aot-ew/v1`` (argument names; the order follows from the spec):
 ``A [B] [C] D``, scalars ``alpha [beta] [gamma]`` (``_re`` / ``_im`` for complex), operator
 codes ``opA [opB] [opC] [opAB] [opABC]`` (i32), ``n_in, n_out, ystep`` (i32),
@@ -49,6 +53,7 @@ class EwSpec:
     cplx: bool = False
     idx64: bool = False
     block: int = 256
+    math: bool = False  # the operators of common.MATH_OPS too (real kernels)
 
     @property
     def cdt(self) -> str:
@@ -73,12 +78,15 @@ class EwSpec:
             raise ValueError("complex kernels move f32 or f64 component pairs")
         if self.block % 64:
             raise ValueError("block must be a multiple of 64")
+        if self.math and self.cplx:
+            raise ValueError("complex kernels have no math operators")
 
     def kernel_name(self) -> str:
         dts = "_".join(x for x in (self.a, self.b, self.c, self.d) if x)
         return (
             f"hiptensor_aot_ew{self.arity}_{'c' if self.cplx else 'r'}_{dts}"
             f"_{'i64' if self.idx64 else 'i32'}_b{self.block}"
+            + ("_m" if self.math else "")
         )
 
 
@@ -86,7 +94,7 @@ def build_ew(spec: EwSpec) -> KernelDef:
     spec.check()
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
-    e = Emit(b, spec.idx64, spec.cdt)
+    e = Emit(b, spec.idx64, spec.cdt, spec.math)
     names = spec.tensors()
     dts = {"A": spec.a, "B": spec.b, "C": spec.c, "D": spec.d}
     P = {n: ptr(b, n, dts[n], readonly=n != "D") for n in names}
@@ -166,7 +174,24 @@ def build_ew(spec: EwSpec) -> KernelDef:
         with b.scf_if(ok):
             vals = {}
             ncomp = 2 if spec.cplx else 1
-            for n in names[:-1]:
+            if spec.math:
+                _math_inputs(
+                    e,
+                    b,
+                    spec,
+                    names,
+                    P,
+                    S,
+                    OPS,
+                    nz,
+                    roff,
+                    dts,
+                    zero,
+                    lim,
+                    ok_load if lim is not None else None,
+                    vals,
+                )
+            for n in (names[:-1] if not spec.math else []):
                 zeros = [zero] * ncomp
                 cond = nz[n]
                 if lim is not None:
@@ -201,3 +226,20 @@ def build_ew(spec: EwSpec) -> KernelDef:
                 out = [e.binary(ab, vals["C"][0], OPS["ABC"])]
             e.store(P["D"], roff["D"], out, spec.d)
     return b.kernel
+
+
+def _math_inputs(e, b, spec, names, P, S, OPS, nz, roff, dts, zero, lim, ok_load, vals):
+    """The inputs of a ``math`` kernel: every input loaded, then the unary operators of all
+    of them with one copy of each math program (:meth:`.common.Emit.unary_inputs`)."""
+    conds, vs = [], []
+    for n in names[:-1]:
+        cond = nz[n]
+        if lim is not None:
+            cond = b.land(cond, ok_load)
+        v = e.when(cond, [zero], lambda _c, n=n: e.load(P[n], roff[n], dts[n], False))
+        conds.append(cond)
+        vs.append(v[0])
+    xs = e.unary_inputs(vs, [OPS[n] for n in names[:-1]])
+    for n, cond, x in zip(names[:-1], conds, xs):
+        # an input that is not read contributes exactly zero: its operator's result is dropped
+        vals[n] = [b.select(cond, b.fmul(S[n][0], x), zero)]

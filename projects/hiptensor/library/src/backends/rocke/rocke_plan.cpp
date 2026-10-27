@@ -93,6 +93,31 @@ namespace hiptensor
                 return complexElement ? 2 * bytes : bytes;
             }
 
+            // The unary operators only the kernel pack's "math" kernels implement (f64 programs
+            // of rocke.helpers.elementary); the other kernels keep their registers without them.
+            bool mathUnary(int op)
+            {
+                switch(op)
+                {
+                case HIPTENSOR_OP_SIN:
+                case HIPTENSOR_OP_COS:
+                case HIPTENSOR_OP_TAN:
+                case HIPTENSOR_OP_SINH:
+                case HIPTENSOR_OP_COSH:
+                case HIPTENSOR_OP_ASIN:
+                case HIPTENSOR_OP_ACOS:
+                case HIPTENSOR_OP_ATAN:
+                case HIPTENSOR_OP_ASINH:
+                case HIPTENSOR_OP_ACOSH:
+                case HIPTENSOR_OP_ATANH:
+                case HIPTENSOR_OP_CEIL:
+                case HIPTENSOR_OP_FLOOR:
+                    return true;
+                default:
+                    return false;
+                }
+            }
+
             bool supportedUnary(hiptensorOperator_t op)
             {
                 switch(op)
@@ -110,7 +135,7 @@ namespace hiptensor
                 case HIPTENSOR_OP_NEG:
                     return true;
                 default:
-                    return false;
+                    return mathUnary(op);
                 }
             }
 
@@ -294,6 +319,10 @@ namespace hiptensor
                     idx64 = idx64 || spanOf(dims, t) > kI32Max;
                 }
                 ints.emplace_back("idx64", idx64 ? 1 : 0);
+                bool const math = std::any_of(operands.begin(),
+                                              operands.end() - 1,
+                                              [](EwOperand const& o) { return mathUnary(o.op); });
+                ints.emplace_back("math", math ? 1 : 0);
                 step.kernel = pack.find(kEw, ints, strs);
                 if(step.kernel == nullptr)
                 {
@@ -1000,7 +1029,9 @@ namespace hiptensor
                 }
                 bool idx64 = spanOf(kept, 0) + spanOf(red, 0) > kI32Max || spanOf(kept, 1) > kI32Max
                              || spanOf(kept, 2) > kI32Max;
-                std::vector<std::pair<std::string, int64_t>>     ints{{"idx64", idx64 ? 1 : 0}};
+                bool const math = mathUnary(A.unaryOp) || mathUnary(opC);
+                std::vector<std::pair<std::string, int64_t>>     ints{{"idx64", idx64 ? 1 : 0},
+                                                                      {"math", math ? 1 : 0}};
                 std::vector<std::pair<std::string, std::string>> strs{
                     {"mode", row ? "row" : "col"}, {"a", a}, {"d", d}};
                 auto const* kernel = pack.find(kReduce, ints, strs);
@@ -3319,7 +3350,7 @@ namespace hiptensor
             }
         } // namespace
 
-        hiptensorStatus_t enumerateCandidates(Problem const&          problem,
+        hiptensorStatus_t enumerateCandidates(Problem const&          original,
                                               Pack const&             pack,
                                               CandidateOptions const& options,
                                               uint64_t                workspaceLimit,
@@ -3327,6 +3358,16 @@ namespace hiptensor
                                               std::string&            reason)
         {
             out.clear();
+            // CONJ of a real tensor is the identity (as for the other backend's kernels): plan
+            // the problem without it, so every route of identity operands applies.
+            Problem problem = original;
+            for(auto& t : problem.t)
+            {
+                if(t.present && t.unaryOp == HIPTENSOR_OP_CONJ && !isComplex(t.type))
+                {
+                    t.unaryOp = HIPTENSOR_OP_IDENTITY;
+                }
+            }
             switch(problem.kind)
             {
             case OpKind::Permute:

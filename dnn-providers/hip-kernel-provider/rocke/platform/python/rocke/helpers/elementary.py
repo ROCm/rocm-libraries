@@ -61,7 +61,7 @@ from __future__ import annotations
 import math
 import struct
 from fractions import Fraction
-from typing import Callable, List, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 from ..core.ir import F64, I32, I64, IRBuilder, Value
 
@@ -110,21 +110,21 @@ _ONE_BITS = 0x3FF0000000000000
 SIN_S = (
     _h("-0x1.5555555555555p-3"),
     _h("0x1.1111111111110p-7"),
-    _h("-0x1.a01a01a01992ap-13"),
-    _h("0x1.71de3a545f19dp-19"),
-    _h("-0x1.ae645410741e4p-26"),
-    _h("0x1.61217d606527fp-33"),
-    _h("-0x1.ab16ed5f71465p-41"),
+    _h("-0x1.a01a01a019929p-13"),
+    _h("0x1.71de3a545f037p-19"),
+    _h("-0x1.ae6454104d5d8p-26"),
+    _h("0x1.61217d41bb89bp-33"),
+    _h("-0x1.ab16db5288252p-41"),
 )
 # (cos(sqrt z) - 1 + z/2)/z^2, z in [0, 0.6169]
 COS_C = (
     _h("0x1.5555555555555p-5"),
     _h("-0x1.6c16c16c16c16p-10"),
     _h("0x1.a01a01a019d06p-16"),
-    _h("-0x1.27e4fb7712686p-22"),
-    _h("0x1.1eed8deaebf3ep-29"),
-    _h("-0x1.9394b9158d529p-37"),
-    _h("0x1.ab77d570b3fbbp-45"),
+    _h("-0x1.27e4fb77125e8p-22"),
+    _h("0x1.1eed8deadabefp-29"),
+    _h("-0x1.9394b8fa4ece7p-37"),
+    _h("0x1.ab77c5650a425p-45"),
 )
 # (atan(sqrt z)/sqrt z - 1)/z, z in [0, (7/16)^2]
 ATAN_A = (
@@ -187,12 +187,12 @@ EXP_P = (
 LOG_G = (
     _h("0x1.5555555555555p-1"),
     _h("0x1.9999999999a38p-2"),
-    _h("0x1.2492492476ba2p-2"),
-    _h("0x1.c71c720176ad6p-3"),
-    _h("0x1.745cf8f95988dp-3"),
-    _h("0x1.3b1c378810048p-3"),
-    _h("0x1.0fbe601dc7877p-3"),
-    _h("0x1.0c05a4e59064fp-3"),
+    _h("0x1.2492492476b5cp-2"),
+    _h("0x1.c71c72017e746p-3"),
+    _h("0x1.745cf8f61afcep-3"),
+    _h("0x1.3b1c38386f2d9p-3"),
+    _h("0x1.0fbe4dac856a8p-3"),
+    _h("0x1.0c0665b09f2b8p-3"),
 )
 
 #: The functions, by name.
@@ -226,12 +226,35 @@ class IRMath:
     Python floats / ints passed to an op are constants; a Python ``bool`` as a predicate
     selects at build time (nothing is emitted for the other side)."""
 
-    def __init__(self, b: IRBuilder):
+    def __init__(self, b: IRBuilder, anchor: Optional[Value] = None):
         self.b = b
+        # ``anchor``: an i64 zero the compiler cannot see through (:func:`opaque_zero`); f64
+        # constants are built on it so that they are not hoisted out of an enclosing loop
+        self.anchor = anchor
+        self.pool: dict = {}
 
     # values
     def f(self, v) -> Value:
-        return self.b.const_f64(float(v)) if isinstance(v, (float, int)) else v
+        if not isinstance(v, (float, int)):
+            return v
+        if self.anchor is None:
+            return self.b.const_f64(float(v))
+        key = _bits(float(v))
+        if key in self.pool:
+            return self.pool[key]
+        # built at its use (a value defined in one branch must not be used in another)
+        return self.b.bitcast(self.b.lor(self.b.const_i64(key), self.anchor), F64)
+
+    def materialize(self, constants: Sequence[float]) -> None:
+        """Build the anchored ``constants`` here, once (they then dominate every later use,
+        nested branches included): one constant, OR and bitcast each instead of one per use.
+        """
+        for c in constants:
+            key = _bits(float(c))
+            if key not in self.pool:
+                self.pool[key] = self.b.bitcast(
+                    self.b.lor(self.b.const_i64(key), self.anchor), F64
+                )
 
     def i(self, v) -> Value:
         return self.b.const_i64(int(v)) if isinstance(v, int) else v
@@ -306,7 +329,12 @@ class IRMath:
             if isinstance(a, int) and isinstance(c, int):
                 return self.b.select(p, self.i(a), self.i(c))
             return self.b.select(p, self.f(a), self.f(c))
-        if isinstance(a, Value) and a.type == I64 or isinstance(c, Value) and c.type == I64:
+        if (
+            isinstance(a, Value)
+            and a.type == I64
+            or isinstance(c, Value)
+            and c.type == I64
+        ):
             return self.b.select(p, self.i(a), self.i(c))
         return self.b.select(p, self.f(a), self.f(c))
 
@@ -719,11 +747,21 @@ def trig(m, x, is_sin: Bool, is_cos: Bool, is_tan: Bool):
         v = m.sel(m.ieq(m.iand(m.iadd(q, 1), 2), 2), m.neg(v), v)
         out = v if out is None else m.sel(is_cos, v, out)
     if is_tan is not False:
-        t = m.sel(
-            odd,
-            m.neg(dd_div(m, ch, cl, sh, sl)),
-            dd_div(m, sh, sl, ch, cl),
-        )
+
+        def tan_q(_v):
+            # sin / cos (even quadrants) or -cos / sin (odd ones): one dd division
+            q = dd_div(
+                m,
+                m.sel(odd, ch, sh),
+                m.sel(odd, cl, sl),
+                m.sel(odd, sh, ch),
+                m.sel(odd, sl, cl),
+            )
+            return [m.sel(odd, m.neg(q), q)]
+
+        # a branch of its own when the predicate is a run-time value (the division is the
+        # most expensive step; sin and cos do not need it)
+        t = m.when(is_tan, [0.0], tan_q)[0]
         out = t if out is None else m.sel(is_tan, t, out)
     # sin and tan are odd
     odd_fn = m.bor(is_sin, is_tan)
@@ -775,10 +813,15 @@ def hyp(m, x, is_sinh: Bool, is_cosh: Bool):
     if is_sinh is not False:
         u, v = two_sum(m, hh, m.neg(gh))
         big = m.add(u, m.add(v, m.sub(hl, gl)))
-        zh, zl = two_prod(m, a, a)
-        sh, sl = series_dd(m, a, zh, zl, SINH_H)
-        small = m.add(sh, sl)
-        v = m.sel(m.lt(a, 1.0), small, big)
+
+        def series(_v):
+            zh, zl = two_prod(m, a, a)
+            sh, sl = series_dd(m, a, zh, zl, SINH_H)
+            return [m.add(sh, sl)]
+
+        lt1 = m.lt(a, 1.0)
+        small = m.when(m.band(is_sinh, lt1), [0.0], series)[0]
+        v = m.sel(lt1, small, big)
         v = m.sel(m.eq(hh, math.inf), math.inf, v)
         out = copysign(m, v, x)
     if is_cosh is not False:
@@ -798,18 +841,26 @@ def asin_acos(m, x, is_asin: Bool, is_acos: Bool):
     """``asin(x)`` or ``acos(x)`` (exactly one predicate holds)."""
     a = m.abs(x)
     negative = _is_negative(m, x)
-    # |x| <= 1/2: asin(a) = a + a z R(z), z = a^2
-    zh, zl = two_prod(m, a, a)
-    ph, pl = series_dd(m, a, zh, zl, ASIN_R)
-    # |x| > 1/2: asin(a) = pi/2 - 2 asin(s), s = sqrt(z), z = (1 - a)/2 (exact)
-    z = m.mul(m.sub(1.0, a), 0.5)
-    s = m.sqrt(z)
-    s_l = m.sel(m.gt(s, 0.0), m.div(m.fma(m.neg(s), s, z), m.add(s, s)), 0.0)
-    wh, wl = series_dd(m, s, z, 0.0, ASIN_R)
-    wl = m.add(wl, m.mul(s_l, m.fma(z, ASIN_R[0], 1.0)))
-    wh, wl = fast_two_sum(m, wh, wl)
-    wh2, wl2 = m.mul(2.0, wh), m.mul(2.0, wl)
     small = m.le(a, 0.5)
+
+    def near_zero(_v):
+        # |x| <= 1/2: asin(a) = a + a z R(z), z = a^2
+        zh, zl = two_prod(m, a, a)
+        return list(series_dd(m, a, zh, zl, ASIN_R))
+
+    def near_one(_v):
+        # |x| > 1/2: asin(a) = pi/2 - 2 asin(s), s = sqrt(z), z = (1 - a)/2 (exact)
+        z = m.mul(m.sub(1.0, a), 0.5)
+        s = m.sqrt(z)
+        s_l = m.sel(m.gt(s, 0.0), m.div(m.fma(m.neg(s), s, z), m.add(s, s)), 0.0)
+        wh, wl = series_dd(m, s, z, 0.0, ASIN_R)
+        wl = m.add(wl, m.mul(s_l, m.fma(z, ASIN_R[0], 1.0)))
+        wh, wl = fast_two_sum(m, wh, wl)
+        return [m.mul(2.0, wh), m.mul(2.0, wl)]
+
+    # each path for the lanes that take it (waves whose lanes all take one skip the other)
+    ph, pl = m.when(small, [0.0, 0.0], near_zero)
+    wh2, wl2 = m.when(m.gt(a, 0.5), [0.0, 0.0], near_one)
     out = None
     if is_asin is not False:
         u, v = two_sum(m, PIO2_0, m.neg(wh2))
@@ -895,7 +946,9 @@ def log_dd(m, yh, yl):
 
 def _sqrt_dd(m, th, tl):
     sh = m.sqrt(th)
-    sl = m.sel(m.gt(sh, 0.0), m.div(m.add(m.fma(m.neg(sh), sh, th), tl), m.add(sh, sh)), 0.0)
+    sl = m.sel(
+        m.gt(sh, 0.0), m.div(m.add(m.fma(m.neg(sh), sh, th), tl), m.add(sh, sh)), 0.0
+    )
     return sh, sl
 
 
@@ -905,19 +958,30 @@ def ainvhyp(m, x, is_asinh: Bool, is_acosh: Bool, is_atanh: Bool):
     # The argument y >= 1 of the log, as a dd; asinh and acosh past 2^28 take log(a) + ln 2.
     big = m.gt(a, 2.0**28)
     v = m.sel(is_acosh, x, a)
-    ph, pl = two_prod(m, v, v)
-    th, tl = two_sum(m, ph, m.sel(is_acosh, -1.0, 1.0))
-    sh, sl = _sqrt_dd(m, th, m.add(tl, pl))
-    yh, ye = two_sum(m, v, sh)
-    yl = m.add(ye, sl)
-    if is_atanh is not False:
+
+    def root_arg(_v):
+        # asinh: |x| + sqrt(x^2 + 1), acosh: x + sqrt(x^2 - 1)
+        ph, pl = two_prod(m, v, v)
+        th, tl = two_sum(m, ph, m.sel(is_acosh, -1.0, 1.0))
+        sh, sl = _sqrt_dd(m, th, m.add(tl, pl))
+        yh, ye = two_sum(m, v, sh)
+        return [yh, m.add(ye, sl)]
+
+    def ratio_arg(_v):
+        # atanh: 1 + 2|x| / (1 - |x|)
         dh, dl = two_sum(m, 1.0, m.neg(a))
         two_a = m.add(a, a)
         uh = m.div(two_a, dh)
         ul = m.div(m.sub(m.fma(m.neg(uh), dh, two_a), m.mul(uh, dl)), dh)
         zh, ze = two_sum(m, 1.0, uh)
+        return [zh, m.add(ze, ul)]
+
+    # one of the two arguments (a branch each when the predicate is a run-time value)
+    yh, yl = m.when(m.bnot(is_atanh), [0.0, 0.0], root_arg)
+    if is_atanh is not False:
+        zh, zl = m.when(is_atanh, [0.0, 0.0], ratio_arg)
         yh = m.sel(is_atanh, zh, yh)
-        yl = m.sel(is_atanh, m.add(ze, ul), yl)
+        yl = m.sel(is_atanh, zl, yl)
     use_big = m.band(big, m.bnot(is_atanh))
     yh = m.sel(use_big, v, yh)
     yl = m.sel(use_big, 0.0, yl)
@@ -983,6 +1047,53 @@ def family(m, fam: str, x, preds: dict):
     raise ValueError(fam)
 
 
+class _RecordingMath(IRMath):
+    """IRMath on a scratch builder that records the f64 constants a program uses."""
+
+    def __init__(self, b: IRBuilder):
+        super().__init__(b)
+        self.seen: List[float] = []
+        self.uses: dict = {}
+
+    def f(self, v) -> Value:
+        if isinstance(v, (float, int)):
+            key = _bits(float(v))
+            if key not in self.uses:
+                self.seen.append(float(v))
+            self.uses[key] = self.uses.get(key, 0) + 1
+        return super().f(v)
+
+
+_CONSTANTS: dict = {}
+
+
+def family_constants(fam: str, preds: dict) -> List[float]:
+    """The f64 constants :func:`family` ``fam`` uses more than once, for predicates of the
+    kinds in ``preds`` (Python bools as given, any other value an IR predicate), in first-use
+    order (a build of the program on a scratch builder): the ones worth
+    :meth:`IRMath.materialize`."""
+    kinds = tuple(
+        (n, preds[n] if isinstance(preds.get(n), bool) else "v")
+        for n in FAMILIES[fam]
+        if n in preds
+    )
+    key = (fam, kinds)
+    if key not in _CONSTANTS:
+        from ..core.ir import I1
+
+        sb = IRBuilder("elementary_constants")
+        x = sb.param("x", F64)
+        p2 = {
+            n: (k if isinstance(k, bool) else sb.param(f"p_{n}", I1)) for n, k in kinds
+        }
+        rec = _RecordingMath(sb)
+        family(rec, fam, x, p2)
+        # constants used once stay at their use: a pooled constant lives from the program's
+        # start, and pooling the single-use ones (the polynomial coefficients) costs registers
+        _CONSTANTS[key] = tuple(c for c in rec.seen if rec.uses[_bits(c)] >= 2)
+    return list(_CONSTANTS[key])
+
+
 def family_of(name: str) -> str:
     for fam, names in FAMILIES.items():
         if name in names:
@@ -995,14 +1106,28 @@ def apply(m, name: str, x):
     return family(m, family_of(name), x, {name: True})
 
 
-def emit(b: IRBuilder, name: str, x: Value) -> Value:
+def opaque_zero(b: IRBuilder) -> Value:
+    """An i64 zero the compiler cannot see through (one scalar move with side effects), the
+    ``anchor`` of :class:`IRMath`: the f64 constants of a program built on it are materialized
+    where they are used. Without it the backend hoists every constant of a program that runs
+    inside a loop (a row loop, a GEMM main loop) out of the loop into VGPRs, and a kernel with
+    these programs needs several times the registers of the program itself."""
+    return b.inline_asm(
+        "s_mov_b64 $0, 0", "=s", [], I64, sideeffect=True, result_name_hint="ozero"
+    )
+
+
+def emit(b: IRBuilder, name: str, x: Value, anchored: bool = True) -> Value:
     """``name(x)`` as IR ops for an f32 or f64 value ``x`` (f32: evaluated in f64, rounded once
-    to f32)."""
+    to f32); ``anchored``: constants on an :func:`opaque_zero`."""
+    m = IRMath(b, opaque_zero(b) if anchored else None)
+    if anchored:
+        m.materialize(family_constants(family_of(name), {name: True}))
     if x.type == F64:
-        return apply(IRMath(b), name, x)
+        return apply(m, name, x)
     if x.type.name != "f32":
         raise ValueError(f"elementary.{name} takes f32 or f64, got {x.type.name}")
-    return b.cvt_f64_to_f32(apply(IRMath(b), name, b.cvt_f32_to_f64(x)))
+    return b.cvt_f64_to_f32(apply(m, name, b.cvt_f32_to_f64(x)))
 
 
 def host(name: str, x: float) -> float:

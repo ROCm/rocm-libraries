@@ -53,6 +53,7 @@ class ReduceSpec:
     d: str  # C / D dtype
     idx64: bool = False
     block: int = 256
+    math: bool = False  # the operators of common.MATH_OPS too
 
     @property
     def cdt(self) -> str:
@@ -62,6 +63,7 @@ class ReduceSpec:
         return (
             f"hiptensor_aot_reduce_{self.mode}_{self.a}_{self.d}"
             f"_{'i64' if self.idx64 else 'i32'}_b{self.block}"
+            + ("_m" if self.math else "")
         )
 
 
@@ -174,7 +176,7 @@ def build_reduce(spec: ReduceSpec) -> KernelDef:
         raise ValueError("block must be a multiple of 64")
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
-    e = Emit(b, spec.idx64, spec.cdt)
+    e = Emit(b, spec.idx64, spec.cdt, spec.math)
     P = _common_params(b, e, spec, True)
     geo = _Geo(b, e, True)
     if spec.mode == "row":
@@ -293,16 +295,34 @@ def _col(b, e: Emit, spec, P, geo: _Geo, n_red, rchunk, ystep, n_outer) -> None:
             with loop as (j, cur):
                 base = b.add(r0, b.mul(j, e.c32(U)))
                 nxt = []
-                for u in range(U):
-                    r = b.add(base, e.c32(u))
-                    ok = b.cmp_lt(r, r1)
-                    rs = b.select(ok, r, e.c32(0))
-                    co = geo.decode(e, rs, geo.re, geo.rm)
-                    off = b.add(abase, _Geo.dot(e, co, geo.rA))
-                    x = e.unary(e.load(P["A"], off, spec.a)[0], P["opA"])
-                    x = b.select(ok, x, ident)
-                    nxt.append(e.binary(cur[u], x, P["opR"]))
-                b.scf_yield(*nxt)
+                if spec.math:
+                    # the U loads first, then the operator once for all of them (one copy of
+                    # the math programs in the loop)
+                    oks, xs = [], []
+                    for u in range(U):
+                        r = b.add(base, e.c32(u))
+                        ok = b.cmp_lt(r, r1)
+                        rs = b.select(ok, r, e.c32(0))
+                        co = geo.decode(e, rs, geo.re, geo.rm)
+                        off = b.add(abase, _Geo.dot(e, co, geo.rA))
+                        oks.append(ok)
+                        xs.append(e.load(P["A"], off, spec.a)[0])
+                    xs = e.unary_list(xs, P["opA"])
+                    for u in range(U):
+                        x = b.select(oks[u], xs[u], ident)
+                        nxt.append(e.binary(cur[u], x, P["opR"]))
+                    b.scf_yield(*nxt)
+                else:
+                    for u in range(U):
+                        r = b.add(base, e.c32(u))
+                        ok = b.cmp_lt(r, r1)
+                        rs = b.select(ok, r, e.c32(0))
+                        co = geo.decode(e, rs, geo.re, geo.rm)
+                        off = b.add(abase, _Geo.dot(e, co, geo.rA))
+                        x = e.unary(e.load(P["A"], off, spec.a)[0], P["opA"])
+                        x = b.select(ok, x, ident)
+                        nxt.append(e.binary(cur[u], x, P["opR"]))
+                    b.scf_yield(*nxt)
             r = loop.results
             acc = e.binary(
                 e.binary(r[0], r[1], P["opR"]), e.binary(r[2], r[3], P["opR"]), P["opR"]
@@ -319,7 +339,7 @@ def build_reduce_finalize(spec: ReduceSpec) -> KernelDef:
     """Combine ``split`` partials ``W[s * n_out + o]`` per output and write D."""
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block
-    e = Emit(b, spec.idx64, spec.cdt)
+    e = Emit(b, spec.idx64, spec.cdt, spec.math)
     P = _common_params(b, e, spec, False)
     geo = _Geo(b, e, False)
     o = b.add(b.mul(b.block_id_x(), e.c32(spec.block)), b.thread_id_x())

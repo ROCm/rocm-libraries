@@ -40,8 +40,9 @@ hipTensor's C++ runtime reads the binary pack (rocke_pack.cpp); it never needs P
 Kernel families (attribute "family"):
 
     ew       strided elementwise kernel (permute, elementwise binary / trinary, contraction
-             operand packing and epilogue)
-    reduce   strided reduction kernels (row, col) and the split finalize kernel
+             operand packing and epilogue); attribute math=1: the rows that also implement the
+             trigonometric and hyperbolic operators, their inverses, ceil and floor
+    reduce   strided reduction kernels (row, col) and the split finalize kernel (math as for ew)
     gemm     universal GEMM bodies with an f32 output (routes h16: f16 / bf16 operands,
              x6: f32 operands split into three bf16 parts, cf32: complex f32 operands)
     gett64   f64 / complex f64 strided batched GEMM with runtime sizes
@@ -278,6 +279,9 @@ def ew_params(idx64, mixed=True):
         out.append(dict(arity=1, a=a, d=d, cplx=True, idx64=idx64))
     for a, c, d in rowsc2:
         out.append(dict(arity=2, a=a, c=c, d=d, cplx=True, idx64=idx64))
+    # the same real rows with the math operators (trigonometric, hyperbolic, their inverses,
+    # floor, ceil): separate kernels, so the rows without them keep their registers
+    out += [dict(p, math=True) for p in out if not p.get("cplx")]
     return out
 
 
@@ -286,9 +290,13 @@ def kernel_descriptors(arch, num_cus):
     features = rocke_features()
     for idx64 in (False, True):
         out.extend(("ew", p) for p in ew_params(idx64))
-        for a, d in REDUCE_ROWS:
-            for mode in ("row", "col", "final"):
-                out.append(("reduce", dict(mode=mode, a=a, d=d, idx64=idx64)))
+        for math in (False, True):
+            for a, d in REDUCE_ROWS:
+                for mode in ("row", "col", "final"):
+                    p = dict(mode=mode, a=a, d=d, idx64=idx64)
+                    if math:
+                        p["math"] = True
+                    out.append(("reduce", p))
     if arch in GEMM_ARCHES and not features["gemm"]:
         for route, bodies in GEMM_BODIES.items():
             dts = ("fp16", "bf16") if route == "h16" else ("bf16",)
@@ -588,6 +596,7 @@ def build_kernel(family, params, arch, num_cus):
             arity=spec.arity,
             cplx=int(spec.cplx),
             idx64=int(spec.idx64),
+            math=int(spec.math),
             a=spec.a,
             b=spec.b or "",
             c=spec.c or "",
@@ -613,6 +622,7 @@ def build_kernel(family, params, arch, num_cus):
             a=spec.a,
             d=spec.d,
             idx64=int(spec.idx64),
+            math=int(spec.math),
             block=spec.block,
             max_rank=8,
             limit_index=(1 << 31) - 1,
@@ -913,8 +923,14 @@ def jit_class_params():
     from kernels.common.hiptensor_aot.ew import EwSpec
     from kernels.common.hiptensor_aot.jit_ew import jit_classes
 
+    # the math rows (one vec-1 class each) only with 32-bit offsets: their recipes carry the
+    # f64 programs of every math operator per input, and a launch of the 64-bit-offset math
+    # rows keeps its kernel-pack kernel
     bases = [
-        EwSpec(**p) for idx64 in (False, True) for p in ew_params(idx64, mixed=False)
+        EwSpec(**p)
+        for idx64 in (False, True)
+        for p in ew_params(idx64, mixed=False)
+        if not (idx64 and p.get("math"))
     ]
     return [(dict(c.base.__dict__), c.vec, tuple(c.unit)) for c in jit_classes(bases)]
 
@@ -933,8 +949,11 @@ def _recipe_source_hash(src):
                 if fn.endswith(".py"):
                     with open(os.path.join(root, fn), "rb") as f:
                         h.update(fn.encode() + f.read().replace(b"\r\n", b"\n"))
-    with open(os.path.join(src, "platform/python/rocke/core/ir.py"), "rb") as f:
-        h.update(f.read().replace(b"\r\n", b"\n"))
+    for name in ("core/ir.py", "helpers/elementary.py"):
+        path = os.path.join(src, "platform/python/rocke", name)
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                h.update(f.read().replace(b"\r\n", b"\n"))
     return h.hexdigest()
 
 

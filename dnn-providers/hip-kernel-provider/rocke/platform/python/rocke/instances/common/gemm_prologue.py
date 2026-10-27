@@ -33,12 +33,19 @@ MFMA:
   The split is Dekker-style and exact in f32: ``p0 = RN(x)``,
   ``r1 = x - p0`` (exact), ``p1 = RN(r1)``, ``p2 = RN(r1 - p1)``.
 * ``unary_a`` / ``unary_b`` -- an elementwise operator applied to the operand
-  before the MFMA (hipTensor opA / opB): ``relu``, ``abs``, ``neg``, ``exp``,
-  ``sq`` (x*x), ``sigmoid``. For 16-bit operands the op runs in f32 and is rounded
-  once to the compute type (``unary_impl="f32"``) or, for ``abs`` / ``neg`` /
-  ``relu``, on the packed 16-bit lanes (``unary_impl="bits"``: ``v_and`` /
-  ``v_xor`` / ``v_pk_max_i16``; exact, the same result). For f32 operands the op
-  runs in f32 before the split.
+  before the MFMA (hipTensor opA / opB): every hipTensor unary operator by its
+  name (``relu``, ``abs``, ``neg``, ``sqrt``, ``rcp``, ``exp``, ``log``,
+  ``sigmoid``, ``tanh``, ``sin``, ``cos``, ``tan``, ``sinh``, ``cosh``,
+  ``asin``, ``acos``, ``atan``, ``asinh``, ``acosh``, ``atanh``, ``ceil``,
+  ``floor``) and ``sq`` (x*x). The trigonometric and hyperbolic operators, their
+  inverses, ``ceil`` and ``floor`` are the f64 programs of
+  :mod:`rocke.helpers.elementary` (f32 in, rounded once to f32); ``exp`` and
+  ``sigmoid`` are one ``v_exp_f32`` of ``x * log2(e)`` with ``fast_exp`` (the
+  default) and the accurate ``llvm.exp.f32`` without it. For 16-bit operands the
+  op runs in f32 and is rounded once to the compute type (``unary_impl="f32"``)
+  or, for ``abs`` / ``neg`` / ``relu``, on the packed 16-bit lanes
+  (``unary_impl="bits"``: ``v_and`` / ``v_xor`` / ``v_pk_max_i16``; exact, the
+  same result). For f32 operands the op runs in f32 before the split.
 * ``out_f32`` -- the direct epilogue writes the f32 accumulators (hipTensor
   ``To = f32``) instead of rounding them to the storage type.
 
@@ -75,7 +82,35 @@ RECIPES: Dict[str, Tuple[int, Tuple[Tuple[int, int], ...]]] = {
         ((0, 0), (0, 1), (1, 0), (0, 2), (1, 1), (2, 0), (1, 2), (2, 1), (2, 2)),
     ),
 }
-UNARY = ("", "relu", "abs", "neg", "exp", "sq", "sigmoid")
+# the operators of rocke.helpers.elementary (f64 programs, f32 in and out)
+_ELEMENTARY = (
+    "sin",
+    "cos",
+    "tan",
+    "sinh",
+    "cosh",
+    "asin",
+    "acos",
+    "atan",
+    "asinh",
+    "acosh",
+    "atanh",
+    "ceil",
+    "floor",
+)
+UNARY = (
+    "",
+    "relu",
+    "abs",
+    "neg",
+    "exp",
+    "sq",
+    "sigmoid",
+    "sqrt",
+    "rcp",
+    "tanh",
+    "log",
+) + _ELEMENTARY
 # largest f32 whose RNE bf16 rounding is finite (0x7F7F7FFF)
 _BF16_SAT = 3.3895313892515355e38
 
@@ -99,7 +134,7 @@ class Prologue:
         False  # pin every converted fragment to the VGPR file (asm "=v,0"): no AGPR detours
     )
     fast_exp: bool = (
-        True  # unary exp via one v_exp_f32 (exp2_fast) instead of the guarded exp2
+        True  # unary exp / sigmoid via one v_exp_f32 of x*log2(e); False: llvm.exp.f32
     )
     psub: bool = (
         False  # residual subtract as packed v_pk_add_f32 (inline asm) instead of v_sub_f32
@@ -194,7 +229,7 @@ class Prologue:
             s += "_pk"
         if self.stage != "lds":
             s += "_vg"
-        if not self.fast_exp and "exp" in (self.unary_a, self.unary_b):
+        if not self.fast_exp and {"exp", "sigmoid"} & {self.unary_a, self.unary_b}:
             s += "_gexp"
         if self.pin_v:
             s += "_pv"
@@ -242,14 +277,34 @@ class PrologueEmitter:
         if u == "neg":
             return b.fneg(x)
         if u == "exp":
+            if not self.pro.fast_exp:
+                return b.exp(x)
             # one v_exp_f32 (no range-reduction guard: overflow gives inf, as exp does)
             e = b.fmul(x, b.const_f32(1.0 / math.log(2.0)))
-            return b.exp2_fast(e) if self.pro.fast_exp else b.exp2(e)
+            return b.exp2_fast(e)
         if u == "sq":
             return b.fmul(x, x)
         if u == "sigmoid":
+            if not self.pro.fast_exp:
+                # t = e^-|x| never overflows: 1 / (1 + t) for x >= 0, t / (1 + t) below
+                one = b.const_f32(1.0)
+                t = b.exp(b.fneg(b.fabs(x)))
+                pos = b.fcmp("oge", x, b.const_f32(0.0))
+                return b.fdiv(b.select(pos, one, t), b.fadd(one, t))
             e = b.exp2(b.fmul(x, b.const_f32(-1.0 / math.log(2.0))))
             return b.fdiv(b.const_f32(1.0), b.fadd(b.const_f32(1.0), e))
+        if u == "sqrt":
+            return b.sqrt(x)
+        if u == "rcp":
+            return b.fdiv(b.const_f32(1.0), x)
+        if u == "tanh":
+            return b.tanh(x)
+        if u == "log":
+            return b.log(x)
+        if u in _ELEMENTARY:
+            from ...helpers import elementary
+
+            return elementary.emit(b, u, x)
         raise ValueError(u)
 
     def _to_f32_vec(self, v: Value) -> Value:

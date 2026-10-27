@@ -152,10 +152,10 @@ The plan's ``HIPTENSOR_PLAN_REQUIRED_WORKSPACE`` is the workspace of the selecte
 The rocKE backend serves contractions and trinary contractions, permutations, elementwise binary and trinary
 operations, and reductions on the GPU targets it has a kernel pack for (gfx90a and gfx942: every contraction on the
 f64 route; gfx950: the routes of each data type, and the f64 route when those decline). Its kernels take their
-sizes and strides at run time. Unary operators other than identity, square root, ReLU, conjugate, reciprocal,
-sigmoid, tanh, exp, log, abs and negation, and contractions of real with complex tensors are declined; the
-fallback backend serves what it supports of them. Contractions need workspace for packed copies of A and B and an
-f32 (f64) result.
+sizes and strides at run time. Every unary operator is served on real tensors (see "Unary operators" below); on
+complex tensors identity and conjugate. Contractions of real with complex tensors and other operators of complex
+tensors are declined; the fallback backend serves what it supports of them. Contractions need workspace for packed
+copies of A and B and an f32 (f64) result.
 
 The data types of a contraction's A, B, C and D may differ: each is f16, bf16, f32 or f64, or each is complex f32
 or complex f64. The compute type sets the precision of the products. With ``HIPTENSOR_COMPUTE_DESC_16F`` and
@@ -169,6 +169,51 @@ type, and the result is rounded once to D's type. The error of an element of D a
 rounded operands is then at most ``2 (K + 4) u_c |alpha| sum |a b| + 2 u_d |d| + 4 u_c |beta c|``, with K the
 number of products, ``u_c`` the unit roundoff of the accumulation (2^-24 for f32, 2^-53 for f64) and ``u_d`` that
 of D's type.
+
+Unary operators apply to an operand in the type the kernel computes in (f32 for f16, bf16 and f32 data, f64 when
+an operand or the output is f64, or with ``HIPTENSOR_COMPUTE_DESC_64F``), before the operand is scaled and combined,
+and their result has that type (for the operands of a contraction with a 16-bit compute type, it's then rounded
+once to that type). The trigonometric and hyperbolic operators, their inverses, ceil and floor are evaluated in f64;
+for f32 the result is rounded once to f32. The table gives the largest error of each operator in units in the last
+place (ulp) of the compute type, against the exact result of the operand. The f32 bounds hold for every one of the
+2^32 inputs; the f64-evaluated operators are correctly rounded in f32 except for at most six inputs per operator,
+which lie within 2^-29 ulp of the midpoint between two f32 values. The f64 bounds come from at least 100,000 inputs
+per operator over its domain, including its boundaries and, for sine, cosine and tangent, the arguments closest to
+multiples of pi/2.
+
+.. list-table::
+   :header-rows: 1
+
+   *   -   Operator
+       -   f32
+       -   f64
+   *   -   identity, conjugate (real data), negation, abs, ReLU, ceil, floor
+       -   exact
+       -   exact
+   *   -   square root, reciprocal
+       -   0.5
+       -   0.5
+   *   -   exp
+       -   1
+       -   1
+   *   -   log
+       -   2.25
+       -   1
+   *   -   tanh
+       -   2
+       -   1
+   *   -   sigmoid
+       -   3
+       -   2
+   *   -   sin, cos, tan, sinh, cosh, asin, acos, atan, asinh, acosh, atanh
+       -   0.5 (see above)
+       -   0.65
+
+Special values follow C: NaN gives NaN, an argument outside the domain gives NaN (sqrt and log of a negative
+number, asin and acos past 1 in magnitude, acosh below 1, atanh past 1 in magnitude), log of zero is -inf and
+atanh of +-1 is +-inf, sin, cos and tan of an infinity are NaN, and odd operators keep the sign of zero. ReLU is
+``x > 0 ? x : 0``, so ReLU of NaN and of -0 is +0. Sigmoid is evaluated as ``1 / (1 + e^-x)`` for x >= 0 and
+``e^x / (1 + e^x)`` below, so large negative arguments keep their small results.
 
 A trinary contraction runs as the library's two contractions: T = opA(A) opB(B), stored with E's data type at the
 start of the workspace (its size is part of the plan's required workspace), then

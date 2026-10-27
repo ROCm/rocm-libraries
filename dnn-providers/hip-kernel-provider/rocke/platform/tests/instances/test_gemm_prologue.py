@@ -96,6 +96,8 @@ def test_no_prologue_is_unchanged():
         (Prologue(unary_a="relu", unary_impl="bits"), "_pro_uarelu_uibits"),
         (Prologue(src="f32", recipe="cvt", stage="vgpr"), "_pro_f32cvt_vg"),
         (Prologue(unary_b="exp", fast_exp=False), "_pro_ubexp_gexp"),
+        (Prologue(unary_a="sigmoid", fast_exp=False), "_pro_uasigmoid_gexp"),
+        (Prologue(unary_a="sin", unary_b="acosh"), "_pro_uasin_ubacosh"),
     ],
 )
 def test_suffix_encodes_knobs(pro, suffix):
@@ -107,7 +109,8 @@ def test_suffix_encodes_knobs(pro, suffix):
     [
         dict(recipe="x3"),  # split recipes need f32 operands
         dict(src="f32", recipe="x5"),
-        dict(unary_a="tanh"),
+        dict(unary_a="gelu"),  # not a hipTensor operator
+        dict(unary_b="exp2"),
         dict(src="f32", recipe="x3", stage="vgpr"),  # vgpr staging is built for cvt
         dict(order="sideways"),
     ],
@@ -178,3 +181,42 @@ def test_unsupported_bodies_rejected(lever):
     sp = attach_prologue(sp, Prologue(src="f32", recipe="x6", out_f32=True))
     with pytest.raises(ValueError, match="sia_sched / asm_loop"):
         build_universal_gemm(sp, "gfx950")
+
+
+def test_every_hiptensor_unary_operator_is_a_prologue_operator():
+    """The operand operators cover hipTensor's unary operators (IDENTITY is no operator, CONJ of
+    real data is the identity), and each builds into a pair-view f32 kernel."""
+    from rocke.instances.common.gemm_prologue import UNARY
+
+    names = {
+        "sqrt",
+        "relu",
+        "rcp",
+        "sigmoid",
+        "tanh",
+        "exp",
+        "log",
+        "abs",
+        "neg",
+        "sin",
+        "cos",
+        "tan",
+        "sinh",
+        "cosh",
+        "asin",
+        "acos",
+        "atan",
+        "asinh",
+        "acosh",
+        "atanh",
+        "ceil",
+        "floor",
+    }
+    assert names <= set(UNARY)
+    for u in sorted(names):
+        sp = attach_prologue(
+            _spec("pro_u" + u),
+            Prologue(src="f32", recipe="x6", out_f32=True, unary_a=u, fast_exp=False),
+        )
+        k = build_universal_gemm(sp, "gfx950")
+        assert "_ua" + u in k.name

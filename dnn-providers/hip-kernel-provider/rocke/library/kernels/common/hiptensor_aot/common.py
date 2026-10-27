@@ -23,9 +23,10 @@ problem does not use costs a scalar compare per element.
 from __future__ import annotations
 
 import itertools
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import BF16, F16, F32, F64, I32, I64, IRBuilder, PtrType, Type, Value
+from rocke.helpers import elementary
 
 #: I/O dtypes and their element size in bytes.
 DTYPES: Dict[str, Tuple[Type, int]] = {
@@ -47,7 +48,22 @@ OP_EXP = 22
 OP_LOG = 23
 OP_ABS = 24
 OP_NEG = 25
-UNARY_OPS = (
+OP_SIN = 26
+OP_COS = 27
+OP_TAN = 28
+OP_SINH = 29
+OP_COSH = 30
+OP_ASIN = 31
+OP_ACOS = 32
+OP_ATAN = 33
+OP_ASINH = 34
+OP_ACOSH = 35
+OP_ATANH = 36
+OP_CEIL = 37
+OP_FLOOR = 38
+
+#: The operators every kernel implements (single instructions or short sequences).
+BASIC_UNARY_OPS = (
     OP_IDENTITY,
     OP_SQRT,
     OP_RELU,
@@ -60,6 +76,27 @@ UNARY_OPS = (
     OP_ABS,
     OP_NEG,
 )
+
+#: The operators only the ``math`` kernels implement (:mod:`rocke.helpers.elementary`
+#: programs, evaluated in f64), by the elementary function name.
+MATH_OPS = {
+    OP_SIN: "sin",
+    OP_COS: "cos",
+    OP_TAN: "tan",
+    OP_SINH: "sinh",
+    OP_COSH: "cosh",
+    OP_ASIN: "asin",
+    OP_ACOS: "acos",
+    OP_ATAN: "atan",
+    OP_ASINH: "asinh",
+    OP_ACOSH: "acosh",
+    OP_ATANH: "atanh",
+    OP_CEIL: "ceil",
+    OP_FLOOR: "floor",
+}
+
+#: Every hipTensor unary operator (``HIPTENSOR_OP_IDENTITY`` to ``HIPTENSOR_OP_FLOOR``).
+UNARY_OPS = BASIC_UNARY_OPS + tuple(MATH_OPS)
 
 #: hipTensor binary operators (elementwise op_AB / op_ABC, reduction op).
 OP_ADD = 3
@@ -102,8 +139,10 @@ def as_i32_bits(v: int) -> int:
 class Emit:
     """Small helpers over an :class:`IRBuilder` for the generic kernels."""
 
-    def __init__(self, b: IRBuilder, idx64: bool, cdt: str):
+    def __init__(self, b: IRBuilder, idx64: bool, cdt: str, math: bool = False):
         self.b = b
+        # ``math``: the unary operators include :data:`MATH_OPS` (the kernels' ``_m`` rows)
+        self.math = math
         # Loop-variable names are numbered per kernel (one Emit per IRBuilder), so a kernel's IR
         # and its rolled recipe do not depend on what the process built before.
         self._uid = itertools.count()
@@ -274,31 +313,121 @@ class Emit:
     # ---------------------------------------------------------------- operators
     def unary(self, v: Value, code: Value) -> Value:
         """hipTensor unary operator ``code`` applied to a real value (CONJ is the identity)."""
+        return self.unary_list([v], code)[0]
+
+    def unary_list(
+        self, vs: Sequence[Value], code: Value, math: Optional[bool] = None
+    ) -> List[Value]:
+        """:meth:`unary` of each of ``vs`` (one wave-uniform branch per operator for all of
+        them). With ``math`` (default: the Emit's) the operators of :data:`MATH_OPS` too: one
+        branch per :data:`rocke.helpers.elementary.FAMILIES` group, evaluated in f64 (f32
+        compute values are rounded once back to f32), one copy of each program for all of
+        ``vs``."""
         b = self.b
         one = self.cf(1.0)
+        math = self.math if math is None else math
 
         def table(xs: List[Value]) -> List[Value]:
-            r = xs[0]
+            r = list(xs)
             for op, fn in (
-                (OP_SQRT, lambda y: b.sqrt(y)),
-                (OP_RELU, lambda y: b.fmax(y, self.cf(0.0))),
-                (OP_RCP, lambda y: b.fdiv(one, y)),
-                (OP_SIGMOID, lambda y: b.fdiv(one, b.fadd(one, b.exp(b.fneg(y))))),
-                (OP_TANH, lambda y: b.tanh(y)),
-                (OP_EXP, lambda y: b.exp(y)),
-                (OP_LOG, lambda y: b.log(y)),
-                (OP_ABS, lambda y: b.fabs(y)),
-                (OP_NEG, lambda y: b.fneg(y)),
+                (OP_SQRT, lambda c: [b.sqrt(y) for y in c]),
+                (OP_RELU, lambda c: [b.fmax(y, self.cf(0.0)) for y in c]),
+                (OP_RCP, lambda c: [b.fdiv(one, y) for y in c]),
+                (OP_SIGMOID, lambda c: [self.sigmoid(y) for y in c]),
+                (OP_TANH, lambda c: [b.tanh(y) for y in c]),
+                (OP_EXP, lambda c: [b.exp(y) for y in c]),
+                (OP_LOG, lambda c: [b.log(y) for y in c]),
+                (OP_ABS, lambda c: [b.fabs(y) for y in c]),
+                (OP_NEG, lambda c: [b.fneg(y) for y in c]),
             ):
-                r = self.when(
-                    b.cmp_eq(code, self.c32(op)), [r], lambda c, fn=fn: [fn(c[0])]
-                )[0]
-            return [r]
+                r = self.when(b.cmp_eq(code, self.c32(op)), r, fn)
+            if math:
+                r = self.math_ops(r, code)
+            return r
 
         not_id = b.land(
             b.cmp_ne(code, self.c32(OP_IDENTITY)), b.cmp_ne(code, self.c32(OP_CONJ))
         )
-        return self.when(not_id, [v], table)[0]
+        return self.when(not_id, list(vs), table)
+
+    def unary_inputs(self, vs: Sequence[Value], codes: Sequence[Value]) -> List[Value]:
+        """:meth:`unary` of value ``vs[i]`` with operator ``codes[i]``: one copy of the
+        operators per input (so that a kernel whose operators are constants keeps only the
+        programs it uses, and the inputs' programs are not scheduled together)."""
+        return [self.unary_list([v], c)[0] for v, c in zip(vs, codes)]
+
+    def sigmoid(self, y: Value) -> Value:
+        """``1 / (1 + e^-y)`` as ``1 / (1 + t)`` (y >= 0) or ``t / (1 + t)`` (y < 0) with
+        ``t = e^-|y|``: ``t`` never overflows, so large negative arguments keep their tiny (or
+        subnormal) results instead of ``1 / inf = 0``."""
+        b = self.b
+        one = self.cf(1.0)
+        t = b.exp(b.fneg(b.fabs(y)))
+        den = b.fadd(one, t)
+        pos = b.fcmp("oge", y, self.cf(0.0))
+        return b.fdiv(b.select(pos, one, t), den)
+
+    def math_ops(self, xs: Sequence[Value], code: Value) -> List[Value]:
+        """The :data:`MATH_OPS` operator ``code`` applied to each of ``xs`` (other codes leave
+        the values), per :data:`rocke.helpers.elementary.FAMILIES` group: a wave-uniform branch
+        when ``code`` is of the group, then the group's program once, in a loop over the values
+        (each picked and put back with selects) when there are several."""
+        b = self.b
+        r = list(xs)
+        for fam, names in elementary.FAMILIES.items():
+            preds = {
+                n: b.cmp_eq(code, self.c32(op))
+                for op, n in MATH_OPS.items()
+                if n in names
+            }
+            hit = None
+            for p in preds.values():
+                hit = p if hit is None else b.lor(hit, p)
+            r = self.when(
+                hit, r, lambda c, fam=fam, preds=preds: self._math_loop(fam, c, preds)
+            )
+        return r
+
+    def _math_loop(self, fam: str, xs: Sequence[Value], preds) -> List[Value]:
+        b = self.b
+        if len(xs) == 1:
+            return [self.math_family(fam, xs[0], preds)]
+        k = next(self._uid)
+        # the trip count on an opaque zero: the loop stays a loop (unrolled, its copies of the
+        # program would be scheduled together and need their registers at once)
+        opaque = b.inline_asm(
+            "s_mov_b32 $0, 0", "=s", [], I32, sideeffect=True, result_name_hint="ozero"
+        )
+        loop = b.scf_for_iter(
+            self.c32(0),
+            b.add(self.c32(len(xs)), opaque),
+            self.c32(1),
+            [(f"m{k}_{i}", v) for i, v in enumerate(xs)],
+            iv_name=f"mi{k}",
+        )
+        with loop as (it, cur):
+            y = cur[0]
+            for j in range(1, len(cur)):
+                y = b.select(b.cmp_eq(it, self.c32(j)), cur[j], y)
+            r = self.math_family(fam, y, preds)
+            b.scf_yield(
+                *[
+                    b.select(b.cmp_eq(it, self.c32(j)), r, cur[j])
+                    for j in range(len(cur))
+                ]
+            )
+        return list(loop.results)
+
+    def math_family(self, fam: str, y: Value, preds) -> Value:
+        """The function of :data:`rocke.helpers.elementary.FAMILIES` group ``fam`` selected by
+        ``preds`` (name -> i1) applied to the compute-type value ``y``, in f64."""
+        b = self.b
+        # constants anchored in the branch: not hoisted out of the kernel's loops into VGPRs
+        m = elementary.IRMath(b, elementary.opaque_zero(b))
+        m.materialize(elementary.family_constants(fam, preds))
+        if self.cdt == "f64":
+            return elementary.family(m, fam, y, preds)
+        return b.cvt_f64_to_f32(elementary.family(m, fam, b.cvt_f32_to_f64(y), preds))
 
     def binary(self, a: Value, c: Value, code: Value, nan_max: bool = True) -> Value:
         """hipTensor binary operator ``code`` (ADD / MUL / MAX / MIN). MAX and MIN propagate

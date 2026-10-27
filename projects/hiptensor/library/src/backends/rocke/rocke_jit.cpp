@@ -1216,8 +1216,10 @@ namespace hiptensor
                             }
                         }
                     }
-                    // 64-bit offset rows have vector classes only with every input a vector
-                    if(ok && k.attr("idx64") == 1)
+                    // 64-bit offset rows and the rows with the math operators have vector
+                    // classes only with every input a vector (the math rows have no other
+                    // class: their other launches keep the pack kernel)
+                    if(ok && (k.attr("idx64") == 1 || k.attr("math") == 1))
                     {
                         ok = std::all_of(vector.begin(), vector.end(), [](bool v) { return v; });
                     }
@@ -1390,8 +1392,9 @@ namespace hiptensor
                       != cls.vectorTensor.end() - 1;
                 if(!promoteAll && (cls.vec == 1 || !vectorInput))
                 {
-                    reason = cls.vec == 1 ? "no vector form for this layout"
-                                          : "no input is read with vector loads (gathered or broadcast)";
+                    reason = cls.vec == 1
+                                 ? "no vector form for this layout"
+                                 : "no input is read with vector loads (gathered or broadcast)";
                     return false;
                 }
                 auto const* recipe = store.find(cls.key);

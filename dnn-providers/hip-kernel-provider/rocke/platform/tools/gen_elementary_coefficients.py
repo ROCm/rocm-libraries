@@ -86,13 +86,13 @@ def _log_g(z):
 #: (name, function, interval, degree). The intervals carry a small margin past the reduced
 #: ranges the module produces (see the module docstring of rocke.helpers.elementary).
 TABLES: List[Tuple[str, Callable, Tuple[float, float], int]] = [
-    ("SIN_S", _sin_s, (0.0, 0.61685), 6),
-    ("COS_C", _cos_c, (0.0, 0.61685), 6),
+    ("SIN_S", _sin_s, (0.0, 0.6169), 6),
+    ("COS_C", _cos_c, (0.0, 0.6169), 6),
     ("ATAN_A", _atan_a, (0.0, 0.19141), 11),
     ("ASIN_R", _asin_r, (0.0, 0.25), 13),
     ("SINH_H", _sinh_h, (0.0, 1.0), 7),
     ("EXP_P", _exp_p, (-0.34658, 0.34658), 10),
-    ("LOG_G", _log_g, (0.0, 0.029437), 7),
+    ("LOG_G", _log_g, (0.0, 0.02944), 7),
 ]
 
 

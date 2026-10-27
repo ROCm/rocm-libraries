@@ -14,9 +14,17 @@ arguments, so one compiled kernel serves every problem of its data-type row.
 
 Rank bucket R8: at most 8 modes per index space after the host drops extent-1 modes and merges
 contiguous modes. Coordinates are i32 (magic-number division); offsets i32 or i64 (`idx64`).
-Operator codes are `hiptensorOperator_t` values; unary IDENTITY, SQRT, RELU, CONJ, RCP, SIGMOID,
-TANH, EXP, LOG, ABS, NEG; binary ADD, MUL, MAX, MIN (MAX / MIN propagate NaN). A tensor whose
-scale is zero is not read.
+Operator codes are `hiptensorOperator_t` values: every unary operator, binary ADD, MUL, MAX, MIN
+(MAX / MIN propagate NaN). Every kernel implements the unary IDENTITY, SQRT, RELU, CONJ, RCP,
+SIGMOID, TANH, EXP, LOG, ABS, NEG (`common.BASIC_UNARY_OPS`); the `math` rows of the elementwise
+and reduction kernels (kernel names ending in `_m`, pack attribute `math=1`) also SIN, COS, TAN,
+SINH, COSH, ASIN, ACOS, ATAN, ASINH, ACOSH, ATANH, CEIL, FLOOR (`common.MATH_OPS`): the f64
+programs of `rocke.helpers.elementary` (f32 compute: evaluated in f64 and rounded once to f32),
+one wave-uniform branch per program group, constants anchored on an opaque zero so that the
+kernels' loops do not hoist them into VGPRs. The plain rows keep their code and registers; the
+math rows have only vec-1 JIT classes. SIGMOID is `1 / (1 + t)` for x >= 0 and `t / (1 + t)`
+below, `t = e^-|x|` (no overflow of `e^-x`, so large negative arguments keep their small
+results). A tensor whose scale is zero is not read and its operator's result is dropped.
 
 Conversions: every value rounds once to nearest even into the output type. Kernels with an f64
 operand compute in f64; their f16 / bf16 outputs go through an f32 rounded to odd
@@ -24,7 +32,9 @@ operand compute in f64; their f16 / bf16 outputs go through an f32 rounded to od
 (f32 has at least two more significand bits than f16 and bf16), so f64 -> f16 / bf16 never rounds
 twice.
 
-Tests: `library/tests/test_hiptensor_aot_numeric.py` (GPU, float64 references; the `row`
+Tests: `library/tests/test_hiptensor_aot_math_ops.py` (GPU: the math operators of every row,
+generic and JIT forms, several inputs, reductions, specials, all exact against the host model of
+`rocke.helpers.elementary`; CPU: rows, classes, recipes), `library/tests/test_hiptensor_aot_numeric.py` (GPU, float64 references; the `row`
 reduction cases need a wave64 device; the conversions against the exact rational rounding of
 `library/tests/_hiptensor_aot_rounding.py`), `library/tests/test_hiptensor_aot_jit.py` (recipes
 roll and reproduce the builder; specialized kernels against float64 references).
