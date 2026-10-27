@@ -207,7 +207,7 @@ RppStatus rppt_yuv_to_rgb_linear_v(RppPtr_t srcYPtr, RppPtr_t srcUVPtr, RpptDesc
                                    RpptColorRange color_range, rppHandle_t rppHandle,
                                    RppBackend executionBackend);
 
-/*! \brief Bayer to RGB (demosaic) operation on HIP/HOST backend
+/*! \brief Bayer to RGB (demosaic) operation on HIP only backend
  * \details Reconstructs an RGB image from a single-channel Bayer colour filter array mosaic by
  * bilinear interpolation. At each pixel the colour sampled by the sensor is copied, and each
  * missing colour is the mean of the nearest pixels of that colour in the 3x3 neighbourhood:
