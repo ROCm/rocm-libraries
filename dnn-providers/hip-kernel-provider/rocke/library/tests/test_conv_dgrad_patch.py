@@ -413,9 +413,9 @@ class TestDispatchFold(unittest.TestCase):
 
         p = _gemm_problem(self._req())
         self.assertEqual((p.C, p.X, p.sW, p.Wi), (48, 1, 1, 14))
-        # Forward is not folded.
+        # Forward runs folded too: a patch row's X * C inputs are one run.
         p = _gemm_problem(self._req(direction="fwd"))
-        self.assertEqual((p.C, p.X, p.sW, p.Wi), (3, 16, 16, 224))
+        self.assertEqual((p.C, p.X, p.sW, p.Wi), (48, 1, 1, 14))
 
 
 if __name__ == "__main__":

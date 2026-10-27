@@ -23,6 +23,11 @@ under w_fold (a half-empty last tile), images narrower than the tile, two W
 tiles, partial channel blocks, ragged row tiles, pad 0 and pad > K/2, filters
 larger than the image, 3x3 to 11x11 and non-square filters, fp16 and bf16.
 
+The forward form (``fwd=True``, the AOT variant ``direct_depthwise_win``)
+is checked against a NumPy grouped forward reference through the forward
+ABI: depthwise and grouped (cpg 8 / 16 / 24 / 32), stride 1 and 2, fp16 and
+bf16 (TestForwardNumerics, gfx950).
+
 Non-finite inputs: the VALU forms keep an Inf / NaN in dY inside its
 receptive field and channel exactly. The MFMA form multiplies one-hot
 weights against 8 channels at once, so a non-finite dY value may reach every
@@ -741,6 +746,124 @@ class TestNonFiniteGradients(unittest.TestCase):
                     ok[n, :, :, g0 : g0 + DW_DGRAD_MFMA_CH] = True
                 # Every other image / group is exact.
                 self.assertEqual(int(np.count_nonzero(~ok)), 0)
+
+
+# ---------------------------------------------------------------------------
+# The forward form (``fwd=True``): depthwise and grouped forward convolution,
+# stride 1 and 2, launched with the forward ABI the AOT variant
+# ``direct_depthwise_win`` uses.
+# ---------------------------------------------------------------------------
+
+
+def _fwd_reference(x: np.ndarray, w: np.ndarray, p: DirectConvProblem) -> np.ndarray:
+    """y[n, ho, wo, g*kpg + k] = sum_{r, s, c} W[g*kpg + k, r, s, c] *
+    x[n, ho*S - PAD + r, wo*S - PAD + s, g*cpg + c]."""
+    S, P = p.stride, p.PAD
+    xp = np.zeros((p.N, p.H + 2 * P, p.W + 2 * P, p.total_c), np.float32)
+    xp[:, P : P + p.H, P : P + p.W, :] = x
+    y = np.zeros((p.N, p.Ho, p.Wo, p.total_k), np.float32)
+    for g in range(p.groups):
+        xs = xp[..., g * p.cpg : (g + 1) * p.cpg]
+        wg = w[g * p.kpg : (g + 1) * p.kpg]  # [kpg, KH, KW, cpg]
+        for r in range(p.KH):
+            for t in range(p.KW):
+                win = xs[
+                    :, r : r + S * (p.Ho - 1) + 1 : S, t : t + S * (p.Wo - 1) + 1 : S
+                ]
+                y[..., g * p.kpg : (g + 1) * p.kpg] += win @ wg[:, r, t, :].T
+    return y
+
+
+def _fwd_launch(knobs: dict, p: DirectConvProblem, arch: str):
+    """Build the ``direct_depthwise_win`` kernel for ``p`` and run it through
+    the forward ABI on a NaN-filled output; return ``(y, ref)``."""
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.conv.direct_variants import (
+        DIRECT_DEPTHWISE_WIN_FWD,
+        direct_spec_for_problem,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    spec, why = direct_spec_for_problem(DIRECT_DEPTHWISE_WIN_FWD, p, knobs, arch)
+    assert spec is not None, why
+    art = _compiled(spec, arch)
+    rng = np.random.default_rng(4321)
+    x32 = rng.uniform(-1, 1, (p.N, p.H, p.W, p.total_c)).astype(np.float32)
+    w32 = rng.uniform(-1, 1, (p.total_k, p.KH, p.KW, p.cpg)).astype(np.float32)
+    if p.dtype == "bf16":
+        x_b, w_b = _to_bf16_bits(x32), _to_bf16_bits(w32)
+    else:
+        x_b = x32.astype(np.float16).view(np.uint16)
+        w_b = w32.astype(np.float16).view(np.uint16)
+    ref = _fwd_reference(_bits_to_f32(x_b, p.dtype), _bits_to_f32(w_b, p.dtype), p)
+
+    rt = Runtime()
+    y_bytes = ref.size * 2
+    X_d, W_d, Y_d = rt.alloc(x_b.nbytes), rt.alloc(w_b.nbytes), rt.alloc(y_bytes)
+    try:
+        rt.memcpy_h2d(X_d, x_b.ctypes.data_as(ctypes.c_void_p), x_b.nbytes)
+        rt.memcpy_h2d(W_d, w_b.ctypes.data_as(ctypes.c_void_p), w_b.nbytes)
+        rt.memset(Y_d, 0xFF, y_bytes)  # NaN in both fp16 and bf16
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=conv_direct_args_signature(p.dtype, direction="fwd"),
+        )
+        values = ConvArgs.from_problem(p, direction="fwd").to_launch_values(
+            int(X_d), int(W_d), int(Y_d), x_b.nbytes, w_b.nbytes, y_bytes
+        )
+        grid, block = direct_launch_geometry(spec)
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        out = np.empty(y_bytes // 2, np.uint16)
+        rt.memcpy_d2h(out.ctypes.data_as(ctypes.c_void_p), Y_d, y_bytes)
+    finally:
+        rt.free(X_d)
+        rt.free(W_d)
+        rt.free(Y_d)
+        synchronize_and_release(0)
+    return _bits_to_f32(out, p.dtype).reshape(ref.shape), ref
+
+
+# (N, H, W, groups, cpg, K, stride, dtype, knobs): depthwise and grouped, odd
+# and ragged extents, partial channel blocks, N not a multiple of w_fold,
+# a 3-wave block holding one 24-channel group, stride 2 on odd images.
+_FWD_CASES = (
+    (3, 15, 17, 64, 1, 3, 1, "fp16", dict(block_waves=8, block_h=8, w_fold=2)),
+    (2, 13, 21, 40, 1, 7, 1, "bf16", dict(block_waves=4, block_h=14, w_fold=1)),
+    (2, 15, 13, 72, 1, 5, 2, "fp16", dict(block_waves=8, block_h=8, w_fold=4)),
+    (2, 14, 19, 12, 8, 3, 1, "fp16", dict(block_waves=4, block_h=8, w_fold=2)),
+    (3, 13, 11, 6, 16, 3, 2, "bf16", dict(block_waves=4, block_h=4, w_fold=1)),
+    (1, 9, 18, 4, 32, 3, 1, "fp16", dict(block_waves=8, block_h=16, w_fold=1)),
+    (2, 11, 10, 3, 24, 3, 2, "bf16", dict(block_waves=3, block_h=12, w_fold=2)),
+)
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx950", f"needs gfx950, got {GPU_ARCH!r}")
+class TestForwardNumerics(unittest.TestCase):
+    def test_depthwise_and_grouped_forward(self):
+        for N, H, W, G, cpg, K, S, dtype, knobs in _FWD_CASES:
+            p = DirectConvProblem(
+                N=N,
+                H=H,
+                W=W,
+                groups=G,
+                cpg=cpg,
+                kpg=cpg,
+                KH=K,
+                KW=K,
+                PAD=(K - 1) // 2,
+                stride=S,
+                dtype=dtype,
+            )
+            with self.subTest(problem=p.short(), stride=S, dtype=dtype, **knobs):
+                y, ref = _fwd_launch(dict(knobs, prefetch_rows=2), p, GPU_ARCH)
+                ok, err = _elementwise_ok(y, ref)
+                self.assertEqual(
+                    int(np.count_nonzero(~ok)), 0, f"max err {float(err.max())}"
+                )
 
 
 if __name__ == "__main__":
