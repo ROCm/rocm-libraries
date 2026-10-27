@@ -3436,11 +3436,11 @@ def cases():
             num_segments=4,
         ),
     )
-    # Split-KV reduce weighted-sum layouts: lane groups per head size (d64: 4,
-    # d128: 2, d256: 1, d192: 1 with idle lanes), the unrolled segment loop
-    # (seg128) and segment counts the groups do not divide (seg9; at d64 the
-    # last group has no segment at all).
-    for _arch in ("gfx942", "gfx950"):
+    # Split-KV reduce weighted-sum layouts (gfx942): lane groups per head size
+    # (d64: 4, d128: 2, d256: 1, d192: 1 with idle lanes), the unrolled segment
+    # loop (seg128) and segment counts the groups do not divide (seg9; at d64
+    # the last group has no segment at all).
+    for _arch in ("gfx942",):
         for _hd, _seg in (
             (64, 128),
             (64, 9),

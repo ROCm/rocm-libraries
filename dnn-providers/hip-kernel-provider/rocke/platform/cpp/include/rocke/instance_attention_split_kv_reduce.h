@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * Weighted segment sum of the split-KV reduce (its pass 3), shared by the
- * gfx942 and gfx950 tiled-3D reduce kernels. C++ twin of
+ * Weighted segment sum of the split-KV reduce (its pass 3), used by the
+ * gfx942 tiled-3D reduce kernel. C++ twin of
  * kernels/common/_split_kv_reduce.py::reduce_weighted_segments; the
  * builder-call order is identical.
  */

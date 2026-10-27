@@ -3,8 +3,9 @@
 
 """Weighted segment sum of the split-KV reduce (its pass 3).
 
-The gfx942 and gfx950 tiled-3D reduce kernels share this pass. One wave64
-CTA owns one ``(token, head)`` row. Each segment's normalized weight
+The gfx942 tiled-3D reduce kernel uses this pass; the gfx950 reduce keeps
+its per-dim scalar sum. One wave64 CTA owns one ``(token, head)`` row.
+Each segment's normalized weight
 ``factor[s] = exp2(segm_max[s] - overall_max)`` is already in LDS; this pass
 computes ``out[d] = inv_l * sum_s factor[s] * segm_output[s, d]`` and stores
 it in the output dtype.

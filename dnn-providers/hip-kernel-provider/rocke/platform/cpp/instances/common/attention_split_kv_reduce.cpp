@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * C99 port of kernels/common/_split_kv_reduce.py::reduce_weighted_segments,
- * the weighted segment sum (pass 3) of the gfx942 / gfx950 tiled-3D split-KV
+ * the weighted segment sum (pass 3) of the gfx942 tiled-3D split-KV
  * reduce. Every lane loads 4 consecutive f32 head dims per segment, so
  * head_size / 4 lanes cover one segment row and the wave splits into
  * 64 / (head_size / 4) lane groups that sum contiguous segment runs; groups
