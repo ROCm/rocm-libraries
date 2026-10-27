@@ -361,19 +361,37 @@ builds and launches only the 2D tiled kernel (explicit spec, `block_size` 64), s
 never runs the 3D path; which harness the series ran on gfx942 is not recorded (§7).
 
 For the A/B, build one checkout per arm. The series' own comparison used develop at
-`a76c2460399` as the baseline; to replay on the merged tree use the squash commit
-`b53003d7bb6` and its first parent `503f5c82876`. To replay a per-lever A/B, compare the
-series commit that introduced the lever with its parent; the series' commits are on
-`refs/pull/13492/head`, in the order of the PR, and the squash merge does not keep them.
-That measures the lever in the kernel as it was at that commit, not in the final kernel.
-A lever with a spec field (segment count, tile, swizzle, page-id window, cache policy)
-can instead be compared on one build, both specs in one process on one stream, which
-gives the same-session ratios
+`a76c2460399` as the baseline; to replay the series as it merged, check out the squash
+commit `b53003d7bb6` and its first parent `503f5c82876` (both predate the fixes below).
+To replay a per-lever A/B, compare the series commit that introduced the lever with its
+parent; the series' commits are on `refs/pull/13492/head`, in the order of the PR, and
+the squash merge does not keep them. That measures the lever in the kernel as it was at
+that commit, not in the final kernel. A lever with a spec field (segment count, tile,
+swizzle, page-id window, cache policy) can instead be compared on one build, both specs
+in one process on one stream, which gives the same-session ratios
 [KERNEL_AUTHORING.md](../../../../KERNEL_AUTHORING.md#d-perf-optimization-no-new-feature)
 asks for (on gfx950, `decode_table_sweep` times a shape's tuning variants in one
-process). The in-repo decode harnesses can replay the comparison; they are not the
-harness the series used, and the series' own shape corpus (prefill and decode attention
-shapes) is not in the repo:
+process).
+
+**Replay and the overflow fixes.** The series' commits predate later fixes to the 3D
+kernels, among them [#14276](https://github.com/ROCm/rocm-libraries/pull/14276) (the
+segment kernels' softmax update now carries the running maximum; with a tile-local
+maximum, a tile that scores far below an earlier tile of its segment overflowed fp32 and
+the row came out NaN) and [#14216](https://github.com/ROCm/rocm-libraries/pull/14216)
+(the gfx942 K/V cache bound). The outcomes in §2 were measured before them, and a
+commit-versus-parent A/B runs the old kernels on both sides. Replay each arm in its own
+detached worktree of the commit (`git worktree add --detach <dir> <commit>`) and leave
+the current tree alone. Do not cherry-pick or rebase the series' commits, and do not copy
+their kernel files, onto a tree that has these fixes: the two transposed-QK commits,
+`c686a6c5b7b` (gfx950) and `9aa3054bf77` (gfx942), wrote the update lines that #14276
+rewrote, and `745416275ff` (native exp2) edits them too, in both engines, so resolving a
+conflict (or copying a file) in the series' favor restores the overflow. A lever that has
+a spec field needs no replay: compare it on one build of current develop, where both arms
+have the fixes.
+
+The in-repo decode harnesses can replay the comparison; they are not the harness the
+series used, and the series' own shape corpus (prefill and decode attention shapes) is
+not in the repo:
 
 ```bash
 python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \
