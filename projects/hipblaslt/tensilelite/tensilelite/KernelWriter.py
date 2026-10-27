@@ -132,6 +132,7 @@ class MatrixInfo:
 @dataclass
 class ABMatrixInfo(MatrixInfo):
   numVgprValuPerBlock: int       = -1
+  valuNegTempOffset: Optional[int] = None  # offset from ValuB_X0_I0 of MAC_F32C's negated-B temps
   numVgprG2L: int                = -1
   numVgprG2LAllocated: int       = -1
   numVgprG2LTailLoopAllocated: int= -1
@@ -8599,6 +8600,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.c.numVgprValu = kernel["ThreadTile0"] * kernel["ThreadTile1"] * kernel["ProblemType"]["ComputeDataType"].numRegisters()
         self.states.a.numVgprValu = self.states.a.numVgprValuPerBlock * valuBlocksA
         self.states.b.numVgprValu = self.states.b.numVgprValuPerBlock * valuBlocksB
+        if kernel["UseDualFMAC"] and kernel["ProblemType"]["DataType"].isSingleComplex():
+          # two -b temps per InnerUnroll for MAC_F32C, after ValuB at an even offset (VGPR bank parity)
+          assert self.states.b.numVgprValu % 2 == 0
+          self.states.b.valuNegTempOffset = self.states.b.numVgprValu
+          self.states.b.numVgprValu += 2 * kernel["InnerUnroll"]
 
       if kernel["ProblemType"]["Sparse"]:
         if kernel["DirectToVgprSparseMetadata"]:

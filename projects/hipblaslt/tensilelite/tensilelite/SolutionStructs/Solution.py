@@ -1234,10 +1234,10 @@ class Solution(collections.abc.Mapping):
 
     state["MfmaInitCVgprs"] = False
 
-    # UseDualFMAC (VOPD v_dual_fmac_f32) applies only to plain f32 source/MAC (non-MFMA) kernels
-    # on archs whose assembler accepts the dual-issue form (gfx11/gfx12). The 2x2 block-diagonal
-    # pairing requires an even x even ThreadTile for full coverage. Auto-disable elsewhere so a
-    # config may enable it broadly without rejecting unrelated solutions.
+    # UseDualFMAC (VOPD v_dual_fmac_f32) applies only to plain f32 and single-complex source/MAC
+    # (non-MFMA) kernels with an even x even ThreadTile, on archs whose assembler accepts the
+    # dual-issue form (gfx11/gfx12). Auto-disable elsewhere so a config may enable it broadly
+    # without rejecting unrelated solutions.
     # Exclude xf32: DataType=f32 but F32XdlMathOp selects xf32 rounding; v_dual_fmac_f32 is plain-f32 only.
     _isXF32 = ("F32XdlMathOp" in state["ProblemType"]
                 and not state["ProblemType"]["F32XdlMathOp"].isSingle()
@@ -1245,7 +1245,8 @@ class Solution(collections.abc.Mapping):
     if state.get("UseDualFMAC", False) and (
         state["KernelLanguage"] != "Assembly"
         or EnableMatrixInstruction
-        or not state["ProblemType"]["DataType"].isSingle()
+        or not (state["ProblemType"]["DataType"].isSingle()
+                or state["ProblemType"]["DataType"].isSingleComplex())
         or _isXF32
         or (state["ThreadTile0"] % 2) or (state["ThreadTile1"] % 2)
         or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):

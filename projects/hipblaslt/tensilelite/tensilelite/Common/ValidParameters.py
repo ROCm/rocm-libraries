@@ -890,8 +890,8 @@ validParameters = { # we need to make sure this matches develop
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
-    # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 source/MAC inner
-    # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
+    # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 and single-complex
+    # source/MAC inner loop (2x FMA issue rate). Source (non-MFMA) kernels on gfx11/gfx12 only; auto-
     # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
     "UseDualFMAC": [False, True],
     # Following parameters are designed for store scheduling.
