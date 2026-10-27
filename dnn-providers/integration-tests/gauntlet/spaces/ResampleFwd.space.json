@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "ResampleFwd",
-  "description": "ResampleFwd (pooling, no index output) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC packed strides, float/half/bfloat16 for x and y alike, maxpool and both avgpool modes, per-dimension window 1..5, stride 1..4 and pre/post padding 0..3 (asymmetric padding and padding of a window or more included, as long as the window fits the padded input). Template: quick ResampleFwd/Variant2, the plain tensor set (x and y, no index tensor, generate_index false, zero_pad); neg_inf_pad needs the index topology of Default and is not drawn here. The domain axis fills x, and the nan and inf domains poison x itself: a pooled output element reads only its own window, so a non-finite x element stays local to the windows covering it.",
+  "description": "ResampleFwd (pooling, no index output) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC packed strides, float/half/bfloat16 for x and y alike, maxpool and both avgpool modes, per-dimension window 1..5, stride 1..4 and pre/post padding 0..3 (asymmetric padding and padding of a window or more included, as long as the window fits the padded input). Template: quick ResampleFwd/Variant2, the plain tensor set (x and y, no index tensor, generate_index false, zero_pad); neg_inf_pad needs the index topology of Default and is not drawn here. The domain axis fills x, and the nan and inf domains poison x itself: a pooled output element reads only its own window, so a non-finite x element stays local to the windows covering it. The alignment axis declares that alignment on x and y (uids 1, 0) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns x (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/ResampleFwd/Variant2/graph.template.json",
   "axes": {
@@ -26,7 +26,9 @@
     "post_d": {"values": [0, 1, 2, 3]},
     "post_h": {"values": [0, 1, 2, 3]},
     "post_w": {"values": [0, 1, 2, 3]},
-    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
   },
   "derive": {
     "d":       "d3 if ndim == 5 else 1",
@@ -59,7 +61,8 @@
     "dom_scale": "32 if domain == 'large' else 1",
     "dom_special": "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction": "0.05",
-    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'"
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "h + pre_h + post_h >= win_h and w + pre_w + post_w >= win_w and (ndim == 4 or d + pre_d + post_d >= win_d)", "reason": "the output extent (x + pre + post - window) / stride + 1 is the one hip-kernel-provider accepts (ResamplePlanUtils.hpp:131-133 validateResampleOutputShape, ResampleApplicabilityChecks.cpp:84-97) and the frontend infers (ResampleFwdNode.hpp:116); it is defined for a window that fits the padded input only, because C++ integer division truncates toward zero and would give 1 for a window that overhangs the padded input"},
@@ -86,7 +89,13 @@
       "validator": "${dom_validator}",
       "inputs": {
         "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
-      }
-    }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}}
+    ]
   }
 }

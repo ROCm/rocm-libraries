@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "SDPA forward in the ASM_SDPA_ENGINE region: bfloat16, head size 128 or 192 for Q and K with V and O at 128 (fmha_v3_fwd gfx942/gfx950 kernel tables), BSHD or BHSD, grouped-query heads, any sequence length, dense or bottom-right causal. gfx950 ships no causal kernel, so its causal samples decline; they stay as probes. The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 192-wide head stay inside the half and bfloat16 range before the softmax scale. The nan and inf domains put the special fill on V alone and leave Q and K at free(-1,1): a non-finite Q or K element spreads over a whole softmax row, while one in V reaches only its own head-dim column of the output; no operand is elementwise-local, so most samples with a long kv sequence turn every output element non-finite and fail the non-finite mask by design.",
+  "description": "SDPA forward in the ASM_SDPA_ENGINE region: bfloat16, head size 128 or 192 for Q and K with V and O at 128 (fmha_v3_fwd gfx942/gfx950 kernel tables), BSHD or BHSD, grouped-query heads, any sequence length, dense or bottom-right causal. gfx950 ships no causal kernel, so its causal samples decline; they stay as probes. The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 192-wide head stay inside the half and bfloat16 range before the softmax scale. The nan and inf domains put the special fill on V alone and leave Q and K at free(-1,1): a non-finite Q or K element spreads over a whole softmax row, while one in V reaches only its own head-dim column of the output; no operand is elementwise-local, so most samples with a long kv sequence turn every output element non-finite and fail the non-finite mask by design. The alignment axis declares that alignment on K, Q, O and V (uids 0, 1, 2, 3) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
   "engine": "ASM_SDPA_ENGINE",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
@@ -15,7 +15,9 @@
     "dqk":    {"values": [128, 192]},
     "causal": {"values": [false, true]},
     "scale":  {"values": [0.0883883461356163, 0.07216878235340118, 0.125, 0.25, 0.5, 1.0]},
-    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true}
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256], "late": true},
+    "placement": {"values": ["default", "exact", "under"], "late": true}
   },
   "derive": {
     "hq":       "hkv * group",
@@ -36,7 +38,8 @@
     "dom_special": "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction": "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "dom_qk_kind": "'free' if domain in ['nan', 'inf'] else dom_kind"
+    "dom_qk_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "not causal or sq <= skv", "reason": "bottom-right causal mask needs sq <= skv"},
@@ -64,7 +67,15 @@
         "0": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "1": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
-      }
-    }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
   }
 }

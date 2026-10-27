@@ -259,6 +259,33 @@ def _extract_values(graph: dict, template: dict) -> dict:
     return values
 
 
+def _alignment_patches(graph: dict, expanded: dict) -> list:
+    """``tensor_patches`` that turn ``expanded`` (a template expansion) into ``graph`` where
+    only a tensor's ``alignment`` differs: a template hard-codes one alignment, and a sweep
+    case declares another through a patch (a fuzz finding at alignment 1, say)."""
+    have = tensors_by_uid(expanded)
+    return [
+        {"uid": uid, "set": {"alignment": tensor["alignment"]}}
+        for uid, tensor in sorted(tensors_by_uid(graph).items())
+        if "alignment" in tensor
+        and uid in have
+        and have[uid].get("alignment") != tensor["alignment"]
+    ]
+
+
+def _apply_patches(expanded: dict, patches) -> None:
+    """Apply a case's ``tensor_patches`` (``set`` and ``remove``) to its expanded graph, as
+    the harness does; a patch naming no tensor of the graph is skipped."""
+    have = tensors_by_uid(expanded)
+    for patch in patches or []:
+        target = have.get(patch.get("uid"))
+        if target is None:
+            continue
+        target.update(patch.get("set", {}))
+        for key in patch.get("remove", []):
+            target.pop(key, None)
+
+
 # --------------------------------------------------------------------------
 # Capture sidecar
 # --------------------------------------------------------------------------
@@ -491,6 +518,7 @@ def main() -> int:
     for template, sweep, sweep_path in matches:
         for case in sweep.get("cases", []):
             expanded = expand(template, case.get("values", {}))
+            _apply_patches(expanded, case.get("tensor_patches"))
             if canon(expanded) == graph_json:
                 existing_meta = case.get("metadata", {})
                 # An unknown seed is not a wildcard: the case would run with the
@@ -515,7 +543,10 @@ def main() -> int:
         tier_matches = [m for m in matches if str(m[2]).startswith(tier_prefix)]
         template, sweep, sweep_path = (tier_matches or matches)[0]
         values = _extract_values(graph, template)
+        patches = _alignment_patches(graph, expand(template, values))
         new_case = {"id": None, "values": values, "metadata": meta}
+        if patches:
+            new_case["tensor_patches"] = patches
         existing_cases = sweep.get("cases", [])
         saved_ids = [c["id"] for c in existing_cases]
         all_cases = existing_cases + [new_case]
@@ -527,6 +558,7 @@ def main() -> int:
             new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
 
         expanded = expand(template, values)
+        _apply_patches(expanded, patches)
         if canon(expanded) != canon(graph):
             _report_roundtrip_failure(
                 "after extraction",

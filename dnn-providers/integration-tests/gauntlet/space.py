@@ -26,12 +26,18 @@ Space file layout::
       "axes":        {"b": {"values": [1, 2]}, "sq": {"range": [1, 64], "boundaries": [1, 64]}},
       "derive":      {"hq": "b * 2"},
       "constraints": [{"rule": "sq <= 64", "reason": "why"}],
-      "case":        {"values": {...}, "metadata": {"purpose": "probe"}}
+      "case":        {"values": {...}, "metadata": {"purpose": "probe"},
+                      "tensor_patches": [{"uid": 3, "set": {"alignment": "${alignment}"}}]}
     }
 
 An axis may carry ``"late": true``: it was added after seeds had been recorded against the
 space, and the sampler draws it from a stream of its own so the earlier axes keep their draws.
 Late axes come last.
+
+The optional ``case.tensor_patches`` is the sweep case's own key of that name: a list of
+``{"uid": <int>, "set": {"alignment": <int >= 1>}}`` entries (``alignment`` is the only key a
+space may set) whose ``uid`` and ``alignment`` may be ``${expr}`` strings. A rendered patch
+with a non-integer uid or an alignment below 1 is an error naming the space.
 
 In ``case``, a string that starts with ``${`` and ends with ``}`` is replaced by the value
 of the expression between them, keeping its JSON type; every other string is copied.
@@ -269,6 +275,49 @@ def _render_case(node, env):
     return node
 
 
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _check_declared_patches(space_name, patches):
+    """``case.tensor_patches`` as declared: a list of ``{"uid", "set": {"alignment"}}``, the
+    uid and the alignment each an integer or a ``${expr}`` string."""
+    where = "case.tensor_patches"
+    if not isinstance(patches, list):
+        raise SpaceError(f"space '{space_name}': '{where}' must be a list")
+    for i, patch in enumerate(patches):
+        at = f"{where}[{i}]"
+        if not isinstance(patch, dict) or set(patch) != {"uid", "set"}:
+            raise SpaceError(
+                f"space '{space_name}': '{at}' must be an object with 'uid' and 'set'"
+            )
+        if not (_is_int(patch["uid"]) or _is_subst(patch["uid"])):
+            raise SpaceError(
+                f"space '{space_name}': '{at}.uid' must be an integer or a ${{expression}}"
+            )
+        values = patch["set"]
+        if not isinstance(values, dict) or set(values) != {"alignment"}:
+            raise SpaceError(
+                f"space '{space_name}': '{at}.set' must be an object whose only key is"
+                " 'alignment'"
+            )
+        if not (_is_int(values["alignment"]) or _is_subst(values["alignment"])):
+            raise SpaceError(
+                f"space '{space_name}': '{at}.set.alignment' must be an integer or a"
+                " ${expression}"
+            )
+
+
+def _check_rendered_patches(space, patches):
+    for i, patch in enumerate(patches):
+        alignment = patch["set"]["alignment"]
+        if not _is_int(patch["uid"]) or not _is_int(alignment) or alignment < 1:
+            raise SpaceError(
+                f"space '{space.space_id}': rendered case.tensor_patches[{i}] is {patch}:"
+                " the uid must be an integer and the alignment an integer of at least 1"
+            )
+
+
 class Axis:
     """One sampled axis: a ``values`` list, or an integer ``range`` with ``boundaries``.
 
@@ -325,6 +374,7 @@ class Space:
         self.constraints = []
         self.case_values = None
         self.case_metadata = {}
+        self.case_tensor_patches = None
         self.space_sha256 = None
         self.template_sha256 = None
 
@@ -353,11 +403,17 @@ class Space:
         return None
 
     def render(self, env):
-        """The sweep case ``{"values": ..., "metadata": ...}`` for a legal sample."""
-        return {
+        """The sweep case ``{"values": ..., "metadata": ...}`` for a legal sample, plus
+        ``"tensor_patches"`` when the space declares them."""
+        row = {
             "values": _render_case(self.case_values, env),
             "metadata": _render_case(self.case_metadata, env),
         }
+        if self.case_tensor_patches is not None:
+            patches = _render_case(self.case_tensor_patches, env)
+            _check_rendered_patches(self, patches)
+            row["tensor_patches"] = patches
+        return row
 
 
 def _split_file_name(path):
@@ -550,7 +606,7 @@ def load_space(path):
         raise SpaceError(
             f"space '{space_name}': 'case' must be an object with a 'values' object"
         )
-    if set(case) - {"values", "metadata"}:
+    if set(case) - {"values", "metadata", "tensor_patches"}:
         raise SpaceError(f"space '{space_name}': 'case' has unknown keys")
     metadata = case.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -562,6 +618,11 @@ def load_space(path):
         )
     space.case_values = _compile_case(case["values"], space_name, "case.values", known)
     space.case_metadata = _compile_case(metadata, space_name, "case.metadata", known)
+    if "tensor_patches" in case:
+        _check_declared_patches(space_name, case["tensor_patches"])
+        space.case_tensor_patches = _compile_case(
+            case["tensor_patches"], space_name, "case.tensor_patches", known
+        )
     return space
 
 

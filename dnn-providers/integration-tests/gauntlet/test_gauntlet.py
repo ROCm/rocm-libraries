@@ -62,9 +62,13 @@ TAG_OF_DTYPE = {"float": "fp32", "half": "fp16", "bfloat16": "bfp16"}
 
 
 def input_dtype_tag(space_id, seed):
-    """The tag of the sample's input dtype, as the quick bundle case ids spell it."""
+    """The tag of the sample's input dtype, as the quick bundle case ids spell it; None for a
+    space with no dtype axis (Matmul/Align), whose suite has no dtype directory."""
     axes = sampler.sample(space_by_id(space_id), seed).axis_values
-    return TAG_OF_DTYPE[axes["x_dtype" if "x_dtype" in axes else "dtype"]]
+    for name in ("x_dtype", "dtype"):
+        if name in axes:
+            return TAG_OF_DTYPE[axes[name]]
+    return None
 
 
 def gtest(space_id, seed):
@@ -72,14 +76,18 @@ def gtest(space_id, seed):
     sweep directory, sanitized and joined by ``_`` (``BundleDiscovery.hpp``)."""
     sp = space_by_id(space_id)
     tag = input_dtype_tag(space_id, seed)
-    return f"gauntlet_{sp.operation}_{sp.name}_{tag}_cases.s{seed}"
+    suite = f"gauntlet_{sp.operation}_{sp.name}" + (
+        "" if tag is None else f"_{tag}_cases"
+    )
+    return f"{suite}.s{seed}"
 
 
 def sweep_dir(work, space_id, seed):
     """The directory under the bundle root that the driver puts the sample's sweep in."""
     sp = space_by_id(space_id)
     tag = input_dtype_tag(space_id, seed)
-    return work / "bundles" / "gauntlet" / sp.operation / sp.name / f"{tag}_cases"
+    base = work / "bundles" / "gauntlet" / sp.operation / sp.name
+    return base if tag is None else base / f"{tag}_cases"
 
 
 # --------------------------------------------------------------------------
@@ -355,13 +363,25 @@ def test_sample_is_determined_by_its_shape_seed(space_id):
     for a, b in zip(first, again):
         assert json.dumps(a.row) == json.dumps(b.row)
         assert a.axis_values == b.axis_values
-    assert len({json.dumps(s.row["values"]) for s in first}) == 3
+    if space_id in FIXED_SHAPE_SPACES:
+        # the shape is fixed; what a seed draws is the alignment and the placement
+        assert (
+            len(
+                {
+                    json.dumps(s.row["tensor_patches"]) + s.row["metadata"]["placement"]
+                    for s in first
+                }
+            )
+            > 1
+        )
+    else:
+        assert len({json.dumps(s.row["values"]) for s in first}) == 3
 
 
 @pytest.mark.parametrize("space_id", SPACE_IDS)
 def test_constraints_hold_over_1000_samples(space_id):
     sp = space_by_id(space_id)
-    assert sp.constraints
+    assert sp.constraints or space_id in FIXED_SHAPE_SPACES
     for seed in range(1000):
         s = sampler.sample(sp, seed)
         env = sp.derive_env(s.axis_values)
@@ -444,7 +464,9 @@ def test_data_seed_can_be_fixed_and_is_validated():
 def test_row_has_sweep_json_format(space_id):
     s = sampler.sample(space_by_id(space_id), 913377)
     row = s.row
-    assert list(row) == ["id", "values", "metadata"]
+    assert list(row)[:3] == ["id", "values", "metadata"]
+    assert set(row) - {"id", "values", "metadata"} <= {"tensor_patches"}
+    assert ("tensor_patches" in row) == (space_id in PATCHED_OPERANDS)
     assert row["id"] == "s913377"
     meta = row["metadata"]
     assert meta["format_version"] == 1 and isinstance(meta["format_version"], int)
@@ -470,6 +492,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "BatchnormInference/Default",
         "Layernorm/Default",
         "LayernormBackward/Default",
+        "Matmul/Align",
         "RMSNorm/Default",
         "RMSNormBackward/Default",
         "ResampleFwd/Default",
@@ -509,6 +532,14 @@ def _packed(dims, strides):
     return sum((d - 1) * s for d, s in zip(dims, strides)) + 1 == count
 
 
+def expanded_graph(template, row):
+    """The graph the harness runs for a sweep row: the template expanded with the row's
+    values, then its ``tensor_patches`` applied."""
+    graph = bu.expand(template, row["values"])
+    fuzz.load_support_matrix_units().apply_tensor_patches(graph, row)
+    return graph
+
+
 @pytest.mark.parametrize("space_id", SPACE_IDS)
 def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, space_id):
     sp = space_by_id(space_id)
@@ -526,7 +557,7 @@ def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, spac
     assert error is None and len(cases) == existing + len(samples)
     template = json.loads((topology / "graph.template.json").read_text())
     for s in samples:
-        graph = bu.expand(template, s.row["values"])
+        graph = expanded_graph(template, s.row)
         assert "${" not in json.dumps(graph), "an unresolved placeholder is left"
         assert bu.canonical_uid_map_by_name(graph) == {
             t["uid"]: t["uid"] for t in graph["tensors"]
@@ -535,10 +566,10 @@ def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, spac
             if tensor.get("value") is None:
                 assert _packed(tensor["dims"], tensor["strides"]), (s.case_id, tensor)
     expanded = {
-        json.dumps(bu.expand(template, s.row["values"]), sort_keys=True)
-        for s in samples
+        json.dumps(expanded_graph(template, s.row), sort_keys=True) for s in samples
     }
-    assert len(expanded) > 30  # the samples are different graphs
+    # the samples are different graphs (a fixed-shape space differs by its alignments only)
+    assert len(expanded) > (5 if space_id in FIXED_SHAPE_SPACES else 30)
 
 
 @pytest.mark.parametrize("space_id", SPACE_IDS)
@@ -637,26 +668,60 @@ OLD_SHAPE_DIGESTS = {
     "SdpaFwd/Default": "13171199efa5647432d6ed13745de2cdcb3925fb5b0589e15f457a4fb6b95302",
     "SdpaFwd/Gfx950Dense": "69623b2107c84d79090cab4630861813954bf838689cb9ae32950835d7e8340c",
 }
+# the spaces without a domain axis: one fixed shape, only alignment and placement are drawn
+FIXED_SHAPE_SPACES = ["Matmul/Align"]
+DOMAIN_SPACE_IDS = [s for s in SPACE_IDS if s not in FIXED_SHAPE_SPACES]
+ALIGNMENTS = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+PLACEMENTS = ["default", "exact", "under"]
+# The tensor (by template name) whose pointer `under` misaligns: the op's primary data
+# operand. Every space renders it as metadata.placement_uid, whatever the placement.
+PLACEMENT_OPERAND = {
+    "Batchnorm/Default": "X",
+    "BatchnormBackward/Default": "x",
+    "BatchnormInference/Default": "X",
+    "Layernorm/Default": "x",
+    "LayernormBackward/Default": "X",
+    "Matmul/Align": "a",
+    "RMSNorm/Default": "x",
+    "RMSNormBackward/Default": "x",
+    "ResampleFwd/Default": "X",
+    "SdpaFwd/Default": "Q",
+    "SdpaFwd/Gfx950Dense": "Q",
+}
+PATCHED_OPERANDS = (
+    PLACEMENT_OPERAND  # every space declares alignments through tensor_patches
+)
 
 
 def test_every_shipped_space_has_its_operands_listed():
-    assert sorted(PRIMARY_OPERANDS) == SPACE_IDS
-    assert sorted(POISONED_OPERANDS) == SPACE_IDS
+    assert sorted(PRIMARY_OPERANDS) == DOMAIN_SPACE_IDS
+    assert sorted(POISONED_OPERANDS) == DOMAIN_SPACE_IDS
+    assert sorted(PLACEMENT_OPERAND) == SPACE_IDS
     assert sorted(OLD_SHAPE_DIGESTS) == [
         "RMSNorm/Default", "SdpaFwd/Default", "SdpaFwd/Gfx950Dense",
     ]  # fmt: skip
 
 
 @pytest.mark.parametrize("space_id", SPACE_IDS)
-def test_domain_is_the_last_axis_with_the_eleven_values_in_order(space_id):
-    # bug caught: a domain axis in the middle shifts the draws of the axes after it, a
-    # reordered or misspelled value is never rendered by the derive chain, and an old value
-    # that moves changes what recorded domain seeds mean
+def test_the_last_axes_are_domain_alignment_placement_in_that_order(space_id):
+    # bug caught: an axis in the middle shifts the draws of the axes after it, a reordered or
+    # misspelled value is never rendered by the derive chain, and an old value that moves
+    # changes what recorded seeds mean; `late` marks exactly the spaces that had seeds recorded
     sp = space_by_id(space_id)
-    assert list(sp.axes)[-1] == "domain"
-    assert sp.axes["domain"].values == DOMAINS
-    drawn = {sampler.sample(sp, seed).axis_values["domain"] for seed in range(300)}
-    assert drawn == set(DOMAINS)
+    tail = ["alignment", "placement"] if space_id in FIXED_SHAPE_SPACES else [
+        "domain", "alignment", "placement",
+    ]  # fmt: skip
+    assert list(sp.axes)[-len(tail) :] == tail
+    assert sp.axes["alignment"].values == ALIGNMENTS
+    assert sp.axes["placement"].values == PLACEMENTS
+    if "domain" in sp.axes:
+        assert sp.axes["domain"].values == DOMAINS
+    assert [name for name, axis in sp.axes.items() if axis.late] == (
+        tail if space_id in OLD_SHAPE_DIGESTS else []
+    )
+    drawn = [sampler.sample(sp, seed).axis_values for seed in range(300)]
+    for name in tail:
+        assert {d[name] for d in drawn} == set(sp.axes[name].values)
 
 
 def _rendered_by_domain(sp, seed=11):
@@ -670,7 +735,7 @@ def _rendered_by_domain(sp, seed=11):
     }
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", DOMAIN_SPACE_IDS)
 def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     # bug caught: a domain that reaches the wrong uid, drops a leaf, poisons an operand the
     # description does not name, sets the validator for a finite domain, or overrides the
@@ -762,7 +827,7 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     assert all(set(primary + poisoned) <= set(m["inputs"]) for m in metas.values())
 
 
-@pytest.mark.parametrize("space_id", SPACE_IDS)
+@pytest.mark.parametrize("space_id", DOMAIN_SPACE_IDS)
 def test_rendered_metadata_has_only_what_the_harness_accepts(space_id):
     # bug caught: a metadata key or fill leaf the strict C++ parsers reject
     # (BundleMetadata.hpp validator, InputFillRecipes.hpp parseFill) fails every case of
@@ -775,8 +840,13 @@ def test_rendered_metadata_has_only_what_the_harness_accepts(space_id):
         return isinstance(x, (int, float)) and not isinstance(x, bool)
 
     for domain, meta in _rendered_by_domain(sp).items():
-        assert set(meta) <= {"purpose", "validator", "inputs"}, (domain, set(meta))
+        assert set(meta) <= {"purpose", "validator", "inputs", "placement", "placement_uid"}, (
+            domain, set(meta),
+        )  # fmt: skip
         assert meta["validator"] in ("default", "match_nonfinite")
+        assert meta["placement"] in PLACEMENTS and isinstance(
+            meta["placement_uid"], int
+        )
         for uid, leaf in meta["inputs"].items():
             assert uid.isdigit() and set(leaf) <= entry_keys, (domain, uid, leaf)
             assert leaf["kind"] in kinds, (domain, uid, leaf)
@@ -790,14 +860,9 @@ def test_rendered_metadata_has_only_what_the_harness_accepts(space_id):
                 assert leaf["special"] in ("nan", "inf", "-inf"), (domain, uid, leaf)
                 assert 0 <= leaf["fraction"] <= 1, (domain, uid, leaf)
     allowed = {
-        "format_version",
-        "generator",
-        "notes",
-        "purpose",
-        "seed",
-        "validator",
-        "inputs",
-    }
+        "format_version", "generator", "notes", "purpose", "seed", "validator", "inputs",
+        "placement", "placement_uid",
+    }  # fmt: skip
     for seed in range(40):
         assert set(sampler.sample(sp, seed).row["metadata"]) <= allowed
 
@@ -807,7 +872,7 @@ def test_the_domain_axis_keeps_the_shapes_that_recorded_seeds_fix(space_id):
     # bug caught: an appended axis drawn from the shared generator shifts every later draw
     # after a retry, so seeds recorded before the domain axis would fix other shapes
     sp = space_by_id(space_id)
-    old = [name for name in sp.axes if name != "domain"]
+    old = [name for name, axis in sp.axes.items() if not axis.late]
     digest = hashlib.sha256()
     for seed in range(300):
         drawn = sampler.sample(sp, seed).axis_values
@@ -878,6 +943,295 @@ def test_late_must_be_a_bool(tmp_path, late):
         space_lib.load_space(
             write_space(tmp_path, axes=axes, derive={}, constraints=[])
         )
+
+
+# --------------------------------------------------------------------------
+# Alignment and placement: the axes, tensor_patches and what the driver does with them
+# --------------------------------------------------------------------------
+
+
+def _device_tensor_uids(template):
+    """The real device tensors of a template graph: not virtual, not pass-by-value, not a
+    host scalar (a tensor that carries a ``value``)."""
+    return sorted(
+        t["uid"]
+        for t in template["tensors"]
+        if not t.get("virtual")
+        and not t.get("is_runtime_pass_by_value")
+        and "value" not in t
+    )
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_every_alignment_and_placement_renders_the_placement_and_the_patches(space_id):
+    # bug caught: a patch on a scalar or virtual tensor (the harness would reject or ignore
+    # it), a missing operand, a placement_uid on another tensor, or an `under` at alignment 1
+    # (nothing can be misaligned below 1, so the case could never pass)
+    sp = space_by_id(space_id)
+    template = json.loads(sp.template_path.read_text())
+    uid_of = {t["name"]: t["uid"] for t in template["tensors"]}
+    devices = _device_tensor_uids(template)
+    sample = sampler.sample(sp, 11)
+    for alignment in ALIGNMENTS:
+        for placement in PLACEMENTS:
+            axes = dict(sample.axis_values, alignment=alignment, placement=placement)
+            case = sp.render(sp.derive_env(axes))
+            meta = case["metadata"]
+            effective = "exact" if placement == "under" and alignment < 2 else placement
+            assert meta["placement"] == effective, (alignment, placement)
+            assert not (meta["placement"] == "under" and alignment < 2)
+            assert meta["placement_uid"] == uid_of[PLACEMENT_OPERAND[space_id]]
+            patches = case["tensor_patches"]
+            assert sorted(p["uid"] for p in patches) == devices
+            assert all(p["set"] == {"alignment": alignment} for p in patches)
+            assert all(type(p["uid"]) is int for p in patches)
+            if meta["placement"] == "under":
+                # the misaligned tensor declares an alignment it can be placed below
+                assert meta["placement_uid"] in devices and alignment >= 2
+
+
+def test_under_is_drawn_at_every_alignment_but_one_and_only_exact_replaces_it():
+    # bug caught: an `under` row at alignment 1, or an exact that is lost at alignment >= 2
+    for space_id in SPACE_IDS:
+        sp = space_by_id(space_id)
+        seen = set()
+        for seed in range(400):
+            s = sampler.sample(sp, seed)
+            a, p = s.axis_values["alignment"], s.axis_values["placement"]
+            seen.add((a, p, s.row["metadata"]["placement"]))
+        assert (1, "under", "exact") in seen and (1, "under", "under") not in seen
+        assert (2, "under", "under") in seen and (256, "under", "under") in seen
+        assert (16, "exact", "exact") in seen and (16, "default", "default") in seen
+
+
+def _toy_patch_space(tmp_path, patches):
+    return space_lib.load_space(
+        write_space(
+            tmp_path,
+            case={
+                "values": {"a": "${a}", "n": "${n}"},
+                "metadata": {"purpose": "probe"},
+                "tensor_patches": patches,
+            },
+        )
+    )
+
+
+def test_a_toy_space_renders_tensor_patches_into_the_row_and_one_without_has_none(
+    tmp_path,
+):
+    # bug caught: patches dropped between render and the row, or a key added to every row
+    sp = _toy_patch_space(tmp_path, [{"uid": 3, "set": {"alignment": "${a * 2}"}}])
+    s = sampler.sample(sp, 5)
+    assert s.row["tensor_patches"] == [
+        {"uid": 3, "set": {"alignment": s.axis_values["a"] * 2}}
+    ]
+    assert list(s.row)[:3] == ["id", "values", "metadata"]
+    plain = space_lib.load_space(write_space(tmp_path))
+    assert "tensor_patches" not in sampler.sample(plain, 5).row
+
+
+@pytest.mark.parametrize(
+    "patches, message",
+    [
+        ({"uid": 1}, "must be a list"),
+        ([[1]], "must be an object with 'uid' and 'set'"),
+        ([{"uid": 1}], "must be an object with 'uid' and 'set'"),
+        (
+            [{"uid": 1, "set": {"alignment": 4}, "x": 1}],
+            "must be an object with 'uid' and 'set'",
+        ),
+        ([{"uid": "3", "set": {"alignment": 4}}], r"uid' must be an integer"),
+        ([{"uid": True, "set": {"alignment": 4}}], r"uid' must be an integer"),
+        ([{"uid": 1, "set": {"alignment": 4, "dims": 2}}], "only key is 'alignment'"),
+        ([{"uid": 1, "set": {"data_type": "half"}}], "only key is 'alignment'"),
+        ([{"uid": 1, "set": {"alignment": "x"}}], r"alignment' must be an integer"),
+        ([{"uid": 1, "set": {"alignment": 1.5}}], r"alignment' must be an integer"),
+    ],
+)
+def test_tensor_patches_declarations_are_validated(tmp_path, patches, message):
+    # bug caught: a patch that sets anything but the alignment, or with a uid the harness
+    # would reject, loads and fails every case at run time instead of at load
+    with pytest.raises(space_lib.SpaceError, match=f"Toy/Default.*{message}"):
+        _toy_patch_space(tmp_path, patches)
+
+
+@pytest.mark.parametrize("alignment", ["0", "-4", "a - a", "a / 2 + 0.5", "True"])
+def test_a_rendered_alignment_below_one_or_not_an_integer_is_an_error(
+    tmp_path, alignment
+):
+    # bug caught: alignment 0 or a float reaches the harness, which has no pointer to place
+    sp = _toy_patch_space(
+        tmp_path, [{"uid": 3, "set": {"alignment": "${%s}" % alignment}}]
+    )
+    with pytest.raises(
+        space_lib.SpaceError, match="Toy/Default.*rendered case.tensor_patches"
+    ):
+        sampler.sample(sp, 5)
+
+
+def test_a_rendered_uid_that_is_not_an_integer_is_an_error(tmp_path):
+    sp = _toy_patch_space(tmp_path, [{"uid": "${'u'}", "set": {"alignment": 4}}])
+    with pytest.raises(space_lib.SpaceError, match="rendered case.tensor_patches"):
+        sampler.sample(sp, 5)
+
+
+def test_remap_meta_inputs_remaps_placement_uid_with_the_inputs():
+    # bug caught: after UIDs are canonicalized the misaligned pointer would belong to
+    # another tensor than the one the case named
+    meta = {
+        "placement": "under",
+        "placement_uid": 7,
+        "inputs": {"7": {"kind": "zeros"}},
+    }
+    out = bu.remap_meta_inputs(meta, {7: 2})
+    assert out["placement_uid"] == 2 and out["inputs"] == {"2": {"kind": "zeros"}}
+    assert meta["placement_uid"] == 7  # a copy
+    assert bu.remap_meta_inputs(meta, {})["placement_uid"] == 7  # unmapped stays
+    assert "placement_uid" not in bu.remap_meta_inputs({"purpose": "probe"}, {7: 2})
+
+
+def test_case_identity_of_a_case_without_patches_or_placement_is_unchanged():
+    # bug caught: new identity fields that rehash, and so rename, every existing case id
+    plain = {
+        "values": {"a": 1},
+        "metadata": {"inputs": {"1": {"kind": "free"}}, "seed": 3},
+    }
+    assert bu._case_identity(plain) == {
+        "values": {"a": 1}, "inputs": {"1": {"kind": "free"}}, "seed": 3,
+    }  # fmt: skip
+    patched = dict(plain, tensor_patches=[{"uid": 1, "set": {"alignment": 2}}])
+    placed = {**plain, "metadata": {**plain["metadata"], "placement": "exact"}}
+    assert len({bu._case_hash(e) for e in (plain, patched, placed)}) == 3
+
+
+@pytest.mark.parametrize("alignment", [2, 256, 16])
+def test_import_graph_keeps_a_declared_alignment_as_tensor_patches(tmp_path, alignment):
+    # bug caught: a graph at alignment N != the template's 16 fails the import round trip,
+    # or is imported without its patches and then runs as a different test
+    sp = space_by_id("SdpaFwd/Default")
+    sample = sampler.sample(sp, 21)
+    row = sp.render(sp.derive_env(dict(sample.axis_values, alignment=alignment)))
+    row["id"] = sample.case_id
+    template = json.loads(sp.template_path.read_text())
+    graph = expanded_graph(template, row)
+    graph_path = tmp_path / "case.json"
+    graph_path.write_text(json.dumps(graph))
+
+    tree = tmp_path / "tree"
+    topology = tree / "quick" / "SdpaFwd" / sp.template_path.parent.name
+    topology.mkdir(parents=True)
+    for name in ("graph.template.json", "sweep.json", "support.json"):
+        shutil.copyfile(sp.template_path.parent / name, topology / name)
+    before = len(json.loads((topology / "sweep.json").read_text())["cases"])
+
+    def import_it(path=graph_path):
+        return subprocess.run(
+            [sys.executable, str(MIGRATION_DIR / "import_graph.py"), "--graph", str(path),
+             "--bundle-dir", str(tree), "--tier", "quick"],
+            capture_output=True, text=True, cwd=MIGRATION_DIR, timeout=120,
+        )  # fmt: skip
+
+    done = import_it()
+    assert done.returncode == 0, done.stderr
+    cases = json.loads((topology / "sweep.json").read_text())["cases"]
+    assert len(cases) == before + 1
+    new = cases[-1]
+    expected = [] if alignment == 16 else [
+        {"uid": uid, "set": {"alignment": alignment}} for uid in _device_tensor_uids(template)
+    ]  # fmt: skip
+    assert new.get("tensor_patches", []) == expected
+    assert ("tensor_patches" in new) == (alignment != 16)
+    # the case expands, patched, to the graph that was imported
+    imported_template = json.loads((topology / "graph.template.json").read_text())
+    back = bu.expand(imported_template, new["values"])
+    fuzz.load_support_matrix_units().apply_tensor_patches(back, new)
+    assert bu.canon(back) == bu.canon(graph)
+    # importing it again is a duplicate, even though the expansion needs the patches
+    assert "DUPLICATE" in import_it().stderr
+    assert len(json.loads((topology / "sweep.json").read_text())["cases"]) == before + 1
+
+
+def test_import_graph_gives_two_alignments_of_one_graph_two_case_ids(tmp_path):
+    # bug caught: the case id hash ignores the patches, so the second import of the same
+    # shape at another alignment collides with the first and is refused or overwrites it
+    sp = space_by_id("SdpaFwd/Default")
+    sample = sampler.sample(sp, 21)
+    template = json.loads(sp.template_path.read_text())
+    tree = tmp_path / "tree"
+    topology = tree / "quick" / "SdpaFwd" / sp.template_path.parent.name
+    topology.mkdir(parents=True)
+    for name in ("graph.template.json", "sweep.json", "support.json"):
+        shutil.copyfile(sp.template_path.parent / name, topology / name)
+    for alignment in (2, 4):
+        row = sp.render(sp.derive_env(dict(sample.axis_values, alignment=alignment)))
+        path = tmp_path / f"case{alignment}.json"
+        path.write_text(json.dumps(expanded_graph(template, row)))
+        done = subprocess.run(
+            [sys.executable, str(MIGRATION_DIR / "import_graph.py"), "--graph", str(path),
+             "--bundle-dir", str(tree), "--tier", "quick"],
+            capture_output=True, text=True, cwd=MIGRATION_DIR, timeout=120,
+        )  # fmt: skip
+        assert done.returncode == 0, done.stderr
+    cases = json.loads((topology / "sweep.json").read_text())["cases"]
+    ids = [c["id"] for c in cases]
+    assert len(ids) == len(set(ids))
+    assert [c["tensor_patches"][0]["set"]["alignment"] for c in cases[-2:]] == [2, 4]
+
+
+def test_summary_breaks_the_outcomes_down_by_alignment_placement_and_domain(run):
+    # bug caught: a run that cannot say which alignment, placement or domain fails
+    run.control(seed_mod={"m": 3, "map": {"0": "wrong", "1": "declined"}})
+    assert (
+        run.run("--samples", "30", "--batch-size", "30", space="RMSNorm/Default") == 1
+    )
+    sp = space_by_id("RMSNorm/Default")
+    expected = {}
+    for seed in range(1000, 1030):
+        axes = sampler.sample(sp, seed).axis_values
+        outcome = {0: "WRONG", 1: "DECLINED"}.get(seed % 3, "PASS")
+        for name in ("alignment", "placement", "domain"):
+            by_value = expected.setdefault(name, {})
+            by_value.setdefault(str(axes[name]), dict.fromkeys(fuzz.OUTCOMES, 0))[
+                outcome
+            ] += 1
+    assert run.summary["axis_outcomes"] == {"RMSNorm/Default": expected}
+    for name, by_value in expected.items():
+        assert sum(sum(c.values()) for c in by_value.values()) == 30, name
+
+
+def test_summary_has_only_the_axes_a_space_declares(run, tmp_path):
+    # bug caught: an axis the space does not have shows up as an empty or invented breakdown
+    assert run.run("--samples", "4", space="Matmul/Align") == 0
+    assert sorted(run.summary["axis_outcomes"]["Matmul/Align"]) == [
+        "alignment",
+        "placement",
+    ]
+    spaces = tmp_path / "toy"
+    spaces.mkdir()
+    write_space(spaces)
+    assert run.run("--samples", "2", "--spaces-dir", str(spaces), space=None) == 0
+    assert run.summary["axis_outcomes"] == {}
+
+
+def test_a_failure_folder_carries_the_alignment_placement_and_patches(run):
+    # bug caught: the graph of a failure folder at the template's alignment 16 although the
+    # case ran at another one, or a meta sidecar without the placement that made it fail
+    run.control(default="wrong")
+    assert run.run("--samples", "1", "--seed", "4242", space="Matmul/Align") == 1
+    sp = space_by_id("Matmul/Align")
+    sample = sampler.sample(sp, 4242)
+    folder = run.failure_dir("s4242", "Matmul_Align")
+    graph = json.loads((folder / "Matmul_Align_s4242.json").read_text())
+    assert {t["uid"]: t["alignment"] for t in graph["tensors"]} == {
+        p["uid"]: p["set"]["alignment"] for p in sample.row["tensor_patches"]
+    }
+    meta = json.loads((folder / "Matmul_Align_s4242.meta.json").read_text())
+    assert (meta["placement"], meta["placement_uid"]) == (
+        sample.row["metadata"]["placement"], sample.row["metadata"]["placement_uid"],
+    )  # fmt: skip
+    repro = json.loads((folder / "repro.json").read_text())
+    assert repro["sweep_row"] == sample.row
 
 
 # --------------------------------------------------------------------------
@@ -1266,6 +1620,10 @@ def test_suite_tag_is_the_dtype_of_the_graphs_input_tensor(run, space_id):
     template = json.loads(sp.template_path.read_text())
     for seed in range(60):
         s = sampler.sample(sp, seed)
+        if space_id in FIXED_SHAPE_SPACES:
+            # no dtype axis, so no dtype directory: the suite is the plain space suite
+            assert f._test_name(sp, s) == f"gauntlet_{sp.operation}_{sp.name}.s{seed}"
+            continue
         graph = bu.expand(template, s.row["values"])
         x = next(t for t in graph["tensors"] if t["name"].lower() in ("x", "q"))
         assert (
@@ -1788,10 +2146,16 @@ def test_fault_graph_is_the_expanded_concrete_graph_with_canonical_uids(findings
         graph = json.loads(
             (findings.failure_dir(case) / f"SdpaFwd_Default_{case}.json").read_text()
         )
-        expected = bu.expand(template, sampler.sample(sp, seed).row["values"])
+        row = sampler.sample(sp, seed).row
+        expected = expanded_graph(
+            template, row
+        )  # with the row's alignment patches applied
         assert bu.canon(graph) == bu.canon(
             bu.remap_graph(expected, bu.canonical_uid_map_by_name(expected))
         )
+        assert {t["alignment"] for t in graph["tensors"]} == {
+            row["tensor_patches"][0]["set"]["alignment"]
+        }
         assert [t["name"] for t in graph["tensors"]] == ["K", "Q", "SdpaFwd_0::O", "V"]
         assert [t["uid"] for t in graph["tensors"]] == [0, 1, 2, 3]
         assert "${" not in json.dumps(graph)
@@ -1967,6 +2331,7 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     assert len(cases) == len(before) + 1
     new = cases[-1]
     expanded = bu.expand(template, new["values"])
+    fuzz.load_support_matrix_units().apply_tensor_patches(expanded, new)
     assert bu.canon(expanded) == bu.canon(failing_graph)  # the same graph back
     # UIDs unchanged: the import did not renumber a tensor (that would change its input seed)
     sampled = bu.expand(template, repro["sweep_row"]["values"])
@@ -1979,10 +2344,35 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     assert new["metadata"]["seed"] == repro["data_seed"]  # the same seed
     # the fill recipes survive the failure folder and the freeze: a frozen regression that
     # lost metadata.inputs would run the harness default fill and no longer reproduce
-    recipes = repro["sweep_row"]["metadata"]["inputs"]
+    recipes = repro["sweep_row"]["metadata"].get("inputs")  # Matmul/Align sets none
     meta = json.loads((folder / f"{case}.meta.json").read_text())
-    assert meta["inputs"] == recipes
-    assert new["metadata"]["inputs"] == recipes
+    assert meta.get("inputs") == recipes
+    assert new["metadata"].get("inputs") == recipes
+    # the declared alignments and the placement survive too: a regression frozen without them
+    # would run at the template's alignment 16 and no longer be the case that failed
+    placement = repro["sweep_row"]["metadata"]
+    assert meta["placement"] == new["metadata"]["placement"] == placement["placement"]
+    assert (
+        meta["placement_uid"]
+        == new["metadata"]["placement_uid"]
+        == placement["placement_uid"]
+    )
+    patched = {
+        p["uid"]: p["set"]["alignment"] for p in repro["sweep_row"]["tensor_patches"]
+    }
+    assert {
+        t["uid"]: t["alignment"]
+        for t in failing_graph["tensors"]
+        if t["uid"] in patched
+    } == patched
+    # a patch exactly where the graph differs from what the template says (some templates
+    # carry no alignment at all)
+    base = {t["uid"]: t.get("alignment") for t in template["tensors"]}
+    assert new.get("tensor_patches", []) == [
+        {"uid": uid, "set": {"alignment": a}}
+        for uid, a in sorted(patched.items())
+        if base[uid] != a
+    ]
     assert new["metadata"]["purpose"] == "regression"
     assert (
         space_id in new["metadata"]["reference_source"]

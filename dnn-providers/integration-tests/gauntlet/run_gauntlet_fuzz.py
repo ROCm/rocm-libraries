@@ -65,6 +65,7 @@ import sampler  # noqa: E402
 import space as space_lib  # noqa: E402
 
 MIGRATION_DIR = HERE.parent / "migration-scripts"
+SCRIPTS_DIR = HERE.parent / "scripts"
 DRIVER_PATH = Path(__file__).resolve()
 
 OUTCOMES = ("PASS", "DECLINED", "WRONG", "CRASH", "UNCLAIMED_PASS", "UNEXERCISED")
@@ -75,6 +76,8 @@ DEFAULT_CASE_TIMEOUT = "10m"
 LOG_TAIL_LINES = 200
 LOG_TAIL_BYTES = 32 * 1024
 HOST_FILL_ENV = "HIPDNN_TEST_HOST_INPUT_FILL"
+# The axes whose values the summary breaks the outcomes down by (``summary["axis_outcomes"]``).
+AXIS_OUTCOME_AXES = ("alignment", "placement", "domain")
 ZERO_TESTS_MARKER = "Error: zero tests ran"
 NO_DEVICE_MARKER = "No HIP devices available"
 GTEST_FILTER_LINE = re.compile(r"\s*gtest_filter:")
@@ -102,6 +105,21 @@ def load_bundle_utils():
     spec = importlib.util.spec_from_file_location("bundle_utils", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules["bundle_utils"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_support_matrix_units():
+    """``scripts/support_matrix_units.py``, imported by path (no copy): the module whose
+    ``apply_tensor_patches`` expands a sweep case's ``tensor_patches`` as the harness does.
+    """
+    module = sys.modules.get("support_matrix_units")
+    if module is not None:
+        return module
+    path = SCRIPTS_DIR / "support_matrix_units.py"
+    spec = importlib.util.spec_from_file_location("support_matrix_units", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["support_matrix_units"] = module
     spec.loader.exec_module(module)
     return module
 
@@ -369,6 +387,8 @@ class Fuzz:
         self._bu = None
         self._outcomes_file = None
         self._samples_file = None
+        # (space id, case id) -> the values of the AXIS_OUTCOME_AXES the sample drew
+        self._outcome_axes = {}
 
     # -- control ---------------------------------------------------------
 
@@ -858,6 +878,11 @@ class Fuzz:
             "arch": arch,
             "source": "binary" if record is not None else "driver",
         }
+        self._outcome_axes[(sp.space_id, sample.case_id)] = {
+            name: sample.axis_values[name]
+            for name in AXIS_OUTCOME_AXES
+            if name in sample.axis_values
+        }
         if record is not None:
             for key in ("purpose", "depth", "origin", "verifier", "platform"):
                 if key in record:
@@ -967,6 +992,7 @@ class Fuzz:
 
         template = json.loads(sp.template_path.read_bytes())
         expanded = bu.expand(template, sample.row["values"])
+        load_support_matrix_units().apply_tensor_patches(expanded, sample.row)
         uid_map = bu.canonical_uid_map_by_name(expanded)
         graph = bu.remap_graph(expanded, uid_map)
         json_dump(folder / f"{case}.json", graph)
@@ -1121,6 +1147,16 @@ class Fuzz:
                 sp["crash"].append(r["case"])
             elif r["outcome"] == "WRONG":
                 sp["wrong"].append(r["case"])
+        axis_outcomes = {}
+        for r in self.results:
+            axes = self._outcome_axes.get((r["space"], r["case"]), {})
+            for name, value in axes.items():
+                counts = (
+                    axis_outcomes.setdefault(r["space"], {})
+                    .setdefault(name, {})
+                    .setdefault(str(value), dict.fromkeys(OUTCOMES, 0))
+                )
+                counts[r["outcome"]] += 1
         per_space_results = {}
         for r in self.results:
             per_space_results[r["space"]] = per_space_results.get(r["space"], 0) + 1
@@ -1164,6 +1200,7 @@ class Fuzz:
             "samples_by_space": dict(self.generated),
             "outcomes": totals,
             "reconciled": reconciled,
+            "axis_outcomes": axis_outcomes,
             "engines": engines,
             "findings": findings,
             "work_dir": str(self.work),

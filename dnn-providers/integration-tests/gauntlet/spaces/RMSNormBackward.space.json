@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "RMSNormBackward",
-  "description": "RMSNorm backward (dx, dscale and dbias outputs, saved inverse RMS as a graph input) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (RMSnormBwdPlan.cpp:120, IValidator::validateDimensionCount ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale and dbias that the engine and both references accept (pure, mixed io, mixed affine, float x with half or bfloat16 dy) with a float inverse RMS, scale, dscale and dbias covering a trailing suffix of the dims (leading dims 1) and inv_rms keeping the leading dims (suffix dims 1). Axis k is the first normalized axis, as in the RMSNorm space. x and dx always share one dtype, as in every quick row. The inv_rms fill range 0.9 to 1.5 is the quick sweep's tuned range for uid 4. Template: quick RMSNormBackward/Default, the topology with the full tensor set (dbias output). Domain axis: x and dy take the domain fill, with large narrowed to scale 4 because dscale and dbias are sums of dy*x*rstd and dy over the batch groups and overflow half at scale 32; the nan and inf domains put the special fill on inv_rms (uid 4, range 0.9 to 1.5 for the finite elements), which is per-group: only the dx elements of poisoned groups go non-finite and dbias (a sum of dy) stays finite, while x and dy stay free(-1,1).",
+  "description": "RMSNorm backward (dx, dscale and dbias outputs, saved inverse RMS as a graph input) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (RMSnormBwdPlan.cpp:120, IValidator::validateDimensionCount ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale and dbias that the engine and both references accept (pure, mixed io, mixed affine, float x with half or bfloat16 dy) with a float inverse RMS, scale, dscale and dbias covering a trailing suffix of the dims (leading dims 1) and inv_rms keeping the leading dims (suffix dims 1). Axis k is the first normalized axis, as in the RMSNorm space. x and dx always share one dtype, as in every quick row. The inv_rms fill range 0.9 to 1.5 is the quick sweep's tuned range for uid 4. Template: quick RMSNormBackward/Default, the topology with the full tensor set (dbias output). Domain axis: x and dy take the domain fill, with large narrowed to scale 4 because dscale and dbias are sums of dy*x*rstd and dy over the batch groups and overflow half at scale 32; the nan and inf domains put the special fill on inv_rms (uid 4, range 0.9 to 1.5 for the finite elements), which is per-group: only the dx elements of poisoned groups go non-finite and dbias (a sum of dy) stays finite, while x and dy stay free(-1,1). Alignment and placement axes: tensor_patches sets the declared alignment of every tensor (uids 0 to 6, all device tensors) to the alignment axis, and placement (default, exact or under; exact when under would need alignment 1) acts on x (uid 6).",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/RMSNormBackward/Default/graph.template.json",
   "axes": {
@@ -16,7 +16,9 @@
     "h":        {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
     "w":        {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
     "k":        {"values": [1, 2, 3, 4]},
-    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
   },
   "derive": {
     "d":       "d3 if ndim == 5 else 1",
@@ -59,7 +61,8 @@
     "dom_special":   "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction":  "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'"
+    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes: scale dim 0 must be 1 and the normalized suffix must start after it (detail/Utilities.hpp:323 validateScaleNormalizedShape, called from RMSNormBackwardNode.hpp:87)"},
@@ -80,12 +83,23 @@
     },
     "metadata": {
       "purpose": "probe",
+      "placement": "${eff_placement}",
+      "placement_uid": 6,
       "validator": "${dom_validator}",
       "inputs": {
         "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "4": {"kind": "${poi_kind}", "lo": 0.8999999761581421, "hi": 1.5, "value": 0, "scale": 1, "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "6": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
-    }
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}},
+      {"uid": 4, "set": {"alignment": "${alignment}"}},
+      {"uid": 5, "set": {"alignment": "${alignment}"}},
+      {"uid": 6, "set": {"alignment": "${alignment}"}}
+    ]
   }
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "Layernorm",
-  "description": "Layernorm forward (training phase: y plus saved mean and inverse variance) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, y, scale and bias, and mean and inverse variance that the engine and both references accept (pure, mixed io, upcast), scale and bias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. Template: quick Layernorm/Default, the topology with the full tensor set (y, mean and inv_variance outputs, scale, bias, epsilon). Domain axis: x takes the domain fill (large uses scale 32, safe for half and bfloat16 since y is O(1) and the stats are bounded by 64); the nan and inf domains put the special fill on scale and bias (uids 5 and 3), which is elementwise-local (y is non-finite only in the poisoned columns and mean and inv_variance stay finite) while x stays free(-1,1).",
+  "description": "Layernorm forward (training phase: y plus saved mean and inverse variance) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, y, scale and bias, and mean and inverse variance that the engine and both references accept (pure, mixed io, upcast), scale and bias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. Template: quick Layernorm/Default, the topology with the full tensor set (y, mean and inv_variance outputs, scale, bias, epsilon). Domain axis: x takes the domain fill (large uses scale 32, safe for half and bfloat16 since y is O(1) and the stats are bounded by 64); the nan and inf domains put the special fill on scale and bias (uids 5 and 3), which is elementwise-local (y is non-finite only in the poisoned columns and mean and inv_variance stay finite) while x stays free(-1,1). Alignment and placement axes: tensor_patches sets the declared alignment of every device tensor (uids 0, 1, 2, 3, 5, 6; not the epsilon scalar, uid 4) to the alignment axis, and placement (default, exact or under; exact when under would need alignment 1) acts on x (uid 6).",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/Layernorm/Default/graph.template.json",
   "axes": {
@@ -16,7 +16,9 @@
     "h":       {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
     "w":       {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
     "k":       {"values": [1, 2, 3, 4]},
-    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
+    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
   },
   "derive": {
     "s_dtype": "p_dtype",
@@ -60,7 +62,8 @@
     "dom_special":   "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction":  "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'"
+    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the frontend always infers scale and bias with batch dim 1 (LayerNormNode.hpp:174 and :199, infer_properties_node sets scaleBiasDim[0] = 1), so axis 0 is never normalized; the quick sweeps use normalized_dim_count <= ndim - 1 and SUPPORT_MATRIX_OVERVIEW.md op-layernorm lists norm:all_dims as used by no test graph"},
@@ -82,12 +85,22 @@
     },
     "metadata": {
       "purpose": "probe",
+      "placement": "${eff_placement}",
+      "placement_uid": 6,
       "validator": "${dom_validator}",
       "inputs": {
         "3": {"kind": "${poi_kind}", "lo": -1, "hi": 1, "value": 0, "scale": 1, "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "5": {"kind": "${poi_kind}", "lo": -1, "hi": 1, "value": 0, "scale": 1, "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "6": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
-    }
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}},
+      {"uid": 5, "set": {"alignment": "${alignment}"}},
+      {"uid": 6, "set": {"alignment": "${alignment}"}}
+    ]
   }
 }

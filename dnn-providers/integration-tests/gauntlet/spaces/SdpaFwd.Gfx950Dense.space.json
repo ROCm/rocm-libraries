@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64). The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 128-wide head stay inside the half range before the softmax scale. The nan and inf domains put the special fill on V alone and leave Q and K at free(-1,1): a non-finite Q or K element spreads over a whole softmax row, while one in V reaches only its own head-dim column of the output; no operand is elementwise-local, so most samples with a long kv sequence turn every output element non-finite and fail the non-finite mask by design.",
+  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64). The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 128-wide head stay inside the half range before the softmax scale. The nan and inf domains put the special fill on V alone and leave Q and K at free(-1,1): a non-finite Q or K element spreads over a whole softmax row, while one in V reaches only its own head-dim column of the output; no operand is elementwise-local, so most samples with a long kv sequence turn every output element non-finite and fail the non-finite mask by design. The alignment axis declares that alignment on K, Q, O and V (uids 0, 1, 2, 3) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
   "engine": "hipkernel:Gfx950AttentionDense",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
@@ -15,7 +15,9 @@
     "skv_n":    {"range": [1, 64], "boundaries": [1, 2, 4, 8, 16, 64]},
     "causal":   {"values": [false, true]},
     "scale":    {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0]},
-    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true}
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256], "late": true},
+    "placement": {"values": ["default", "exact", "under"], "late": true}
   },
   "derive": {
     "heads":     "heads_d64 if d == 64 else heads_d128",
@@ -35,7 +37,8 @@
     "dom_special": "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction": "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "dom_qk_kind": "'free' if domain in ['nan', 'inf'] else dom_kind"
+    "dom_qk_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "hq % hkv == 0", "reason": "GQA: query heads must be a multiple of kv heads"},
@@ -64,7 +67,15 @@
         "0": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "1": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
-      }
-    }
+      },
+      "placement": "${eff_placement}",
+      "placement_uid": 1
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}}
+    ]
   }
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "BatchnormInference",
-  "description": "BatchNorm forward inference (spatial mode, estimated mean and inverse variance as inputs) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x with float scale, bias, mean and inv-variance, y in x's dtype or widened to float (the 'upcast' sweep cases; the inference kernel takes its output type separately, BatchNormFwdInferSpatial.cpp:8, and the reference signature keys register y in {x dtype, float} only, GpuBatchnormFwdInfSignatureKey.hpp:113-147), hw and c swept around the vector-width cut points (inCstride % 4, c % 4, % 2 in computeVectorSize, PlanUtils.hpp:69-84) and powers of two +-1. N*H*W may be 1: inference uses stored statistics (BatchnormInferenceNode.hpp:119). Template: quick BatchnormInference/Default (the only inference topology; BatchnormInferenceVarianceExt is a separate op). The quick sweep sets no metadata.inputs, so the harness op defaults (mean -0.1..0.1, inv_variance 0.5..1.5, FillInputs.cpp:94-95) apply to the other inputs. The last axis, domain (default/narrow/wide/positive/constant/nonzero/zeros/large/subnormal/nan/inf), renders the fill of x (uid 1); default is the harness default -1..1; large keeps scale 32. Inference is elementwise in x, so nan and inf put the special fill (5% of elements, at least one) on x itself: only those y positions are non-finite and the rest stay finite (only a one-element x makes y entirely non-finite, which fails under match_nonfinite by design). The validator is match_nonfinite exactly for nan and inf.",
+  "description": "BatchNorm forward inference (spatial mode, estimated mean and inverse variance as inputs) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x with float scale, bias, mean and inv-variance, y in x's dtype or widened to float (the 'upcast' sweep cases; the inference kernel takes its output type separately, BatchNormFwdInferSpatial.cpp:8, and the reference signature keys register y in {x dtype, float} only, GpuBatchnormFwdInfSignatureKey.hpp:113-147), hw and c swept around the vector-width cut points (inCstride % 4, c % 4, % 2 in computeVectorSize, PlanUtils.hpp:69-84) and powers of two +-1. N*H*W may be 1: inference uses stored statistics (BatchnormInferenceNode.hpp:119). Template: quick BatchnormInference/Default (the only inference topology; BatchnormInferenceVarianceExt is a separate op). The quick sweep sets no metadata.inputs, so the harness op defaults (mean -0.1..0.1, inv_variance 0.5..1.5, FillInputs.cpp:94-95) apply to the other inputs. The axis domain (default/narrow/wide/positive/constant/nonzero/zeros/large/subnormal/nan/inf) renders the fill of x (uid 1); default is the harness default -1..1; large keeps scale 32. Inference is elementwise in x, so nan and inf put the special fill (5% of elements, at least one) on x itself: only those y positions are non-finite and the rest stay finite (only a one-element x makes y entirely non-finite, which fails under match_nonfinite by design). The validator is match_nonfinite exactly for nan and inf. The last axes, alignment (1..256) and placement (default/exact/under), declare that alignment on every device tensor (tensor_patches on uids 0-5) and place the run's pointers accordingly; under misaligns x (placement_uid 1) and needs alignment >= 2, so eff_placement turns under into exact at alignment 1.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/BatchnormInference/Default/graph.template.json",
   "axes": {
@@ -14,7 +14,9 @@
     "hw":      {"range": [1, 8192], "boundaries": [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 255, 256, 257, 1024, 1025, 4095, 4096, 4097]},
     "hs":      {"values": [1, 2, 3, 4, 5, 8, 16, 64]},
     "ds":      {"values": [1, 2, 3, 4]},
-    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
+    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]},
+    "alignment": {"values": [1, 2, 4, 8, 16, 32, 64, 128, 256]},
+    "placement": {"values": ["default", "exact", "under"]}
   },
   "derive": {
     "ydt":     "'float' if y_float else dtype",
@@ -38,7 +40,8 @@
     "dom_special": "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction": "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "xk":        "'special' if domain in ['nan', 'inf'] else dom_kind"
+    "xk":        "'special' if domain in ['nan', 'inf'] else dom_kind",
+    "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "n * c * hw <= 2**30", "reason": "GPU reference cost ceiling for normalization ops (RFC 0023 section 14); also keeps every extent inside the checkedNarrowToInt int range the inference plan requires (BatchnormFwdInferencePlan.cpp:137-158, PlanUtils.hpp:19)"}
@@ -58,9 +61,19 @@
     "metadata": {
       "purpose": "probe",
       "validator": "${dom_validator}",
+      "placement": "${eff_placement}",
+      "placement_uid": 1,
       "inputs": {
         "1": {"kind": "${xk}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
-    }
+    },
+    "tensor_patches": [
+      {"uid": 0, "set": {"alignment": "${alignment}"}},
+      {"uid": 1, "set": {"alignment": "${alignment}"}},
+      {"uid": 2, "set": {"alignment": "${alignment}"}},
+      {"uid": 3, "set": {"alignment": "${alignment}"}},
+      {"uid": 4, "set": {"alignment": "${alignment}"}},
+      {"uid": 5, "set": {"alignment": "${alignment}"}}
+    ]
   }
 }

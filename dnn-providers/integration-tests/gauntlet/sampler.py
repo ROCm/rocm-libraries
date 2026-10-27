@@ -7,7 +7,8 @@ Seeded sampler for gauntlet spaces (RFC 0023, sections 5 and 7.3).
 One sample is fully determined by its shape seed: ``sample()`` seeds a fresh
 ``random.Random`` with it, draws every axis (a boundary value with probability 1/2, else
 a uniform value), redraws when a constraint is violated, and renders the space's case
-block into a row in ``sweep.json``'s own ``{id, values, metadata}`` format.
+block into a row in ``sweep.json``'s own ``{id, values, metadata}`` format (plus
+``tensor_patches`` when the space declares them).
 
 The data seed is separate. By default it is derived from the shape seed; it becomes the
 case's ``metadata.seed``, which the harness uses for input fills.
@@ -144,4 +145,7 @@ def _row(space, shape_seed, data_seed, axis_values, case):
     metadata.update(case["metadata"])
     metadata.setdefault("purpose", DEFAULT_PURPOSE)
     metadata["seed"] = data_seed
-    return {"id": case_id(shape_seed), "values": case["values"], "metadata": metadata}
+    row = {"id": case_id(shape_seed), "values": case["values"], "metadata": metadata}
+    if "tensor_patches" in case:
+        row["tensor_patches"] = case["tensor_patches"]
+    return row

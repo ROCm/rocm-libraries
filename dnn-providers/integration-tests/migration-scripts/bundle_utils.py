@@ -222,17 +222,21 @@ def canonical_uid_map_by_name(graph: dict) -> dict:
 
 
 def remap_meta_inputs(meta: dict, m: dict) -> dict:
-    """Deep copy of metadata with ``inputs`` fill-spec keys remapped via ``m``.
+    """Deep copy of metadata with its tensor-UID references remapped via ``m``.
 
-    ``inputs`` is keyed by stringified tensor UID, so it must be remapped in
-    lockstep with the graph whenever UIDs are canonicalized — otherwise a
-    tensor's fill spec (range/kind/seed) would end up attached to the wrong
+    ``inputs`` is keyed by stringified tensor UID, and ``placement_uid`` names the
+    tensor a misaligned placement targets, so both must be remapped in lockstep
+    with the graph whenever UIDs are canonicalized — otherwise a tensor's fill spec
+    (range/kind/seed) or the misaligned pointer would end up attached to the wrong
     tensor after remapping.
     """
     out = copy.deepcopy(meta)
     inputs = out.get("inputs")
     if isinstance(inputs, dict):
         out["inputs"] = {str(m.get(int(k), int(k))): v for k, v in inputs.items()}
+    uid = out.get("placement_uid")
+    if isinstance(uid, int) and not isinstance(uid, bool):
+        out["placement_uid"] = m.get(uid, uid)
     return out
 
 
@@ -597,11 +601,19 @@ def _case_identity(entry: dict) -> dict:
     otherwise such cases would silently collide.
     """
     meta = entry.get("metadata", {})
-    return {
+    identity = {
         "values": entry.get("values", {}),
         "inputs": meta.get("inputs", {}),
         "seed": meta.get("seed"),
     }
+    # Declared alignment and misaligned placement make cases with one graph distinct tests.
+    # Added only when present, so the hash, and with it the id, of every other case is unchanged.
+    if entry.get("tensor_patches"):
+        identity["tensor_patches"] = entry["tensor_patches"]
+    for key in ("placement", "placement_uid"):
+        if key in meta:
+            identity[key] = meta[key]
+    return identity
 
 
 def _case_hash(entry: dict) -> str:
