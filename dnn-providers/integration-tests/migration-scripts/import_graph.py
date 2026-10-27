@@ -275,14 +275,18 @@ def _alignment_patches(graph: dict, expanded: dict) -> list:
 
 def _apply_patches(expanded: dict, patches) -> None:
     """Apply a case's ``tensor_patches`` (``set`` and ``remove``) to its expanded graph, as
-    the harness does; a patch naming no tensor of the graph is skipped."""
+    the harness does. Anything that is not a list of patch objects naming a tensor of the
+    graph (hand-written cases carry other shapes) is skipped."""
+    if not isinstance(patches, list):
+        return
     have = tensors_by_uid(expanded)
-    for patch in patches or []:
-        target = have.get(patch.get("uid"))
+    for patch in patches:
+        target = have.get(patch.get("uid")) if isinstance(patch, dict) else None
         if target is None:
             continue
-        target.update(patch.get("set", {}))
-        for key in patch.get("remove", []):
+        if isinstance(patch.get("set"), dict):
+            target.update(patch["set"])
+        for key in patch.get("remove") or []:
             target.pop(key, None)
 
 

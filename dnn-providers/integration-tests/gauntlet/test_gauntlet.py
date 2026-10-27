@@ -11,6 +11,7 @@ the same command line and writes the same outcome-report JSON Lines. Run with::
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import hashlib
 import importlib.util
@@ -1210,6 +1211,46 @@ def test_case_identity_of_a_case_without_patches_or_placement_is_unchanged():
     patched = dict(plain, tensor_patches=[{"uid": 1, "set": {"alignment": 2}}])
     placed = {**plain, "metadata": {**plain["metadata"], "placement": "exact"}}
     assert len({bu._case_hash(e) for e in (plain, patched, placed)}) == 3
+    # the tensor_patches shipped sweeps carry (a scalar made pass-by-value) are not identity
+    scalar = dict(
+        plain,
+        tensor_patches=[
+            {"uid": 1, "set": {"is_runtime_pass_by_value": True}, "remove": ["value"]}
+        ],
+    )
+    assert bu._case_identity(scalar) == bu._case_identity(plain)
+    assert bu._case_hash(scalar) == bu._case_hash(plain)
+
+
+def test_every_shipped_case_id_is_unchanged(monkeypatch):
+    # bug caught: an identity field that rehashes cases which already ship, so regenerating
+    # a sweep renames them (and every golden pointer, claim and TOML filter keyed on the id)
+    def legacy_identity(entry):
+        meta = entry.get("metadata", {})
+        return {
+            "values": entry.get("values", {}),
+            "inputs": meta.get("inputs", {}),
+            "seed": meta.get("seed"),
+        }
+
+    checked = with_patches = reproduced = 0
+    for path in sorted(BUNDLES.rglob("sweep.json")):
+        cases = json.loads(path.read_text(encoding="utf-8"))["cases"]
+        if not cases:
+            continue
+        current = copy.deepcopy(cases)
+        bu.assign_case_ids(current)
+        with monkeypatch.context() as patch:
+            patch.setattr(bu, "_case_identity", legacy_identity)
+            before = copy.deepcopy(cases)
+            bu.assign_case_ids(before)
+        assert [c["id"] for c in current] == [c["id"] for c in before], path
+        checked += len(cases)
+        with_patches += sum(1 for c in cases if c.get("tensor_patches"))
+        reproduced += sum(1 for c, d in zip(cases, current) if c["id"] == d["id"])
+    assert checked > 10000 and with_patches > 0, (checked, with_patches)
+    print(f"shipped cases checked {checked}, with tensor_patches {with_patches}, "
+          f"ids reproduced by re-running assign_case_ids {reproduced}")  # fmt: skip
 
 
 @pytest.mark.parametrize("alignment", [2, 256, 16])

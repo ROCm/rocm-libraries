@@ -606,10 +606,19 @@ def _case_identity(entry: dict) -> dict:
         "inputs": meta.get("inputs", {}),
         "seed": meta.get("seed"),
     }
-    # Declared alignment and misaligned placement make cases with one graph distinct tests.
-    # Added only when present, so the hash, and with it the id, of every other case is unchanged.
-    if entry.get("tensor_patches"):
-        identity["tensor_patches"] = entry["tensor_patches"]
+    # A declared alignment (an alignment entry of tensor_patches) and a placement make cases
+    # with one graph distinct tests. They ride the hash only when present. The other
+    # tensor_patches shipped sweeps carry (is_runtime_pass_by_value, remove value) stay out
+    # of it, so no existing case id changes (test_every_shipped_case_id_is_unchanged).
+    aligned = [
+        {"uid": p.get("uid"), "alignment": p["set"]["alignment"]}
+        for p in entry.get("tensor_patches") or []
+        if isinstance(p, dict)
+        and isinstance(p.get("set"), dict)
+        and "alignment" in p["set"]
+    ]
+    if aligned:
+        identity["alignment"] = aligned
     for key in ("placement", "placement_uid"):
         if key in meta:
             identity[key] = meta[key]
