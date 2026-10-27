@@ -44,7 +44,6 @@
         }                                                                            \
     }
 
-#ifdef HIPSPARSE_WITH_SPGEAM
 //! [doc example start]
 int main()
 {
@@ -254,10 +253,3 @@ int main()
     return 0;
 }
 //! [doc example end]
-#else
-int main()
-{
-    // hipSPARSE was built with the generic SpGEAM API disabled (HIPSPARSE_WITH_SPGEAM off).
-    return 0;
-}
-#endif

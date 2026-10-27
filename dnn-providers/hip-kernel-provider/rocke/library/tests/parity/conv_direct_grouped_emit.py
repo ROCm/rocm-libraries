@@ -11,13 +11,15 @@
 # from index 42, the non-grouped DirectNongroupedConvSpec, from index 57 the
 # output-stationary DirectDepthwiseTiledSpec, from index 63 the dilated
 # non-grouped DirectNongroupedConvSpec, from index 66 specs both engines
-# must reject, from index 71 the runtime-channel DirectConvWgradSpec and from
+# must reject, from index 71 the runtime-channel DirectConvWgradSpec, from
 # index 75 the parametric DirectConvSpec and the MFMA dgrad weight transforms,
 # baked and runtime-channel, from index 95 the split-C non-grouped
 # DirectNongroupedConvSpec and its DirectSplitReduceSpec second pass, from
 # index 103 its grouped / group-merge mode, and from index 114 the direct
 # wgrad kernels: DirectWgradTiledSpec, DwWgradFoldSpec, DwWgradColsSpec,
-# DwWgradLdsSpec and WgradGatherSpec), builds the kernel
+# DwWgradLdsSpec, WgradGatherSpec, DwWgradMfmaSpec and GroupedWgradMfmaSpec,
+# from index 163 the bf16 DirectConv4cSpec, and from index 166 the depthwise
+# forward kernels on the wave32 gfx1250), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -67,6 +69,14 @@ from kernels.common.conv_direct_dw_wgrad import (
     build_dw_wgrad_cols,
     build_dw_wgrad_fold,
     build_dw_wgrad_lds,
+)
+from kernels.common.conv_direct_dw_wgrad_mfma import (
+    DwWgradMfmaSpec,
+    build_dw_wgrad_mfma,
+)
+from kernels.common.conv_direct_grouped_wgrad_mfma import (
+    GroupedWgradMfmaSpec,
+    build_grouped_wgrad_mfma,
 )
 from kernels.common.conv_direct_wgrad_gather import (
     WgradGatherSpec,
@@ -121,7 +131,7 @@ _NONGROUPED_GROUPED_CFG_BASE = 103
 
 
 # ---------------------------------------------------------------------------
-# The direct wgrad kernels, indices 114..147: DirectWgradTiledSpec (wave tiles,
+# The direct wgrad kernels, indices 114..162: DirectWgradTiledSpec (wave tiles,
 # unfold_n, row_unroll, q_groups with and without pingpong, 1x1 and 5x5), the
 # DwWgradFoldSpec partial-slot fold, DwWgradColsSpec (small C), DwWgradLdsSpec
 # (row rings, strided, cols_per_lane, a partial channel tile), WgradGatherSpec
@@ -129,10 +139,39 @@ _NONGROUPED_GROUPED_CFG_BASE = 103
 # both engines must reject; a small-C depthwise spec with more outputs than
 # threads; then eight more rejections (LDS footprints over budget, targets
 # without 16-byte LDS DMA, a negative row_unroll, no blocks, no dtype); then
-# WgradGatherSpec at valid padding over three k-waves. Follows the 11 grouped
-# non-grouped configs.
+# WgradGatherSpec at valid padding over three k-waves; from 148 DwWgradMfmaSpec
+# (preshifted and plain windows, packed images, 3x3 tap groups, the
+# single-prologue PAD = KH - 1 case, a partial channel tile) and
+# GroupedWgradMfmaSpec (4 and 8 channels per group, wave splits, a partial
+# channel tile), each with a reject; then both with no blocks and with a
+# negative block budget. Follows the 11 grouped non-grouped configs.
 # ---------------------------------------------------------------------------
 _WGRAD_DIRECT_CFG_BASE = 114
+
+# bf16 4c (mfma_f32_4x4x4_bf16) configs, indices 163..165, after the direct
+# wgrad ones.
+_FOURC_BF16_CFG_BASE = 163
+
+
+def _fourc_bf16_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_FOURC_BF16_CFG_BASE + idx``, or
+    None. 0: odd H/W (right-edge column mask, H-edge rows); 1: gfx942 (the
+    ``_1k`` atom is CDNA2+, so the kernel stays arch-neutral); 2: two waves per
+    block and four q-tiles per wave."""
+    # (N, H, W, groups, block_q, block_groups, arch)
+    table = {
+        0: (2, 13, 13, 32, 4, 16, "gfx950"),
+        1: (1, 8, 8, 16, 8, 16, "gfx942"),
+        2: (2, 15, 15, 32, 16, 32, "gfx950"),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    N, H, W, groups, bq, bg, arch = sel
+    p = DirectConvProblem(
+        N=N, H=H, W=W, groups=groups, cpg=4, kpg=4, KH=3, KW=3, PAD=1, dtype="bf16"
+    )
+    return ("4c", DirectConv4cSpec(problem=p, block_q=bq, block_groups=bg), arch)
 
 
 def _wp(**over):
@@ -159,11 +198,13 @@ def _dwp(C, **over):
 
 def _wgrad_direct_spec(idx: int):
     """Return (kind, spec, arch) for config ``_WGRAD_DIRECT_CFG_BASE + idx``."""
-    ts, ls, cs, gs = (
+    ts, ls, cs, gs, dm, gm = (
         DirectWgradTiledSpec,
         DwWgradLdsSpec,
         DwWgradColsSpec,
         WgradGatherSpec,
+        DwWgradMfmaSpec,
+        GroupedWgradMfmaSpec,
     )
     table = {
         0: ("wgrad_tiled", ts(problem=_wp(cpg=128, kpg=128, H=30))),
@@ -349,11 +390,170 @@ def _wgrad_direct_spec(idx: int):
                 prefetch=1,
             ),
         ),
+        # Depthwise 4x4x4 MFMA: 7x7 (preshifted window, both prologue bodies).
+        34: (
+            "dw_wgrad_mfma",
+            dm(problem=_dwp(64, KH=7, KW=7, PAD=3, W=20), q_tiles=4),
+        ),
+        # 3x3 fp16 (no preshift), a partial channel tile, prefetch 1.
+        35: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(72, H=9, W=30, dtype="fp16"),
+                rows_per_chunk=4,
+                prefetch=1,
+            ),
+        ),
+        # Three 7x7 images packed in one 32-wide tile.
+        36: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(128, KH=7, KW=7, PAD=3, N=5, H=7, W=7),
+                rows_per_chunk=14,
+                unfold_n=3,
+            ),
+        ),
+        # 5x5 "valid" padding, two packed images, three staging buffers.
+        37: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(64, KH=5, KW=5, PAD=0, H=10, W=6),
+                q_tiles=5,
+                unfold_n=2,
+                prefetch=3,
+            ),
+        ),
+        # 11x11: 3x3 tap groups.
+        38: (
+            "dw_wgrad_mfma",
+            dm(
+                problem=_dwp(64, KH=11, KW=11, PAD=5, H=12, W=12),
+                q_tiles=2,
+                rows_per_chunk=8,
+                target_blocks=64,
+            ),
+        ),
+        # PAD = KH - 1: one prologue body only.
+        39: ("dw_wgrad_mfma", dm(problem=_dwp(64, PAD=2), q_tiles=4)),
+        # Must reject: stride 2.
+        40: ("dw_wgrad_mfma", dm(problem=_dwp(64, stride=2))),
+        # Grouped 4x4x4 MFMA: 4 channels per group.
+        41: ("grouped_wgrad_mfma", gm(problem=_wp(groups=16, cpg=4, kpg=4))),
+        # 8 channels per group, fp16, a partial channel tile, 2x2 wave split.
+        42: (
+            "grouped_wgrad_mfma",
+            gm(
+                problem=_wp(groups=9, cpg=8, kpg=8, dtype="fp16", W=24),
+                waves_q=2,
+                wave_q4=2,
+                rows_per_chunk=8,
+                prefetch=3,
+            ),
+        ),
+        # 5x5, one wave over four column groups, four staging buffers.
+        43: (
+            "grouped_wgrad_mfma",
+            gm(
+                problem=_wp(groups=16, cpg=4, kpg=4, KH=5, KW=5, PAD=2),
+                waves_q=1,
+                wave_q4=4,
+                prefetch=4,
+                target_blocks=64,
+            ),
+        ),
+        # Must reject: 16 channels per group.
+        44: ("grouped_wgrad_mfma", gm(problem=_wp(groups=4, cpg=16, kpg=16))),
+        # Must reject: no blocks, and a negative block budget.
+        45: ("dw_wgrad_mfma", dm(problem=_dwp(64), target_blocks=0)),
+        46: ("dw_wgrad_mfma", dm(problem=_dwp(64), target_blocks=-1)),
+        47: (
+            "grouped_wgrad_mfma",
+            gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=0),
+        ),
+        48: (
+            "grouped_wgrad_mfma",
+            gm(problem=_wp(groups=16, cpg=4, kpg=4), target_blocks=-1),
+        ),
     }
     sel = table.get(idx)
     if sel is None:
         return None
     return (sel[0], sel[1], sel[2] if len(sel) > 2 else "gfx950")
+
+
+# ---------------------------------------------------------------------------
+# Depthwise forward on a wave32 target (gfx1250), indices 166..170: the
+# preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
+# the preloading kernel at wave_size 64: a logical wave of 64 threads, which
+# the wave32 target runs as two hardware waves.
+# ---------------------------------------------------------------------------
+_WAVE32_CFG_BASE = 166
+
+
+def _dwp_fwd(N, H, W, groups, KH, PAD, stride, dtype):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=1,
+        kpg=1,
+        KH=KH,
+        KW=KH,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+    )
+
+
+def _wave32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WAVE32_CFG_BASE + idx``, or None."""
+    if idx == 0:
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2, wave_size=32),
+            "gfx1250",
+        )
+    if idx == 1:
+        p = _dwp_fwd(2, 14, 14, 3, 3, 1, 2, "bf16")
+        return (
+            "spatial",
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=2, wave_size=32),
+            "gfx1250",
+        )
+    if idx == 2:
+        p = _dwp_fwd(2, 16, 16, 96, 5, 2, 1, "bf16")
+        return (
+            "dw_tiled",
+            DirectDepthwiseTiledSpec(
+                problem=p, block_w=8, block_h=2, block_waves=2, wave_size=32
+            ),
+            "gfx1250",
+        )
+    if idx == 3:
+        p = _dwp_fwd(2, 12, 12, 96, 3, 1, 2, "fp16")
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(
+                problem=p,
+                block_h=8,
+                block_w=2,
+                block_waves=1,
+                dtype="fp16",
+                wave_size=32,
+            ),
+            "gfx1250",
+        )
+    if idx == 4:
+        # wave64 (logical) spec on the wave32 target.
+        p = _dwp_fwd(2, 14, 14, 64, 3, 1, 1, "fp16")
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
+            "gfx1250",
+        )
+    return None
 
 
 def _gp(groups, cpg, kpg, *, N=2, H=20, W=24, KH=3, PAD=1, dtype="fp16"):
@@ -1645,6 +1845,16 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _WAVE32_CFG_BASE:
+        sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _FOURC_BF16_CFG_BASE:
+        sel = _fourc_bf16_spec(idx - _FOURC_BF16_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_DIRECT_CFG_BASE:
         sel = _wgrad_direct_spec(idx - _WGRAD_DIRECT_CFG_BASE)
         if sel is not None:
@@ -1811,6 +2021,10 @@ def main() -> int:
         kernel = build_wgrad_gather(spec, arch=arch)
     elif kind == "split_reduce":
         kernel = build_direct_conv_split_reduce(spec, arch=arch)
+    elif kind == "dw_wgrad_mfma":
+        kernel = build_dw_wgrad_mfma(spec, arch=arch)
+    elif kind == "grouped_wgrad_mfma":
+        kernel = build_grouped_wgrad_mfma(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":
