@@ -50,6 +50,7 @@ import sys
 from dataclasses import fields
 from pathlib import Path
 
+from kernels.common.attention_dense_decode import NONPERSIST_DECODES
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     check_dense_spec_preflight,
@@ -72,7 +73,7 @@ _BASE = dict(
 
 # One case per reject reason (each reached by the smallest change from _BASE), the
 # 32-bit and paged extent edges, the boundary on each side of every comparison,
-# and valid specs that exercise every kernel-name token and both persist decodes.
+# and valid specs that exercise every persistent and non-persistent decode/name token.
 _CASES: tuple[dict, ...] = (
     # ---- __post_init__ rejects, in validator order ----
     dict(dtype="fp32"),
@@ -99,10 +100,41 @@ _CASES: tuple[dict, ...] = (
     dict(num_kv_heads=-2),
     dict(persistent=True, num_persistent=0),
     dict(persistent=True, num_persistent=-1),
-    dict(persist_decode="gqa_pair"),
     dict(persist_decode=None),
     dict(persist_decode="it's"),
     dict(persist_decode='x"y'),
+    dict(nonpersist_decode=None),
+    dict(nonpersist_decode="bogus"),
+    dict(chiplet_num_xcds=0),
+    dict(chiplet_num_xcds=-1),
+    dict(nonpersist_decode="hq_minor_swz", num_query_heads=7, num_kv_heads=1),
+    dict(persistent=True, persist_decode="hq_minor_swz", num_persistent=257),
+    dict(
+        persistent=True, persist_decode="hq_minor_swz", num_persistent=256, seqlen_q=768
+    ),
+    dict(persistent=True, persist_decode="gqa_pair", num_persistent=4, causal=False),
+    dict(
+        persistent=True,
+        persist_decode="gqa_pair",
+        num_persistent=4,
+        ragged=True,
+    ),
+    dict(persistent=True, persist_decode="gqa_pair", num_persistent=4, seqlen_q=768),
+    dict(
+        persistent=True,
+        persist_decode="gqa_pair",
+        num_persistent=4,
+        num_query_heads=6,
+    ),
+    dict(persistent=True, persist_decode="gqa_pair", num_persistent=8),
+    dict(
+        persistent=True,
+        persist_decode="gqa_pair_2phase",
+        num_persistent=1,
+        num_query_heads=1,
+        num_kv_heads=1,
+    ),
+    dict(persistent=True, persist_decode="gqa_pair_2phase", num_persistent=4),
     dict(sliding_window=-64),
     dict(causal=False, sliding_window=64),
     dict(sliding_window=100),
@@ -200,6 +232,34 @@ _CASES: tuple[dict, ...] = (
     dict(persistent=True, num_persistent=4, persist_decode="qb_major", batch=16),
     dict(persistent=True, num_persistent=256, persist_decode="hkv_major"),
     dict(persistent=True, num_persistent=8, num_kv_heads=8, batch=64),
+    dict(persist_decode="gqa_pair"),  # known but inactive on the non-persistent grid
+    dict(nonpersist_decode="qb_minor"),
+    dict(nonpersist_decode="bt_hkv_minor"),
+    dict(
+        nonpersist_decode="hq_minor_swz",
+        num_query_heads=8,
+        num_kv_heads=8,
+        chiplet_num_xcds=4,
+    ),
+    dict(chiplet_num_xcds=4),
+    dict(
+        persistent=True,
+        num_persistent=256,
+        persist_decode="bt_hkv_minor",
+        chiplet_num_xcds=4,
+    ),
+    dict(
+        persistent=True,
+        num_persistent=256,
+        persist_decode="hq_minor_swz",
+        num_query_heads=8,
+        num_kv_heads=8,
+        seqlen_q=768,
+        sliding_window=64,
+    ),
+    dict(persistent=True, num_persistent=4, persist_decode="gqa_pair"),
+    dict(persistent=True, num_persistent=8, persist_decode="gqa_pair_2phase"),
+    dict(batch=64, seqlen_q=4096, num_query_heads=8, num_kv_heads=8),
     # The auto persist decode one CTA either side of its threshold.
     dict(persistent=True, num_persistent=32, batch=8),
     dict(persistent=True, num_persistent=33, batch=8),
@@ -226,6 +286,12 @@ _HOOK_CASES: tuple[tuple[type, dict], ...] = (
     (_G, dict(ragged=True, seqlen_q=300, seqlen_kv=500, causal=False)),  # cross-length
     (_G, dict(persistent=True, num_persistent=4, persist_decode="gqa_pair")),
     (_G, dict(persistent=True, num_persistent=8, persist_decode="gqa_pair_2phase")),
+    (
+        _G,
+        dict(
+            persistent=True, num_persistent=4, persist_decode="gqa_pair", right_bound=64
+        ),
+    ),
     (_G, dict(persist_decode="bogus")),  # the gfx950 decode set, in the reason
     (_G, dict(lds_k_row_pad=16, lds_v_row_pad=16)),  # layout parts; shape parts off
     (_G, dict(right_bound=64)),  # band part
@@ -291,6 +357,7 @@ def _evaluate(values: dict) -> dict:
     out = _expect(spec)
     if out["valid"]:
         out["resolved_persist_decode"] = spec.resolved_persist_decode
+        out["resolved_nonpersist_decode"] = spec.resolved_nonpersist_decode
     return out
 
 
@@ -315,6 +382,7 @@ def _hooks() -> dict:
             spec._supports_noncausal_cross_length_ragged()
         ),
         "persist_decodes": sorted(spec.supported_persist_decodes()),
+        "nonpersist_decodes": sorted(spec.supported_nonpersist_decodes()),
     }
 
 
@@ -332,11 +400,17 @@ def _name_parts(spec) -> dict:
         "band": list(spec._band_name_parts()),
         "algorithm": list(spec._algorithm_name_parts()),
         "persist_decode": spec._persist_decode_name_part() if spec.persistent else "",
+        "nonpersist_decode": (
+            NONPERSIST_DECODES[spec.resolved_nonpersist_decode].tag
+            if not spec.persistent
+            else ""
+        ),
     }
     for key in ("layout", "band", "algorithm"):
         assert len(parts[key]) <= _NAME_PART_SLOTS, (key, parts[key])
         assert all(len(p) <= _NAME_PART_CHARS for p in parts[key]), parts[key]
     assert len(parts["persist_decode"]) <= _NAME_PART_CHARS
+    assert len(parts["nonpersist_decode"]) <= _NAME_PART_CHARS
     return parts
 
 
@@ -354,7 +428,10 @@ def _evaluate_hook_case(cls: type, overrides: dict) -> dict:
     # The C++ test names every hook case's type with the recorded gfx950 hooks.
     if cls is not Gfx950AttentionDenseSpec:
         assert expect["preflight_ok"], (cls.__name__, expect)
-    case = {"spec": {name: getattr(spec, name) for name in _field_names()}}
+    case = {
+        "spec": {name: getattr(spec, name) for name in _field_names()},
+        "decode_context": {"right_bound": getattr(spec, "right_bound", 0)},
+    }
     if expect["valid"]:
         case["name_parts"] = _name_parts(spec)
     case["expect"] = expect
@@ -447,8 +524,17 @@ def test_cases_cover_every_reject_reason_and_valid_specs():
     assert None in rejects  # the division-by-zero paths, verdict only
     assert len(preflight) >= 4
     assert len(valid) >= 12
-    decodes = {c["expect"]["resolved_persist_decode"] for c in valid}
-    assert decodes == {"qb_major", "hkv_major"}
+    persist_decodes = {c["expect"]["resolved_persist_decode"] for c in valid}
+    assert persist_decodes == {
+        "qb_major",
+        "hkv_major",
+        "bt_hkv_minor",
+        "hq_minor_swz",
+        "gqa_pair",
+        "gqa_pair_2phase",
+    }
+    nonpersist_decodes = {c["expect"]["resolved_nonpersist_decode"] for c in valid}
+    assert nonpersist_decodes == {"qb_minor", "bt_hkv_minor", "hq_minor_swz"}
 
 
 def test_hook_cases_exercise_every_hook():
@@ -457,7 +543,21 @@ def test_hook_cases_exercise_every_hook():
     hooks = _load()["hooks"]
     assert hooks["supports_noncausal_window"]
     assert hooks["supports_noncausal_cross_length_ragged"]
-    assert set(hooks["persist_decodes"]) - {"auto", "hkv_major", "qb_major"}
+    assert set(hooks["persist_decodes"]) == {
+        "auto",
+        "qb_major",
+        "hkv_major",
+        "bt_hkv_minor",
+        "hq_minor_swz",
+        "gqa_pair",
+        "gqa_pair_2phase",
+    }
+    assert set(hooks["nonpersist_decodes"]) == {
+        "auto",
+        "qb_minor",
+        "bt_hkv_minor",
+        "hq_minor_swz",
+    }
     named = [c for c in _load()["hook_cases"] if "name_parts" in c]
     parts = [c["name_parts"] for c in named]
     assert any(p["layout"] for p in parts)
@@ -467,6 +567,9 @@ def test_hook_cases_exercise_every_hook():
     assert any(len(p["algorithm"]) > 1 for p in parts)
     assert any(p["persist_decode"] not in ("", "hkvmaj") for p in parts)
     specs = [c["spec"] for c in named]
+    assert any(p["nonpersist_decode"] == "npbthkvmin" for p in parts)
+    assert any(p["nonpersist_decode"] == "" for p in parts)
+    assert any(c["decode_context"]["right_bound"] > 0 for c in _load()["hook_cases"])
     assert any(not s["causal"] and s["sliding_window"] > 0 for s in specs)
     assert any(
         s["ragged"] and not s["causal"] and s["seqlen_q"] != s["seqlen_kv"]

@@ -72,8 +72,8 @@ extern const rocke_dense_tile_geometry_t
 #define ROCKE_ATTENTION_DENSE_REASON_CAP 512
 #define ROCKE_ATTENTION_DENSE_NAME_CAP 512
 
-/* AttentionDenseSpec, field for field in Python declaration order. dtype and
- * persist_decode are caller-owned strings (not copied). */
+/* AttentionDenseSpec, field for field in Python declaration order. dtype,
+ * persist_decode, and nonpersist_decode are caller-owned strings (not copied). */
 typedef struct rocke_attention_dense_spec
 {
     /* Problem shape and semantics. */
@@ -106,6 +106,8 @@ typedef struct rocke_attention_dense_spec
     int num_kv_blocks; /* 0 */
     bool use_sinks; /* False */
     bool causal_bottom_right; /* False (kw_only) */
+    const char* nonpersist_decode; /* "auto" */
+    int chiplet_num_xcds; /* 8 */
 } rocke_attention_dense_spec_t;
 
 /* The dataclass defaults. The six shape fields have no Python default and are
@@ -121,14 +123,18 @@ typedef struct rocke_attention_dense_traits
     bool supports_noncausal_window;
     /* _supports_noncausal_cross_length_ragged() */
     bool supports_noncausal_cross_length_ragged;
-    /* supported_persist_decodes(), sorted ascending (the order Python's
-     * sorted() prints in the reject reason). */
+    /* supported_persist_decodes(), sorted ascending (Python's reject order). */
     const char* const* persist_decodes;
     size_t num_persist_decodes;
+    /* supported_nonpersist_decodes(), sorted ascending. */
+    const char* const* nonpersist_decodes;
+    size_t num_nonpersist_decodes;
+    /* Concrete gfx950 context: nonzero right_bound rejects GQA-pair decodes. */
+    bool has_right_bound;
 } rocke_attention_dense_traits_t;
 
-/* The base class: no noncausal window, no noncausal cross-length ragged, and
- * persist decodes {"auto", "hkv_major", "qb_major"}. type_name
+/* Base support: all registered persistent and non-persistent decodes, with no
+ * noncausal-window or cross-length-ragged support. type_name is
  * "AttentionDenseSpec". */
 rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void);
 
@@ -145,12 +151,14 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* spe
 int rocke_attention_dense_spec_num_waves(const rocke_attention_dense_spec_t* spec);
 /* @property num_queries_per_kv: num_query_heads // num_kv_heads. */
 int rocke_attention_dense_spec_num_queries_per_kv(const rocke_attention_dense_spec_t* spec);
-/* @property resolved_persist_decode, the base policy: persist_decode unless it
- * is "auto"; auto resolves to "hkv_major" when the GQA ratio > 1 and the work
- * per KV head is at least twice num_persistent, else "qb_major". Returns
- * spec->persist_decode or a static literal. */
+/* @property resolved_persist_decode: explicit value, or the base auto policy
+ * using causal balance, chiplet locality, and persistent work thresholds. */
 const char*
     rocke_attention_dense_spec_resolved_persist_decode(const rocke_attention_dense_spec_t* spec);
+/* @property resolved_nonpersist_decode: explicit value, or the base auto
+ * policy for the one-CTA-per-work-item grid. */
+const char*
+    rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* spec);
 
 /* The _*_name_parts hooks of kernel_name(), filled by the concrete spec. */
 #define ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS 8
@@ -170,11 +178,13 @@ typedef struct rocke_attention_dense_name_parts
     int num_algorithm;
     /* _persist_decode_name_part(); "" for none. */
     char persist_decode[ROCKE_ATTENTION_DENSE_NAME_PART_CAP];
+    /* Resolved non-persistent decode tag; "" for qb_minor. */
+    char nonpersist_decode[ROCKE_ATTENTION_DENSE_NAME_PART_CAP];
 } rocke_attention_dense_name_parts_t;
 
-/* The base-class hooks for spec: head and shape parts on, no layout or band
- * parts, algorithm ("lazyrs",) when lazy_rescale, and persist decode "hkvmaj"
- * when the base policy resolves to "hkv_major". */
+/* The base-class name parts: head and shape tokens, no layout or band parts,
+ * the lazy-rescale algorithm token, and the resolved persistent/non-persistent
+ * decode tags. */
 void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* spec,
                                            rocke_attention_dense_name_parts_t* out);
 

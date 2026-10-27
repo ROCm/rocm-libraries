@@ -25,7 +25,9 @@
   "block_size",
   "num_kv_blocks",
   "use_sinks",
-  "causal_bottom_right"
+  "causal_bottom_right",
+  "nonpersist_decode",
+  "chiplet_num_xcds"
  ],
  "cases": [
   {
@@ -54,7 +56,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -89,7 +93,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -124,7 +130,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -159,7 +167,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -194,7 +204,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -229,7 +241,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -264,7 +278,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -299,7 +315,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -334,7 +352,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -369,7 +389,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -404,7 +426,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": true
+    "causal_bottom_right": true,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -439,7 +463,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": true
+    "causal_bottom_right": true,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -474,7 +500,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -509,7 +537,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -544,7 +574,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -579,7 +611,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -614,7 +648,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -649,7 +685,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -684,17 +722,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "seqlen_q must be positive, got -256",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq-256_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq-256_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -723,7 +764,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -758,7 +801,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -793,17 +838,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "num_kv_heads must be positive, got -2",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv-2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv-2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": -4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -832,7 +880,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -867,7 +917,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -896,54 +948,21 @@
     "persistent": false,
     "num_persistent": 256,
     "interleave": false,
-    "persist_decode": "gqa_pair",
-    "lazy_rescale": true,
-    "paged": false,
-    "block_size": 0,
-    "num_kv_blocks": 0,
-    "use_sinks": false,
-    "causal_bottom_right": false
-   },
-   "expect": {
-    "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'gqa_pair'",
-    "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'gqa_pair'"
-   }
-  },
-  {
-   "spec": {
-    "batch": 1,
-    "seqlen_q": 512,
-    "seqlen_kv": 512,
-    "num_query_heads": 8,
-    "num_kv_heads": 2,
-    "head_size": 128,
-    "causal": true,
-    "dtype": "bf16",
-    "sliding_window": 0,
-    "ragged": false,
-    "varlen": false,
-    "block_m": 256,
-    "block_n": 64,
-    "waves_per_eu": 2,
-    "lds_k_group_pad": 8,
-    "persistent": false,
-    "num_persistent": 256,
-    "interleave": false,
     "persist_decode": null,
     "lazy_rescale": true,
     "paged": false,
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got None",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got None",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got None"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got None"
    }
   },
   {
@@ -972,13 +991,15 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got \"it's\"",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got \"it's\"",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got \"it's\""
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got \"it's\""
    }
   },
   {
@@ -1007,13 +1028,533 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'x\"y'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'x\"y'",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'x\"y'"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'x\"y'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": null,
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "nonpersist_decode must be one of ['auto', 'bt_hkv_minor', 'hq_minor_swz', 'qb_minor'], got None",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: nonpersist_decode must be one of ['auto', 'bt_hkv_minor', 'hq_minor_swz', 'qb_minor'], got None"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "bogus",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "nonpersist_decode must be one of ['auto', 'bt_hkv_minor', 'hq_minor_swz', 'qb_minor'], got 'bogus'",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: nonpersist_decode must be one of ['auto', 'bt_hkv_minor', 'hq_minor_swz', 'qb_minor'], got 'bogus'"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 0
+   },
+   "expect": {
+    "valid": false,
+    "reason": "chiplet_num_xcds must be positive, got 0",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: chiplet_num_xcds must be positive, got 0"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": -1
+   },
+   "expect": {
+    "valid": false,
+    "reason": "chiplet_num_xcds must be positive, got -1",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: chiplet_num_xcds must be positive, got -1"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 7,
+    "num_kv_heads": 1,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "hq_minor_swz",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "hq_minor_swz needs num_query_heads (7) divisible by chiplet_num_xcds (8)",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: hq_minor_swz needs num_query_heads (7) divisible by chiplet_num_xcds (8)"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 257,
+    "interleave": false,
+    "persist_decode": "hq_minor_swz",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "hq_minor_swz needs num_query_heads and num_persistent divisible by 8",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: hq_minor_swz needs num_query_heads and num_persistent divisible by 8"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 768,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "hq_minor_swz",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "hq_minor_swz needs an even number of query blocks under causal masking without a sliding window",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: hq_minor_swz needs an even number of query blocks under causal masking without a sliding window"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": false,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair requires persistent causal attention",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair requires persistent causal attention"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": true,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair is validated only for aligned dense attention",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair is validated only for aligned dense attention"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 768,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair requires even NQB and even GQA ratio",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair requires even NQB and even GQA ratio"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 6,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair requires even NQB and even GQA ratio",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair requires even NQB and even GQA ratio"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 8,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair requires num_persistent == NQB*Hkv*B (4), got 8",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair requires num_persistent == NQB*Hkv*B (4), got 8"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 1,
+    "num_kv_heads": 1,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 1,
+    "interleave": false,
+    "persist_decode": "gqa_pair_2phase",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair_2phase requires even NQB and GQA ratio >= 2",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair_2phase requires even NQB and GQA ratio >= 2"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair_2phase",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair_2phase requires num_persistent == W/2 (8), got 4",
+    "preflight_ok": false,
+    "preflight_reason": "invalid AttentionDenseSpec: gqa_pair_2phase requires num_persistent == W/2 (8), got 4"
    }
   },
   {
@@ -1042,7 +1583,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1077,7 +1620,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1112,7 +1657,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1147,7 +1694,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1182,7 +1731,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1217,7 +1768,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1252,7 +1805,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1287,7 +1842,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1322,7 +1879,9 @@
     "block_size": 48,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1357,7 +1916,9 @@
     "block_size": 128,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1392,7 +1953,9 @@
     "block_size": 4,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1427,7 +1990,9 @@
     "block_size": 8,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -1437,7 +2002,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_swa256_pgd8_nb64_lazyrs",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -1466,7 +2032,9 @@
     "block_size": 8,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1501,7 +2069,9 @@
     "block_size": 16,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1536,7 +2106,9 @@
     "block_size": 16,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1571,7 +2143,9 @@
     "block_size": 16,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1606,7 +2180,9 @@
     "block_size": 16,
     "num_kv_blocks": 1048576,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1641,7 +2217,9 @@
     "block_size": 16,
     "num_kv_blocks": 65536,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1676,7 +2254,9 @@
     "block_size": 16,
     "num_kv_blocks": 65536,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -1686,7 +2266,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv-8_bn64_bf16_sq512_sk512_causal_swa256_pgd16_nb65536_lazyrs",
     "num_waves": 8,
     "num_queries_per_kv": -1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -1715,7 +2296,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1750,7 +2333,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1785,7 +2370,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1820,7 +2407,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1855,7 +2444,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1890,7 +2481,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": true,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1925,7 +2518,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": true,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1960,7 +2555,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -1995,7 +2592,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -2030,7 +2629,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -2065,17 +2666,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": true
+    "causal_bottom_right": true,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_br_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_br_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2104,17 +2708,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2143,17 +2750,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2182,13 +2792,15 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_majorx'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'qb_majorx'",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_majorx'"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'qb_majorx'"
    }
   },
   {
@@ -2217,13 +2829,15 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_maj'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'qb_maj'",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'qb_maj'"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'qb_maj'"
    }
   },
   {
@@ -2252,7 +2866,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
@@ -2287,13 +2903,15 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\\\b'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'a\\\\b'",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\\\b'"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'a\\\\b'"
    }
   },
   {
@@ -2322,13 +2940,15 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\nb'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'a\\nb'",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\nb'"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'a\\nb'"
    }
   },
   {
@@ -2357,13 +2977,15 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\x01b'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'a\\x01b'",
     "preflight_ok": false,
-    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'hkv_major', 'qb_major'], got 'a\\x01b'"
+    "preflight_reason": "invalid AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'a\\x01b'"
    }
   },
   {
@@ -2392,17 +3014,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "batch must be positive, got 0",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2431,17 +3056,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "batch must be positive, got -1",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2470,17 +3098,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "seqlen_kv must be positive, got -512",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk-512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk-512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2509,17 +3140,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "num_query_heads must be positive, got 0",
-    "kernel_name": "rocke_attention_dense_d128_hq0_kv-2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq0_kv-2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 0,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2548,17 +3182,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "block_n must divide the 128-row query tile (got block_n=96; the spec also requires block_n % 32 == 0, so use 32, 64, 128 or 256). Load-bearing for causal=True, where n_per = 128 // block_n floors and drops keys",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn96_bf16_bm128_sq384_sk384_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn96_bf16_bm128_sq384_sk384_causal_lazyrs_npbthkvmin",
     "num_waves": 4,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2587,17 +3224,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "K/V extent is 2147483648 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
-    "kernel_name": "rocke_attention_dense_d128_hq128_kv128_bn64_bf16_sq65536_sk65536_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq128_kv128_bn64_bf16_sq65536_sk65536_causal_lazyrs_nphqminswz",
     "num_waves": 8,
     "num_queries_per_kv": 1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "hq_minor_swz",
+    "resolved_nonpersist_decode": "hq_minor_swz"
    }
   },
   {
@@ -2626,17 +3266,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "K/V extent is 2535301046979548251017181102080 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
-    "kernel_name": "rocke_attention_dense_d128_hq2147483647_kv2147483647_bn64_bf16_bm128_sq2147483520_sk2147483520_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq2147483647_kv2147483647_bn64_bf16_bm128_sq2147483520_sk2147483520_causal_lazyrs_npbthkvmin",
     "num_waves": 4,
     "num_queries_per_kv": 1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2665,17 +3308,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "Q/O extent is 137438953472 elements, at or past the 32-bit addressing limit (2147483648)",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq65536_sk64_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq65536_sk64_causal_lazyrs_nphqminswz",
     "num_waves": 8,
     "num_queries_per_kv": 1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "hq_minor_swz",
+    "resolved_nonpersist_decode": "hq_minor_swz"
    }
   },
   {
@@ -2704,17 +3350,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "Q/O extent is 2147483648 elements, at or past the 32-bit addressing limit (2147483648)",
-    "kernel_name": "rocke_attention_dense_d128_hq128_kv1_bn64_bf16_sq131072_sk64_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq128_kv1_bn64_bf16_sq131072_sk64_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 128,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2743,17 +3392,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "K/V extent is 512000000000 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "hkv_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2782,17 +3434,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "K/V extent is 4611686016279904256 B, at or past the 32-bit buffer-resource limit (2147483648 B)",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk1048576_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk1048576_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "hq_minor_swz",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2821,17 +3476,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2860,17 +3518,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq127_kv127_bn64_bf16_sq65536_sk65536_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq127_kv127_bn64_bf16_sq65536_sk65536_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2899,7 +3560,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -2909,7 +3572,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_fp16_sq512_sk512_full",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -2938,17 +3602,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d64_hq8_kv2_bn64_bf16_bm128_kpad0_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d64_hq8_kv2_bn64_bf16_bm128_kpad0_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 4,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -2977,17 +3644,20 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d64_hq8_kv2_bn32_bf16_kpad16_sq512_sk512_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d64_hq8_kv2_bn32_bf16_kpad16_sq512_sk512_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3016,7 +3686,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": true
+    "causal_bottom_right": true,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3026,7 +3698,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq256_sk1024_causal_br_swa256_lazyrs",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -3055,7 +3728,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": true,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3065,7 +3740,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq500_sk500_causal_ragged_sinks_lazyrs",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -3094,7 +3770,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3104,7 +3782,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_swa128_varlen_lazyrs",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -3133,7 +3812,9 @@
     "block_size": 16,
     "num_kv_blocks": 64,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3143,7 +3824,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_swa256_pgd16_nb64_lazyrs",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   },
   {
@@ -3172,7 +3854,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3182,7 +3866,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist304_intl",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3211,7 +3896,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3221,7 +3908,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist4_hkvmaj",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "hkv_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3250,7 +3938,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3260,7 +3950,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist4",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3289,7 +3980,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3299,7 +3992,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_hkvmaj",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "hkv_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3328,17 +4022,440 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist8",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_persist8_hqminswz",
     "num_waves": 8,
     "num_queries_per_kv": 1,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "hq_minor_swz",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "gqa_pair",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "qb_minor",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "qb_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "bt_hkv_minor",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 8,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "hq_minor_swz",
+    "chiplet_num_xcds": 4
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq512_sk512_causal_lazyrs_nphqminswz_xcd4",
+    "num_waves": 8,
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "hq_minor_swz"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 4
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_npbthkvmin_xcd4",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "bt_hkv_minor",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 4
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist256_bthkvmin_xcd4",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "bt_hkv_minor",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 768,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 8,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 64,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "hq_minor_swz",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq768_sk512_causal_swa64_lazyrs_persist256_hqminswz",
+    "num_waves": 8,
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "hq_minor_swz",
+    "resolved_nonpersist_decode": "qb_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist4_gqapair",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "gqa_pair",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 8,
+    "interleave": false,
+    "persist_decode": "gqa_pair_2phase",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist8_gqapair2",
+    "num_waves": 8,
+    "num_queries_per_kv": 4,
+    "resolved_persist_decode": "gqa_pair_2phase",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
+   }
+  },
+  {
+   "spec": {
+    "batch": 64,
+    "seqlen_q": 4096,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 8,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
+    "persistent": false,
+    "num_persistent": 256,
+    "interleave": false,
+    "persist_decode": "auto",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "expect": {
+    "valid": true,
+    "reason": "",
+    "preflight_ok": true,
+    "preflight_reason": "",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv8_bn64_bf16_sq4096_sk512_causal_lazyrs_nphqminswz",
+    "num_waves": 8,
+    "num_queries_per_kv": 1,
+    "resolved_persist_decode": "hq_minor_swz",
+    "resolved_nonpersist_decode": "hq_minor_swz"
    }
   },
   {
@@ -3367,7 +4484,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3377,7 +4496,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist32_hkvmaj",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "hkv_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3406,7 +4526,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3416,7 +4538,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_persist33",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "qb_major"
+    "resolved_persist_decode": "qb_major",
+    "resolved_nonpersist_decode": "bt_hkv_minor"
    }
   },
   {
@@ -3445,7 +4568,9 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
    },
    "expect": {
     "valid": true,
@@ -3455,7 +4580,8 @@
     "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq500_sk500_causal_ragged_lazyrs_persist4_hkvmaj",
     "num_waves": 8,
     "num_queries_per_kv": 4,
-    "resolved_persist_decode": "hkv_major"
+    "resolved_persist_decode": "hkv_major",
+    "resolved_nonpersist_decode": "qb_minor"
    }
   }
  ],
@@ -3465,10 +4591,18 @@
   "supports_noncausal_cross_length_ragged": true,
   "persist_decodes": [
    "auto",
+   "bt_hkv_minor",
    "gqa_pair",
    "gqa_pair_2phase",
    "hkv_major",
+   "hq_minor_swz",
    "qb_major"
+  ],
+  "nonpersist_decodes": [
+   "auto",
+   "bt_hkv_minor",
+   "hq_minor_swz",
+   "qb_minor"
   ]
  },
  "hook_cases": [
@@ -3498,7 +4632,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3508,7 +4647,8 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
@@ -3546,7 +4686,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3556,7 +4701,8 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
@@ -3594,7 +4740,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3604,7 +4755,8 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": "gqapair"
+    "persist_decode": "gqapair",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
@@ -3642,7 +4794,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3652,7 +4809,8 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": "gqapair2"
+    "persist_decode": "gqapair2",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
@@ -3681,6 +4839,46 @@
     "block_n": 64,
     "waves_per_eu": 2,
     "lds_k_group_pad": 8,
+    "persistent": true,
+    "num_persistent": 4,
+    "interleave": false,
+    "persist_decode": "gqa_pair",
+    "lazy_rescale": true,
+    "paged": false,
+    "block_size": 0,
+    "num_kv_blocks": 0,
+    "use_sinks": false,
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 64
+   },
+   "expect": {
+    "valid": false,
+    "reason": "gqa_pair requires persistent causal attention",
+    "preflight_ok": false,
+    "preflight_reason": "invalid Gfx950AttentionDenseSpec: gqa_pair requires persistent causal attention"
+   }
+  },
+  {
+   "spec": {
+    "batch": 1,
+    "seqlen_q": 512,
+    "seqlen_kv": 512,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "head_size": 128,
+    "causal": true,
+    "dtype": "bf16",
+    "sliding_window": 0,
+    "ragged": false,
+    "varlen": false,
+    "block_m": 256,
+    "block_n": 64,
+    "waves_per_eu": 2,
+    "lds_k_group_pad": 8,
     "persistent": false,
     "num_persistent": 256,
     "interleave": false,
@@ -3690,13 +4888,18 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "expect": {
     "valid": false,
-    "reason": "persist_decode must be one of ['auto', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'qb_major'], got 'bogus'",
+    "reason": "persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'bogus'",
     "preflight_ok": false,
-    "preflight_reason": "invalid Gfx950AttentionDenseSpec: persist_decode must be one of ['auto', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'qb_major'], got 'bogus'"
+    "preflight_reason": "invalid Gfx950AttentionDenseSpec: persist_decode must be one of ['auto', 'bt_hkv_minor', 'gqa_pair', 'gqa_pair_2phase', 'hkv_major', 'hq_minor_swz', 'qb_major'], got 'bogus'"
    }
   },
   {
@@ -3725,7 +4928,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3738,14 +4946,15 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": "npbthkvmin"
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_krpad16_vpad16_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_krpad16_vpad16_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4
    }
@@ -3776,7 +4985,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 64
    },
    "name_parts": {
     "head_parts": true,
@@ -3788,7 +5002,8 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
@@ -3826,7 +5041,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 64
    },
    "name_parts": {
     "head_parts": true,
@@ -3838,7 +5058,8 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
@@ -3876,7 +5097,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3888,14 +5114,15 @@
      "wdma",
      "wpe1"
     ],
-    "persist_decode": ""
+    "persist_decode": "bthkvmin",
+    "nonpersist_decode": ""
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_wdma_wpe1_persist256",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_sq512_sk512_causal_lazyrs_wdma_wpe1_persist256_bthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4
    }
@@ -3926,7 +5153,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3938,14 +5170,15 @@
      "cgdb8f8daf",
      "lse"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": "npbthkvmin"
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs_cgdb8f8daf_lse",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs_cgdb8f8daf_lse_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4
    }
@@ -3976,7 +5209,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": true,
@@ -3986,14 +5224,15 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": "npbthkvmin"
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": false,
     "preflight_reason": "batch must be positive, got 0",
-    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_hq8_kv2_bn64_bf16_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4
    }
@@ -4024,7 +5263,12 @@
     "block_size": 0,
     "num_kv_blocks": 0,
     "use_sinks": false,
-    "causal_bottom_right": false
+    "causal_bottom_right": false,
+    "nonpersist_decode": "auto",
+    "chiplet_num_xcds": 8
+   },
+   "decode_context": {
+    "right_bound": 0
    },
    "name_parts": {
     "head_parts": false,
@@ -4034,14 +5278,15 @@
     "algorithm": [
      "lazyrs"
     ],
-    "persist_decode": ""
+    "persist_decode": "",
+    "nonpersist_decode": "npbthkvmin"
    },
    "expect": {
     "valid": true,
     "reason": "",
     "preflight_ok": true,
     "preflight_reason": "",
-    "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs",
+    "kernel_name": "rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_npbthkvmin",
     "num_waves": 8,
     "num_queries_per_kv": 4
    }

@@ -27,6 +27,7 @@ from .ir import (
     F64,
     I32,
     _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
     PtrType,
@@ -200,10 +201,6 @@ typedef short i16x4_raw __attribute__((ext_vector_type(4)));
 __device__ extern "C" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(
  const __attribute__((address_space(3))) void*)
  __asm("llvm.amdgcn.ds.read.tr16.b64");
-typedef short i16x8_raw __attribute__((ext_vector_type(8)));
-__device__ extern "C" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(
- const __attribute__((address_space(3))) void*)
- __asm("llvm.amdgcn.ds.read.tr16.b128");
 // ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to
 // {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},
 // which is what async-DMA pipelines (compv4 / split-KV attention) need.
@@ -2064,36 +2061,6 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
-    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
-
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
-        """
-        a, b, c, a_scale, b_scale = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
         """HIP debug shim for the P13 register permutation."""
         (qk_c,) = op.operands
@@ -2479,26 +2446,6 @@ class _Lowerer:
         )
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
 
-    def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        # ``ds_read_b128_tr_b16`` -- wide gfx950 transpose-read.
-        # Same shape as the b64 variant, ``<8 x i16>`` per lane.
-        self._require_ds_read_tr("ds_read_tr16_b128")
-        smem = op.operands[0]
-        indices = op.operands[1:]
-        storage = smem.op.attrs.get("_storage")
-        if storage is None:
-            raise RuntimeError("ds_read_tr16_b128 before smem_alloc was lowered")
-        idx_str = "][".join(_name(i) for i in indices)
-        elem = op.attrs.get("elem_type", "f16")
-        vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")
-        nice = _name(op.result)
-        raw_tmp = f"_trraw_{nice.lstrip('%')}"
-        self._emit(
-            f"i16x8_raw {raw_tmp} = _llvm_amdgcn_ds_read_tr16_b128("
-            f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
-        )
-        self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
-
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands
         self._emit(
@@ -2749,6 +2696,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]

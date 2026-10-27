@@ -14,12 +14,11 @@
  * answers from the C++ port. A Python change therefore fails there first, and the
  * regenerated file then fails here until the C++ port is updated to match.
  *
- * Two tables. "cases" run with the base hooks. "hook_cases" run with the hook
- * answers of Gfx950AttentionDenseSpec, recorded in "hooks" and per case in
- * "name_parts": they go through the traits struct, the name-parts struct, and a
- * preflight validator whose context is a separate tagged struct, never the spec.
- * A null reason (the interpreter-specific ZeroDivisionError paths) compares only
- * the verdict.
+ * Two tables. "cases" run with base hooks. "hook_cases" record Gfx950 answers
+ * in "hooks" plus per-case name parts and decode context; they go through the
+ * traits struct and a preflight validator with a separate tagged context, never
+ * the spec. A null reason (the interpreter-specific ZeroDivisionError paths)
+ * compares only the verdict.
  */
 #include <cstdint>
 #include <cstdio>
@@ -67,7 +66,7 @@ int g_failures = 0;
         }                                                             \
     } while(0)
 
-/* Up to this many persist decodes in the "hooks" section. */
+/* Up to this many entries in either decode table in the "hooks" section. */
 constexpr int k_max_decodes = 8;
 
 /* The concrete validator's context. Deliberately not the spec: preflight must hand
@@ -159,6 +158,7 @@ bool set_field(rocke_attention_dense_spec_t* s, const char* name, const jd_val_t
         {"num_persistent", &rocke_attention_dense_spec_t::num_persistent},
         {"block_size", &rocke_attention_dense_spec_t::block_size},
         {"num_kv_blocks", &rocke_attention_dense_spec_t::num_kv_blocks},
+        {"chiplet_num_xcds", &rocke_attention_dense_spec_t::chiplet_num_xcds},
     };
     static const BoolField bools[] = {
         {"causal", &rocke_attention_dense_spec_t::causal},
@@ -174,6 +174,7 @@ bool set_field(rocke_attention_dense_spec_t* s, const char* name, const jd_val_t
     static const StrField strs[] = {
         {"dtype", &rocke_attention_dense_spec_t::dtype},
         {"persist_decode", &rocke_attention_dense_spec_t::persist_decode},
+        {"nonpersist_decode", &rocke_attention_dense_spec_t::nonpersist_decode},
     };
     for(const auto& f : ints)
         if(std::strcmp(f.name, name) == 0)
@@ -218,6 +219,7 @@ bool json_name_parts(const jd_val_t* v, rocke_attention_dense_name_parts_t* np)
 {
     std::memset(np, 0, sizeof(*np));
     const char* decode = nullptr;
+    const char* nonpersist_decode = nullptr;
     return v != nullptr && json_bool(rocke_jget(v, "head_parts"), &np->head_parts)
            && json_bool(rocke_jget(v, "shape_parts"), &np->shape_parts)
            && json_parts(rocke_jget(v, "layout"), np->layout, &np->num_layout)
@@ -225,7 +227,12 @@ bool json_name_parts(const jd_val_t* v, rocke_attention_dense_name_parts_t* np)
            && json_parts(rocke_jget(v, "algorithm"), np->algorithm, &np->num_algorithm)
            && (decode = rocke_jstr(rocke_jget(v, "persist_decode"))) != nullptr
            && std::strlen(decode) < sizeof(np->persist_decode)
-           && std::snprintf(np->persist_decode, sizeof(np->persist_decode), "%s", decode) >= 0;
+           && std::snprintf(np->persist_decode, sizeof(np->persist_decode), "%s", decode) >= 0
+           && (nonpersist_decode = rocke_jstr(rocke_jget(v, "nonpersist_decode"))) != nullptr
+           && std::strlen(nonpersist_decode) < sizeof(np->nonpersist_decode)
+           && std::snprintf(
+                  np->nonpersist_decode, sizeof(np->nonpersist_decode), "%s", nonpersist_decode)
+                  >= 0;
 }
 
 /* Check one case. hooked: a "hook_cases" row, whose name parts are recorded rather
@@ -261,6 +268,14 @@ void check_case(const char* table,
             return;
         }
     }
+    rocke_attention_dense_traits_t case_traits = *t;
+    const jd_val_t* decode_context = rocke_jget(c, "decode_context");
+    if(decode_context != nullptr)
+    {
+        int right_bound = 0;
+        CHECK(json_int(rocke_jget(decode_context, "right_bound"), &right_bound));
+        case_traits.has_right_bound = right_bound != 0;
+    }
 
     bool want_valid = false;
     bool want_preflight = false;
@@ -269,15 +284,16 @@ void check_case(const char* table,
 
     const char* want_text = nullptr;
     char reason[ROCKE_ATTENTION_DENSE_REASON_CAP] = "";
-    const bool valid = rocke_attention_dense_spec_validate(&s, t, reason, sizeof(reason));
+    const bool valid
+        = rocke_attention_dense_spec_validate(&s, &case_traits, reason, sizeof(reason));
     CHECK(valid == want_valid);
     if(expect_text(expect, "reason", &want_text))
         CHECK_STR(valid ? "" : reason, want_text);
 
-    const ValidatorCtx ctx{k_ctx_magic, &s, t};
+    const ValidatorCtx ctx{k_ctx_magic, &s, &case_traits};
     char pre[ROCKE_ATTENTION_DENSE_REASON_CAP] = "x";
     const bool pok = rocke_attention_dense_spec_preflight(
-        &s, t->type_name, validate_ctx, &ctx, pre, sizeof(pre));
+        &s, case_traits.type_name, validate_ctx, &ctx, pre, sizeof(pre));
     CHECK(pok == want_preflight);
     if(expect_text(expect, "preflight_reason", &want_text))
         CHECK_STR(pre, want_text);
@@ -292,10 +308,14 @@ void check_case(const char* table,
     char name[ROCKE_ATTENTION_DENSE_NAME_CAP];
     CHECK(rocke_attention_dense_kernel_name(&s, &parts, name, sizeof(name)) == ROCKE_OK);
     CHECK_STR(name, rocke_jstr(rocke_jget(expect, "kernel_name")));
-    /* The base persist-decode policy; a subclass's own policy is its port's to check. */
+    /* The base auto policies; a subclass's overrides are captured in its name parts. */
     if(!hooked)
+    {
         CHECK_STR(rocke_attention_dense_spec_resolved_persist_decode(&s),
                   rocke_jstr(rocke_jget(expect, "resolved_persist_decode")));
+        CHECK_STR(rocke_attention_dense_spec_resolved_nonpersist_decode(&s),
+                  rocke_jstr(rocke_jget(expect, "resolved_nonpersist_decode")));
+    }
     int want_waves = -1;
     int want_qpk = -1;
     CHECK(json_int(rocke_jget(expect, "num_waves"), &want_waves));
@@ -307,16 +327,26 @@ void check_case(const char* table,
 /* The recorded subclass hook answers ("hooks") into a traits struct. */
 bool json_traits(const jd_val_t* h,
                  rocke_attention_dense_traits_t* t,
-                 const char* (&decodes)[k_max_decodes])
+                 const char* (&persist_decodes)[k_max_decodes],
+                 const char* (&nonpersist_decodes)[k_max_decodes])
 {
-    const jd_val_t* list = rocke_jget(h, "persist_decodes");
-    if(h == nullptr || list == nullptr || list->kind != JD_ARR || list->arr_len > k_max_decodes)
+    const jd_val_t* persist_list = rocke_jget(h, "persist_decodes");
+    const jd_val_t* nonpersist_list = rocke_jget(h, "nonpersist_decodes");
+    if(h == nullptr || persist_list == nullptr || persist_list->kind != JD_ARR
+       || persist_list->arr_len > k_max_decodes || nonpersist_list == nullptr
+       || nonpersist_list->kind != JD_ARR || nonpersist_list->arr_len > k_max_decodes)
         return false;
-    for(int i = 0; i < list->arr_len; ++i)
-        if((decodes[i] = rocke_jstr(list->arr[i])) == nullptr)
+    for(int i = 0; i < persist_list->arr_len; ++i)
+        if((persist_decodes[i] = rocke_jstr(persist_list->arr[i])) == nullptr)
             return false;
-    t->persist_decodes = decodes;
-    t->num_persist_decodes = static_cast<size_t>(list->arr_len);
+    for(int i = 0; i < nonpersist_list->arr_len; ++i)
+        if((nonpersist_decodes[i] = rocke_jstr(nonpersist_list->arr[i])) == nullptr)
+            return false;
+    t->persist_decodes = persist_decodes;
+    t->num_persist_decodes = static_cast<size_t>(persist_list->arr_len);
+    t->nonpersist_decodes = nonpersist_decodes;
+    t->num_nonpersist_decodes = static_cast<size_t>(nonpersist_list->arr_len);
+    t->has_right_bound = false;
     return (t->type_name = rocke_jstr(rocke_jget(h, "type_name"))) != nullptr
            && json_bool(rocke_jget(h, "supports_noncausal_window"), &t->supports_noncausal_window)
            && json_bool(rocke_jget(h, "supports_noncausal_cross_length_ragged"),
@@ -348,9 +378,10 @@ void check_vectors()
     }
 
     rocke_attention_dense_traits_t hooks = base;
-    const char* decodes[k_max_decodes] = {};
+    const char* persist_decodes[k_max_decodes] = {};
+    const char* nonpersist_decodes[k_max_decodes] = {};
     const jd_val_t* hook_cases = rocke_jget(root, "hook_cases");
-    CHECK(json_traits(rocke_jget(root, "hooks"), &hooks, decodes));
+    CHECK(json_traits(rocke_jget(root, "hooks"), &hooks, persist_decodes, nonpersist_decodes));
     CHECK(hook_cases != nullptr && hook_cases->kind == JD_ARR && hook_cases->arr_len > 0);
     if(hook_cases != nullptr && hook_cases->kind == JD_ARR)
     {
@@ -370,6 +401,8 @@ void check_defaults_and_tables()
     CHECK(s.lds_k_group_pad == 8 && s.num_persistent == 256);
     CHECK_STR(s.dtype, "bf16");
     CHECK_STR(s.persist_decode, "auto");
+    CHECK_STR(s.nonpersist_decode, "auto");
+    CHECK(s.chiplet_num_xcds == 8);
     CHECK_STR(ROCKE_DENSE_TILE_GEOMETRIES[0].name, "default");
     CHECK(ROCKE_DENSE_TILE_GEOMETRIES[0].block_m == 256
           && ROCKE_DENSE_TILE_GEOMETRIES[0].block_n == 64);

@@ -28,7 +28,10 @@ const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_G
 namespace
 {
 
-const char* const k_base_persist_decodes[] = {"auto", "hkv_major", "qb_major"};
+const char* const k_base_persist_decodes[] = {
+    "auto", "bt_hkv_minor", "gqa_pair", "gqa_pair_2phase", "hkv_major", "hq_minor_swz", "qb_major"};
+const char* const k_base_nonpersist_decodes[]
+    = {"auto", "bt_hkv_minor", "hq_minor_swz", "qb_minor"};
 
 /* Write the formatted reason (if a buffer was given) and return false. */
 bool reject(char* reason, size_t cap, const char* fmt, ...)
@@ -128,9 +131,8 @@ void py_str_list(const char* const* items, size_t count, char* out, size_t cap)
     put("]");
 }
 
-/* An exact product of int factors. Python ints are unbounded, so a reason
- * that prints a product prints its exact value; four int32 factors overflow
- * 64 bits. Magnitude in base-10**9 limbs, least significant first. */
+/* Exact products of spec factors. Python ints are unbounded, so products and
+ * error messages cannot narrow to 64 bits. Magnitude uses base-10**9 limbs. */
 struct ExactProduct
 {
     bool negative = false;
@@ -138,15 +140,15 @@ struct ExactProduct
     uint32_t limb[6] = {1};
     int n = 1;
 
-    explicit ExactProduct(std::initializer_list<int> factors)
+    explicit ExactProduct(std::initializer_list<int64_t> factors)
     {
-        for(int f : factors)
+        for(int64_t f : factors)
         {
             if(f == 0)
                 zero = true;
             if(f < 0)
                 negative = !negative;
-            const uint64_t m = f < 0 ? (uint64_t)(-(int64_t)f) : (uint64_t)f;
+            const uint64_t m = f < 0 ? (uint64_t)(-(f + 1)) + 1u : (uint64_t)f;
             uint64_t carry = 0;
             for(int i = 0; i < n; ++i)
             {
@@ -179,6 +181,25 @@ struct ExactProduct
         return v >= t;
     }
 
+    /* Compare exact signed products without narrowing Python's unbounded ints. */
+    int compare(const ExactProduct& other) const
+    {
+        if(negative != other.negative)
+            return negative ? -1 : 1;
+        if(n != other.n)
+        {
+            const int magnitude = n < other.n ? -1 : 1;
+            return negative ? -magnitude : magnitude;
+        }
+        for(int i = n - 1; i >= 0; --i)
+            if(limb[i] != other.limb[i])
+            {
+                const int magnitude = limb[i] < other.limb[i] ? -1 : 1;
+                return negative ? -magnitude : magnitude;
+            }
+        return 0;
+    }
+
     void str(char* out, size_t cap) const
     {
         size_t k = (size_t)snprintf(out, cap, "%s%u", negative ? "-" : "", limb[n - 1]);
@@ -202,6 +223,133 @@ bool contains(const char* const* items, size_t count, const char* s)
         if(streq(items[i], s))
             return true;
     return false;
+}
+
+int64_t dense_nqb(const rocke_attention_dense_spec_t* s)
+{
+    return py_floordiv((int64_t)s->seqlen_q + s->block_m - 1, s->block_m);
+}
+
+int64_t dense_gqa(const rocke_attention_dense_spec_t* s)
+{
+    return py_floordiv(s->num_query_heads, s->num_kv_heads);
+}
+
+bool balance_causal(const rocke_attention_dense_spec_t* s)
+{
+    return s->causal && !(s->sliding_window > 0 && s->sliding_window < s->seqlen_kv);
+}
+
+bool aligned_causal(const rocke_attention_dense_spec_t* s, bool has_right_bound)
+{
+    const bool moving_diagonal = s->causal_bottom_right && s->seqlen_q != s->seqlen_kv;
+    return balance_causal(s) && !moving_diagonal && !s->ragged && !s->varlen && !s->paged
+           && !has_right_bound;
+}
+
+bool check_nonpersist_decode(const rocke_attention_dense_spec_t* s, char* reason, size_t cap)
+{
+    if(streq(s->nonpersist_decode, "hq_minor_swz") && s->num_query_heads % s->chiplet_num_xcds != 0)
+        return reject(reason,
+                      cap,
+                      "hq_minor_swz needs num_query_heads (%d) divisible by chiplet_num_xcds (%d)",
+                      s->num_query_heads,
+                      s->chiplet_num_xcds);
+    return true;
+}
+
+bool check_persist_decode(const rocke_attention_dense_spec_t* s,
+                          const rocke_attention_dense_traits_t* t,
+                          char* reason,
+                          size_t cap)
+{
+    if(streq(s->persist_decode, "hq_minor_swz"))
+    {
+        if(s->num_query_heads % s->chiplet_num_xcds != 0
+           || s->num_persistent % s->chiplet_num_xcds != 0)
+            return reject(reason,
+                          cap,
+                          "hq_minor_swz needs num_query_heads and num_persistent divisible by %d",
+                          s->chiplet_num_xcds);
+        if(balance_causal(s) && dense_nqb(s) % 2 != 0)
+            return reject(reason,
+                          cap,
+                          "hq_minor_swz needs an even number of query blocks under causal "
+                          "masking without a sliding window");
+        return true;
+    }
+
+    const bool gqa_pair = streq(s->persist_decode, "gqa_pair");
+    const bool gqa_pair_2phase = streq(s->persist_decode, "gqa_pair_2phase");
+    if(!gqa_pair && !gqa_pair_2phase)
+        return true;
+
+    const char* name = gqa_pair ? "gqa_pair" : "gqa_pair_2phase";
+    if(!s->persistent || !s->causal || t->has_right_bound)
+        return reject(reason, cap, "%s requires persistent causal attention", name);
+    if(s->ragged || s->varlen || s->paged)
+        return reject(reason, cap, "%s is validated only for aligned dense attention", name);
+
+    const int64_t nqb = dense_nqb(s);
+    const int64_t gqa = dense_gqa(s);
+    if(gqa_pair)
+    {
+        if(nqb % 2 != 0 || gqa % 2 != 0)
+            return reject(reason, cap, "gqa_pair requires even NQB and even GQA ratio");
+        const ExactProduct expected({nqb, s->num_kv_heads, s->batch});
+        const ExactProduct got({s->num_persistent});
+        if(expected.compare(got) != 0)
+        {
+            char expected_text[64];
+            expected.str(expected_text, sizeof(expected_text));
+            return reject(reason,
+                          cap,
+                          "gqa_pair requires num_persistent == NQB*Hkv*B (%s), got %d",
+                          expected_text,
+                          s->num_persistent);
+        }
+        return true;
+    }
+
+    if(nqb % 2 != 0 || gqa < 2)
+        return reject(reason, cap, "gqa_pair_2phase requires even NQB and GQA ratio >= 2");
+    const ExactProduct expected({nqb / 2, s->num_kv_heads, s->batch, gqa});
+    const ExactProduct got({s->num_persistent});
+    if(expected.compare(got) != 0)
+    {
+        char expected_text[64];
+        expected.str(expected_text, sizeof(expected_text));
+        return reject(reason,
+                      cap,
+                      "gqa_pair_2phase requires num_persistent == W/2 (%s), got %d",
+                      expected_text,
+                      s->num_persistent);
+    }
+    return true;
+}
+
+const char* persist_decode_tag(const char* decode)
+{
+    if(streq(decode, "hkv_major"))
+        return "hkvmaj";
+    if(streq(decode, "bt_hkv_minor"))
+        return "bthkvmin";
+    if(streq(decode, "hq_minor_swz"))
+        return "hqminswz";
+    if(streq(decode, "gqa_pair"))
+        return "gqapair";
+    if(streq(decode, "gqa_pair_2phase"))
+        return "gqapair2";
+    return "";
+}
+
+const char* nonpersist_decode_tag(const char* decode)
+{
+    if(streq(decode, "bt_hkv_minor"))
+        return "npbthkvmin";
+    if(streq(decode, "hq_minor_swz"))
+        return "nphqminswz";
+    return "";
 }
 
 } // namespace
@@ -229,6 +377,8 @@ rocke_attention_dense_spec_t rocke_attention_dense_spec_default(void)
     s.num_kv_blocks = 0;
     s.use_sinks = false;
     s.causal_bottom_right = false;
+    s.nonpersist_decode = "auto";
+    s.chiplet_num_xcds = 8;
     return s;
 }
 
@@ -238,8 +388,12 @@ rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void)
     t.type_name = "AttentionDenseSpec";
     t.supports_noncausal_window = false;
     t.supports_noncausal_cross_length_ragged = false;
+    t.has_right_bound = false;
     t.persist_decodes = k_base_persist_decodes;
     t.num_persist_decodes = sizeof(k_base_persist_decodes) / sizeof(k_base_persist_decodes[0]);
+    t.nonpersist_decodes = k_base_nonpersist_decodes;
+    t.num_nonpersist_decodes
+        = sizeof(k_base_nonpersist_decodes) / sizeof(k_base_nonpersist_decodes[0]);
     return t;
 }
 
@@ -319,8 +473,6 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                       "num_query_heads (%d) must be a positive multiple of num_kv_heads (%d)",
                       s->num_query_heads,
                       s->num_kv_heads);
-    if(s->persistent && s->num_persistent <= 0)
-        return reject(reason, cap, "num_persistent must be positive, got %d", s->num_persistent);
     if(!contains(t->persist_decodes, t->num_persist_decodes, s->persist_decode))
     {
         char allowed[ROCKE_ATTENTION_DENSE_REASON_CAP];
@@ -329,6 +481,27 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
         py_repr(s->persist_decode, got, sizeof(got));
         return reject(reason, cap, "persist_decode must be one of %s, got %s", allowed, got);
     }
+    if(!contains(t->nonpersist_decodes, t->num_nonpersist_decodes, s->nonpersist_decode))
+    {
+        char allowed[ROCKE_ATTENTION_DENSE_REASON_CAP];
+        char got[ROCKE_ATTENTION_DENSE_NAME_PART_CAP * 2];
+        py_str_list(t->nonpersist_decodes, t->num_nonpersist_decodes, allowed, sizeof(allowed));
+        py_repr(s->nonpersist_decode, got, sizeof(got));
+        return reject(reason, cap, "nonpersist_decode must be one of %s, got %s", allowed, got);
+    }
+    if(s->chiplet_num_xcds <= 0)
+        return reject(
+            reason, cap, "chiplet_num_xcds must be positive, got %d", s->chiplet_num_xcds);
+    if(s->persistent)
+    {
+        if(s->num_persistent <= 0)
+            return reject(
+                reason, cap, "num_persistent must be positive, got %d", s->num_persistent);
+        if(!streq(s->persist_decode, "auto") && !check_persist_decode(s, t, reason, cap))
+            return false;
+    }
+    else if(!streq(s->nonpersist_decode, "auto") && !check_nonpersist_decode(s, reason, cap))
+        return false;
     if(s->sliding_window < 0)
         return reject(reason, cap, "sliding_window must be >= 0, got %d", s->sliding_window);
     if(s->sliding_window > 0)
@@ -436,12 +609,49 @@ const char*
 {
     if(!streq(s->persist_decode, "auto"))
         return s->persist_decode;
-    const int64_t gqa = rocke_attention_dense_spec_num_queries_per_kv(s);
-    const int64_t nqb = py_floordiv((int64_t)s->seqlen_q + s->block_m - 1, s->block_m);
-    const int64_t per_hkv = gqa * nqb * s->batch;
-    if(gqa > 1 && per_hkv >= 2 * (int64_t)s->num_persistent)
+
+    const int64_t gqa = dense_gqa(s);
+    const int64_t nqb = dense_nqb(s);
+    if(aligned_causal(s, false))
+    {
+        if(s->interleave)
+            return "qb_major";
+        if(gqa == 1 && s->num_query_heads % s->chiplet_num_xcds == 0
+           && s->num_persistent % s->chiplet_num_xcds == 0 && (!balance_causal(s) || nqb % 2 == 0))
+        {
+            const ExactProduct work({nqb, s->num_query_heads, s->batch});
+            const ExactProduct threshold({8, s->num_persistent});
+            if(work.compare(threshold) > 0)
+                return "hq_minor_swz";
+        }
+        if(s->batch < s->chiplet_num_xcds)
+            return "bt_hkv_minor";
+    }
+
+    const ExactProduct per_hkv({gqa, nqb, s->batch});
+    const ExactProduct threshold({2, s->num_persistent});
+    if(gqa > 1 && per_hkv.compare(threshold) >= 0)
         return "hkv_major";
     return "qb_major";
+}
+
+const char*
+    rocke_attention_dense_spec_resolved_nonpersist_decode(const rocke_attention_dense_spec_t* s)
+{
+    if(!streq(s->nonpersist_decode, "auto"))
+        return s->nonpersist_decode;
+    if(!aligned_causal(s, false))
+        return "qb_minor";
+
+    const int64_t nqb = dense_nqb(s);
+    if(s->num_query_heads == s->num_kv_heads && s->num_query_heads % s->chiplet_num_xcds == 0
+       && nqb >= 16)
+    {
+        const ExactProduct work({s->batch, s->num_query_heads, nqb});
+        if(work.at_least(8192))
+            return "hq_minor_swz";
+    }
+    return "bt_hkv_minor";
 }
 
 void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* s,
@@ -453,8 +663,14 @@ void rocke_attention_dense_name_parts_base(const rocke_attention_dense_spec_t* s
     if(s->lazy_rescale)
         snprintf(
             out->algorithm[out->num_algorithm++], ROCKE_ATTENTION_DENSE_NAME_PART_CAP, "lazyrs");
-    if(streq(rocke_attention_dense_spec_resolved_persist_decode(s), "hkv_major"))
-        snprintf(out->persist_decode, sizeof(out->persist_decode), "hkvmaj");
+    snprintf(out->persist_decode,
+             sizeof(out->persist_decode),
+             "%s",
+             persist_decode_tag(rocke_attention_dense_spec_resolved_persist_decode(s)));
+    snprintf(out->nonpersist_decode,
+             sizeof(out->nonpersist_decode),
+             "%s",
+             nonpersist_decode_tag(rocke_attention_dense_spec_resolved_nonpersist_decode(s)));
 }
 
 rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spec_t* s,
@@ -530,6 +746,10 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
         if(s->interleave)
             add("intl");
     }
+    else if(np->nonpersist_decode[0] != '\0')
+        add("%s", np->nonpersist_decode);
+    if(s->chiplet_num_xcds != 8)
+        add("xcd%d", s->chiplet_num_xcds);
     return rocke_kernel_name_join(
         "rocke_attention_dense", parts, n, NULL, NULL, 0, out, out_cap, NULL);
 }
