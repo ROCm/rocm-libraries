@@ -56,29 +56,6 @@ TEST(TestIngestorWinnerCache, ARecordCoveringEveryCandidateIsCovered)
     EXPECT_TRUE(recordCovers(record, {&first, &second}));
 }
 
-TEST(TestIngestorWinnerCache, AViewOfTheCandidatesIsCoveredAndOrderedAsTheCandidates)
-{
-    const auto first = definitionFor(0x01);
-    const auto second = definitionFor(0x02);
-    const auto stale = definitionFor(0x03, 0xF1);
-    const WinnerRecord record{entryFor(second, 1.0), entryFor(first, 2.0)};
-    const std::vector<KernelDefinition> kernels{first, second};
-    const std::vector<const KernelDefinition*> view{&kernels[0], &kernels[1]};
-
-    EXPECT_EQ(recordCoversView(record, view), recordCovers(record, kernels));
-    const auto ordered = orderByRecordView(record, view);
-    ASSERT_EQ(ordered.size(), 2U);
-    EXPECT_EQ(ordered[0], &kernels[1]);
-    EXPECT_EQ(ordered[1], &kernels[0]);
-    ASSERT_TRUE(orderIfFullyCoveredView(record, view).has_value());
-    EXPECT_EQ(*orderIfFullyCoveredView(record, view), ordered);
-
-    // A candidate the record does not cover declines it, as for copies.
-    const std::vector<const KernelDefinition*> wider{&kernels[0], &kernels[1], &stale};
-    EXPECT_FALSE(recordCoversView(record, wider));
-    EXPECT_FALSE(orderIfFullyCoveredView(record, wider).has_value());
-}
-
 TEST(TestIngestorWinnerCache, ARecordMissingACandidateIsNotCovered)
 {
     const auto first = definitionFor(0x01);
@@ -255,22 +232,29 @@ TEST(TestIngestorWinnerCache, HashedRecordFunctionsAgreeWithTheLinearScansOnRand
                         : entryFor(randomDefinition(), 1.0);
         }
 
-        ASSERT_EQ(recordCovers(record, kernels), referenceRecordCovers(record, kernels))
+        std::vector<const KernelDefinition*> views;
+        views.reserve(kernels.size());
+        for(const auto& kernel : kernels)
+        {
+            views.push_back(&kernel);
+        }
+
+        ASSERT_EQ(recordCovers(record, views), referenceRecordCovers(record, kernels))
             << "trial " << trial;
 
-        const auto ordered = orderByRecord(record, kernels);
+        const auto ordered = orderByRecord(record, views);
         const auto expected = referenceOrderByRecord(record, kernels);
         ASSERT_EQ(ordered.size(), expected.size()) << "trial " << trial;
         for(size_t index = 0; index < ordered.size(); ++index)
         {
-            ASSERT_EQ(ordered[index].kernelId, expected[index].kernelId) << "trial " << trial;
-            ASSERT_EQ(ordered[index].packId, expected[index].packId) << "trial " << trial;
-            ASSERT_EQ(ordered[index].dispatchId, expected[index].dispatchId) << "trial " << trial;
-            ASSERT_EQ(ordered[index].priority, expected[index].priority)
+            ASSERT_EQ(ordered[index]->kernelId, expected[index].kernelId) << "trial " << trial;
+            ASSERT_EQ(ordered[index]->packId, expected[index].packId) << "trial " << trial;
+            ASSERT_EQ(ordered[index]->dispatchId, expected[index].dispatchId) << "trial " << trial;
+            ASSERT_EQ(ordered[index]->priority, expected[index].priority)
                 << "trial " << trial << ": a repeated triple must resolve to its first candidate";
         }
 
-        const auto served = orderIfFullyCovered(record, kernels);
+        const auto served = orderIfFullyCovered(record, views);
         const bool expectServed
             = referenceRecordCovers(record, kernels) && expected.size() == kernels.size();
         ASSERT_EQ(served.has_value(), expectServed) << "trial " << trial;
@@ -285,11 +269,11 @@ TEST(TestIngestorWinnerCache, OrderByRecordResolvesARepeatedTripleToItsFirstCand
     repeat.priority = 2;
     const WinnerRecord record{entryFor(first, 1.0), entryFor(first, 2.0)};
 
-    const auto ordered = orderByRecord(record, {first, repeat});
+    const auto ordered = orderByRecord(record, {&first, &repeat});
 
     ASSERT_EQ(ordered.size(), 2U) << "a repeated record entry repeats its kernel";
-    EXPECT_EQ(ordered[0].priority, 1);
-    EXPECT_EQ(ordered[1].priority, 1);
+    EXPECT_EQ(ordered[0]->priority, 1);
+    EXPECT_EQ(ordered[1]->priority, 1);
 }
 
 TEST(TestIngestorWinnerCache, KeysDifferingOnlyInDeviceAreDistinct)

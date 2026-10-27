@@ -93,6 +93,10 @@ struct IngestorSettings
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
     std::optional<int64_t> workspaceLimit;
+    /// How many of the best-ranked knob-filtered candidates buildPlan() considers; unset
+    /// considers all of them. Applied with benchmarking on or off, so a record benchmarked
+    /// under a limit covers the same candidates a later build under it walks.
+    std::optional<size_t> candidateLimit;
 };
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
@@ -141,7 +145,7 @@ public:
             {
                 return false;
             }
-            return !_stateManager.catalogView(contextFor(handle, opGraph))->entries.empty();
+            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
         }
         catch(const std::exception& error)
         {
@@ -310,8 +314,8 @@ public:
                                const TSettings& executionSettings) const override
     {
         const auto context = contextFor(handle, opGraph);
-        const auto catalog = _stateManager.catalogView(context);
-        if(catalog->entries.empty())
+        const auto catalog = _stateManager.unsortedCatalog(context);
+        if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
         }
@@ -321,7 +325,7 @@ public:
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(executionSettings.ingestorSettings.knobFilter,
-                                         catalog->entries.size());
+                                         catalog.entries.size());
         }
 
         size_t maxBytes = 0;
@@ -361,16 +365,13 @@ public:
         const auto context
             = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
-        // A shared view, not a copy: only the candidates that survive the constraints are
-        // copied out of it.
-        const auto view = _stateManager.sortedCatalogView(context);
-        const auto& catalog = *view;
+        const auto catalog = _stateManager.sortedCatalog(context);
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
         }
 
-        const auto filtered = applyConstraints(catalog, settings, context);
+        auto filtered = applyConstraints(catalog, settings, context);
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
@@ -384,53 +385,7 @@ public:
            && serveRecordedOrder(
                filtered, catalog.measuredRecord->size(), context, catalog.bound, executionContext))
         {
-            // Walk the ranked list rather than take its front: a GenericPlan can fail to
-            // build, and a cache hit must not be stricter than an empty cache.
-            for(size_t rank = 0; rank < filtered.size(); ++rank)
-            {
-                std::string failure;
-                try
-                {
-                    auto plan = std::make_unique<GenericPlan<THandle>>(
-                        _stateManager.getDispatchDetails(*filtered[rank]), context, catalog.bound);
-
-                    // The record is the catalog's own snapshot, so this holds even after the
-                    // winner cache evicts its copy.
-                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                           << _engine.name << "' served kernel "
-                                           << toString(filtered[rank]->kernelId) << " at rank "
-                                           << rank << " from a benchmarked record of "
-                                           << catalog.measuredRecord->size() << " entry(s) for "
-                                           << filtered.size() << " candidate(s)");
-
-                    executionContext.setPlan(std::move(plan));
-                    return;
-                }
-                catch(const HipdnnPluginException& error)
-                {
-                    // A malformed descriptor is the author's mistake: rethrow rather than
-                    // silently serve a different kernel.
-                    if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
-                    {
-                        throw;
-                    }
-                    failure = error.what();
-                }
-                catch(const std::exception& error)
-                {
-                    failure = error.what();
-                }
-
-                HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                       << _engine.name << "' could not build a plan for "
-                                       << toString(filtered[rank]->kernelId) << " at rank " << rank
-                                       << ": " << failure << "; trying the next ranked entry");
-            }
-
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                   << _engine.name
-                                   << "' found a benchmarked record whose entries no longer "
-                                      "resolve; falling back to normal selection");
+            return;
         }
 
         // The lookup stays lazy: a WinnerKey hashes the whole graph, so it is not worth
@@ -464,8 +419,7 @@ public:
         if(catalog.measuredRecord == nullptr && record.has_value() && settings.benchmarkingEnabled)
         {
             // A record only reorders candidates measured together; one that does not cover
-            // the whole catalog (or, under a limit, the shortlist) is ignored rather than
-            // partially trusted.
+            // the whole catalog is ignored rather than partially trusted.
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: engine '"
                 << _engine.name << "' has a benchmarked record that does not fully cover its "
@@ -609,8 +563,7 @@ public:
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-        const auto catalog = _stateManager.sortedCatalogView(contextFor(handle, opGraph));
-        const auto& ranked = catalog->entries;
+        const auto ranked = _stateManager.sortedDefinitions(contextFor(handle, opGraph));
         std::vector<KnobT> knobs;
         if(ranked.empty())
         {
@@ -1266,7 +1219,6 @@ private:
         filtered.reserve(catalog.size());
         for(const KernelDefinition* kernel : catalog)
         {
-            const auto& kernel = detail::kernelOf(entry);
             // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
             const bool matchesEverySetKnob
                 = std::all_of(filter.begin(), filter.end(), [this, kernel](const auto& setting) {
@@ -1278,6 +1230,62 @@ private:
             }
         }
         return filtered;
+    }
+
+    /// Builds the first plan of @p ranked, a benchmarked record's order over the candidates,
+    /// that constructs, and sets it on @p executionContext; false when none does.
+    ///
+    /// Walks the ranked list rather than take its front: a GenericPlan can fail to build, and
+    /// a cache hit must not be stricter than an empty cache.
+    bool serveRecordedOrder(const std::vector<const KernelDefinition*>& ranked,
+                            size_t recordSize,
+                            const MatchContext& context,
+                            const BoundTokens& bound,
+                            TContext& executionContext) const
+    {
+        for(size_t rank = 0; rank < ranked.size(); ++rank)
+        {
+            std::string failure;
+            try
+            {
+                auto plan = std::make_unique<GenericPlan<THandle>>(
+                    _stateManager.getDispatchDetails(*ranked[rank]), context, bound);
+
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                       << _engine.name << "' served kernel "
+                                       << toString(ranked[rank]->kernelId) << " at rank " << rank
+                                       << " from a benchmarked record of " << recordSize
+                                       << " entry(s) for " << ranked.size() << " candidate(s)");
+
+                executionContext.setPlan(std::move(plan));
+                return true;
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                // A malformed descriptor is the author's mistake: rethrow rather than
+                // silently serve a different kernel.
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+                failure = error.what();
+            }
+            catch(const std::exception& error)
+            {
+                failure = error.what();
+            }
+
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                   << _engine.name << "' could not build a plan for "
+                                   << toString(ranked[rank]->kernelId) << " at rank " << rank
+                                   << ": " << failure << "; trying the next ranked entry");
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                               << _engine.name
+                               << "' found a benchmarked record whose entries no longer "
+                                  "resolve; falling back to normal selection");
+        return false;
     }
 
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record

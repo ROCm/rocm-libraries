@@ -13,7 +13,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -59,16 +58,6 @@ struct ResolvedMatcher
     KernelMatcherFn kernelFn = nullptr;
     /// A kernel-scoped matcher's optional KernelPrepareFn, registered under its symbol.
     KernelPrepareFn prepareFn = nullptr;
-};
-
-/// A kernel-scoped matcher's CandidateFilterFn, resolved once with the matcher, and the
-/// packs whose admitted kernels it refines as one set: every pack listing the matcher.
-struct ResolvedCandidateFilter
-{
-    DescriptorId matcherId;
-    std::string description;
-    CandidateFilterFn filter = nullptr;
-    std::unordered_set<DescriptorId, DescriptorIdHash> listingPacks;
 };
 
 /// A UDD plus the handler its dispatchSymbol resolved to at construction.
@@ -163,7 +152,7 @@ struct MetadataTupleValuesHash
 /// catalog, or record a ranking for the same key -- and the last store wins. Both
 /// stores are equally valid, so the cost is the redundant work, never a wrong answer.
 template <typename THandle>
-class KernelIngestorSharedState
+class KernelIngestorStateManager
 {
 public:
     /// How many (graph, device) catalogs to retain; eviction costs a rematch, never a
@@ -259,7 +248,6 @@ public:
 
         validateAndIndexPacks();
         prepareDefinitions();
-        resolveCandidateFilters();
     }
 
     // Pinned in place: catalog pointers into `_definitions` rely on a stable address.
@@ -325,13 +313,13 @@ public:
     /// Every kernel that applies to the graph and device @p context names, unordered.
     std::vector<const KernelDefinition*> unsortedDefinitions(const MatchContext& context) const
     {
-        return _matchers;
+        return catalogFor(context).entries;
     }
 
-    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
-        dispatches() const
+    /// The unranked catalog and the state matching bound, from one lookup.
+    Catalog unsortedCatalog(const MatchContext& context) const
     {
-        return _dispatches;
+        return catalogFor(context);
     }
 
     /// nullopt when the graph supplies no usable content key (no or unverifiable
@@ -441,12 +429,14 @@ public:
     /// Every kernel that applies to the graph and device @p context names, best first.
     std::vector<const KernelDefinition*> sortedDefinitions(const MatchContext& context) const
     {
-        return _packs;
+        return sortedCatalog(context).entries;
     }
 
-    /// One entry per pack, parallel to packs(): its kernels' context-independent
-    /// definitions, completed once at construction.
-    const std::vector<std::vector<KernelDefinition>>& definitions() const
+    /// The ordered catalog and the state matching bound, from one lookup.
+    ///
+    /// A benchmarked record covering the whole catalog supplies a measured order and
+    /// `rank()` is never called; otherwise the heuristic orders it.
+    Catalog sortedCatalog(const MatchContext& context) const
     {
         // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
         // and device ordinal, not arch, so without this an unresolved-arch context would
@@ -600,9 +590,9 @@ public:
             {
                 continue;
             }
-            if(seen.insert(it->second).second)
+            if(std::find(values.begin(), values.end(), *value) == values.end())
             {
-                values.push_back(it->second);
+                values.push_back(*value);
             }
         }
         return values;
@@ -625,11 +615,8 @@ public:
         {
             return std::nullopt;
         }
-        // The domain is sorted and duplicate-free (buildOrdinalDomains), so a binary search
-        // finds the one index a linear scan would; the equality check rejects a value the
-        // domain does not carry.
-        const auto position = std::lower_bound(domain->second.begin(), domain->second.end(), value);
-        if(position == domain->second.end() || !(*position == value))
+        const auto position = std::find(domain->second.begin(), domain->second.end(), value);
+        if(position == domain->second.end())
         {
             return std::nullopt;
         }
@@ -640,12 +627,12 @@ public:
     /// does not match.
     bool knobMatches(const KernelDefinition& kernel, const std::string& field, int64_t pinned) const
     {
-        const auto it = kernel.metadata.find(field);
-        if(it == kernel.metadata.end())
+        const auto value = kernel.tryGetMetadata(field);
+        if(!value.has_value())
         {
             return false;
         }
-        const auto ordinal = knobOrdinal(field, it->second);
+        const auto ordinal = knobOrdinal(field, *value);
         return ordinal.has_value() && *ordinal == pinned;
     }
 
@@ -654,14 +641,6 @@ public:
     bool isOrdinalKnob(const std::string& field) const
     {
         return _ordinalDomains.find(field) != _ordinalDomains.end();
-    }
-
-    /// Every kernel-scoped matcher whose symbol also names a CandidateFilterFn, in the
-    /// order the packs first list them. Resolved at construction, like the matchers: the
-    /// registry is immutable once the provider loaded, and absence means no refinement.
-    const std::vector<ResolvedCandidateFilter>& candidateFilters() const
-    {
-        return _candidateFilters;
     }
 
 private:
@@ -740,12 +719,6 @@ private:
         restrictRanking(const std::vector<ScoredKernel>& ranking,
                         const std::vector<const KernelDefinition*>& candidates)
     {
-        std::unordered_set<DescriptorId, DescriptorIdHash> survivors;
-        survivors.reserve(candidates.size());
-        for(const auto& kernel : candidates)
-        {
-            survivors.insert(kernel.kernelId);
-        }
         std::vector<ScoredKernel> restricted;
         restricted.reserve(std::min(ranking.size(), candidates.size()));
         for(const auto& scored : ranking)
@@ -760,6 +733,44 @@ private:
             }
         }
         return restricted;
+    }
+
+    /// Runs each pack's KernelPrepareFn, if one of its kernel-scoped matchers registers
+    /// one, over every definition of the pack, once. A pack may have at most one: its
+    /// kernels carry a single payload.
+    /// @throws std::invalid_argument a pack lists two matchers with different preparers.
+    void prepareDefinitions()
+    {
+        for(size_t packIndex = 0; packIndex < _packs.size(); ++packIndex)
+        {
+            const auto& pack = _packs[packIndex];
+            KernelPrepareFn prepare = nullptr;
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                const auto candidate = _matchers.at(matcherId).prepareFn;
+                if(candidate == nullptr || candidate == prepare)
+                {
+                    continue;
+                }
+                if(prepare != nullptr)
+                {
+                    throw std::invalid_argument("pack '" + toString(pack.id)
+                                                + "' lists two kernel-scoped matchers with "
+                                                  "different kernel preparers; a kernel "
+                                                  "carries one prepared payload");
+                }
+                prepare = candidate;
+            }
+            if(prepare == nullptr)
+            {
+                continue;
+            }
+            for(auto& definition : _definitions[packIndex])
+            {
+                definition.prepared = prepare(definition);
+                definition.preparedBy = prepare;
+            }
+        }
     }
 
     /// Validates every pack's references and builds the KernelDefinition for each of
@@ -935,7 +946,9 @@ private:
                                                            kernel.originDirectory,
                                                            kernel.name,
                                                            kernel.treeRoot,
-                                                           kernel.sources});
+                                                           kernel.sources,
+                                                           nullptr,
+                                                           nullptr});
             }
             // Pushed even when every kernel was dropped: _definitions is indexed by pack
             // position, so skipping one entry would bind every later pack's definitions to
@@ -1055,7 +1068,7 @@ private:
                                      ? "no device resolved"
                                      : "resolved device reports no gcnArchName";
             HIPDNN_PLUGIN_LOG_INFO("ingestor: " << reason << "; no kernel applies");
-            return std::make_shared<const CatalogView>();
+            return Catalog{};
         }
 
         return catalogFor(context, cacheKey(context));
@@ -1071,6 +1084,8 @@ private:
             {
                 HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device "
                                         << context.deviceId);
+                // get() already returned a copy; moving out of that local avoids a
+                // second one on the hot path.
                 return std::move(*cached);
             }
         }
@@ -1080,8 +1095,7 @@ private:
                 "ingestor: graph supplies no content key, so its catalog cannot be cached");
         }
 
-        std::shared_ptr<const CatalogView> catalog
-            = std::make_shared<const CatalogView>(buildCatalog(context));
+        Catalog catalog = buildCatalog(context);
 
         if(key.has_value())
         {
@@ -1186,9 +1200,6 @@ private:
                 continue;
             }
 
-            // The pack's kernel-scoped matchers, resolved once per pack rather than looked
-            // up per kernel.
-            const auto kernelFns = kernelMatcherFns(pack);
             size_t admitted = 0;
             for(const auto& precomputed : _definitions[packIndex])
             {
@@ -1231,6 +1242,7 @@ private:
         }
 
         shadowByArchTier(catalog, context);
+        applyCandidateFilters(context, catalog);
 
         HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
                                << context.deviceId << " holds " << catalog.entries.size()
@@ -1283,34 +1295,6 @@ private:
             {
                 it->second = i;
             }
-            if(candidates.empty())
-            {
-                continue;
-            }
-
-            const auto kept = resolved.filter(context, catalog.bound, candidates);
-            if(kept.size() != candidates.size())
-            {
-                throw std::runtime_error("the candidate filter of " + resolved.description
-                                         + " returned " + std::to_string(kept.size())
-                                         + " flag(s) for " + std::to_string(candidates.size())
-                                         + " kernel(s)");
-            }
-            size_t survivors = 0;
-            for(size_t i = 0; i < kept.size(); ++i)
-            {
-                if(kept[i])
-                {
-                    ++survivors;
-                }
-                else
-                {
-                    keep[indices[i]] = false;
-                }
-            }
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
-                                   << resolved.description << " kept " << survivors << " of "
-                                   << candidates.size() << " kernel(s)");
         }
 
         bool anyShadowed = false;
@@ -1345,6 +1329,102 @@ private:
         entries.resize(kept);
     }
 
+    /// Each kernel-scoped matcher whose symbol also names a CandidateFilterFn narrows, as
+    /// one set, every kernel admitted from the packs listing it. Runs once every pack has
+    /// been matched, so a set sharded across packs is refined whole; what stays keeps its
+    /// order. Resolved per call rather than at construction: absence is the common case
+    /// and means no refinement, and the registry is immutable once the provider loaded.
+    void applyCandidateFilters(const MatchContext& context, Catalog& catalog) const
+    {
+        if(catalog.entries.empty())
+        {
+            return;
+        }
+        std::vector<bool> keep(catalog.entries.size(), true);
+        std::unordered_set<DescriptorId, DescriptorIdHash> visited;
+        for(const auto& pack : _packs)
+        {
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                const auto& matcher = _matchers.at(matcherId);
+                if(matcher.descriptor.scope != MatchScope::KERNEL
+                   || !visited.insert(matcherId).second)
+                {
+                    continue;
+                }
+                const auto filter
+                    = CandidateFilterRegistry::tryResolve(matcher.descriptor.matchSymbol);
+                if(filter == nullptr)
+                {
+                    continue;
+                }
+
+                std::unordered_set<DescriptorId, DescriptorIdHash> listing;
+                for(const auto& other : _packs)
+                {
+                    if(std::find(other.matcherIds.begin(), other.matcherIds.end(), matcherId)
+                       != other.matcherIds.end())
+                    {
+                        listing.insert(other.id);
+                    }
+                }
+                std::vector<size_t> indices;
+                std::vector<const KernelDefinition*> candidates;
+                for(size_t i = 0; i < catalog.entries.size(); ++i)
+                {
+                    if(keep[i] && listing.count(catalog.entries[i]->packId) != 0)
+                    {
+                        indices.push_back(i);
+                        candidates.push_back(catalog.entries[i]);
+                    }
+                }
+                if(candidates.empty())
+                {
+                    continue;
+                }
+
+                const auto description
+                    = describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id);
+                const auto kept = filter(context, catalog.bound, candidates);
+                if(kept.size() != candidates.size())
+                {
+                    throw std::runtime_error("the candidate filter of " + description + " returned "
+                                             + std::to_string(kept.size()) + " flag(s) for "
+                                             + std::to_string(candidates.size()) + " kernel(s)");
+                }
+                size_t survivors = 0;
+                for(size_t i = 0; i < kept.size(); ++i)
+                {
+                    if(kept[i])
+                    {
+                        ++survivors;
+                    }
+                    else
+                    {
+                        keep[indices[i]] = false;
+                    }
+                }
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: the candidate filter of "
+                                       << description << " kept " << survivors << " of "
+                                       << candidates.size() << " kernel(s)");
+            }
+        }
+
+        size_t next = 0;
+        for(size_t i = 0; i < catalog.entries.size(); ++i)
+        {
+            if(keep[i])
+            {
+                if(next != i)
+                {
+                    catalog.entries[next] = catalog.entries[i];
+                }
+                ++next;
+            }
+        }
+        catalog.entries.resize(next);
+    }
+
     bool graphLevelMatchersPass(const KernelDescriptorPack& pack,
                                 const MatchContext& context,
                                 GraphMatcherMemo& graphVerdicts,
@@ -1374,18 +1454,24 @@ private:
         return true;
     }
 
-    std::vector<KernelMatcherFn> kernelMatcherFns(const KernelDescriptorPack& pack) const
+    bool kernelLevelMatchersPass(const KernelDescriptorPack& pack,
+                                 const MatchContext& context,
+                                 const BoundTokens& bound,
+                                 const KernelDefinition& kernel) const
     {
-        std::vector<KernelMatcherFn> kernelFns;
         for(const auto& matcherId : pack.matcherIds)
         {
             const auto& matcher = _matchers.at(matcherId);
-            if(matcher.descriptor.scope == MatchScope::KERNEL)
+            if(matcher.descriptor.scope != MatchScope::KERNEL)
             {
-                kernelFns.push_back(matcher.kernelFn);
+                continue;
+            }
+            if(!matcher.kernelFn(context, bound, kernel))
+            {
+                return false;
             }
         }
-        return kernelFns;
+        return true;
     }
 
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
@@ -1627,13 +1713,10 @@ private:
         }
     }
 
-    /// Shared, immutable, and declared first: every alias below binds into it.
-    std::shared_ptr<const KernelIngestorSharedState<THandle>> _state;
-    const MetadataSchema& _schema;
-    const std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash>& _matchers;
-    const std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash>&
-        _dispatches;
-    const std::vector<KernelDescriptorPack>& _packs;
+    MetadataSchema _schema;
+    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
+    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
+    std::vector<KernelDescriptorPack> _packs;
     /// One entry per pack, parallel to _packs: its kernels' context-independent
     /// definitions, completed once at construction and never mutated after, so the
     /// pointers every Catalog holds into it stay valid for this manager's lifetime.
