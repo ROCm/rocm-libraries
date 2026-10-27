@@ -36,6 +36,7 @@
 
 #include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
+#include <ostream>
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -60,6 +61,18 @@ enum BlockScanAlgorithm
     BLOCK_SCAN_WARP_SCANS
         = detail::to_BlockScanAlgorithm_enum(::rocprim::block_scan_algorithm::using_warp_scan)
 };
+
+inline ::std::ostream& operator<<(::std::ostream& os, BlockScanAlgorithm algo)
+{
+    switch(algo)
+    {
+        case BLOCK_SCAN_RAKING: return os << "BLOCK_SCAN_RAKING";
+        // Note: for rocPRIM backend this is a duplicate of BLOCK_SCAN_RAKING
+        // case BLOCK_SCAN_RAKING_MEMOIZE: return os << "BLOCK_SCAN_RAKING_MEMOIZE";
+        case BLOCK_SCAN_WARP_SCANS: return os << "BLOCK_SCAN_WARP_SCANS";
+        default: return os << "<unknown BlockScanAlgorithm: " << static_cast<int>(algo) << ">";
+    }
+}
 
 template<typename T,
          int                BlockDimX,
