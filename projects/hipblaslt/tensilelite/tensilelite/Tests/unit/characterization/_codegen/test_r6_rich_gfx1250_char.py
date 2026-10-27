@@ -259,8 +259,8 @@ def test_r6_rich_gfx1250_device_scalar_alpha_dispatch_present(scalar_config):
 
 def test_r6_rich_gfx1250_conversion_uses_scalar_alpha_element_zero(scalar_config):
     """Post-GSU conversion replaces inline alpha with the device scalar."""
-    from Tensile.KernelHelperNaming import initConversionKernelObjects
-    from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.KernelHelperNaming import initConversionKernelObjects
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     import codegen_harness as _ch
 
     sols = solutions_from_config(scalar_config, arch=_ARCH, limit_solutions=1)

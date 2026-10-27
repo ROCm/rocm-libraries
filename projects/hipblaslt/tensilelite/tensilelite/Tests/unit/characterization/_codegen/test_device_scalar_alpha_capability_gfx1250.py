@@ -17,8 +17,8 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("capability", [False, True], ids=["legacy", "scalar-capable"])
 @pytest.mark.parametrize("runtime_scalar", [False, True])
 def test_f32_sav_capability_requires_explicit_opt_in(tmp_path, vector_mode, capability, runtime_scalar):
-    from Tensile.Contractions import InternalArgsSupport
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.Contractions import InternalArgsSupport
+    from tensilelite.KernelWriter import KernelWriter
 
     source_config = Path(__file__).parent / "data/test_data/_designed/gfx1250/rich_gemm_sb.yaml"
     config = yaml.safe_load(source_config.read_text())
@@ -39,7 +39,7 @@ def test_f32_sav_capability_requires_explicit_opt_in(tmp_path, vector_mode, capa
     solution = solutions[0]
     enabled = capability is True
     assert "SupportDeviceScalarAlpha" not in solution["InternalSupportParams"]
-    from Tensile.Common.Utilities import state
+    from tensilelite.Common.Utilities import state
     assert "deviceScalarAlpha" not in state(InternalArgsSupport.FromOriginalState(solution._state))
     assert KernelWriter.gsuMaskHex(None, solution) == ("0x7ff" if enabled else "0xfff")
 
@@ -70,7 +70,7 @@ def test_generated_kernel_rejects_other_internal_overrides(tmp_path, override):
 
 
 def test_scalar_capability_rejects_unsupported_problem(tmp_path, capsys, monkeypatch):
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     # Keep rejection output in this process instead of a reused joblib worker.
     monkeypatch.setitem(globalParameters, "CpuThreads", 1)

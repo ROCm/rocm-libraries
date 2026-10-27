@@ -78,11 +78,11 @@ def test_scalar_capability_rejects_non_gfx1250_before_derivation(
 def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(
     problem_name, arch, cu_suffix, library_type
 ):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.LibraryIO import parseLibraryLogicFile
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.LibraryIO import parseLibraryLogicFile
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
     product = Path(__file__).resolve().parents[4] / "library/src/amd_detail/rocblaslt"
     if not product.is_dir():
@@ -134,7 +134,7 @@ def test_device_scalar_conversion_emits_both_runtime_variants(
 
 
 def _alpha_benchmark(final_args):
-    from Tensile.BenchmarkStructs import BenchmarkProcess
+    from tensilelite.BenchmarkStructs import BenchmarkProcess
 
     return BenchmarkProcess(
         {"OperationType": "GEMM", "DataType": "s", "UseScaleAlphaVec": 1},
@@ -168,7 +168,7 @@ def test_duplicate_alpha_runtime_arguments_are_rejected(capsys):
 
 
 def test_mxf4_yaml_runs_both_modes_and_keeps_singlebuffer_scalar():
-    from Tensile.BenchmarkStructs import BenchmarkProcess
+    from tensilelite.BenchmarkStructs import BenchmarkProcess
 
     path = Path(__file__).resolve().parents[1] / "common/gemm/gfx12/mxf4_device_scalar_alpha_gfx1250.yaml"
     config = yaml.safe_load(path.read_text())
@@ -181,7 +181,7 @@ def test_mxf4_yaml_runs_both_modes_and_keeps_singlebuffer_scalar():
 @pytest.mark.parametrize("failure", ["none", "True", "False"])
 @pytest.mark.parametrize("modes", [[True, False], [False, True]])
 def test_alpha_runtime_sweep_reuses_kernels_and_preserves_failures(tmp_path, monkeypatch, failure, modes):
-    import Tensile.ClientWriter as cw
+    import tensilelite.ClientWriter as cw
 
     # Execute the generated launch scripts; only the GPU client is replaced.
     client = tmp_path / "client.py"
