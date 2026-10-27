@@ -328,6 +328,46 @@ TEST(LocalKernelRegister, RegistersOnTheHandlesDevice)
         << "the worker failed; its output is above";
 }
 
+TEST(LocalKernelRegister, DISABLED_ForeignProcessorMetadataWorker)
+{
+    using namespace TensileLite;
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    expectNothingRegistered(handle);
+
+    int             device = 0;
+    hipDeviceProp_t prop;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipGetDeviceProperties(&prop, device), hipSuccess);
+    auto foreign = std::string(prop.gcnArchName).rfind("gfx950", 0) == 0
+                       ? AMDGPU::Processor::gfx942
+                       : AMDGPU::Processor::gfx950;
+
+    // Name lookup needs only metadata, so this registers a solution for a
+    // different processor without requiring another device or code object.
+    auto solution               = std::make_shared<ContractionSolution>();
+    solution->index             = -1;
+    solution->kernelName        = "ForeignKernel";
+    solution->solutionName      = "ForeignSolution";
+    solution->hardwarePredicate = std::make_shared<Predicates::True<Hardware>>();
+    ASSERT_TRUE(pinToProcessor(*solution, foreign));
+    auto indices = globalLocalKernelLibrary<ContractionProblemGemm>()->addSolutions({solution});
+    ASSERT_EQ(indices.size(), 1u);
+
+    hipblasLtMatmulAlgo_t algo{};
+    std::memcpy(algo.data, &indices[0], sizeof(indices[0]));
+    EXPECT_TRUE(hipblaslt_ext::getKernelNameFromAlgo(handle, algo).empty());
+    EXPECT_TRUE(hipblaslt_ext::getSolutionNameFromAlgo(handle, algo).empty());
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelRegister, ForeignProcessorMetadata)
+{
+    EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_ForeignProcessorMetadataWorker"), 0)
+        << "the worker failed; its output is above";
+}
+
 // Payloads that reach the code object load and fail there are refused cleanly:
 // nothing is registered and the shipped kernel already in use still runs.
 TEST(LocalKernelRegister, DISABLED_BadPayloadsWorker)
