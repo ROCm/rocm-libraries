@@ -264,6 +264,7 @@ add_hipcub_test("hipcub.BlockRunLengthDecode" test_hipcub_block_run_length_decod
 add_hipcub_test("hipcub.BlockScan" test_hipcub_block_scan.cpp)
 add_hipcub_test("hipcub.BlockShuffle" test_hipcub_block_shuffle.cpp)
 add_hipcub_test("hipcub.DeviceAdjacentDifference" test_hipcub_device_adjacent_difference.cpp)
+add_hipcub_test("hipcub.DeviceBinarySearch" test_hipcub_device_binary_search.cpp)
 add_hipcub_test("hipcub.DeviceCopy" test_hipcub_device_copy.cpp)
 add_hipcub_test("hipcub.DeviceIf" test_hipcub_device_find_if.cpp)
 add_hipcub_test("hipcub.DeviceFor" test_hipcub_device_for.cpp)
