@@ -224,6 +224,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* num_seqs_p; /* I32 num_seqs                                */
     rocke_value_t* bt_stride_p; /* I32 block_table_stride                      */
     rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0                        */
+    rocke_value_t* sliding_window_p; /* I32 sliding_window (RUNTIME_KERNARG_FIELDS) */
 
     /* ---------- grid ids + thread (lines 331-334) ---------- */
     rocke_value_t* q_block_global_idx; /* block_id_x()                              */
@@ -256,7 +257,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* one_f; /* const_f32(1.0)                            */
     rocke_value_t* rcp_ln2; /* const_f32(1.4426950408889634)             */
     rocke_value_t* qk_scale; /* scale_p * rcp_ln2                         */
-    rocke_value_t* sw_const; /* const_i32(SLIDING_WINDOW)                 */
+    rocke_value_t* sw_const; /* sliding_window_p                          */
     rocke_value_t* z8; /* zero_vec(dtype, 8)                        */
 
     /* ---------- lane decode (lines 482-483) ---------- */

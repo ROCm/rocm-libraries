@@ -117,6 +117,9 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+    /* This body also stands in for the gfx950 Python builder (the fastKV
+     * register-P twin), which bakes the shape values gfx942 reads at runtime. */
+    ctx->runtime_shape = rocke_a2d_streq(arch, "gfx942");
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
     if(!rocke_a2d_require_tiled_attention_arch(b, arch))
@@ -398,6 +401,8 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        if(ctx->runtime_shape)
+            ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
     }
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
@@ -427,7 +432,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- seq lookup + Q-block geometry (lines 1390-1409) ---- */
-    if(rocke_a2d_streq(arch, "gfx942"))
+    if(ctx->runtime_shape)
     {
         rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
         ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
@@ -435,8 +440,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
     else
     {
-        /* This body also stands in for the gfx950 Python builder (the fastKV
-         * register-P twin), which still bakes the trip count. */
         ctx->seq_idx
             = rocke_binary_search_seq_idx(b,
                                           ctx->cu_q,
@@ -746,8 +749,8 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
      * (line 1994) and mask (lines 4111/4328/4403) regions. The previous port
      * created an unused i32 0 here and a FRESH const in the loop scaffold,
      * allocating an extra SSA value that shifted every later %N. Cache it. */
-    ctx->sw_const_v = rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
-    ctx->c0 = ctx->sw_const_v;
+    ctx->sw_const_v
+        = ctx->runtime_shape ? ctx->sliding_window_p : rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
 
     /* ---- acc geometry the epilogue aliases (lines 2142-2143) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;

@@ -1723,7 +1723,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         problem.head_size,
         problem.block_size,
         problem.dtype,
-        problem.sliding_window,
+        _window_key(problem, arch, "2d"),
         bool(problem.use_sinks),
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
@@ -4084,7 +4084,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         problem.head_size,
         problem.block_size,
         problem.dtype,
-        problem.sliding_window,
+        _window_key(problem, arch, "3d"),
         bool(problem.use_sinks),
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
@@ -4132,20 +4132,32 @@ def _runtime_kernarg_fields(spec_cls) -> Tuple[str, ...]:
     return tuple(getattr(spec_cls, "RUNTIME_KERNARG_FIELDS", ()))
 
 
-_SEARCHES_AT_RUNTIME: Dict[Tuple[str, str], bool] = {}
+_TILED_SPEC_CLS: Dict[Tuple[str, str], type] = {}
+
+
+def _tiled_spec_cls(arch: str, path: str) -> type:
+    """The tiled ``path`` ("2d" or "3d" segment) spec class for ``arch``. Memoized:
+    the cache keys read its class attributes on every launch."""
+    key = (arch, path)
+    if key not in _TILED_SPEC_CLS:
+        impl = _tiled_2d_impl(arch) if path == "2d" else _tiled_3d_impl(arch)
+        _TILED_SPEC_CLS[key] = impl[0]
+    return _TILED_SPEC_CLS[key]
 
 
 def _searches_at_runtime(arch: str, path: str) -> bool:
-    """True when the tiled ``path`` ("2d" or "3d") body for ``arch`` derives its cu_q
-    search trip count from the num_seqs kernarg (``RUNTIME_SEARCH_ITERS``), so
-    num_seqs never reaches its IR. Memoized: the cache keys call it per launch."""
-    key = (arch, path)
-    if key not in _SEARCHES_AT_RUNTIME:
-        spec_cls = (_tiled_2d_impl(arch) if path == "2d" else _tiled_3d_impl(arch))[0]
-        _SEARCHES_AT_RUNTIME[key] = bool(
-            getattr(spec_cls, "RUNTIME_SEARCH_ITERS", False)
-        )
-    return _SEARCHES_AT_RUNTIME[key]
+    """True when the tiled ``path`` body for ``arch`` derives its cu_q search trip
+    count from the num_seqs kernarg (``RUNTIME_SEARCH_ITERS``), so num_seqs never
+    reaches its IR."""
+    return bool(getattr(_tiled_spec_cls(arch, path), "RUNTIME_SEARCH_ITERS", False))
+
+
+def _window_key(problem: UnifiedAttentionProblem, arch: str, path: str):
+    """The sliding window as the tiled ``path`` body for ``arch`` bakes it: the size
+    itself, or only whether there is one when the size is a kernarg."""
+    if "sliding_window" in _runtime_kernarg_fields(_tiled_spec_cls(arch, path)):
+        return problem.sliding_window > 0
+    return problem.sliding_window
 
 
 def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:

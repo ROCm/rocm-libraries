@@ -177,6 +177,11 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    /* RUNTIME_KERNARG_FIELDS params; set only when runtime_shape. */
+    rocke_value_t* sliding_window_p;
+    /* The gfx942 Python body: it reads its runtime kernargs and searches at
+     * runtime. False when this body stands in for the gfx950 builder. */
+    bool runtime_shape;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
@@ -268,13 +273,12 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* lane_rg_is2_v;
 
     /* ---- SSA constants (lines 1891-1912) ---- */
-    rocke_value_t* c0;
     rocke_value_t* zero_f;
     rocke_value_t* neg_inf_v; /* b.const_f32(-inf)              (1892) */
     rocke_value_t* one_f_v; /* b.const_f32(1.0)               (1894) */
     rocke_value_t* rcp_ln2_v; /* b.const_f32(1.4426950408889634) (1895) */
     rocke_value_t* qk_scale_v; /* derived from scale_p            */
-    rocke_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW) (1910) */
+    rocke_value_t* sw_const_v; /* sliding_window_p, else const_i32(SLIDING_WINDOW) */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 2163-2351) ---- */
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */

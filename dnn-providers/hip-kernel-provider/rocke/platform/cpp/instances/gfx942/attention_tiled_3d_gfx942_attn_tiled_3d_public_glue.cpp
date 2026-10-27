@@ -299,9 +299,10 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "sinks";
     }
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
     {
-        snprintf(sw_part, sizeof(sw_part), "sw%d", s->sliding_window);
+        snprintf(sw_part, sizeof(sw_part), "sw");
         parts[np++] = sw_part;
     }
     if(s->has_softcap)

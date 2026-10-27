@@ -164,7 +164,7 @@ class UnifiedAttention2DTiledSpec:
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
-    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ()
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ("sliding_window",)
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
@@ -985,7 +985,8 @@ class UnifiedAttention2DTiledSpec:
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "fnuz" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
-            f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
+            # The window size is a kernarg; only whether the body masks one is baked.
+            "sw" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
@@ -1568,6 +1569,9 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
+    # after every fixed param so the shared launch signature can append them.
+    rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
 
     if spec.use_q_major_grid:
         q_block_global_idx = b.block_id_x()
@@ -2142,7 +2146,7 @@ def build_unified_attention_2d_tiled(
     # stays the same as the default bf16 path -- just softmax_scale /
     # ln(2) -- and we do NOT fold k_scale into qk_scale here.
     pv_fp8_scale = b.fdiv(v_scale_p, b.const_f32(240.0)) if FP8_MFMA_PV else None
-    sw_const = b.const_i32(int(SLIDING_WINDOW))
+    sw_const = rt["sliding_window"]
     z8 = b.zero_vec(dtype, 8)
 
     # ---------------- Q -> LDS (cooperative vec8 chunks) ----------------
@@ -5869,6 +5873,9 @@ def _build_gfx942_4warp_gqa_lean(
     # Unused here; declared so every later param sits where the shared 2D
     # launch signature packs it.
     b.param("qq_bias_stride_0", I32)
+    # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
+    # after every fixed param so the shared launch signature can append them.
+    rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
 
     tid = b.thread_id_x()
     wid = b.div(tid, b.const_i32(64))
@@ -6167,6 +6174,9 @@ def build_gfx942_4warp_gqa(
     # Unused here; declared so every later param sits where the shared 2D
     # launch signature packs it.
     b.param("qq_bias_stride_0", I32)
+    # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
+    # after every fixed param so the shared launch signature can append them.
+    rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
 
     tid = b.thread_id_x()
     wid = b.div(tid, b.const_i32(64))
@@ -6261,6 +6271,7 @@ def build_gfx942_4warp_gqa(
     ]
     context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
     window = int(spec.sliding_window)  # 0 = causal; >0 = SWA (keep dist < window)
+    window_p = rt["sliding_window"]  # the size itself is a kernarg
     causal_t = b.div(
         b.add(b.add(context_off, qbase), b.const_i32(TOKBLK + BN - 1)), b.const_i32(BN)
     )
@@ -6268,7 +6279,7 @@ def build_gfx942_4warp_gqa(
     kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
     # E6: windowed KV-loop start - skip tiles fully before the window (bounded work)
     if window > 0:
-        _ks = b.sub(b.add(context_off, qbase), b.const_i32(window))
+        _ks = b.sub(b.add(context_off, qbase), window_p)
         _ks = b.select(b.cmp_gt(_ks, b.const_i32(0)), _ks, b.const_i32(0))
         kvstart = b.div(_ks, b.const_i32(BN))
     else:
@@ -6290,7 +6301,7 @@ def build_gfx942_4warp_gqa(
     int_end = b.select(b.cmp_lt(int_end_c, int_end_r), int_end_c, int_end_r)
     if window > 0:
         _sn = b.sub(
-            b.add(q_blk_hi, b.const_i32(1)), b.const_i32(window)
+            b.add(q_blk_hi, b.const_i32(1)), window_p
         )  # window-interior: kv*BN>=q_blk_hi-window+1
         _cs = b.div(b.add(_sn, b.const_i32(BN - 1)), b.const_i32(BN))  # ceil
         int_start = b.select(b.cmp_lt(_sn, b.const_i32(0)), kvstart, _cs)
@@ -6480,7 +6491,7 @@ def build_gfx942_4warp_gqa(
                     mask_cond = b.lor(b.cmp_gt(key_g, q_g), b.cmp_ge(key_g, klen))
                     if window > 0:
                         mask_cond = b.lor(
-                            mask_cond, b.cmp_ge(b.sub(q_g, key_g), b.const_i32(window))
+                            mask_cond, b.cmp_ge(b.sub(q_g, key_g), window_p)
                         )
                     Sm[kt][i] = b.select(mask_cond, ninf, raw)
                 else:

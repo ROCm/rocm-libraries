@@ -90,6 +90,9 @@ def _norm_spec(spec):
     bakes_search = not getattr(type(spec), "RUNTIME_SEARCH_ITERS", False)
     if bakes_search and not getattr(spec, "use_decode_grid", False):
         fields["binary_search_iters"] = spec.binary_search_iters
+    # A kernarg field reaches IR only through the structure it selects.
+    if "sliding_window" in getattr(type(spec), "RUNTIME_KERNARG_FIELDS", ()):
+        fields["sliding_window"] = spec.sliding_window > 0
     return fields
 
 
@@ -549,6 +552,42 @@ _SHARED_PAIRS = [
         P(total_q=6, num_seqs=3, **_D128_TWO_TOKENS),
         P(total_q=18, num_seqs=9, **_D128_TWO_TOKENS),
     ),
+    # gfx942 reads the window size as a kernarg, so window sizes share a binary.
+    (
+        "gfx942-2d-sw256-vs-sw1024",
+        "gfx942",
+        "2d",
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            sliding_window=256,
+            **_D64_GQA8,
+        ),
+        P(
+            total_q=2048,
+            num_seqs=2,
+            max_seqlen_q=1024,
+            max_seqlen_k=1024,
+            sliding_window=1024,
+            **_D64_GQA8,
+        ),
+    ),
+    (
+        "gfx942-2d-4warp-fold-sw1024-vs-sw4096",
+        "gfx942",
+        "2d",
+        P(total_q=2 * 8192, num_seqs=2, **dict(_D128_FOLD, sliding_window=1024)),
+        P(total_q=2 * 8192, num_seqs=2, **_D128_FOLD),
+    ),
+    (
+        "gfx942-3d-decode-sw256-vs-sw4096",
+        "gfx942",
+        "3d",
+        P(total_q=4, num_seqs=4, sliding_window=256, **_D128_DECODE),
+        P(total_q=4, num_seqs=4, sliding_window=4096, **_D128_DECODE),
+    ),
     # gfx1250 3D floors the search at 32 iterations, so ns 3 and 4 share a
     # binary even though they sit in different log2 buckets.
     (
@@ -571,7 +610,7 @@ def test_same_outputs_share_key_and_ir(routing_env, arch, path, a, b, flavor):
         if path == "2d"
         else (au._tiled_3d_cache_key, _lower_3d)
     )
-    assert a.num_seqs != b.num_seqs or a.max_seqlen_q != b.max_seqlen_q
+    assert a != b
     assert key_fn(a, arch) == key_fn(b, arch)
     assert lower(a, arch, flavor) == lower(b, arch, flavor)
 
