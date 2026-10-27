@@ -58,6 +58,14 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
+/// @see packs/Gfx950ConvFwdNative.cpp
+void registerGfx950ConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvFwdModuleCache();
+
+/// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
+void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvFwdAotModuleCache();
+
 /// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();

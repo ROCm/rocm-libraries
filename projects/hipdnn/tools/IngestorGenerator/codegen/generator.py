@@ -26,6 +26,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from . import generic_targets as gtmod
 from . import prior_ids
+from .json_output import dump_descriptor
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -206,6 +207,8 @@ def mint_ids(
     if config.engine.has_heuristic:
         ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
     ids["udd"] = take(engine.udd["id"] if engine else None)
+    for dispatch in config.pack_dispatches[1:]:
+        ids[("udd", dispatch)] = take(None)
 
     prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
 
@@ -257,7 +260,7 @@ def mint_ids(
         name = f"{config.engine.namespace}:{config.kdp_stem(pack)}"
         matched = prior_packs.get(name) or supplement_packs.get(name)
         ids[("pack", pack_index)] = take(matched.id if matched else None)
-        if config.is_multi_pack:
+        if config.has_operation_matchers:
             ids[("operation_umd", pack_index)] = take(
                 matched.operation_umd_id if matched else None
             )
@@ -327,7 +330,7 @@ def mint_ids(
 
 
 def _dump(obj: dict) -> str:
-    return json.dumps(obj, indent=2, sort_keys=False) + "\n"
+    return dump_descriptor(obj)
 
 
 def build_kmd(config: IngestorConfig, ids: dict) -> dict:
@@ -382,13 +385,28 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
     return ued
 
 
-def build_udd(config: IngestorConfig, ids: dict) -> dict:
+def build_udd(config: IngestorConfig, ids: dict, dispatch: str = "") -> dict:
+    """The UDD of the engine's own dispatch handler, or of the one a pack's
+    ``dispatch`` names."""
+    if not dispatch:
+        return {
+            "version": "1.0",
+            "id": ids["udd"],
+            "name": f"{config.engine.local_name} dispatch",
+            "dispatch_symbol": config.dispatch_symbol,
+        }
     return {
         "version": "1.0",
-        "id": ids["udd"],
-        "name": f"{config.engine.local_name} dispatch",
-        "dispatch_symbol": config.dispatch_symbol,
+        "id": ids[("udd", dispatch)],
+        "name": f"{config.engine.local_name} {dispatch} dispatch",
+        "dispatch_symbol": f"{config.native_symbol_namespace}.{dispatch}_dispatch",
     }
+
+
+def udd_filename(config: IngestorConfig, dispatch: str = "") -> str:
+    """The UDD file of ``dispatch`` ("" for the engine's own handler)."""
+    slug = config.engine.slug
+    return f"{slug}.udd.json" if not dispatch else f"{slug}_{dispatch}.udd.json"
 
 
 def build_kernel_match_umd(config: IngestorConfig, ids: dict) -> dict:
@@ -463,8 +481,9 @@ def _check_metadata_resolved(
     ``kernel_source.spec``.
 
     An absent knob takes the KMD ``default_value`` as its catalog key while the
-    binary was built from the builder dataclass's default. Mandatory fields are
-    left to the config loader.
+    binary was built from the builder dataclass's default, unless the KMD field
+    declares ``builder_default`` (the two defaults are the same value). Mandatory
+    fields are left to the config loader.
     """
     # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
     prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
@@ -484,10 +503,15 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # A `builder_default` field is declared to share its default with the
+    # builder's dataclass, so leaving it out of both layers decides it.
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and not f.builder_default
+        and f.name not in metadata
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (
@@ -640,7 +664,7 @@ def build_operation_umd(
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
     the engine has more than one pack. A single-pack engine gets zero
     graph-scoped UMDs."""
-    if not config.is_multi_pack:
+    if not config.has_operation_matchers:
         return None
     return {
         "version": "1.0",
@@ -711,7 +735,7 @@ def build_kdp(
     """
     pack_index = _pack_index(config, pack)
     matchers = [ids["kernel_match"]]
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
     # tuple is a duplicate only when arch coverage competes: the same candidate
@@ -840,7 +864,7 @@ def build_kdp(
         "name": f"{config.engine.namespace}:{config.kdp_stem(pack)}",
         "matchers": matchers,
         "engine": ids["ued"],
-        "dispatch": ids["udd"],
+        "dispatch": ids[("udd", pack.dispatch)] if pack.dispatch else ids["udd"],
         # Declared once per pack, after minting, since every kernel shares one
         # engine, KMD and field partition. A reader resolves a kernel's own
         # declaration first (``hkp_pack.agreement.resolved_contract``), so a
@@ -1417,14 +1441,13 @@ class IngestorGenerator:
         files = [
             f"{ddir}/{slug}.kmd.json",
             f"{ddir}/{slug}.ued.json",
-            f"{ddir}/{slug}.udd.json",
-        ]
+        ] + [f"{ddir}/{udd_filename(config, d)}" for d in config.pack_dispatches]
         if config.engine.has_heuristic:
             files.append(f"{ddir}/{slug}.uhd.json")
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
-            if config.is_multi_pack:
+            if config.has_operation_matchers:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")
@@ -1497,7 +1520,11 @@ class IngestorGenerator:
         if not resolution.satellite:
             write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
             write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-            write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+            for dispatch in config.pack_dispatches:
+                write_json(
+                    f"{ddir}/{udd_filename(config, dispatch)}",
+                    build_udd(config, ids, dispatch),
+                )
             uhd = build_uhd(config, ids)
             if uhd is not None:
                 write_json(f"{ddir}/{slug}.uhd.json", uhd)

@@ -184,6 +184,13 @@ class KmdField:
     #: ``None`` means the field is mandatory on every kernel; that is the KMD's
     #: own semantics.
     default_value: object = None
+    #: Generator-only (never emitted): the builder's spec dataclass defaults this
+    #: field to ``default_value`` too, so a kernel may state it in neither its
+    #: metadata nor its ``kernel_source.spec``. This is how a field added to an
+    #: existing engine leaves the shipped descriptors' bytes unchanged. The
+    #: packer still proves the two defaults agree: it compares the completed
+    #: metadata with the hydrated spec's attribute for every bound field.
+    builder_default: bool = False
 
     @property
     def is_mandatory(self) -> bool:
@@ -373,6 +380,12 @@ class PackSpec:
     #: Native symbol suffix for this pack's operation-matcher, e.g. "add" ->
     #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack.
     discriminator: str = ""
+    #: The dispatch handler this pack's kernels launch through. Empty is the
+    #: engine's own, ``hipkernel.<engine>.dispatch``; a name, e.g. "split_c",
+    #: is ``hipkernel.<engine>.split_c_dispatch``, with its own UDD. A handler
+    #: declares one set of launch names, so packs whose kernels carry another
+    #: launch set (a multi-launch kernel beside single-launch ones) name one.
+    dispatch: str = ""
 
     @property
     def pascal_name(self) -> str:
@@ -406,6 +419,10 @@ class EngineSpec:
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model.
     heuristic: str = "native"
+    #: Another engine whose native symbols this engine's descriptors name, e.g. a
+    #: test-only engine serving a subset of a shipped engine's catalog through the
+    #: shipped engine's registered code. Empty names this engine's own symbols.
+    native_symbols_from: str = ""
     #: Optional IngestorPacks.hpp engine-name constant used by the generated
     #: census test; the descriptor still carries ``name`` above.
     census_name_symbol: str | None = None
@@ -492,6 +509,14 @@ class IngestorConfig:
         return len(self.packs) > 1
 
     @property
+    def has_operation_matchers(self) -> bool:
+        """Each pack narrows the engine's graph_match with its own operation-scoped
+        matcher, named by its ``discriminator``. A multi-pack engine whose packs
+        declare none is one catalog sharded across KDP files: every pack is
+        admitted by the engine's graph_match alone, like a single pack."""
+        return self.is_multi_pack and any(p.discriminator for p in self.packs)
+
+    @property
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir:
         ``direct_load`` under the authored set in ``test_descriptors/``,
@@ -542,9 +567,12 @@ class IngestorConfig:
     @property
     def native_symbol_namespace(self) -> str:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
-        becomes ``hipkernel.conv_fwd``."""
-        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", self.engine.local_name).lower()
-        return f"{self.engine.namespace}.{local_snake}"
+        becomes ``hipkernel.conv_fwd``. An engine naming ``native_symbols_from``
+        takes that engine's namespace instead of its own."""
+        name = self.engine.native_symbols_from or self.engine.name
+        namespace, local_name = name.split(":", 1)
+        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+        return f"{namespace}.{local_snake}"
 
     @property
     def graph_match_symbol(self) -> str:
@@ -558,6 +586,23 @@ class IngestorConfig:
     def dispatch_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.dispatch"
 
+    def pack_dispatch_symbol(self, pack: PackSpec) -> str:
+        """The dispatch symbol of ``pack``: the engine's own, or the one its
+        ``dispatch`` names."""
+        if not pack.dispatch:
+            return self.dispatch_symbol
+        return f"{self.native_symbol_namespace}.{pack.dispatch}_dispatch"
+
+    @property
+    def pack_dispatches(self) -> list[str]:
+        """The ``dispatch`` names the packs use, the engine's own ("") first,
+        each once, in pack order: one UDD each."""
+        names = [""]
+        for pack in self.packs:
+            if pack.dispatch not in names:
+                names.append(pack.dispatch)
+        return names
+
     @property
     def kernel_match_symbol(self) -> str:
         """Kernel-scoped dtype matcher, shared across every pack."""
@@ -565,7 +610,7 @@ class IngestorConfig:
 
     def operation_match_symbol(self, pack: PackSpec) -> str:
         """Per-pack operation-scoped matcher symbol, meaningful only when
-        ``is_multi_pack``; a single-pack engine emits none."""
+        ``has_operation_matchers``; any other engine emits none."""
         return f"{self.native_symbol_namespace}.{pack.discriminator}_match"
 
     @property

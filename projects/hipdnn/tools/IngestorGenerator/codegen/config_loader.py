@@ -67,8 +67,8 @@ class ConfigError(Exception):
 _MERGE_KEY = object()
 
 
-class _DuplicateKeySafeLoader(yaml.SafeLoader):
-    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+class _RejectRepeatedKeys:
+    """Loader mixin that refuses a mapping declaring the same key twice.
 
     Stock construction keeps the last of two equal keys and drops the first
     without a word, so a key repeated while editing a long config silently
@@ -78,6 +78,9 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
     precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
     by the stock constructor, so two spellings YAML resolves to one value (``0x10``
     and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+
+    Only construction is overridden, so the mixin works over either parser:
+    see `_DuplicateKeySafeLoader`.
     """
 
     def __init__(self, stream):
@@ -117,6 +120,23 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
                     f"this later value",
                     key_node.start_mark,
                 )
+
+
+class _PyDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.SafeLoader):
+    """`_RejectRepeatedKeys` over PyYAML's pure-Python parser."""
+
+
+if getattr(yaml, "__with_libyaml__", False):
+
+    class _CDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.CSafeLoader):
+        """`_RejectRepeatedKeys` over libyaml's parser, which reads a large config
+        an order of magnitude faster. Construction, and so every value and every
+        refused key, is the pure-Python loader's; an error's marks carry the same
+        line and column but no source snippet."""
+
+    _DuplicateKeySafeLoader = _CDuplicateKeySafeLoader
+else:
+    _DuplicateKeySafeLoader = _PyDuplicateKeySafeLoader
 
 
 #: Private, never authored: an expanded kernel dict carries the
@@ -199,6 +219,7 @@ def load_config(path: Path) -> IngestorConfig:
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic=engine_raw.get("heuristic", "native"),
+        native_symbols_from=engine_raw.get("native_symbols_from", ""),
         census_name_symbol=engine_raw.get("census_name_symbol"),
     )
 
@@ -214,8 +235,20 @@ def load_config(path: Path) -> IngestorConfig:
                 name=raw_field["name"],
                 type=raw_field["type"],
                 default_value=raw_field.get("default_value"),
+                builder_default=raw_field.get("builder_default", False),
             )
         )
+        if not isinstance(kmd_fields[-1].builder_default, bool):
+            raise ConfigError(
+                f"kmd_fields entry '{raw_field['name']}' declares builder_default "
+                f"{kmd_fields[-1].builder_default!r}; it must be true or false."
+            )
+        if kmd_fields[-1].builder_default and kmd_fields[-1].is_mandatory:
+            raise ConfigError(
+                f"kmd_fields entry '{raw_field['name']}' declares builder_default "
+                f"without a default_value. builder_default lets a kernel omit the "
+                f"field, which only a KMD default_value can then decide."
+            )
 
     kmd_field_names = {f.name for f in kmd_fields}
 
@@ -379,6 +412,7 @@ def load_config(path: Path) -> IngestorConfig:
                     pack_raw.get("arch", []), f"pack '{pack_raw['name']}' arch"
                 ),
                 discriminator=pack_raw.get("discriminator", ""),
+                dispatch=_pack_dispatch(pack_raw),
             )
         )
 
@@ -1161,10 +1195,11 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "native_symbols_from",
         "census_name_symbol",
     }
 )
-_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
+_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
 _KNOWN_PACK = frozenset(
     {
         "name",
@@ -1172,6 +1207,7 @@ _KNOWN_PACK = frozenset(
         "kernels",
         "kernel_defaults",
         "discriminator",
+        "dispatch",
         "axes",
         "kernel_template",
         "variants",
@@ -1479,6 +1515,18 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"(FNV-1a) into the global 64-bit engine-id space and requires "
             f"global uniqueness."
         )
+    borrowed = config.engine.native_symbols_from
+    if borrowed and (
+        not isinstance(borrowed, str)
+        or not ENGINE_NAME_PATTERN.match(borrowed)
+        or borrowed == config.engine.name
+    ):
+        raise ConfigError(
+            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
+            f"scoped 'namespace:local' like engine.name: the engine whose registered "
+            f"native symbols this engine's descriptors name. Omit it to name this "
+            f"engine's own."
+        )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
             f"engine.heuristic '{config.engine.heuristic}' must be 'native' "
@@ -1546,10 +1594,11 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
     )
 
 
-def _check_knobs_int_typed(config: IngestorConfig) -> None:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field.
-    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives,
-    so the loader silently produces no knob at all for any other type."""
+def _check_knobs_addressable(config: IngestorConfig) -> None:
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field.
+    ``GenericPlanBuilder::getCustomKnobs`` advertises an int field by its own value
+    and a string field by its ordinal, its index in the field's value set
+    (``KernelIngestorStateManager::knobOrdinal``); no other type is pinned there."""
     declared = config.kmd_field_by_name
     for knob in config.engine.knobs:
         kmd_field = declared.get(knob)
@@ -1558,15 +1607,13 @@ def _check_knobs_int_typed(config: IngestorConfig) -> None:
                 f"engine.knobs names '{knob}', which no kmd_fields entry "
                 f"declares. Every knob must name a declared KMD field."
             )
-        if not kmd_field.is_int_typed:
+        if not kmd_field.is_int_typed and kmd_field.type != "string":
             raise ConfigError(
                 f"engine.knobs names '{knob}', declared in kmd_fields with "
-                f"type '{kmd_field.type}'. Only int-typed fields become "
-                f"usable knobs -- a non-int knob is accepted by the loader "
-                f"and then silently produces no knob at all, with no error "
-                f"and no warning, discovered only at plan-build time against "
-                f"a real device (GenericPlanBuilder::getCustomKnobs). Retype "
-                f"'{knob}' to 'int' or remove it from engine.knobs."
+                f"type '{kmd_field.type}'. Only int-typed fields (addressed by "
+                f"value) and string-typed fields (addressed by ordinal) become "
+                f"usable knobs (GenericPlanBuilder::getCustomKnobs). Retype "
+                f"'{knob}' to 'int' or 'string', or remove it from engine.knobs."
             )
 
 
@@ -2041,31 +2088,47 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                 )
 
 
-def _check_launch_names_agree(config: IngestorConfig) -> None:
-    """Every kernel of the engine names the same set of launches.
+#: A pack's ``dispatch`` name becomes part of a native symbol.
+_PACK_DISPATCH_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
-    The engine has one dispatch handler, and the handler declares the one set of
-    launch names it launches (``launchNames()``, which the generated native stub
-    emits). The state manager drops a kernel whose set differs from it, so a
-    config mixing single-launch and multi-launch kernels, or two different sets,
-    would generate cleanly and ship kernels that are dropped at load.
+
+def _pack_dispatch(pack_raw: dict) -> str:
+    """The pack's ``dispatch`` name, "" for the engine's own handler."""
+    name = pack_raw.get("dispatch", "")
+    if name and (not isinstance(name, str) or not _PACK_DISPATCH_NAME.match(name)):
+        raise ConfigError(
+            f"pack '{pack_raw['name']}' dispatch {name!r} must be a lowercase "
+            f"identifier (it names the native symbol "
+            f"'<namespace>.{{dispatch}}_dispatch')."
+        )
+    return name
+
+
+def _check_launch_names_agree(config: IngestorConfig) -> None:
+    """Every kernel launched through one dispatch handler names the same set of
+    launches.
+
+    A dispatch handler declares the one set of launch names it launches
+    (``launchNames()``, which the generated native stub emits). The state manager
+    drops a kernel whose set differs from its pack's handler's, so a config mixing
+    single-launch and multi-launch kernels on one handler, or two different sets,
+    would generate cleanly and ship kernels that are dropped at load. The packs
+    of one engine share its handler unless a pack names its own (``dispatch``).
     """
-    expected = None
-    first = ""
+    expected: dict = {}
     for pack in config.packs:
         for kernel in pack.kernels:
             names = frozenset(kernel.kernel_source.launches)
             where = f"pack '{pack.name}' kernel '{kernel.name}'"
-            if expected is None:
-                expected, first = names, where
-            elif names != expected:
+            prior = expected.setdefault(pack.dispatch, (names, where))
+            if names != prior[0]:
                 raise ConfigError(
                     f"{where} names launches {sorted(names) or 'none'}, but "
-                    f"{first} names {sorted(expected) or 'none'}. One engine has "
-                    f"one dispatch handler, which declares one set of launch "
-                    f"names, and a kernel whose set differs is dropped when the "
-                    f"catalog loads. Split the kernels into engines by launch "
-                    f"set."
+                    f"{prior[1]} names {sorted(prior[0]) or 'none'}. Both launch "
+                    f"through one dispatch handler, which declares one set of "
+                    f"launch names, and a kernel whose set differs is dropped when "
+                    f"the catalog loads. Put the kernels of another launch set in "
+                    f"a pack that names its own dispatch."
                 )
 
 
@@ -2224,19 +2287,21 @@ def _check_workspace_policy(config: IngestorConfig) -> None:
 
 
 def _check_pack_discriminators(config: IngestorConfig) -> None:
-    """A multi-pack engine needs a discriminator per pack to name its
-    operation-scoped matcher symbol; a single-pack engine must not declare
+    """A multi-pack engine either names an operation-scoped matcher symbol
+    per pack, each pack declaring its own discriminator, or declares none and
+    shards one catalog across its packs; a single-pack engine must not declare
     one (there is nothing to discriminate -- see the UMD policy)."""
     if config.is_multi_pack:
         missing = [p.name for p in config.packs if not p.discriminator]
-        if missing:
+        if missing and len(missing) != len(config.packs):
             raise ConfigError(
-                f"packs {missing} declare no 'discriminator', but this engine "
-                f"has {len(config.packs)} packs. Every pack needs a "
-                f"discriminator to name its own operation-scoped matcher "
-                f"symbol (e.g. 'add' -> '<engine>.add_match')."
+                f"packs {missing} declare no 'discriminator', but other packs "
+                f"of this engine do. Either every pack names its own "
+                f"operation-scoped matcher symbol (e.g. 'add' -> "
+                f"'<engine>.add_match'), or none does and the packs are shards "
+                f"of one catalog that the engine's graph_match admits alone."
             )
-        names = [p.discriminator for p in config.packs]
+        names = [p.discriminator for p in config.packs if p.discriminator]
         if len(names) != len(set(names)):
             raise ConfigError(f"packs declare duplicate discriminators: {names}.")
     else:
@@ -2419,7 +2484,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # After the name, before the knobs: both read the engine block, and a name
     # defect is the one an author fixes first.
     _check_engine_declaration(config)
-    _check_knobs_int_typed(config)  # #2
+    _check_knobs_addressable(config)  # #2
     _check_kernel_metadata_against_kmd(config)  # #3
     # After #3, which establishes that every declared type is one of
     # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.

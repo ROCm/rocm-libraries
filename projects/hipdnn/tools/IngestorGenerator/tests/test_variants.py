@@ -1070,6 +1070,66 @@ class TestLaunches:
         config = _load(tmp_path, _config(kernel_defaults={}, kernels=kernels))
         assert config.launch_names == ("a", "b")
 
+    def _two_packs(self, second: dict) -> dict:
+        """A single-launch pack beside ``second``, a multi-launch one."""
+        launches = {"a": {}, "b": {"role": "b"}}
+        one = self._kernel("one", dict(self.BASE))
+        two = self._kernel("two", {**self.BASE, "launches": launches})
+        two["metadata"]["seqlen_q"] = 2
+        raw = _config(kernel_defaults={}, kernels=[one])
+        raw["packs"].append(
+            {
+                "name": "split",
+                "arch": ["gfx942"],
+                "kernel_defaults": {},
+                "kernels": [two],
+            }
+            | second
+        )
+        return raw
+
+    def test_a_pack_naming_its_own_dispatch_may_launch_another_set(self, tmp_path):
+        """Each dispatch handler declares one set of launch names, so a pack of
+        multi-launch kernels beside single-launch ones names a dispatch of its own:
+        its own UDD and native symbol, which its KDP references."""
+        from codegen.generator import build_kdp, build_udd, mint_ids
+
+        raw = self._two_packs({"dispatch": "two_step"})
+        raw["specialization"] = {
+            "metadata_fields": ["dtype", "seqlen_q", "block_m", "use_exp2_fast"],
+            "matcher_only_fields": [],
+            "bindings": {
+                "dtype": {"field": "dtype"},
+                "seqlen_q": {"field": "seqlen_q"},
+                "block_m": {"field": "block_m"},
+                "use_exp2_fast": {"method": "effective_use_exp2_fast"},
+            },
+            "vocabulary": {"dtype": {"bf16": "BF16"}},
+        }
+        config = _load(tmp_path, raw)
+        assert [pack.dispatch for pack in config.packs] == ["", "two_step"]
+        assert config.pack_dispatches == ["", "two_step"]
+        assert config.launch_names == ("a", "b")
+        ids = mint_ids(config)
+        own, split = build_udd(config, ids), build_udd(config, ids, "two_step")
+        assert own["dispatch_symbol"] == "hipkernel.attn.dispatch"
+        assert split["dispatch_symbol"] == "hipkernel.attn.two_step_dispatch"
+        assert own["id"] != split["id"]
+        assert [build_kdp(config, pack, ids)["dispatch"] for pack in config.packs] == [
+            own["id"],
+            split["id"],
+        ]
+
+    def test_launch_sets_are_checked_per_dispatch(self, tmp_path):
+        """The control: without a dispatch of its own, the multi-launch pack shares
+        the engine's handler and is refused."""
+        with pytest.raises(ConfigError, match="names launches"):
+            _load(tmp_path, self._two_packs({}))
+
+    def test_a_pack_dispatch_name_is_a_lowercase_identifier(self, tmp_path):
+        with pytest.raises(ConfigError, match="lowercase identifier"):
+            _load(tmp_path, self._two_packs({"dispatch": "Two-Step"}))
+
     @staticmethod
     def _launch_config(config, names=("decode", "merge")):
         """`config` with every kernel declaring a launch per name."""

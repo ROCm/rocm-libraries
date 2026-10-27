@@ -600,6 +600,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
+        "tests/library/tests/test_convolution_forward_packaging.py"
         "tests/library/tests/test_conv_aot_grid_limits.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_kernel_cache.py"
