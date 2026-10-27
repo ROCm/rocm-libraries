@@ -9,8 +9,9 @@
 // Instances: 16 waves (256x256x256, warps 4x4x1) and 4 waves (128x128x256, warps 2x2x1), each with
 // the default policy (one split barrier per K tile) and with the two joint barriers per K tile
 // (kUseSplitBarrier = false); plus, at 16 waves, the split barrier with fixed TDM issuers
-// (kAlternateIssuers = false) and with the TENSORcnt wait on the issuing waves only
-// (kTensorWaitAllWaves = false).
+// (kAlternateIssuers = false), with the TENSORcnt wait on the issuing waves only
+// (kTensorWaitAllWaves = false) and with the refill issued right after the arrive
+// (kRefillPoint = AfterArrive).
 //
 // Shapes: K = 256, 512 and 768 (one, two and three K tiles: both tail paths, with and without the
 // hot loop) and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_wmma.cpp (SMOKE_TEST); K = 65536 (a
@@ -61,6 +62,12 @@ struct SplitFixedIssuerPolicy : SplitBarrierPolicy
 struct TensorWaitIssuersOnlyPolicy : SplitBarrierPolicy
 {
     static constexpr bool kTensorWaitAllWaves = false;
+};
+// Split barrier; the issuers of the stage just read refill it right after their arrive. The
+// resource test skips this kernel (RefillAfterArrive in its name): it spills on some compilers.
+struct RefillAfterArrivePolicy : SplitBarrierPolicy
+{
+    static constexpr RefillPoint kRefillPoint = RefillPoint::AfterArrive;
 };
 } // namespace comp_tdm_v3_test
 
@@ -247,6 +254,7 @@ using V3Configs =
                      V3Config<256, 256, 4, 4, comp_tdm_v3_test::JointBarrierPolicy>,
                      V3Config<128, 128, 2, 2, comp_tdm_v3_test::JointBarrierPolicy>,
                      V3Config<256, 256, 4, 4, comp_tdm_v3_test::SplitFixedIssuerPolicy>,
-                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::TensorWaitIssuersOnlyPolicy>>;
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::TensorWaitIssuersOnlyPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::RefillAfterArrivePolicy>>;
 
 } // namespace

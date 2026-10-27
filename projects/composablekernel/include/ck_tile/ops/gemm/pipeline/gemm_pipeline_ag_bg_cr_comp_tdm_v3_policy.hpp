@@ -31,13 +31,17 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// published wait, inside their wave-uniform issuer branch.
     static constexpr bool kTensorWaitAllWaves = true;
 
-    /// Where the next K tile's TDM fill is issued (split barrier only).
+    /// Where the next K tile's TDM fill is issued (split barrier only). Both keep one fill per
+    /// LDS stage in flight.
     /// TopOfNextTile: every wave waits at the top of the K tile; then the issuers of the LDS
-    /// stage every wave finished reading before its previous arrive refill it. One fill per LDS
-    /// stage is in flight.
+    /// stage every wave finished reading before its previous arrive refill it.
+    /// AfterArrive: the issuers of the stage just read wait right after their own arrive, refill
+    /// that stage, then run their overlapped WMMAs; every other wave waits at the top of the next
+    /// K tile. The fill starts earlier, and the issuers give up their overlap window.
     enum class RefillPoint
     {
-        TopOfNextTile
+        TopOfNextTile,
+        AfterArrive
     };
     static constexpr RefillPoint kRefillPoint = RefillPoint::TopOfNextTile;
 

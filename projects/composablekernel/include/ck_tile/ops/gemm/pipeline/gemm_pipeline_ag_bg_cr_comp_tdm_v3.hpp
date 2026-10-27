@@ -26,8 +26,10 @@ namespace ck_tile {
  * K tile; per K sub-tile, read B whole and A one warp-GEMM row at a time, each row right before
  * its WMMAs; arrive after the read of the last row of the last sub-tile (TENSORcnt 0 first, so
  * the fill is published); that row's WMMAs run while the other waves reach the barrier. One fill
- * per stage is in flight. With kUseSplitBarrier = false the pipeline keeps V2's two joint
- * barriers per K tile and its post-compute refill.
+ * per stage is in flight. Policy::kRefillPoint = AfterArrive moves the fill earlier: the issuers
+ * of the stage just read wait right after their arrive and refill it before their overlapped
+ * WMMAs. With kUseSplitBarrier = false the pipeline keeps V2's two joint barriers per K tile and
+ * its post-compute refill.
  */
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMV3Policy>
 struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
@@ -105,6 +107,8 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         // Split barrier (Policy::kUseSplitBarrier). The split form has no data cache prefetch: a
         // policy that asks for prefetch keeps the joint form.
         static constexpr bool kSplitBarrier = Policy::kUseSplitBarrier && !UseDataCachePrefetch;
+        static constexpr bool kRefillAfterArrive =
+            Policy::kRefillPoint == Policy::RefillPoint::AfterArrive;
         // Split barrier: B resident, A read one warp-GEMM row at a time (see stage_gemm_arrive).
         // Needs BlockGemm's (MIterPerWarp, MWarp) A layout and a non-transposed A read; other
         // configurations read each K sub-tile whole.
@@ -503,15 +507,38 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     });
                 };
 
-                // One K tile t, read from LDS stage s. The wait at the top makes stage s visible and
-                // frees stage 1 - s, whose reads all came before the previous arrive. With has_next
-                // (tile t + 1 exists) the issuers of stage 1 - s then fill it with tile t + 1, and
-                // this tile's arrive publishes that fill. One fill per stage is in flight, and every
-                // wave arrives and waits once per K tile.
-                auto k_tile = [&](auto s, auto has_next) {
+                // One K tile t, read from LDS stage s.
+                // - has_next: tile t + 1 exists; its fill (LDS stage 1 - s) is published by this
+                //   tile's arrive.
+                // - TopOfNextTile: every wave waits at the top; the wait makes stage s visible and
+                //   frees stage 1 - s, whose reads all came before the previous arrive; the issuers
+                //   of stage 1 - s then fill it with tile t + 1.
+                // - AfterArrive: the fill of tile t + 1 was issued at the end of tile t - 1 (or in
+                //   the prologue) by the issuers of stage 1 - s, which already waited there
+                //   (early_prev) and skip the wait at the top. With early_next (tile t + 2 exists;
+                //   early_next_rt is its run-time part) the issuers of stage s wait right after
+                //   their arrive, when every wave has read stage s, and fill it with tile t + 2
+                //   before their overlapped WMMAs; the other waves wait at the next tile's top.
+                // Either way one fill per stage is in flight, and every wave arrives and waits
+                // once per K tile.
+                auto k_tile = [&](auto s,
+                                  auto has_next,
+                                  auto early_prev,
+                                  auto early_next,
+                                  bool early_next_rt = true) {
                     constexpr index_t si = decltype(s)::value;
-                    workgroup_barrier_wait();
-                    if constexpr(decltype(has_next)::value)
+                    if constexpr(kRefillAfterArrive && decltype(early_prev)::value)
+                    {
+                        if(!is_stage_issuer(number<1 - si>{}))
+                        {
+                            workgroup_barrier_wait();
+                        }
+                    }
+                    else
+                    {
+                        workgroup_barrier_wait();
+                    }
+                    if constexpr(!kRefillAfterArrive && decltype(has_next)::value)
                     {
                         fill_stage(number<1 - si>{});
                     }
@@ -524,29 +551,57 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         {
                             workgroup_barrier_arrive();
                         }
+                        if constexpr(kRefillAfterArrive && decltype(early_next)::value)
+                        {
+                            if(is_stage_issuer(s) && early_next_rt)
+                            {
+                                workgroup_barrier_wait();
+                                fill_stage(s);
+                            }
+                        }
                     });
                 };
 
                 arrive_publishing(I0{});
+                // AfterArrive: the issuers of stage 1 fill tile 1 the same way, right after the
+                // prologue arrive (stage 1 holds nothing yet).
+                constexpr bool has_tile1 = HasHotLoop || TailNum == TailNumber::Two;
+                if constexpr(kRefillAfterArrive && has_tile1)
+                {
+                    if(is_stage_issuer(I1{}))
+                    {
+                        workgroup_barrier_wait();
+                        fill_stage(I1{});
+                    }
+                }
+
+                using True  = bool_constant<true>;
+                using False = bool_constant<false>;
                 if constexpr(HasHotLoop)
                 {
                     index_t i_global_read = amd_wave_read_first_lane(2);
                     do
                     {
-                        k_tile(I0{}, bool_constant<true>{});
-                        k_tile(I1{}, bool_constant<true>{});
+                        // tiles i_global_read - 2 and - 1; tile i_global_read always exists, tile
+                        // i_global_read + 1 does not on the last trip of a TailNumber::One loop
+                        k_tile(I0{}, True{}, True{}, True{});
+                        k_tile(I1{},
+                               True{},
+                               True{},
+                               True{},
+                               TailNum == TailNumber::Two || i_global_read + 1 < num_loop);
                         i_global_read += 2;
                     } while(i_global_read < num_loop);
                 }
 
                 if constexpr(TailNum == TailNumber::Two)
                 {
-                    k_tile(I0{}, bool_constant<true>{});
-                    k_tile(I1{}, bool_constant<false>{});
+                    k_tile(I0{}, True{}, True{}, False{});
+                    k_tile(I1{}, False{}, False{}, False{});
                 }
                 else if constexpr(TailNum == TailNumber::One)
                 {
-                    k_tile(I0{}, bool_constant<false>{});
+                    k_tile(I0{}, False{}, False{}, False{});
                 }
                 workgroup_barrier_wait();
                 // No fill is in flight here (the last K tile issues none); kept so that every
