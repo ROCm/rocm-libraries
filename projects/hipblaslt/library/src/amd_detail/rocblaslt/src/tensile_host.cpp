@@ -4112,6 +4112,12 @@ namespace
             return gInstance;
         }
 
+        ~TuningScratch()
+        {
+            for(const auto& entry : m_slots)
+                static_cast<void>(hipFree(entry.second.ptr));
+        }
+
         size_t cap() const
         {
             return m_cap;
