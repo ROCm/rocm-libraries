@@ -58,6 +58,10 @@ ninja
 | **Device Memory Utility** | Surface<type> | MigratableMemory<type> |
 | **Device Memory Access** | Surface<type>::devPtr | MigratableMemory<type>::deviceData() |
 
+### cuDNN Compatibility Headers
+
+hipDNN also provides cuDNN-spelled headers under `frontend/include/hipdnn_compatibility/cudnn/` (for example, `#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>`). These headers let hipified code keep cuDNN type names. They are installed only when hipDNN is built with `HIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. See the samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/).
+
 ### Tensor Dimensions and Layouts
 
 Tensor dimension ordering in hipDNN is **operation-specific**, following the same conventions as
