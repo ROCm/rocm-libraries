@@ -8553,6 +8553,8 @@ namespace
         }
         ~HandleDeviceScope()
         {
+            // Nothing can report a failed restore here, and the call's own
+            // status has already been decided.
             if(m_changed && m_previous >= 0)
                 static_cast<void>(hipSetDevice(m_previous));
         }
@@ -8594,7 +8596,6 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
                                                  const char*       libraryPath,
                                                  const char*       codeObjectPath,
                                                  std::vector<int>& kernelIndices)
-try
 {
     kernelIndices.clear();
 
@@ -8694,19 +8695,9 @@ try
     }
     return rocblaslt_status_success;
 }
-catch(const std::exception& e)
-{
-    log_error(__func__, e.what());
-    return rocblaslt_status_internal_error;
-}
-catch(...)
-{
-    return rocblaslt_status_internal_error;
-}
 
 rocblaslt_status rocblaslt_local_kernel_set_exact_match(
     rocblaslt_handle handle, int kernelIndex, size_t m, size_t n, size_t batch, size_t k)
-try
 {
     if(!handle)
         return rocblaslt_status_invalid_handle;
@@ -8726,19 +8717,9 @@ try
         return rocblaslt_status_invalid_value;
     return rocblaslt_status_success;
 }
-catch(const std::exception& e)
-{
-    log_error(__func__, e.what());
-    return rocblaslt_status_internal_error;
-}
-catch(...)
-{
-    return rocblaslt_status_internal_error;
-}
 
 rocblaslt_status
     rocblaslt_local_kernel_counts(rocblaslt_handle handle, size_t* registered, size_t* selectable)
-try
 {
     if(!handle)
         return rocblaslt_status_invalid_handle;
@@ -8757,15 +8738,6 @@ try
     if(selectable)
         *selectable = localLibrary->selectableCount();
     return rocblaslt_status_success;
-}
-catch(const std::exception& e)
-{
-    log_error(__func__, e.what());
-    return rocblaslt_status_internal_error;
-}
-catch(...)
-{
-    return rocblaslt_status_internal_error;
 }
 
 bool rocblaslt_is_local_kernel_index(int index)
