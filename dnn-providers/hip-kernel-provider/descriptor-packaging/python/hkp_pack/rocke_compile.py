@@ -454,6 +454,39 @@ def _check_support_predicate(module, builder, spec_obj, arch):
         )
 
 
+def _refuse_unchecked_launch_contract(kernel, builder, arch):
+    """Refuse a kernel whose launch contract a packed code object would drop.
+
+    A kernel that states parameter facts or an exact workgroup size is checked
+    on the host before every launch, by rocke's `KernelLauncher.from_artifact`.
+    A packed code object carries none of those rows, and the ingestor launches
+    it with its own geometry, so packing such a kernel would ship it with its
+    checks silently gone. rocke's `write_artifact` refuses the same kernels for
+    the same reason. A `KernelModule` is refused when any of its kernels states
+    such a row. Anything else the builder returned is left to the compile step,
+    which reports what it cannot lower.
+    """
+    from rocke.core.ir import KernelDef
+    from rocke.helpers import KernelModule
+    from rocke.runtime import parameter_contract
+
+    if isinstance(kernel, KernelModule):
+        kernels = [kernel.primary, *kernel.companions.values()]
+    elif isinstance(kernel, KernelDef):
+        kernels = [kernel]
+    else:
+        return
+    for each in kernels:
+        if parameter_contract(each).states_facts:
+            raise HkpPackError(
+                f"builder '{builder}' @ {arch} returned kernel '{each.name}', which "
+                "states parameter facts or an exact workgroup size. A packed code "
+                "object does not carry them yet, so a launch through the ingestor "
+                "would go unchecked; launch it with rocke's "
+                "KernelLauncher.from_artifact instead of packing it."
+            )
+
+
 def compile_rocke_variant(
     source,
     builder,
@@ -479,6 +512,8 @@ def compile_rocke_variant(
     rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
+    A kernel that states parameter facts or an exact workgroup size is refused
+    before it is compiled: the packed object would launch without their checks.
 
     A builder may instead return a `rocke.helpers.KernelModule` (a primary kernel
     plus role-keyed companions), lowered via `compile_module` into one code
@@ -538,6 +573,8 @@ def compile_rocke_variant(
         raise HkpPackError(
             f"builder call failed ({type(exc).__name__}): {exc}"
         ) from exc
+
+    _refuse_unchecked_launch_contract(kernel, builder, compile_arch)
 
     compile_kernel, ComgrError = _load_compiler()
     KernelModule, compile_module = _load_module_compiler()

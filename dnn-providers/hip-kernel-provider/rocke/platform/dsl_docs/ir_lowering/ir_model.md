@@ -352,6 +352,9 @@ text.
 A C++ caller may also pass a parameter's Value as a bound (`rocke_int_bound_t.value_bound`); it is
 stored as that parameter's relation.
 
+The host checks the facts through `KernelLauncher.from_artifact`, which reads them as the kernel's
+parameter contract (`rocke.runtime.parameter_contract`; see `runtime/compile_launch_and_manifest.md`).
+
 ### Values only the GPU can see: `gpu_checked_value`
 
 ```python
