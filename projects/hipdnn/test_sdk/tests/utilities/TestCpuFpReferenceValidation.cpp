@@ -1337,7 +1337,7 @@ TYPED_TEST(PayloadNanSentinel, IsQuietNaNDistinctFromDefaultQuietNaN)
     const auto sentinelBits = payloadNanSentinelBits<TypeParam>();
     ASSERT_TRUE(sentinelBits.has_value());
 
-    const TypeParam sentinelValue = payloadNanSentinelValue<TypeParam>();
+    const auto sentinelValue = payloadNanSentinelValue<TypeParam>();
     const uint64_t defaultBits
         = non_finite_detail::elementBits(std::numeric_limits<TypeParam>::quiet_NaN());
 

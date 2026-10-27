@@ -685,17 +685,19 @@ TEST(TestParseBundleMetadataJson, UnknownOrMistypedValidatorAndPlacementThrow)
 
 // Bug caught: "under" without a target tensor has nothing to misalign, and a stray uid on
 // another placement would be silently ignored.
-TEST(TestParseBundleMetadataJson, PlacementUidIsRequiredExactlyForUnder)
+TEST(TestParseBundleMetadataJson, PlacementUidIsRequiredForUnderAndIgnoredOtherwise)
 {
     EXPECT_THROW(parseBundleMetadataJson(
                      nlohmann::json::parse(R"({"format_version": 1, "placement": "under"})")),
                  BundleMetadataError);
-    EXPECT_THROW(parseBundleMetadataJson(nlohmann::json::parse(
-                     R"({"format_version": 1, "placement": "exact", "placement_uid": 4})")),
-                 BundleMetadataError);
-    EXPECT_THROW(parseBundleMetadataJson(
-                     nlohmann::json::parse(R"({"format_version": 1, "placement_uid": 4})")),
-                 BundleMetadataError);
+    // A space renders the uid for every placement; only "under" acts on it.
+    const auto exact = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 1, "placement": "exact", "placement_uid": 4})"));
+    EXPECT_EQ(exact.placement, CasePlacement::EXACT);
+    EXPECT_EQ(exact.placementUid, std::optional<int64_t>(4));
+    const auto bare = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "placement_uid": 4})"));
+    EXPECT_EQ(bare.placement, CasePlacement::DEFAULT);
 }
 
 TEST(TestParseBundleMetadataJson, ValidatorAndPlacementSpellingIsExact)

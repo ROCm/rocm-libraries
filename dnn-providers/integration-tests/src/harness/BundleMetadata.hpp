@@ -128,15 +128,15 @@ struct BundleMetadata
     std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
     CaseValidator validator = CaseValidator::DEFAULT;
     CasePlacement placement = CasePlacement::DEFAULT;
-    /// The tensor `placement: "under"` misaligns. Set exactly when placement is UNDER.
+    /// The tensor `placement: "under"` misaligns. Required for UNDER; ignored by every other
+    /// placement, so a space can always render it.
     std::optional<int64_t> placementUid;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
 };
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`, `purpose`,
-/// `validator` or `placement`, a `placement` of "under" without `placement_uid` (or the uid
-/// without "under"), a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
+/// `validator` or `placement`, a `placement` of "under" without `placement_uid`, a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
 /// valid JSON. An authoring error,
 /// never a "metadata not recorded" case, so it must not degrade to defaults.
 class BundleMetadataError : public std::runtime_error
@@ -150,8 +150,8 @@ public:
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
 /// `format_version`, carries an unsupported format version, has an invalid
-/// `enforcement_level`, `purpose`, `validator` or `placement`, a placement/placement_uid
-/// mismatch, or has an `inputs` key that is not a tensor UID.
+/// `enforcement_level`, `purpose`, `validator` or `placement`, an "under" placement without
+/// placement_uid, or has an `inputs` key that is not a tensor UID.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -325,11 +325,6 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     if(meta.placement == CasePlacement::UNDER && !meta.placementUid.has_value())
     {
         throw BundleMetadataError(where + " has placement \"under\" but no placement_uid");
-    }
-    if(meta.placement != CasePlacement::UNDER && meta.placementUid.has_value())
-    {
-        throw BundleMetadataError(where
-                                  + " has placement_uid, which only placement \"under\" uses");
     }
 
     if(json.contains("inputs") && json["inputs"].is_object())

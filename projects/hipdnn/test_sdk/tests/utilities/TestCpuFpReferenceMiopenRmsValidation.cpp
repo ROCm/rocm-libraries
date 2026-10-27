@@ -658,7 +658,7 @@ TYPED_TEST(CpuFpReferenceMiopenRmsValidationNonFiniteMask, NonFiniteDisagreement
     const std::vector<int64_t> dims = {2, 2};
     const TypeParam nanValue = std::numeric_limits<TypeParam>::quiet_NaN();
     const TypeParam infValue = std::numeric_limits<TypeParam>::infinity();
-    const TypeParam one(1.0f);
+    const TypeParam one = static_cast<TypeParam>(1.0f);
 
     const std::vector<std::pair<TypeParam, TypeParam>> disagreements = {{nanValue, one},
                                                                         {one, nanValue},

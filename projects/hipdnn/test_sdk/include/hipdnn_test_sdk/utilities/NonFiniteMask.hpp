@@ -203,9 +203,9 @@ inline std::optional<uint64_t>
 template <typename T>
 T payloadNanSentinelValue() noexcept
 {
-    constexpr std::optional<uint64_t> bits = payloadNanSentinelBits<T>();
-    static_assert(bits.has_value(), "T has no payload NaN sentinel");
-    const auto storage = static_cast<non_finite_detail::StorageBits<T>>(*bits);
+    constexpr std::optional<uint64_t> BITS = payloadNanSentinelBits<T>();
+    static_assert(BITS.has_value(), "T has no payload NaN sentinel");
+    const auto storage = static_cast<non_finite_detail::StorageBits<T>>(*BITS);
     T value{};
     std::memcpy(&value, &storage, sizeof(T));
     return value;
