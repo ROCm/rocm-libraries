@@ -98,8 +98,13 @@ void GpuFpReferenceLayernorm::launchBprop(const void* dyPtr,
         outerSize, innerSize, stride, dyDims, dyStrides, normalizedDimCount);
 
     detail::launchKernel1d(kernel.function(), outerSize * stride, localSize, &args, sizeof(args));
-    detail::launchKernel1d(
-        kernelWeights.function(), outerSize * stride, localSize, &argsWeights, sizeof(argsWeights));
+    // LayernormBwdWeightsRef runs one thread per dscale/dbias element (gid = threadIdx.x +
+    // blockIdx.x * LOCAL_SIZE), so the grid covers innerSize rather than the group count.
+    detail::launchKernel1d(kernelWeights.function(),
+                           (innerSize + localSize - 1) / localSize,
+                           localSize,
+                           &argsWeights,
+                           sizeof(argsWeights));
 }
 
 } // namespace hipdnn_gpu_ref
