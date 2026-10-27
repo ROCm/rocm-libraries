@@ -34,7 +34,8 @@ that CI built.
 
 ## Running
 
-The harness itself needs Python 3.9 or later and `msgpack` (`pip install msgpack`). To test a
+The harness itself needs Python 3.9 or later, `msgpack` and PyYAML (`pip install msgpack
+pyyaml`). To test a
 CI build, take the GitHub Actions run ID of a TheRock or rocm-libraries multi-arch CI run and
 fetch its artifacts with TheRock's `install_rocm_from_artifacts.py`, from a TheRock checkout
 with its `requirements.txt` installed:
@@ -59,8 +60,27 @@ problem type, a quick stratified sample), `--limit` and `--dedupe` narrow the ru
 slice of the corpus, and every shard writes its own `shard-<i>-of-<n>/` directory under the
 same `--out`. `report.py --out <dir>` merges whatever shards are present.
 
-The exit code is 1 when any case failed, crashed or timed out, 3 when the GPU stopped running
-even a basic GEMM, and 0 otherwise.
+The exit code is 1 when a case failed, crashed or timed out outside the known-bugs list, or the
+list needs attention; 2 for a usage error or a malformed list; 3 when the GPU stopped running
+even a basic GEMM; and 0 otherwise.
+
+## Known bugs
+
+[`clients/tests/data/kernel_corpus_known_bugs.yaml`](../../tests/data/kernel_corpus_known_bugs.yaml)
+lists kernels known to fail, each with a ticket, the date it was added, a review date and a
+reason. Listed kernels still run. A failing case that matches an entry is reported as
+`known_fail` with its ticket and does not fail the run. Two things do fail it, so the list cannot
+hide a fix or go stale:
+
+- every case an entry matches passed: the bug looks fixed, so the fixing PR removes the entry;
+- an entry's `review_by` date has passed: renew it with a new date and reason, or remove it.
+
+An entry that matched no case in this run (a shard that did not reach it, or a retune that
+renamed the kernel) is reported as not seen and does not fail the run. Entries name a kernel by
+architecture and solution name, the TensileLite name that survives a retune; the file's header
+lists the optional fields that narrow a match. `--known-bugs <file>` uses another list, and
+`--no-known-bugs` reports every failure as a failure. `summary.md` lists every entry with its
+age and outcome.
 
 ## Outcomes
 
@@ -68,6 +88,7 @@ even a basic GEMM, and 0 otherwise.
 | --- | --- |
 | `pass` | fast_check found every element of D correct |
 | `fail` | a wrong answer, or another gtest failure |
+| `known_fail` | a failure, crash or timeout that matches an entry in the known-bugs list |
 | `crash`, `timeout` | the process died or went silent during the case; `fault` marks a GPU memory fault |
 | `refused` | the pinned solution rejected the problem (`NO solution found!`), a planner miss or a predicate that is too strict |
 | `skip` | hipblaslt-test skipped the case |
