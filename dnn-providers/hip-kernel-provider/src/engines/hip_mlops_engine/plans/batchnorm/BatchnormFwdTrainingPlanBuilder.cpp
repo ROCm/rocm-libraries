@@ -269,16 +269,16 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
         return false;
     }
 
+    if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
+    {
+        return false;
+    }
+
     // Ragged tensors address each batch through a device offset table; the kernels
     // read dense strides only, so decline rather than read a packed buffer as dense.
     if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
     {
         HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTraining plan builder does not support ragged tensors");
-        return false;
-    }
-
-    if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
-    {
         return false;
     }
 

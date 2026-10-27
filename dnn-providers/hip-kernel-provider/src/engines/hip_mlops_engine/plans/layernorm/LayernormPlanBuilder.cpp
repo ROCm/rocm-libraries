@@ -85,14 +85,6 @@ bool LayernormPlanBuilder::isApplicable(
         return false;
     }
 
-    // Ragged tensors address each batch through a device offset table; the kernels
-    // read dense strides only, so decline rather than read a packed buffer as dense.
-    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
-    {
-        HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder does not support ragged tensors");
-        return false;
-    }
-
     auto anyNodeIsNotF32Compute = [&]() {
         return !std::all_of(
             opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), [](const auto& node) {
@@ -119,6 +111,14 @@ bool LayernormPlanBuilder::isApplicable(
                        LayernormBackwardAttributes}))
         {
             HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder is not applicable for this graph");
+            return false;
+        }
+
+        // Ragged tensors address each batch through a device offset table; the kernels
+        // read dense strides only, so decline rather than read a packed buffer as dense.
+        if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
+        {
+            HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder does not support ragged tensors");
             return false;
         }
 
