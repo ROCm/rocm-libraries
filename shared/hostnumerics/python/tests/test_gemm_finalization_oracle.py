@@ -41,7 +41,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 include_amax=False,
             )
 
-        full = run(hv.IndexRange.all())
+        full = run(hv.IndexRange.all(inputs.size))
         partial = run(set(selected))
 
         self.assertIsNotNone(full.raw_output)
@@ -97,7 +97,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
             compute_type_a=None,
             compute_type_b=None,
             math_mode=hv.MathMode.Default,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(initial.size),
             index_order=hv.LastDimensionFastest(),
             backend=hv.GemmBackend.Automatic,
             accumulation_rounding=hv.AccumulationRounding.TypeDefault,
@@ -145,7 +145,7 @@ class GemmFinalizationOracleTests(unittest.TestCase):
                 compute_type_a=None,
                 compute_type_b=None,
                 math_mode=hv.MathMode.Default,
-                indices=hv.IndexRange.all(),
+                indices=hv.IndexRange.all(initial.size),
                 index_order=hv.LastDimensionFastest(),
                 output_conversion=hv.OutputConversion.Default,
                 accumulation_rounding=hv.AccumulationRounding.TypeDefault,

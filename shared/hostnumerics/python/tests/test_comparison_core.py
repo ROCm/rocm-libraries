@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import sys
 
 from _hostnumerics_test_support import *  # noqa: F403
 
@@ -95,7 +94,7 @@ class ComparisonCoreTests(unittest.TestCase):  # noqa: F405
             observed,
             expected,
             selected,
-            hv.IndexRange(0, 2, sys.maxsize * 2 + 1),
+            hv.IndexRange(0, 6, 2),
             [1, 0],
         )
         expected_flat_fortran = expected_values.reshape(-1, order="F")

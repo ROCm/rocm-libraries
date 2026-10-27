@@ -604,7 +604,10 @@ namespace TensileLite::Client::hostnumerics
             {
                 size_t selectedCount;
                 if constexpr(std::is_same_v<Indices, roc::hostnumerics::IndexRange>)
-                    selectedCount = indices.count(*logicalCount);
+                    selectedCount
+                        = roc::hostnumerics::IndexRange(
+                              indices.start, std::min(indices.end, *logicalCount), indices.stride)
+                              .count();
                 else
                 {
                     if(!indices.empty() && *indices.rbegin() >= *logicalCount)
@@ -1256,7 +1259,7 @@ namespace TensileLite::Client::hostnumerics
                            b,
                            d,
                            options,
-                           roc::hostnumerics::IndexRange::all(),
+                           roc::hostnumerics::IndexRange::all(d.elementCount()),
                            roc::hostnumerics::LastDimensionFastest{},
                            backend);
             else
@@ -1275,11 +1278,12 @@ namespace TensileLite::Client::hostnumerics
         if(epilogue)
         {
             if(selectAllOutputs)
-                referenceEpilogueInto(epilogue->input,
-                                      epilogue->outputs,
-                                      epilogue->options,
-                                      roc::hostnumerics::IndexRange::all(),
-                                      roc::hostnumerics::LastDimensionFastest{});
+                referenceEpilogueInto(
+                    epilogue->input,
+                    epilogue->outputs,
+                    epilogue->options,
+                    roc::hostnumerics::IndexRange::all(epilogue->input.elementCount()),
+                    roc::hostnumerics::LastDimensionFastest{});
             else
                 referenceEpilogueInto(epilogue->input,
                                       epilogue->outputs,

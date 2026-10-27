@@ -243,7 +243,7 @@ static ComparisonReport compareBound(const Tensor& observed, const Tensor& expec
 
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                          const ComparisonOptions& options) {
-    return compare(observed, expected, options, IndexRange::all(),
+    return compare(observed, expected, options, IndexRange::all(observed.elementCount()),
                    observed.shape().indexOrderLastDimensionFastest());
 }
 ComparisonReport compare(const Tensor& observed, const Tensor& expected,
@@ -313,7 +313,7 @@ std::optional<ComparisonTolerance> findAllCloseTolerance(const Tensor& observed,
                                                          std::span<const double> relativeCandidates,
                                                          ComparisonOptions options) {
     return findAllCloseTolerance(observed, expected, absoluteCandidates, relativeCandidates,
-                                 options, IndexRange::all(),
+                                 options, IndexRange::all(observed.elementCount()),
                                  observed.shape().indexOrderLastDimensionFastest());
 }
 
@@ -385,7 +385,8 @@ SentinelReport checkUnusedTensorStorage(const Tensor& logicalTensor, size_t allo
         throw std::runtime_error("Logical tensor addresses outside allocated storage.");
     std::vector<bool> used(allocatedElements, false);
     layout.shape().forEachCoordinateLastDimensionFastest(
-        IndexRange::all(), [&](size_t, std::span<const size_t> coordinates) {
+        IndexRange::all(layout.shape().elementCount()),
+        [&](size_t, std::span<const size_t> coordinates) {
             used[static_cast<size_t>(detail::preparedElementOffset(layout, coordinates))] = true;
         });
 

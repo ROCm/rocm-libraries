@@ -176,7 +176,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation_parameter0=0.0,
             activation_parameter1=0.0,
             output_conversion=hv.OutputConversion.Default,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(values.size),
             index_order=hv.LastDimensionFastest(),
         )
         pre_activation = values + bias[:, None]
@@ -209,7 +209,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation_parameter1=0.0,
             output_conversion=hv.OutputConversion.Default,
             include_amax=False,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(values.size),
             index_order=hv.LastDimensionFastest(),
         )
         raw = values * 2.0
@@ -256,7 +256,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             activation_parameter1=0.0,
             include_raw_output=False,
             include_amax=False,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(int8_values.size),
             index_order=hv.LastDimensionFastest(),
         )
         np.testing.assert_array_equal(
@@ -281,7 +281,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(gradient.size),
             index_order=hv.LastDimensionFastest(),
         )
         expected = gradient * (activation_input > 0)
@@ -301,7 +301,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(gradient.size),
             index_order=hv.LastDimensionFastest(),
         )
         coefficient0 = np.float32(0.7978845608028654)
@@ -400,7 +400,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     output_conversion=hv.OutputConversion.Default,
                     include_raw_output=False,
                     include_amax=False,
-                    indices=hv.IndexRange.all(),
+                    indices=hv.IndexRange.all(values.size),
                     index_order=hv.LastDimensionFastest(),
                 )
                 np.testing.assert_allclose(
@@ -449,7 +449,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
                     output_conversion=hv.OutputConversion.Default,
                     include_raw_output=False,
                     include_amax=False,
-                    indices=hv.IndexRange.all(),
+                    indices=hv.IndexRange.all(gradient.size),
                     index_order=hv.LastDimensionFastest(),
                 )
                 np.testing.assert_allclose(
@@ -474,7 +474,7 @@ class ReferenceOperationsTests(unittest.TestCase):  # noqa: F405
             output_conversion=hv.OutputConversion.Default,
             include_raw_output=False,
             include_amax=False,
-            indices=hv.IndexRange.all(),
+            indices=hv.IndexRange.all(values.size),
             index_order=hv.LastDimensionFastest(),
         )
         expected = 1.0 / (1.0 + np.exp(-values))

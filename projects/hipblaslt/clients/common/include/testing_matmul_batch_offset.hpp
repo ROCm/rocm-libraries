@@ -315,7 +315,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 scaledC,
                 result,
                 computeType,
-                roc::hostnumerics::IndexRange::all(),
+                roc::hostnumerics::IndexRange::all(result.elementCount()),
                 roc::hostnumerics::LastDimensionFastest{});
     }
 
@@ -366,11 +366,12 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 .maxReportedMismatches = 0,
             };
 
-            const auto comparison = compare(observedD.shareStorageWithLayout(observedLayout),
-                                            expectedD.shareStorageWithLayout(expectedLayout),
-                                            options,
-                                            roc::hostnumerics::IndexRange::all(),
-                                            std::vector<size_t>{1, 0});
+            const auto comparison
+                = compare(observedD.shareStorageWithLayout(observedLayout),
+                          expectedD.shareStorageWithLayout(expectedLayout),
+                          options,
+                          roc::hostnumerics::IndexRange::all(observedLayout.shape().elementCount()),
+                          std::vector<size_t>{1, 0});
             matched &= comparison.passed();
             maximumDifference = std::max(maximumDifference, comparison.maxAbsoluteDifference);
         }

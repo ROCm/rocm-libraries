@@ -1019,7 +1019,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                         hd[i].shareStorageWithLayout(comparisonLayout),
                         hd_gold[i].shareStorageWithLayout(comparisonLayout),
                         comparisonOptions,
-                        roc::hostnumerics::IndexRange::all(),
+                        roc::hostnumerics::IndexRange::all(comparisonLayout.shape().elementCount()),
                         std::vector<size_t>{1, 0});
                     passed = passed && comparison.passed();
                     for(const auto& mismatch : comparison.reportedMismatches)

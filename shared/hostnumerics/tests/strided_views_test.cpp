@@ -34,7 +34,7 @@ void testStridedAndOffsetViews() {
         multiply(product, 2.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
     const Tensor scaledC =
         multiply(inputC, 3.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
-    addInto(scaledProduct, scaledC, d, ScalarType::Float32, IndexRange::all(),
+    addInto(scaledProduct, scaledC, d, ScalarType::Float32, IndexRange::all(d.elementCount()),
             LastDimensionFastest{});
 
     std::array<float, 12> expected;

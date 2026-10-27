@@ -15,7 +15,7 @@ struct GemmTestCase : detail::GemmInvocation {
         : GemmTestCase(std::move(a), std::move(b), std::move(d), MatmulOptions(accumulator)) {}
 
     GemmTestCase(Tensor a, Tensor b, Tensor d, const MatmulOptions& options)
-        : detail::GemmInvocation(a, b, d, options, IndexRange::all(),
+        : detail::GemmInvocation(a, b, d, options, IndexRange::all(d.elementCount()),
                                  d.shape().indexOrderLastDimensionFastest()) {}
 };
 
