@@ -27,7 +27,12 @@
 #pragma once
 
 #include <atomic>
+#include <iterator>
+#include <list>
+#include <mutex>
 #include <shared_mutex>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 
 #include <Tensile/ContractionProblem.hpp>
@@ -256,6 +261,13 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
+            if constexpr(CacheKey<MyProblem>::implemented)
+            {
+                auto const* amdgpu = dynamic_cast<AMDGPU const*>(&hardware);
+                if(amdgpu == nullptr)
+                    return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+                return findTopSolutionsByKey(problem, *amdgpu, numSolutions);
+            }
             try
             {
                 auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
@@ -325,13 +337,114 @@ namespace TensileLite
             return m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
         }
 
+        /// Upper bound on the problems whose findTopSolutions results are kept;
+        /// at the bound, a new problem replaces the least recently used one.
+        static constexpr size_t TopSolutionsCapacity = size_t(1) << 14;
+
     private:
+        struct TopSolutions
+        {
+            SolutionVector<MySolution> solutions;
+            bool                       returnedAll = false;
+        };
+
+        struct TopEntry
+        {
+            std::string  key;
+            TopSolutions value;
+        };
+        using TopList = std::list<TopEntry>;
+
+        SolutionVector<MySolution> findTopSolutionsByKey(MyProblem const& problem,
+                                                         AMDGPU const&    amdgpu,
+                                                         int              numSolutions) const
+        {
+            thread_local std::string key;
+            key.clear();
+            AppendCacheKeys(key, amdgpu, problem);
+
+            SolutionVector<MySolution> solutions;
+            bool                       returnedAll = false;
+            {
+                std::lock_guard<std::mutex> lock(m_topMutex);
+                auto                        it = m_top.find(key);
+                if(it != m_top.end())
+                {
+                    m_topOrder.splice(m_topOrder.begin(), m_topOrder, it->second);
+                    solutions   = it->second->value.solutions;
+                    returnedAll = it->second->value.returnedAll;
+                }
+            }
+            lastFindTopRetAll = returnedAll;
+            if(solutions.size() >= numSolutions || returnedAll)
+                return solutions;
+
+            // The sub-library can reach another CachingLibrary on this thread,
+            // which reuses `key`.
+            std::string ownKey = key;
+            solutions          = m_subLibrary->findTopSolutions(problem, amdgpu, numSolutions);
+            if(solutions.size() != 0)
+            {
+                TopSolutions entry{solutions, m_subLibrary->lastFindTopAlreadyRetAll()};
+                std::lock_guard<std::mutex> lock(m_topMutex);
+                storeTopSolutions(std::move(ownKey), std::move(entry));
+            }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
+            return solutions;
+        }
+
+        // Called with m_topMutex held.
+        void storeTopSolutions(std::string&& key, TopSolutions&& entry) const
+        {
+            auto it = m_top.find(key);
+            if(it != m_top.end())
+            {
+                it->second->value = std::move(entry);
+                m_topOrder.splice(m_topOrder.begin(), m_topOrder, it->second);
+                return;
+            }
+            // Reserving the full capacity up front means the map never rehashes.
+            if(m_top.empty())
+                m_top.reserve(TopSolutionsCapacity);
+            if(m_top.size() < TopSolutionsCapacity)
+            {
+                m_topOrder.push_front(TopEntry{std::move(key), std::move(entry)});
+                m_top.emplace(m_topOrder.front().key, m_topOrder.begin());
+                return;
+            }
+            // The map keys view the list's strings: drop the evicted key from the
+            // map before its string is overwritten, then reuse both nodes.
+            auto oldest   = std::prev(m_topOrder.end());
+            auto node     = m_top.extract(oldest->key);
+            oldest->key   = std::move(key);
+            oldest->value = std::move(entry);
+            m_topOrder.splice(m_topOrder.begin(), m_topOrder, oldest);
+            node.key() = oldest->key;
+            m_top.insert(std::move(node));
+        }
+
         std::shared_ptr<Library>  m_subLibrary;
         mutable Cache             m_cache;
         mutable Caches            m_caches;
         mutable CachesAllSolsFlag m_cachesAllSolutions;
         mutable CachesGroupedGemm m_cachesGroupedGemm;
         mutable std::atomic<bool> lastFindTopRetAll = false;
+
+        mutable std::mutex m_topMutex;
+        // Most recently used first.
+        mutable TopList                                                          m_topOrder;
+        mutable std::unordered_map<std::string_view, typename TopList::iterator> m_top;
     };
+
+    /// `library` without the CachingLibrary that wraps it, if any.
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        withoutCache(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> const& library)
+    {
+        auto cache = std::dynamic_pointer_cast<CachingLibrary<MyProblem, MySolution>>(library);
+        return cache ? cache->library() : library;
+    }
 
 } // namespace TensileLite
