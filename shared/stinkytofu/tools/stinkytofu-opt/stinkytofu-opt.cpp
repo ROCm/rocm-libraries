@@ -47,6 +47,7 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/support/PassArguments.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
 #include "stinkytofu/support/TimePassesInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
@@ -74,9 +75,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        GfxArchID arch =
-            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
-                         passCtx.getGemmTileConfig().arch[2]);
+        GfxArchID arch = getGfxArchID(passCtx.getGemmTileConfig().arch);
 
         std::string irText = readFile(stinkytofuIRFile);
 
@@ -135,15 +134,6 @@ static bool isRemovedDsPacingFlag(const std::string& a) {
         if (a == f || a.starts_with(f + "=")) return true;
     }
     return false;
-}
-
-static void trimWhitespace(std::string& s) {
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
-        s.erase(0, 1);
-    }
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
-        s.pop_back();
-    }
 }
 
 int extractOptLevel(int argc, char** argv) {
@@ -227,22 +217,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
             std::string body = arg.substr(2);  // strip "--"
             RequestedPass rp;
             size_t eq = body.find('=');
-            if (eq == std::string::npos) {
-                rp.name = std::move(body);
-            } else {
-                rp.name = body.substr(0, eq);
-                std::string rest = body.substr(eq + 1);
-                size_t start = 0;
-                while (start <= rest.size()) {
-                    size_t comma = rest.find(',', start);
-                    std::string tok = rest.substr(
-                        start, comma == std::string::npos ? std::string::npos : comma - start);
-                    trimWhitespace(tok);
-                    if (!tok.empty()) rp.args.push_back(std::move(tok));
-                    if (comma == std::string::npos) break;
-                    start = comma + 1;
-                }
-            }
+            rp.name = body.substr(0, eq);
+            if (eq != std::string::npos) rp.args = splitPassArgs(body.substr(eq + 1));
             passes.push_back(std::move(rp));
         }
     }
@@ -702,8 +678,8 @@ int main(int argc, char** argv) {
     // Prefer the named stepping's identity when the user gave one; the triple alone first-matches
     // v1 for steppings that share it. resolvedArchName is only set after getArchInfo(name)
     // confirmed the name is registered, so getGfxArchID(name) here never hits its assert path.
-    GfxArchID archID = resolvedArchName.empty() ? getGfxArchID(arch[0], arch[1], arch[2])
-                                                : getGfxArchID(resolvedArchName);
+    GfxArchID archID =
+        resolvedArchName.empty() ? getGfxArchID(arch) : getGfxArchID(resolvedArchName);
 
     stinkytofu::MultiParseResult parsed;
     std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
@@ -717,11 +693,10 @@ int main(int argc, char** argv) {
         if (asmResult.hasErrors()) {
             std::cerr << "Error: Failed to parse assembly input file\n";
             for (const auto& diag : asmResult.diagnostics)
-                std::cerr << "  " << diag.getMessage() << "\n";
+                std::cerr << "  " << diag.format() << "\n";
             return 1;
         }
-        for (const auto& diag : asmResult.diagnostics)
-            std::cerr << "Warning: " << diag.getMessage() << "\n";
+        for (const auto& diag : asmResult.diagnostics) std::cerr << diag.format() << "\n";
         asmSignature = std::move(asmResult.signature);
         if (asmResult.parsedFunction)
             parsed.functions.push_back(std::move(asmResult.parsedFunction));
@@ -730,8 +705,7 @@ int main(int argc, char** argv) {
         parsed = stinkytofu::parseAllSourceStringsWithDiagnostics(fileContent);
         if (parsed.hasErrors()) {
             std::cerr << "Error: Failed to parse input file\n";
-            for (const auto& diag : parsed.diagnostics)
-                std::cerr << "  " << diag.getMessage() << "\n";
+            for (const auto& diag : parsed.diagnostics) std::cerr << "  " << diag.format() << "\n";
             return 1;
         }
         // Fall back to single-function parsing for flat format (no st.func)
@@ -927,9 +901,7 @@ int main(int argc, char** argv) {
             passManager.setGemmTileConfig(gemmTileConfig);
             auto caps = stinkytofu::ToolchainCaps::probe(archID);
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
-            // Stand in for rocisa's archCaps, which only TensileLite can supply.
-            caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
-            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
+            stinkytofu::applyStandaloneArchCaps(caps, arch);
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 

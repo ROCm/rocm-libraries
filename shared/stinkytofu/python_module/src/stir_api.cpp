@@ -55,6 +55,7 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/PassArguments.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -122,23 +123,6 @@ std::string errorText(const std::vector<Diagnostic>& diagnostics) {
         out << diagnostic.format();
     }
     return out.str();
-}
-
-std::vector<std::string> splitArgs(const std::string& text) {
-    std::vector<std::string> args;
-    std::string current;
-    for (char ch : text) {
-        if (ch == ',') {
-            current = trimCopy(std::move(current));
-            if (!current.empty()) args.push_back(std::move(current));
-            current.clear();
-        } else {
-            current.push_back(ch);
-        }
-    }
-    current = trimCopy(std::move(current));
-    if (!current.empty()) args.push_back(std::move(current));
-    return args;
 }
 
 std::string catalogNames() {
@@ -251,9 +235,7 @@ std::unique_ptr<StinkyAsmModule> loadStir(const std::string& text, std::array<in
         throw std::invalid_argument("unknown arch (" + std::to_string(arch[0]) + ", " +
                                     std::to_string(arch[1]) + ", " + std::to_string(arch[2]) + ")");
     }
-    const GfxArchID archId =
-        getGfxArchID(static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
-                     static_cast<uint32_t>(arch[2]));
+    const GfxArchID archId = getGfxArchID(arch);
 
     MultiParseResult parsed = parseAllSourceStringsWithDiagnostics(withoutModuleWrapper(text));
     const std::string errors = errorText(parsed.diagnostics);
@@ -320,14 +302,8 @@ void runOnePass(StinkyAsmModule& module, Function& function, const std::string& 
     GemmTileConfig tile;
     tile.arch = arch;
     passManager.setGemmTileConfig(tile);
-    const GfxArchID archId =
-        getGfxArchID(static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
-                     static_cast<uint32_t>(arch[2]));
-    AsmCapsConfig caps = ToolchainCaps::probe(archId);
-    if (arch == std::array<int, 3>{12, 5, 0}) {
-        caps.requiresXCntForVolatileVMEM = true;
-        caps.enableXnackReplay = true;
-    }
+    AsmCapsConfig caps = ToolchainCaps::probe(getGfxArchID(arch));
+    applyStandaloneArchCaps(caps, arch);
     passManager.setAsmCapsConfig(caps);
     passManager.getPassContext().setRemarksEnabled(true);
 
@@ -344,16 +320,6 @@ void runOnePass(StinkyAsmModule& module, Function& function, const std::string& 
                 missedLines.push_back(line);
             }
         });
-
-    bool known = false;
-    for (const PassInfo& info : passCatalog()) {
-        if (name == info.name) {
-            known = true;
-            break;
-        }
-    }
-    if (!known)
-        throw std::invalid_argument("unknown pass '" + name + "'; passes: " + catalogNames());
 
     std::unique_ptr<Pass> pass = createCatalogPass(name, args);
     if (!pass) throw std::invalid_argument(name + " rejected its arguments");
@@ -383,9 +349,10 @@ void runPasses(StinkyAsmModule& module, const std::vector<std::string>& specs) {
         const size_t eq = spec.find('=');
         Requested item;
         item.name = trimCopy(eq == std::string::npos ? spec : spec.substr(0, eq));
-        if (eq != std::string::npos) item.args = splitArgs(spec.substr(eq + 1));
-        if (item.name.empty())
-            throw std::invalid_argument("unknown pass ''; passes: " + catalogNames());
+        if (eq != std::string::npos) item.args = splitPassArgs(spec.substr(eq + 1));
+        if (findCatalogPass(item.name) == nullptr)
+            throw std::invalid_argument("unknown pass '" + item.name +
+                                        "'; passes: " + catalogNames());
         requested.push_back(std::move(item));
     }
 

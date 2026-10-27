@@ -75,6 +75,14 @@ def test_unknown_pass_names_a_real_pass():
         module.run_passes(["NotARealPass"])
 
 
+def test_unknown_pass_runs_nothing():
+    module = stinkytofu.load_stir(KERNEL)
+    before = module.serialize()
+    with pytest.raises(ValueError, match="unknown pass 'NotARealPass'"):
+        module.run_passes(["RemoveInstructionPass=v_mov_b32", "NotARealPass"])
+    assert module.serialize() == before
+
+
 def test_pass_names_lists_the_lift():
     assert "LiftAsmRegistersToSSAPass" in stinkytofu.pass_names()
 
