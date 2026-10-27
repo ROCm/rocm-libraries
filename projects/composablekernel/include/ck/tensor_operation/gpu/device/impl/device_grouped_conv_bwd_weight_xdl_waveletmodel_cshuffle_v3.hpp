@@ -285,7 +285,8 @@ template <ck::index_t NDimSpatial,
           typename ComputeTypeB    = ComputeTypeA,
           index_t NumGroupsToMerge = 1,
           bool DirectLoad          = false,
-          bool UseTdm              = false>
+          bool UseTdm              = false,
+          bool UseNamedBarrier     = false>
 struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -502,9 +503,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         ComputeTypeA,
         ComputeTypeB,
         DirectLoad,
-        UseTdm, // UseTdmA
-        false,  // UseTdmB
-        false,  // UseNamedBarrier
+        UseTdm,          // UseTdmA
+        false,           // UseTdmB
+        UseNamedBarrier, // UseNamedBarrier
         UseLdsTranspose>;
     using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
@@ -1389,6 +1390,10 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
         if constexpr(UseTdm)
         {
             str << "_Tdm";
+        }
+        if constexpr(UseNamedBarrier)
+        {
+            str << "_PingPong";
         }
         str << "<" << TileLoadThreadGroupSize << "l," << TileMathThreadGroupSize << "m, "
             << MPerBlock << ", "
