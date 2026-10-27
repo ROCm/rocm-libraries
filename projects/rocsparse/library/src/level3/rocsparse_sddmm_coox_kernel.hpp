@@ -72,9 +72,10 @@ namespace rocsparse
         static constexpr rocsparse_int NUM_COEFF         = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
         const I                        local_coeff_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
         const I local_thread_index                       = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
-        const int64_t                  incx = (orderA == rocsparse_order_column)
-                                                  ? ((transA == rocsparse_operation_none) ? lda : 1)
-                                                  : ((transA == rocsparse_operation_none) ? 1 : lda);
+
+        const int64_t incx = (orderA == rocsparse_order_column)
+                                 ? ((transA == rocsparse_operation_none) ? lda : 1)
+                                 : ((transA == rocsparse_operation_none) ? 1 : lda);
 
         const int64_t incy = (orderB == rocsparse_order_column)
                                  ? ((transB == rocsparse_operation_none) ? 1 : ldb)
