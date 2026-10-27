@@ -8,10 +8,11 @@ a :class:`DirectSession` owns the compiler's persistent worker threads (so a
 compile pays no thread start) and the state of a streamed input. Results are
 those of ``build_direct_rocke_ir_hsaco`` on the same IR, byte for byte.
 
-The C ABI is ``rocke_codeobj_session_*_v1`` in ``rocke/code_object_ffi.h``.
-Calls on one session must not overlap; this wrapper serializes them with a
-lock, so a session may be shared between Python threads. Distinct sessions
-are independent.
+The C ABI is ``rocke_codeobj_session_*_v1`` in ``rocke/code_object_ffi.h``, and
+``rocke_codeobj_session_create_v2`` for a session of another target than
+gfx1151. Calls on one session must not overlap; this wrapper serializes them
+with a lock, so a session may be shared between Python threads. Distinct
+sessions are independent.
 
 Usage::
 
@@ -35,10 +36,14 @@ from .code_object import (
     CodeObjectCompilerInfo,
     CodeObjectError,
     CodeObjectTimings,
+    DirectUnsupported,
     _CodeObjectCompileResultV1,
     _direct_library_functions,
     _direct_rocke_compiler_info,
+    _direct_supported_targets,
+    _direct_target,
     _DirectGemmCompileRequestV1,
+    _rejection,
     _require_direct_library,
 )
 
@@ -53,6 +58,28 @@ class _SessionOptionsV1(ctypes.Structure):
         ("struct_size", ctypes.c_uint32),
         ("worker_threads", ctypes.c_uint32),
     ]
+
+
+class _SessionOptionsV2(ctypes.Structure):
+    _fields_ = [
+        ("struct_size", ctypes.c_uint32),
+        ("worker_threads", ctypes.c_uint32),
+        ("target", ctypes.c_char_p),
+    ]
+
+
+@functools.cache
+def _session_create_v2(path: str):
+    """The library's session constructor that takes a target, or None."""
+    library, _compile_gemm, _dispose = _direct_library_functions(path)
+    create = getattr(library, "rocke_codeobj_session_create_v2", None)
+    if create is not None:
+        create.argtypes = [
+            ctypes.POINTER(_SessionOptionsV2),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        create.restype = ctypes.c_int32
+    return create
 
 
 @functools.cache
@@ -102,10 +129,7 @@ def _take_result(
             else ""
         )
         if status != 0 or result.status != 0:
-            raise CodeObjectError(
-                "direct rocKE IR compiler rejected the kernel"
-                + (f": {diagnostics}" if diagnostics else "")
-            )
+            raise _rejection(diagnostics)
         if not result.hsaco or not 0 < result.hsaco_size <= 64 * 1024 * 1024:
             raise CodeObjectError(
                 f"direct compiler returned invalid image size {result.hsaco_size}"
@@ -124,18 +148,24 @@ def _take_result(
 
 
 class DirectSession:
-    """A compile session of the direct gfx1151 compiler; see the module docs.
+    """A compile session of the direct compiler for one target (``isa``, an
+    ISA name or target ID the library reports; gfx1151 by default); see the
+    module docs.
 
     ``worker_threads`` is the number of threads the session starts (0 picks a
     default). Close the session (or use it as a context manager) to stop them.
+    A target the library does not compile for raises :class:`DirectUnsupported`.
     """
 
     def __init__(self, worker_threads: int = 0, *, isa: str = _DIRECT_ISA) -> None:
-        if isa.split(":")[0] != _DIRECT_ISA:
-            raise CodeObjectError(
-                f"the direct code-object backend targets {_DIRECT_ISA}, not {isa!r}"
-            )
         self._path = _require_direct_library()
+        target = _direct_target(isa)
+        supported = _direct_supported_targets(self._path)
+        if target not in supported:
+            raise DirectUnsupported(
+                f"the direct code-object backend compiles for {', '.join(supported)}, "
+                f"not {isa!r}"
+            )
         (
             self._create,
             self._free,
@@ -144,12 +174,23 @@ class DirectSession:
             self._finish,
             self._dispose,
         ) = _session_functions(self._path)
-        options = _SessionOptionsV1(
-            struct_size=ctypes.sizeof(_SessionOptionsV1),
-            worker_threads=int(worker_threads),
-        )
         handle = ctypes.c_void_p()
-        if self._create(ctypes.byref(options), ctypes.byref(handle)) != 0 or not handle:
+        create_for_target = _session_create_v2(self._path)
+        if create_for_target is not None:
+            self._target_name = target.encode("ascii")
+            options = _SessionOptionsV2(
+                struct_size=ctypes.sizeof(_SessionOptionsV2),
+                worker_threads=int(worker_threads),
+                target=self._target_name,
+            )
+            created = create_for_target(ctypes.byref(options), ctypes.byref(handle))
+        else:
+            options = _SessionOptionsV1(
+                struct_size=ctypes.sizeof(_SessionOptionsV1),
+                worker_threads=int(worker_threads),
+            )
+            created = self._create(ctypes.byref(options), ctypes.byref(handle))
+        if created != 0 or not handle:
             raise CodeObjectError("cannot create a direct compile session")
         self._handle: ctypes.c_void_p | None = handle
         self._lock = threading.Lock()

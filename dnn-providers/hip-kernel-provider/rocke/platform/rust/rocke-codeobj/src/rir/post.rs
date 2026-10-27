@@ -406,15 +406,20 @@ fn result_latency(inst: &MInst) -> u32 {
 /// which bounds the change in register pressure.
 pub fn schedule_window(f: &mut MFunc, window: usize) {
     let units = UnitIndex::new(f.blocks.iter().flat_map(|b| b.insts.iter()));
+    let target = f.target;
     for block in f.blocks.iter_mut() {
         let insts = std::mem::take(&mut block.insts);
-        block.insts = schedule_block(insts, window, &units);
+        block.insts = schedule_block(insts, window, &units, target);
     }
 }
 
 const NO_INST: u32 = u32::MAX;
 
-fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex) -> Vec<MInst> {
+fn schedule_block(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target) -> Vec<MInst> {
+    let result_latency = |inst: &MInst| match target {
+        crate::target::Target::Gfx1151 => result_latency(inst),
+        crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
+    };
     let n = insts.len();
     // Dependence edges (from, to, latency); successor order does not matter.
     let mut edges: Vec<(u32, u32, u32)> = Vec::with_capacity(4 * n);
@@ -1137,6 +1142,14 @@ fn lds_merge(inst: &MInst) -> bool {
     inst.op.flags() & (F_LDS | F_TIED) == F_LDS | F_TIED
 }
 
+/// The use of a d16 load that is its destination's old value: its last.
+/// Any other use naming the destination, such as an address in the
+/// register the load overwrites, is read when the load issues.
+fn tied_source(inst: &MInst) -> Option<usize> {
+    let last = inst.uses.len().checked_sub(1)?;
+    (inst.op.flags() & F_TIED != 0 && inst.defs.contains(&inst.uses[last])).then_some(last)
+}
+
 /// One step of the wait model; returns the wait to insert before `inst`.
 fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
     let flags = inst.op.flags();
@@ -1144,13 +1157,14 @@ fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
     let lds_merge = lds_merge(inst);
     let mut need_vm = NONE;
     let mut need_lgkm = NONE;
-    for o in inst.uses.iter().chain(inst.defs.iter()) {
+    let tied_use = tied_source(inst);
+    for (i, o) in inst.uses.iter().chain(inst.defs.iter()).enumerate() {
         // VMEM loads write VGPRs in issue order, and a d16 load merges into
         // the half it keeps when it writes, so neither a load's destination
         // nor that tied source waits for an earlier VMEM load. The same holds
         // for LDS: a wave's DS results are written in issue order, and an
         // LDS d16 load writes only its half when its data returns.
-        let tied = inst.defs.contains(o);
+        let tied = i >= inst.uses.len() || tied_use == Some(i);
         for k in reg_keys(o) {
             if !(vmem_load && tied) {
                 need_vm = need_vm.min(state.vm.get(k));
@@ -1429,7 +1443,7 @@ mod tests {
 
     fn schedule_block(insts: Vec<MInst>, window: usize) -> Vec<MInst> {
         let units = UnitIndex::new(insts.iter());
-        super::schedule_block(insts, window, &units)
+        super::schedule_block(insts, window, &units, crate::target::Target::Gfx1151)
     }
 
     #[test]
@@ -1548,7 +1562,7 @@ mod tests {
     }
 
     fn func(insts: Vec<MInst>) -> MFunc {
-        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs: Vec::new() }
+        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs: Vec::new(), ..Default::default() }
     }
 
     fn with_waits(f: &MFunc) -> Vec<(Opc, i64)> {
@@ -1574,6 +1588,36 @@ mod tests {
                 (Opc::DsLoadU16D16, 0),
                 (Opc::SWaitcnt, waitcnt_imm(NONE, 0)),
                 (Opc::VAddNcU32, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_address_in_the_destination_waits_for_its_load() {
+        // A reload into v1, then a load through v1 into v1 (forced spilling
+        // made this common): the address is read at issue, unlike the
+        // destination, so it waits; the d16 merge's kept half still does not.
+        let saddr = Opnd::P(Phys::S(0), 2);
+        let mut f = func(vec![
+            MInst::new(Opc::ScratchLoadB32, [v(1)], []).with_imm(16),
+            MInst::new(Opc::GLoadB32, [v(1)], [v(1), saddr]).with_mods(M_SADDR),
+            MInst::new(Opc::DsLoadU16, [v(2)], [v(12)]),
+            MInst::new(Opc::DsLoadU16D16Hi, [v(2)], [v(2), v(2)]),
+            MInst::new(Opc::GLoadB32, [v(3)], [v(13), saddr]).with_mods(M_SADDR),
+            MInst::new(Opc::GLoadD16HiB16, [v(3)], [v(14), saddr, v(3)]).with_mods(M_SADDR),
+        ]);
+        insert_waitcnt(&mut f);
+        assert_eq!(
+            with_waits(&f),
+            [
+                (Opc::ScratchLoadB32, 0),
+                (Opc::SWaitcnt, waitcnt_imm(0, NONE)),
+                (Opc::GLoadB32, 0),
+                (Opc::DsLoadU16, 0),
+                (Opc::SWaitcnt, waitcnt_imm(NONE, 0)),
+                (Opc::DsLoadU16D16Hi, 0),
+                (Opc::GLoadB32, 0),
+                (Opc::GLoadD16HiB16, 0),
             ]
         );
     }

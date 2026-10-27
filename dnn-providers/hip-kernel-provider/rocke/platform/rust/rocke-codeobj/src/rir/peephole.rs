@@ -1150,7 +1150,7 @@ mod tests {
 
     impl Builder {
         fn new() -> Self {
-            Builder { f: MFunc { blocks: vec![MBlock::default()], vregs: Vec::new() } }
+            Builder { f: MFunc { blocks: vec![MBlock::default()], vregs: Vec::new(), ..Default::default() } }
         }
         fn reg(&mut self, class: Class, size: u8) -> VRef {
             let align = if class == Class::S && size >= 2 { 2 } else { 1 };
@@ -1501,7 +1501,7 @@ mod tests {
         run(&mut g, ALL);
         let head: Vec<Opc> = g.blocks[0].insts.iter().map(|i| i.op).collect();
         assert_eq!(head, [Opc::SAddI32, Opc::SMaxI32, Opc::SCmpLgU32, Opc::SCbranchScc0]);
-        assert_eq!(ops(&MFunc { blocks: vec![g.blocks[1].clone()], vregs: g.vregs.clone() }), [Opc::VCmp(0x49), Opc::VCmp(0x49)]);
+        assert_eq!(ops(&MFunc { blocks: vec![g.blocks[1].clone()], vregs: g.vregs.clone(), ..Default::default() }), [Opc::VCmp(0x49), Opc::VCmp(0x49)]);
     }
 
     #[test]
@@ -1737,7 +1737,7 @@ mod tests {
             (MInst::new(Opc::VCndmaskB32, [v(0, 1)], [imm(0), v(1, 1), s(3, 1)]), vec![0xD501_0000, 0x000E_0280]),
         ];
         for (inst, want) in cases {
-            let f = MFunc { blocks: vec![MBlock { insts: vec![inst.clone()], loop_depth: 0 }], vregs: Vec::new() };
+            let f = MFunc { blocks: vec![MBlock { insts: vec![inst.clone()], loop_depth: 0 }], vregs: Vec::new(), ..Default::default() };
             let words: Vec<u32> = super::super::asm::assemble(&f)
                 .expect("encodes")
                 .chunks(4)

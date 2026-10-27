@@ -272,7 +272,7 @@ mod tests {
     }
 
     fn words(inst: &MInst) -> Vec<u32> {
-        let f = MFunc { blocks: vec![MBlock { insts: vec![inst.clone()], loop_depth: 0 }], vregs: Vec::new() };
+        let f = MFunc { blocks: vec![MBlock { insts: vec![inst.clone()], loop_depth: 0 }], vregs: Vec::new(), ..Default::default() };
         super::super::asm::assemble(&f)
             .expect("encodes")
             .chunks(4)
@@ -382,7 +382,7 @@ mod tests {
     }
 
     fn block(insts: Vec<MInst>) -> MFunc {
-        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs: Vec::new() }
+        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs: Vec::new(), ..Default::default() }
     }
 
     // Expected words from `llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`.

@@ -85,6 +85,27 @@ ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_compile_gfx1151_wmma_gemm_v1(
 ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_compile_rocke_ir_v1(
     const rocke_codeobj_compile_request_v1* request, rocke_codeobj_compile_result_v1* result);
 
+/* Request for rocke_codeobj_compile_rocke_ir_v2: the v1 request plus the
+ * target to compile for. */
+typedef struct rocke_codeobj_compile_request_v2
+{
+    uint32_t struct_size; /* sizeof(rocke_codeobj_compile_request_v2) */
+    const uint8_t* serialized_ir;
+    size_t serialized_ir_size;
+    const char* target; /* NUL-terminated target name: "gfx1151" or "gfx950" */
+} rocke_codeobj_compile_request_v2;
+
+/* rocke_codeobj_compile_rocke_ir_v1 for request->target. A NULL, unknown or
+ * unsupported target fails with a "request: ..." diagnostic; a kernel using an
+ * operation the compiler does not lower for the target fails with a
+ * "ROCKE_DIRECT_UNSUPPORTED: ..." one. */
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_compile_rocke_ir_v2(
+    const rocke_codeobj_compile_request_v2* request, rocke_codeobj_compile_result_v1* result);
+
+/* The targets the library compiles for: a static NUL-terminated,
+ * comma-separated list of names (e.g. "gfx1151,gfx950"). Do not free it. */
+ROCKE_CODEOBJ_FFI_API const char* rocke_codeobj_supported_targets_v1(void);
+
 ROCKE_CODEOBJ_FFI_API void
     rocke_codeobj_compile_result_dispose_v1(rocke_codeobj_compile_result_v1* result);
 
@@ -130,29 +151,44 @@ typedef struct rocke_codeobj_session_options_v1
 ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_create_v1(
     const rocke_codeobj_session_options_v1* options, rocke_codeobj_session_v1** session);
 
+typedef struct rocke_codeobj_session_options_v2
+{
+    uint32_t struct_size; /* sizeof(rocke_codeobj_session_options_v2) */
+    uint32_t worker_threads; /* threads to start; 0 picks a default from the machine */
+    const char* target; /* NUL-terminated name of the target every compile is for */
+} rocke_codeobj_session_options_v2;
+
+/* rocke_codeobj_session_create_v1 with a target: the session's compile and
+ * finish entry points compile for it. NULL options take the defaults
+ * (gfx1151); a NULL, unknown or unsupported target fails as a mismatched
+ * struct_size does. */
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_create_v2(
+    const rocke_codeobj_session_options_v2* options, rocke_codeobj_session_v1** session);
+
 /* Stops and joins the session's threads and frees it; NULL is ignored. */
 ROCKE_CODEOBJ_FFI_API void rocke_codeobj_session_free_v1(rocke_codeobj_session_v1* session);
 
 /* rocke_codeobj_compile_rocke_ir_v1 using the session's threads. Same request
  * and result conventions; dispose the result as usual. */
-ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_compile_v1(rocke_codeobj_session_v1* session,
-                                                              const rocke_codeobj_compile_request_v1* request,
-                                                              rocke_codeobj_compile_result_v1* result);
+ROCKE_CODEOBJ_FFI_API int32_t
+    rocke_codeobj_session_compile_v1(rocke_codeobj_session_v1* session,
+                                     const rocke_codeobj_compile_request_v1* request,
+                                     rocke_codeobj_compile_result_v1* result);
 
 /* Appends size bytes at data to the input being streamed (starting a stream
  * if none is). Returns 0, or 1 without effect for a NULL session, NULL data
  * with size > 0, or an overlapping call. */
 ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_feed_v1(rocke_codeobj_session_v1* session,
-                                                           const uint8_t* data,
-                                                           size_t size);
+                                                            const uint8_t* data,
+                                                            size_t size);
 
 /* Compiles everything fed since the last finish, as
  * rocke_codeobj_compile_rocke_ir_v1 would compile it whole (an empty or
  * non-UTF-8 input fails the same way), and ends the stream. Result
  * conventions as for the other entry points; executable_seconds counts from
  * this call, not the overlapped parsing before it. */
-ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_finish_v1(rocke_codeobj_session_v1* session,
-                                                             rocke_codeobj_compile_result_v1* result);
+ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_session_finish_v1(
+    rocke_codeobj_session_v1* session, rocke_codeobj_compile_result_v1* result);
 
 #ifdef __cplusplus
 } /* extern "C" */

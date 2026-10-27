@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-//! Developer driver: `cargo run --release --example mir_dump -- [--peephole] <out-dir> <in.ir>...`.
+//! Developer driver: `cargo run --release --example mir_dump -- [--peephole] [--target <gfx>] <out-dir> <in.ir>...`.
 //! Writes `<out-dir>/<stem>.mir` for each input: the machine IR after
 //! instruction selection, dead-copy removal and VALU fusion, in a line format
 //! for offline pattern mining. With `--peephole` the peephole pass runs where
@@ -9,6 +9,8 @@
 //! then left out): `<stem>.pre.mir` is its input, `<stem>.mir` its output, and
 //! how often each rule family fired is printed per input.
 //! `MIR_DUMP_TIME_REPS=<n>` also prints the pass's mean time over n runs.
+//! `--target gfx950` selects for gfx950 (gfx1151 by default); VALU fusion
+//! and the peephole pass are gfx11's, so its dump stops after dead-copy removal.
 //!
 //! ```text
 //! kernel <name>
@@ -24,6 +26,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use rocke_codeobj_ffi::rir::{analysis, isel, mir, opt, parse, peephole, post};
+use rocke_codeobj_ffi::target::Target;
 
 fn operand(o: &mir::Opnd) -> String {
     match o {
@@ -77,8 +80,17 @@ fn main() {
     if with_peephole {
         args.remove(1);
     }
-    if args.len() < 3 {
-        eprintln!("usage: mir_dump [--peephole] <out-dir> <in.ir>...");
+    let mut target = Target::Gfx1151;
+    if args.len() > 2 && args[1] == "--target" {
+        let name = args.remove(2);
+        args.remove(1);
+        target = Target::from_name(&name).unwrap_or_else(|| {
+            eprintln!("mir_dump: unknown target {name}");
+            std::process::exit(2)
+        });
+    }
+    if args.len() < 3 || (with_peephole && target != Target::Gfx1151) {
+        eprintln!("usage: mir_dump [--peephole] [--target <gfx>] <out-dir> <in.ir>... (--peephole is gfx1151's)");
         std::process::exit(2);
     }
     let out_dir = Path::new(&args[1]);
@@ -92,10 +104,11 @@ fn main() {
         let text = std::fs::read_to_string(path).expect("read IR");
         let selected = (|| {
             let mut kernel = parse::parse(&text)?;
+            kernel.wave = target.info().wave;
             let (mut lds, lds_size) = analysis::lds_layout(&kernel);
             let facts = opt::optimize(&mut kernel, &mut lds)?;
             let uniform = analysis::classify(&kernel);
-            let mut sel = isel::select(&kernel, &facts, uniform, &lds, lds_size)?;
+            let mut sel = isel::select_for(target, &kernel, &facts, uniform, &lds, lds_size)?;
             post::remove_dead_copies(&mut sel.func);
             let mut pre = None;
             let stats = if with_peephole {
@@ -115,7 +128,9 @@ fn main() {
                 }
                 Some(peephole::optimize(&mut sel.func))
             } else {
-                post::fuse_valu(&mut sel.func);
+                if target == Target::Gfx1151 {
+                    post::fuse_valu(&mut sel.func);
+                }
                 None
             };
             Ok::<_, rocke_codeobj_ffi::error::CompileError>((kernel.name.clone(), sel.func, stats, pre))

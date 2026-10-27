@@ -732,6 +732,13 @@ pub struct Kernel {
     /// occupancy cap: trading waves below the achievable count for a wider
     /// scheduling window is slower on gfx1151.
     pub waves_per_eu: (u32, u32),
+    /// Lanes per wave of the GPU the kernel compiles for: the parser's 32
+    /// (gfx1151) until the compile driver sets its target's.
+    pub wave: u32,
+    /// VGPRs the allocation may use when fewer than the target's: `None`
+    /// from the parsers; `rir::compile_any_target_limited` sets it to test
+    /// spilling.
+    pub vgpr_limit: Option<u32>,
     pub params: Vec<Param>,
     pub body: Region,
     pub values: Vec<ValueDef>,

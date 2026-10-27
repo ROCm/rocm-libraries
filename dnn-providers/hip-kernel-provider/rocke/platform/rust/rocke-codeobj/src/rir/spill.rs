@@ -203,7 +203,8 @@ impl Spiller {
     fn new_temp(&mut self, f: &mut MFunc, class: Class, n: u8) -> VRef {
         let reg = f.vregs.len() as u32;
         let align = match (class, n) {
-            (Class::V, _) | (Class::S, 1) => 1,
+            (Class::V, 1) | (Class::S, 1) => 1,
+            (Class::V, _) => f.target.info().vgpr_tuple_align,
             (Class::S, 2) => 2,
             _ => 4,
         };

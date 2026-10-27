@@ -330,6 +330,9 @@ struct Simplifier<'k> {
 /// bounds the stack should a rule pair ever cycle.
 const MAX_REWRITE_DEPTH: u32 = 64;
 
+/// Definitions `low_zeros` looks through to a shift, a product or a constant.
+const LOW_ZEROS_DEPTH: u32 = 6;
+
 /// A region being simplified: the ops still to visit and the output so far.
 struct OpenRegion {
     input: std::collections::VecDeque<Op>,
@@ -964,7 +967,7 @@ impl<'k> Simplifier<'k> {
                 }
             }
             OpKind::Cmp | OpKind::Fcmp => Some(Range::new(0, 1)),
-            OpKind::LaneId => Some(Range::new(0, 31)),
+            OpKind::LaneId => Some(Range::new(0, self.kernel.wave as i64 - 1)),
             _ => None,
         }
     }
@@ -1122,6 +1125,15 @@ impl<'k> Simplifier<'k> {
                                     return Ok(Some(a));
                                 }
                             }
+                            if let Some((x, k)) = cb.and_then(|mask| self.masked_add_parts(a, mask)) {
+                                let x = if k == 0 {
+                                    x
+                                } else {
+                                    let kv = self.int_const(&ty, k);
+                                    self.emit(OpKind::Add, ty.clone(), [x, kv], modular(), out)
+                                };
+                                return Ok(Some(self.emit(OpKind::And, ty, [x, b], [], out)));
+                            }
                         }
                     }
                     OpKind::Or => {
@@ -1212,6 +1224,9 @@ impl<'k> Simplifier<'k> {
                         }
                     }
                 }
+                if let Some(v) = self.known_bits_test(a, b, pred) {
+                    return Ok(Some(self.int_const(&bool_ty, v as i64)));
+                }
                 if let (Some(ra), Some(rb)) = (self.range(a), self.range(b)) {
                     let known = match pred {
                         "lt" => decide(ra.hi < rb.lo, ra.lo >= rb.hi),
@@ -1299,6 +1314,8 @@ impl<'k> Simplifier<'k> {
                 .def_of(operands[0])
                 .filter(|d| d.kind == OpKind::CastToF32 && *self.kernel.ty(d.operand(0)) == ty)
                 .map(|d| d.operand(0))),
+            OpKind::Fma if ty == Type::Scalar(Scalar::F32) => Ok(self.zero_product_fma(operands, out)),
+            OpKind::Fadd if ty == Type::Scalar(Scalar::F32) => Ok(self.repeated_zero_add(operands)),
             _ => Ok(None),
         }
     }
@@ -1332,6 +1349,128 @@ impl<'k> Simplifier<'k> {
 
     fn def_of(&self, value: ValueId) -> Option<Def> {
         self.defs.get(value.0 as usize).copied().flatten()
+    }
+
+    /// `(x, k mod 2^n)` when `value` is `x + k` with a constant `k` outside
+    /// `0..2^n`, `n >= 2` the bit length of `mask`: a carry only moves up, so
+    /// `(x + k) & mask == (x + k mod 2^n) & mask` whether or not the add
+    /// wraps, and offsets that differ by multiples of `2^n` meet, with what
+    /// is computed from them (the conv loaders' divisions of a K index). A
+    /// parity (`& 1`) is left alone: merging saves one cheap test, rewriting
+    /// adds an add where `x + k` stays live, and measured no faster
+    /// (direct depthwise and grouped dgrad).
+    fn masked_add_parts(&self, value: ValueId, mask: i64) -> Option<(ValueId, i64)> {
+        let def = self.def_of(value).filter(|d| d.kind == OpKind::Add && d.count == 2 && mask >= 3)?;
+        let modulus = 1i128 << (64 - mask.leading_zeros());
+        [(0, 1), (1, 0)].into_iter().find_map(|(x, k)| {
+            let k = self.int(def.operand(k))? as i128;
+            let reduced = k.rem_euclid(modulus);
+            (reduced != k).then_some((def.operand(x), reduced as i64))
+        })
+    }
+
+    /// Low bits of `value` known to be zero, up to 64: a constant's trailing
+    /// zeros; a left shift by a constant and a product add them; a sum, a
+    /// difference and a bitwise or or xor keep the fewer of their operands',
+    /// a bitwise and the more. Wrapping drops high bits only, so it keeps them.
+    fn low_zeros(&self, value: ValueId, depth: u32) -> u32 {
+        if let Some(k) = self.int(value) {
+            return if k == 0 { 64 } else { k.trailing_zeros() };
+        }
+        let Some(d) = self.def_of(value).filter(|d| d.count == 2 && depth > 0) else {
+            return 0;
+        };
+        let (x, y) = (d.operand(0), d.operand(1));
+        let zeros = |v: ValueId| self.low_zeros(v, depth - 1);
+        match d.kind {
+            OpKind::Shl => match self.int(y) {
+                Some(s) if (0..shift_width(self.kernel.ty(value))).contains(&s) => (zeros(x) + s as u32).min(64),
+                _ => 0,
+            },
+            OpKind::Mul => (zeros(x) + zeros(y)).min(64),
+            OpKind::Add | OpKind::Sub | OpKind::Or | OpKind::Xor => zeros(x).min(zeros(y)),
+            OpKind::And => zeros(x).max(zeros(y)),
+            _ => 0,
+        }
+    }
+
+    /// The constant `value & mask` when the bits `mask >= 0` keeps are known:
+    /// `value` has at least as many low zero bits as `mask` has bits, or is
+    /// `x + k` with such an `x` and a constant `k`, whose low bits are then
+    /// those of the sum (no carry reaches them).
+    fn masked_known(&self, value: ValueId, mask: i64) -> Option<i64> {
+        if mask < 0 {
+            return None;
+        }
+        let bits = 64 - mask.leading_zeros();
+        if self.low_zeros(value, LOW_ZEROS_DEPTH) >= bits {
+            return Some(0);
+        }
+        let def = self.def_of(value).filter(|d| d.kind == OpKind::Add && d.count == 2)?;
+        [(0, 1), (1, 0)].into_iter().find_map(|(x, k)| {
+            let k = self.int(def.operand(k))?;
+            (self.low_zeros(def.operand(x), LOW_ZEROS_DEPTH) >= bits).then_some(k & mask)
+        })
+    }
+
+    /// The outcome of `(x & mask) == c` (or `!=`) when `masked_known` knows
+    /// `x & mask`. The parity test of a stride-2 tap, `(4 bx + j - s) % 2 == 0`,
+    /// is then a constant per (j, s), as LLVM's known bits make it, and the
+    /// taps it rules out fold away. Only tests are decided: folding the mask
+    /// in address arithmetic saves an instruction and measured slower once
+    /// the schedule around it changed (implicit-GEMM loaders, `& 7`).
+    fn known_bits_test(&self, a: ValueId, b: ValueId, pred: &str) -> Option<bool> {
+        if !matches!(pred, "eq" | "ne") {
+            return None;
+        }
+        let (masked, c) = match (self.int(a), self.int(b)) {
+            (None, Some(c)) => (a, c),
+            (Some(c), None) => (b, c),
+            _ => return None,
+        };
+        if !matches!(self.kernel.ty(masked), Type::Scalar(Scalar::I32 | Scalar::I64)) {
+            return None;
+        }
+        let def = self.def_of(masked).filter(|d| d.kind == OpKind::And && d.count == 2)?;
+        let v = self.masked_known(def.operand(0), self.int(def.operand(1))?)?;
+        Some((v == c) == (pred == "eq"))
+    }
+
+    /// `a * b + c` with constant multiplicands whose exact product is `+0.0`
+    /// is `c + 0.0`, exactly: no rounding is involved. A tap a mask rules out
+    /// multiplies two selected zeros.
+    fn zero_product_fma(&mut self, operands: &[ValueId], out: &mut Vec<Op>) -> Option<ValueId> {
+        let float = |v: ValueId| match self.facts.konst.get(v.0 as usize).copied().flatten() {
+            Some(Konst::F32(bits)) => Some(f32::from_bits(bits)),
+            _ => None,
+        };
+        let (a, b) = (float(operands[0])?, float(operands[1])?);
+        let zero = (a == 0.0 && b.is_finite()) || (b == 0.0 && a.is_finite());
+        if !zero || a.is_sign_negative() != b.is_sign_negative() {
+            return None;
+        }
+        let f32t = Type::Scalar(Scalar::F32);
+        let plus_zero = self.constant(f32t.clone(), Konst::F32(0));
+        Some(self.emit(OpKind::Fadd, f32t, [operands[2], plus_zero], [], out))
+    }
+
+    /// `x + 0.0` is `x` when `x` can be neither `-0.0` nor a signaling NaN: a
+    /// constant other than those and NaN, or a sum with `+0.0` itself (round
+    /// to nearest gives `-0.0 + 0.0 == +0.0`). Chains of the taps a mask
+    /// rules out leave such sums.
+    fn repeated_zero_add(&self, operands: &[ValueId]) -> Option<ValueId> {
+        let konst = |v: ValueId| self.facts.konst.get(v.0 as usize).copied().flatten();
+        let plus_zero = |v: ValueId| konst(v) == Some(Konst::F32(0));
+        let x = match (operands[0], operands[1]) {
+            (x, z) | (z, x) if plus_zero(z) => x,
+            _ => return None,
+        };
+        let kept = match konst(x) {
+            Some(Konst::F32(bits)) => bits != 0x8000_0000 && !f32::from_bits(bits).is_nan(),
+            Some(Konst::Int(_)) => false,
+            None => self.def_of(x).is_some_and(|d| d.kind == OpKind::Fadd && d.count == 2 && plus_zero(d.operand(1))),
+        };
+        kept.then_some(x)
     }
 
     /// f32 `math.tanh` composed exactly as the LLVM lowering composes it
@@ -3276,5 +3415,202 @@ kernel @smem_offset_probe {
         let uniform = super::super::analysis::classify(&kernel);
         let sel = super::super::isel::select(&kernel, &facts, uniform, &lds, lds_size).unwrap();
         assert_eq!(sel.wg_ids, [true, false, false]);
+    }
+
+    /// The constant of each `And(Add(x, k), m)` in `region` (every op an `And`
+    /// with a constant mask), with its mask: `None` when the masked value is
+    /// not an add of a constant.
+    fn masked_offsets(region: &Region, facts: &Facts) -> Vec<(i64, Option<i64>)> {
+        let ops = all_ops(region);
+        let add_const = |v: ValueId| {
+            ops.iter().find(|op| op.results.first() == Some(&v) && op.kind == OpKind::Add).and_then(|op| facts.int(op.operands[1]))
+        };
+        ops.iter()
+            .filter(|op| op.kind == OpKind::And)
+            .filter_map(|op| facts.int(op.operands[1]).map(|m| (m, add_const(op.operands[0]))))
+            .collect()
+    }
+
+    /// The conv loaders' `(tid - 32 + 128 j) % 64`, non-negative for j > 0,
+    /// becomes `(tid + 96 + 128 (j - 1)) & 63`: with the offset kept modulo the
+    /// mask's span, every j meets in `(tid + 32) & 63`, and so does the
+    /// division computed from it.
+    #[test]
+    fn masked_offsets_meet_modulo_the_mask() {
+        let mut body = String::from(
+            "    %c32 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:32 }\n    \
+             %c64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:64 }\n    %x : i32 = arith.sub ( %tid, %c32 )\n",
+        );
+        for j in 1..5 {
+            body += &format!(
+                "    %k{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n    %a{j} : i32 = arith.add ( %x, %k{j} )\n    \
+                 %m{j} : i32 = arith.mod ( %a{j}, %c64 )\n    %u{j} : i32 = arith.umul_hi_i32 ( %m{j}, %n )\n    \
+                 %f{j} : f32 = arith.bitcast ( %u{j} )\n    memref.global_store_typed ( %Y, %a{j}, %f{j} ) {{ align = i:4 }}\n",
+                128 * j
+            );
+        }
+        let text = probe("", &body);
+        let mut kernel = super::super::parse::parse(&text).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let ops = all_ops(&kernel.body);
+        assert_eq!(ops.iter().filter(|op| op.kind == OpKind::UmulHi).count(), 1);
+        assert_eq!(masked_offsets(&kernel.body, &facts), [(63, Some(32))]);
+        assert!(super::super::compile(&text).is_ok());
+        // The identity behind it, wrapping included.
+        for (x, k, m) in [(-32i32, 224i64, 63i64), (i32::MAX, 96, 63), (7, -1 << 24, 0xff_ffff), (-5, 1 << 40, 1)] {
+            let span = 1i128 << (64 - m.leading_zeros());
+            let reduced = (k as i128).rem_euclid(span) as i64;
+            assert_eq!(x.wrapping_add(k as i32) as i64 & m, x.wrapping_add(reduced as i32) as i64 & m, "{x} {k} {m}");
+        }
+    }
+
+    /// Offsets already within the mask's span stay, and so do masks that
+    /// clear low bits instead (`& -64`), where a carry into them matters,
+    /// and parities (`& 1`).
+    #[test]
+    fn masked_offsets_in_range_negative_masks_and_parities_stay() {
+        let body = "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    \
+                    %c3 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:3 }\n    \
+                    %c5 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5 }\n    \
+                    %c63 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:63 }\n    \
+                    %c128 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:128 }\n    \
+                    %cm64 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:-64 }\n    \
+                    %a : i32 = arith.add ( %n, %c5 )\n    %m : i32 = arith.and ( %a, %c63 )\n    \
+                    %b : i32 = arith.add ( %n, %c128 )\n    %h : i32 = arith.and ( %b, %cm64 )\n    \
+                    %p : i32 = arith.add ( %n, %c3 )\n    %q : i32 = arith.and ( %p, %c1 )\n    \
+                    %s : i32 = arith.add ( %m, %h )\n    %t : i32 = arith.add ( %s, %q )\n    %f : f32 = arith.bitcast ( %t )\n    \
+                    memref.global_store_typed ( %Y, %tid, %f ) { align = i:4 }\n";
+        let mut kernel = super::super::parse::parse(&probe("", body)).unwrap();
+        let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+        let facts = optimize(&mut kernel, &mut lds).unwrap();
+        let mut found = masked_offsets(&kernel.body, &facts);
+        found.sort();
+        assert_eq!(found, [(-64, Some(128)), (1, Some(3)), (63, Some(5))]);
+    }
+
+    fn count(kernel: &Kernel, kind: OpKind) -> usize {
+        all_ops(&kernel.body).iter().filter(|op| op.kind == kind).count()
+    }
+
+    /// A test of `4 bx + k` masked to bits that `4 bx` has zero is a test of
+    /// `k` masked: every parity and low-two-bits test of it folds, negative
+    /// `k` included, and the masks go with them. A mask past the known zeros,
+    /// a mask of a sum of two unknowns and a mask that clears low bits stay
+    /// undecided, and a mask that arithmetic reads stays.
+    #[test]
+    fn tests_of_known_low_zero_bits_fold() {
+        let mut body = String::from(
+            "    %bx : i32 = gpu.block_id (  ) { axis = s:\"x\" }\n    \
+             %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    \
+             %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    \
+             %c3 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:3 }\n    \
+             %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+             %x4 : i32 = arith.mul ( %bx, %c4 )\n    %acc0 : i32 = arith.add ( %tid, %c1 )\n",
+        );
+        for (i, k) in [0, 1, 2, 3, 5, -3].into_iter().enumerate() {
+            body += &format!(
+                "    %k{i} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{k} }}\n    \
+                 %a{i} : i32 = arith.add ( %x4, %k{i} )\n    %p{i} : i32 = arith.and ( %a{i}, %c1 )\n    \
+                 %q{i} : i32 = arith.and ( %a{i}, %c3 )\n    %e{i} : i1 = arith.cmp ( %p{i}, %c1 ) {{ pred = s:\"eq\" }}\n    \
+                 %g{i} : i1 = arith.cmp ( %q{i}, %c2 ) {{ pred = s:\"ne\" }}\n    \
+                 %u{i} : i32 = arith.select ( %e{i}, %tid, %n )\n    %w{i} : i32 = arith.select ( %g{i}, %u{i}, %c3 )\n    \
+                 %acc{} : i32 = arith.add ( %acc{i}, %w{i} )\n",
+                i + 1
+            );
+        }
+        body += "    %f : f32 = arith.bitcast ( %acc6 )\n    memref.global_store_typed ( %Y, %tid, %f ) { align = i:4 }\n";
+        let kernel = optimized(&probe("", &body));
+        assert_eq!(count(&kernel, OpKind::Cmp), 0, "{}", super::super::print::dump(&kernel));
+        assert_eq!(count(&kernel, OpKind::And), 0);
+        let kept = "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    \
+                    %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    \
+                    %c3 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:3 }\n    \
+                    %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+                    %cm4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:-4 }\n    \
+                    %x2 : i32 = arith.mul ( %n, %c2 )\n    %a : i32 = arith.add ( %x2, %c3 )\n    \
+                    %m : i32 = arith.and ( %a, %c3 )\n    %em : i1 = arith.cmp ( %m, %c3 ) { pred = s:\"eq\" }\n    \
+                    %b : i32 = arith.add ( %x2, %tid )\n    %p : i32 = arith.and ( %b, %c3 )\n    \
+                    %ep : i1 = arith.cmp ( %p, %c1 ) { pred = s:\"eq\" }\n    \
+                    %h : i32 = arith.and ( %a, %cm4 )\n    %eh : i1 = arith.cmp ( %h, %c4 ) { pred = s:\"eq\" }\n    \
+                    %x4 : i32 = arith.mul ( %n, %c4 )\n    %r : i32 = arith.add ( %x4, %c1 )\n    %o : i32 = arith.and ( %r, %c1 )\n    \
+                    %s1 : i32 = arith.select ( %em, %tid, %n )\n    %s2 : i32 = arith.select ( %ep, %s1, %c1 )\n    \
+                    %s3 : i32 = arith.select ( %eh, %s2, %c2 )\n    %t : i32 = arith.add ( %s3, %o )\n    %f : f32 = arith.bitcast ( %t )\n    \
+                    memref.global_store_typed ( %Y, %tid, %f ) { align = i:4 }\n";
+        let kernel = optimized(&probe("", kept));
+        assert_eq!(count(&kernel, OpKind::Cmp), 3, "{}", super::super::print::dump(&kernel));
+        assert_eq!(count(&kernel, OpKind::And), 4);
+    }
+
+    /// A stride-2 dgrad's column test, `(4 bx + j + 2 - s) % 2 == 0`, is a
+    /// constant per tap: the taps it rules out select zeros, their FMAs of
+    /// those zeros become one add of `+0.0` each, and their loads go.
+    #[test]
+    fn taps_a_known_parity_rules_out_lose_their_loads() {
+        let mut body = String::from(
+            "    %bx : i32 = gpu.block_id (  ) { axis = s:\"x\" }\n    \
+             %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    \
+             %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    \
+             %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+             %oob : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2147483647 }\n    \
+             %z : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:0.0 }\n    \
+             %x4 : i32 = arith.mul ( %bx, %c4 )\n    %acc0 : f32 = arith.bitcast ( %n )\n",
+        );
+        for (i, (j, s)) in [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0)].into_iter().enumerate() {
+            body += &format!(
+                "    %d{i} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n    \
+                 %col{i} : i32 = arith.add ( %x4, %d{i} )\n    %m{i} : i32 = arith.mod ( %col{i}, %c2 )\n    \
+                 %ok{i} : i1 = arith.cmp ( %m{i}, %c0 ) {{ pred = s:\"eq\" }}\n    \
+                 %o{i} : i32 = arith.select ( %ok{i}, %tid, %oob )\n    \
+                 %v{i} : f32 = memref.global_load_typed ( %Y, %o{i} ) {{ align = i:4, elem_type = s:\"f32\" }}\n    \
+                 %f{i} : f32 = arith.select ( %ok{i}, %v{i}, %z )\n    %acc{} : f32 = arith.fma ( %f{i}, %f{i}, %acc{i} )\n",
+                j + 2 - s,
+                i + 1
+            );
+        }
+        body += "    memref.global_store_typed ( %Y, %tid, %acc6 ) { align = i:4 }\n";
+        let text = probe("", &body);
+        let kernel = optimized(&text);
+        // Live where j - s is even: (0, 0), (1, 1) and (2, 0). The ruled-out
+        // taps leave one add after (0, 0) (both of its neighbours') and one
+        // at the end.
+        assert_eq!(count(&kernel, OpKind::GLoad), 3, "{}", super::super::print::dump(&kernel));
+        assert_eq!(count(&kernel, OpKind::Fma), 3);
+        assert_eq!(count(&kernel, OpKind::Fadd), 2);
+        assert!(super::super::compile(&text).is_ok());
+    }
+
+    /// `fma(+0, +0, c)` and `fma(+0, 1, c)` add `+0.0` to `c`, and a sum with
+    /// `+0.0` absorbs another; a negative zero product, a product of an
+    /// unknown and a constant zero, and an add of `+0.0` to an unknown stay.
+    #[test]
+    fn zero_products_add_zero_once() {
+        let body = "    %v : f32 = memref.global_load_typed ( %Y, %tid ) { align = i:4, elem_type = s:\"f32\" }\n    \
+                    %z : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:0.0 }\n    \
+                    %nz : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:-0.0 }\n    \
+                    %one : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n    \
+                    %a : f32 = arith.fma ( %z, %z, %v )\n    %b : f32 = arith.fma ( %z, %z, %a )\n    \
+                    %d : f32 = arith.fma ( %z, %one, %b )\n    %c : f32 = arith.fma ( %nz, %z, %v )\n    \
+                    %e : f32 = arith.fma ( %z, %v, %v )\n    %s : f32 = arith.fadd ( %c, %e )\n    \
+                    %t : f32 = arith.fadd ( %s, %d )\n    memref.global_store_typed ( %Y, %tid, %t ) { align = i:4 }\n";
+        let kernel = optimized(&probe("", body));
+        // Left: v + 0 (for a, b and d), c's and e's FMAs, and the two sums.
+        assert_eq!(count(&kernel, OpKind::Fma), 2, "{}", super::super::print::dump(&kernel));
+        assert_eq!(count(&kernel, OpKind::Fadd), 3);
+    }
+
+    /// The identities behind the float rules, on the host's IEEE arithmetic
+    /// (round to nearest): `fma(+0, +0, c) == c + 0` and `(c + 0) + 0 == c + 0`
+    /// bit for bit, signed zeros, subnormals and infinities included.
+    #[test]
+    fn zero_product_identities_hold() {
+        let values = [0.0f32, -0.0, 1.5, -2.25, f32::MIN_POSITIVE / 8.0, -f32::MIN_POSITIVE / 8.0, f32::INFINITY, f32::NEG_INFINITY];
+        for c in values {
+            let once = c + 0.0;
+            assert_eq!(0.0f32.mul_add(0.0, c).to_bits(), once.to_bits(), "{c}");
+            assert_eq!(0.0f32.mul_add(1.0, c).to_bits(), once.to_bits(), "{c}");
+            assert_eq!((once + 0.0).to_bits(), once.to_bits(), "{c}");
+        }
+        assert!(0.0f32.mul_add(0.0, f32::NAN).is_nan() && (f32::NAN + 0.0).is_nan());
     }
 }

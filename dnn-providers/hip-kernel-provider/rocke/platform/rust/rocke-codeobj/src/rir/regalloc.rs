@@ -722,6 +722,20 @@ impl Default for Limits {
     }
 }
 
+impl Limits {
+    /// Every register of `t` an allocation may hand out.
+    pub fn for_target(t: &crate::target::TargetInfo) -> Self {
+        Limits { vgprs: t.max_vgprs, sgprs: t.max_sgprs }
+    }
+
+    /// Every register an allocation of `f` may hand out: its target's, or
+    /// fewer VGPRs under the function's `vgpr_limit`.
+    pub fn for_func(f: &MFunc) -> Self {
+        let hw = Limits::for_target(f.target.info());
+        Limits { vgprs: f.vgpr_limit.map_or(hw.vgprs, |v| v.clamp(1, hw.vgprs)), ..hw }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Allocation {
     pub num_sgprs: u32,
@@ -845,7 +859,7 @@ pub(super) fn coalesce(f: &MFunc, live: &mut Live) -> Groups {
 
 /// Allocates within the hardware limits, without spilling.
 pub fn allocate(f: &mut MFunc) -> Result<Allocation, CompileError> {
-    allocate_within(f, Limits::default())
+    allocate_within(f, Limits::for_func(f))
 }
 
 /// Allocates registers for `f` without spilling. `budget` is the register
@@ -855,7 +869,8 @@ pub fn allocate(f: &mut MFunc) -> Result<Allocation, CompileError> {
 pub fn allocate_within(f: &mut MFunc, budget: Limits) -> Result<Allocation, CompileError> {
     let mut live = analyze(f)?;
     let groups = coalesce(f, &mut live);
-    let hard = Limits { vgprs: budget.vgprs.max(MAX_VGPRS), sgprs: budget.sgprs.max(MAX_SGPRS) };
+    let hw = Limits::for_func(f);
+    let hard = Limits { vgprs: budget.vgprs.max(hw.vgprs), sgprs: budget.sgprs.max(hw.sgprs) };
     let (phys, used, tight) = assign_best(f, &live, groups, budget, hard, 1).map_err(overflow_error)?;
     rewrite(f, &phys);
     let pressure = Pressure::default();
@@ -868,7 +883,7 @@ pub fn assignment_need(f: &MFunc) -> Result<Pressure, CompileError> {
     let mut live = analyze(f)?;
     let groups = coalesce(f, &mut live);
     let unbounded = Limits { vgprs: 4 * MAX_VGPRS, sgprs: 4 * MAX_SGPRS };
-    let (_, used, _) = assign_best(f, &live, groups, Limits::default(), unbounded, 1).map_err(overflow_error)?;
+    let (_, used, _) = assign_best(f, &live, groups, Limits::for_func(f), unbounded, 1).map_err(overflow_error)?;
     Ok(used)
 }
 
@@ -893,7 +908,8 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
         }
     }
     let mut spiller = super::spill::Spiller::new(f, cfg);
-    let (mut target_s, mut target_v) = (limits.sgprs.min(MAX_SGPRS), limits.vgprs.min(MAX_VGPRS));
+    let hw = Limits::for_func(f);
+    let (mut target_s, mut target_v) = (limits.sgprs.min(hw.sgprs), limits.vgprs.min(hw.vgprs));
     // The liveness of `f` as it stands, while a step leaves `f` unchanged.
     let mut known = None;
     loop {
@@ -907,7 +923,7 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
         // Coalescing merges segments; the next round starts from `f` as is.
         known = Some(live.clone());
         let groups = coalesce(f, &mut live);
-        let hard = Limits { vgprs: limits.vgprs.min(MAX_VGPRS), sgprs: limits.sgprs.min(MAX_SGPRS) };
+        let hard = Limits { vgprs: limits.vgprs.min(hw.vgprs), sgprs: limits.sgprs.min(hw.sgprs) };
         // Fragmentation can need more registers than are live at once:
         // then spill further below the limit.
         let assigned = assign_best(f, &live, groups, hard, hard, threads);

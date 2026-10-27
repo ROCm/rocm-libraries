@@ -13,6 +13,7 @@ mod gfx1151_isa;
 mod hsaco_writer;
 pub mod native;
 pub mod rir;
+pub mod target;
 
 pub use direct_gemm::{
     compile_gfx1151_wmma_gemm_ir, emit_gfx1151_wmma_gemm, parse_gfx1151_wmma_gemm_ir,

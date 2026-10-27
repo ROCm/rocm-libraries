@@ -230,6 +230,8 @@ vopd 18 v_dual_and_b32 y
 # SOP1
 inst SAndSaveexecB32 d=sdst:s1,exec:x1 u=ssrc0:ss1,exec:x1
 inst SMovB64 form=b64
+inst SAndSaveexecB64 d=sdst:s2,exec:x2 u=ssrc0:ss2,exec:x2 form=b64
+inst SNotB64 form=b64
 # SOP2
 inst SLshlB64 form=b64_shift
 inst SLshrB64 form=b64_shift
@@ -238,6 +240,8 @@ inst SAndB64 form=b64
 inst SOrB64 form=b64
 inst SXorB64 form=b64
 inst SCselectB64 form=b64
+inst SAndNot1B64 form=b64
+inst SOrNot1B64 form=b64
 # SOPC
 inst SCmpEqU64 form=b64
 inst SCmpLgU64 form=b64

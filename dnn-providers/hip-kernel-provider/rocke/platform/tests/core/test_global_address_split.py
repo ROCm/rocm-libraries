@@ -92,7 +92,8 @@ def _readfirstlane_of(base: str) -> str:
 def test_uniform_plus_lane_index_splits_on_gfx1151():
     ll = _lower(_gather(_row), "gfx1151")
     base = re.search(
-        r"(%gbase\.\d+) = getelementptr half, ptr addrspace\(1\) %S, i32 (%mul\d+)\n", ll
+        r"(%gbase\.\d+) = getelementptr half, ptr addrspace\(1\) %S, i32 (%mul\d+)\n",
+        ll,
     )
     assert base, ll
     assert re.search(
@@ -104,14 +105,18 @@ def test_uniform_plus_lane_index_splits_on_gfx1151():
     # No loop, so nothing for LICM to reassociate.
     assert "readfirstlane" not in ll
     # The store's index is the lane term alone: nothing uniform to split off.
-    assert re.search(r"= getelementptr inbounds half, ptr addrspace\(1\) %D, i32 %tid", ll)
+    assert re.search(
+        r"= getelementptr inbounds half, ptr addrspace\(1\) %D, i32 %tid", ll
+    )
 
 
 def test_loop_varying_base_goes_through_readfirstlane():
     """The row (counter times stride) varies in the loop, the thread id does
     not: the uniform base is a readfirstlane, which the per-lane GEP indexes."""
     ll = _lower(_loop_kernel(unroll=False, carry_lane=False), "gfx1151")
-    base = re.search(r"(%gbase\.\d+) = getelementptr float, ptr addrspace\(1\) %S, ", ll)
+    base = re.search(
+        r"(%gbase\.\d+) = getelementptr float, ptr addrspace\(1\) %S, ", ll
+    )
     assert base, ll
     uniform = re.search(_readfirstlane_of(base.group(1)), ll)
     assert uniform, ll
@@ -124,7 +129,14 @@ def test_loop_varying_base_goes_through_readfirstlane():
 
 def test_unrolled_loop_needs_no_readfirstlane():
     ll = _lower(_loop_kernel(unroll=True, carry_lane=False), "gfx1151")
-    assert len(re.findall(r"= getelementptr float, ptr addrspace\(1\) %gbase\.\d+, i32 %tid", ll)) == 4
+    assert (
+        len(
+            re.findall(
+                r"= getelementptr float, ptr addrspace\(1\) %gbase\.\d+, i32 %tid", ll
+            )
+        )
+        == 4
+    )
     assert "readfirstlane" not in ll
 
 
@@ -136,7 +148,9 @@ def test_loop_varying_lane_term_needs_no_readfirstlane():
     stride = b.param("stride", I32)
     tid, bid = b.thread_id_x(), b.block_id_x()
     row = b.mul(bid, stride)
-    loop = b.scf_for_iter(b.const_i32(0), b.const_i32(4), b.const_i32(1), [("acc", b.const_f32(0.0))])
+    loop = b.scf_for_iter(
+        b.const_i32(0), b.const_i32(4), b.const_i32(1), [("acc", b.const_f32(0.0))]
+    )
     with loop as (k, (acc,)):
         lane = b.mul(tid, b.add(k, b.const_i32(1)))
         b.scf_yield(b.fadd(acc, b.global_load(src, b.add(row, lane), F32)))
@@ -147,9 +161,7 @@ def test_loop_varying_lane_term_needs_no_readfirstlane():
     assert "readfirstlane" not in ll
 
 
-@pytest.mark.parametrize(
-    "arch", [gfx for gfx in wired_arches() if gfx != "gfx1151"]
-)
+@pytest.mark.parametrize("arch", [gfx for gfx in wired_arches() if gfx != "gfx1151"])
 def test_other_targets_keep_the_single_gep(arch):
     ll = _lower(_gather(_row), arch)
     assert "%gbase." not in ll
@@ -161,7 +173,9 @@ def test_constants_come_right_before_the_lane_term():
         return b.add(b.add(tid, b.const_i32(16)), b.mul(bid, s))
 
     ll = _lower(_gather(index), "gfx1151")
-    chain = re.findall(r"= getelementptr half, ptr addrspace\(1\) (%\S+), (i\d+ \S+)\n", ll)
+    chain = re.findall(
+        r"= getelementptr half, ptr addrspace\(1\) (%\S+), (i\d+ \S+)\n", ll
+    )
     assert len(chain) == 3, chain
     (base0, index0), (_, index1), (_, index2) = chain
     assert base0 == "%S" and index0.startswith("i32 %mul")
@@ -187,7 +201,14 @@ def test_constants_come_right_before_the_lane_term():
         # only constants besides the lane term
         lambda b, tid, bid, s: b.add(tid, b.const_i32(64)),
     ],
-    ids=["two_lanes", "negative_lane", "unbounded_lane", "nuw_add", "assume_range", "constant_only"],
+    ids=[
+        "two_lanes",
+        "negative_lane",
+        "unbounded_lane",
+        "nuw_add",
+        "assume_range",
+        "constant_only",
+    ],
 )
 def test_unproven_indices_keep_the_single_gep(index):
     ll = _lower(_gather(index), "gfx1151")
@@ -253,7 +274,11 @@ def _loop_kernel(*, unroll: bool, carry_lane: bool):
 def test_loop_counter_and_uniform_carried_value_are_uniform(unroll):
     ll = _lower(_loop_kernel(unroll=unroll, carry_lane=False), "gfx1151")
     loads = ll.count("= load float, ptr addrspace(1) ")
-    splits = len(re.findall(r"= getelementptr float, ptr addrspace\(1\) %gbase\.\d+, i32 %tid", ll))
+    splits = len(
+        re.findall(
+            r"= getelementptr float, ptr addrspace\(1\) %gbase\.\d+, i32 %tid", ll
+        )
+    )
     assert loads == (4 if unroll else 1)
     assert splits == loads
 
@@ -334,7 +359,9 @@ def _parity_kernels():
     yield "constant", _gather(
         lambda b, tid, bid, s: b.add(b.add(tid, b.const_i32(16)), b.mul(bid, s))
     )
-    yield "two_lanes", _gather(lambda b, tid, bid, s: b.add(_row(b, tid, bid, s), b.lane_id()))
+    yield "two_lanes", _gather(
+        lambda b, tid, bid, s: b.add(_row(b, tid, bid, s), b.lane_id())
+    )
     for unroll in (False, True):
         for carry_lane in (False, True):
             yield f"loop_u{int(unroll)}_c{int(carry_lane)}", _loop_kernel(
@@ -391,6 +418,8 @@ def test_split_access_selects_an_sgpr_base():
             capture_output=True,
             text=True,
         ).stdout
-    loads = [ln.split("//")[0].strip() for ln in isa.splitlines() if "global_load" in ln]
+    loads = [
+        ln.split("//")[0].strip() for ln in isa.splitlines() if "global_load" in ln
+    ]
     assert len(loads) == 1, loads
     assert re.search(r", s\[\d+:\d+\]$", loads[0]), loads

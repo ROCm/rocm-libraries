@@ -11,6 +11,7 @@ use super::fx::{FxHashMap, FxHashSet};
 use super::mir::*;
 use super::opt::Facts;
 use crate::error::CompileError;
+use crate::target::{gfx9::isel_hooks, Target, TargetInfo};
 
 #[path = "burs.rs"]
 mod burs;
@@ -132,6 +133,8 @@ struct Isel<'a> {
     lds: &'a FxHashMap<ValueId, u32>,
     depth: u32,
     single_wave: bool,
+    /// The facts of the target selected for: wave size, lane-mask width.
+    t: &'static TargetInfo,
     kernarg_ptr: VRef,
     tid: VRef,
     bid: [Option<VRef>; 3],
@@ -194,8 +197,6 @@ fn sub(v: VRef, off: u8, n: u8) -> VRef {
     }
 }
 
-const EXEC: Opnd = Opnd::P(Phys::ExecLo, 1);
-const VCC: Opnd = Opnd::P(Phys::VccLo, 1);
 const NULL: Opnd = Opnd::P(Phys::Null, 1);
 
 /// `v_permlanex16_b32` lane selects that make every lane read lane `L ^ 16`.
@@ -222,6 +223,44 @@ impl<'a> Isel<'a> {
             _ => 4,
         };
         self.vreg(Class::S, size, align)
+    }
+
+    /// An SGPR lane mask: a compare result, a carry, a saved EXEC.
+    fn mreg(&mut self) -> VRef {
+        self.sreg(self.t.lane_mask_dwords)
+    }
+
+    /// EXEC and VCC as lane masks.
+    fn exec(&self) -> Opnd {
+        Opnd::P(Phys::ExecLo, self.t.lane_mask_dwords)
+    }
+
+    fn vcc(&self) -> Opnd {
+        Opnd::P(Phys::VccLo, self.t.lane_mask_dwords)
+    }
+
+    /// The wave32 lane-mask opcode `op` at the target's lane-mask width.
+    fn lm(&self, op: Opc) -> Opc {
+        if self.t.lane_mask_dwords == 2 {
+            isel_hooks::wide(op)
+        } else {
+            op
+        }
+    }
+
+    /// Lane masks `a op b` in a new lane mask.
+    fn m_bin(&mut self, op: Opc, a: Opnd, b: Opnd) -> Opnd {
+        let dst = self.mreg();
+        self.salu(self.lm(op), [r(dst)], [a, b]);
+        r(dst)
+    }
+
+    /// Refuses `what` on gfx950, which has no lowering of it yet.
+    fn gfx11_only(&self, what: &str) -> Result<(), CompileError> {
+        match self.t.target {
+            Target::Gfx950 => Err(unsupported(format!("{what} on gfx950"))),
+            Target::Gfx1151 => Ok(()),
+        }
     }
 
     fn vgpr(&mut self, size: u8) -> VRef {
@@ -399,6 +438,10 @@ impl<'a> Isel<'a> {
                 | Opc::SCmpEqU64
                 | Opc::SCmpLgU64
                 | Opc::SMovB64
+                | Opc::SAndNot1B64
+                | Opc::SOrNot1B64
+                | Opc::SNotB64
+                | Opc::SAndSaveexecB64
         );
         let mut literal: Option<u32> = None;
         for (i, s) in srcs.iter_mut().enumerate() {
@@ -550,7 +593,7 @@ impl<'a> Isel<'a> {
     fn scc(&mut self, v: ValueId) -> Result<(), CompileError> {
         match self.get(v)? {
             Val::C(c) => self.salu(c.op, [], [c.a, c.b]),
-            Val::M(m) => self.salu(Opc::SCmpLgU32, [], [m, Opnd::Imm(0)]),
+            Val::M(m) => self.salu(self.lm(Opc::SCmpLgU32), [], [m, Opnd::Imm(0)]),
             Val::W(o) => self.salu(Opc::SCmpLgU32, [], [o, Opnd::Imm(0)]),
             other => return Err(unsupported(format!("{other:?} is not a condition"))),
         }
@@ -562,8 +605,8 @@ impl<'a> Isel<'a> {
             Val::M(m) => Ok(m),
             Val::C(c) => {
                 self.salu(c.op, [], [c.a, c.b]);
-                let dst = self.sreg(1);
-                self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(u32::MAX), Opnd::Imm(0)]);
+                let dst = self.mreg();
+                self.salu(self.lm(Opc::SCselectB32), [r(dst)], [Opnd::Imm(u32::MAX), Opnd::Imm(0)]);
                 Ok(r(dst))
             }
             Val::W(Opnd::Imm(c)) => Ok(Opnd::Imm(if c & 1 != 0 { u32::MAX } else { 0 })),
@@ -577,7 +620,7 @@ impl<'a> Isel<'a> {
         }
         if uniform {
             let dst = self.sreg(1);
-            self.salu(Opc::SCmpLgU32, [], [mask, Opnd::Imm(0)]);
+            self.salu(self.lm(Opc::SCmpLgU32), [], [mask, Opnd::Imm(0)]);
             self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(1), Opnd::Imm(0)]);
             r(dst)
         } else {
@@ -684,7 +727,7 @@ impl<'a> Isel<'a> {
             return (r(sub(dst, 0, 1)), r(sub(dst, 1, 1)));
         }
         let dst = self.vgpr(2);
-        let carry = self.sreg(1);
+        let carry = self.mreg();
         let (lo_op, hi_op) = if subtract { (Opc::VSubCoU32, Opc::VSubCoCiU32) } else { (Opc::VAddCoU32, Opc::VAddCoCiU32) };
         self.valu(lo_op, [r(sub(dst, 0, 1)), r(carry)], [a.0, b.0], 0);
         self.valu(hi_op, [r(sub(dst, 1, 1)), NULL], [a.1, b.1, r(carry)], 0);
@@ -820,7 +863,7 @@ impl<'a> Isel<'a> {
         let qd = self.v_bin(Opc::VMulLoU32, q, d);
         let mut rem = self.v_bin(Opc::VSubNcU32, n, qd);
         for step in 0..2 {
-            let ge = self.sreg(1);
+            let ge = self.mreg();
             self.valu(Opc::VCmp(0x4e), [r(ge)], [rem, d], 0);
             let q1 = self.v_bin(Opc::VAddNcU32, Opnd::Imm(1), q);
             q = self.v3(Opc::VCndmaskB32, q, q1, r(ge), 0);
@@ -984,7 +1027,7 @@ impl<'a> Isel<'a> {
                 };
                 let a = self.w(op.operands[0])?;
                 let b = self.w(op.operands[1])?;
-                let dst = self.sreg(1);
+                let dst = self.mreg();
                 self.valu(Opc::VCmp(pred), [r(dst)], [a, b], 0);
                 self.set(res.unwrap(), Val::M(r(dst)));
             }
@@ -1074,7 +1117,7 @@ impl<'a> Isel<'a> {
             }
             Exp2 => {
                 let x = self.w(op.operands[0])?;
-                let m = self.sreg(1);
+                let m = self.mreg();
                 self.valu(Opc::VCmp(0x14), [r(m)], [Opnd::Imm(0xc2fc_0000), x], 0);
                 let t = self.v3(Opc::VCndmaskB32, Opnd::Imm(0), Opnd::Imm(0x4280_0000), r(m), 0);
                 let x2 = self.v_bin(Opc::VAddF32, x, t);
@@ -1086,7 +1129,7 @@ impl<'a> Isel<'a> {
             }
             Log2 => {
                 let x = self.w(op.operands[0])?;
-                let m = self.sreg(1);
+                let m = self.mreg();
                 self.valu(Opc::VCmp(0x14), [r(m)], [Opnd::Imm(0x0080_0000), x], 0);
                 let s = self.v3(Opc::VCndmaskB32, Opnd::Imm(0), Opnd::Imm(32), r(m), 0);
                 let o = self.v3(Opc::VCndmaskB32, Opnd::Imm(0), Opnd::Imm(0x4200_0000), r(m), 0);
@@ -1103,7 +1146,7 @@ impl<'a> Isel<'a> {
                 let den = self.vgpr(1);
                 self.valu(Opc::VDivScaleF32, [r(den), NULL], [x, x, one], 0);
                 let num = self.vgpr(1);
-                let flag = self.sreg(1);
+                let flag = self.mreg();
                 self.valu(Opc::VDivScaleF32, [r(num), r(flag)], [one, x, one], 0);
                 let rc = self.vgpr(1);
                 self.valu(Opc::VRcpF32, [r(rc)], [r(den)], 0);
@@ -1113,7 +1156,7 @@ impl<'a> Isel<'a> {
                 let e = self.v3(Opc::VFmaF32, r(den), q, r(num), M_NEG0);
                 let q2 = self.v3(Opc::VFmaF32, e, r2, q, 0);
                 let e2 = self.v3(Opc::VFmaF32, r(den), q2, r(num), M_NEG0);
-                self.emit(MInst::new(Opc::SMovB32, [VCC], [r(flag)]));
+                self.emit(MInst::new(self.lm(Opc::SMovB32), [self.vcc()], [r(flag)]));
                 let fm = self.v3(Opc::VDivFmasF32, e2, r2, q2, 0);
                 let out = self.v3(Opc::VDivFixupF32, fm, x, one, 0);
                 self.set(res.unwrap(), Val::W(out));
@@ -1545,6 +1588,7 @@ impl<'a> Isel<'a> {
                 self.emit(MInst::new(Opc::SSetprio, [], []).with_imm(level & 0xffff));
             }
             WaitCnt => {
+                self.gfx11_only("tile.wait_cnt")?;
                 // gfx11 fields: expcnt 2:0, lgkmcnt 9:4, vmcnt 15:10; -1 is no wait.
                 let count = |key: &str, max: i64| match op.int_attr(key).unwrap_or(-1) {
                     c if c < 0 => max,
@@ -1566,6 +1610,10 @@ impl<'a> Isel<'a> {
             DppXor | QuadPerm | MovDpp8 => {
                 let (opc, ctrl) = match op.kind {
                     DppXor => match op.int_attr("xor_mask") {
+                        Some(mask @ 1..=15) if self.t.target == Target::Gfx950 => match isel_hooks::xor_shuffle(mask as u32) {
+                            isel_hooks::XorShuffle::QuadPerm(ctrl) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl, true)),
+                            isel_hooks::XorShuffle::Swizzle(offset) => (Opc::DsSwizzleB32, offset),
+                        },
                         Some(mask @ 1..=15) => (Opc::VMovB32Dpp, dpp16_ctrl(0x160 | mask as u32, true)),
                         _ => return Err(unsupported("tile.dpp_xor xor_mask outside 1..15")),
                     },
@@ -1574,7 +1622,10 @@ impl<'a> Isel<'a> {
                         _ => return Err(unsupported("tile.quad_perm ctrl outside 0..255")),
                     },
                     _ => match op.int_attr("sel") {
-                        Some(sel) => (Opc::VMovB32Dpp8, sel as u32 & 0xff_ffff),
+                        Some(sel) => {
+                            self.gfx11_only("tile.mov_dpp8")?;
+                            (Opc::VMovB32Dpp8, sel as u32 & 0xff_ffff)
+                        }
                         None => return Err(unsupported("tile.mov_dpp8 without sel")),
                     },
                 };
@@ -1632,9 +1683,13 @@ impl<'a> Isel<'a> {
                 let out = self.v3(Opc::VPermB32, a, b, sel, 0);
                 self.set(res.unwrap(), Val::W(out));
             }
-            Permlanex16 | Permlane16 => self.permlane_op(op)?,
+            Permlanex16 | Permlane16 => {
+                self.gfx11_only("tile.permlane16 / tile.permlanex16")?;
+                self.permlane_op(op)?
+            }
             // A wave32 has no other half to swap with: the source itself.
             Permlane64 => {
+                self.gfx11_only("tile.permlane64")?;
                 let x = self.get(op.operands[0])?;
                 self.set(res.unwrap(), x);
             }
@@ -1651,7 +1706,14 @@ impl<'a> Isel<'a> {
             LaneId => {
                 let dst = self.vgpr(1);
                 self.valu(Opc::VMbcntLoU32B32, [r(dst)], [Opnd::Imm(u32::MAX), Opnd::Imm(0)], 0);
-                self.set(res.unwrap(), Val::W(r(dst)));
+                if self.t.wave == 64 {
+                    let lo = dst;
+                    let dst = self.vgpr(1);
+                    self.valu(Opc::VMbcntHiU32B32, [r(dst)], [Opnd::Imm(u32::MAX), r(lo)], 0);
+                    self.set(res.unwrap(), Val::W(r(dst)));
+                } else {
+                    self.set(res.unwrap(), Val::W(r(dst)));
+                }
             }
             GAtomicAdd => self.atomic_add_op(op)?,
             Fence => {
@@ -1772,7 +1834,7 @@ impl<'a> Isel<'a> {
         let den = self.vgpr(1);
         self.valu(Opc::VDivScaleF32, [r(den), NULL], [b, b, a], 0);
         let num = self.vgpr(1);
-        let flag = self.sreg(1);
+        let flag = self.mreg();
         self.valu(Opc::VDivScaleF32, [r(num), r(flag)], [a, b, a], 0);
         let rc = self.vgpr(1);
         self.valu(Opc::VRcpF32, [r(rc)], [r(den)], 0);
@@ -1782,7 +1844,7 @@ impl<'a> Isel<'a> {
         let e = self.v3(Opc::VFmaF32, r(den), q, r(num), M_NEG0);
         let q2 = self.v3(Opc::VFmaF32, e, r2, q, 0);
         let e2 = self.v3(Opc::VFmaF32, r(den), q2, r(num), M_NEG0);
-        self.emit(MInst::new(Opc::SMovB32, [VCC], [r(flag)]));
+        self.emit(MInst::new(self.lm(Opc::SMovB32), [self.vcc()], [r(flag)]));
         let fm = self.v3(Opc::VDivFmasF32, e2, r2, q2, 0);
         self.v3(Opc::VDivFixupF32, fm, b, a, 0)
     }
@@ -1834,7 +1896,7 @@ impl<'a> Isel<'a> {
         let den = self.vgpr(2);
         self.valu(Opc::VDivScaleF64, [r(den), NULL], [b, b, a], 0);
         let num = self.vgpr(2);
-        let flag = self.sreg(1);
+        let flag = self.mreg();
         self.valu(Opc::VDivScaleF64, [r(num), r(flag)], [a, b, a], 0);
         let rc = self.v64(Opc::VRcpF64, [r(den)], 0);
         let e0 = self.v64(Opc::VFmaF64, [r(den), r(rc), one], M_NEG0);
@@ -1843,7 +1905,7 @@ impl<'a> Isel<'a> {
         let r2 = self.v64(Opc::VFmaF64, [r(r1), r(e1), r(r1)], 0);
         let q = self.v64(Opc::VMulF64, [r(num), r(r2)], 0);
         let e2 = self.v64(Opc::VFmaF64, [r(den), r(q), r(num)], M_NEG0);
-        self.emit(MInst::new(Opc::SMovB32, [VCC], [r(flag)]));
+        self.emit(MInst::new(self.lm(Opc::SMovB32), [self.vcc()], [r(flag)]));
         let fm = self.v64(Opc::VDivFmasF64, [r(e2), r(r2), r(q)], 0);
         let out = self.v64(Opc::VDivFixupF64, [r(fm), b, a], 0);
         self.canon64.insert(v);
@@ -1854,6 +1916,8 @@ impl<'a> Isel<'a> {
     /// `arith.fdot2(a, b: f16x2 or bf16x2, c: f32)`, clamp off:
     /// `v_dot2_f32_f16` / `v_dot2_f32_bf16`.
     fn fdot2_op(&mut self, op: &Op) -> Result<(), CompileError> {
+        // gfx950's DOT hazards are the MFMA-family rules (design 5.2, G2).
+        self.gfx11_only("arith.fdot2")?;
         let opc = match self.k.ty(op.operands[0]).elem() {
             Scalar::F16 => Opc::VDot2F32F16,
             Scalar::BF16 => Opc::VDot2F32Bf16,
@@ -1885,8 +1949,8 @@ impl<'a> Isel<'a> {
                 _ => match self.mask(x)? {
                     Opnd::Imm(m) => Val::M(Opnd::Imm(!m)),
                     m => {
-                        let dst = self.sreg(1);
-                        self.salu(Opc::SNotB32, [r(dst)], [m]);
+                        let dst = self.mreg();
+                        self.salu(self.lm(Opc::SNotB32), [r(dst)], [m]);
                         Val::M(r(dst))
                     }
                 },
@@ -2214,23 +2278,23 @@ impl<'a> Isel<'a> {
         let lanes = if let Some(&(c, t, f)) = self.vote_sel.get(&p) {
             // p = select(c, t, f): the lanes where p != 0 are c's or its complement's.
             match (t, f) {
-                (true, true) => EXEC,
+                (true, true) => self.exec(),
                 (false, false) => Opnd::Imm(0),
                 (true, false) => {
                     let m = self.mask(c)?;
-                    self.s_bin(Opc::SAndB32, m, EXEC)
+                    self.m_bin(Opc::SAndB32, m, self.exec())
                 }
                 (false, true) => {
                     let m = self.mask(c)?;
-                    self.s_bin(Opc::SAndNot1B32, EXEC, m)
+                    self.m_bin(Opc::SAndNot1B32, self.exec(), m)
                 }
             }
         } else if *self.k.ty(p) == Type::Scalar(Scalar::I1) {
             let m = self.mask(p)?;
-            self.s_bin(Opc::SAndB32, m, EXEC)
+            self.m_bin(Opc::SAndB32, m, self.exec())
         } else {
             let x = self.w(p)?;
-            let m = self.sreg(1);
+            let m = self.mreg();
             self.valu(Opc::VCmp(0x4d), [r(m)], [Opnd::Imm(0), x], 0);
             r(m)
         };
@@ -2239,7 +2303,7 @@ impl<'a> Isel<'a> {
         } else {
             (Opc::SCmpEqU32, Opnd::Imm(u32::MAX))
         };
-        self.salu(test, [], [lanes, against]);
+        self.salu(self.lm(test), [], [lanes, against]);
         let dst = self.sreg(1);
         self.salu(Opc::SCselectB32, [r(dst)], [Opnd::Imm(1), Opnd::Imm(0)]);
         self.set(op.results[0], Val::W(r(dst)));
@@ -2291,6 +2355,7 @@ impl<'a> Isel<'a> {
     /// then invalidates the caches below the scope (L0 is per CU, and a
     /// workgroup spans both CUs of a WGP).
     fn memory_fence(&mut self, scope: &str, acquire: bool) -> Result<(), CompileError> {
+        self.gfx11_only("memory fences")?;
         let l1 = match scope {
             "agent" | "system" => true,
             "workgroup" => false,
@@ -2432,7 +2497,7 @@ impl<'a> Isel<'a> {
             return Val::C(SCmp { op: Opc::SCmpLgU32, a: bit, b: Opnd::Imm(0) });
         }
         let bit = self.v_bin(Opc::VAndB32, Opnd::Imm(1), x);
-        let dst = self.sreg(1);
+        let dst = self.mreg();
         self.valu(Opc::VCmp(0x4d), [r(dst)], [bit, Opnd::Imm(0)], 0);
         Val::M(r(dst))
     }
@@ -2528,7 +2593,7 @@ impl<'a> Isel<'a> {
         let x = self.to_v(x);
         let lsb = self.v3(Opc::VBfeU32, x, Opnd::Imm(16), Opnd::Imm(1), 0);
         let quiet = self.v_bin(Opc::VOrB32, Opnd::Imm(0x40_0000), x);
-        let nan = self.sreg(1);
+        let nan = self.mreg();
         self.valu(Opc::VCmp(0x18), [r(nan)], [x, x], 0);
         let rounded = self.v3(Opc::VAdd3U32, lsb, x, Opnd::Imm(0x7fff), 0);
         (self.v3(Opc::VCndmaskB32, rounded, quiet, r(nan), 0), true)
@@ -2537,6 +2602,7 @@ impl<'a> Isel<'a> {
     /// `tile.mma` as one WMMA: `accumulate` writes D over C when this is C's
     /// last use (the copy coalesces away), `early` a fresh D otherwise.
     fn wmma(&mut self, op: &Op, accumulate: Opc, early: Opc, mods: u32) -> Result<(), CompileError> {
+        self.gfx11_only("tile.mma")?;
         let a = self.tuple(op.operands[0])?;
         let b = self.tuple(op.operands[1])?;
         let c = self.tuple(op.operands[2])?;
@@ -2668,7 +2734,7 @@ impl<'a> Isel<'a> {
         match ty {
             Type::Scalar(Scalar::I1) if self.chains.finite.contains_key(&v) => {
                 let x = self.w(self.chains.finite[&v])?;
-                let dst = self.sreg(1);
+                let dst = self.mreg();
                 // Negative and positive normals, denormals and zeros.
                 self.valu(Opc::VCmp(VCMP_CLASS_F32), [r(dst)], [x, Opnd::Imm(0x1f8)], 0);
                 self.set(v, Val::M(r(dst)));
@@ -2682,7 +2748,7 @@ impl<'a> Isel<'a> {
                     OpKind::Xor => Opc::SXorB32,
                     other => return Err(unsupported(format!("i1 {other:?}"))),
                 };
-                let out = self.s_bin(opc, a, b);
+                let out = self.m_bin(opc, a, b);
                 self.set(v, Val::M(out));
             }
             Type::Scalar(Scalar::I64) => {
@@ -2896,7 +2962,7 @@ impl<'a> Isel<'a> {
     /// `a - b` and whether it borrowed (`a < b` unsigned): 0 or 1 in an SGPR
     /// for uniform operands, a lane mask otherwise.
     fn sub64_borrow(&mut self, a: (Opnd, Opnd), b: (Opnd, Opnd), uniform: bool) -> ((Opnd, Opnd), Opnd) {
-        let borrow = self.sreg(1);
+        let borrow = if uniform { self.sreg(1) } else { self.mreg() };
         if uniform {
             let dst = self.sreg(2);
             self.salu(Opc::SSubU32, [r(sub(dst, 0, 1))], [a.0, b.0]);
@@ -2905,7 +2971,7 @@ impl<'a> Isel<'a> {
             return ((r(sub(dst, 0, 1)), r(sub(dst, 1, 1))), r(borrow));
         }
         let dst = self.vgpr(2);
-        let carry = self.sreg(1);
+        let carry = self.mreg();
         self.valu(Opc::VSubCoU32, [r(sub(dst, 0, 1)), r(carry)], [a.0, b.0], 0);
         self.valu(Opc::VSubCoCiU32, [r(sub(dst, 1, 1)), r(borrow)], [a.1, b.1, r(carry)], 0);
         ((r(sub(dst, 0, 1)), r(sub(dst, 1, 1))), r(borrow))
@@ -3088,7 +3154,7 @@ impl<'a> Isel<'a> {
         } else {
             (self.w(op.operands[0])?, self.w(op.operands[1])?)
         };
-        let dst = self.sreg(1);
+        let dst = self.mreg();
         self.valu(Opc::VCmp(code), [r(dst)], [a, b], 0);
         self.set(v, Val::M(r(dst)));
         Ok(())
@@ -3102,9 +3168,9 @@ impl<'a> Isel<'a> {
             let mc = self.mask(c)?;
             let ma = self.mask(a)?;
             let mb = self.mask(b)?;
-            let t = self.s_bin(Opc::SAndB32, mc, ma);
-            let f = self.s_bin(Opc::SAndNot1B32, mb, mc);
-            let out = self.s_bin(Opc::SOrB32, t, f);
+            let t = self.m_bin(Opc::SAndB32, mc, ma);
+            let f = self.m_bin(Opc::SAndNot1B32, mb, mc);
+            let out = self.m_bin(Opc::SOrB32, t, f);
             self.set(v, Val::M(out));
             return Ok(());
         }
@@ -3160,7 +3226,7 @@ impl<'a> Isel<'a> {
         } else {
             let m = self.mask(c)?;
             for &(x, y) in &pieces {
-                outs.push(self.v3(Opc::VCndmaskB32, y, x, m, 0));
+                outs.push(self.select_lanes(y, x, m));
             }
         }
         let val = match shape {
@@ -3182,6 +3248,18 @@ impl<'a> Isel<'a> {
         };
         self.set(v, val);
         Ok(())
+    }
+
+    /// `m ? t : f` in each lane. v_cndmask_b32 reads its lane mask from a
+    /// scalar register only: an inline constant there is no mask, and the
+    /// hardware selects garbage. A condition known for every lane (`mask`
+    /// gives it as 0 or all ones) takes the operand it selects.
+    fn select_lanes(&mut self, f: Opnd, t: Opnd, m: Opnd) -> Opnd {
+        match m {
+            Opnd::Imm(0) => f,
+            Opnd::Imm(u32::MAX) => t,
+            _ => self.v3(Opc::VCndmaskB32, f, t, m, 0),
+        }
     }
 
     fn convert_op(&mut self, op: &Op) -> Result<(), CompileError> {
@@ -3501,6 +3579,9 @@ impl<'a> Isel<'a> {
 
     fn lload(&mut self, op: &Op) -> Result<(), CompileError> {
         let v = op.results[0];
+        if let Some(&quad) = self.chains.quads.get(&v) {
+            return self.lload_quad(op, quad);
+        }
         let ty = self.k.ty(v).clone();
         let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
         if self.gathers.contains(&v) {
@@ -3547,6 +3628,19 @@ impl<'a> Isel<'a> {
             _ => Val::T(dst),
         };
         self.set(v, val);
+        Ok(())
+    }
+
+    /// The four loads of `find_dword_quads` that start at `op`, as one
+    /// `ds_load_b128` whose dwords they read.
+    fn lload_quad(&mut self, op: &Op, quad: [ValueId; 4]) -> Result<(), CompileError> {
+        let (addr, offset) = self.lds_addr(op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0))?;
+        let dst = self.vgpr(4);
+        self.emit(MInst::new(Opc::DsLoadB128, [r(dst)], [addr]).with_imm(offset));
+        for (k, v) in quad.into_iter().enumerate() {
+            let part = sub(dst, k as u8, 1);
+            self.set(v, if matches!(self.k.ty(v), Type::Vec(..)) { Val::T(part) } else { Val::W(r(part)) });
+        }
         Ok(())
     }
 
@@ -3611,7 +3705,7 @@ impl<'a> Isel<'a> {
     fn carried(&mut self, ty: &Type, uniform: bool) -> (VRef, Val) {
         match ty {
             Type::Scalar(Scalar::I1) => {
-                let reg = self.sreg(1);
+                let reg = self.mreg();
                 (reg, Val::M(r(reg)))
             }
             Type::Scalar(Scalar::I64 | Scalar::F64) | Type::Ptr(_) => {
@@ -3779,13 +3873,13 @@ impl<'a> Isel<'a> {
             (Some(l), Some(s), Some(u)) => s > 0 && u.hi <= l + s,
             _ => false,
         };
-        let saved = self.sreg(1);
-        self.emit(MInst::new(Opc::SMovB32, [r(saved)], [EXEC]));
+        let saved = self.mreg();
+        self.emit(MInst::new(self.lm(Opc::SMovB32), [r(saved)], [self.exec()]));
         self.depth += 1;
         let head = self.new_block();
-        let running = self.sreg(1);
+        let running = self.mreg();
         self.valu(Opc::VCmp(0x41), [r(running)], [r(iv), ub], 0);
-        self.salu(Opc::SAndB32, [EXEC], [EXEC, r(running)]);
+        self.salu(self.lm(Opc::SAndB32), [self.exec()], [self.exec(), r(running)]);
         self.emit(MInst::new(Opc::SCbranchExecz, [], []));
         let leave = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
         self.new_block();
@@ -3827,7 +3921,7 @@ impl<'a> Isel<'a> {
         self.depth -= 1;
         let exit = self.new_block();
         self.f.blocks[leave.0].insts[leave.1].imm = exit as i64;
-        self.emit(MInst::new(Opc::SMovB32, [EXEC], [r(saved)]));
+        self.emit(MInst::new(self.lm(Opc::SMovB32), [self.exec()], [r(saved)]));
         for (i, &res) in op.results.iter().enumerate() {
             let view = match self.k.ty(res).clone() {
                 Type::Scalar(Scalar::I64 | Scalar::F64) | Type::Ptr(_) => Val::D(r(sub(carried[i], 0, 1)), r(sub(carried[i], 1, 1))),
@@ -3864,8 +3958,9 @@ impl<'a> Isel<'a> {
             return Ok(());
         }
         let mask = self.mask(cond)?;
-        let saved = self.sreg(1);
-        self.emit(MInst::new(Opc::SAndSaveexecB32, [r(saved), EXEC], [mask, EXEC]));
+        let saved = self.mreg();
+        let exec = self.exec();
+        self.emit(MInst::new(self.lm(Opc::SAndSaveexecB32), [r(saved), exec], [mask, exec]));
         self.emit(MInst::new(Opc::SCbranchExecz, [], []));
         let first = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
         self.new_block();
@@ -3873,18 +3968,18 @@ impl<'a> Isel<'a> {
         if has_else {
             let else_block = self.new_block();
             self.f.blocks[first.0].insts[first.1].imm = else_block as i64;
-            self.salu(Opc::SAndNot1B32, [EXEC], [r(saved), mask]);
+            self.salu(self.lm(Opc::SAndNot1B32), [exec], [r(saved), mask]);
             self.emit(MInst::new(Opc::SCbranchExecz, [], []));
             let second = (self.cur, self.f.blocks[self.cur].insts.len() - 1);
             self.new_block();
             self.region(&op.regions[1])?;
             let end = self.new_block();
             self.f.blocks[second.0].insts[second.1].imm = end as i64;
-            self.emit(MInst::new(Opc::SMovB32, [EXEC], [r(saved)]));
+            self.emit(MInst::new(self.lm(Opc::SMovB32), [exec], [r(saved)]));
         } else {
             let end = self.new_block();
             self.f.blocks[first.0].insts[first.1].imm = end as i64;
-            self.salu(Opc::SOrB32, [EXEC], [EXEC, r(saved)]);
+            self.salu(self.lm(Opc::SOrB32), [exec], [exec, r(saved)]);
         }
         Ok(())
     }
@@ -4062,6 +4157,9 @@ struct Chains {
     /// i32 `or(zext(lo), shl(zext(hi), 16))` of two 16-bit values -> (lo, hi);
     /// the zexts and the shift are in `skip`.
     packs: FxHashMap<ValueId, (ValueId, ValueId)>,
+    /// First of four dword LDS loads made one (`find_dword_quads`) -> the four
+    /// results; the other three are in `skip`.
+    quads: FxHashMap<ValueId, [ValueId; 4]>,
 }
 
 struct ChainCx<'a> {
@@ -4212,6 +4310,55 @@ fn lds_chain(cx: &ChainCx, region: &Region, pos: &FxHashMap<ValueId, usize>, cha
     out.skip.extend(folded);
     out.lds.insert(region.ops[tail].results[0], (smem, addr, first, align));
     true
+}
+
+/// Four dword LDS loads (f32 or i32, scalar or one-element vectors) of one
+/// address at byte offsets `o` to `o + 12`, in program order with nothing
+/// in between that has a side effect, the address and `o` 16-byte aligned:
+/// one `ds_load_b128` at the first (the scalar reads of a block reduction).
+fn find_dword_quads(cx: &ChainCx, region: &Region, gathers: &FxHashSet<ValueId>, out: &mut Chains) {
+    for op in &region.ops {
+        for inner in &op.regions {
+            find_dword_quads(cx, inner, gathers, out);
+        }
+    }
+    let dword = |v: ValueId| {
+        matches!(cx.k.ty(v), Type::Scalar(Scalar::F32 | Scalar::I32) | Type::Vec(Scalar::F32 | Scalar::I32, 1))
+    };
+    let mut effects = vec![0u32; region.ops.len() + 1];
+    let mut at: FxHashMap<(ValueId, ValueId, i64), Option<usize>> = FxHashMap::default();
+    for (i, op) in region.ops.iter().enumerate() {
+        effects[i + 1] = effects[i] + has_side_effects(op.kind) as u32;
+        if op.kind == OpKind::LLoad && dword(op.results[0]) && !gathers.contains(&op.results[0]) {
+            let key = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
+            at.entry(key).and_modify(|p| *p = None).or_insert(Some(i));
+        }
+    }
+    let mut taken = FxHashSet::default();
+    for (i, op) in region.ops.iter().enumerate() {
+        if op.kind != OpKind::LLoad || taken.contains(&i) {
+            continue;
+        }
+        let (smem, addr, first) = (op.operands[0], op.operands[1], op.int_attr("offset").unwrap_or(0));
+        if at.get(&(smem, addr, first)) != Some(&Some(i)) {
+            continue;
+        }
+        let Some(&base) = cx.lds.get(&smem) else { continue };
+        if (base as i64 + first) % 16 != 0 || known_align(cx, addr, 0) % 16 != 0 {
+            continue;
+        }
+        let rest: Option<Vec<usize>> = (1..4).map(|k| at.get(&(smem, addr, first + 4 * k)).copied().flatten()).collect();
+        let Some(rest) = rest else { continue };
+        let last = rest[2];
+        let ordered = i < rest[0] && rest[0] < rest[1] && rest[1] < last;
+        if !ordered || effects[last + 1] != effects[i] || rest.iter().any(|p| taken.contains(p)) {
+            continue;
+        }
+        let quad = [i, rest[0], rest[1], last].map(|p| region.ops[p].results[0]);
+        taken.extend([i, rest[0], rest[1], last]);
+        out.skip.extend(&quad[1..]);
+        out.quads.insert(quad[0], quad);
+    }
 }
 
 /// Finiteness tests `fcmp ogt x, -inf && fcmp olt x, +inf` whose compares
@@ -4499,6 +4646,18 @@ pub fn select(
     lds: &FxHashMap<ValueId, u32>,
     lds_size: u32,
 ) -> Result<IselResult, CompileError> {
+    select_for(Target::Gfx1151, kernel, facts, uniform, lds, lds_size)
+}
+
+/// Selection for `target`; the machine function carries it on.
+pub fn select_for(
+    target: Target,
+    kernel: &Kernel,
+    facts: &Facts,
+    uniform: Vec<bool>,
+    lds: &FxHashMap<ValueId, u32>,
+    lds_size: u32,
+) -> Result<IselResult, CompileError> {
     let mut wg_ids = [false; 3];
     find_block_ids(&kernel.body, &mut wg_ids);
     // Workgroup id x is always delivered; it anchors the SGPR layout.
@@ -4512,6 +4671,9 @@ pub fn select(
     let mut chains = Chains::default();
     let cx = ChainCx { k: kernel, facts, lds, uses: &uses, defs: &defs };
     find_chains(&cx, &kernel.body, &mut chains);
+    if target == Target::Gfx1151 {
+        find_dword_quads(&cx, &kernel.body, &gathers, &mut chains);
+    }
     find_finite_tests(&cx, &kernel.body, &mut chains);
     find_half_packs(&cx, &kernel.body, &uniform, &mut chains);
     let mut packs = FxHashMap::default();
@@ -4528,12 +4690,13 @@ pub fn select(
         k: kernel,
         facts,
         uniform,
-        f: MFunc::default(),
+        f: MFunc { target, ..MFunc::default() },
         cur: 0,
         vals: vec![None; kernel.values.len()],
         lds,
         depth: 0,
-        single_wave: kernel.max_workgroup_size <= 32,
+        single_wave: kernel.max_workgroup_size <= target.info().wave,
+        t: target.info(),
         kernarg_ptr: VRef { reg: 0, off: 0, n: 2 },
         tid: VRef { reg: 0, off: 0, n: 1 },
         bid: [None; 3],
@@ -5440,7 +5603,7 @@ mod convmem_tests {
         ];
         for (inst, want) in cases {
             let text = inst_text(&MFunc::default(), &inst);
-            let f = MFunc { blocks: vec![MBlock { insts: vec![inst], loop_depth: 0 }], vregs: Vec::new() };
+            let f = MFunc { blocks: vec![MBlock { insts: vec![inst], loop_depth: 0 }], vregs: Vec::new(), ..Default::default() };
             assert_eq!(super::super::asm::assemble(&f).expect("encodes"), want, "{text}");
         }
     }
@@ -5711,5 +5874,134 @@ mod convmem_tests {
             let hint = kept.iter().position(|&k| !matches!(k, OpKind::ThreadId | OpKind::GlobalLoad)).expect("the hint");
             assert!(kept[..hint].iter().filter(|&&k| k == OpKind::GlobalLoad).count() == 2, "{between}: {kept:?}");
         }
+    }
+}
+
+/// Lane selects whose condition is known for every lane.
+#[cfg(test)]
+mod lane_mask_tests {
+    use super::*;
+
+    fn kernel(body: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @probe {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %X : ptr<i8,global>\n    \
+             %Y : ptr<i8,global>\n  }}\n  region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n{body}    \
+             cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    /// Guards the optimizer proves for every thread of the workgroup (a thread
+    /// id against a bound past it, as `deep_fused_conv_pool` stages its
+    /// operands) leave vector selects of a divergent load on a constant
+    /// condition. Each is the operand it selects: v_cndmask_b32 cannot take a
+    /// constant lane mask.
+    #[test]
+    fn vector_select_on_a_known_condition_is_its_operand() {
+        let body = r#"    %c16 : i32 = arith.constant (  ) { ity = s:"i32", value = i:16 }
+    %c100 : i32 = arith.constant (  ) { ity = s:"i32", value = i:100 }
+    %c1024 : i32 = arith.constant (  ) { ity = s:"i32", value = i:1024 }
+    %row : i32 = arith.mul ( %tid, %c16 )
+    %far : i32 = arith.add ( %row, %c1024 )
+    %in : i1 = arith.cmp ( %tid, %c100 ) { pred = s:"lt" }
+    %out : i1 = arith.cmp ( %tid, %c100 ) { pred = s:"ge" }
+    %v : vec<i8x16> = memref.global_load_vN ( %X, %row ) { align = i:16, elem_type = s:"i8", vec = i:16 }
+    %z : vec<i8x16> = arith.constant_vec (  ) { elem = s:"i8", fill = f:0.0, vec = i:16 }
+    %taken : vec<i8x16> = vector.select ( %in, %v, %z )
+    %kept : vec<i8x16> = vector.select ( %out, %z, %v )
+    memref.global_store_vN ( %Y, %row, %taken ) { align = i:16, elem_type = s:"i8", vec = i:16 }
+    memref.global_store_vN ( %Y, %far, %kept ) { align = i:16, elem_type = s:"i8", vec = i:16 }
+"#;
+        let compiled = super::super::compile(&kernel(body)).unwrap_or_else(|e| panic!("{e}"));
+        let insts: Vec<&MInst> = compiled.func.blocks.iter().flat_map(|b| &b.insts).collect();
+        assert!(!insts.iter().any(|i| i.op == Opc::VCndmaskB32), "{}", compiled.listing());
+        assert_eq!(insts.iter().filter(|i| i.op == Opc::GStoreB128).count(), 2);
+    }
+
+    /// The encoder refuses a lane mask or carry-in that is not a scalar
+    /// register, whatever pass put it there.
+    #[test]
+    fn lane_masks_come_from_scalar_registers() {
+        let v = |r: u16| Opnd::P(Phys::V(r), 1);
+        let encode = |op: Opc, defs: &[Opnd], m: Opnd| {
+            let inst = MInst::new(op, defs, [v(1), v(2), m]);
+            let f = MFunc { blocks: vec![MBlock { insts: vec![inst], loop_depth: 0 }], ..Default::default() };
+            super::super::asm::assemble(&f).map(|_| ()).map_err(|e| e.kind)
+        };
+        let carry = [v(0), Opnd::P(Phys::Null, 1)];
+        for (op, defs) in [(Opc::VCndmaskB32, &[v(0)][..]), (Opc::VAddCoCiU32, &carry[..]), (Opc::VSubCoCiU32, &carry[..])] {
+            assert_eq!(encode(op, defs, Opnd::P(Phys::S(3), 1)), Ok(()));
+            assert_eq!(encode(op, defs, Opnd::P(Phys::VccLo, 1)), Ok(()));
+            for m in [Opnd::Imm(u32::MAX), Opnd::Imm(0), v(3)] {
+                assert_eq!(encode(op, defs, m), Err("ROCKE_DIRECT_ENCODE"), "{} with {m:?}", op.name());
+            }
+        }
+    }
+}
+
+/// Dword LDS loads merged into ds_load_b128.
+#[cfg(test)]
+mod dword_quad_tests {
+    use super::*;
+
+    /// A block reduction: every thread stores one f32 to `%red[tid]`, then
+    /// threads below 2 sum `count` consecutive values from `%red[tid * 128 +
+    /// first]`, with `between` after the first load.
+    fn reduction(first: i64, count: i64, between: &str) -> String {
+        let mut body = String::from(
+            "    %red : smem<f32, [1x256]> = tile.smem_alloc (  )\n    \
+             %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n    \
+             %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    \
+             %c128 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:128 }\n    \
+             %x : f32 = memref.global_load_typed ( %F, %tid ) { align = i:4, elem_type = s:\"f32\" }\n    \
+             tile.smem_store_vN_f32 ( %red, %c0, %tid, %x ) { elem_type = s:\"f32\", rank = i:2, vec = i:1 }\n    \
+             tile.sync (  )\n    %lt : i1 = arith.cmp ( %tid, %c2 ) { pred = s:\"lt\" }\n    scf.if ( %lt )\n      \
+             region @then {\n        %row : i32 = arith.mul ( %tid, %c128 )\n",
+        );
+        let mut sum = String::new();
+        for j in 0..count {
+            body += &format!(
+                "        %k{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n        \
+                 %i{j} : i32 = arith.add ( %row, %k{j} )\n        \
+                 %l{j} : vec<f32x1> = tile.smem_load_vN_f32 ( %red, %c0, %i{j} ) {{ elem_type = s:\"f32\", rank = i:2, vec = i:1 }}\n        \
+                 %e{j} : f32 = vector.extract ( %l{j} ) {{ index = i:0 }}\n",
+                first + j
+            );
+            if j == 0 {
+                body += between;
+                sum = "%e0".into();
+            } else {
+                body += &format!("        %s{j} : f32 = arith.fadd ( {sum}, %e{j} )\n");
+                sum = format!("%s{j}");
+            }
+        }
+        body += &format!(
+            "        memref.global_store_typed ( %F, %tid, {sum} ) {{ align = i:4, elem_type = s:\"f32\" }}\n      }}\n"
+        );
+        format!(
+            "ckdsl.ir v1\nkernel @reduce {{\n  attrs {{ max_workgroup_size = i:256 }}\n  params {{\n    \
+             %F : ptr<f32,global>\n  }}\n  region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n\
+             {body}    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    fn lds_loads(text: &str, target: Target) -> (usize, usize) {
+        let compiled = super::super::compile_any_target(text, target).unwrap_or_else(|e| panic!("{e}"));
+        let insts: Vec<&MInst> = compiled.func.blocks.iter().flat_map(|b| &b.insts).collect();
+        let count = |op: Opc| insts.iter().filter(|i| i.op == op).count();
+        (count(Opc::DsLoadB128), count(Opc::DsLoadB32))
+    }
+
+    /// The reduction's reads at 16-byte aligned offsets take one
+    /// `ds_load_b128` per four dwords (the LDS swizzle keeps them aligned);
+    /// a partial quad, a misaligned start, a store between and gfx950 keep
+    /// their `ds_load_b32`s.
+    #[test]
+    fn aligned_dword_loads_of_one_address_merge_in_fours() {
+        assert_eq!(lds_loads(&reduction(0, 8, ""), Target::Gfx1151), (2, 0));
+        assert_eq!(lds_loads(&reduction(0, 3, ""), Target::Gfx1151), (0, 3));
+        assert_eq!(lds_loads(&reduction(1, 4, ""), Target::Gfx1151), (0, 4));
+        let store = "        tile.smem_store_vN_f32 ( %red, %c0, %row, %x ) { elem_type = s:\"f32\", rank = i:2, vec = i:1 }\n";
+        assert_eq!(lds_loads(&reduction(0, 4, store), Target::Gfx1151), (0, 4));
+        assert_eq!(lds_loads(&reduction(0, 8, ""), Target::Gfx950).0, 0);
     }
 }

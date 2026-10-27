@@ -3,6 +3,7 @@
 
 //! Flat C ABI for direct rocKE IR compilation.
 
+use std::ffi::{c_char, CStr};
 use std::mem;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
@@ -14,6 +15,7 @@ use crate::direct_gemm::compile_gfx1151_wmma_gemm_ir;
 use crate::error::CompileError;
 use crate::rir::session::{Session, SessionOptions};
 use crate::rir::CompiledKernel;
+use crate::target::Target;
 
 pub const ROCKE_CODEOBJ_FFI_ABI_VERSION: u32 = 1;
 
@@ -214,6 +216,66 @@ pub unsafe extern "C" fn rocke_codeobj_compile_rocke_ir_v1(
     set_compile_outcome(result, operation)
 }
 
+/// Request for `rocke_codeobj_compile_rocke_ir_v2`: the v1 request and the
+/// target to compile for.
+#[repr(C)]
+pub struct RockeIrCompileRequestV2 {
+    pub struct_size: u32,
+    pub serialized_ir: *const u8,
+    pub serialized_ir_size: usize,
+    /// NUL-terminated target name (`"gfx1151"`, `"gfx950"`); an unknown or unsupported
+    /// one is a `request` error.
+    pub target: *const c_char,
+}
+
+/// The supported target `name` points at, or the `request` error.
+unsafe fn input_target(name: *const c_char) -> Result<Target, CompileError> {
+    if name.is_null() {
+        return Err(CompileError::new("request", "target is null"));
+    }
+    let name = unsafe { CStr::from_ptr(name) }
+        .to_str()
+        .map_err(|error| CompileError::new("request", format!("target is not UTF-8: {error}")))?;
+    Target::requested(name)
+}
+
+/// `rocke_codeobj_compile_rocke_ir_v1` for the request's target.
+///
+/// # Safety
+///
+/// Same contract as [`rocke_codeobj_compile_rocke_ir_v1`], and `target`
+/// must be null or point to a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn rocke_codeobj_compile_rocke_ir_v2(
+    request: *const RockeIrCompileRequestV2,
+    result: *mut RockeCodeobjCompileResultV1,
+) -> i32 {
+    if unsafe { reset_compile_result(result) }.is_err() {
+        return 1;
+    }
+    let result = unsafe { &mut *result };
+    let operation = catch_unwind(AssertUnwindSafe(|| {
+        if request.is_null() || unsafe { (*request).struct_size } != mem::size_of::<RockeIrCompileRequestV2>() as u32 {
+            return Err(CompileError::new("request", "rocKE IR request has an incompatible struct_size"));
+        }
+        let request = unsafe { &*request };
+        let target = unsafe { input_target(request.target) }?;
+        let ir = unsafe { input_string(request.serialized_ir, request.serialized_ir_size, "serialized_ir") }
+            .map_err(|message| CompileError::new("request", message))?;
+        let start = std::time::Instant::now();
+        let compiled = crate::rir::compile_for(&ir, target)?;
+        Ok((compiled, start.elapsed().as_secs_f64()))
+    }));
+    set_compile_outcome(result, operation)
+}
+
+/// The targets this library compiles for: a static NUL-terminated,
+/// comma-separated list of names (`"gfx1151,gfx950"`).
+#[no_mangle]
+pub extern "C" fn rocke_codeobj_supported_targets_v1() -> *const c_char {
+    crate::target::SUPPORTED_NAMES.as_ptr()
+}
+
 /// Fills `result` from a compile, as every rocKE IR entry point reports it.
 fn set_compile_outcome(
     result: &mut RockeCodeobjCompileResultV1,
@@ -282,7 +344,55 @@ pub unsafe extern "C" fn rocke_codeobj_session_create_v1(
     } else {
         unsafe { (*options).worker_threads }
     };
-    match catch_unwind(|| Box::new(Session::new(SessionOptions { worker_threads }))) {
+    match catch_unwind(|| Box::new(Session::new(SessionOptions { worker_threads, target: Target::Gfx1151 }))) {
+        Ok(created) => {
+            unsafe { *session = Box::into_raw(created) };
+            0
+        }
+        Err(_) => 1,
+    }
+}
+
+#[repr(C)]
+pub struct RockeCodeobjSessionOptionsV2 {
+    pub struct_size: u32,
+    /// Worker threads the session starts; 0 picks a default.
+    pub worker_threads: u32,
+    /// NUL-terminated name of the target every compile of the session is
+    /// for (`"gfx1151"`, `"gfx950"`).
+    pub target: *const c_char,
+}
+
+/// `rocke_codeobj_session_create_v1` with a target: the session's compile,
+/// feed and finish entry points compile for it. Null `options` takes the
+/// defaults (gfx1151); a null, unknown or unsupported target fails as a
+/// mismatched `struct_size` does.
+///
+/// # Safety
+///
+/// `options` must be null or point to a valid v2 options struct whose
+/// `target` is null or NUL-terminated; `session` as for
+/// `rocke_codeobj_session_create_v1`.
+#[no_mangle]
+pub unsafe extern "C" fn rocke_codeobj_session_create_v2(
+    options: *const RockeCodeobjSessionOptionsV2,
+    session: *mut *mut Session,
+) -> i32 {
+    if session.is_null() {
+        return 1;
+    }
+    unsafe { *session = ptr::null_mut() };
+    let (worker_threads, target) = if options.is_null() {
+        (0, Target::Gfx1151)
+    } else if unsafe { (*options).struct_size } != mem::size_of::<RockeCodeobjSessionOptionsV2>() as u32 {
+        return 1;
+    } else {
+        match unsafe { input_target((*options).target) } {
+            Ok(target) => (unsafe { (*options).worker_threads }, target),
+            Err(_) => return 1,
+        }
+    };
+    match catch_unwind(|| Box::new(Session::new(SessionOptions { worker_threads, target }))) {
         Ok(created) => {
             unsafe { *session = Box::into_raw(created) };
             0
@@ -500,6 +610,105 @@ mod tests {
         assert_eq!(unsafe { rocke_codeobj_session_feed_v1(session, ptr::null(), 4) }, 1);
         unsafe { rocke_codeobj_session_free_v1(session) };
         unsafe { rocke_codeobj_session_free_v1(ptr::null_mut()) };
+    }
+
+    fn v2_request(text: &[u8], target: *const c_char) -> RockeIrCompileRequestV2 {
+        RockeIrCompileRequestV2 {
+            struct_size: mem::size_of::<RockeIrCompileRequestV2>() as u32,
+            serialized_ir: text.as_ptr(),
+            serialized_ir_size: text.len(),
+            target,
+        }
+    }
+
+    #[test]
+    fn v2_compiles_for_its_target_and_refuses_the_rest() {
+        let broken = PROBE.replace("%tid )\n", "%nope )\n");
+        for text in [PROBE.as_bytes(), broken.as_bytes(), b"", b"ckdsl.ir v1\n\xff\n"] {
+            let request = RockeDirectGemmCompileRequestV1 {
+                struct_size: mem::size_of::<RockeDirectGemmCompileRequestV1>() as u32,
+                serialized_ir: text.as_ptr(),
+                serialized_ir_size: text.len(),
+            };
+            let mut plain = empty_compile_result();
+            let status = unsafe { rocke_codeobj_compile_rocke_ir_v1(&request, &mut plain) };
+            let reference = outcome(status, &mut plain);
+            let mut via = empty_compile_result();
+            let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&v2_request(text, c"gfx1151".as_ptr()), &mut via) };
+            assert_eq!(outcome(status, &mut via), reference, "{text:?}");
+        }
+        for target in [c"gfx942".as_ptr(), c"".as_ptr(), ptr::null()] {
+            let mut result = empty_compile_result();
+            let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&v2_request(PROBE.as_bytes(), target), &mut result) };
+            let (status, hsaco, diagnostics) = outcome(status, &mut result);
+            assert_eq!((status, hsaco.len()), (1, 0));
+            assert!(diagnostics.starts_with("request: "), "{diagnostics}");
+        }
+        // gfx950 compiles the kernel to a gfx950 code object, and refuses an
+        // operation it does not lower as unsupported.
+        let mut result = empty_compile_result();
+        let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&v2_request(PROBE.as_bytes(), c"gfx950".as_ptr()), &mut result) };
+        let (status, hsaco, _) = outcome(status, &mut result);
+        assert_eq!(status, 0);
+        assert_eq!(u32::from_le_bytes(hsaco[48..52].try_into().unwrap()), 0x54f);
+        let permlane = PROBE.replace("%e : f32 = arith.bitcast ( %tid )", "%p : i32 = tile.permlane64 ( %tid )\n    %e : f32 = arith.bitcast ( %p )");
+        let mut result = empty_compile_result();
+        let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&v2_request(permlane.as_bytes(), c"gfx950".as_ptr()), &mut result) };
+        let (status, hsaco, diagnostics) = outcome(status, &mut result);
+        assert_eq!((status, hsaco.len()), (1, 0));
+        assert!(diagnostics.starts_with("ROCKE_DIRECT_UNSUPPORTED: "), "{diagnostics}");
+        let mut request = v2_request(PROBE.as_bytes(), c"gfx1151".as_ptr());
+        request.struct_size = mem::size_of::<RockeDirectGemmCompileRequestV1>() as u32;
+        let mut result = empty_compile_result();
+        let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&request, &mut result) };
+        assert!(outcome(status, &mut result).2.contains("struct_size"));
+        let supported = unsafe { CStr::from_ptr(rocke_codeobj_supported_targets_v1()) };
+        assert_eq!(supported.to_str().ok(), Some("gfx1151,gfx950"));
+    }
+
+    #[test]
+    fn v2_sessions_compile_for_their_target() {
+        let options = |target: *const c_char| RockeCodeobjSessionOptionsV2 {
+            struct_size: mem::size_of::<RockeCodeobjSessionOptionsV2>() as u32,
+            worker_threads: 1,
+            target,
+        };
+        let request = RockeDirectGemmCompileRequestV1 {
+            struct_size: mem::size_of::<RockeDirectGemmCompileRequestV1>() as u32,
+            serialized_ir: PROBE.as_ptr(),
+            serialized_ir_size: PROBE.len(),
+        };
+        let mut plain = empty_compile_result();
+        let status = unsafe { rocke_codeobj_compile_rocke_ir_v1(&request, &mut plain) };
+        let reference = outcome(status, &mut plain);
+        assert_eq!(reference.0, 0);
+        for opts in [Some(options(c"gfx1151".as_ptr())), None] {
+            let mut session = ptr::null_mut();
+            let opts_ptr = opts.as_ref().map_or(ptr::null(), |o| o as *const _);
+            assert_eq!(unsafe { rocke_codeobj_session_create_v2(opts_ptr, &mut session) }, 0);
+            assert_eq!(unsafe { (*session).target() }, Target::Gfx1151);
+            let mut via = empty_compile_result();
+            let status = unsafe { rocke_codeobj_session_compile_v1(session, &request, &mut via) };
+            assert_eq!(outcome(status, &mut via), reference);
+            unsafe { rocke_codeobj_session_free_v1(session) };
+        }
+        let mut session = ptr::null_mut();
+        assert_eq!(unsafe { rocke_codeobj_session_create_v2(&options(c"gfx950".as_ptr()), &mut session) }, 0);
+        assert_eq!(unsafe { (*session).target() }, Target::Gfx950);
+        let mut via = empty_compile_result();
+        let status = unsafe { rocke_codeobj_session_compile_v1(session, &request, &mut via) };
+        let (status, hsaco, _) = outcome(status, &mut via);
+        assert_eq!((status, u32::from_le_bytes(hsaco[48..52].try_into().unwrap())), (0, 0x54f));
+        unsafe { rocke_codeobj_session_free_v1(session) };
+        for target in [c"gfx942".as_ptr(), c"gfx9".as_ptr(), ptr::null()] {
+            let mut session = ptr::null_mut();
+            assert_eq!(unsafe { rocke_codeobj_session_create_v2(&options(target), &mut session) }, 1);
+            assert!(session.is_null());
+        }
+        let mut short = options(c"gfx1151".as_ptr());
+        short.struct_size = mem::size_of::<RockeCodeobjSessionOptionsV1>() as u32;
+        let mut session = ptr::null_mut();
+        assert_eq!(unsafe { rocke_codeobj_session_create_v2(&short, &mut session) }, 1);
     }
 
     #[test]

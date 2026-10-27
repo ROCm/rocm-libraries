@@ -8,6 +8,7 @@ pub mod analysis;
 pub mod asm;
 pub mod ast;
 pub mod fx;
+mod fma_mix;
 #[rustfmt::skip]
 pub mod gen_isa;
 pub mod isa;
@@ -16,6 +17,7 @@ pub mod isel;
 mod loadorder;
 pub mod lds_swizzle;
 pub mod mir;
+mod mma_order;
 pub mod opt;
 pub mod parse;
 mod parse_par;
@@ -23,6 +25,7 @@ pub mod peephole;
 pub mod post;
 pub mod print;
 pub mod regalloc;
+mod reload;
 pub mod unroll;
 mod scan;
 mod scan_line;
@@ -30,12 +33,14 @@ pub mod session;
 pub mod validate;
 mod spill;
 mod stream;
+mod uniform_masks;
 pub mod vopd;
 
 use std::time::{Duration, Instant};
 
 use crate::error::CompileError;
 use crate::hsaco_writer::{write_kernel_object, KernelArgMeta, KernelObjectSpec};
+pub use crate::target::Target;
 use ast::{Scalar, Type};
 
 /// Conservative-mode switches for bisecting miscompiles, e.g.
@@ -44,49 +49,11 @@ use ast::{Scalar, Type};
 /// `nopeephole` skips the proven peephole rules, `nopeephole_<family>` one family of them.
 /// `nounroll` leaves rolled the loops the IR does not mark `unroll = true` (`unroll::Auto`).
 /// `noalias` keeps every pair of global accesses in order, as if no kernel argument were `noalias`.
+/// `nohoist` leaves spill reloads right before their uses, where the spiller puts them (`reload`).
+/// `nommaorder` keeps program order when it does not fit the VGPRs (`mma_order`).
+/// `nomix` keeps shared f16 conversions (`fma_mix`); `nomasks` evaluates a row's guard at each use (`uniform_masks`).
 pub(crate) fn debug_flag(name: &str) -> bool {
     std::env::var("ROCKE_DIRECT_DEBUG").is_ok_and(|v| v.split(',').any(|f| f.trim() == name))
-}
-
-/// Waves per SIMD that can be resident on gfx1151 in wave32 WGP mode: VGPRs
-/// come in blocks of 24 out of 1536 per SIMD, and a WGP's four SIMDs share
-/// 128 KiB of LDS.
-fn occupancy(vgprs: u32, lds_bytes: u32, workgroup_size: u32) -> u32 {
-    let by_vgprs = 1536 / vgprs.max(1).next_multiple_of(24);
-    let by_lds = match lds_bytes {
-        0 => 16,
-        lds => ((128 * 1024 / lds) * workgroup_size.div_ceil(32) / 4).max(1),
-    };
-    by_vgprs.min(by_lds).min(16)
-}
-
-#[cfg(test)]
-mod occupancy_tests {
-    use super::*;
-
-    #[test]
-    fn budgets_keep_the_occupancy_of_the_pressure() {
-        // 143 live: 10 waves, which 144 VGPRs keep and 145 do not.
-        assert_eq!(occupancy(143, 512, 32), 10);
-        assert_eq!(vgpr_budget(10, 512, 32), 144);
-        // LDS caps occupancy at one wave: every VGPR count keeps it.
-        assert_eq!(occupancy(181, 33792, 32), 1);
-        assert_eq!(vgpr_budget(1, 33792, 32), 256);
-        assert_eq!(vgpr_budget(16, 0, 64), 96);
-    }
-
-    #[test]
-    fn lds_spill_slots_keep_the_workgroups_per_wgp() {
-        // One-wave workgroups at 256 VGPRs: 5 waves per SIMD, 20 per WGP, so
-        // up to 6553 bytes of LDS each; 512 are used, the rest is 47 slots.
-        assert_eq!(lds_spill_slots(512, 32, 256), 47);
-        // 41472 bytes leave three workgroups per WGP: up to 43690 bytes.
-        assert_eq!(lds_spill_slots(41472, 32, 256), (43690 - 41472) / 128);
-        // A workgroup never gets past 64 KiB: two 1024-lane workgroups fill
-        // a WGP, each with 64 KiB, 16 slots of 4 KiB.
-        assert_eq!(lds_spill_slots(0, 1024, 16), 16);
-        assert_eq!(lds_spill_slots(60000, 32, 256), (64 * 1024 - 60000) / 128);
-    }
 }
 
 #[cfg(test)]
@@ -121,10 +88,10 @@ mod thread_tests {
     #[test]
     fn one_thread_and_four_give_the_same_bytes() {
         let text = spilling_kernel(700);
-        let one = compile_parsed_by_on(&text, &parse::parse, 1).unwrap_or_else(|e| panic!("{e}"));
+        let one = compile_parsed_by_on(&text, &parse::parse, 1, Target::Gfx1151).unwrap_or_else(|e| panic!("{e}"));
         assert!(spilled(&one.stats) > 0, "spills");
         assert!(one.stats.instructions >= regalloc::PARALLEL_MIN_INSTS, "{} instructions", one.stats.instructions);
-        let four = compile_parsed_by_on(&text, &parse::parse, 4).unwrap_or_else(|e| panic!("{e}"));
+        let four = compile_parsed_by_on(&text, &parse::parse, 4, Target::Gfx1151).unwrap_or_else(|e| panic!("{e}"));
         assert!(one.hsaco == four.hsaco, "the thread count changed the code object");
     }
 
@@ -144,12 +111,12 @@ mod thread_tests {
     fn a_resumed_spill_gives_the_code_of_the_spilling_compile() {
         for (text, facts) in [(spilling_kernel(300), false), (spilling_kernel_with_facts(300), true)] {
             let auto = Some(unroll::Auto::DEFAULT);
-            let Err(Failure::Unfit(resume)) = compile_with(&text, false, false, &parse::parse, auto, &mut 0, 0) else {
+            let Err(Failure::Unfit(resume)) = compile_with(&text, false, false, &parse::parse, auto, &mut 0, 0, Target::Gfx1151) else {
                 panic!("fits without spilling");
             };
             assert_eq!(alias::relaxes(&resume.selected.sel.func), facts);
             let resumed = resume.spill(0, 0).unwrap_or_else(|e| panic!("{e}"));
-            let full = compile_with(&text, false, true, &parse::parse, auto, &mut 0, 0)
+            let full = compile_with(&text, false, true, &parse::parse, auto, &mut 0, 0, Target::Gfx1151)
                 .map_err(Failure::into_error)
                 .unwrap_or_else(|e| panic!("{e}"));
             assert!(spilled(&full.stats) > 0, "spills");
@@ -158,24 +125,6 @@ mod thread_tests {
             assert!(compiled.hsaco == full.hsaco, "compile does not resume the spilling compile");
         }
     }
-}
-
-/// The most VGPRs that still give `waves` waves per SIMD.
-fn vgpr_budget(waves: u32, lds_bytes: u32, workgroup_size: u32) -> u32 {
-    (1..=regalloc::MAX_VGPRS).rev().find(|&v| occupancy(v, lds_bytes, workgroup_size) >= waves).unwrap_or(1)
-}
-
-/// LDS dwords per work-item that spill slots may add without lowering the
-/// workgroups a WGP holds, as limited by `vgprs`, the LDS already used, and
-/// sixteen waves per SIMD; a workgroup's LDS stays within 64 KiB.
-fn lds_spill_slots(lds_bytes: u32, workgroup_size: u32, vgprs: u32) -> u32 {
-    let wg = workgroup_size.max(1);
-    let waves_per_group = wg.div_ceil(32);
-    let by_vgprs = 4 * (1536 / vgprs.max(1).next_multiple_of(24)).min(16) / waves_per_group;
-    let by_lds = if lds_bytes == 0 { u32::MAX } else { 128 * 1024 / lds_bytes };
-    let groups = by_vgprs.min(by_lds).max(1);
-    let most = (128 * 1024 / groups).min(64 * 1024);
-    most.saturating_sub(lds_bytes) / (4 * wg)
 }
 
 /// The schedules spilling chooses among: each scheduling window, load
@@ -214,14 +163,15 @@ fn schedule_and_allocate(
     spill: bool,
     threads: usize,
 ) -> Result<(regalloc::Allocation, usize), Unallocated> {
-    let waves = |vgprs: u32| occupancy(vgprs, lds_size, wg);
-    let hw = regalloc::Limits::default();
+    let t = func.target.info();
+    let waves = |vgprs: u32| t.occupancy(vgprs, lds_size, wg);
+    let hw = regalloc::Limits::for_func(func);
     let mut sunk = func.clone();
     post::sink_load_uses(&mut sunk, 32);
     let base_pressure = regalloc::pressure(&sunk)?;
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
-    let budget = |target: u32| regalloc::Limits { vgprs: vgpr_budget(target, lds_size, wg), sgprs: hw.sgprs };
+    let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
     let windows: &[usize] = if debug_flag("nosched") { &[] } else { &[64, 32, 16] };
     let mut base: Option<(mir::MFunc, regalloc::Allocation)> = None;
     let mut scheduled: Vec<(usize, mir::MFunc, regalloc::Pressure)> = Vec::with_capacity(windows.len());
@@ -336,7 +286,8 @@ fn spill_best(
     wg: u32,
     threads: usize,
 ) -> Result<(regalloc::Allocation, usize), CompileError> {
-    let hw = regalloc::Limits::default();
+    let t = candidates[0].1.target.info();
+    let hw = regalloc::Limits::for_func(&candidates[0].1);
     let over = |p: &regalloc::Pressure| p.vgprs.saturating_sub(hw.vgprs) + p.sgprs.saturating_sub(hw.sgprs);
     let large = candidates[0].1.blocks.iter().map(|b| b.insts.len()).sum::<usize>() >= regalloc::PARALLEL_MIN_INSTS;
     let threads = match threads {
@@ -355,7 +306,7 @@ fn spill_best(
     let cfg = regalloc::SpillConfig {
         lds_size,
         wg_size: wg.max(1),
-        lds_slots: lds_spill_slots(lds_size, wg, hw.vgprs),
+        lds_slots: t.lds_spill_slots(lds_size, wg, hw.vgprs),
     };
     let a = regalloc::allocate_spilling_on(&mut f, hw, cfg, threads)?;
     *func = f;
@@ -419,14 +370,15 @@ fn widen_schedule(
     lds_size: u32,
     wg: u32,
 ) -> Result<(regalloc::Allocation, usize), CompileError> {
-    let waves = |vgprs: u32| occupancy(vgprs, lds_size, wg);
+    let t = func.target.info();
+    let waves = |vgprs: u32| t.occupancy(vgprs, lds_size, wg);
     let chosen = waves(alloc.num_vgprs);
     let cost = post::schedule_cost(func);
     let bar = cost.cycles(chosen) * 19 / 20;
     if debug_flag("nowiden") || window == 1 || bar <= cost.issue() {
         return Ok((alloc, window));
     }
-    let hw = regalloc::Limits::default();
+    let hw = regalloc::Limits::for_func(func);
     let mut f = unscheduled.clone();
     post::sink_load_uses(&mut f, 32);
     post::schedule_window(&mut f, WIDE_WINDOW);
@@ -440,7 +392,7 @@ fn widen_schedule(
             continue;
         }
         let mut g = f.clone();
-        let budget = regalloc::Limits { vgprs: vgpr_budget(target, lds_size, wg), sgprs: hw.sgprs };
+        let budget = regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
         let Ok(a) = regalloc::allocate_within(&mut g, budget) else {
             continue;
         };
@@ -463,6 +415,10 @@ fn widen_schedule(
 /// the WMMA hazard, clauses, ALU delay hints, the VGPR release, FMAC
 /// shrinking. Returns the VOPD pair counts.
 fn finish(func: &mut mir::MFunc, num_vgprs: u32) -> Result<(u32, u64), CompileError> {
+    if func.target == Target::Gfx950 {
+        crate::target::gfx9::finish(func, num_vgprs)?;
+        return Ok((0, 0));
+    }
     post::expand_pseudos(func)?;
     post::insert_waitcnt(func);
     if !debug_flag("novopd") {
@@ -546,9 +502,10 @@ fn prefer_facts(
         return strict;
     }
     let faster = |a: u64, b: u64| a < b && a * 20 <= b * 19;
-    let waves = occupancy(strict.0.num_vgprs.max(1), lds_size, wg);
+    let t = func.target.info();
+    let waves = t.occupancy(strict.0.num_vgprs.max(1), lds_size, wg);
     let fragmented = strict.0.num_vgprs.saturating_sub(strict.0.pressure.vgprs);
-    let hw = regalloc::Limits::default();
+    let hw = regalloc::Limits::for_func(func);
     let mut sunk = func.clone();
     post::sink_load_uses(&mut sunk, 32);
     let mut probe = None;
@@ -556,7 +513,7 @@ fn prefer_facts(
         let mut f = sunk.clone();
         post::schedule_window(&mut f, window);
         let Ok(p) = regalloc::pressure(&f) else { continue };
-        if p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs && occupancy(p.vgprs + fragmented, lds_size, wg) >= waves {
+        if p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs && t.occupancy(p.vgprs + fragmented, lds_size, wg) >= waves {
             probe = Some(f);
             break;
         }
@@ -572,7 +529,7 @@ fn prefer_facts(
     };
     // (spilled dwords, waves per SIMD, cycles at those waves, cycles of one wave).
     let rank = |f: &mir::MFunc, a: &regalloc::Allocation| {
-        let waves = occupancy(a.num_vgprs.max(1), lds_size + a.spill.lds_bytes, wg);
+        let waves = t.occupancy(a.num_vgprs.max(1), lds_size + a.spill.lds_bytes, wg);
         let cost = post::schedule_cost(f);
         (a.spill.lds_dwords + a.spill.scratch_dwords, waves, cost.cycles(waves), cost.cycles(1))
     };
@@ -621,6 +578,8 @@ pub struct CompiledKernel {
     pub name: String,
     pub hsaco: Vec<u8>,
     pub stats: CompileStats,
+    /// The target the code object is for.
+    pub target: Target,
     func: mir::MFunc,
     /// Plain first-fit did not fit the hardware (see `compile`).
     tight: bool,
@@ -629,22 +588,50 @@ pub struct CompiledKernel {
 impl CompiledKernel {
     /// Text listing of the machine code with byte offsets and encodings.
     pub fn listing(&self) -> String {
-        asm::listing(&self.func).expect("the code assembled once")
+        match self.target {
+            Target::Gfx1151 => asm::listing(&self.func),
+            Target::Gfx950 => crate::target::gfx9::asm::listing(&self.func),
+        }
+        .expect("the code assembled once")
     }
 }
 
 /// Compiles one rocKE IR kernel to a loadable gfx1151 code object.
 pub fn compile(text: &str) -> Result<CompiledKernel, CompileError> {
-    compile_parsed_by(text, &parse::parse)
+    compile_parsed_by(text, &parse::parse, Target::Gfx1151)
 }
 
-/// `compile`, with `parse` (which gives `parse::parse`'s result) parsing the
-/// text, as a session does on its own threads.
+/// Compiles one rocKE IR kernel to a loadable code object for `target`; a
+/// target the compiler does not support is a `request` error.
+pub fn compile_for(text: &str, target: Target) -> Result<CompiledKernel, CompileError> {
+    compile_parsed_by(text, &parse::parse, target.require_supported()?)
+}
+
+/// `compile_for` without the support check, for a target the back end
+/// knows but does not support yet (gfx950): its code objects are for the
+/// tests and offline checks that bring the target up. Sessions and the FFI
+/// never call it.
+pub fn compile_any_target(text: &str, target: Target) -> Result<CompiledKernel, CompileError> {
+    compile_parsed_by(text, &parse::parse, target)
+}
+
+/// `compile_any_target` with at most `vgprs` VGPRs for the allocation:
+/// below what the kernel needs it spills, which is how the tests and the
+/// offline checks exercise spilling where no kernel needs it. Sessions and
+/// the FFI never call it.
+pub fn compile_any_target_limited(text: &str, target: Target, vgprs: u32) -> Result<CompiledKernel, CompileError> {
+    let limited = |text: &str| parse::parse(text).map(|kernel| ast::Kernel { vgpr_limit: Some(vgprs), ..kernel });
+    compile_parsed_by(text, &limited, target)
+}
+
+/// `compile_for`, with `parse` (which gives `parse::parse`'s result)
+/// parsing the text, as a session does on its own threads.
 pub(crate) fn compile_parsed_by(
     text: &str,
     parse: &dyn Fn(&str) -> Result<ast::Kernel, CompileError>,
+    target: Target,
 ) -> Result<CompiledKernel, CompileError> {
-    compile_parsed_by_on(text, parse, 0)
+    compile_parsed_by_on(text, parse, 0, target)
 }
 
 /// `compile_parsed_by` with independent steps on up to `threads` threads
@@ -654,9 +641,10 @@ pub(crate) fn compile_parsed_by_on(
     text: &str,
     parse: &dyn Fn(&str) -> Result<ast::Kernel, CompileError>,
     threads: usize,
+    target: Target,
 ) -> Result<CompiledKernel, CompileError> {
     if debug_flag("nounroll") {
-        return compile_retrying(text, parse, None, &mut 0, threads);
+        return compile_retrying(text, parse, None, &mut 0, threads, target);
     }
     // Loops unrolled beyond the IR's hints stay unrolled only if that
     // spills no more than leaving them rolled and keeps its occupancy;
@@ -664,23 +652,20 @@ pub(crate) fn compile_parsed_by_on(
     // A retry can keep an earlier attempt's result, so a result is judged by
     // its own count; `unrolled` (the last attempt's) only covers an error.
     let mut unrolled = 0;
-    let first = compile_retrying(text, parse, Some(unroll::Auto::DEFAULT), &mut unrolled, threads);
+    let first = compile_retrying(text, parse, Some(unroll::Auto::DEFAULT), &mut unrolled, threads, target);
     match &first {
         Ok(u) if u.stats.unrolled == 0 => return first,
         Err(_) if unrolled == 0 => return first,
-        Ok(u) if spilled(&u.stats) == 0 && u.stats.waves >= MAX_WAVES => return first,
+        Ok(u) if spilled(&u.stats) == 0 && u.stats.waves >= target.info().max_waves => return first,
         _ => {}
     }
-    let rolled = compile_retrying(text, parse, None, &mut 0, threads);
+    let rolled = compile_retrying(text, parse, None, &mut 0, threads, target);
     match (first, rolled) {
         (Ok(u), Ok(r)) => Ok(if keeps_unrolled(&u.stats, &r.stats) { u } else { r }),
         (Ok(u), Err(_)) => Ok(u),
         (Err(_), rolled) => rolled,
     }
 }
-
-/// Waves per SIMD `occupancy` allows at most.
-const MAX_WAVES: u32 = 16;
 
 /// VGPR dwords spilled to LDS or scratch.
 fn spilled(stats: &CompileStats) -> u32 {
@@ -701,24 +686,25 @@ fn compile_retrying(
     auto: Option<unroll::Auto>,
     unrolled: &mut usize,
     threads: usize,
+    target: Target,
 ) -> Result<CompiledKernel, CompileError> {
     // Merged LDS loads live longer: a kernel they push out of registers
     // compiles without them, and spills only if it still does not fit. One
     // that only packing tuples first fits also tries without them (as plain
     // first fit, which did not fit, always did) and keeps the higher
     // occupancy.
-    let result = match compile_with(text, true, false, parse, auto, unrolled, threads) {
+    let result = match compile_with(text, true, false, parse, auto, unrolled, threads, target) {
         Err(failure) if failure.error().kind == "ROCKE_DIRECT_REGISTERS" => {
-            match compile_with(text, false, false, parse, auto, unrolled, threads) {
+            match compile_with(text, false, false, parse, auto, unrolled, threads, target) {
                 // Spilling compiles the same up to where this stopped.
                 Err(Failure::Unfit(resume)) => return resume.spill(*unrolled, threads),
                 Err(failure) if failure.error().kind == "ROCKE_DIRECT_REGISTERS" => {
-                    compile_with(text, false, true, parse, auto, unrolled, threads)
+                    compile_with(text, false, true, parse, auto, unrolled, threads, target)
                 }
                 result => result,
             }
         }
-        Ok(packed) if packed.tight => match compile_with(text, false, false, parse, auto, unrolled, threads) {
+        Ok(packed) if packed.tight => match compile_with(text, false, false, parse, auto, unrolled, threads, target) {
             Ok(other) if other.stats.waves > packed.stats.waves => Ok(other),
             _ => Ok(packed),
         },
@@ -813,12 +799,14 @@ fn compile_with(
     auto: Option<unroll::Auto>,
     unrolled: &mut usize,
     threads: usize,
+    target: Target,
 ) -> Result<CompiledKernel, Failure> {
     let mut laps = Laps { phases: Vec::new(), mark: Instant::now() };
     let mut kernel = parse(text)?;
+    kernel.wave = target.info().wave;
     validate::kernel(&kernel)?;
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);
-    validate::lds_pool(lds_size)?;
+    validate::lds_pool(lds_size, target.info())?;
     laps.lap("parse");
     let facts = if lds_cse {
         opt::optimize(&mut kernel, &mut lds)?
@@ -838,16 +826,26 @@ fn compile_with(
     laps.lap("swizzle");
     let uniform = analysis::classify(&kernel);
     validate::uniformity(&kernel, &uniform)?;
-    let mut sel = isel::select(&kernel, &facts, uniform, &lds, lds_size)?;
+    let mut sel = isel::select_for(target, &kernel, &facts, uniform, &lds, lds_size)?;
+    sel.func.vgpr_limit = kernel.vgpr_limit;
     post::remove_dead_copies(&mut sel.func);
-    peephole::optimize(&mut sel.func);
-    if !debug_flag("nofuse") {
-        post::fuse_valu(&mut sel.func);
+    if target == Target::Gfx950 {
+        // The peephole rules, guard reuse and VALU fusion are proven for gfx11 only.
+        crate::target::gfx9::legalize::run(&mut sel.func);
+    } else {
+        peephole::optimize(&mut sel.func);
+        uniform_masks::reuse_masks(&mut sel.func);
+        if !debug_flag("nofuse") {
+            post::fuse_valu(&mut sel.func);
+        }
     }
     laps.lap("isel");
+    if !lds_cse || spill {
+        mma_order::fit(&mut sel.func);
+    }
     // Overlapping latencies costs registers: take the widest scheduling
     // window that keeps the occupancy of load sinking alone.
-    let (alloc, window) = match schedule_with_facts(&mut sel.func, sel.lds_size, kernel.max_workgroup_size, spill, threads) {
+    let (alloc, window) = match fma_mix::schedule_folding(&mut sel.func, sel.lds_size, kernel.max_workgroup_size, spill, threads) {
         Ok(chosen) => chosen,
         Err(Unallocated::Error(error)) => return Err(Failure::Error(error)),
         Err(Unallocated::Unfit(error, candidates)) => {
@@ -866,11 +864,16 @@ fn complete(
     unrolled: usize,
 ) -> Result<CompiledKernel, CompileError> {
     let Selected { kernel, mut sel, mut laps } = selected;
+    let target = sel.func.target;
     let lds_total = sel.lds_size + alloc.spill.lds_bytes;
+    reload::hoist(&mut sel.func, &alloc, sel.lds_size, target.info().occupancy(alloc.num_vgprs.max(1), lds_total, kernel.max_workgroup_size));
     laps.lap("regalloc");
     let (vopd_pairs, vopd_weighted) = finish(&mut sel.func, alloc.num_vgprs)?;
     laps.lap("post");
-    let code = asm::assemble(&sel.func)?;
+    let code = match target {
+        Target::Gfx1151 => asm::assemble(&sel.func)?,
+        Target::Gfx950 => crate::target::gfx9::asm::assemble(&sel.func)?,
+    };
     laps.lap("encode");
 
     let vgprs = alloc.num_vgprs.max(1);
@@ -881,6 +884,14 @@ fn complete(
         | (sel.wg_ids[2] as u32) << 9
         | u32::from(alloc.spill.scratch_bytes > 0);
     let rsrc3 = (code.len().div_ceil(128).min(63) as u32) << 4;
+    let (rsrc1, rsrc2, rsrc3, sgpr_count) = match target {
+        Target::Gfx1151 => (rsrc1, rsrc2, rsrc3, alloc.num_sgprs + 2),
+        Target::Gfx950 => {
+            let scratch = alloc.spill.scratch_bytes > 0;
+            let r = crate::target::gfx9::program_resources(vgprs, alloc.num_sgprs, sel.wg_ids, scratch);
+            (r.rsrc1, r.rsrc2, r.rsrc3, r.sgpr_count)
+        }
+    };
     let (offsets, kernarg_size) = opt::kernarg_layout(&kernel);
     let args = kernel
         .params
@@ -902,13 +913,14 @@ fn complete(
         })
         .collect();
     let spec = KernelObjectSpec {
+        target: sel.func.target.info().object,
         symbol: &kernel.name,
         code: &code,
         args,
         kernarg_size,
         group_segment_size: lds_total,
         max_flat_workgroup_size: kernel.max_workgroup_size,
-        sgpr_count: alloc.num_sgprs + 2,
+        sgpr_count,
         vgpr_count: vgprs,
         rsrc1,
         rsrc2,
@@ -933,12 +945,13 @@ fn complete(
             pressure_vgprs: alloc.pressure.vgprs,
             pressure_sgprs: alloc.pressure.sgprs,
             window,
-            waves: occupancy(vgprs, lds_total, kernel.max_workgroup_size),
+            waves: sel.func.target.info().occupancy(vgprs, lds_total, kernel.max_workgroup_size),
             vopd_pairs,
             vopd_weighted,
             spill: alloc.spill,
             unrolled,
         },
+        target: sel.func.target,
         func: sel.func,
         tight: alloc.tight && window <= 1,
     })

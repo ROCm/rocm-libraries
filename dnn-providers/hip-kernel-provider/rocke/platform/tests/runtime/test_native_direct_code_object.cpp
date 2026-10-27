@@ -137,7 +137,8 @@ class StreamSerializer
 {
 public:
     StreamSerializer(size_t flush_bytes, std::function<void(const char*, size_t)> sink)
-        : flush_bytes_(flush_bytes), sink_(std::move(sink))
+        : flush_bytes_(flush_bytes)
+        , sink_(std::move(sink))
     {
         out_.reserve(flush_bytes * 2 + 4096);
     }
@@ -358,7 +359,8 @@ private:
             {
                 if(i > 0)
                     out_ += ", ";
-                std::snprintf(num, sizeof(num), "i:%lld", static_cast<long long>(v->u.ilist.ints[i]));
+                std::snprintf(
+                    num, sizeof(num), "i:%lld", static_cast<long long>(v->u.ilist.ints[i]));
                 out_ += num;
             }
             out_ += " ]";
@@ -381,11 +383,12 @@ private:
         order.reserve(static_cast<size_t>(count));
         for(int i = 0; i < count; ++i)
             order.push_back(&m->entries[i]);
-        std::qsort(order.data(), order.size(), sizeof(order[0]), [](const void* pa, const void* pb) {
-            const auto* a = *static_cast<const rocke_attr_entry_t* const*>(pa);
-            const auto* b = *static_cast<const rocke_attr_entry_t* const*>(pb);
-            return std::strcmp(a->key ? a->key : "", b->key ? b->key : "");
-        });
+        std::qsort(
+            order.data(), order.size(), sizeof(order[0]), [](const void* pa, const void* pb) {
+                const auto* a = *static_cast<const rocke_attr_entry_t* const*>(pa);
+                const auto* b = *static_cast<const rocke_attr_entry_t* const*>(pb);
+                return std::strcmp(a->key ? a->key : "", b->key ? b->key : "");
+            });
         out_ += "{ ";
         for(int i = 0; i < count; ++i)
         {
@@ -506,8 +509,8 @@ struct ConvTile
 Case conv_case(const std::string& name, const ConvShape& p, const ConvTile& t)
 {
     rocke_implicit_gemm_conv_spec_t spec = rocke_implicit_gemm_conv_spec_default();
-    spec.problem
-        = rocke_conv_problem_make(p.n, p.hi, p.wi, p.c, p.k, p.y, p.x, p.sh, p.sw, p.ph, p.pw, 1, 1);
+    spec.problem = rocke_conv_problem_make(
+        p.n, p.hi, p.wi, p.c, p.k, p.y, p.x, p.sh, p.sw, p.ph, p.pw, 1, 1);
     spec.tile_m = t.tile_m;
     spec.tile_n = t.tile_n;
     spec.tile_k = t.tile_k;
@@ -546,7 +549,9 @@ Case gemm_case()
     c.name = "gemm_f16_rcr_xm";
     c.family = "gemm";
     c.entry = Entry::WmmaGemm;
-    c.build = [spec](rocke_ir_builder_t* b) { return rocke_build_wmma_gemm_gfx1151_new(b, &spec, kArch); };
+    c.build = [spec](rocke_ir_builder_t* b) {
+        return rocke_build_wmma_gemm_gfx1151_new(b, &spec, kArch);
+    };
     return c;
 }
 
@@ -642,7 +647,8 @@ std::string split_diagnostics(const std::string& text, std::map<std::string, dou
 size_t count_newlines(const char* text, size_t size)
 {
     size_t lines = 0;
-    for(const char* p = text; (p = static_cast<const char*>(std::memchr(p, '\n', size - (p - text))));
+    for(const char* p = text;
+        (p = static_cast<const char*>(std::memchr(p, '\n', size - (p - text))));
         ++p)
         ++lines;
     return lines;
@@ -689,7 +695,8 @@ Outcome run_once(const Case& c, Mode mode = Mode::Plain, bool keep_ir = true)
         bool fed = true;
         StreamSerializer producer(g_settings.feed_bytes, [&](const char* data, size_t size) {
             fed = fed
-                  && rocke_codeobj_session_feed_v1(g_settings.session, reinterpret_cast<const uint8_t*>(data), size)
+                  && rocke_codeobj_session_feed_v1(
+                         g_settings.session, reinterpret_cast<const uint8_t*>(data), size)
                          == 0;
             if(keep_ir)
                 streamed.append(data, size);
@@ -704,10 +711,12 @@ Outcome run_once(const Case& c, Mode mode = Mode::Plain, bool keep_ir = true)
         if(keep_ir)
         {
             char* reference = nullptr;
-            if(rocke_ir_serialize(kernel, &reference) != ROCKE_OK || !reference || streamed != reference)
+            if(rocke_ir_serialize(kernel, &reference) != ROCKE_OK || !reference
+               || streamed != reference)
             {
                 std::free(reference);
-                throw std::runtime_error(c.name + ": the streamed pieces differ from rocke_ir_serialize");
+                throw std::runtime_error(c.name
+                                         + ": the streamed pieces differ from rocke_ir_serialize");
             }
             std::free(reference);
         }
@@ -729,10 +738,12 @@ Outcome run_once(const Case& c, Mode mode = Mode::Plain, bool keep_ir = true)
         request.serialized_ir = reinterpret_cast<const uint8_t*>(text);
         request.serialized_ir_size = text_size;
         t3 = Clock::now();
-        const int32_t status = c.entry == Entry::WmmaGemm ? rocke_codeobj_compile_gfx1151_wmma_gemm_v1(&request, &result)
-                               : mode == Mode::Session
-                                   ? rocke_codeobj_session_compile_v1(g_settings.session, &request, &result)
-                                   : rocke_codeobj_compile_rocke_ir_v1(&request, &result);
+        const int32_t status
+            = c.entry == Entry::WmmaGemm
+                  ? rocke_codeobj_compile_gfx1151_wmma_gemm_v1(&request, &result)
+              : mode == Mode::Session
+                  ? rocke_codeobj_session_compile_v1(g_settings.session, &request, &result)
+                  : rocke_codeobj_compile_rocke_ir_v1(&request, &result);
         t4 = Clock::now();
         if(status != 0 && result.status == 0)
             result.status = status;
@@ -787,11 +798,17 @@ Outcome run_once(const Case& c, Mode mode = Mode::Plain, bool keep_ir = true)
 
 void check_image(const Case& c, const Outcome& o)
 {
-    if(o.hsaco.size() < 4 || std::memcmp(o.hsaco.data(), "\x7f" "ELF", 4) != 0)
+    if(o.hsaco.size() < 4
+       || std::memcmp(o.hsaco.data(),
+                      "\x7f"
+                      "ELF",
+                      4)
+              != 0)
         throw std::runtime_error(c.name + ": direct compiler returned a non-ELF image");
     const auto* begin = reinterpret_cast<const uint8_t*>(o.symbol.data());
     if(o.symbol.empty()
-       || std::search(o.hsaco.begin(), o.hsaco.end(), begin, begin + o.symbol.size()) == o.hsaco.end())
+       || std::search(o.hsaco.begin(), o.hsaco.end(), begin, begin + o.symbol.size())
+              == o.hsaco.end())
         throw std::runtime_error(c.name + ": image does not contain kernel symbol " + o.symbol);
 }
 
@@ -870,12 +887,14 @@ Report measure_case(const Case& c, int reps, int warmup, const std::string& dump
     {
         check_image(c, first);
         if(!dump_dir.empty())
-            write_file(dump_dir + "/" + c.name + ".cpp.hsaco", first.hsaco.data(), first.hsaco.size());
+            write_file(
+                dump_dir + "/" + c.name + ".cpp.hsaco", first.hsaco.data(), first.hsaco.size());
     }
     for(size_t m = 1; m < modes.size(); ++m)
     {
         const Outcome other = run_once(c, modes[m]);
-        if(other.ir != first.ir || other.hsaco != first.hsaco || other.compile_error != first.compile_error)
+        if(other.ir != first.ir || other.hsaco != first.hsaco
+           || other.compile_error != first.compile_error)
             throw std::runtime_error(c.name + ": mode " + mode_name(modes[m]) + " disagrees with "
                                      + mode_name(modes.front()));
     }
@@ -920,7 +939,8 @@ Report report_mode(const Case& c,
     const double build = med([](const Sample& s) { return s.build_ms; });
     const double serialize = med([](const Sample& s) { return s.serialize_ms; });
     const double compile = med([](const Sample& s) { return s.compile_ms; });
-    const double lean = med([](const Sample& s) { return s.build_ms + s.serialize_ms + s.compile_ms; });
+    const double lean
+        = med([](const Sample& s) { return s.build_ms + s.serialize_ms + s.compile_ms; });
     std::map<std::string, double> phase_medians;
     for(const auto& kv : samples.front().phases)
     {
@@ -931,13 +951,24 @@ Report report_mode(const Case& c,
         });
     }
     const double parse = phase_medians.count("parse") ? phase_medians["parse"] : 0.0;
-    const std::string label = c.name + (g_settings.modes.size() > 1 ? std::string(" [") + mode_name(mode) + "]" : "");
+    const std::string label
+        = c.name + (g_settings.modes.size() > 1 ? std::string(" [") + mode_name(mode) + "]" : "");
     if(rejected)
-        std::printf("%-40s %9.4f %9.4f  REJECTED: %s\n", label.c_str(), build, serialize,
+        std::printf("%-40s %9.4f %9.4f  REJECTED: %s\n",
+                    label.c_str(),
+                    build,
+                    serialize,
                     first.compile_error.c_str());
     else
-        std::printf("%-40s %9.4f %9.4f %9.4f %9.4f %9.4f %9.3f %8.1f %8zu\n", label.c_str(), build,
-                    serialize, compile, parse, lean, first_ms, first.ir.size() / 1024.0,
+        std::printf("%-40s %9.4f %9.4f %9.4f %9.4f %9.4f %9.3f %8.1f %8zu\n",
+                    label.c_str(),
+                    build,
+                    serialize,
+                    compile,
+                    parse,
+                    lean,
+                    first_ms,
+                    first.ir.size() / 1024.0,
                     first.hsaco.size());
 
     /* The GEMM graph also goes to the generic entry point once, for the record. */
@@ -950,18 +981,20 @@ Report report_mode(const Case& c,
                               ? std::string("compiled")
                               : bytes_to_string(result.diagnostics, result.diagnostics_size);
         rocke_codeobj_compile_result_dispose_v1(&result);
-        std::printf("%-32s rocke_codeobj_compile_rocke_ir_v1 on the same IR: %s\n", "",
+        std::printf("%-32s rocke_codeobj_compile_rocke_ir_v1 on the same IR: %s\n",
+                    "",
                     generic_verdict.c_str());
     }
     std::fflush(stdout);
 
     std::ostringstream json;
-    json << "{\"case\":\"" << c.name << "\",\"family\":\"" << c.family << "\",\"mode\":\"" << mode_name(mode)
-         << "\",\"entry\":\""
+    json << "{\"case\":\"" << c.name << "\",\"family\":\"" << c.family << "\",\"mode\":\""
+         << mode_name(mode) << "\",\"entry\":\""
          << (c.entry == Entry::WmmaGemm ? "rocke_codeobj_compile_gfx1151_wmma_gemm_v1"
              : mode == Mode::Plain      ? "rocke_codeobj_compile_rocke_ir_v1"
-             : mode == Mode::Session    ? "rocke_codeobj_session_compile_v1"
-                                        : "rocke_codeobj_session_feed_v1+rocke_codeobj_session_finish_v1")
+             : mode == Mode::Session
+                 ? "rocke_codeobj_session_compile_v1"
+                 : "rocke_codeobj_session_feed_v1+rocke_codeobj_session_finish_v1")
          << "\",\"symbol\":\"" << json_escape(first.symbol) << "\",\"ir_bytes\":" << first.ir.size()
          << ",\"ir_lines\":" << count_newlines(first.ir.data(), first.ir.size())
          << ",\"hsaco_bytes\":" << first.hsaco.size() << ",\"stats\":\"" << json_escape(first.stats)
@@ -1052,14 +1085,15 @@ try
         else if(arg == "--session-threads")
             session_threads = parse_count(argv[++i], 0, 256, "--session-threads");
         else if(arg == "--feed-bytes")
-            g_settings.feed_bytes = static_cast<size_t>(parse_count(argv[++i], 1, 1 << 30, "--feed-bytes"));
+            g_settings.feed_bytes
+                = static_cast<size_t>(parse_count(argv[++i], 1, 1 << 30, "--feed-bytes"));
         else
             throw std::runtime_error("unknown argument " + arg);
     }
     if(rocke_codeobj_ffi_abi_version() != ROCKE_CODEOBJ_FFI_ABI_VERSION)
         throw std::runtime_error("Rust code-object library has an incompatible ABI");
-    const bool needs_session = std::any_of(g_settings.modes.begin(), g_settings.modes.end(),
-                                           [](Mode m) { return m != Mode::Plain; });
+    const bool needs_session = std::any_of(
+        g_settings.modes.begin(), g_settings.modes.end(), [](Mode m) { return m != Mode::Plain; });
     if(needs_session)
     {
         rocke_codeobj_session_options_v1 options = {};
@@ -1083,19 +1117,22 @@ try
         std::ifstream file(path, std::ios::binary);
         if(!file)
             throw std::runtime_error("cannot read " + path);
-        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const std::string text((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
         Case c;
         c.name = name;
         c.family = "ir";
-        c.parsed_builder = std::shared_ptr<rocke_ir_builder_t>(new rocke_ir_builder_t, [](rocke_ir_builder_t* b) {
-            rocke_ir_builder_free(b);
-            delete b;
-        });
+        c.parsed_builder = std::shared_ptr<rocke_ir_builder_t>(new rocke_ir_builder_t,
+                                                               [](rocke_ir_builder_t* b) {
+                                                                   rocke_ir_builder_free(b);
+                                                                   delete b;
+                                                               });
         rocke_ir_builder_init(c.parsed_builder.get(), "parse");
         if(rocke_ir_parse(text.c_str(), c.parsed_builder.get(), &c.parsed) != ROCKE_OK || !c.parsed)
         {
             const char* message = rocke_ir_builder_error(c.parsed_builder.get());
-            throw std::runtime_error(name + ": rocke_ir_parse failed: " + (message ? message : "?"));
+            throw std::runtime_error(name
+                                     + ": rocke_ir_parse failed: " + (message ? message : "?"));
         }
         cases.push_back(std::move(c));
     }
@@ -1103,8 +1140,16 @@ try
     std::ostringstream json;
     json << "{\"arch\":\"" << kArch << "\",\"reps\":" << reps << ",\"warmup\":" << warmup
          << ",\"cases\":[";
-    std::printf("%-40s %9s %9s %9s %9s %9s %9s %8s %8s\n", "case", "build", "serialize",
-                "compile", "parse", "lean", "first", "ir_kb", "hsaco");
+    std::printf("%-40s %9s %9s %9s %9s %9s %9s %8s %8s\n",
+                "case",
+                "build",
+                "serialize",
+                "compile",
+                "parse",
+                "lean",
+                "first",
+                "ir_kb",
+                "hsaco");
     int ran = 0;
     std::vector<std::string> failures;
     for(const Case& c : cases)
@@ -1140,8 +1185,10 @@ try
         const std::string text = json.str();
         write_file(json_path, text.data(), text.size());
     }
-    std::printf("cases=%d failed=%zu reps=%d external_compiler=false cache=false\n", ran,
-                failures.size(), reps);
+    std::printf("cases=%d failed=%zu reps=%d external_compiler=false cache=false\n",
+                ran,
+                failures.size(),
+                reps);
     for(const std::string& name : failures)
         std::fprintf(stderr, "failed: %s\n", name.c_str());
     return failures.empty() ? 0 : 1;

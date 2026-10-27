@@ -45,7 +45,8 @@ kernel @split {
 }
 )IR";
 
-const char* const kDecl = "declare ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1))";
+const char* const kDecl
+    = "declare ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1))";
 
 /* A k loop carrying `accs` per-lane vec<f32x8> sums and reading the per-lane
  * vec<f32x8> %seed from outside, around the gather S[k * stride + tid]: its
@@ -72,18 +73,19 @@ std::string budget_kernel(int accs)
         meta += sep + "{ name = s:\"%a" + std::to_string(i) + "\", type = s:\"vec<f32x8>\" }";
         yields += sep + "%y" + std::to_string(i);
     }
-    s += results + " = scf.for ( %c0, %n, %c1" + inits
-         + " ) { iter_args = l:[ " + meta + " ], iv = s:\"%k\", iv_type = s:\"i32\", num_iter_args = i:"
-         + std::to_string(accs) + ", unroll = b:false }\n";
+    s += results + " = scf.for ( %c0, %n, %c1" + inits + " ) { iter_args = l:[ " + meta
+         + " ], iv = s:\"%k\", iv_type = s:\"i32\", num_iter_args = i:" + std::to_string(accs)
+         + ", unroll = b:false }\n";
     s += "      region @body {\n"
          "        %row : i32 = arith.mul ( %k, %stride )\n"
          "        %idx : i32 = arith.add ( %row, %tid )\n"
-         "        %v : f32 = memref.global_load_typed ( %S, %idx ) { align = i:4, elem_type = s:\"f32\" }\n"
+         "        %v : f32 = memref.global_load_typed ( %S, %idx ) { align = i:4, elem_type = "
+         "s:\"f32\" }\n"
          "        %splat : vec<f32x8> = vector.splat ( %v ) { vec = i:8 }\n"
          "        %step : vec<f32x8> = vector.add ( %splat, %seed )\n";
     for(int i = 0; i < accs; ++i)
-        s += "        %y" + std::to_string(i) + " : vec<f32x8> = vector.add ( %a" + std::to_string(i)
-             + ", %step )\n";
+        s += "        %y" + std::to_string(i) + " : vec<f32x8> = vector.add ( %a"
+             + std::to_string(i) + ", %step )\n";
     s += "        scf.yield ( " + yields + " ) { num = i:" + std::to_string(accs) + " }\n      }\n";
     s += "    %sum : f32 = vector.sum ( %r0 )\n"
          "    memref.global_store_typed ( %D, %tid, %sum ) { align = i:4, elem_type = s:\"f32\" }\n"
@@ -114,7 +116,8 @@ std::string lower(const std::string& text, const char* arch)
     {
         char* ll = nullptr;
         char err[512] = {0};
-        if(rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_LLVM22, arch, &ll, err, sizeof(err)) == ROCKE_OK
+        if(rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_LLVM22, arch, &ll, err, sizeof(err))
+               == ROCKE_OK
            && ll)
             out = ll;
         else
@@ -128,7 +131,8 @@ std::string lower(const std::string& text, const char* arch)
 size_t count(const std::string& hay, const std::string& needle)
 {
     size_t n = 0;
-    for(size_t p = hay.find(needle); p != std::string::npos; p = hay.find(needle, p + needle.size()))
+    for(size_t p = hay.find(needle); p != std::string::npos;
+        p = hay.find(needle, p + needle.size()))
         ++n;
     return n;
 }
@@ -152,24 +156,29 @@ int main()
     const std::string term = defined_by(ll, "getelementptr half, ptr addrspace(1) %S, i32 %mul3");
     check(term.rfind("%gbase.", 0) == 0, "the uniform term indexes the pointer first");
     check(!term.empty()
-              && ll.find("= getelementptr half, ptr addrspace(1) " + term + ", i32 %tid1\n") != std::string::npos,
+              && ll.find("= getelementptr half, ptr addrspace(1) " + term + ", i32 %tid1\n")
+                     != std::string::npos,
           "the per-lane term indexes the uniform base");
     check(ll.find("readfirstlane") == std::string::npos, "no loop, no readfirstlane");
-    check(ll.find("getelementptr inbounds half, ptr addrspace(1) %D, i32 %tid1") != std::string::npos,
+    check(ll.find("getelementptr inbounds half, ptr addrspace(1) %D, i32 %tid1")
+              != std::string::npos,
           "a lane-only index keeps the single GEP");
 
     /* In the k loop the row k * stride varies and the thread id does not. */
     const std::string looped = lower(budget_kernel(2), "gfx1151");
-    const std::string row = defined_by(looped, "getelementptr float, ptr addrspace(1) %S, i32 %row");
+    const std::string row
+        = defined_by(looped, "getelementptr float, ptr addrspace(1) %S, i32 %row");
     const std::string uniform = defined_by(
-        looped, "call ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) " + row + ")");
+        looped,
+        "call ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) " + row + ")");
     check(row.rfind("%gbase.", 0) == 0 && uniform.rfind("%gbase.", 0) == 0,
           "a loop-varying uniform base goes through readfirstlane");
     check(!uniform.empty()
               && looped.find("= getelementptr float, ptr addrspace(1) " + uniform + ", i32 %tid\n")
                      != std::string::npos,
           "the per-lane term indexes the readfirstlane result");
-    check(count(looped, std::string(kDecl) + "\n") == 1, "the readfirstlane declaration appears once");
+    check(count(looped, std::string(kDecl) + "\n") == 1,
+          "the readfirstlane declaration appears once");
 
     const std::string gfx950 = lower(kGather, "gfx950");
     check(!gfx950.empty() && gfx950.find("readfirstlane.p1") == std::string::npos
@@ -179,8 +188,9 @@ int main()
 
     /* gfx1151 has 256 VGPRs: 16 sums keep 137 words live, 31 keep 257. */
     const std::string under = lower(budget_kernel(16), "gfx1151");
-    check(!under.empty() && under.find("@llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) %gbase.")
-                                != std::string::npos,
+    check(!under.empty()
+              && under.find("@llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) %gbase.")
+                     != std::string::npos,
           "a loop within the register file splits");
     const std::string over = lower(budget_kernel(31), "gfx1151");
     check(!over.empty() && over.find("%gbase.") == std::string::npos
@@ -188,6 +198,7 @@ int main()
                      != std::string::npos,
           "a loop past the register file keeps the single GEP");
 
-    std::printf(failures ? ">> GLOBAL ADDRESS SPLIT FAILURES\n" : ">> ALL GLOBAL ADDRESS SPLIT CHECKS PASSED\n");
+    std::printf(failures ? ">> GLOBAL ADDRESS SPLIT FAILURES\n"
+                         : ">> ALL GLOBAL ADDRESS SPLIT CHECKS PASSED\n");
     return failures ? 1 : 0;
 }

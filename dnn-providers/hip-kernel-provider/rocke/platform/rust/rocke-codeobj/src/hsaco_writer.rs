@@ -184,9 +184,66 @@ pub struct KernelArgMeta {
     pub access: Option<&'static str>,
 }
 
-/// Everything that varies between single-kernel gfx1151 code objects.
+/// What a code object states about its target processor, as LLVM writes it
+/// for that processor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObjectTarget {
+    /// The processor of `amdhsa.target` (`amdgcn-amd-amdhsa--<processor>`).
+    pub processor: &'static str,
+    /// ELF `e_flags`: `EF_AMDGPU_MACH`, plus xnack and sramecc `any` on gfx9.
+    pub e_flags: u32,
+    pub wavefront_size: u32,
+    /// gfx10+ records `.workgroup_processor_mode`; gfx9 records
+    /// `.agpr_count` instead.
+    pub wgp_mode: bool,
+    /// The descriptor's `kernel_code_properties`: the kernarg segment
+    /// pointer, and wave32 on gfx11.
+    pub kernel_code_properties: u16,
+    /// Text after the code: up to a multiple of `text_line` bytes, then
+    /// `text_fill` more, all `text_pad` words (LLVM's `EmitCodeEnd`).
+    pub text_line: usize,
+    pub text_fill: usize,
+    pub text_pad: u32,
+    /// The `.comment` producer string, NUL-terminated.
+    pub producer: &'static [u8],
+    /// The read-only LOAD segment ends at the kernel descriptor, as LLD 22
+    /// writes it, rather than at the text, as the gfx1151 oracle's linker did.
+    pub ro_segment_to_descriptor: bool,
+}
+
+/// gfx1151: `s_code_end` padding to 128 bytes plus three lines.
+pub const GFX1151_OBJECT: ObjectTarget = ObjectTarget {
+    processor: "gfx1151",
+    e_flags: 0x4a,
+    wavefront_size: 32,
+    wgp_mode: true,
+    kernel_code_properties: 0x0408,
+    text_line: 128,
+    text_fill: 384,
+    text_pad: 0xbf9f_0000,
+    producer: b"rocKE Rust direct gfx1151 WMMA encoder + ELF writer\0",
+    ro_segment_to_descriptor: false,
+};
+
+/// gfx950 with xnack and sramecc `any` (`e_flags` 0x54f, so it loads in
+/// every mode): `s_nop 0` padding to 64 bytes plus sixteen lines.
+pub const GFX950_OBJECT: ObjectTarget = ObjectTarget {
+    processor: "gfx950",
+    e_flags: 0x54f,
+    wavefront_size: 64,
+    wgp_mode: false,
+    kernel_code_properties: 0x0008,
+    text_line: 64,
+    text_fill: 1024,
+    text_pad: 0xbf80_0000,
+    producer: b"rocKE Rust direct gfx950 encoder + ELF writer\0",
+    ro_segment_to_descriptor: true,
+};
+
+/// Everything that varies between single-kernel code objects.
 #[derive(Clone, Debug)]
 pub struct KernelObjectSpec<'a> {
+    pub target: ObjectTarget,
     pub symbol: &'a str,
     pub code: &'a [u8],
     pub args: Vec<KernelArgMeta>,
@@ -238,6 +295,7 @@ fn gemm_spec<'a>(symbol: &'a str, code: &'a [u8]) -> KernelObjectSpec<'a> {
         access,
     };
     KernelObjectSpec {
+        target: GFX1151_OBJECT,
         symbol,
         code,
         args: vec![
@@ -268,12 +326,17 @@ fn metadata_note(symbol: &str) -> Vec<u8> {
 
 fn metadata_note_for(spec: &KernelObjectSpec) -> Vec<u8> {
     let symbol = spec.symbol;
+    let target = spec.target;
     let mut descriptor = Vec::new();
     descriptor.push(0x83);
     msgpack_str(&mut descriptor, "amdhsa.kernels");
     descriptor.push(0x91);
     descriptor.extend([0xde, 0x00, 0x10]);
 
+    if !target.wgp_mode {
+        msgpack_str(&mut descriptor, ".agpr_count");
+        msgpack_uint(&mut descriptor, 0);
+    }
     msgpack_str(&mut descriptor, ".args");
     msgpack_array(&mut descriptor, spec.args.len());
     for arg in &spec.args {
@@ -307,12 +370,14 @@ fn metadata_note_for(spec: &KernelObjectSpec) -> Vec<u8> {
     msgpack_str(&mut descriptor, ".vgpr_spill_count");
     msgpack_uint(&mut descriptor, spec.vgpr_spill_count);
     msgpack_str(&mut descriptor, ".wavefront_size");
-    msgpack_uint(&mut descriptor, 32);
-    msgpack_str(&mut descriptor, ".workgroup_processor_mode");
-    msgpack_uint(&mut descriptor, 1);
+    msgpack_uint(&mut descriptor, target.wavefront_size);
+    if target.wgp_mode {
+        msgpack_str(&mut descriptor, ".workgroup_processor_mode");
+        msgpack_uint(&mut descriptor, 1);
+    }
 
     msgpack_str(&mut descriptor, "amdhsa.target");
-    msgpack_str(&mut descriptor, "amdgcn-amd-amdhsa--gfx1151");
+    msgpack_str(&mut descriptor, &format!("amdgcn-amd-amdhsa--{}", target.processor));
     msgpack_str(&mut descriptor, "amdhsa.version");
     descriptor.extend([0x92, 0x01, 0x02]);
 
@@ -533,7 +598,7 @@ fn kernel_descriptor(text_vaddr: usize, rodata: usize, spec: &KernelObjectSpec) 
     put_u32(&mut descriptor, 44, spec.rsrc3);
     put_u32(&mut descriptor, 48, spec.rsrc1);
     put_u32(&mut descriptor, 52, spec.rsrc2);
-    put_u16(&mut descriptor, 56, 0x0408);
+    put_u16(&mut descriptor, 56, spec.target.kernel_code_properties);
     descriptor
 }
 
@@ -599,7 +664,8 @@ pub fn write_gfx1151_wmma_gemm(symbol: &str, code: &[u8]) -> Result<Vec<u8>, Str
     write_kernel_object(&gemm_spec(symbol, code))
 }
 
-/// Construct a loadable single-kernel gfx1151 AMDHSA code object.
+/// Construct a loadable single-kernel AMDHSA code object for the spec's
+/// target.
 pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     let symbol = spec.symbol;
     let code = spec.code;
@@ -614,7 +680,8 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     if code.is_empty() || code.len() % 4 != 0 {
         return Err(format!("kernel code is {} bytes; expected whole dwords", code.len()));
     }
-    let text_size = align_up(code.len(), 128) + 384;
+    let target = spec.target;
+    let text_size = align_up(code.len(), target.text_line) + target.text_fill;
 
     let note = metadata_note_for(spec);
     let dynstr = dynamic_strings(symbol);
@@ -635,7 +702,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     // Keep non-loadable tables at the qualified object's stable offsets while
     // recording honest producer provenance instead of LLVM linker text.
     let mut comment = [0_u8; 0x9c];
-    let producer = b"rocKE Rust direct gfx1151 WMMA encoder + ELF writer\0";
+    let producer = target.producer;
     comment[..producer.len()].copy_from_slice(producer);
     let comment_offset = dynamic_offset + DYNAMIC_SIZE;
 
@@ -698,7 +765,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     image[layout.rodata..layout.rodata + rodata.len()].copy_from_slice(&rodata);
     image[layout.text..layout.text + code.len()].copy_from_slice(code);
     for offset in (layout.text + code.len()..layout.text + text_size).step_by(4) {
-        image[offset..offset + 4].copy_from_slice(&0xbf9f_0000_u32.to_le_bytes());
+        image[offset..offset + 4].copy_from_slice(&target.text_pad.to_le_bytes());
     }
     image[layout.dynamic..layout.dynamic + dynamic.len()].copy_from_slice(&dynamic);
     image[layout.comment..layout.comment + comment.len()].copy_from_slice(&comment);
@@ -714,7 +781,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     put_u64(&mut image, 24, 0);
     put_u64(&mut image, 32, ELF_HEADER_SIZE as u64);
     put_u64(&mut image, 40, layout.section_headers as u64);
-    put_u32(&mut image, 48, 0x4a);
+    put_u32(&mut image, 48, target.e_flags);
     put_u16(&mut image, 52, ELF_HEADER_SIZE as u16);
     put_u16(&mut image, 54, PROGRAM_HEADER_SIZE as u16);
     put_u16(&mut image, 56, PROGRAM_HEADER_COUNT as u16);
@@ -722,6 +789,7 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
     put_u16(&mut image, 60, SECTION_COUNT as u16);
     put_u16(&mut image, 62, 13);
 
+    let ro_segment_size = if target.ro_segment_to_descriptor { layout.rodata + rodata.len() } else { layout.text };
     write_program_header(
         &mut image,
         0,
@@ -743,8 +811,8 @@ pub fn write_kernel_object(spec: &KernelObjectSpec) -> Result<Vec<u8>, String> {
             flags: PF_R,
             offset: 0,
             virtual_address: 0,
-            file_size: layout.text as u64,
-            memory_size: layout.text as u64,
+            file_size: ro_segment_size as u64,
+            memory_size: ro_segment_size as u64,
             alignment: 0x1000,
         },
     );
@@ -1071,6 +1139,87 @@ mod tests {
         assert_eq!(note[find(".vgpr_spill_count")], 24);
         let rodata = image.windows(4).position(|w| w == spec.rsrc1.to_le_bytes()).expect("descriptor") - 48;
         assert_eq!(u32::from_le_bytes(image[rodata + 4..rodata + 8].try_into().unwrap()), 100);
+    }
+
+    fn hex_bytes(hex: &str) -> Vec<u8> {
+        let digits: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        (0..digits.len()).step_by(2).map(|i| u8::from_str_radix(&digits[i..i + 2], 16).unwrap()).collect()
+    }
+
+    /// COMGR's gfx950 object of `rocke_permute_s32x32_p10_bf16_b256`
+    /// (corpus kernel 12b5ff7b0f6f65bb), test data only.
+    const PERMUTE_ORACLE_HEX: &str = include_str!("target/gfx9/permute_oracle.hex");
+
+    /// That kernel written again from its code and resources: every
+    /// loader-visible byte agrees (ELF header, program headers, metadata
+    /// note, dynamic symbols and hashes, kernel descriptor, text and its
+    /// padding, dynamic section, and the section headers in front of
+    /// `.comment`). The producer's own tables after it (`.comment`,
+    /// `.symtab`, `.strtab`) and so the section table's offset differ.
+    #[test]
+    fn gfx950_object_matches_the_comgr_object() {
+        let oracle = hex_bytes(PERMUTE_ORACLE_HEX);
+        let symbol = "rocke_permute_s32x32_p10_bf16_b256";
+        let r = crate::target::gfx9::program_resources(4, 5, [true, false, false], false);
+        let arg = |name: &str, offset, access| KernelArgMeta {
+            name: name.to_string(),
+            offset,
+            size: 8,
+            pointer: true,
+            access: Some(access),
+        };
+        let spec = KernelObjectSpec {
+            target: GFX950_OBJECT,
+            symbol,
+            code: &oracle[0x600..0x600 + 116],
+            args: vec![arg("X", 0, "read_only"), arg("Y", 8, "write_only")],
+            kernarg_size: 16,
+            group_segment_size: 0,
+            max_flat_workgroup_size: 256,
+            sgpr_count: r.sgpr_count,
+            vgpr_count: r.vgpr_count,
+            rsrc1: r.rsrc1,
+            rsrc2: r.rsrc2,
+            rsrc3: r.rsrc3,
+            private_segment_size: 0,
+            vgpr_spill_count: 0,
+        };
+        let image = write_kernel_object(&spec).unwrap();
+        let comment = 0xaf0;
+        let first_difference = |from: usize, to: usize| (from..to).find(|&i| image[i] != oracle[i]);
+        assert_eq!(first_difference(0, 0x28), None);
+        assert_eq!(first_difference(0x30, comment), None);
+        let shoff = |b: &[u8]| u64::from_le_bytes(b[0x28..0x30].try_into().unwrap()) as usize;
+        let header = |b: &[u8], i: usize| b[shoff(b) + 64 * i..shoff(b) + 64 * (i + 1)].to_vec();
+        for i in 0..11 {
+            assert_eq!(header(&image, i), header(&oracle, i), "section {i}");
+        }
+        // The later sections keep their name, type, flags, alignment and
+        // entry size.
+        let fixed = |h: Vec<u8>| [&h[0..16], &h[48..64]].concat();
+        for i in 11..15 {
+            assert_eq!(fixed(header(&image, i)), fixed(header(&oracle, i)), "section {i}");
+        }
+        let facts = validate_hsaco(&image, &[symbol.to_string()]).unwrap();
+        assert_eq!(facts.flags, 0x54f);
+        assert_eq!(validate_hsaco(&oracle, &[symbol.to_string()]).unwrap().flags, 0x54f);
+    }
+
+    /// The gfx1151 note keeps `.workgroup_processor_mode` and wave32; the
+    /// gfx950 one has `.agpr_count`, wave64 and its own target.
+    #[test]
+    fn metadata_follows_the_target() {
+        let mut spec = gemm_spec(SYMBOL, &[0u8; 8]);
+        let has = |note: &[u8], key: &str| note.windows(key.len()).any(|w| w == key.as_bytes());
+        let gfx1151 = metadata_note_for(&spec);
+        assert!(has(&gfx1151, ".workgroup_processor_mode") && !has(&gfx1151, ".agpr_count"));
+        assert!(has(&gfx1151, "amdgcn-amd-amdhsa--gfx1151"));
+        spec.target = GFX950_OBJECT;
+        let gfx950 = metadata_note_for(&spec);
+        assert!(!has(&gfx950, ".workgroup_processor_mode") && has(&gfx950, ".agpr_count"));
+        assert!(has(&gfx950, "amdgcn-amd-amdhsa--gfx950"));
+        let find = |key: &str| gfx950.windows(key.len()).position(|w| w == key.as_bytes()).expect("key") + key.len();
+        assert_eq!(gfx950[find(".wavefront_size")], 64);
     }
 
     #[test]

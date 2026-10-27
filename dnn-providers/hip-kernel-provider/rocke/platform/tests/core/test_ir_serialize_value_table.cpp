@@ -47,16 +47,21 @@ std::string op(const std::string& line)
 /* An scf.for over [0, %n) with counter `iv`, one carried i32 `arg` (initial
  * value `init`), whose body yields `res_next = arg + iv`; its result is `res`.
  * Body results stay defined after the loop, so each loop names its own. */
-std::string loop(const std::string& res, const std::string& iv, const std::string& arg, const std::string& init)
+std::string loop(const std::string& res,
+                 const std::string& iv,
+                 const std::string& arg,
+                 const std::string& init)
 {
-    return "    " + res + " : i32 = scf.for ( %zero, %n, %one, " + init + " ) { iter_args = l:[ { name = s:\"" + arg
-           + "\", type = s:\"i32\" } ], iv = s:\"" + iv + "\", iv_type = s:\"i32\", num_iter_args = i:1 }\n"
-           + "      region @body {\n        " + res + "_next : i32 = arith.add ( " + arg + ", " + iv
-           + " )\n        scf.yield ( " + res + "_next ) { num = i:1 }\n      }\n";
+    return "    " + res + " : i32 = scf.for ( %zero, %n, %one, " + init
+           + " ) { iter_args = l:[ { name = s:\"" + arg + "\", type = s:\"i32\" } ], iv = s:\"" + iv
+           + "\", iv_type = s:\"i32\", num_iter_args = i:1 }\n" + "      region @body {\n        "
+           + res + "_next : i32 = arith.add ( " + arg + ", " + iv + " )\n        scf.yield ( " + res
+           + "_next ) { num = i:1 }\n      }\n";
 }
 
-const std::string kConsts = op("%zero : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }")
-                            + op("%one : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }");
+const std::string kConsts
+    = op("%zero : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }")
+      + op("%one : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }");
 
 /* Parse `text`; on success also returns serialize(parse(text)) in `back`. */
 bool parse(const std::string& text, std::string* back, std::string* error)
@@ -111,8 +116,11 @@ int main()
      * times. */
     std::string chain = kHead + op("%v0 : i32 = arith.add ( %n, %n )");
     for(int i = 1; i < 3000; ++i)
-        chain += op("%v" + std::to_string(i) + " : i32 = arith.add ( %v" + std::to_string(i - 1) + ", %v0 )");
-    chain += op("memref.global_store_typed ( %P, %n, %v2999 ) { align = i:4, elem_type = s:\"i32\" }") + kTail;
+        chain += op("%v" + std::to_string(i) + " : i32 = arith.add ( %v" + std::to_string(i - 1)
+                    + ", %v0 )");
+    chain
+        += op("memref.global_store_typed ( %P, %n, %v2999 ) { align = i:4, elem_type = s:\"i32\" }")
+           + kTail;
     std::string back, error;
     check(parse(chain, &back, &error) && back == chain, "3000-value chain round-trips");
 
@@ -129,7 +137,8 @@ int main()
                                 + op("memref.global_store_typed ( %P, %n, %k ) { align = i:4, "
                                      "elem_type = s:\"i32\" }")
                                 + kTail;
-    check(!parse(escaped, nullptr, &error) && error.find("used before definition") != std::string::npos,
+    check(!parse(escaped, nullptr, &error)
+              && error.find("used before definition") != std::string::npos,
           "a counter used after its loop is rejected");
 
     /* 4. A carried name that shadows an outer value retires the outer one. */
@@ -138,19 +147,21 @@ int main()
                                + op("memref.global_store_typed ( %P, %n, %acc ) { align = i:4, "
                                     "elem_type = s:\"i32\" }")
                                + kTail;
-    check(!parse(shadow, nullptr, &error) && error.find("used before definition") != std::string::npos,
+    check(!parse(shadow, nullptr, &error)
+              && error.find("used before definition") != std::string::npos,
           "a shadowed outer name is retired with the body's");
 
     /* 5. Redefinition. */
-    const std::string twice = kHead + op("%x : i32 = arith.add ( %n, %n )") + op("%x : i32 = arith.add ( %n, %n )")
-                              + kTail;
+    const std::string twice = kHead + op("%x : i32 = arith.add ( %n, %n )")
+                              + op("%x : i32 = arith.add ( %n, %n )") + kTail;
     check(!parse(twice, nullptr, &error) && error.find("redefined") != std::string::npos,
           "a redefined id is rejected");
 
     /* 6. Canonical ids. */
     const std::string canon = canonicalize(siblings);
     check(!canon.empty() && canonicalize(canon) == canon, "canonicalize is idempotent");
-    check(canonicalize(rename_ids(siblings)) == canon, "canonicalize ignores a consistent renaming");
+    check(canonicalize(rename_ids(siblings)) == canon,
+          "canonicalize ignores a consistent renaming");
     const std::string canon_chain = canonicalize(chain);
     check(canon_chain.find("%3001 : i32 = arith.add ( %3000, %2 )") != std::string::npos,
           "ids number params first, then results by definition");

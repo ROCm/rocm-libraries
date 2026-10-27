@@ -970,7 +970,7 @@ impl Shared {
         if !stack.is_empty() || values.len() != w.vbase[n + 1] as usize {
             return None;
         }
-        Some(Kernel { name, max_workgroup_size, waves_per_eu, params, body: body?, values, names })
+        Some(Kernel { name, max_workgroup_size, waves_per_eu, wave: 32, vgpr_limit: None, params, body: body?, values, names })
     }
 }
 

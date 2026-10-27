@@ -256,7 +256,9 @@ def test_one_wave_d128_tiles_resolve_to_the_policy_scheduler(arch):
     if arch in ("gfx942", "gfx950"):
         assert AttnBwdSpec(head_size=128).resolved(arch).scheduler_strategy is None
     else:
-        two_wave = dict(waves=2, block_m=16, block_n=32, block_k4=32, warp_grid_g4=(1, 2))
+        two_wave = dict(
+            waves=2, block_m=16, block_n=32, block_k4=32, warp_grid_g4=(1, 2)
+        )
         r = AttnBwdSpec(head_size=128, **two_wave).resolved(arch)
         assert r.scheduler_strategy == "iterative-minreg"
 

@@ -293,7 +293,7 @@ def render(
     d, u = v.defs, v.uses
     neg = lambda k: bool(m >> k & 1)
     fmt = i.fmt
-    if v.name == "SAndSaveexecB32":
+    if v.name in ("SAndSaveexecB32", "SAndSaveexecB64"):
         return f"{mn} {reg(d[0])}, {reg(u[0])}"
     if fmt in ("Sop1", "Sop2"):
         return f"{mn} {reg(d[0])}, " + ", ".join(reg(x) for x in u)
@@ -455,19 +455,249 @@ def render(
 
 
 # --------------------------------------------------------------------------
+# gfx950 (`--isa gfx950`): the description isa/gfx950.isa and gfx9 syntax
+# --------------------------------------------------------------------------
+
+GFX9_E64_ALWAYS = {
+    "v_cndmask_b32",
+    "v_add_co_u32",
+    "v_sub_co_u32",
+    "v_subrev_co_u32",
+    "v_addc_co_u32",
+    "v_subb_co_u32",
+}
+
+
+def load_info_gfx950(crate: Path) -> tuple[dict[str, Info], dict[int, str]]:
+    """Per-variant facts of isa/gfx950.isa, and its compares by shared code."""
+    tree = isa_tables.Tree(crate)
+    text = tree.read(isa_tables.GFX950_DESCRIPTION)
+    desc = isa_tables.Desc(isa_tables.parse(text, isa_tables.GFX950_DESCRIPTION), text)
+    aliases = {r.args[0]: r.get("flags").split("|") for r in desc.section("alias")}
+    out = {}
+    for r in desc.insts + [desc.family]:
+        flags = set()
+        for t in isa_tables._flags_field(
+            r.get("flags") if r.get("flags") != "macro" else "VALU"
+        ):
+            flags.update(aliases.get(t, [t]))
+        fmt = "Vopc" if r.kind == "family" else desc.fmt_of(r)
+        out[r.args[0]] = Info(
+            r.args[1],
+            r.args[2],
+            fmt,
+            r.get("form") or "plain",
+            flags,
+            set(filter(None, (r.get("m") or "").split(","))),
+            isa_tables.parse_sig_list(r.get("u")),
+            isa_tables.parse_sig_list(r.get("d")),
+        )
+    vcmp = {int(c.args[0], 0): c.args[1] for c in desc.section("vcmp")}
+    return out, vcmp
+
+
+def reg9(tok: str, float_text: bool = False) -> str:
+    """`reg` with gfx9's 64-bit lane masks."""
+    if tok in ("vcc", "exec"):
+        return tok
+    return reg(tok, float_text=float_text)
+
+
+def src_text9(tok: str, neg: bool, float_op: bool) -> str:
+    text = reg9(tok)
+    if neg:
+        if not float_op:
+            raise Unprintable("neg on an integer operand")
+        text = f"-{text}" if not is_imm(tok) else f"neg({text})"
+    return text
+
+
+def is_vop3_word9(w: int) -> bool:
+    return w >> 26 == 0x34
+
+
+def dpp_text9(imm: int) -> str:
+    """The gfx9 DPP controls; others (gfx10+ row_share, row_xmask) in gfx10
+    syntax, which llvm-mc then refuses for gfx950."""
+    ctrl = imm & 0x1FF
+    named = {
+        0x130: "wave_shl:1",
+        0x134: "wave_rol:1",
+        0x138: "wave_shr:1",
+        0x13C: "wave_ror:1",
+        0x140: "row_mirror",
+        0x141: "row_half_mirror",
+        0x142: "row_bcast:15",
+        0x143: "row_bcast:31",
+    }
+    if ctrl <= 0xFF:
+        c = "quad_perm:[" + ",".join(str((ctrl >> (2 * k)) & 3) for k in range(4)) + "]"
+    elif 0x101 <= ctrl <= 0x10F:
+        c = f"row_shl:{ctrl & 0xF}"
+    elif 0x111 <= ctrl <= 0x11F:
+        c = f"row_shr:{ctrl & 0xF}"
+    elif 0x121 <= ctrl <= 0x12F:
+        c = f"row_ror:{ctrl & 0xF}"
+    elif ctrl in named:
+        c = named[ctrl]
+    else:
+        return dpp16_text(imm)
+    if imm & 0xF000:
+        raise Unprintable("DPP source modifiers")
+    if imm >> 10 & 1:
+        raise Unprintable("fi is a gfx10+ DPP bit")
+    parts = [
+        c,
+        f"row_mask:0x{(imm >> 20) & 0xF:x}",
+        f"bank_mask:0x{(imm >> 16) & 0xF:x}",
+    ]
+    if imm >> 11 & 1:
+        parts.append("bound_ctrl:1")
+    return " ".join(parts)
+
+
+def render9(v: Variant, info: dict[str, Info], vcmp: dict[int, str]) -> str:
+    if v.name == "VCmp":
+        i = info["VCmp"]
+        mn = vcmp[v.code]
+    else:
+        i = info[v.name]
+        mn = i.mnemonic
+    words = v.words()
+    m = v.mods
+    d, u = v.defs, v.uses
+    neg = lambda k: bool(m >> k & 1)
+    fmt = i.fmt
+    if v.name == "SAndSaveexecB64":
+        return f"{mn} {reg9(d[0])}, {reg9(u[0])}"
+    if fmt in ("Sop1", "Sop2"):
+        return f"{mn} {reg9(d[0])}, " + ", ".join(reg9(x) for x in u)
+    if fmt == "Sopc":
+        return f"{mn} {reg9(u[0])}, {reg9(u[1])}"
+    if fmt == "Sopk":
+        return f"{mn} {reg9(d[0])}, 0x{v.imm & 0xFFFF:x}"
+    if fmt == "Sopp":
+        if mn in ("s_endpgm", "s_barrier"):
+            if v.imm:
+                raise Unprintable("an operand on a SOPP without one")
+            return mn
+        return f"{mn} {v.imm & 0xFFFF:#x}"
+    if fmt == "Smem":
+        off = v.imm
+        return f"{mn} {reg9(d[0])}, {reg9(u[0])}, " + (
+            f"{off:#x}" if off >= 0 else f"-{-off:#x}"
+        )
+    if fmt == "Vop1":
+        if not d:
+            return mn
+        if i.form == "dpp16":
+            return f"v_mov_b32_dpp {reg9(d[0])}, {reg9(u[0])} {dpp_text9(v.imm)}"
+        if i.form == "sdwa_hi" and m & 0x10:
+            if m & ~0x11:
+                raise Unprintable("SDWA modifiers beyond neg")
+            src = src_text9(u[0], neg(0), True)
+            return f"{mn}_sdwa {reg9(d[0])}, {src} dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1"
+        if m & ~0x7:
+            raise Unprintable("modifier bits beyond neg")
+        e64 = words is not None and is_vop3_word9(words[0])
+        return f"{mn}{'_e64' if e64 else '_e32'} {reg9(d[0])}, {src_text9(u[0], neg(0), float_source(mn, 0))}"
+    if fmt == "Vop2":
+        if m & ~0x7:
+            raise Unprintable("modifier bits beyond neg")
+        e64 = words is not None and is_vop3_word9(words[0])
+        srcs = [src_text9(x, neg(k), float_source(mn, k)) for k, x in enumerate(u)]
+        return f"{mn}{'_e64' if e64 else '_e32'} {reg9(d[0])}, " + ", ".join(srcs)
+    if fmt in ("Vop3", "Vop3b", "Vopc"):
+        enc_uses = [x for x, sig in zip(u, i.uses) if sig[0] != "old"]
+        sfx = "_e64" if v.name == "VCmp" or mn in GFX9_E64_ALWAYS else ""
+        opsel = ""
+        if v.name == "VPackB32F16":
+            if m & ~0x30:
+                raise Unprintable("modifier bits beyond op_sel")
+            opsel = f" op_sel:[{m >> 4 & 1},{m >> 5 & 1},0]" if m & 0x30 else ""
+            m = 0
+        if m & ~0x7:
+            raise Unprintable("modifier bits beyond neg")
+        srcs = [
+            src_text9(x, neg(k), float_source(mn, k)) for k, x in enumerate(enc_uses)
+        ]
+        return f"{mn}{sfx} " + ", ".join([reg9(x) for x in d] + srcs) + opsel
+    if fmt == "Vop3p":
+        enc_uses = [x for x, sig in zip(u, i.uses) if sig[0] != "old"]
+        if i.form == "mix":
+            if m & ~0xE77:
+                raise Unprintable("modifier bits beyond neg, op_sel and op_sel_hi")
+            srcs = [
+                src_text(x, neg(k), False, True, float_text=True)
+                for k, x in enumerate(enc_uses)
+            ]
+            op_sel = ",".join(str(m >> (4 + k) & 1) for k in range(3))
+            op_sel_hi = ",".join(str(m >> (9 + k) & 1) for k in range(3))
+            tail = f" op_sel:[{op_sel}] op_sel_hi:[{op_sel_hi}]" if m & 0xE70 else ""
+            return f"{mn} {reg9(d[0])}, " + ", ".join(srcs) + tail
+        if m & ~0x7:
+            raise Unprintable("modifier bits beyond neg_lo")
+        srcs = [reg9(x) for x in enc_uses]
+        tail = (
+            " neg_lo:[" + ",".join(str(m >> k & 1) for k in range(len(srcs))) + "]"
+            if m & 7
+            else ""
+        )
+        return f"{mn} {reg9(d[0])}, " + ", ".join(srcs) + tail
+    if fmt == "Ds":
+        roles = [r for r, _c, _n in i.uses]
+        if v.name == "DsStore2addrB32":
+            return (
+                f"{mn} {reg9(u[0])}, {reg9(u[1])}, {reg9(u[2])}"
+                + mem_offset("offset0", v.imm & 0xFF)
+                + mem_offset("offset1", v.imm >> 8 & 0xFF)
+            )
+        ops = [reg9(d[0])] if d else []
+        ops += [reg9(x) for x, r in zip(u, roles) if r != "vdst"]
+        return f"{mn} " + ", ".join(ops) + mem_offset("offset", v.imm & 0xFFFF)
+    if fmt == "Global" and i.form == "scratch":
+        tail = mem_offset("offset", v.imm)
+        if d:
+            return f"{mn} {reg9(d[0])}, off, off{tail}"
+        return f"{mn} off, {reg9(u[0])}, off{tail}"
+    if fmt == "Global":
+        saddr = bool(m & (1 << 8))
+        roles = [r for r, _c, _n in i.uses]
+        base = reg9(u[1]) if saddr else "off"
+        rest = u[2:] if saddr else u[1:]
+        data = [reg9(x) for x, r in zip(rest, roles[1:]) if r != "vdst"]
+        ops = ([reg9(d[0])] if d else []) + [reg9(u[0])] + data + [base]
+        if m & ~((1 << 8) | (1 << 12)):
+            raise Unprintable("modifier bits beyond saddr and sc0")
+        return (
+            f"{mn} "
+            + ", ".join(ops)
+            + mem_offset("offset", v.imm)
+            + (" sc0" if m & (1 << 12) else "")
+        )
+    if fmt == "Mubuf":
+        vdata, rest = (reg9(d[0]), u) if d else (reg9(u[0]), u[1:])
+        return (
+            f"{mn} {vdata}, {reg9(rest[0])}, {reg9(rest[1])}, {reg9(rest[2])} offen"
+            + mem_offset("offset", v.imm)
+        )
+    raise Unprintable(f"format {fmt}")
+
+
+# --------------------------------------------------------------------------
 # llvm-mc
 # --------------------------------------------------------------------------
 
 
 def run_mc(
-    llvm_bin: Path, lines: list[str], disassemble: bool
+    llvm_bin: Path, lines: list[str], disassemble: bool, mcpu: str = "gfx1151"
 ) -> tuple[list[str], dict[int, str]]:
     """Output lines (in order) and errors by 1-based input line."""
     exe = llvm_bin / ("llvm-mc.exe" if sys.platform == "win32" else "llvm-mc")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / ("in.txt" if disassemble else "in.s")
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        args = [str(exe), "-arch=amdgcn", "-mcpu=gfx1151"]
+        args = [str(exe), "-arch=amdgcn", f"-mcpu={mcpu}"]
         args += ["--disassemble"] if disassemble else ["-show-encoding"]
         proc = subprocess.run(
             args + [str(path)], capture_output=True, text=True, check=False
@@ -485,14 +715,16 @@ def run_mc(
     return out, errors
 
 
-def disassemble(llvm_bin: Path, byte_lists: list[list[int]]) -> list[str]:
+def disassemble(
+    llvm_bin: Path, byte_lists: list[list[int]], mcpu: str = "gfx1151"
+) -> list[str]:
     """Disassembly of each byte list. The disassembler reads its input as one
     byte stream (an instruction that expects a literal takes the next line's
     bytes), so each list gets its own process."""
 
     def one(b: list[int]) -> str:
         out, errors = run_mc(
-            llvm_bin, [" ".join(f"0x{x:02x}" for x in b)], disassemble=True
+            llvm_bin, [" ".join(f"0x{x:02x}" for x in b)], disassemble=True, mcpu=mcpu
         )
         text = " ; ".join(line.split(";")[0].strip() for line in out)
         return text if text and not errors else (text + " <invalid encoding>").strip()
@@ -511,9 +743,11 @@ def norm(text: str) -> str:
     return " ".join(text.replace(",", ", ").split()).replace(" ,", ",")
 
 
-def classify(vs: list[Variant], llvm_bin: Path) -> None:
+def classify(vs: list[Variant], llvm_bin: Path, mcpu: str = "gfx1151") -> None:
     printable = [v for v in vs if v.asm]
-    out, errors = run_mc(llvm_bin, [v.asm for v in printable], disassemble=False)
+    out, errors = run_mc(
+        llvm_bin, [v.asm for v in printable], disassemble=False, mcpu=mcpu
+    )
     it = iter(out)
     for n, v in enumerate(printable, 1):
         if n in errors:
@@ -531,9 +765,11 @@ def classify(vs: list[Variant], llvm_bin: Path) -> None:
         if v.our_bytes() is not None and v.our_bytes() != v.llvm_bytes
     ]
     canon = [v for v in dis if v.llvm_bytes]
-    for v, text in zip(dis, disassemble(llvm_bin, [v.our_bytes() for v in dis])):
+    for v, text in zip(dis, disassemble(llvm_bin, [v.our_bytes() for v in dis], mcpu)):
         v.ours_text = text
-    for v, text in zip(canon, disassemble(llvm_bin, [v.llvm_bytes for v in canon])):
+    for v, text in zip(
+        canon, disassemble(llvm_bin, [v.llvm_bytes for v in canon], mcpu)
+    ):
         v.extra["llvm_dis"] = text
     for v in vs:
         ours = v.our_bytes()
@@ -568,21 +804,32 @@ def literal_for_inline(v: Variant) -> bool:
 # --------------------------------------------------------------------------
 
 
-def report(vs: list[Variant], path: Path) -> str:
+def report(vs: list[Variant], path: Path, isa: str = "gfx11") -> str:
     counts = collections.Counter(v.verdict for v in vs)
     by_op = collections.defaultdict(collections.Counter)
     for v in vs:
         by_op[v.name if v.name != "VCmp" else f"VCmp({v.code:#04x})"][v.verdict] += 1
-    lines = [
-        "# llvm-mc cross-check of the gfx11 encoder",
-        "",
+    summary = (
         (
             f"Variants: {len(vs)} over {len(by_op)} opcodes (table-encoded opcodes of `isa/gfx11.isa`; "
             "operands by class: VGPRs below and above v127, SGPRs, special registers, inline integer, f32 and "
             "f64 constants, literals; each accepted modifier bit; immediate ranges). Reference: "
             "`llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`. Table and hand encoders agree on every variant: "
             f"{sum(v.table == v.hand for v in vs)} of {len(vs)}."
-        ),
+        )
+        if isa == "gfx11"
+        else (
+            f"Variants: {len(vs)} over {len(by_op)} opcodes (the rows of `isa/gfx950.isa`; operands by class: "
+            "VGPRs below and above v127, SGPRs up to s101, special registers and the 64-bit lane masks vcc and "
+            "exec, inline integer, f32 and f64 constants, literals; each accepted modifier bit; immediate "
+            "ranges). Reference: `llvm-mc -arch=amdgcn -mcpu=gfx950 -show-encoding`. One encoder "
+            "(`src/target/gfx9/asm.rs`)."
+        )
+    )
+    lines = [
+        f"# llvm-mc cross-check of the {isa} encoder",
+        "",
+        summary,
         "",
         "| verdict | variants |",
         "|---|---|",
@@ -669,12 +916,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", type=Path, default=Path("isa_xcheck.md"))
     ap.add_argument("--json", type=Path)
+    ap.add_argument(
+        "--isa",
+        choices=("gfx11", "gfx950"),
+        default="gfx11",
+        help="the encoder: gfx11 (rir, llvm-mc -mcpu=gfx1151) or gfx950 (target::gfx9, -mcpu=gfx950)",
+    )
     args = ap.parse_args(argv)
+    gfx950 = args.isa == "gfx950"
     if args.variants:
         text = args.variants.read_text(encoding="utf-8-sig")
     else:
         proc = subprocess.run(
-            ["cargo", "run", "-q", "--release", "--example", "isa_xcheck"],
+            ["cargo", "run", "-q", "--release", "--example", "isa_xcheck"]
+            + (["--", "--target", "gfx950"] if gfx950 else []),
             cwd=args.crate,
             capture_output=True,
             text=True,
@@ -685,15 +940,18 @@ def main(argv: list[str] | None = None) -> int:
             return proc.returncode
         text = proc.stdout
     vs = parse_variants(text)
-    info = load_info(args.crate)
-    vcmp, vopd = vcmp_names(), vopd_names(args.crate)
+    if gfx950:
+        info9, vcmp9 = load_info_gfx950(args.crate)
+    else:
+        info = load_info(args.crate)
+        vcmp, vopd = vcmp_names(), vopd_names(args.crate)
     for v in vs:
         try:
-            v.asm = render(v, info, vcmp, vopd)
+            v.asm = render9(v, info9, vcmp9) if gfx950 else render(v, info, vcmp, vopd)
         except Unprintable as e:
             v.why = str(e)
-    classify(vs, args.llvm_bin)
-    text = report(vs, args.out)
+    classify(vs, args.llvm_bin, "gfx950" if gfx950 else "gfx1151")
+    text = report(vs, args.out, args.isa)
     if args.json:
         args.json.write_text(
             json.dumps([v.__dict__ for v in vs], indent=1), encoding="utf-8"

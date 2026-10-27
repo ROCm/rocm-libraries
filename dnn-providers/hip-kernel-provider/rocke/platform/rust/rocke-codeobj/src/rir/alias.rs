@@ -238,7 +238,7 @@ mod tests {
         let mut vregs = vec![VRegInfo { class: Class::V, size: 4, align: 1, fixed: None }; 102];
         vregs[100].size = 2;
         vregs[101].size = 2;
-        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs }
+        MFunc { blocks: vec![MBlock { insts, loop_depth: 0 }], vregs, ..Default::default() }
     }
 
     /// The block's (opcode, tag) after scheduling with a window of 16.

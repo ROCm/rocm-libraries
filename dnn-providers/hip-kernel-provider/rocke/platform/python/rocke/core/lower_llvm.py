@@ -1799,7 +1799,9 @@ _WAVE_UNIFORM_OPS = frozenset(
 )
 # Ops outside ``arith`` that compute their result from their operands alone
 # (every ``arith`` op does).
-_PURE_OPS = frozenset({"tile.global_ptr_add", "tile.global_ptr_to_i64", "tile.pin_sgpr"})
+_PURE_OPS = frozenset(
+    {"tile.global_ptr_add", "tile.global_ptr_to_i64", "tile.pin_sgpr"}
+)
 
 # Bytes per element of the scalar types a global access GEPs over.
 _GEP_ELEM_BYTES = {
@@ -1976,7 +1978,9 @@ class _IndexFacts:
                 return True
         return False
 
-    def _record(self, v: Value, uniform: bool, bounds: Optional[Tuple[int, int]]) -> None:
+    def _record(
+        self, v: Value, uniform: bool, bounds: Optional[Tuple[int, int]]
+    ) -> None:
         self._facts[id(v)] = (v, uniform, bounds)
 
     def _find_block_values(self, region: Region) -> None:
@@ -2012,7 +2016,8 @@ class _IndexFacts:
         values = self._block_values.get(id(op), {})
         # _Lowerer._op_scf_for unrolls exactly these loops.
         unrolled = op.attrs.get("unroll", False) and all(
-            v.op is not None and v.op.name == "arith.constant" for v in (lower, upper, step)
+            v.op is not None and v.op.name == "arith.constant"
+            for v in (lower, upper, step)
         )
         if not unrolled:
             self._parent_loop[id(op)] = self._loops[-1]

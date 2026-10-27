@@ -33,6 +33,7 @@ fn src_lit(op: Opc, k: usize) -> Lit {
         Opc::SMovB64 | Opc::SAndB64 | Opc::SOrB64 | Opc::SXorB64 | Opc::SCselectB64 | Opc::SCmpEqU64 | Opc::SCmpLgU64 => {
             Lit::Plain
         }
+        Opc::SAndSaveexecB64 | Opc::SNotB64 | Opc::SAndNot1B64 | Opc::SOrNot1B64 => Lit::Plain,
         // The i32 exponent.
         Opc::VLdexpF64 if k == 1 => Lit::B32,
         Opc::VFmaF64
@@ -201,10 +202,27 @@ fn vop3_words(
 /// description (`isa.rs`), or the hand encoder below for the opcodes the
 /// description leaves to it (`table_encoded`).
 fn encode(inst: &MInst, e: &mut Enc) -> Result<(), CompileError> {
+    lane_mask_source(inst)?;
     if super::isa::encode(inst, &mut e.words)? {
         return Ok(());
     }
     encode_legacy(inst, e)
+}
+
+/// Source 2 of v_cndmask_b32 (the lane mask) and of v_add_co_ci_u32 /
+/// v_sub_co_ci_u32 (the carry-in) is read from a scalar register. The field
+/// also encodes inline constants and VGPRs, which the hardware does not read
+/// as a mask: such a select picks garbage, differently from run to run.
+fn lane_mask_source(inst: &MInst) -> Result<(), CompileError> {
+    if !matches!(inst.op, Opc::VCndmaskB32 | Opc::VAddCoCiU32 | Opc::VSubCoCiU32) {
+        return Ok(());
+    }
+    match inst.uses.get(2) {
+        Some(o @ (Opnd::Imm(_) | Opnd::P(Phys::V(_), _))) => {
+            Err(bad(format!("{} reads its lane mask from a scalar register, not {o:?}", inst.op.name())))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The hand encoder's words for one instruction: the reference the

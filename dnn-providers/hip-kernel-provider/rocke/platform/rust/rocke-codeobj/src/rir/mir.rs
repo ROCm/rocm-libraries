@@ -345,6 +345,12 @@ pub struct MBlock {
 pub struct MFunc {
     pub blocks: Vec<MBlock>,
     pub vregs: Vec<VRegInfo>,
+    /// The target the function is compiled for, from instruction selection
+    /// on (gfx1151 by default).
+    pub target: crate::target::Target,
+    /// VGPRs the allocation may use when fewer than the target's: set only
+    /// by `rir::compile_any_target_limited`, which tests spilling with it.
+    pub vgpr_limit: Option<u32>,
 }
 
 impl MFunc {
@@ -380,6 +386,8 @@ pub fn phys_name(phys: Phys, n: u8) -> String {
         Phys::S(i) => format!("s[{}:{}]", i, i + n as u16 - 1),
         Phys::V(i) if n == 1 => format!("v{i}"),
         Phys::V(i) => format!("v[{}:{}]", i, i + n as u16 - 1),
+        Phys::VccLo if n == 2 => "vcc".into(),
+        Phys::ExecLo if n == 2 => "exec".into(),
         Phys::VccLo => "vcc_lo".into(),
         Phys::ExecLo => "exec_lo".into(),
         Phys::M0 => "m0".into(),

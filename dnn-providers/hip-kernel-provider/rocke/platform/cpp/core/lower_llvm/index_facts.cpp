@@ -141,7 +141,8 @@ static bool ll_is_arith(const rocke_op_t* op)
     return name != NULL && strncmp(name, "arith.", 6) == 0;
 }
 
-static void ll_push_value(rocke_lower_t* L, ROCKE_VEC(const rocke_value_t*) * v, const rocke_value_t* x)
+static void
+    ll_push_value(rocke_lower_t* L, ROCKE_VEC(const rocke_value_t*) * v, const rocke_value_t* x)
 {
     int rc = 0;
     rocke_vec_push(&L->arena, v, x, rc);
@@ -293,7 +294,8 @@ static bool ll_lane_hoistable(const rocke_ll_index_facts_t* F,
         if(loop == NULL)
             continue;
         bool around_lane = false;
-        for(const rocke_op_t* l = ll_loop_of(F, lane); l != NULL && !around_lane; l = ll_parent_loop(F, l))
+        for(const rocke_op_t* l = ll_loop_of(F, lane); l != NULL && !around_lane;
+            l = ll_parent_loop(F, l))
             around_lane = l == loop;
         if(!around_lane)
             return true;
@@ -315,7 +317,8 @@ static bool ll_is_param(const rocke_lower_t* L, const rocke_value_t* v)
 }
 
 /* Python _IndexFacts.uniform. */
-static bool ll_uniform(const rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_value_t* v)
+static bool
+    ll_uniform(const rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_value_t* v)
 {
     const ll_fact_t* f = ll_find(F, v);
     if(f != NULL)
@@ -520,7 +523,8 @@ static bool ll_op_bounds(const rocke_ll_index_facts_t* F, const rocke_op_t* op, 
 }
 
 /* Python _IndexFacts._op_uniform. */
-static bool ll_op_uniform(const rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_op_t* op)
+static bool
+    ll_op_uniform(const rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_op_t* op)
 {
     switch(op->opcode)
     {
@@ -610,7 +614,8 @@ static void ll_alloc_block_slots(rocke_lower_t* L, rocke_ll_index_facts_t* F, si
 
 /* Python _IndexFacts._find_block_values. The first value seen under a
  * (loop, name) is the one kept. */
-static void ll_find_block_values(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_region_t* region)
+static void
+    ll_find_block_values(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rocke_region_t* region)
 {
     for(int i = 0; i < region->num_ops; i++)
     {
@@ -632,7 +637,8 @@ static void ll_find_block_values(rocke_lower_t* L, rocke_ll_index_facts_t* F, co
                 ll_alloc_block_slots(L, F, 2 * old_cap);
                 for(size_t k = 0; k < old_cap; k++)
                     if(old[k].loop != NULL)
-                        F->block_slots[ll_block_slot(F, old[k].loop, old[k].value->name, old[k].hash)]
+                        F->block_slots[ll_block_slot(
+                            F, old[k].loop, old[k].value->name, old[k].hash)]
                             = old[k];
             }
             F->block_slots[ll_block_slot(F, loop, v->name, h)] = ll_block_value_t{loop, v, h};
@@ -670,8 +676,9 @@ static void ll_visit_for(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rock
     const int num_inits = (int)ll_max(0, ll_min(num_iter, op->num_operands - 3));
     const rocke_region_t* body = op->regions[0];
     /* _op_scf_for (control.cpp) unrolls exactly these loops. */
-    const bool unrolled = rocke_attr_get_bool(&op->attrs, "unroll", false) && rocke_ll_is_constant(lower)
-                          && rocke_ll_is_constant(upper) && rocke_ll_is_constant(step);
+    const bool unrolled = rocke_attr_get_bool(&op->attrs, "unroll", false)
+                          && rocke_ll_is_constant(lower) && rocke_ll_is_constant(upper)
+                          && rocke_ll_is_constant(step);
     if(!unrolled)
     {
         int rc = 0;
@@ -722,8 +729,7 @@ static void ll_visit_for(rocke_lower_t* L, rocke_ll_index_facts_t* F, const rock
         bool changed = false;
         for(int i = 0; i < num_inits; i++)
         {
-            const bool held
-                = assumed[i] && i < num_yielded && ll_uniform(L, F, yield->operands[i]);
+            const bool held = assumed[i] && i < num_yielded && ll_uniform(L, F, yield->operands[i]);
             changed = changed || held != assumed[i];
             assumed[i] = held;
         }
@@ -913,7 +919,8 @@ static int64_t ll_live_in_words(rocke_lower_t* L,
 }
 
 /* Python _IndexFacts._loop_words. */
-static int64_t ll_loop_words(rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_op_t* loop)
+static int64_t
+    ll_loop_words(rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_op_t* loop)
 {
     if(loop->num_regions < 1 || loop->regions[0] == NULL)
         return 0;
@@ -937,8 +944,9 @@ static int64_t ll_loop_words(rocke_lower_t* L, const rocke_ll_index_facts_t* F, 
 }
 
 /* Python _IndexFacts._max_loop_words. */
-static int64_t
-    ll_max_loop_words(rocke_lower_t* L, const rocke_ll_index_facts_t* F, const rocke_region_t* region)
+static int64_t ll_max_loop_words(rocke_lower_t* L,
+                                 const rocke_ll_index_facts_t* F,
+                                 const rocke_region_t* region)
 {
     int64_t best = 0;
     for(int i = 0; i < region->num_ops; i++)
@@ -1087,10 +1095,11 @@ void rocke_ll_global_gep(rocke_lower_t* L,
     {
         rocke_ll_need_dynamic(L, LL_READFIRSTLANE_P1, LL_READFIRSTLANE_P1_DECL);
         const char* uniform_base = rocke_ll_fresh(L, "gbase");
-        rocke_ll_emitf(L,
-                       "  %s = call ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) %s)",
-                       uniform_base,
-                       base);
+        rocke_ll_emitf(
+            L,
+            "  %s = call ptr addrspace(1) @llvm.amdgcn.readfirstlane.p1(ptr addrspace(1) %s)",
+            uniform_base,
+            base);
         base = uniform_base;
     }
     if(constant != 0)

@@ -26,6 +26,7 @@ use super::parse_par::{self, Job, WORKER_STACK};
 use super::stream::Stream;
 use super::{parse, CompiledKernel};
 use crate::error::CompileError;
+use crate::target::Target;
 
 /// Inputs smaller than this are parsed on the calling thread. Parallel
 /// parsing starts lower than without a session (`parse::PARALLEL_MIN_BYTES`)
@@ -48,6 +49,8 @@ pub struct SessionOptions {
     /// parallelism; 1 or more starts that many. Each costs a thread start
     /// when the session is created and nothing per compile.
     pub worker_threads: u32,
+    /// The target every compile of the session is for.
+    pub target: Target,
 }
 
 struct PoolState {
@@ -138,6 +141,7 @@ pub(super) struct State {
 pub struct Session {
     pool: Pool,
     state: Mutex<State>,
+    target: Target,
 }
 
 impl Session {
@@ -146,12 +150,17 @@ impl Session {
             0 => std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_sub(1).min(DEFAULT_WORKERS),
             n => n as usize,
         };
-        Session { pool: Pool::new(workers), state: Mutex::new(State::default()) }
+        Session { pool: Pool::new(workers), state: Mutex::new(State::default()), target: options.target }
     }
 
     /// Worker threads running.
     pub fn workers(&self) -> usize {
         self.pool.threads.len()
+    }
+
+    /// The target the session compiles for.
+    pub fn target(&self) -> Target {
+        self.target
     }
 
     /// The per-call state, or an error if another call holds it.
@@ -211,16 +220,17 @@ impl Session {
         parse::parse_options(text, 1, 0, hashcons)
     }
 
-    /// `rir::compile` with the parse on the session's threads.
+    /// `rir::compile_for` the session's target, with the parse on the
+    /// session's threads.
     pub fn compile(&self, text: &str) -> Result<CompiledKernel, CompileError> {
         let _state = self.enter()?;
-        super::compile_parsed_by(text, &|t| self.parse_shared(None, t))
+        super::compile_parsed_by(text, &|t| self.parse_shared(None, t), self.target)
     }
 
     /// `compile` of a text the caller already holds in an `Arc`.
     pub fn compile_shared(&self, text: &Arc<str>) -> Result<CompiledKernel, CompileError> {
         let _state = self.enter()?;
-        super::compile_parsed_by(text, &|t| self.parse_shared(Some(text), t))
+        super::compile_parsed_by(text, &|t| self.parse_shared(Some(text), t), self.target)
     }
 
     /// Appends `bytes` to the input being streamed, starting one if none is.
@@ -257,7 +267,7 @@ mod tests {
         let text = kernel(40);
         let reference = outcome(parse::parse_with_threads(&text, 1));
         for workers in [1, 2, 5] {
-            let session = Session::new(SessionOptions { worker_threads: workers });
+            let session = Session::new(SessionOptions { worker_threads: workers, ..Default::default() });
             assert_eq!(session.workers(), workers as usize);
             for _ in 0..3 {
                 let shared: Arc<str> = Arc::from(text.as_str());
@@ -273,7 +283,7 @@ mod tests {
 
     #[test]
     fn overlapping_calls_are_refused() {
-        let session = Session::new(SessionOptions { worker_threads: 1 });
+        let session = Session::new(SessionOptions { worker_threads: 1, ..Default::default() });
         let held = session.enter().expect("free");
         let refused = session.compile("ckdsl.ir v1\n").err().expect("refused");
         assert_eq!(refused.kind, "ROCKE_DIRECT_SESSION");
@@ -283,7 +293,7 @@ mod tests {
 
     #[test]
     fn a_panicking_job_leaves_the_pool_serving() {
-        let session = Session::new(SessionOptions { worker_threads: 1 });
+        let session = Session::new(SessionOptions { worker_threads: 1, ..Default::default() });
         session.spawn(Box::new(|| panic!("job panics on purpose")));
         let (tx, rx) = std::sync::mpsc::channel();
         session.spawn(Box::new(move || tx.send(7).expect("send")));

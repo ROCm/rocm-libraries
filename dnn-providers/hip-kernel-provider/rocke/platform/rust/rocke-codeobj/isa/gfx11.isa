@@ -523,6 +523,11 @@ inst   VDivFixupF64      v_div_fixup_f64           VOP3    0x228  flags=VALU|64B
 inst   VDot2F32Bf16      v_dot2_f32_bf16           VOP3P   0x1a   flags=VALU d=vdst:v1 u=src0:vi1,src1:vi1,src2:vi1 m=neg imp=use:exec unit=VALU lat=valu form=dot2
 inst   BufferGl0Inv      buffer_gl0_inv            MUBUF   0x2b   flags=FENCE imp=use:exec unit=VMEM lat=vmem_store note="Cache invalidations of an acquire fence (no operands)."
 inst   BufferGl1Inv      buffer_gl1_inv            MUBUF   0x2c   flags=FENCE imp=use:exec unit=VMEM lat=vmem_store
+inst   SAndSaveexecB64   s_and_saveexec_b64        SOP1    0x21   flags=DEF_SCC|DEF_EXEC|USE_EXEC d=sdst:s2,exec:x2 u=ssrc0:ss2,exec:x2 imp=def:exec,def:scc,use:exec unit=SALU lat=salu form=b64 note="Wave64 lane masks: selected for gfx950 only."
+inst   SNotB64           s_not_b64                 SOP1    0x1f   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SAndNot1B64       s_and_not1_b64            SOP2    0x23   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   SOrNot1B64        s_or_not1_b64             SOP2    0x25   flags=DEF_SCC d=sdst:s2 u=ssrc0:ss2,ssrc1:ss2 imp=def:scc unit=SALU lat=salu form=b64
+inst   VMbcntHiU32B32    v_mbcnt_hi_u32_b32        VOP3    0x320  flags=VALU d=vdst:v1 u=src0:vs1,src1:vs1 m=neg,opsel,opsel_dst imp=use:exec unit=VALU lat=valu
 group pseudo
 inst   Copy              COPY                      PSEUDO  0x00   flags=0 d=dst:a1 u=src:a1 unit=PSEUDO lat=pseudo
 inst   ImplicitDef       IMPLICIT_DEF              PSEUDO  0x00   flags=0 d=dst:a1 unit=PSEUDO lat=pseudo note="Defines a register whose contents are never read before overwritten."

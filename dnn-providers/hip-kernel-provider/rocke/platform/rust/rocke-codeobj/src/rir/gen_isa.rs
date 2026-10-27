@@ -14,7 +14,7 @@
 use super::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0x7595c3765554c9a4;
+pub const DESCRIPTION_DIGEST: u64 = 0x907feabe25b7fe30;
 
 // ----- operand codes -----
 
@@ -484,7 +484,7 @@ impl EncMubuf {
 // ----- per-opcode facts -----
 
 /// The named opcodes, in description order (the `VCmp` family excluded).
-pub const ALL: [Opc; 252] = [
+pub const ALL: [Opc; 257] = [
     Opc::SMovB32, Opc::SMovB64, Opc::SNotB32, Opc::SAndSaveexecB32, Opc::SAddU32, Opc::SSubU32,
     Opc::SAddI32, Opc::SSubI32, Opc::SAddcU32, Opc::SSubbU32, Opc::SLshlB32, Opc::SLshlB64,
     Opc::SLshrB32, Opc::SLshrB64, Opc::SAshrI32, Opc::SAshrI64, Opc::SLshl1AddU32, Opc::SLshl2AddU32,
@@ -526,7 +526,8 @@ pub const ALL: [Opc; 252] = [
     Opc::VRndneF32, Opc::GLoadU8, Opc::GStoreB8, Opc::GStoreD16HiB8, Opc::DsLoadU8, Opc::DsStoreB8,
     Opc::DsStoreB8D16Hi, Opc::VFmaF64, Opc::VAddF64, Opc::VMulF64, Opc::VMaxF64, Opc::VMinF64,
     Opc::VLdexpF64, Opc::VRcpF64, Opc::VDivScaleF64, Opc::VDivFmasF64, Opc::VDivFixupF64, Opc::VDot2F32Bf16,
-    Opc::BufferGl0Inv, Opc::BufferGl1Inv, Opc::Copy, Opc::ImplicitDef, Opc::PackF16, Opc::SchedBarrier,
+    Opc::BufferGl0Inv, Opc::BufferGl1Inv, Opc::SAndSaveexecB64, Opc::SNotB64, Opc::SAndNot1B64, Opc::SOrNot1B64,
+    Opc::VMbcntHiU32B32, Opc::Copy, Opc::ImplicitDef, Opc::PackF16, Opc::SchedBarrier,
 ];
 
 /// Rust variant name of an opcode.
@@ -781,6 +782,11 @@ pub fn variant(op: Opc) -> &'static str {
         Opc::VDot2F32Bf16 => "VDot2F32Bf16",
         Opc::BufferGl0Inv => "BufferGl0Inv",
         Opc::BufferGl1Inv => "BufferGl1Inv",
+        Opc::SAndSaveexecB64 => "SAndSaveexecB64",
+        Opc::SNotB64 => "SNotB64",
+        Opc::SAndNot1B64 => "SAndNot1B64",
+        Opc::SOrNot1B64 => "SOrNot1B64",
+        Opc::VMbcntHiU32B32 => "VMbcntHiU32B32",
         Opc::Copy => "Copy",
         Opc::ImplicitDef => "ImplicitDef",
         Opc::PackF16 => "PackF16",
@@ -829,7 +835,7 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::SCselectB32 | Opc::SCselectB64 | Opc::SCmpEqI32 | Opc::SCmpLgI32 | Opc::SCmpGtI32
         | Opc::SCmpGeI32 | Opc::SCmpLtI32 | Opc::SCmpLeI32 | Opc::SCmpEqU32 | Opc::SCmpLgU32 | Opc::SCmpGtU32
         | Opc::SCmpGeU32 | Opc::SCmpLtU32 | Opc::SCmpLeU32 | Opc::SCmpEqU64 | Opc::SCmpLgU64 | Opc::SMovkI32
-        | Opc::SWaitcntVscnt => Unit::Salu,
+        | Opc::SWaitcntVscnt | Opc::SAndSaveexecB64 | Opc::SNotB64 | Opc::SAndNot1B64 | Opc::SOrNot1B64 => Unit::Salu,
         Opc::SNop | Opc::SClause | Opc::SDelayAlu | Opc::SWaitcnt | Opc::SCodeEnd | Opc::SEndpgm | Opc::SSendmsg
         | Opc::SBarrier | Opc::SBarrierLds | Opc::SBarrierBare | Opc::SSetprio | Opc::SWaitcntExplicit => Unit::Ctrl,
         Opc::SBranch | Opc::SCbranchScc0 | Opc::SCbranchScc1 | Opc::SCbranchExecz | Opc::SCbranchExecnz => Unit::Branch,
@@ -851,7 +857,7 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16 | Opc::VFmaMixhiF16 | Opc::VDual
         | Opc::VReadlaneB32 | Opc::VWritelaneB32 | Opc::VRndneF32 | Opc::VFmaF64 | Opc::VAddF64 | Opc::VMulF64
         | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64 | Opc::VDivScaleF64 | Opc::VDivFmasF64
-        | Opc::VDivFixupF64 | Opc::VDot2F32Bf16 => Unit::Valu,
+        | Opc::VDivFixupF64 | Opc::VDot2F32Bf16 | Opc::VMbcntHiU32B32 => Unit::Valu,
         Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64 => Unit::Trans,
         Opc::VWmmaF32F16 | Opc::VWmmaF32F16Early | Opc::VWmmaF32Bf16 | Opc::VWmmaF32Bf16Early | Opc::VWmmaI32Iu8
         | Opc::VWmmaI32Iu8Early | Opc::VWmmaI32Iu4 | Opc::VWmmaI32Iu4Early => Unit::Wmma,
@@ -901,7 +907,8 @@ pub fn issue(op: Opc) -> u32 {
         | Opc::VSubCoU32 | Opc::VSubrevCoU32 | Opc::VPackB32F16 | Opc::VLdexpF32 | Opc::VPkFmaF16
         | Opc::VPkAddF16 | Opc::VPkMulF16 | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16
         | Opc::VFmaMixhiF16 | Opc::VDual | Opc::VReadlaneB32 | Opc::VWritelaneB32 | Opc::VRndneF32
-        | Opc::VDot2F32Bf16 => 1,
+        | Opc::VDot2F32Bf16 | Opc::SAndSaveexecB64 | Opc::SNotB64 | Opc::SAndNot1B64 | Opc::SOrNot1B64
+        | Opc::VMbcntHiU32B32 => 1,
         Opc::SMulI32 | Opc::SMulHiU32 | Opc::SMulHiI32 | Opc::VLshlrevB64 | Opc::VLshrrevB64 | Opc::VAshrrevI64 => 2,
         Opc::SNop | Opc::SClause | Opc::SDelayAlu | Opc::SWaitcnt | Opc::SCodeEnd | Opc::SEndpgm | Opc::SSendmsg
         | Opc::SBarrier | Opc::SBarrierLds | Opc::SBarrierBare | Opc::SSetprio | Opc::SWaitcntExplicit
@@ -1058,7 +1065,7 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::SCselectB32 | Opc::SCselectB64 | Opc::SCmpEqI32 | Opc::SCmpLgI32 | Opc::SCmpGtI32
         | Opc::SCmpGeI32 | Opc::SCmpLtI32 | Opc::SCmpLeI32 | Opc::SCmpEqU32 | Opc::SCmpLgU32 | Opc::SCmpGtU32
         | Opc::SCmpGeU32 | Opc::SCmpLtU32 | Opc::SCmpLeU32 | Opc::SCmpEqU64 | Opc::SCmpLgU64 | Opc::SMovkI32
-        | Opc::SWaitcntVscnt => Lat::Salu,
+        | Opc::SWaitcntVscnt | Opc::SAndSaveexecB64 | Opc::SNotB64 | Opc::SAndNot1B64 | Opc::SOrNot1B64 => Lat::Salu,
         Opc::SNop | Opc::SClause | Opc::SDelayAlu | Opc::SWaitcnt | Opc::SCodeEnd | Opc::SBranch
         | Opc::SCbranchScc0 | Opc::SCbranchScc1 | Opc::SCbranchExecz | Opc::SCbranchExecnz | Opc::SEndpgm
         | Opc::SSendmsg | Opc::SBarrier | Opc::SBarrierLds | Opc::SBarrierBare | Opc::SSetprio
@@ -1081,7 +1088,7 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::VDot2F32F16 | Opc::VFmaMixF32 | Opc::VFmaMixloF16 | Opc::VFmaMixhiF16 | Opc::VDual
         | Opc::VReadlaneB32 | Opc::VWritelaneB32 | Opc::VRndneF32 | Opc::VFmaF64 | Opc::VAddF64 | Opc::VMulF64
         | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64 | Opc::VDivScaleF64 | Opc::VDivFmasF64
-        | Opc::VDivFixupF64 | Opc::VDot2F32Bf16 => Lat::Valu,
+        | Opc::VDivFixupF64 | Opc::VDot2F32Bf16 | Opc::VMbcntHiU32B32 => Lat::Valu,
         Opc::VExpF32 | Opc::VLogF32 | Opc::VRcpF32 | Opc::VRcpIflagF32 | Opc::VRsqF32 | Opc::VRcpF64 => Lat::Trans,
         Opc::VWmmaF32F16 | Opc::VWmmaF32F16Early | Opc::VWmmaF32Bf16 | Opc::VWmmaF32Bf16Early | Opc::VWmmaI32Iu8
         | Opc::VWmmaI32Iu8Early | Opc::VWmmaI32Iu4 | Opc::VWmmaI32Iu4Early => Lat::Wmma,
@@ -1183,7 +1190,8 @@ pub fn hazards(op: Opc) -> u32 {
         | Opc::GStoreB8 | Opc::GStoreD16HiB8 | Opc::DsLoadU8 | Opc::DsStoreB8 | Opc::DsStoreB8D16Hi
         | Opc::VFmaF64 | Opc::VAddF64 | Opc::VMulF64 | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64
         | Opc::VRcpF64 | Opc::VDivScaleF64 | Opc::VDivFmasF64 | Opc::VDivFixupF64 | Opc::VDot2F32Bf16
-        | Opc::BufferGl0Inv | Opc::BufferGl1Inv | Opc::Copy | Opc::ImplicitDef | Opc::PackF16
+        | Opc::BufferGl0Inv | Opc::BufferGl1Inv | Opc::SAndSaveexecB64 | Opc::SNotB64 | Opc::SAndNot1B64
+        | Opc::SOrNot1B64 | Opc::VMbcntHiU32B32 | Opc::Copy | Opc::ImplicitDef | Opc::PackF16
         | Opc::SchedBarrier => 0,
         Opc::VWmmaF32F16 | Opc::VWmmaF32F16Early | Opc::VWmmaF32Bf16 | Opc::VWmmaF32Bf16Early | Opc::VWmmaI32Iu8
         | Opc::VWmmaI32Iu8Early | Opc::VWmmaI32Iu4 | Opc::VWmmaI32Iu4Early => HZ_WMMA_D | HZ_WMMA_AB,
@@ -1239,7 +1247,8 @@ pub fn vopd(op: Opc) -> Option<(u8, bool)> {
         | Opc::GStoreB8 | Opc::GStoreD16HiB8 | Opc::DsLoadU8 | Opc::DsStoreB8 | Opc::DsStoreB8D16Hi
         | Opc::VFmaF64 | Opc::VAddF64 | Opc::VMulF64 | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64
         | Opc::VRcpF64 | Opc::VDivScaleF64 | Opc::VDivFmasF64 | Opc::VDivFixupF64 | Opc::VDot2F32Bf16
-        | Opc::BufferGl0Inv | Opc::BufferGl1Inv | Opc::Copy | Opc::ImplicitDef | Opc::PackF16
+        | Opc::BufferGl0Inv | Opc::BufferGl1Inv | Opc::SAndSaveexecB64 | Opc::SNotB64 | Opc::SAndNot1B64
+        | Opc::SOrNot1B64 | Opc::VMbcntHiU32B32 | Opc::Copy | Opc::ImplicitDef | Opc::PackF16
         | Opc::SchedBarrier => None,
         Opc::VMovB32 => Some((8, false)),
         Opc::VAddF32 => Some((4, false)),
@@ -1304,8 +1313,9 @@ pub fn vopd_special(op: Opc) -> Option<Option<u8>> {
         | Opc::VWmmaI32Iu4Early | Opc::VRndneF32 | Opc::GLoadU8 | Opc::GStoreB8 | Opc::GStoreD16HiB8
         | Opc::DsLoadU8 | Opc::DsStoreB8 | Opc::DsStoreB8D16Hi | Opc::VFmaF64 | Opc::VAddF64 | Opc::VMulF64
         | Opc::VMaxF64 | Opc::VMinF64 | Opc::VLdexpF64 | Opc::VRcpF64 | Opc::VDivScaleF64 | Opc::VDivFmasF64
-        | Opc::VDivFixupF64 | Opc::VDot2F32Bf16 | Opc::BufferGl0Inv | Opc::BufferGl1Inv | Opc::Copy
-        | Opc::ImplicitDef | Opc::PackF16 | Opc::SchedBarrier => None,
+        | Opc::VDivFixupF64 | Opc::VDot2F32Bf16 | Opc::BufferGl0Inv | Opc::BufferGl1Inv | Opc::SAndSaveexecB64
+        | Opc::SNotB64 | Opc::SAndNot1B64 | Opc::SOrNot1B64 | Opc::VMbcntHiU32B32 | Opc::Copy | Opc::ImplicitDef
+        | Opc::PackF16 | Opc::SchedBarrier => None,
         Opc::VFmaF32 => Some(Some(0)),
         Opc::VCmp(_) => None,
     }
@@ -1405,7 +1415,7 @@ pub struct Info {
 
 /// `Info` of each opcode in `ALL` order, then the compare family's
 /// fields that do not depend on its code.
-static INFO: [Info; 253] = [
+static INFO: [Info; 258] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x001, vop3: 0x001, flags: 0x00000, fmt: Fmt::Sop1, form: Form::B64, table: true },
     Info { code: 0x01e, vop3: 0x01e, flags: 0x00001, fmt: Fmt::Sop1, form: Form::Plain, table: true },
@@ -1654,6 +1664,11 @@ static INFO: [Info; 253] = [
     Info { code: 0x01a, vop3: 0x01a, flags: 0x00010, fmt: Fmt::Vop3p, form: Form::Dot2, table: true },
     Info { code: 0x02b, vop3: 0x02b, flags: 0x40000, fmt: Fmt::Mubuf, form: Form::Plain, table: true },
     Info { code: 0x02c, vop3: 0x02c, flags: 0x40000, fmt: Fmt::Mubuf, form: Form::Plain, table: true },
+    Info { code: 0x021, vop3: 0x021, flags: 0x00019, fmt: Fmt::Sop1, form: Form::B64, table: true },
+    Info { code: 0x01f, vop3: 0x01f, flags: 0x00001, fmt: Fmt::Sop1, form: Form::B64, table: true },
+    Info { code: 0x023, vop3: 0x023, flags: 0x00001, fmt: Fmt::Sop2, form: Form::B64, table: true },
+    Info { code: 0x025, vop3: 0x025, flags: 0x00001, fmt: Fmt::Sop2, form: Form::B64, table: true },
+    Info { code: 0x320, vop3: 0x320, flags: 0x00010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
     Info { code: 0x000, vop3: 0x000, flags: 0x20010, fmt: Fmt::Pseudo, form: Form::Plain, table: false },
@@ -1913,11 +1928,16 @@ fn index(op: Opc) -> usize {
         Opc::VDot2F32Bf16 => 245,
         Opc::BufferGl0Inv => 246,
         Opc::BufferGl1Inv => 247,
-        Opc::Copy => 248,
-        Opc::ImplicitDef => 249,
-        Opc::PackF16 => 250,
-        Opc::SchedBarrier => 251,
-        Opc::VCmp(_) => 252,
+        Opc::SAndSaveexecB64 => 248,
+        Opc::SNotB64 => 249,
+        Opc::SAndNot1B64 => 250,
+        Opc::SOrNot1B64 => 251,
+        Opc::VMbcntHiU32B32 => 252,
+        Opc::Copy => 253,
+        Opc::ImplicitDef => 254,
+        Opc::PackF16 => 255,
+        Opc::SchedBarrier => 256,
+        Opc::VCmp(_) => 257,
     }
 }
 
@@ -2598,30 +2618,36 @@ const SIG_89: Sig = Sig {
     mods: 0x7,
 };
 const SIG_90: Sig = Sig {
-    defs: &[Operand { role: Role::Dst, class: Class::A, dwords: 1 }],
-    uses: &[Operand { role: Role::Src, class: Class::A, dwords: 1 }],
+    defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 2 }, Operand { role: Role::Exec, class: Class::X, dwords: 2 }],
+    uses: &[Operand { role: Role::Ssrc0, class: Class::Ss, dwords: 2 }, Operand { role: Role::Exec, class: Class::X, dwords: 2 }],
     imm: Imm::None,
     mods: 0x0,
 };
 const SIG_91: Sig = Sig {
     defs: &[Operand { role: Role::Dst, class: Class::A, dwords: 1 }],
-    uses: &[],
+    uses: &[Operand { role: Role::Src, class: Class::A, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
 const SIG_92: Sig = Sig {
+    defs: &[Operand { role: Role::Dst, class: Class::A, dwords: 1 }],
+    uses: &[],
+    imm: Imm::None,
+    mods: 0x0,
+};
+const SIG_93: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }],
     imm: Imm::None,
     mods: 0x0,
 };
-const SIG_93: Sig = Sig {
+const SIG_94: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 1 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 1 }],
     imm: Imm::None,
     mods: 0x77,
 };
-const SIG_94: Sig = Sig {
+const SIG_95: Sig = Sig {
     defs: &[Operand { role: Role::Sdst, class: Class::S, dwords: 1 }],
     uses: &[Operand { role: Role::Src0, class: Class::Vs, dwords: 2 }, Operand { role: Role::Src1, class: Class::Vs, dwords: 2 }],
     imm: Imm::None,
@@ -2633,7 +2659,7 @@ const SIG_94: Sig = Sig {
 pub fn signature(op: Opc) -> &'static Sig {
     match op {
         Opc::SMovB32 | Opc::SNotB32 => &SIG_0,
-        Opc::SMovB64 => &SIG_1,
+        Opc::SMovB64 | Opc::SNotB64 => &SIG_1,
         Opc::SAndSaveexecB32 => &SIG_2,
         Opc::SAddU32 | Opc::SSubU32 | Opc::SAddI32 | Opc::SSubI32 | Opc::SAddcU32 | Opc::SSubbU32
         | Opc::SLshlB32 | Opc::SLshrB32 | Opc::SAshrI32 | Opc::SLshl1AddU32 | Opc::SLshl2AddU32
@@ -2641,7 +2667,7 @@ pub fn signature(op: Opc) -> &'static Sig {
         | Opc::SAndB32 | Opc::SOrB32 | Opc::SXorB32 | Opc::SAndNot1B32 | Opc::SOrNot1B32 | Opc::SBfeU32
         | Opc::SMulI32 | Opc::SMulHiU32 | Opc::SMulHiI32 | Opc::SCselectB32 => &SIG_3,
         Opc::SLshlB64 | Opc::SLshrB64 | Opc::SAshrI64 => &SIG_4,
-        Opc::SAndB64 | Opc::SOrB64 | Opc::SXorB64 | Opc::SCselectB64 => &SIG_5,
+        Opc::SAndB64 | Opc::SOrB64 | Opc::SXorB64 | Opc::SCselectB64 | Opc::SAndNot1B64 | Opc::SOrNot1B64 => &SIG_5,
         Opc::SCmpEqI32 | Opc::SCmpLgI32 | Opc::SCmpGtI32 | Opc::SCmpGeI32 | Opc::SCmpLtI32 | Opc::SCmpLeI32
         | Opc::SCmpEqU32 | Opc::SCmpLgU32 | Opc::SCmpGtU32 | Opc::SCmpGeU32 | Opc::SCmpLtU32 | Opc::SCmpLeU32 => &SIG_6,
         Opc::SCmpEqU64 | Opc::SCmpLgU64 => &SIG_7,
@@ -2680,7 +2706,8 @@ pub fn signature(op: Opc) -> &'static Sig {
         | Opc::VAddLshlU32 | Opc::VAdd3U32 | Opc::VLshlOrB32 | Opc::VAndOrB32 | Opc::VOr3B32 | Opc::VMaxminI32
         | Opc::VMinmaxI32 => &SIG_32,
         Opc::VPermlane16B32 | Opc::VPermlanex16B32 => &SIG_33,
-        Opc::VMbcntLoU32B32 | Opc::VLdexpF32 | Opc::VMulLoU32 | Opc::VMulHiU32 | Opc::VMulHiI32 => &SIG_34,
+        Opc::VMbcntLoU32B32 | Opc::VLdexpF32 | Opc::VMulLoU32 | Opc::VMulHiU32 | Opc::VMulHiI32
+        | Opc::VMbcntHiU32B32 => &SIG_34,
         Opc::VDivScaleF32 => &SIG_35,
         Opc::VMadU64U32 | Opc::VMadI64I32 => &SIG_36,
         Opc::VAddCoU32 | Opc::VSubCoU32 | Opc::VSubrevCoU32 => &SIG_37,
@@ -2738,11 +2765,12 @@ pub fn signature(op: Opc) -> &'static Sig {
         Opc::VLdexpF64 => &SIG_87,
         Opc::VRcpF64 => &SIG_88,
         Opc::VDivScaleF64 => &SIG_89,
-        Opc::Copy => &SIG_90,
-        Opc::ImplicitDef => &SIG_91,
-        Opc::PackF16 => &SIG_92,
-        Opc::VCmp(c) if VCMP64.contains(&c) => &SIG_94,
-        Opc::VCmp(_) => &SIG_93,
+        Opc::SAndSaveexecB64 => &SIG_90,
+        Opc::Copy => &SIG_91,
+        Opc::ImplicitDef => &SIG_92,
+        Opc::PackF16 => &SIG_93,
+        Opc::VCmp(c) if VCMP64.contains(&c) => &SIG_95,
+        Opc::VCmp(_) => &SIG_94,
     }
 }
 

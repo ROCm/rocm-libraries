@@ -1276,6 +1276,8 @@ fn parse_sequential(text: &str, hashcons: bool) -> Result<Kernel, CompileError> 
         name: prologue.name,
         max_workgroup_size: prologue.max_workgroup_size,
         waves_per_eu: prologue.waves_per_eu,
+        wave: 32,
+        vgpr_limit: None,
         params,
         body,
         values: parser.names.values,

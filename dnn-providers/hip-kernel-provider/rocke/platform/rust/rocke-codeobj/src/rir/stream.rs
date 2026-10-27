@@ -237,7 +237,7 @@ impl Stream {
         let compiled = super::compile_parsed_by(&text, &|t| match first.lock().unwrap_or_else(PoisonError::into_inner).take() {
             Some(stream) => stream.parse(session, t),
             None => session.parse(t),
-        });
+        }, session.target());
         (compiled, text.into_bytes())
     }
 
@@ -299,7 +299,7 @@ mod tests {
         assert!(text.len() > 4 * super::STREAM_CHUNK_BYTES);
         let reference = outcome(parse::parse_with_threads(&text, 1));
         for workers in [1, 3] {
-            let session = Session::new(SessionOptions { worker_threads: workers });
+            let session = Session::new(SessionOptions { worker_threads: workers, ..Default::default() });
             for piece in [1usize, 7, 333, 4096, 65536, text.len()] {
                 for part in text.as_bytes().chunks(piece) {
                     session.feed(part).expect("feeds");
@@ -318,7 +318,7 @@ mod tests {
     /// Streamed compiles agree with `compile`, for valid and broken inputs.
     #[test]
     fn streamed_compiles_agree_with_compile() {
-        let session = Session::new(SessionOptions { worker_threads: 2 });
+        let session = Session::new(SessionOptions { worker_threads: 2, ..Default::default() });
         let good = kernel(60).replace("    %lt : i1", "    %st : i32 = arith.add ( %c0, %n )\n    %lt : i1");
         let inputs = [
             good.clone(),

@@ -24,6 +24,7 @@ use std::rc::Rc;
 use super::ast::{Attr, Kernel, Op, OpKind, Operands, Region, Scalar, Text, Type, ValueId};
 use super::fx::{FxHashMap, FxHashSet};
 use super::opt::{Facts, Konst, Range};
+use crate::target::GFX1151;
 
 pub const WAVE: usize = 32;
 const BANKS: i64 = 32;
@@ -409,6 +410,17 @@ fn run_units(offset: i64, bytes: u32, align: i64, out: &mut Vec<(i64, u32)>) {
     }
 }
 
+/// Machine accesses of a dword quad: one b128 when its start stays 16-byte
+/// aligned and its bytes contiguous, else its four b32 loads (as
+/// `isel::find_dword_quads` merges them or not).
+fn quad_units(offset: i64, aligned: bool, out: &mut Vec<(i64, u32)>) {
+    if aligned {
+        out.push((offset, 16));
+    } else {
+        out.extend((0..4).map(|k| (offset + 4 * k, 4)));
+    }
+}
+
 struct Collector<'a> {
     kernel: &'a Kernel,
     facts: &'a Facts,
@@ -428,6 +440,9 @@ struct Collector<'a> {
     runs: Vec<Vec<usize>>,
     /// Every allocation with its size in bytes.
     allocs: Vec<(ValueId, u32)>,
+    /// `runs` from this one on are dword quads (`isel::find_dword_quads`).
+    quads_from: usize,
+    quads: Vec<Vec<usize>>,
 }
 
 /// Ops past which the loads before and after cannot be one folded run.
@@ -461,6 +476,8 @@ impl<'a> Collector<'a> {
             def_weight: vec![1.0; n],
             runs: Vec::new(),
             allocs: Vec::new(),
+            quads_from: 0,
+            quads: Vec::new(),
         };
         c.walk(&kernel.body, 1.0);
         // A folded load's value has one use; split runs at the others.
@@ -487,7 +504,47 @@ impl<'a> Collector<'a> {
                 c.runs.push(cur);
             }
         }
+        c.quads_from = c.runs.len();
+        let quads = std::mem::take(&mut c.quads);
+        c.runs.extend(quads);
         c
+    }
+
+    /// Bytes per load of run `r`.
+    fn run_elem(&self, r: usize) -> u32 {
+        if r >= self.quads_from {
+            4
+        } else {
+            2
+        }
+    }
+
+    /// Quads of the dword loads in `open` (per address, in program order):
+    /// offsets `o` to `o + 12` from a 16-byte multiple `o`, in that order.
+    fn close_quads(&mut self, open: &mut OpenRuns) {
+        for (_, loads) in open.drain(..) {
+            let at = |o: i64| {
+                let mut hits = loads.iter().filter(|l| l.0 == o);
+                match (hits.next(), hits.next()) {
+                    (Some(&(_, a)), None) => Some(a),
+                    _ => None,
+                }
+            };
+            let mut used = FxHashSet::default();
+            for &(o, first) in &loads {
+                if o % 16 != 0 || used.contains(&first) {
+                    continue;
+                }
+                let quad: Option<Vec<usize>> = (0..4).map(|k| at(o + 4 * k)).collect();
+                match quad {
+                    Some(q) if q.windows(2).all(|w| w[0] < w[1]) && q.iter().all(|a| !used.contains(a)) => {
+                        used.extend(q.iter().copied());
+                        self.quads.push(q);
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn konst(&self, op: &Op, i: usize) -> Option<i64> {
@@ -497,6 +554,7 @@ impl<'a> Collector<'a> {
     fn walk(&mut self, region: &'a Region, weight: f64) {
         // Open 16-bit loads per (smem, addr): (offset, access number).
         let mut open: OpenRuns = Vec::new();
+        let mut open4: OpenRuns = Vec::new();
         for op in &region.ops {
             for &v in &op.results {
                 self.defs[v.0 as usize] = Some(op);
@@ -516,6 +574,7 @@ impl<'a> Collector<'a> {
             }
             if breaks_runs(op.kind) || !op.regions.is_empty() {
                 self.close_runs(&mut open);
+                self.close_quads(&mut open4);
             }
             match op.kind {
                 OpKind::SmemAlloc => {
@@ -540,6 +599,14 @@ impl<'a> Collector<'a> {
                         match open.iter_mut().find(|(k, _)| *k == key) {
                             Some((_, loads)) => loads.push((offset, index)),
                             None => open.push((key, vec![(offset, index)])),
+                        }
+                    }
+                    let dword = matches!(ty, Type::Scalar(Scalar::F32 | Scalar::I32) | Type::Vec(Scalar::F32 | Scalar::I32, 1));
+                    if !store && dword {
+                        let key = (op.operands[0], op.operands[1]);
+                        match open4.iter_mut().find(|(k, _)| *k == key) {
+                            Some((_, loads)) => loads.push((offset, index)),
+                            None => open4.push((key, vec![(offset, index)])),
                         }
                     }
                     self.accesses.push(Access {
@@ -575,6 +642,7 @@ impl<'a> Collector<'a> {
             }
         }
         self.close_runs(&mut open);
+        self.close_quads(&mut open4);
     }
 
     fn close_runs(&mut self, open: &mut OpenRuns) {
@@ -877,6 +945,8 @@ struct Run {
     offset: i64,
     bytes: u32,
     weight: f64,
+    /// Bytes per load: 2 for a folded f16 run, 4 for a dword quad.
+    elem: u32,
 }
 
 /// Conflicts seen while pricing: per stride exponent, the weighted excess
@@ -957,7 +1027,9 @@ impl Pricer<'_> {
             let t = layout.apply(a);
             align = align.min(if t == 0 { 16 } else { 1 << t.trailing_zeros() });
         }
-        if contiguous && align >= 4 {
+        if r.elem == 4 {
+            quad_units(r.offset, contiguous && align >= 16, out);
+        } else if contiguous && align >= 4 {
             run_units(r.offset, r.bytes, align, out);
         } else {
             out.extend((0..r.bytes as i64 / 2).map(|i| (r.offset + 2 * i, 2)));
@@ -1271,7 +1343,7 @@ impl Analysis {
                     let wg = kernel.max_workgroup_size;
                     let fits = relayout(&layout, alloc, new_bytes).filter(|&(_, s)| {
                         let s = s.max(size_now);
-                        super::validate::lds_pool(s).is_ok() && lds_groups(s, wg) >= lds_groups(size_now, wg)
+                        super::validate::lds_pool(s, &GFX1151).is_ok() && lds_groups(s, wg) >= lds_groups(size_now, wg)
                     });
                     if let Some((l, s)) = fits {
                         layout = l;
@@ -1358,10 +1430,11 @@ impl Analysis {
                 if r != usize::MAX {
                     let run = &col.runs[r];
                     if run[0] == m {
-                        let bytes = 2 * run.len() as u32;
+                        let elem = col.run_elem(r);
+                        let bytes = elem * run.len() as u32;
                         max_bytes = max_bytes.max(bytes);
                         max_unit = max_unit.max(16.min(bytes));
-                        pricer.runs.push(Run { pattern, offset: a.offset, bytes, weight: a.weight });
+                        pricer.runs.push(Run { pattern, offset: a.offset, bytes, weight: a.weight, elem });
                     }
                     continue;
                 }
@@ -1428,7 +1501,7 @@ impl Analysis {
                     let new_bytes = candidate.size(bytes).next_multiple_of(16);
                     let Some((_, new_size)) = relayout(&layout, alloc, new_bytes) else { continue };
                     let new_size = new_size.max(size);
-                    if super::validate::lds_pool(new_size).is_err()
+                    if super::validate::lds_pool(new_size, &GFX1151).is_err()
                         || (lds_groups(new_size, wg) as f64) < MIN_GROUPS_KEPT * lds_groups(lds_size, wg) as f64
                     {
                         continue;
@@ -1690,9 +1763,9 @@ fn rewrite(kernel: &mut Kernel, facts: &mut Facts, analysis: &Analysis) {
 
 /// Chooses and applies a layout per LDS allocation of the optimized kernel.
 /// Returns the facts, extended to the values the rewrite adds, and the LDS
-/// pool size.
+/// pool size. Wave64 kernels keep their layout: the bank model is gfx1151's.
 pub fn run(kernel: &mut Kernel, mut facts: Facts, lds: &mut FxHashMap<ValueId, u32>, lds_size: u32) -> (Facts, u32) {
-    if lds.is_empty() || super::debug_flag("noswizzle") {
+    if lds.is_empty() || kernel.wave as usize != WAVE || super::debug_flag("noswizzle") {
         return (facts, lds_size);
     }
     let analysis = Analysis::new(kernel, &facts, lds, lds_size);
@@ -1802,7 +1875,7 @@ pub fn self_check(kernel: &Kernel, facts: &Facts, lds: &FxHashMap<ValueId, u32>,
             }
         }
     }
-    if size < analysis.layout.iter().map(|&(_, o, b)| o + b).max().unwrap_or(0) || super::validate::lds_pool(size).is_err() {
+    if size < analysis.layout.iter().map(|&(_, o, b)| o + b).max().unwrap_or(0) || super::validate::lds_pool(size, &GFX1151).is_err() {
         return Err(format!("pool of {size} bytes does not hold its allocations"));
     }
     Ok((checked, skipped))
@@ -1984,6 +2057,8 @@ mod tests {
         assert_eq!(o.size, 2048 + 16 * 15);
         let compiled = super::super::compile(&text).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(compiled.stats.lds_bytes, 2048 + 16 * 15);
+        let wave64 = super::super::compile_for(&text, crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(wave64.stats.lds_bytes, 2048);
     }
 
     #[test]
@@ -2071,6 +2146,55 @@ mod tests {
         let listing = compiled.listing();
         assert_eq!(listing.matches("ds_load_b128").count(), 2, "{listing}");
         assert!(!listing.contains("ds_load_u16"), "{listing}");
+    }
+
+    /// The block reduction of `conv_direct_wgrad_dw_cols`: 128 threads store
+    /// three sums each, then three threads read 128 consecutive f32 each from
+    /// rows 512 bytes apart, which share banks. The reads are aligned dword
+    /// quads that isel loads 16 bytes at a time, so the layout that spreads
+    /// the rows keeps them 16-byte aligned (a 4-byte pad split every quad).
+    #[test]
+    fn dword_quad_reads_keep_their_alignment() {
+        let mut body = String::new();
+        for k in 0..3 {
+            body += &format!(
+                "    %sk{k} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n\
+                 \x20   %si{k} : i32 = arith.add ( %tid, %sk{k} )\n\
+                 \x20   tile.smem_store_vN_f32 ( %red, %c0, %si{k}, %x ) {{ elem_type = s:\"f32\", rank = i:2, vec = i:1 }}\n",
+                128 * k
+            );
+        }
+        body += "    tile.sync (  )\n    %lt : i1 = arith.cmp ( %tid, %c3 ) { pred = s:\"lt\" }\n    scf.if ( %lt )\n      region @then {\n\
+                 \x20       %row : i32 = arith.mul ( %tid, %c128 )\n";
+        let mut sum = "%e0".to_string();
+        for j in 0..128 {
+            body += &format!(
+                "        %k{j} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{j} }}\n\
+                 \x20       %i{j} : i32 = arith.add ( %row, %k{j} )\n\
+                 \x20       %l{j} : vec<f32x1> = tile.smem_load_vN_f32 ( %red, %c0, %i{j} ) {{ elem_type = s:\"f32\", rank = i:2, vec = i:1 }}\n\
+                 \x20       %e{j} : f32 = vector.extract ( %l{j} ) {{ index = i:0 }}\n"
+            );
+            if j > 0 {
+                body += &format!("        %s{j} : f32 = arith.fadd ( {sum}, %e{j} )\n");
+                sum = format!("%s{j}");
+            }
+        }
+        body += &format!("        memref.global_store_typed ( %dst, %tid, {sum} ) {{ align = i:4, elem_type = s:\"f32\" }}\n      }}\n");
+        let text = format!(
+            "ckdsl.ir v1\nkernel @swz_reduce {{\n  attrs {{ max_workgroup_size = i:128 }}\n  params {{\n    %dst : ptr<f32,global>\n    %x : f32\n  }}\n  region @entry {{\n\
+             \x20   %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n\
+             \x20   %c0 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n\
+             \x20   %c3 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:3 }}\n\
+             \x20   %c128 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:128 }}\n\
+             \x20   %red : smem<f32, [1x384]> = tile.smem_alloc (  )\n\
+             {body}\x20   cf.return (  )\n  }}\n}}\n"
+        );
+        let (layout, o) = check_rewrite(&text);
+        assert!(layout != Layout::Identity && layout.keeps_align() >= 16, "{layout:?}");
+        let col = Collector::new(&o.kernel, &o.facts);
+        assert_eq!(col.runs.len() - col.quads_from, 32, "every quad of the reads");
+        let listing = super::super::compile(&text).unwrap_or_else(|e| panic!("{e}")).listing();
+        assert_eq!((listing.matches("ds_load_b128").count(), listing.matches("ds_load_b32").count()), (32, 0), "{listing}");
     }
 
     #[test]

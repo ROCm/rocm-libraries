@@ -293,6 +293,12 @@ opcodes! {
     // Cache invalidations of an acquire fence (no operands).
     BufferGl0Inv = (Mubuf, 0x2b, "buffer_gl0_inv", F_FENCE),
     BufferGl1Inv = (Mubuf, 0x2c, "buffer_gl1_inv", F_FENCE),
+    // Wave64 lane masks: selected for gfx950 only.
+    SAndSaveexecB64 = (Sop1, 0x21, "s_and_saveexec_b64", F_DEF_SCC | F_DEF_EXEC | F_USE_EXEC),
+    SNotB64 = (Sop1, 0x1f, "s_not_b64", F_DEF_SCC),
+    SAndNot1B64 = (Sop2, 0x23, "s_and_not1_b64", F_DEF_SCC),
+    SOrNot1B64 = (Sop2, 0x25, "s_or_not1_b64", F_DEF_SCC),
+    VMbcntHiU32B32 = (Vop3, 0x320, "v_mbcnt_hi_u32_b32", VALU),
     // pseudo
     Copy = (Pseudo, 0x00, "COPY", 0),
     // Defines a register whose contents are never read before overwritten.

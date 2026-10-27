@@ -59,6 +59,46 @@ def test_description_round_trips():
     assert isa_tables.write_description(secs) == text
 
 
+def test_gfx950_description_and_table_are_current():
+    assert run(CRATE, "check", "--isa", "gfx950") == 0
+
+
+def test_gfx950_check_fails_when_its_table_is_stale(tmp_path):
+    crate = copy_crate(tmp_path / "crate")
+    gen = crate / isa_tables.GFX950_GEN_ISA
+    gen.parent.mkdir(parents=True)
+    shutil.copyfile(CRATE / isa_tables.GFX950_GEN_ISA, gen)
+    assert run(crate, "check", "--isa", "gfx950") == 0
+    original = gen.read_bytes()
+    gen.write_bytes(original + b"// edited\n")
+    assert run(crate, "check", "--isa", "gfx950") == 1
+    assert run(crate, "generate", "--isa", "gfx950") == 0
+    assert gen.read_bytes() == original
+    # The gfx950 commands leave the gfx11 description and tables alone.
+    assert run(crate, "check") == 0
+
+
+def test_gfx950_table_covers_only_its_rows():
+    text = (CRATE / isa_tables.GFX950_GEN_ISA).read_text()
+    assert "use crate::rir::mir::{Fmt, Opc};" in text and "        _ => None," in text
+    desc_text = isa_tables.Tree(CRATE).read(isa_tables.GFX950_DESCRIPTION)
+    secs = isa_tables.parse(desc_text, "gfx950.isa")
+    names = {r.args[0] for r in secs["inst"] if r.kind == "inst"}
+    assert "VAddNcU32" in names and not names & {
+        "VDual",
+        "SAndSaveexecB32",
+        "VMovB32Dpp8",
+    }
+    rows = {r.args[0]: r for r in secs["inst"] if r.kind == "inst"}
+    # gfx9's no-carry add, and lane masks as SGPR pairs.
+    assert (rows["VAddNcU32"].args[1], rows["VAddNcU32"].args[3]) == (
+        "v_add_u32",
+        "0x34",
+    )
+    assert "sdst:s2" in rows["VAddCoU32"].get("d")
+    assert all(r.get("op") for r in secs["vcmp"])
+
+
 def test_check_fails_when_a_generated_file_or_the_description_is_stale(tmp_path):
     crate = copy_crate(tmp_path / "crate")
     assert run(crate, "check") == 0
@@ -84,9 +124,9 @@ def test_generated_files_use_the_line_endings_of_mir_rs(tmp_path):
     newline = isa_tables.Tree(crate).newline(isa_tables.MIR)
     for rel in (isa_tables.DESCRIPTION, isa_tables.GEN_ISA, isa_tables.GEN_OPCODES):
         data = (crate / rel).read_bytes()
-        assert data.count(b"\r\n") == (data.count(b"\n") if newline == "\r\n" else 0), (
-            rel
-        )
+        assert data.count(b"\r\n") == (
+            data.count(b"\n") if newline == "\r\n" else 0
+        ), rel
 
 
 def unswitch_rows(crate: Path) -> None:
@@ -209,9 +249,9 @@ def test_switch_applies_once_and_keeps_line_endings(tmp_path, newline):
     assert run(crate, "switch", "--skip", "isel:") == 0
     first = {n: (crate / "src" / "rir" / n).read_bytes() for n in SYNTHETIC}
     for name, data in first.items():
-        assert data.count(b"\r\n") == (data.count(b"\n") if newline == "\r\n" else 0), (
-            name
-        )
+        assert data.count(b"\r\n") == (
+            data.count(b"\n") if newline == "\r\n" else 0
+        ), name
     assert b'include!("gen_opcodes.rs");' in first["mir.rs"]
     assert b"super::gen_isa::delay_clears(inst.op)" in first["post.rs"]
     assert b"let latency = match kind" not in first["post.rs"]

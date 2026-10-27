@@ -93,6 +93,7 @@ from ..core.lower_llvm import (
 )
 from ..core.passes import PassStats, optimize_kernel
 from ..runtime.code_object import (
+    DirectUnsupported,
     _require_compiler_info,
     build_direct_rocke_ir_hsaco,
     build_hsaco_from_llvm_ir,
@@ -114,6 +115,10 @@ class KernelArtifact:
 
     ``isa`` records the COMGR ISA name for the compiler target used to build
     ``hsaco``, including any target features. It is not a device query result.
+    ``code_object_backend`` is the compiler that built ``hsaco`` (``"comgr"``
+    or ``"direct"``); when the direct backend was asked for but does not
+    compile the kernel for the target, COMGR built it and ``direct_fallback``
+    holds the direct compiler's reason.
     """
 
     kernel: KernelDef
@@ -123,6 +128,8 @@ class KernelArtifact:
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: PassStats = field(default_factory=PassStats)
     isa: str = "amdgcn-amd-amdhsa--gfx950"
+    code_object_backend: str = "comgr"
+    direct_fallback: str = ""
 
     @property
     def kernel_name(self) -> str:
@@ -181,9 +188,28 @@ def compile_kernel(
     _lower_arch, isa = _resolve_compile_target(arch, isa)
     selected_code_object_backend = resolve_code_object_backend(code_object_backend)
     if selected_code_object_backend == "direct":
-        return _compile_kernel_direct(
-            kernel, isa=isa, capture_ir_text=capture_ir_text, optimize_ir=optimize_ir
-        )
+        try:
+            return _compile_kernel_direct(
+                kernel,
+                isa=isa,
+                capture_ir_text=capture_ir_text,
+                optimize_ir=optimize_ir,
+            )
+        except DirectUnsupported as refused:
+            # The passes ran on `kernel` before the direct compiler refused it.
+            artifact = compile_kernel(
+                kernel,
+                arch=arch,
+                isa=isa,
+                capture_ir_text=capture_ir_text,
+                optimize_ir=False,
+                backend=backend,
+                code_object_backend="comgr",
+                spec=spec,
+            )
+            artifact.pass_stats = getattr(refused, "pass_stats", artifact.pass_stats)
+            artifact.direct_fallback = str(refused)
+            return artifact
     llvm_flavor = _code_object_llvm_flavor(selected_code_object_backend)
 
     timings: Dict[str, float] = {}
@@ -250,7 +276,13 @@ def _compile_kernel_direct(
     t1 = time.perf_counter()
     serialized = serialize(kernel)
     t2 = time.perf_counter()
-    hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(serialized, isa=isa)
+    try:
+        hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(
+            serialized, isa=isa
+        )
+    except DirectUnsupported as refused:
+        refused.pass_stats = pass_stats
+        raise
     t3 = time.perf_counter()
 
     timings["ir_opt"] = (t_pass - t0) * 1000.0
@@ -271,6 +303,7 @@ def _compile_kernel_direct(
         timings=timings,
         pass_stats=pass_stats,
         isa=isa,
+        code_object_backend="direct",
     )
 
 

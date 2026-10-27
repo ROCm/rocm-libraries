@@ -11,6 +11,7 @@
 
 use super::ast::{Attr, Kernel, Op, OpKind, Region, Scalar, Type, ValueId};
 use crate::error::CompileError;
+use crate::target::TargetInfo;
 
 /// Deepest region nesting accepted, counting the kernel body. Instruction
 /// selection recurses once per level; a 1 MiB thread stack takes about 2.4
@@ -117,10 +118,12 @@ pub fn kernel(kernel: &Kernel) -> Result<(), CompileError> {
 }
 
 /// The LDS pool `analysis::lds_layout` packed: what the LLVM lowering
-/// allocates, and gfx1151 refuses above 64 KiB.
-pub fn lds_pool(bytes: u32) -> Result<(), CompileError> {
-    if bytes > MAX_LDS_BYTES {
-        return Err(invalid(format!("the kernel needs {bytes} bytes of LDS; a workgroup has at most {MAX_LDS_BYTES}")));
+/// allocates, and the target refuses above its workgroup limit (gfx1151:
+/// 64 KiB).
+pub fn lds_pool(bytes: u32, t: &TargetInfo) -> Result<(), CompileError> {
+    let most = t.lds_bytes_per_group;
+    if bytes > most {
+        return Err(invalid(format!("the kernel needs {bytes} bytes of LDS; a workgroup has at most {most}")));
     }
     Ok(())
 }

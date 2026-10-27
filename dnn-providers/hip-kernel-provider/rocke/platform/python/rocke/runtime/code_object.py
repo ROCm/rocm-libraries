@@ -6,9 +6,13 @@
 `ROCKE_BACKEND` chooses the Python/C++ engine that emits LLVM text.
 `ROCKE_CODEOBJ_BACKEND` independently chooses how a kernel becomes a code
 object. ``comgr`` compiles that LLVM text; its low-level API remains public.
-``direct`` (gfx1151 only) skips LLVM entirely: serialized rocKE IR goes to an
-in-process Rust compiler (optimizer, instruction selection, register
-allocation, encoder, ELF writer) and IR it does not support is rejected. The
+``direct`` skips LLVM entirely: serialized rocKE IR goes to an in-process Rust
+compiler (optimizer, instruction selection, register allocation, encoder, ELF
+writer) for the targets the library reports (``rocke_codeobj_supported_targets_v1``:
+gfx1151, and gfx950 for the families it lowers there). A target it does not
+compile, or a kernel using an operation it does not lower for the target
+(``ROCKE_DIRECT_UNSUPPORTED``), raises :class:`DirectUnsupported`, on which
+``rocke.helpers.compile_kernel`` compiles the kernel with COMGR instead. The
 gfx1151 WMMA GEMM proof slice uses the same library through its own entry.
 """
 
@@ -29,11 +33,13 @@ __all__ = [
     "CodeObjectError",
     "CodeObjectProcessDied",
     "CodeObjectTimings",
+    "DirectUnsupported",
     "build_direct_gfx1151_wmma_gemm_hsaco",
     "build_direct_rocke_ir_hsaco",
     "build_hsaco_from_llvm_ir",
     "build_hsaco_from_llvm_modules",
     "compiler_identity",
+    "direct_supported_targets",
     "loaded_compiler_info",
     "resolve_code_object_backend",
     "supported_isas",
@@ -52,6 +58,15 @@ class _DirectGemmCompileRequestV1(ctypes.Structure):
         ("struct_size", ctypes.c_uint32),
         ("serialized_ir", ctypes.c_void_p),
         ("serialized_ir_size", ctypes.c_size_t),
+    ]
+
+
+class _RockeIrCompileRequestV2(ctypes.Structure):
+    _fields_ = [
+        ("struct_size", ctypes.c_uint32),
+        ("serialized_ir", ctypes.c_void_p),
+        ("serialized_ir_size", ctypes.c_size_t),
+        ("target", ctypes.c_char_p),
     ]
 
 
@@ -76,6 +91,18 @@ class CodeObjectError(RuntimeError):
 
 class CodeObjectProcessDied(CodeObjectError):
     """A fresh compiler process exited without a complete response."""
+
+
+class DirectUnsupported(CodeObjectError):
+    """The direct compiler does not compile this kernel for this target: the
+    target is not one it reports, or the kernel uses an operation it does not
+    lower there (``ROCKE_DIRECT_UNSUPPORTED``). COMGR may compile it."""
+
+
+def _direct_target(isa: str) -> str:
+    """The processor name of an ISA name or target ID (``gfx950`` for
+    ``amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-``)."""
+    return isa.split("--")[-1].split(":")[0]
 
 
 @dataclass(frozen=True)
@@ -323,22 +350,69 @@ def _direct_rocke_ir_function(path: str):
 
 
 @functools.cache
+def _direct_rocke_ir_v2_function(path: str):
+    """The library's rocKE IR entry that takes a target, or None in a
+    library that predates it (which compiles for gfx1151 only)."""
+    library, _compile_gemm, _dispose = _direct_library_functions(path)
+    compile_ir = getattr(library, "rocke_codeobj_compile_rocke_ir_v2", None)
+    if compile_ir is not None:
+        compile_ir.argtypes = [
+            ctypes.POINTER(_RockeIrCompileRequestV2),
+            ctypes.POINTER(_CodeObjectCompileResultV1),
+        ]
+        compile_ir.restype = ctypes.c_int32
+    return compile_ir
+
+
+@functools.cache
+def _direct_supported_targets(path: str) -> tuple[str, ...]:
+    library, _compile_gemm, _dispose = _direct_library_functions(path)
+    query = getattr(library, "rocke_codeobj_supported_targets_v1", None)
+    if query is None or _direct_rocke_ir_v2_function(path) is None:
+        return ("gfx1151",)
+    query.argtypes = []
+    query.restype = ctypes.c_char_p
+    return tuple(name for name in query().decode("ascii").split(",") if name)
+
+
+def direct_supported_targets() -> list[str]:
+    """Targets the direct code-object library compiles for, as it reports
+    them (``["gfx1151", "gfx950"]``); loads the library, queries no GPU."""
+    return list(_direct_supported_targets(_require_direct_library()))
+
+
+@functools.cache
 def _direct_rocke_compiler_info(path: str) -> CodeObjectCompilerInfo:
+    targets = _direct_supported_targets(path)
     return CodeObjectCompilerInfo(
         backend="direct",
         llvm_version=None,
         source="in-process Rust rocKE IR compiler",
-        identity=f"rust-direct:gfx1151:{_path_identity(path)}",
+        identity=f"rust-direct:{','.join(targets)}:{_path_identity(path)}",
         path=path,
         details={
             "backend": "direct",
-            "supported_targets": ["gfx1151"],
+            "supported_targets": list(targets),
             "implementation": "Rust rocKE IR optimizer, isel, regalloc, encoder, ELF writer",
             "uses_comgr": False,
             "uses_llvm": False,
             "uses_external_tools": False,
             "uses_cache": False,
         },
+    )
+
+
+def _rejection(diagnostics: str) -> CodeObjectError:
+    """The error of a rejected direct compile: :class:`DirectUnsupported`
+    for an operation the compiler does not lower for the target."""
+    error = (
+        DirectUnsupported
+        if diagnostics.startswith("ROCKE_DIRECT_UNSUPPORTED")
+        else CodeObjectError
+    )
+    return error(
+        "direct rocKE IR compiler rejected the kernel"
+        + (f": {diagnostics}" if diagnostics else "")
     )
 
 
@@ -358,27 +432,43 @@ def build_direct_rocke_ir_hsaco(
     *,
     isa: str = _DIRECT_ISA,
 ) -> tuple[bytes, CodeObjectTimings, CodeObjectCompilerInfo, str]:
-    """Compile serialized ``ck.dsl.ir/v1`` to a gfx1151 HSACO without LLVM.
+    """Compile serialized ``ck.dsl.ir/v1`` to an HSACO for ``isa`` without LLVM.
 
     Returns the image, timings, compiler provenance and the compiler's
-    resource summary. Unsupported IR raises; there is no fallback.
+    resource summary. A target the library does not compile for, or a kernel
+    using an operation it does not lower there, raises
+    :class:`DirectUnsupported`; other rejected IR raises
+    :class:`CodeObjectError`. Nothing falls back to another compiler here.
     """
-    if isa.split(":")[0] != _DIRECT_ISA:
-        raise CodeObjectError(
-            f"the direct code-object backend targets {_DIRECT_ISA}, not {isa!r}"
-        )
     if isinstance(serialized_ir, str):
         serialized_ir = serialized_ir.encode("utf-8")
     if not serialized_ir:
         raise ValueError("serialized_ir must be non-empty")
     path = _require_direct_library()
+    target = _direct_target(isa)
+    supported = _direct_supported_targets(path)
+    if target not in supported:
+        raise DirectUnsupported(
+            f"the direct code-object backend compiles for {', '.join(supported)}, "
+            f"not {isa!r}"
+        )
     compile_ir, dispose = _direct_rocke_ir_function(path)
+    compile_for_target = _direct_rocke_ir_v2_function(path)
     ir_storage = ctypes.create_string_buffer(serialized_ir)
-    request = _DirectGemmCompileRequestV1(
-        struct_size=ctypes.sizeof(_DirectGemmCompileRequestV1),
-        serialized_ir=ctypes.cast(ir_storage, ctypes.c_void_p),
-        serialized_ir_size=len(serialized_ir),
-    )
+    if compile_for_target is not None:
+        compile_ir = compile_for_target
+        request = _RockeIrCompileRequestV2(
+            struct_size=ctypes.sizeof(_RockeIrCompileRequestV2),
+            serialized_ir=ctypes.cast(ir_storage, ctypes.c_void_p),
+            serialized_ir_size=len(serialized_ir),
+            target=target.encode("ascii"),
+        )
+    else:
+        request = _DirectGemmCompileRequestV1(
+            struct_size=ctypes.sizeof(_DirectGemmCompileRequestV1),
+            serialized_ir=ctypes.cast(ir_storage, ctypes.c_void_p),
+            serialized_ir_size=len(serialized_ir),
+        )
     result = _CodeObjectCompileResultV1(
         struct_size=ctypes.sizeof(_CodeObjectCompileResultV1)
     )
@@ -394,10 +484,7 @@ def build_direct_rocke_ir_hsaco(
             else ""
         )
         if status != 0 or result.status != 0:
-            raise CodeObjectError(
-                "direct rocKE IR compiler rejected the kernel"
-                + (f": {diagnostics}" if diagnostics else "")
-            )
+            raise _rejection(diagnostics)
         if not result.hsaco or not 0 < result.hsaco_size <= 64 * 1024 * 1024:
             raise CodeObjectError(
                 f"direct compiler returned invalid image size {result.hsaco_size}"
@@ -452,7 +539,10 @@ def compiler_identity(backend: str | None = None) -> str:
 def supported_isas(backend: str | None = None) -> list[str]:
     """Targets known by the selected backend, without querying a GPU."""
     if resolve_code_object_backend(backend) == "direct":
-        return [_DIRECT_ISA]
+        path = _direct_library_path()
+        if path is None:
+            return [_DIRECT_ISA]
+        return [f"amdgcn-amd-amdhsa--{t}" for t in _direct_supported_targets(path)]
     from .comgr import supported_isas as comgr_supported_isas
 
     return comgr_supported_isas()
