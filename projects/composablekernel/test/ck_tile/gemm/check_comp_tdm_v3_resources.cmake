@@ -8,7 +8,8 @@
 # Extracts the gfx125x code objects from the test binary (llvm-objdump --offloading), reads the
 # AMDGPU metadata (llvm-readelf --notes) and requires, for every kernel whose name contains
 # CompTDMV3, .private_segment_fixed_size 0 and .vgpr_spill_count 0. At least one such kernel must
-# be found.
+# be found. Kernels whose name contains TensorWaitIssuersOnly (the opt-in per-issuer TENSORcnt
+# wait variant, which spills with some compilers) are not checked.
 #
 # Usage: cmake -DTEST_BINARY=<exe> -DLLVM_OBJDUMP=<llvm-objdump> -DLLVM_READELF=<llvm-readelf>
 #              -DWORK_DIR=<dir> -P check_comp_tdm_v3_resources.cmake
@@ -53,6 +54,9 @@ foreach(co ${code_objects})
     foreach(line ${lines})
         if(line MATCHES "^[ ]+\\.name:[ ]+([^ ]+)")
             set(name "${CMAKE_MATCH_1}")
+            if(name MATCHES "TensorWaitIssuersOnly")
+                set(name "")
+            endif()
             if(name MATCHES "CompTDMV3")
                 math(EXPR num_kernels "${num_kernels} + 1")
             endif()

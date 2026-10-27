@@ -17,6 +17,30 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// for both stages when false.
     static constexpr bool kAlternateIssuers = true;
 
+    /// true: one split workgroup barrier per K tile (workgroup_barrier_arrive/wait). Per K
+    /// sub-tile, B is read whole and stays in registers and A is read one warp-GEMM row at a time,
+    /// right before that row's WMMAs; the arrive follows the read of the last row of the last
+    /// sub-tile, so that row's WMMAs overlap the barrier. One TDM fill per LDS stage is in flight.
+    /// Not used with data cache prefetch (DataCachePrefetchA/B), which keeps the joint form.
+    /// false: two joint barriers per K tile, with the refill issued after the stage's WMMAs (up
+    /// to two fills in flight).
+    static constexpr bool kUseSplitBarrier = true;
+
+    /// Split barrier only. true: every wave waits for TENSORcnt 0 before it arrives (a no-op on
+    /// the waves that issued no fill). false: only the waves that issued the fill being
+    /// published wait, inside their wave-uniform issuer branch.
+    static constexpr bool kTensorWaitAllWaves = true;
+
+    /// Where the next K tile's TDM fill is issued (split barrier only).
+    /// TopOfNextTile: every wave waits at the top of the K tile; then the issuers of the LDS
+    /// stage every wave finished reading before its previous arrive refill it. One fill per LDS
+    /// stage is in flight.
+    enum class RefillPoint
+    {
+        TopOfNextTile
+    };
+    static constexpr RefillPoint kRefillPoint = RefillPoint::TopOfNextTile;
+
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).
     static constexpr index_t kBlockPerCu = 1;
 

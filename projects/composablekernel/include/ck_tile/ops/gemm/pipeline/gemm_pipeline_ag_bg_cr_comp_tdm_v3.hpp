@@ -20,6 +20,14 @@ namespace ck_tile {
  * only the issuing waves wait on TENSORcnt. It is a separate pipeline so that V2 and its
  * default policy stay unchanged while v3 grows 16-wave support and its own register budget
  * (GemmPipelineAgBgCrCompTDMV3Policy). The MX (scaled) entry points of V2 are not copied.
+ *
+ * Synchronisation (Policy::kUseSplitBarrier): one split workgroup barrier per K tile
+ * (split_barrier.hpp). Per K tile: wait; the issuers of the other LDS stage fill it with the next
+ * K tile; per K sub-tile, read B whole and A one warp-GEMM row at a time, each row right before
+ * its WMMAs; arrive after the read of the last row of the last sub-tile (TENSORcnt 0 first, so
+ * the fill is published); that row's WMMAs run while the other waves reach the barrier. One fill
+ * per stage is in flight. With kUseSplitBarrier = false the pipeline keeps V2's two joint
+ * barriers per K tile and its post-compute refill.
  */
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMV3Policy>
 struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
@@ -93,6 +101,109 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         static constexpr index_t MPerBlock     = OuterClass::MPerBlock;
         static constexpr index_t NPerBlock     = OuterClass::NPerBlock;
         static constexpr index_t KPerBlock     = OuterClass::KPerBlock;
+
+        // Split barrier (Policy::kUseSplitBarrier). The split form has no data cache prefetch: a
+        // policy that asks for prefetch keeps the joint form.
+        static constexpr bool kSplitBarrier = Policy::kUseSplitBarrier && !UseDataCachePrefetch;
+        // Split barrier: B resident, A read one warp-GEMM row at a time (see stage_gemm_arrive).
+        // Needs BlockGemm's (MIterPerWarp, MWarp) A layout and a non-transposed A read; other
+        // configurations read each K sub-tile whole.
+        static constexpr bool kStreamARows =
+            !is_a_load_tr_v && !BlockGemm::PackMNIter && !BlockGemm::UseDefaultScheduler;
+        // K extent of one K sub-tile in LDS
+        static constexpr index_t kSubTileK = KPerBlock / sub_tile_num;
+        // M extent of one warp-GEMM row of A: BlockGemm orders M as (MIterPerWarp, MWarp), so row
+        // r is the contiguous block rows [r, r + 1) * a_row_m
+        static constexpr index_t a_row_m = MPerBlock / BlockGemm::MIterPerWarp;
+
+        // Distribution of one warp-GEMM row of one K sub-tile of A: BlockGemm's A distribution
+        // with MIterPerWarp = 1.
+        CK_TILE_DEVICE static constexpr auto MakeARowDistribution()
+        {
+            return make_static_tile_distribution(detail::make_embed_tile_distribution_encoding(
+                tile_distribution_encoding<
+                    sequence<BlockGemm::NWarp>,
+                    tuple<sequence<1, BlockGemm::MWarp>, sequence<BlockGemm::KPerSubTile>>,
+                    tuple<sequence<1, 0>>,
+                    tuple<sequence<1, 0>>,
+                    sequence<1, 2>,
+                    sequence<0, 0>>{},
+                typename BlockGemm::WarpGemm::AWarpDstrEncoding{}));
+        }
+
+        // C += A * B for NumRows warp-GEMM rows of one K sub-tile: A row ARow + j of
+        // a_block_tensor updates C row CRow + j. This is the hot loop of
+        // BlockGemmARegBRegCRegV1::operator() restricted to an M range, so that A can be read one
+        // row at a time and the split barrier's arrive can sit between two rows.
+        template <index_t CRow,
+                  index_t ARow,
+                  index_t NumRows,
+                  typename CBlockTensor,
+                  typename ABlockTensor,
+                  typename BBlockTensor>
+        CK_TILE_DEVICE static void BlockGemmRows(CBlockTensor& c_block_tensor,
+                                                 const ABlockTensor& a_block_tensor,
+                                                 const BBlockTensor& b_block_tensor)
+        {
+            using WarpGemm    = typename BlockGemm::WarpGemm;
+            using AWarpDstr   = typename WarpGemm::AWarpDstr;
+            using BWarpDstr   = typename WarpGemm::BWarpDstr;
+            using CWarpDstr   = typename WarpGemm::CWarpDstr;
+            using AWarpTensor = typename WarpGemm::AWarpTensor;
+            using BWarpTensor = typename WarpGemm::BWarpTensor;
+            using CWarpTensor = typename WarpGemm::CWarpTensor;
+
+            constexpr auto a_warp_y_lengths =
+                to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto b_warp_y_lengths =
+                to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto c_warp_y_lengths =
+                to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+            constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+            constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+            static_ford<sequence<BlockGemm::KPerSubTile, NumRows>>{}([&](auto km) {
+                constexpr auto kIter = number<km[number<0>{}]>{};
+                constexpr auto aIter = number<ARow + km[number<1>{}]>{};
+                constexpr auto mIter = number<CRow + km[number<1>{}]>{};
+                AWarpTensor a_warp_tensor;
+                a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                    merge_sequences(sequence<aIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+
+                static_for<0, BlockGemm::NIterPerWarp, 1>{}([&](auto nIter) {
+                    BWarpTensor b_warp_tensor;
+                    b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                        merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+
+                    using c_iter_idx = std::conditional_t<BlockGemm::TransposeC,
+                                                          sequence<nIter, mIter>,
+                                                          sequence<mIter, nIter>>;
+                    CWarpTensor c_warp_tensor;
+                    c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+
+                    if constexpr(nIter != 0)
+                    {
+                        WarpGemm{}.template operator()<ReuseA<true>, ReuseB<false>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
+                    else
+                    {
+                        WarpGemm{}.template operator()<ReuseA<false>, ReuseB<false>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor);
+                    }
+
+                    c_block_tensor.set_y_sliced_thread_data(
+                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                        c_warp_tensor.get_thread_buffer());
+                });
+            });
+        }
 
         template <bool HasHotLoop,
                   TailNumber TailNum,
@@ -263,264 +374,452 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             using BLdsTile =
                 decltype(make_static_distributed_tensor<BDataType>(b_lds_load_tile_distr));
 
-            if(is_a_issuer0)
+            if constexpr(kSplitBarrier)
             {
-                Base::GlobalPrefetchTDM(
-                    tdm_config_a[0], a_copy_lds_windows[number<0>{}], a_copy_dram_window);
-            }
-            if(is_b_issuer0)
-            {
-                Base::GlobalPrefetchTDM(
-                    tdm_config_b[0], b_copy_lds_windows[number<0>{}], b_copy_dram_window);
-            }
-            if(is_a_issuer1)
-            {
-                move_tile_window(a_dram_window1, a_dram_tile_window_step);
-                Base::GlobalPrefetchTDM(
-                    tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_dram_window1);
-            }
-            if(is_b_issuer1)
-            {
-                move_tile_window(b_dram_window1, b_dram_tile_window_step);
-                Base::GlobalPrefetchTDM(
-                    tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
-            }
+                // Issue the TDM fill of LDS stage f from the issuer's DRAM window, then point the
+                // window at the tile this issuer fills next (two K tiles on).
+                auto fill_stage = [&](auto f) {
+                    constexpr index_t s = decltype(f)::value;
+                    auto& a_window      = std::get<s>(std::tie(a_copy_dram_window, a_dram_window1));
+                    auto& b_window      = std::get<s>(std::tie(b_copy_dram_window, b_dram_window1));
+                    if(s == 0 ? is_a_issuer0 : is_a_issuer1)
+                    {
+                        Base::GlobalPrefetchTDM(tdm_config_a[s], a_copy_lds_windows[f], a_window);
+                        move_tile_window(a_window, a_dram_tile_window_step_stride);
+                    }
+                    if(s == 0 ? is_b_issuer0 : is_b_issuer1)
+                    {
+                        Base::GlobalPrefetchTDM(tdm_config_b[s], b_copy_lds_windows[f], b_window);
+                        move_tile_window(b_window, b_dram_tile_window_step_stride);
+                    }
+                };
+                // The waves that fill LDS stage f.
+                auto is_stage_issuer = [&](auto f) {
+                    if constexpr(decltype(f)::value == 0)
+                    {
+                        return is_a_issuer0 || is_b_issuer0;
+                    }
+                    else
+                    {
+                        return is_a_issuer1 || is_b_issuer1;
+                    }
+                };
+                // Arrive on the split barrier, publishing the fill of LDS stage f: TENSORcnt 0
+                // first, on every wave or only on that stage's issuers.
+                auto arrive_publishing = [&](auto f) {
+                    if constexpr(Policy::kTensorWaitAllWaves)
+                    {
+                        workgroup_barrier_arrive<0>();
+                    }
+                    else
+                    {
+                        if(is_stage_issuer(f))
+                        {
+                            s_wait_tensorcnt<0>();
+                        }
+                        workgroup_barrier_arrive();
+                    }
+                };
 
-            // initialize C block tile
-            auto c_block_tile = block_gemm.MakeCBlockTile();
-            clear_tile(c_block_tile);
+                // stage-1 issuers start one K tile ahead of the stage-0 issuers
+                if(is_a_issuer1)
+                {
+                    move_tile_window(a_dram_window1, a_dram_tile_window_step);
+                }
+                if(is_b_issuer1)
+                {
+                    move_tile_window(b_dram_window1, b_dram_tile_window_step);
+                }
+                fill_stage(I0{});
 
-            // register tiles: one A and one B tile, each holding one K sub-tile (k-atom); every
-            // sub-tile is read from LDS right before its WMMAs (no register double buffering, so
-            // the 16-wave 256x256x256 tile fits the per-wave VGPR budget)
-            ALdsTile a_block_tile;
-            BLdsTile b_block_tile;
+                auto c_block_tile = block_gemm.MakeCBlockTile();
+                clear_tile(c_block_tile);
 
-            static_assert(!(is_tile_window_linear_v<decltype(a_lds_gemm_windows[I0{}])>) &&
-                              !(is_tile_window_linear_v<decltype(a_lds_gemm_windows[I1{}])>) &&
-                              !(is_tile_window_linear_v<decltype(b_lds_gemm_windows[I0{}])>) &&
-                              !(is_tile_window_linear_v<decltype(b_lds_gemm_windows[I1{}])>),
-                          "LDS windows must not be linear");
+                ALdsTile a_block_tile;
+                BLdsTile b_block_tile;
 
-            // Data cache prefetch for upcoming TDM loads
-            auto a_prefetch_window = a_copy_dram_window;
-            auto b_prefetch_window = b_copy_dram_window;
-            if constexpr(UseDataCachePrefetch && HasHotLoop)
+                // Reads and multiplies the K sub-tiles of LDS stage s and calls arrive() right
+                // after the last LDS read of the stage, so that no read of stage s follows the
+                // arrive (a later read could race with the refill another wave issues after its
+                // next wait) and the WMMAs that follow it overlap the barrier.
+                // kStreamARows: per K sub-tile the B sub-tile is read whole and stays in
+                // registers, and A is read one warp-GEMM row (MIterPerWarp) at a time, right before
+                // that row's WMMAs. Only B, one row of A and the accumulators are live, and the
+                // last row's WMMAs overlap the barrier. Otherwise (transposed A load, packed or
+                // wave-group block GEMM) each sub-tile is read whole, as in the joint form, and
+                // the last sub-tile's WMMAs overlap the barrier.
+                auto stage_gemm_arrive = [&](auto s, auto arrive) {
+                    static_for<0, sub_tile_num, 1>{}([&](auto i) {
+                        constexpr bool is_last_sub_tile = (i.value == sub_tile_num - 1);
+                        if constexpr(kStreamARows)
+                        {
+                            auto b_window = b_lds_gemm_windows[s];
+                            move_tile_window(b_window,
+                                             is_b_load_tr_v ? multi_index<2>{i.value * kSubTileK, 0}
+                                                            : multi_index<2>{0, i.value * kSubTileK});
+                            if constexpr(is_b_load_tr_v)
+                            {
+                                b_block_tile = load_tile_transpose(b_window);
+                            }
+                            else
+                            {
+                                load_tile(b_block_tile, b_window);
+                            }
+                            static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
+                                constexpr auto a_row_distr = MakeARowDistribution();
+                                auto a_row_tile =
+                                    make_static_distributed_tensor<ADataType>(a_row_distr);
+                                load_tile(a_row_tile,
+                                          make_tile_window(
+                                              a_lds_block_views[s],
+                                              make_tuple(number<a_row_m>{}, number<kSubTileK>{}),
+                                              {r.value * a_row_m, i.value * kSubTileK},
+                                              a_row_distr));
+                                if constexpr(is_last_sub_tile &&
+                                             r.value == BlockGemm::MIterPerWarp - 1)
+                                {
+                                    arrive();
+                                }
+                                BlockGemmRows<r.value, 0, 1>(c_block_tile, a_row_tile, b_block_tile);
+                            });
+                        }
+                        else
+                        {
+                            constexpr auto mode = sub_tile_num == 1 ? WindowSlideMode::Stay
+                                                  : is_last_sub_tile ? WindowSlideMode::Reset
+                                                                     : WindowSlideMode::Move;
+                            block_gemm.template LocalPrefetch<mode>(a_block_tile,
+                                                                    b_block_tile,
+                                                                    a_lds_gemm_windows[s],
+                                                                    b_lds_gemm_windows[s],
+                                                                    is_a_load_tr_v,
+                                                                    is_b_load_tr_v);
+                            if constexpr(is_last_sub_tile)
+                            {
+                                arrive();
+                            }
+                            block_gemm(c_block_tile, a_block_tile, b_block_tile);
+                        }
+                    });
+                };
+
+                // One K tile t, read from LDS stage s. The wait at the top makes stage s visible and
+                // frees stage 1 - s, whose reads all came before the previous arrive. With has_next
+                // (tile t + 1 exists) the issuers of stage 1 - s then fill it with tile t + 1, and
+                // this tile's arrive publishes that fill. One fill per stage is in flight, and every
+                // wave arrives and waits once per K tile.
+                auto k_tile = [&](auto s, auto has_next) {
+                    constexpr index_t si = decltype(s)::value;
+                    workgroup_barrier_wait();
+                    if constexpr(decltype(has_next)::value)
+                    {
+                        fill_stage(number<1 - si>{});
+                    }
+                    stage_gemm_arrive(s, [&]() {
+                        if constexpr(decltype(has_next)::value)
+                        {
+                            arrive_publishing(number<1 - si>{});
+                        }
+                        else
+                        {
+                            workgroup_barrier_arrive();
+                        }
+                    });
+                };
+
+                arrive_publishing(I0{});
+                if constexpr(HasHotLoop)
+                {
+                    index_t i_global_read = amd_wave_read_first_lane(2);
+                    do
+                    {
+                        k_tile(I0{}, bool_constant<true>{});
+                        k_tile(I1{}, bool_constant<true>{});
+                        i_global_read += 2;
+                    } while(i_global_read < num_loop);
+                }
+
+                if constexpr(TailNum == TailNumber::Two)
+                {
+                    k_tile(I0{}, bool_constant<true>{});
+                    k_tile(I1{}, bool_constant<false>{});
+                }
+                else if constexpr(TailNum == TailNumber::One)
+                {
+                    k_tile(I0{}, bool_constant<false>{});
+                }
+                workgroup_barrier_wait();
+                // No fill is in flight here (the last K tile issues none); kept so that every
+                // exit drains TENSORcnt and orders the last LDS reads before LDS is reused.
+                s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+                return c_block_tile;
+            }
+            else
             {
-                __builtin_amdgcn_sched_barrier(0);
                 if(is_a_issuer0)
                 {
-                    if constexpr(Policy::DataCachePrefetchA != DataCachePrefetchKind::None)
-                    {
-                        move_tile_window(a_prefetch_window, a_dram_tile_window_step_stride);
-                        a_prefetch_window.template prefetch_for_tdm<Policy::DataCachePrefetchA>(
-                            tdm_config_a[0]);
-                    }
+                    Base::GlobalPrefetchTDM(
+                        tdm_config_a[0], a_copy_lds_windows[number<0>{}], a_copy_dram_window);
                 }
                 if(is_b_issuer0)
                 {
-                    if constexpr(Policy::DataCachePrefetchB != DataCachePrefetchKind::None)
-                    {
-                        move_tile_window(b_prefetch_window, b_dram_tile_window_step_stride);
-                        b_prefetch_window.template prefetch_for_tdm<Policy::DataCachePrefetchB>(
-                            tdm_config_b[0]);
-                    }
+                    Base::GlobalPrefetchTDM(
+                        tdm_config_b[0], b_copy_lds_windows[number<0>{}], b_copy_dram_window);
                 }
-                __builtin_amdgcn_sched_barrier(0);
-            }
-
-            if(is_a_issuer0 || is_b_issuer0)
-            {
-                s_wait_tensorcnt<kNewerFillsOnWait>();
-            }
-
-            __builtin_amdgcn_s_barrier_signal(-1);
-            __builtin_amdgcn_s_barrier_wait(-1);
-
-            // Runs LDS stage s: for each K sub-tile (k-atom), read it into the registers and run
-            // its WMMAs. Nothing but the accumulators stays live across the stage barrier.
-            auto stage_gemm = [&](auto s) {
-                static_for<0, sub_tile_num, 1>{}([&](auto i) {
-                    constexpr auto mode = sub_tile_num == 1               ? WindowSlideMode::Stay
-                                          : (i.value == sub_tile_num - 1) ? WindowSlideMode::Reset
-                                                                          : WindowSlideMode::Move;
-                    block_gemm.template LocalPrefetch<mode>(a_block_tile,
-                                                            b_block_tile,
-                                                            a_lds_gemm_windows[s],
-                                                            b_lds_gemm_windows[s],
-                                                            is_a_load_tr_v,
-                                                            is_b_load_tr_v);
-                    // no sched_group_barrier hints: they pull the k-atom's LDS reads ahead of its
-                    // WMMAs and raise register pressure
-                    block_gemm(c_block_tile, a_block_tile, b_block_tile);
-                });
-            };
-
-            __builtin_amdgcn_sched_barrier(0);
-            if constexpr(HasHotLoop)
-            {
-                index_t i_global_read = amd_wave_read_first_lane(2);
-                do
+                if(is_a_issuer1)
                 {
-                    // ping
+                    move_tile_window(a_dram_window1, a_dram_tile_window_step);
+                    Base::GlobalPrefetchTDM(
+                        tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_dram_window1);
+                }
+                if(is_b_issuer1)
+                {
+                    move_tile_window(b_dram_window1, b_dram_tile_window_step);
+                    Base::GlobalPrefetchTDM(
+                        tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
+                }
+
+                // initialize C block tile
+                auto c_block_tile = block_gemm.MakeCBlockTile();
+                clear_tile(c_block_tile);
+
+                // register tiles: one A and one B tile, each holding one K sub-tile (k-atom); every
+                // sub-tile is read from LDS right before its WMMAs (no register double buffering,
+                // so the 16-wave 256x256x256 tile fits the per-wave VGPR budget)
+                ALdsTile a_block_tile;
+                BLdsTile b_block_tile;
+
+                static_assert(!(is_tile_window_linear_v<decltype(a_lds_gemm_windows[I0{}])>) &&
+                                  !(is_tile_window_linear_v<decltype(a_lds_gemm_windows[I1{}])>) &&
+                                  !(is_tile_window_linear_v<decltype(b_lds_gemm_windows[I0{}])>) &&
+                                  !(is_tile_window_linear_v<decltype(b_lds_gemm_windows[I1{}])>),
+                              "LDS windows must not be linear");
+
+                // Data cache prefetch for upcoming TDM loads
+                auto a_prefetch_window = a_copy_dram_window;
+                auto b_prefetch_window = b_copy_dram_window;
+                if constexpr(UseDataCachePrefetch && HasHotLoop)
+                {
+                    __builtin_amdgcn_sched_barrier(0);
+                    if(is_a_issuer0)
                     {
-                        if constexpr(UseDataCachePrefetch)
+                        if constexpr(Policy::DataCachePrefetchA != DataCachePrefetchKind::None)
                         {
-                            // NOTE: found out that this place for prefetch give best performance
-                            // when swizzled with block_gemm
-                            if(is_a_issuer1)
-                            {
-                                if constexpr(Policy::DataCachePrefetchA !=
-                                             DataCachePrefetchKind::None)
-                                {
-                                    if(i_global_read + 2 < num_loop)
-                                        move_tile_window(a_prefetch_window,
-                                                         a_dram_tile_window_step_stride);
-                                    // check if prefetch is needed or was covered by warp_id 0
-                                    if constexpr(!a_prefetch_window
-                                                      .template prefetch_for_tdm_covers_more_calls<
-                                                          Policy::DataCachePrefetchA>(
-                                                          a_dram_tile_window_step))
-                                        a_prefetch_window
-                                            .template prefetch_for_tdm<Policy::DataCachePrefetchA>(
-                                                tdm_config_a[1]);
-                                }
-                            }
-                            if(is_b_issuer1)
-                            {
-                                if constexpr(Policy::DataCachePrefetchB !=
-                                             DataCachePrefetchKind::None)
-                                {
-                                    if(i_global_read + 2 < num_loop)
-                                        move_tile_window(b_prefetch_window,
-                                                         b_dram_tile_window_step_stride);
-                                    // check if prefetch is needed or was covered by warp_id 1
-                                    if constexpr(!b_prefetch_window
-                                                      .template prefetch_for_tdm_covers_more_calls<
-                                                          Policy::DataCachePrefetchB>(
-                                                          b_dram_tile_window_step))
-                                        b_prefetch_window
-                                            .template prefetch_for_tdm<Policy::DataCachePrefetchB>(
-                                                tdm_config_b[1]);
-                                }
-                            }
-                        }
-                        stage_gemm(I0{});
-
-                        block_sync_lds();
-
-                        if(is_a_issuer0)
-                        {
-                            move_tile_window(a_copy_dram_window, a_dram_tile_window_step_stride);
-                            Base::GlobalPrefetchTDM(tdm_config_a[0],
-                                                    a_copy_lds_windows[number<0>{}],
-                                                    a_copy_dram_window);
-                        }
-                        if(is_b_issuer0)
-                        {
-                            move_tile_window(b_copy_dram_window, b_dram_tile_window_step_stride);
-                            Base::GlobalPrefetchTDM(tdm_config_b[0],
-                                                    b_copy_lds_windows[number<0>{}],
-                                                    b_copy_dram_window);
-                        }
-                        if(is_a_issuer1 || is_b_issuer1)
-                        {
-                            s_wait_tensorcnt<kNewerFillsOnWait>();
-                        }
-
-                        __builtin_amdgcn_s_barrier_signal(-1);
-                        __builtin_amdgcn_s_barrier_wait(-1);
-                        __builtin_amdgcn_sched_barrier(0);
-                        if constexpr(UseDataCachePrefetch)
-                        {
-                            // NOTE: found out that this place for prefetch give best performance
-                            // when swizzled with block_gemm
-                            if(is_a_issuer0)
-                            {
-                                if constexpr(Policy::DataCachePrefetchA !=
-                                             DataCachePrefetchKind::None)
-                                {
-                                    if(i_global_read + 2 < num_loop)
-                                        move_tile_window(a_prefetch_window,
-                                                         a_dram_tile_window_step_stride);
-                                    a_prefetch_window
-                                        .template prefetch_for_tdm<Policy::DataCachePrefetchA>(
-                                            tdm_config_a[0]);
-                                }
-                            }
-                            if(is_b_issuer0)
-                            {
-                                if constexpr(Policy::DataCachePrefetchB !=
-                                             DataCachePrefetchKind::None)
-                                {
-                                    if(i_global_read + 2 < num_loop)
-                                        move_tile_window(b_prefetch_window,
-                                                         b_dram_tile_window_step_stride);
-                                    b_prefetch_window
-                                        .template prefetch_for_tdm<Policy::DataCachePrefetchB>(
-                                            tdm_config_b[0]);
-                                }
-                            }
+                            move_tile_window(a_prefetch_window, a_dram_tile_window_step_stride);
+                            a_prefetch_window.template prefetch_for_tdm<Policy::DataCachePrefetchA>(
+                                tdm_config_a[0]);
                         }
                     }
-                    // pong
+                    if(is_b_issuer0)
                     {
-                        stage_gemm(I1{});
-
-                        block_sync_lds();
-
-                        if(is_a_issuer1)
+                        if constexpr(Policy::DataCachePrefetchB != DataCachePrefetchKind::None)
                         {
-                            move_tile_window(a_dram_window1, a_dram_tile_window_step_stride);
-                            Base::GlobalPrefetchTDM(
-                                tdm_config_a[1], a_copy_lds_windows[number<1>{}], a_dram_window1);
+                            move_tile_window(b_prefetch_window, b_dram_tile_window_step_stride);
+                            b_prefetch_window.template prefetch_for_tdm<Policy::DataCachePrefetchB>(
+                                tdm_config_b[0]);
                         }
-                        if(is_b_issuer1)
-                        {
-                            move_tile_window(b_dram_window1, b_dram_tile_window_step_stride);
-                            Base::GlobalPrefetchTDM(
-                                tdm_config_b[1], b_copy_lds_windows[number<1>{}], b_dram_window1);
-                        }
-
-                        if(is_a_issuer0 || is_b_issuer0)
-                        {
-                            s_wait_tensorcnt<kNewerFillsOnWait>();
-                        }
-
-                        __builtin_amdgcn_s_barrier_signal(-1);
-                        __builtin_amdgcn_s_barrier_wait(-1);
-                        __builtin_amdgcn_sched_barrier(0);
                     }
-                    i_global_read += 2;
-                } while(i_global_read < num_loop);
-            }
+                    __builtin_amdgcn_sched_barrier(0);
+                }
 
-            if constexpr(TailNum == TailNumber::Two)
-            {
-                stage_gemm(I0{});
-                if(is_a_issuer1 || is_b_issuer1)
+                if(is_a_issuer0 || is_b_issuer0)
                 {
-                    s_wait_tensorcnt();
+                    s_wait_tensorcnt<kNewerFillsOnWait>();
                 }
 
                 __builtin_amdgcn_s_barrier_signal(-1);
                 __builtin_amdgcn_s_barrier_wait(-1);
+
+                // Runs LDS stage s: for each K sub-tile (k-atom), read it into the registers and
+                // run its WMMAs. Nothing but the accumulators stays live across the stage barrier.
+                auto stage_gemm = [&](auto s) {
+                    static_for<0, sub_tile_num, 1>{}([&](auto i) {
+                        constexpr auto mode = sub_tile_num == 1 ? WindowSlideMode::Stay
+                                              : (i.value == sub_tile_num - 1)
+                                                  ? WindowSlideMode::Reset
+                                                  : WindowSlideMode::Move;
+                        block_gemm.template LocalPrefetch<mode>(a_block_tile,
+                                                                b_block_tile,
+                                                                a_lds_gemm_windows[s],
+                                                                b_lds_gemm_windows[s],
+                                                                is_a_load_tr_v,
+                                                                is_b_load_tr_v);
+                        // no sched_group_barrier hints: they pull the k-atom's LDS reads ahead of
+                        // its WMMAs and raise register pressure
+                        block_gemm(c_block_tile, a_block_tile, b_block_tile);
+                    });
+                };
+
                 __builtin_amdgcn_sched_barrier(0);
-                stage_gemm(I1{});
+                if constexpr(HasHotLoop)
+                {
+                    index_t i_global_read = amd_wave_read_first_lane(2);
+                    do
+                    {
+                        // ping
+                        {
+                            if constexpr(UseDataCachePrefetch)
+                            {
+                                // NOTE: found out that this place for prefetch give best
+                                // performance when swizzled with block_gemm
+                                if(is_a_issuer1)
+                                {
+                                    if constexpr(Policy::DataCachePrefetchA !=
+                                                 DataCachePrefetchKind::None)
+                                    {
+                                        if(i_global_read + 2 < num_loop)
+                                            move_tile_window(a_prefetch_window,
+                                                             a_dram_tile_window_step_stride);
+                                        // check if prefetch is needed or was covered by warp_id 0
+                                        if constexpr(
+                                            !a_prefetch_window
+                                                 .template prefetch_for_tdm_covers_more_calls<
+                                                     Policy::DataCachePrefetchA>(
+                                                     a_dram_tile_window_step))
+                                            a_prefetch_window.template prefetch_for_tdm<
+                                                Policy::DataCachePrefetchA>(tdm_config_a[1]);
+                                    }
+                                }
+                                if(is_b_issuer1)
+                                {
+                                    if constexpr(Policy::DataCachePrefetchB !=
+                                                 DataCachePrefetchKind::None)
+                                    {
+                                        if(i_global_read + 2 < num_loop)
+                                            move_tile_window(b_prefetch_window,
+                                                             b_dram_tile_window_step_stride);
+                                        // check if prefetch is needed or was covered by warp_id 1
+                                        if constexpr(
+                                            !b_prefetch_window
+                                                 .template prefetch_for_tdm_covers_more_calls<
+                                                     Policy::DataCachePrefetchB>(
+                                                     b_dram_tile_window_step))
+                                            b_prefetch_window.template prefetch_for_tdm<
+                                                Policy::DataCachePrefetchB>(tdm_config_b[1]);
+                                    }
+                                }
+                            }
+                            stage_gemm(I0{});
+
+                            block_sync_lds();
+
+                            if(is_a_issuer0)
+                            {
+                                move_tile_window(a_copy_dram_window,
+                                                 a_dram_tile_window_step_stride);
+                                Base::GlobalPrefetchTDM(tdm_config_a[0],
+                                                        a_copy_lds_windows[number<0>{}],
+                                                        a_copy_dram_window);
+                            }
+                            if(is_b_issuer0)
+                            {
+                                move_tile_window(b_copy_dram_window,
+                                                 b_dram_tile_window_step_stride);
+                                Base::GlobalPrefetchTDM(tdm_config_b[0],
+                                                        b_copy_lds_windows[number<0>{}],
+                                                        b_copy_dram_window);
+                            }
+                            if(is_a_issuer1 || is_b_issuer1)
+                            {
+                                s_wait_tensorcnt<kNewerFillsOnWait>();
+                            }
+
+                            __builtin_amdgcn_s_barrier_signal(-1);
+                            __builtin_amdgcn_s_barrier_wait(-1);
+                            __builtin_amdgcn_sched_barrier(0);
+                            if constexpr(UseDataCachePrefetch)
+                            {
+                                // NOTE: found out that this place for prefetch give best
+                                // performance when swizzled with block_gemm
+                                if(is_a_issuer0)
+                                {
+                                    if constexpr(Policy::DataCachePrefetchA !=
+                                                 DataCachePrefetchKind::None)
+                                    {
+                                        if(i_global_read + 2 < num_loop)
+                                            move_tile_window(a_prefetch_window,
+                                                             a_dram_tile_window_step_stride);
+                                        a_prefetch_window
+                                            .template prefetch_for_tdm<Policy::DataCachePrefetchA>(
+                                                tdm_config_a[0]);
+                                    }
+                                }
+                                if(is_b_issuer0)
+                                {
+                                    if constexpr(Policy::DataCachePrefetchB !=
+                                                 DataCachePrefetchKind::None)
+                                    {
+                                        if(i_global_read + 2 < num_loop)
+                                            move_tile_window(b_prefetch_window,
+                                                             b_dram_tile_window_step_stride);
+                                        b_prefetch_window
+                                            .template prefetch_for_tdm<Policy::DataCachePrefetchB>(
+                                                tdm_config_b[0]);
+                                    }
+                                }
+                            }
+                        }
+                        // pong
+                        {
+                            stage_gemm(I1{});
+
+                            block_sync_lds();
+
+                            if(is_a_issuer1)
+                            {
+                                move_tile_window(a_dram_window1, a_dram_tile_window_step_stride);
+                                Base::GlobalPrefetchTDM(tdm_config_a[1],
+                                                        a_copy_lds_windows[number<1>{}],
+                                                        a_dram_window1);
+                            }
+                            if(is_b_issuer1)
+                            {
+                                move_tile_window(b_dram_window1, b_dram_tile_window_step_stride);
+                                Base::GlobalPrefetchTDM(tdm_config_b[1],
+                                                        b_copy_lds_windows[number<1>{}],
+                                                        b_dram_window1);
+                            }
+
+                            if(is_a_issuer0 || is_b_issuer0)
+                            {
+                                s_wait_tensorcnt<kNewerFillsOnWait>();
+                            }
+
+                            __builtin_amdgcn_s_barrier_signal(-1);
+                            __builtin_amdgcn_s_barrier_wait(-1);
+                            __builtin_amdgcn_sched_barrier(0);
+                        }
+                        i_global_read += 2;
+                    } while(i_global_read < num_loop);
+                }
+
+                if constexpr(TailNum == TailNumber::Two)
+                {
+                    stage_gemm(I0{});
+                    if(is_a_issuer1 || is_b_issuer1)
+                    {
+                        s_wait_tensorcnt();
+                    }
+
+                    __builtin_amdgcn_s_barrier_signal(-1);
+                    __builtin_amdgcn_s_barrier_wait(-1);
+                    __builtin_amdgcn_sched_barrier(0);
+                    stage_gemm(I1{});
+                }
+                else if constexpr(TailNum == TailNumber::One)
+                {
+                    stage_gemm(I0{});
+                }
+                // Drain TENSORcnt before leaving the pipeline. On the TailNumber::One path the fill
+                // of LDS stage 1 issued for the past-the-end K tile is still in flight, and the
+                // compiler does not track TDM writes to LDS, so the epilogue could reuse that LDS
+                // while the TDM engine still writes it. TENSORcnt is per wave: each issuer waits
+                // for its own fills (a no-op for the other waves); the barrier makes the drain
+                // workgroup-wide and orders every wave's last LDS reads before LDS is reused. On
+                // TailNumber::Two it is a no-op wait plus one barrier.
+                s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
+                return c_block_tile;
             }
-            else if constexpr(TailNum == TailNumber::One)
-            {
-                stage_gemm(I0{});
-            }
-            // Drain TENSORcnt before leaving the pipeline. On the TailNumber::One path the fill of
-            // LDS stage 1 issued for the past-the-end K tile is still in flight, and the compiler
-            // does not track TDM writes to LDS, so the epilogue could reuse that LDS while the TDM
-            // engine still writes it. TENSORcnt is per wave: each issuer waits for its own fills
-            // (a no-op for the other waves); the barrier makes the drain workgroup-wide and orders
-            // every wave's last LDS reads before LDS is reused. On TailNumber::Two it is a no-op
-            // wait plus one barrier.
-            s_wait_tensorcnt_barrier<0 /*tensorcnt*/, 0 /*lgkmcnt*/>();
-            return c_block_tile;
         }
 
         template <bool HasHotLoop,

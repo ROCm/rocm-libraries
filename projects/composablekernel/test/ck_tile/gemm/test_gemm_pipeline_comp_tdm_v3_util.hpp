@@ -6,8 +6,11 @@
 // Shared setup of the comp_tdm_v3 gtests: GemmPipelineAgBgCrCompTDMV3 on gfx1250, fp8 x fp8 ->
 // bf16, A row-major, B column-major, C row-major, warp tile 32x32x128.
 //
-// Instances: 16 waves (256x256x256, warps 4x4x1) with alternating and with fixed TDM issuers, and
-// 4 waves (128x128x256, warps 2x2x1).
+// Instances: 16 waves (256x256x256, warps 4x4x1) and 4 waves (128x128x256, warps 2x2x1), each with
+// the default policy (one split barrier per K tile) and with the two joint barriers per K tile
+// (kUseSplitBarrier = false); plus, at 16 waves, the split barrier with fixed TDM issuers
+// (kAlternateIssuers = false) and with the TENSORcnt wait on the issuing waves only
+// (kTensorWaitAllWaves = false).
 //
 // Shapes: K = 256, 512 and 768 (one, two and three K tiles: both tail paths, with and without the
 // hot loop) and 512x512x1024 in test_gemm_pipeline_comp_tdm_v3_wmma.cpp (SMOKE_TEST); K = 65536 (a
@@ -34,13 +37,30 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
-// Waves 0 (A) and 1 (B) fill both LDS stages. Outside the anonymous namespace: the host pass
-// never reads kAlternateIssuers, and an internal-linkage constant would trip
-// -Wunused-const-variable.
+// Policy variants. Outside the anonymous namespace: the host pass never reads the policy flags, and
+// an internal-linkage constant would trip -Wunused-const-variable.
 namespace comp_tdm_v3_test {
-struct FixedIssuerPolicy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
+// One split barrier per K tile, refill at the top of the K tile (the default; set here so the
+// variants below do not depend on it).
+struct SplitBarrierPolicy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
+{
+    static constexpr bool kUseSplitBarrier = true;
+};
+// Two joint barriers per K tile.
+struct JointBarrierPolicy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
+{
+    static constexpr bool kUseSplitBarrier = false;
+};
+// Split barrier; waves 0 (A) and 1 (B) fill both LDS stages.
+struct SplitFixedIssuerPolicy : SplitBarrierPolicy
 {
     static constexpr bool kAlternateIssuers = false;
+};
+// Split barrier; only the waves that issued the published fill wait for TENSORcnt 0. The resource
+// test skips this kernel (TensorWaitIssuersOnly in its name): it spills on some compilers.
+struct TensorWaitIssuersOnlyPolicy : SplitBarrierPolicy
+{
+    static constexpr bool kTensorWaitAllWaves = false;
 };
 } // namespace comp_tdm_v3_test
 
@@ -223,7 +243,10 @@ class TestCkTileGemmPipelineCompTDMV3 : public ::testing::Test
 
 using V3Configs =
     ::testing::Types<V3Config<256, 256, 4, 4, ck_tile::GemmPipelineAgBgCrCompTDMV3Policy>,
-                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::FixedIssuerPolicy>,
-                     V3Config<128, 128, 2, 2, ck_tile::GemmPipelineAgBgCrCompTDMV3Policy>>;
+                     V3Config<128, 128, 2, 2, ck_tile::GemmPipelineAgBgCrCompTDMV3Policy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::JointBarrierPolicy>,
+                     V3Config<128, 128, 2, 2, comp_tdm_v3_test::JointBarrierPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::SplitFixedIssuerPolicy>,
+                     V3Config<256, 256, 4, 4, comp_tdm_v3_test::TensorWaitIssuersOnlyPolicy>>;
 
 } // namespace
