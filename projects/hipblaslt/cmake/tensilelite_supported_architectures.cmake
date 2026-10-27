@@ -7,6 +7,7 @@ set(SUPPORTED_ARCHITECTURES
     "gfx90a"
     "gfx942"
     "gfx950"
+    "gfx1030"
     "gfx1100"
     "gfx1101"
     "gfx1102"
@@ -38,6 +39,15 @@ set(BASE_ARCHITECTURES)
 # gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
 # but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
+#
+# gfx1030 (RDNA2) is the one gfx10 target that can be built:
+#  - It has no matrix instructions (no MFMA/WMMA), so it uses the non-MatrixInstruction
+#    (V_DOT2 / FMA) kernel path, which tensilelite supports.
+#  - The ExtOp device-library generators (Amax, LayerNorm, Softmax) emit no matrix
+#    instructions and already list gfx1030 in their supported-architecture set; they
+#    select the legacy SDWA code path (no true16) for gfx1030.
+#  - gfx1010/gfx1011/gfx1012 (RDNA1) remain excluded: they lack the packed dot
+#    instructions (v_dot2c_f32_f16, v_dot4c_i32_i8) the ExtOp generators rely on.
 if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
     # For device address sanitizer builds, "all" is just the architectures that
     # support xnack+.
@@ -56,6 +66,7 @@ else()
         "gfx90a"
         "gfx942"
         "gfx950"
+        "gfx1030"
         "gfx1100"
         "gfx1101"
         "gfx1103"
