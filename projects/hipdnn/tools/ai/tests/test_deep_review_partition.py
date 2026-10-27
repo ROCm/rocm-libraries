@@ -118,7 +118,7 @@ def plan(part, rd, *extra):
     return lanes
 
 
-def test_plan_small_change_is_one_lane_with_binary_and_rename(part, tmp_path):
+def test_plan_small_change_with_binary_and_delete_add_pair_is_one_lane(part, tmp_path):
     rd = make_round(
         tmp_path,
         [
@@ -251,6 +251,38 @@ def test_gate_line_sum_mismatch(part, tmp_path, capsys):
     code, out = gate(part, tmp_path, [("CORR1", "a.cpp"), ("CORR1", "b.bin")], capsys)
     assert code == 1
     assert "owned 12 of 22 lines" in out
+
+
+@pytest.mark.parametrize("cmd", ["gate", "packets"])
+@pytest.mark.parametrize(
+    "owners, message",
+    [
+        ("TESTQ\ta.cpp\n", "owner is not CORR<k> or DOCS: 'TESTQ'"),
+        ("CORR\ta.cpp\n", "owner is not CORR<k> or DOCS: 'CORR'"),
+        ("CORR1 a.cpp\n", "no tab"),
+    ],
+)
+def test_malformed_owners_row_fails_with_one_line(part, tmp_path, cmd, owners, message):
+    rd = make_round(tmp_path, GATE_NUMSTAT)
+    run(part, "areas", rd)
+    (rd / "owners.tsv").write_text(owners)
+    with pytest.raises(SystemExit) as exc:
+        run(part, cmd, rd)
+    assert message in str(exc.value)
+
+
+def test_packets_lanes_tokens_are_stripped(part, tmp_path):
+    rd = make_round(
+        tmp_path,
+        [(1, 0, "projects/hipdnn/backend/a.cpp"), (1, 0, "CMakeLists.txt")],
+    )
+    run(part, "areas", rd)
+    (rd / "owners.tsv").write_text(
+        "CORR1\tprojects/hipdnn/backend/a.cpp\nCORR1\tCMakeLists.txt\n"
+    )
+    run(part, "packets", rd, "--lanes", "TESTQ, DEPS")
+    assert (rd / "packets" / "TESTQ.md").is_file()
+    assert (rd / "packets" / "DEPS.md").is_file()
 
 
 def test_gate_empty_owners(part, tmp_path):

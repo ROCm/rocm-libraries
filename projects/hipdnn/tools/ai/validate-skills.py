@@ -41,6 +41,13 @@ EXPECTED_SCRIPTS = {
         "discover_test_targets.py",
         "windows_rocm_setup.py",
     ),
+    "hipdnn-deep-review": (
+        "comments.py",
+        "ledger.py",
+        "partition.py",
+        "pin.py",
+        "reviewlib.py",
+    ),
     "hipdnn-trigger-ci": ("trigger_ci.py",),
     "hipdnn-uhd": (
         "candidate_tree.py",
@@ -332,6 +339,21 @@ def check_placeholders(skill: Path) -> list[str]:
     return errors
 
 
+def frontmatter_fields(skill_md: Path) -> set[str]:
+    """Top-level frontmatter keys of a SKILL.md."""
+    lines = skill_md.read_text(encoding="utf-8").splitlines()
+    fields: set[str] = set()
+    if not lines or lines[0].strip() != "---":
+        return fields
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        key, sep, _ = line.partition(":")
+        if sep and not line[0].isspace():
+            fields.add(key.strip())
+    return fields
+
+
 def validate_skill(skill: Path) -> list[str]:
     errors: list[str] = []
     skill_md = skill / "SKILL.md"
@@ -377,8 +399,9 @@ def validate_skill(skill: Path) -> list[str]:
 
     # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
     if skill.name in CLAUDE_COMMAND_SKILLS:
+        fields = frontmatter_fields(skill_md)
         for field in REQUIRED_CLAUDE_COMMAND_FIELDS:
-            if f"{field}:" not in text:
+            if field not in fields:
                 errors.append(f"{skill_md}: missing {field} in frontmatter")
 
     errors.extend(check_link_targets(skill))

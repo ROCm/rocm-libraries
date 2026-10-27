@@ -59,7 +59,7 @@ With no PR, save the intent document as `intent.md`. An empty description is an 
 `process` finding.
 
 Complete `PIN.md` by appending the `report.md` fields `init` does not write: `Change`,
-`Round`, `Repo`, `Stack parent`, `Description`, `Checks`, `PR bot`, `Build host`,
+`Round`, `Repo`, `Files` (range and branch reviews: the `files.txt` count), `Stack parent`, `Description`, `Checks`, `PR bot`, `Build host`,
 `Leak terms`. `Build host: yes` needs `cmake`, `ninja`, a C++ compiler, a ROCm install
 (Linux: `${ROCM_PATH:-/opt/rocm}`; Windows: the wheel SDK, which `windows_rocm_setup.py --provision never --venv-path $SCRATCH/rocm-venv` from [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) validates; when only the wheel SDK is missing, record `yes (RUN provisions the SDK)`, since `RUN` provisions it with `--provision auto`; Clang present per that skill) and 25 GB free in `$SCRATCH`; else `no (<missing>)`. `PR bot` is
 the `therock-pr-bot` check. Round N > 1 also records the previous head and base, saves `git
@@ -67,9 +67,9 @@ the `therock-pr-bot` check. Round N > 1 also records the previous head and base,
 writes `affected.txt` (*Iterate*); `partition.py packets` lists them when `range-diff.txt` exists.
 
 **Gate:** `pin.py init` exits 0: both SHAs and both sparse worktrees exist; for a PR, `$HEAD`
-equals `headRefOid` and the `git diff --name-only -M` count equals `pr/files.json`'s length.
-On a mismatch it compares `--no-renames` lists (adding renamed files' old paths) and fails only
-when they differ, naming the first differences. At 3000 files GitHub truncates: it records
+equals `headRefOid` and the `--no-renames` file list equals `pr/files.json`'s (renamed files'
+old paths added); a mismatch fails, naming the first differences and both counts. A match
+records `Files: <count> (GitHub <count>)`. At 3000 files GitHub truncates: it records
 `Files: unverifiable (>3000)` and relies on the SHA match. On any failure: `pin.py cleanup`
 (*Iterate*), then re-run `init` once to re-fetch; if it persists, stop and report both lists
 (or the moved head; re-pin only if the user wants the new head). When `init` rejects the key,
@@ -300,13 +300,13 @@ a different verifier. Send to a second verifier each `REFUTED` `BLOCKING` or `IM
 finding and each verdict whose final tier is on the other side of the `IMPORTANT`/`SUGGESTION`
 line from the reported tier ([findings.md](findings.md) *Verdicts*).
 
-**Gate:** `ledger.py verdicts "$EVIDENCE" <N>` exits 0 and prints no `missing:` or `second
-verifier needed:` line. It sets verdict, status, final tier and (`PARTIAL`) the narrowed
+**Gate:** `ledger.py verdicts "$EVIDENCE" <N>` exits 0, which it does only when it prints no
+`missing:` or `second verifier needed:` line. It sets verdict, status, final tier and (`PARTIAL`) the narrowed
 claim on each ledger row from `verify/<ID>.md`; `verify/<ID>-2.md` replaces the first verdict
 where it differs. Every candidate not `SUPERSEDED-BY` another has `verify/<ID>.md` (and
 `<ID>-2.md` where a second verifier ran) and a ledger verdict. Dispatch the second verifier
-for each `second verifier needed:` line and run it again; it exits 1 and lists each
-non-conforming verify file for re-dispatch.
+for each `second verifier needed:` line and run it again; it exits 1 on any such line and
+lists each non-conforming verify file for re-dispatch.
 
 ## Synthesize
 
@@ -317,11 +317,13 @@ theme; fold M-rule failures into the **Verdict** and fix groups. The `M<n>:` lin
 `TESTQ` (M1, M3), `TESTB` (M2) and `AUTH` (M4, M5); test execution for M1-M3 comes from `AUTH`.
 List each human decision under **Decisions needed**. Set `Closure:` from `ledger.py counts
 "$EVIDENCE" <N>`, which implements [SKILL.md](SKILL.md) *Completion*: it prints per-tier counts
-and `Closure: OPEN; waiting: ...` or `Closure: CLOSED`; it does not read decisions, so a
-pending one keeps `Closure: OPEN`. Run `comments.py draft "$EVIDENCE" <N>` for `COMMENTS.md`
-(needs `ID-MAP.md`): an `OPEN` `BLOCKING` or `IMPORTANT` finding whose first `Where` is
-`path:line` inside a changed hunk becomes an inline entry, every other one a `## General`
-item, and `SUGGESTION` and `FUTURE WORK` one item per tier and kind. Review and edit the
+and `Closure: OPEN; waiting: ...` or `Closure: CLOSED`. Every Open questions row and every
+Decisions row with an empty Decision cell keeps `Closure: OPEN`; move an answered question
+from Open questions into Decisions. Run `comments.py draft "$EVIDENCE" <N>` for `COMMENTS.md`
+(needs `ID-MAP.md`): an `OPEN` or `UNVERIFIED` `BLOCKING` or `IMPORTANT` finding whose first
+`Where` is `path:line` inside a changed hunk becomes an inline entry, every other one a
+`## General` item; an `UNVERIFIED` one is marked `(UNVERIFIED: <verifier's Reason>)`. An `OPEN`
+`SUGGESTION` or `FUTURE WORK` finding is one item per tier and kind. Review and edit the
 drafts. Re-dispatch `LEAK` for
 its output sweep ([lanes/leaks.md](lanes/leaks.md); output `$EVIDENCE/r<N>/lanes/LEAK-sweep.md`) before the user sees either file; redact each hit it reports in the output and in the published `$KNOWLEDGE` copy (the sweep reads both and fails when the copy is missing), then sweep again. Evidence subdirectories are local-only and not swept.
 `comments.py check-sweep "$EVIDENCE" <N>` exits 0 only when the sweep says `Sweep: clean` and is newer than every file it read; a later edit makes it stale.
@@ -360,7 +362,8 @@ or `ledger.py set ... <ID> ACCEPTED-RISK --note <the human's decision>` (it also
 Decisions row); both set `Round closed`. `verdicts` never touches a `FIXED` or `ACCEPTED-RISK`
 row, so when a later head breaks a closed finding, `ledger.py set ... <ID> OPEN` reopens it and
 `verdicts` re-verifies it. Record other decisions and open questions as rows of the ledger's
-Decisions and Open questions tables, by hand.
+Decisions and Open questions tables, by hand; an answered question moves from Open questions
+into Decisions.
 
 **Gate:** [SKILL.md](SKILL.md) *Completion*. On closing, `pin.py cleanup --evidence "$EVIDENCE"
 --round <N>` removes the review worktrees under `$SCRATCH` (including the lanes'), the `fullclone` checkouts

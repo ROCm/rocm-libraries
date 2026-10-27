@@ -227,7 +227,7 @@ def parse_coverage(text):
 
 
 M_LINE = re.compile(
-    r"^\s*(?:[-*]\s+)?(?:\*\*)?M([1-5]):(?:\*\*)?\s*(PASS|FAIL|WAIVED\([^)]*\)|N/A|UNVERIFIED)(?=\s|$)\s*(.*)$"
+    r"^\s*(?:[-*]\s+)?(?:\*\*)?M([1-5]):(?:\*\*)?\s*(PASS|FAIL|WAIVED\([^)]*\)|N/A|UNVERIFIED)[.,;:]?(?=\s|$)\s*(.*)$"
 )
 
 

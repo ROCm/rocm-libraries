@@ -234,7 +234,7 @@ class FakeGh:
         if args[0] == "api" and args[-1].endswith("/files"):
             half = len(self.files) // 2
             return "".join(
-                json.dumps([{"filename": f} for f in part])
+                json.dumps([{"filename": f} if isinstance(f, str) else f for f in part])
                 for part in (self.files[:half], self.files[half:])
             )
         if args[0] == "api" and "--jq" in args:
@@ -260,6 +260,7 @@ def test_pr_saves_artifacts(pin, origin, monkeypatch):
         f["filename"] for f in json.loads((r1 / "pr/files.json").read_text())
     ] == PR_FILES
     assert (r1 / "pr/checks.tsv").read_text() == "ci\tsuccess\thttp://x\n"
+    assert "Files: 4 (GitHub 4)\n" in (r1 / "PIN.md").read_text()
 
 
 def test_pr_head_moved(pin, origin, monkeypatch):
@@ -274,6 +275,70 @@ def test_pr_file_count_mismatch(pin, origin, monkeypatch):
     with pytest.raises(SystemExit) as e:
         pin.main(init_args(origin, "--pr", "7"))
     assert "file lists differ" in str(e.value)
+
+
+def test_pr_file_sets_differ_with_equal_counts(pin, origin, monkeypatch):
+    other = PR_FILES[:3] + ["docs/other.md"]
+    monkeypatch.setattr(pin, "gh", FakeGh(origin["head"], other))
+    with pytest.raises(SystemExit) as e:
+        pin.main(init_args(origin, "--pr", "7"))
+    assert "only git: ['projects/hipdnn/tools/x.sh']" in str(e.value)
+
+
+def test_pr_rename_made_with_git_mv_passes_the_file_gate(pin, origin, monkeypatch):
+    t = origin["tmp"]
+    work = t / "renamer"
+    run("git", "clone", "-q", "-b", "feat/one", origin["url"], str(work))
+    g = ["git", "-C", str(work), "-c", "user.name=t", "-c", "user.email=t@t"]
+    run(*g, "mv", "docs/guide.md", "docs/manual.md")
+    run(*g, "commit", "-qm", "rename")
+    renamed = run(*g, "rev-parse", "HEAD")
+    run(*g, "push", "-q", origin["url"], "HEAD:refs/pull/8/head")
+    files = [
+        "README.md",
+        "docs/manual.md",
+        "projects/hipdnn/src/a.cpp",
+        "projects/hipdnn/tools/x.sh",
+    ]
+    pr_files = [
+        (
+            {"filename": f, "previous_filename": "docs/guide.md"}
+            if f.endswith("manual.md")
+            else f
+        )
+        for f in files
+    ]
+    monkeypatch.setattr(pin, "gh", FakeGh(renamed, pr_files))
+    pin.main(init_args(origin, "--pr", "8"))
+    r1 = t / "ev/r1"
+    assert "Files: 4 (GitHub 4)\n" in (r1 / "PIN.md").read_text()
+    numstat = (r1 / "numstat.txt").read_text()
+    assert "docs/guide.md" in numstat and "docs/manual.md" in numstat
+
+
+def test_init_empty_diff_writes_an_empty_numstat(pin, origin):
+    pin.main(init_args(origin, "--range", "develop..develop"))
+    assert (origin["tmp"] / "ev/r1/numstat.txt").read_text() == ""
+
+
+def test_init_clone_inside_another_repo_is_a_fresh_clone(pin, origin):
+    t = origin["tmp"]
+    outer = t / "outer"
+    run("git", "init", "-q", str(outer))
+    clone = outer / "clone"
+    clone.mkdir()
+    pin.main(init_args(origin, "--branch", "feat/one") + ["--clone", str(clone)])
+    top = run("git", "-C", str(clone), "rev-parse", "--show-toplevel")
+    assert Path(top).resolve() == clone.resolve()
+
+
+def test_init_occupied_non_repo_clone_path_fails(pin, origin):
+    clone = origin["tmp"] / "scratch" / "clone"
+    clone.mkdir(parents=True)
+    (clone / "stray.txt").write_text("x")
+    with pytest.raises(SystemExit) as e:
+        pin.main(init_args(origin, "--branch", "feat/one"))
+    assert "is not a git clone" in str(e.value)
 
 
 def test_cleanup_without_a_clone_is_a_no_op(pin, tmp_path, capsys):

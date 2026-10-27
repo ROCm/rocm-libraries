@@ -59,25 +59,10 @@ def _write_skill(
         )
 
 
-def _frontmatter_fields(skill_md: Path) -> set[str]:
-    """Top-level frontmatter keys of a SKILL.md."""
-    lines = skill_md.read_text(encoding="utf-8").splitlines()
-    fields: set[str] = set()
-    if not lines or lines[0].strip() != "---":
-        return fields
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        key, sep, _ = line.partition(":")
-        if sep and not line[0].isspace():
-            fields.add(key.strip())
-    return fields
-
-
 def test_registered_claude_command_skills_carry_both_fields(validate_mod):
     """Every registered skill's SKILL.md has argument-hint and allowed-tools."""
     for name in sorted(validate_mod.CLAUDE_COMMAND_SKILLS):
-        fields = _frontmatter_fields(SKILLS_DIR / name / "SKILL.md")
+        fields = validate_mod.frontmatter_fields(SKILLS_DIR / name / "SKILL.md")
         missing = set(validate_mod.REQUIRED_CLAUDE_COMMAND_FIELDS) - fields
         assert not missing, f"{name}: missing {sorted(missing)}"
 
@@ -89,7 +74,7 @@ def test_skills_with_claude_command_fields_are_registered(validate_mod):
     unregistered = [
         skill_md.parent.name
         for skill_md in sorted(SKILLS_DIR.glob("*/SKILL.md"))
-        if required & _frontmatter_fields(skill_md)
+        if required & validate_mod.frontmatter_fields(skill_md)
         and skill_md.parent.name not in validate_mod.CLAUDE_COMMAND_SKILLS
     ]
     assert not unregistered, f"not registered as claude commands: {unregistered}"
@@ -296,6 +281,25 @@ def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_pat
     errors = validate_mod.validate_skill(skill)
     assert any("argument-hint" in error for error in errors)
     assert any("allowed-tools" in error for error in errors)
+
+
+def test_validate_skill_ignores_claude_fields_outside_frontmatter(
+    validate_mod, tmp_path
+):
+    """argument-hint and allowed-tools mentioned in the body do not satisfy the check."""
+    skill = tmp_path / "hipdnn-pr-quality"
+    _write_skill(skill, body="argument-hint: x\nallowed-tools: y\n")
+    errors = validate_mod.validate_skill(skill)
+    assert any("argument-hint" in error for error in errors)
+    assert any("allowed-tools" in error for error in errors)
+
+
+def test_expected_scripts_cover_every_deep_review_script(validate_mod):
+    """A deep-review script added or removed shows up in EXPECTED_SCRIPTS."""
+    on_disk = {
+        p.name for p in (SKILLS_DIR / "hipdnn-deep-review" / "scripts").glob("*.py")
+    }
+    assert set(validate_mod.EXPECTED_SCRIPTS["hipdnn-deep-review"]) == on_disk
 
 
 def test_symlink_target_recognises_a_git_materialized_link(validate_mod, tmp_path):

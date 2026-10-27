@@ -219,6 +219,49 @@ def test_understated_known_item_and_supersede_flow_into_ledger(ledger, rl, ev):
     )
 
 
+def test_seed_skips_blank_numstat_lines(ledger, rl, ev):
+    (ev / "r1" / "numstat.txt").write_text("3\t2\ta.cpp\n\n-\t-\tb.bin\n\n")
+    assert run(ledger, "seed", ev) == 0
+    assert len(table(rl, ev, "Coverage (round 1)").rows) == 2
+
+
+@pytest.mark.parametrize("tier", ["Blocking", ""])
+def test_ids_rejects_a_missing_or_unknown_tier(ledger, ev, capsys, tier):
+    seeded(ledger, ev)
+    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1", tier=tier)]))
+    capsys.readouterr()
+    assert run(ledger, "ids", ev) == 1
+    err = capsys.readouterr().err
+    assert "CORR1.md: CORR1-p1: Tier" in err
+
+
+def test_claim_is_the_first_sentence_of_the_whole_actual(ledger, rl, ev):
+    seeded(ledger, ev)
+    long = "word " * 80
+    with_reports(
+        ledger,
+        ev,
+        CORR1=report(
+            "CORR1",
+            [
+                finding(
+                    "CORR1-p1",
+                    actual="The loop never exits when\nn is zero and the buffer is empty."
+                    " Later text.",
+                ),
+                finding("CORR1-p2", actual=long),
+            ],
+        ),
+    )
+    assert run(ledger, "ids", ev) == 0
+    rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
+    assert rows["CORR-1"]["Claim"] == (
+        "The loop never exits when n is zero and the buffer is empty."
+    )
+    claim = rows["CORR-2"]["Claim"]
+    assert claim.endswith("word…") and len(claim) <= 201
+
+
 def test_coverage_copies_owner_lane_depth_and_tests(ledger, rl, ev, capsys):
     seeded(ledger, ev)
     with_reports(
@@ -268,7 +311,7 @@ def test_verdicts_status_tier_and_narrowed_claim(ledger, rl, ev, capsys):
     write_verify(ev, "CORR-2", "REFUTED", "IMPORTANT")
     write_verify(ev, "CORR-3", "DOWNGRADED", "SUGGESTION")
     capsys.readouterr()
-    assert run(ledger, "verdicts", ev) == 0
+    assert run(ledger, "verdicts", ev) == 1
     out = capsys.readouterr().out
     rows = {r["ID"]: r for r in table(rl, ev, "Findings").rows}
     assert (rows["CORR-1"]["Status"], rows["CORR-1"]["Claim"]) == (
@@ -284,6 +327,21 @@ def test_verdicts_status_tier_and_narrowed_claim(ledger, rl, ev, capsys):
     assert "CORR-1" not in out
     assert "second verifier needed: CORR-2 (REFUTED IMPORTANT)" in out
     assert "second verifier needed: CORR-3 (tier BLOCKING -> SUGGESTION)" in out
+
+
+def test_verdicts_exit_1_only_while_a_finding_is_pending(ledger, ev, capsys):
+    make_candidates(ledger, ev, "IMPORTANT", "IMPORTANT")
+    write_verify(ev, "CORR-1", "CONFIRMED", "IMPORTANT")
+    capsys.readouterr()
+    assert run(ledger, "verdicts", ev) == 1  # CORR-2 has no verify file
+    assert "missing: CORR-2" in capsys.readouterr().out
+    write_verify(ev, "CORR-2", "REFUTED", "IMPORTANT")
+    assert (
+        run(ledger, "verdicts", ev) == 1
+    )  # a REFUTED IMPORTANT needs a second verifier
+    assert "second verifier needed: CORR-2" in capsys.readouterr().out
+    write_verify(ev, "CORR-2", "REFUTED", "IMPORTANT", second=True)
+    assert run(ledger, "verdicts", ev) == 0
 
 
 def test_second_verifier_replaces_differing_verdict_and_is_not_requested_again(
@@ -336,6 +394,18 @@ def test_mlines_collect_fail_missing_and_vacuous_pass(ledger, ev, capsys):
     assert "missing: M5 (AUTH: no M-line)" in out
 
 
+def test_mline_status_may_be_followed_by_punctuation(rl):
+    text = report(
+        "TESTQ",
+        mlines=["M1: PASS. ran the suite", "M2: FAIL; no test", "M3: N/A."],
+    )
+    assert rl.parse_mlines(text) == [
+        (1, "PASS", "ran the suite"),
+        (2, "FAIL", "no test"),
+        (3, "N/A", ""),
+    ]
+
+
 def test_mlines_complete_report_succeeds(ledger, ev):
     seeded(ledger, ev)
     with_reports(
@@ -346,6 +416,23 @@ def test_mlines_complete_report_succeeds(ledger, ev):
         AUTH=report("AUTH", mlines=["M4: N/A (no PR)", "M5: N/A (no PR)"]),
     )
     assert run(ledger, "mlines", ev) == 0
+
+
+def test_counts_waits_on_open_questions_and_undecided_decisions(ledger, rl, ev, capsys):
+    seeded(ledger, ev)
+    tables = rl.parse_tables((ev / "LEDGER.md").read_text())
+    rl.find_table(tables, "Decisions").add(
+        Round="1", Question="Ship it?", Decision="", **{"Findings affected": ""}
+    )
+    rl.find_table(tables, "Decisions").add(
+        Round="1", Question="Rename it?", Decision="yes", **{"Findings affected": ""}
+    )
+    rl.find_table(tables, "Open questions").add(ID="Q1", Question="Which API?")
+    (ev / "LEDGER.md").write_text(rl.render_tables(tables))
+    capsys.readouterr()
+    run(ledger, "counts", ev)
+    closure = capsys.readouterr().out.splitlines()[-1]
+    assert closure == "Closure: OPEN; waiting: question Q1, decision Ship it?"
 
 
 def test_counts_closure_and_known_open_item(ledger, rl, ev, capsys):

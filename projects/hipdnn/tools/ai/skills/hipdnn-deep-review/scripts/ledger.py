@@ -60,6 +60,23 @@ def collapse(text):
     return " ".join(text.split())
 
 
+CLAIM_CAP = 200
+
+
+def cap(text, limit=CLAIM_CAP):
+    """collapse(text) cut at the last word boundary within `limit` characters, with `…`."""
+    text = collapse(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def claim_of(actual):
+    """The ledger Claim of a finding's `Actual`: collapsed to one line, cut after its first
+    sentence (a `.`, `?` or `!` followed by a space), capped at CLAIM_CAP characters."""
+    return cap(re.split(r"(?<=[.?!])\s", collapse(actual), maxsplit=1)[0])
+
+
 def report_order(path):
     """Sort key: a lane's report, then its follow-ups in numeric order (`AUTH`, `AUTH-f1`,
     `AUTH-f2`), so the last report of a lane is its newest."""
@@ -108,6 +125,8 @@ def cmd_seed(a):
     )
     cov = rl.Table(f"Coverage (round {a.round})", COVERAGE_COLS)
     for line in (rp / "numstat.txt").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
         added, deleted, path = line.split("\t", 2)
         lines = 0 if added == "-" else int(added) + int(deleted)
         cov.add(
@@ -153,7 +172,8 @@ def cmd_ids(a):
     to the provisional IDs in lanes/*.md and verify/VER<batch>.md, continuing each prefix's
     counter in LEDGER.md; write ID-MAP.md; add a candidate row per new finding. IDs already
     in an existing ID-MAP.md keep their value; a SUPERSEDED-BY entry there sets the row's
-    status. Fails when a report is nested below `r<k>/` or holds `ID:` lines it cannot parse.
+    status. Fails when a report is nested below `r<k>/`, holds `ID:` lines it cannot parse or
+    reports a finding whose Tier is missing or not one of the four tiers.
     """
     rp = rl.round_dir(a.evidence, a.round)
     require_flat(rp)
@@ -185,6 +205,11 @@ def cmd_ids(a):
             unparsed.append(path.name)
         for f in rl.parse_findings(text):
             prov = f["ID"]
+            if f.get("Tier") not in rl.TIERS:
+                raise rl.Fail(
+                    f"{path.name}: {prov}: Tier '{f.get('Tier', '')}' is not one of "
+                    + ", ".join(rl.TIERS)
+                )
             m = re.fullmatch(r"(.+)-p(\d+)", prov)
             if not m:
                 raise rl.Fail(f"{path.name}: bad provisional ID {prov}")
@@ -216,7 +241,7 @@ def cmd_ids(a):
                     "ID": final,
                     "Tier": f"{tier} -> {tier}",
                     "Kind": f.get("Kind", ""),
-                    "Claim": collapse(f.get("Actual", "").split("\n")[0]),
+                    "Claim": claim_of(f.get("Actual", "")),
                     "Where": collapse(f.get("Where", "")),
                     "Evidence": collapse(f.get("Proof", "")),
                     "Round opened": a.round,
@@ -298,11 +323,13 @@ def cmd_verdicts(a):
     replaces it. Lists candidates without a verify file and findings that still need a
     second verifier (REFUTED at BLOCKING/IMPORTANT, or a final tier across the
     IMPORTANT/SUGGESTION line from the reported tier; PARTIAL keeping its side does not).
+    Exits 1 when any finding is listed as missing or needing a second verifier, or a verify
+    file does not conform.
     """
     rp = rl.round_dir(a.evidence, a.round)
     tables = load_ledger(a.evidence)
     ft = rl.find_table(tables, "Findings")
-    bad, updated = [], 0
+    bad, updated, pending = [], 0, 0
     for row in ft.rows:
         status, fid = row["Status"], row["ID"]
         if status.startswith(("SUPERSEDED-BY", "FIXED")) or status == "ACCEPTED-RISK":
@@ -311,6 +338,7 @@ def cmd_verdicts(a):
         if not first_path.is_file():
             if not row["Verdict"]:
                 print(f"missing: {fid}")
+                pending += 1
             continue
         vs = [read_verify(first_path, fid)]
         second_path = rp / "verify" / f"{fid}-2.md"
@@ -329,6 +357,7 @@ def cmd_verdicts(a):
                 why = f"tier {reported} -> {first['Tier']}"
             if why:
                 print(f"second verifier needed: {fid} ({why})")
+                pending += 1
         row["Verdict"] = final["Verdict"]
         row["Status"] = (
             final["Verdict"]
@@ -345,6 +374,10 @@ def cmd_verdicts(a):
         print(f"non-conforming: {reason}")
     if bad:
         raise rl.Fail(f"{len(bad)} non-conforming verify files")
+    if pending:
+        raise rl.Fail(
+            f"{pending} findings missing a verdict or needing a second verifier"
+        )
 
 
 def cmd_mlines(a):
@@ -387,7 +420,9 @@ def cmd_counts(a):
     """Per final tier: OPEN, UNVERIFIED, candidate (no verdict), REFUTED and other closed
     rows; rows with a known-open-item; and the SKILL.md Completion check: Closure is OPEN
     while a BLOCKING or IMPORTANT row is OPEN, UNVERIFIED or a candidate, or this round's
-    Lanes table has a FAILED lane or a STOP. Unresolved decisions are not read."""
+    Lanes table has a FAILED lane or a STOP, or a question waits: every Open questions row
+    and every Decisions row with an empty Decision cell. An answered question is moved from
+    Open questions into Decisions."""
     tables = load_ledger(a.evidence)
     ft = rl.find_table(tables, "Findings")
     counts = {t: {} for t in rl.TIERS}
@@ -416,6 +451,14 @@ def cmd_counts(a):
                 for k in ("OPEN", "UNVERIFIED", "candidate", "REFUTED", "closed")
             )
         )
+    waits += [
+        f"question {r['ID']}" for r in rl.find_table(tables, "Open questions").rows
+    ]
+    waits += [
+        f"decision {r['Question']}"
+        for r in rl.find_table(tables, "Decisions").rows
+        if not r["Decision"].strip()
+    ]
     for t in tables:
         if t.title == f"Lanes (round {a.round})":
             waits += [

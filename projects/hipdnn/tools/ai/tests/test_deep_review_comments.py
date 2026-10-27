@@ -190,7 +190,7 @@ def test_anchor_inside_hunk_is_inline_and_outside_or_removed_is_general(
     assert "Removed line mattered." in general
 
 
-def test_only_open_findings_are_drafted_and_suggestions_are_batched_by_theme(
+def test_open_and_unverified_blocking_findings_are_drafted_suggestions_by_theme(
     comments, repo, tmp_path
 ):
     ev = build(
@@ -216,10 +216,26 @@ def test_only_open_findings_are_drafted_and_suggestions_are_batched_by_theme(
                 "source-claim",
             ),
             ("CORR-5", "FUTURE WORK", "a.txt:1", "extract helper.", "OPEN", "process"),
+            ("CORR-6", "SUGGESTION", "a.txt:5", "unverified nit.", "UNVERIFIED", "x"),
+            ("CORR-7", "BLOCKING", "a.txt:2", "no verifier file.", "UNVERIFIED", "x"),
         ],
     )
+    (ev / "r1" / "verify").mkdir()
+    (ev / "r1" / "verify" / "CORR-2.md").write_text(
+        "ID: CORR-2\nVerdict: UNVERIFIED\nTier: IMPORTANT\nClaim:\n"
+        "Reason: the runner was\n  offline. Retry later.\nProof: p\n"
+    )
     out = draft(comments, ev)
-    assert "###" not in out and "CORR-1" not in out and "CORR-2" not in out
+    assert (
+        "### a.txt:5 (CORR-2, IMPORTANT) (UNVERIFIED: the runner was offline. Retry later.)"
+        in out
+    )
+    assert (
+        "(CORR-7, BLOCKING; not in a changed hunk) (UNVERIFIED): no verifier file."
+        in out
+    )
+    assert out.count("###") == 1
+    assert "CORR-1" not in out and "CORR-6" not in out
     themed = [line for line in out.splitlines() if line.startswith("- **")]
     assert len(themed) == 2
     assert (
@@ -227,6 +243,16 @@ def test_only_open_findings_are_drafted_and_suggestions_are_batched_by_theme(
         and "rename that too." in themed[0]
         and "extract helper." in themed[1]
     )
+
+
+def test_draft_needs_the_rounds_id_map(comments, repo, tmp_path, capsys):
+    ev = build(
+        tmp_path, repo, [("CORR-1", "BLOCKING", "a.txt:5", "x.", "OPEN", "defect")]
+    )
+    (ev / "r1" / "ID-MAP.md").unlink()
+    assert comments.main(["draft", str(ev), "1"]) == 1
+    assert "ID-MAP.md" in capsys.readouterr().err
+    assert not (ev / "r1" / "COMMENTS.md").exists()
 
 
 def test_pasted_actual_has_no_code_fences(comments, repo, tmp_path):

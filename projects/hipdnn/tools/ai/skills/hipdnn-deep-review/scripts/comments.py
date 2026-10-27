@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ledger  # noqa: E402
 import partition  # noqa: E402
 import reviewlib as rl  # noqa: E402
 
@@ -84,8 +85,28 @@ def finding_blocks(evidence):
     return out
 
 
+def unverified_note(evidence, fid):
+    """` (UNVERIFIED: <reason>)` from the newest verify file of fid (the `-2` file first),
+    capped like a ledger Claim; ` (UNVERIFIED)` when no file gives a Reason."""
+    for rp in reversed(rl.round_dirs(evidence)):
+        for name in (f"{fid}-2.md", f"{fid}.md"):
+            path = rp / "verify" / name
+            if path.is_file():
+                reason = ledger.cap(
+                    strip_fences(
+                        rl.parse_verifier(path.read_text(encoding="utf-8")).get(
+                            "Reason", ""
+                        )
+                    )
+                )
+                return f" (UNVERIFIED: {reason})" if reason else " (UNVERIFIED)"
+    return " (UNVERIFIED)"
+
+
 def cmd_draft(a):
-    """Write r<round>/COMMENTS.md from the OPEN ledger rows. An OPEN BLOCKING or IMPORTANT
+    """Write r<round>/COMMENTS.md from the OPEN ledger rows and the UNVERIFIED BLOCKING and
+    IMPORTANT rows (their heading or item carries `(UNVERIFIED: <reason>)`, the Reason of
+    the finding's verify file). Needs r<round>/ID-MAP.md. An OPEN BLOCKING or IMPORTANT
     finding is an inline `### <path>:<line> (<ID>, <tier>)` entry (Actual, Expected, Fix)
     when its first `Where` location is `path:line` inside a changed new-side hunk between
     PIN.md's BASE and HEAD; otherwise (line outside every hunk, `$BASE:` removed content,
@@ -94,6 +115,8 @@ def cmd_draft(a):
     one General item per tier and kind. Pasted text loses fenced code, provisional IDs, lane
     reports, `$EVIDENCE` paths and `$HEAD:`/`$BASE:` prefixes."""
     rp = rl.round_dir(a.evidence, a.round)
+    if not (rp / "ID-MAP.md").is_file():
+        raise rl.Fail(f"missing {rp / 'ID-MAP.md'}; run ledger.py ids")
     pins = {k: rl.pin_value(rp, k) for k in ("CLONE", "BASE", "HEAD")}
     if not all(pins.values()):
         raise rl.Fail("PIN.md lacks CLONE, BASE or HEAD")
@@ -104,9 +127,12 @@ def cmd_draft(a):
     ranges = {}
     inline, general, themes = [], [], {}
     for row in rl.find_table(tables, "Findings").rows:
-        if row["Status"] != "OPEN":
-            continue
         fid, tier = row["ID"], rl.tier_pair(row["Tier"])[1]
+        if row["Status"] != "OPEN" and not (
+            row["Status"] == "UNVERIFIED" and tier in rl.TIERS[:2]
+        ):
+            continue
+        note = unverified_note(a.evidence, fid) if row["Status"] != "OPEN" else ""
         block = blocks.get(fid, {})
         claim = strip_fences(row["Claim"])
         where = row["Where"]
@@ -142,12 +168,13 @@ def cmd_draft(a):
                         rl.TIERS.index(tier),
                         path,
                         line,
-                        f"### {path}:{line} ({fid}, {tier})\n\n" + "\n\n".join(body),
+                        f"### {path}:{line} ({fid}, {tier}){note}\n\n"
+                        + "\n\n".join(body),
                     )
                 )
             else:
                 general.append(
-                    f"- {anchor or fid} ({fid}, {tier}; not in a changed hunk): {claim}"
+                    f"- {anchor or fid} ({fid}, {tier}; not in a changed hunk){note}: {claim}"
                     + (f" Fix: {fix}" if fix else "")
                 )
         else:

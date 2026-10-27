@@ -146,10 +146,17 @@ def read_areas(round_dir: Path) -> dict[str, str]:
 
 
 def read_owners(round_dir: Path) -> list[tuple[str, str]]:
-    return [
-        tuple(ln.split("\t", 1))
-        for ln in read_lines(round_dir / "owners.tsv", "owners.tsv")
-    ]
+    """(owner, path) rows of owners.tsv; a row without a tab or with an owner that is not
+    `CORR<k>` or `DOCS` is a failure."""
+    rows = []
+    for ln in read_lines(round_dir / "owners.tsv", "owners.tsv"):
+        owner, sep, path = ln.partition("\t")
+        if not sep:
+            fail(f"malformed owners.tsv row (no tab): {ln!r}")
+        if not re.fullmatch(r"CORR\d+|DOCS", owner):
+            fail(f"owners.tsv owner is not CORR<k> or DOCS: {owner!r}")
+        rows.append((owner, path))
+    return rows
 
 
 def read_sampled(sampled: str | None) -> dict[str, tuple[str, bool]]:
@@ -403,7 +410,7 @@ def cmd_packets(args) -> None:
     for lane, lane_rows in owned.items():
         write_packet(rd, lane, "correctness", lane_rows, areas, sampled, None)
         print(f"packets/{lane}.md: {len(lane_rows)} files")
-    for lane in args.lanes.split(",") if args.lanes else []:
+    for lane in [x.strip() for x in args.lanes.split(",")] if args.lanes else []:
         if lane not in CONCERN_LANES:
             fail(f"unknown concern lane: {lane}")
         if lane in owned:

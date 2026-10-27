@@ -223,12 +223,12 @@ def cmd_init(args):
     rl.write(rdir / "env.sh", ENV_SH)
 
     url = args.remote_url or f"https://github.com/{args.owner_repo}.git"
-    if (
-        subprocess.run(
-            ["git", "-C", str(clone), "rev-parse", "--git-dir"], capture_output=True
-        ).returncode
-        != 0
-    ):
+    code, top, _ = rl.git(clone, "rev-parse", "--show-toplevel")
+    if code == 0 and same_path(top.strip()) == same_path(clone):
+        pass
+    elif clone.exists() and (not clone.is_dir() or any(clone.iterdir())):
+        die(f"{clone} exists and is not a git clone")
+    else:
         git(None, "clone", "--filter=blob:none", "--no-checkout", url, str(clone))
     git(clone, "config", "gc.auto", "0")
 
@@ -297,7 +297,12 @@ def cmd_init(args):
     rl.write(rdir / "sparse.txt", "".join(d + "\n" for d in sparse_set(files)))
     rl.write(
         rdir / "numstat.txt",
-        git(clone, "diff", "--numstat", "--no-renames", base, head) + "\n",
+        "".join(
+            line + "\n"
+            for line in git(
+                clone, "diff", "--numstat", "--no-renames", base, head
+            ).splitlines()
+        ),
     )
     rl.write(
         rdir / "commits.txt",
@@ -324,7 +329,7 @@ def cmd_init(args):
 
 
 def pr_gate(args, rdir, clone, base, head):
-    """Save pr/ artifacts and check headRefOid and the file-count Gate."""
+    """Save pr/ artifacts, check headRefOid and the file-set Gate, and record `Files:`."""
     pr, o = args.pr, args.owner_repo
     pr_dir = rdir / "pr"
     pr_dir.mkdir(exist_ok=True)
@@ -370,8 +375,6 @@ def pr_gate(args, rdir, clone, base, head):
         append_pin(rdir, f"Files: unverifiable (>{MAX_GH_FILES})\n")
         return
     local = git(clone, "diff", "--name-only", "-M", base, head).splitlines()
-    if len(local) == len(pr_files):
-        return
     both = set(
         git(clone, "diff", "--name-only", "--no-renames", base, head).splitlines()
     )
@@ -382,6 +385,7 @@ def pr_gate(args, rdir, clone, base, head):
             f"file lists differ: git {len(local)} files, GitHub {len(pr_files)} files; "
             f"only git: {sorted(both - theirs)[:5]}, only GitHub: {sorted(theirs - both)[:5]}"
         )
+    append_pin(rdir, f"Files: {len(local)} (GitHub {len(pr_files)})\n")
 
 
 def read_pin(rdir):

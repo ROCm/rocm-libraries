@@ -42,7 +42,8 @@ schema is stable; a row in another format is a candidate, not a record.
 ```markdown
 ## Coverage (round N)     table: File | Lines | Owner lane | Read depth | Tests reaching it
 ## Findings               table: ID | Tier (`<reported> -> <final>`) | Kind | Status | Verdict | Claim (narrowed
-                          if PARTIAL; the first line of `Actual:` until a verdict) | Where | Evidence |
+                          if PARTIAL; until a verdict, `Actual:` collapsed to one line, cut after its first
+                          sentence and capped at 200 characters) | Where | Evidence |
                           Round opened | Round closed | known-open-item (empty or `K<n>`)
 ## Lanes (round N)        table: Lane | Ran / N/A / merged into / split / FAILED (reason) | Report | STOP
 ## Decisions              table: Round | Question | Decision | Findings affected
