@@ -1603,7 +1603,7 @@ TEST(TestFillInputs, SpecialOnTypesThatHoldTheValueIsAccepted)
 // bf16 0x7FC0 and 0x7F80 / 0xFF80, e4m3 NaN 0x7F, e5m2 NaN 0x7F and +-inf 0x7C / 0xFC, the fnuz
 // formats' NaN 0x80, e8m0 NaN 0xFF.
 template <typename T>
-void expectEveryElementHasBits(const FillRecipe& recipe, unsigned int bits)
+static void expectEveryElementHasBits(const FillRecipe& recipe, unsigned int bits)
 {
     SCOPED_TRACE(EnumNameDataType(dataTypeOf<T>()));
     const auto filled = fillSingle<T>(recipe, 7, 4, 4);

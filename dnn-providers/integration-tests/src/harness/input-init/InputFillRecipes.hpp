@@ -423,9 +423,9 @@ private:
         if(!kind.has_value())
         {
             throw FillRecipeError(
-                at + ": \"kind\" is an unknown fill kind \"" + kindName
-                + "\" (expected free, fixed, nonzero, zeros, large, subnormal or special; "
-                  "the constant fill is \"fixed\")");
+                at + R"(: "kind" is an unknown fill kind ")" + kindName
+                + R"(" (expected free, fixed, nonzero, zeros, large, subnormal or special; )"
+                  R"(the constant fill is "fixed"))");
         }
 
         FillRecipe f;
