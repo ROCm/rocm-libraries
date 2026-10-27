@@ -74,8 +74,12 @@ supposed to catch this?), release-readiness review, onboarding, and planning CI 
 thing it can do is make the sentence "we assumed CI was covering it" less common. Every gap recorded
 below is a place where that sentence would otherwise get said later, with worse consequences.
 
-**Where this is headed.** This document describes the current state at the start of a redesign of
-hipBLASLt and TensileLite testing (AIHPBLAS-5028); see [Improvement Roadmap](#improvement-roadmap).
+**Where this is headed.** Testing for hipBLASLt and TensileLite is being regularized as one effort
+(AIHPBLAS-5028): a shared testing philosophy, a small set of test kinds, a cadence contract for
+presubmit, postsubmit, nightly, and weekly runs, and five workstreams that carry every known gap. See
+[Improvement Roadmap](#improvement-roadmap). One part has started: a harness that tests every shipped
+kernel directly, which found a GPU-faulting defect on its first day. See
+[Kernel corpus testing](#kernel-corpus-testing).
 
 ## Contents
 
@@ -125,7 +129,14 @@ its incident write-ups, lives in [tensilelite/TESTING.md](tensilelite/TESTING.md
 
 **What we owe**
 
-- [Improvement Roadmap](#improvement-roadmap)
+- [Improvement Roadmap](#improvement-roadmap), shared with TensileLite
+  - [Testing philosophy](#testing-philosophy)
+  - [Target test kinds](#target-test-kinds)
+  - [Who tests what](#who-tests-what)
+  - [Kernel corpus testing](#kernel-corpus-testing)
+  - [Cadence contract](#cadence-contract)
+  - [Coverage model](#coverage-model)
+  - [Workstreams](#workstreams)
 - [Known Risks and Gaps](#known-risks-and-gaps)
 - [Owners and Review Cadence](#owners-and-review-cadence)
 
@@ -376,6 +387,15 @@ host, so the large-K cases pick the pattern by output type:
 | bf16 | exact below K of about 32; rounding modelled above | `sparse_k` (every result at most 140) |
 | fp8 | rounding modelled at any K; fp8 outputs are always checked on the host | `sparse_k` |
 | int8 | saturates; each saturated result is recomputed | `sparse_k` |
+
+**When fast_check declines a case.** A declined case says nothing about the kernel. It means the case
+asks for something fast_check can't check exactly: a non-integer input or scale, a compute type it
+does not support, or results past the exact range above. `hipblaslt-test` reports a declined case as a
+failure, not a skip, with a message that begins `fast_check requires`, `fast_check does not support`,
+or similar. So a red fast_check case may be a problem with the test rather than a defect. Read the
+message before filing a bug, and fix the case by choosing a pattern from the tables above or by moving
+it to the CPU reference. The kernel corpus harness counts these cases as unsupported rather than as
+failures.
 
 **Pre-flight layout validation.** Before the GTest binary runs, the TheRock lane walks the installed
 tree and validates its physical layout. This exists because the runtime's kernel-library probe has
@@ -1170,84 +1190,600 @@ for this document.
 
 ## Improvement Roadmap
 
-**This section is not yet a plan.** Testing across hipBLASLt and TensileLite is being redesigned as
-one effort under AIHPBLAS-5028: a shared testing philosophy, an inventory of every suite and where it
-runs, and a model of the usage space the tests are meant to cover. That work will arrive in follow-up
-changes, and it will replace this section. What is listed here is narrower: tactical fixes found while
-documenting the current state. Each names the ticket that tracks it, for the same reason the
-[Known Risks and Gaps](#known-risks-and-gaps) table does, but the list is neither a commitment nor a
-priority order.
+Testing for hipBLASLt and TensileLite grew up one lane and one incident at a time, and it shows. The
+same TensileLite suite runs in four lanes, while gfx1250 gets no test stage at all and a rocRoller-only
+pull request gets no hipBLASLt Math CI jobs. Known-bad behavior is suppressed in nine different ways.
+The kinds of test have multiplied (unit, characterization, client GTest, `Tests/common`, emulation,
+stress, sanitizer, benchmark) without a shared rule for what each one is for or where it should run.
+The gaps recorded in this document are real, but fixing them one at a time would leave that shape in
+place.
 
-This covers hipBLASLt's C++ client and library. The TensileLite, rocisa, and library-logic items,
-including the characterization-to-unit migration and mutation testing, are in
-[tensilelite/TESTING.md#improvement-roadmap](tensilelite/TESTING.md#improvement-roadmap).
+This section is the plan for regularizing testing across both products. They are tightly coupled
+(TensileLite generates the kernels hipBLASLt ships), so they are planned together here, and
+[tensilelite/TESTING.md](tensilelite/TESTING.md#improvement-roadmap) points to this section. The work
+is tracked under AIHPBLAS-5028. It is a proposal: the philosophy and the target shape are for the team
+to agree on, and both will be refined as the inventory and the coverage model fill in.
 
-### Process and policy fixes
+One part of the plan reaches past these two products. Kernel correctness is tested today in the
+hipBLASLt client suite, in TensileLite's `Tests/common`, and (in principle) in StinkyTofu, and none of
+them tests the set of kernels that ships. [Who tests what](#who-tests-what) proposes a split: StinkyTofu
+and TensileLite each test the correctness of the code they emit, a new kernel corpus layer tests every
+shipped kernel across the problems it is selected for, and hipBLASLt's own tests become mostly host
+unit tests of argument validation, selection, and dispatch. TensileLite's and StinkyTofu's TESTING.md
+files each carry a short pointer to that section.
 
-1. **Publish the required-check list**
-   ([#12996](https://github.com/ROCm/rocm-libraries/issues/12996)). Document which checks actually
-   block a merge, so contributors and reviewers stop guessing. The lane tables in this document and in
-   [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, and
-   [docs/gardening.md](../../docs/gardening.md) has a list, but it has already drifted. This belongs
-   somewhere it cannot drift from the repository ruleset itself.
-2. **Govern known-bug entries as one thing** (AIHPBLAS-5031). Nine mechanisms suppress or record
-   known-bad behavior and none of them share a convention. The proposal, which needs team agreement
-   before it becomes policy, is four rules:
+### Testing philosophy
 
-   - Every entry names its ticket in a machine-readable field rather than a comment, so ownership and
-     status live on the ticket where they can be kept current, instead of as a name in a file that
-     goes stale.
-   - Every entry carries a review date.
-   - The suppressed code keeps running wherever the mechanism allows, so a fix can be observed rather
-     than assumed.
-   - A fix fails the build, so the entry deletes itself.
+These build on the principles in TheRock's
+[TESTING.md](https://github.com/ROCm/TheRock/blob/main/TESTING.md): layer tests by their cost and the
+confidence they provide, keep important behavior testable on an ordinary development machine, and test
+the product as a whole as well as its parts. For a math library they become:
 
-   Two mechanisms cannot satisfy the third rule today, so adopting this means changing them or
-   accepting a stated exception. Start by splitting flaky from known-failing in the client quarantine
-   list, which is the largest and blindest surface.
+1. **Every test states its question and its oracle.** The oracle is what decides pass or fail: a CPU
+   reference within a tolerance, an analytic identity, an invariant, a performance baseline, or a
+   golden. A test whose oracle nobody can name is a test nobody can maintain.
+2. **There are only a few kinds of test.** They are listed under
+   [Target test kinds](#target-test-kinds). A new test fits one of them, or the list gets argued about
+   and changed.
+3. **A tier is a sampling density, not a different suite.** Presubmit, nightly, and weekly run the same
+   test definitions over the same space of problems, sampled sparsely where feedback has to be fast and
+   densely where it can be slow. A case moves between tiers by changing its category, not by being
+   rewritten.
+4. **Catch each defect at the cheapest layer that can see it.** Host before GPU, build before run,
+   presubmit before nightly. A GPU should only be held by a test that needs one.
+5. **Test what ships.** GPU correctness runs against installed artifacts in TheRock, the same build
+   users get.
+6. **Test density follows risk.** The space of ways this library gets called is far too large to cover
+   evenly, so tests concentrate where a defect is most likely and would cost the most. In
+   signal-processing terms this is importance sampling. Defects also cluster at boundaries (tile edges,
+   alignment edges, the points where solution selection switches kernels, 32-bit limits), so each known
+   boundary gets tested on both sides.
+7. **Every test earns its slot.** A test's value is its unique coverage of high-risk cases, its record
+   of catching real defects, and its cost in runner time. Duplicates merge. A test that covers nothing
+   another test does not already cover retires, or moves to a slower tier. Equal line coverage does
+   not make two tests duplicates, though: they can reach the same lines and catch different failures.
+   Before a case retires, the tests that remain must still exercise its heuristic decisions, its
+   numerical boundaries, its architecture-specific behavior and its side effects, and any known-defect
+   reproducer stays.
+8. **Every suppression is temporary and cleans itself up.** A quarantined case keeps running where the
+   mechanism allows, names its ticket where a tool can read it, and fails loudly once its bug is fixed.
+   The `_ROCM3994_XFAIL` marker described under
+   [Known Bugs and Expected Failures](#known-bugs-and-expected-failures) is the pattern to copy.
 
-### Structural changes
+### Target test kinds
 
-1. **Create a host-only link target for library internals** (AIHPBLAS-5033), resolving the
-   include-path collision, so C++ unit tests can reach validation, enum and string mapping,
-   tuning-override parsing, and workspace-sizing logic without linking the whole shared library.
-   Everything in the C++ unit-test backlog is blocked behind this one change.
-2. **Unify the three parallel enum-to-string tables** (AIHPBLAS-3558), covering the client, library,
-   and test-data YAML tables, or at minimum add a test that asserts they agree. They can drift today,
-   and a drift produces confusing test-selection behavior rather than an obvious failure.
-3. **Extract validation ahead of dispatch** (AIHPBLAS-5034) so argument-error paths are reachable
-   without a GPU.
+| Kind | Question it answers | Oracle | Needs a GPU | Today, for example |
+| --- | --- | --- | --- | --- |
+| Host unit | Does this piece of code do what it says? | Expected values and invariants | No | TensileLite Python unit tests, rocisa tests, the TensileLite C++ host tests, the tuning-store test, GEKO |
+| Static and build checks | Is the source, or the artifact generated from it, well formed? | A rule set | No | `TensileLogic --check-all`, `pre-commit`, lint, and (once they exist) type checking and clang-tidy |
+| Numerical correctness | Does a GEMM on real hardware match a reference? | A CPU reference within a tolerance | Yes | The hipBLASLt client GTest suite, TensileLite `Tests/common` |
+| Performance | Is it at least as fast as it was? | A baseline with a measured noise floor | Yes | The nightly benchmarking lane |
 
-### Larger investments
+Two kinds of test in the tree today deliberately do not appear in that table:
 
-1. **Get a performance number onto the change** (AIHPBLAS-5029, with architecture and shape breadth
-   in AIHPBLAS-5030). Pull requests are not benchmarked today, so this builds something new rather
-   than repairing something. The nightly lane already has the pieces
-   worth reusing: version-controlled datasets, a comparison against a baseline, and a runner pool.
-   What we would like, roughly in order:
+- **Characterization goldens are scaffolding, not a kind.** They pin current behavior so code can be
+  refactored safely, which is valuable, but they verify nothing about correctness. Each module's
+  goldens are on the way to being replaced by unit tests (see the characterization-to-unit migration
+  under [Keep it honest](#keep-it-honest)).
+- **Sanitizers, stress, multi-GPU, and HMM are run modes, not suites.** An AddressSanitizer lane, a
+  large-memory stress run, a two-GPU run, and a managed-memory run all execute unit or correctness
+  tests under different conditions. Treating them as modes means one set of test definitions run more
+  than one way, instead of a parallel suite per condition.
 
-   - A measurement tied to one commit, on a small and fast problem set, with the result visible to
-     the author on the pull request. Feedback first; gating only once it is stable enough not to
-     become the thing everyone reruns.
-   - Architecture coverage beyond gfx950, prioritized by where the library ships tuned kernels and
-     where customers run.
-   - Shape coverage along the two axes today's sample holds fixed: batch counts, including batched
-     FP8, and padded leading dimensions.
-   - A stability story before a threshold: enable the harness's adaptive sampling, or pin clocks, or
-     both, so the noise floor is a measured quantity rather than an assumption.
-   - Problem lists version controlled in this repository, so a change to what we measure is reviewed
-     like any other change. This is how the nightly lane manages its datasets and is worth copying.
-   - A lane that reports its own failure. One that says nothing when it works and nothing when it
-     breaks will stop working without anyone noticing.
-   - A named owner for the signal.
+TensileLite's `Tests/common` and the hipBLASLt client suite are both numerical-correctness tests with
+the same kind of oracle, but they sample different spaces, and neither of those spaces is the set of
+kernels that actually ships. [Who tests what](#who-tests-what) proposes how to divide that work.
 
-2. **Prune redundant numerical variants** (AIHPBLAS-5036) in the client suite to buy back runtime,
-   and spend it on architecture breadth per PR.
-3. **Introduce real static analysis on the C++ library** (AIHPBLAS-5032). Add a `.clang-tidy` with a deliberately
-   small starting rule set, wire it into the build the way sibling projects in this repository
-   already do, and ratchet it rather than trying to land a clean full-strength run. Adding `cpp` to
-   the CodeQL language matrix is the cheaper first step and would at least produce a weekly signal.
-   Type checking on TensileLite is the equivalent item in that document's own roadmap.
+### Who tests what
+
+Kernel correctness is tested in three places today, and each one samples something different. The
+hipBLASLt client suite runs whichever solution the selection heuristic picks for each problem in its
+YAML data, so its coverage of any one kernel is incidental. TensileLite's `Tests/common` builds and runs
+kernels from its own test configurations, which exercise the generator's features but are not the
+kernels in the shipped library logic. StinkyTofu, which schedules and protects those kernels on
+gfx1250, runs none of them (see `shared/stinkytofu/TESTING.md`, in review in
+[PR #13945](https://github.com/ROCm/rocm-libraries/pull/13945)). The result is overlap in the work and
+a hole in the coverage: no suite in CI tests the kernels we ship, across the problems each one is
+selected for. That layer has started outside CI, as a kernel corpus harness developed under
+AIHPBLAS-3894 (see [Kernel corpus testing](#kernel-corpus-testing)). Until it lands, fast_check's
+every-solution cases in the client suite are the closest thing CI has.
+
+The proposal is to give each layer one question it owns, and to test each question once, at the layer
+that defines the thing being tested. This is a proposal for the teams involved to agree on, not
+current practice.
+
+| Layer | The question it owns | Oracle | Hardware | Owner |
+| --- | --- | --- | --- | --- |
+| StinkyTofu | Does its transformation preserve what the kernel computes, and protect every hazard on the hardware it targets? | Unit and FileCheck tests; scheduled and unscheduled builds of the same kernel must produce bitwise-identical output; an independent hazard check; one small hardware test per hazard rule | A little | StinkyTofu team |
+| TensileLite | Given solution parameters, does it emit the kernel those parameters describe? | Python unit tests; one small hardware test per code-generation feature (Stream-K, TDM, each epilogue), not per shape | A little | TensileLite team |
+| Kernel corpus (new) | Does every kernel we ship compute correctly across the problems it is selected for? | A CPU reference, or fast_check's exact integer checks; repeated launches; buffer placement near 32-bit and 4 GiB boundaries | Almost all of it | Whoever defines the kernels |
+| hipBLASLt library | Does the library validate its arguments, select a kernel, and dispatch it correctly? | Host unit tests against a fake kernel library; a thin end-to-end set on hardware | A thin layer | hipBLASLt team |
+
+Eight design rules make the kernel corpus layer concrete. The last two came out of the first corpus
+pass:
+
+1. **The corpus is what ships.** It is read from the installed library, the `TensileLibrary` files
+   the runtime actually loads, rather than from the logic YAML that should have produced them. It also
+   includes kernels that do not come from TensileLite at all (the rocRoller kernels, and any
+   hand-written ones). Those do not describe themselves in the same files, so the harness cannot plan
+   tests for them yet. How a kernel was generated does not change how it is tested.
+2. **The range of uses comes from the corpus's own data.** Each solution's logic entry already
+   records where it applies: its selection predicates and the sizes it was tuned for. A generator
+   reading that data can emit each solution's boundary cases, such as a K tail, M and N that are not
+   multiples of the tile, padded leading dimensions, batch counts, and buffers straddling 4 GiB. New
+   tuning then brings its tests with it, and "the full range of uses" becomes something a script can
+   check rather than a judgment call.
+3. **Launch through the public API, by solution index.** The code that packs a kernel's arguments
+   lives in TensileLite's C++ runtime
+   ([`ContractionSolution.cpp`](tensilelite/src/ContractionSolution.cpp)), and address-arithmetic
+   defects live there as often as in the kernels. A corpus harness with its own launcher would skip that
+   code. Launching each solution by index through hipBLASLt, as `algo_method` index selection already
+   does in the client suite, tests the real path while keeping the coverage target the kernel set
+   rather than the library.
+4. **Retest what changed.** Library logic, TensileLite, StinkyTofu, and compiler changes can all change
+   a shipped kernel. Rebuilding the kernels and comparing hashes of the code objects shows which ones
+   actually changed, so a pull request tests only those, and the full corpus runs on the nightly and
+   weekly cadences.
+5. **The corpus is a shared fixture.** StinkyTofu's scheduled-versus-unscheduled comparison needs
+   realistic kernels, and the corpus supplies them, so the layers share inputs without sharing
+   ownership.
+6. **Static checks of the corpus data belong to the corpus.** `TensileLogic --check-all` already
+   validates the library logic before codegen; under this split it is the corpus layer's static check.
+7. **A crash costs one case.** Some kernels fault the GPU or hang. The harness records the crash
+   against the case that caused it, checks that the GPU still runs a basic GEMM, and carries on in a
+   new process. Without that, one bad kernel ends the run and hides everything after it. It matters
+   most on gfx1250, where a bad memory access can wedge the GPU until a reboot (ROCM-32049).
+8. **Test the artifacts CI built.** The harness runs against TheRock CI's own build artifacts with
+   no rebuild, so it tests exactly what CI produced. It shards the way TheRock's test jobs do, so it
+   can move into them without rework.
+
+**What it would mean for the existing suites.**
+
+- **The hipBLASLt client suite becomes mostly host unit tests.** Its cases would be tagged as API-level
+  or kernel-level, and the kernel-level ones would move to the corpus as the corpus harness grows. It
+  keeps a thin end-to-end set on hardware, about one case per architecture and problem type, because
+  some failures only appear when real selection meets real kernels on a real device. The 38-CU
+  partition described in
+  [one number and three months](tensilelite/TESTING.md#how-this-one-was-learned-one-number-and-three-months)
+  is one. This move depends on the host-only link target (AIHPBLAS-5033) and on validation that runs
+  ahead of dispatch (AIHPBLAS-5034). Until both exist, and until the corpus layer does, the client suite
+  is the corpus test, however accidental, and nothing should be removed from it.
+- **`Tests/common` narrows to generator features.** Its sweeps over shapes of shipped kernels move to
+  the corpus, which answers the question of whether it and the client suite should share a harness:
+  they stop overlapping.
+- **StinkyTofu adds its bitwise comparison and hazard checks** over the corpus, rather than testing GEMM
+  numerics itself.
+- **Runner time concentrates in one layer.** That makes capacity easier to plan, and it means the
+  corpus layer needs an owner with a runner budget.
+
+**Open questions.** Who owns the corpus: the per-architecture tuning and logic owners, or a dedicated
+team? Where its harness lives once it lands in `develop`? Whether hipSPARSELt, which also ships
+TensileLite kernels, gets its own corpus or shares this one? These are open under AIHPBLAS-3894, and
+the inventory and the coverage model should inform the answers.
+
+### Kernel corpus testing
+
+The kernel corpus layer proposed above has started, as a test harness developed under AIHPBLAS-3894.
+It is not in `develop` yet, so no CI lane runs it. This section records where it stands and what it
+has taught us, and it changes as the work does.
+
+**What the first pass does.** The first pass, the smoke profile, has four steps:
+
+1. It reads every solution out of an installed hipBLASLt library (design rule 1).
+2. For each solution it builds four problems from that solution's own macro tile: an exact tile
+   multiple, ragged M and N, a K tail, and a strided batch of three.
+3. It runs each problem through `hipblaslt-test` with that solution pinned by index (design rule 3),
+   so the library's own predicates decide whether the solution accepts the problem, and fast_check
+   checks every element of D exactly.
+4. It records each result as it finishes, so a rerun resumes where the last run stopped, and a crash
+   costs only its own case (design rule 7).
+
+**How big the corpus is, and what the first pass found.** These counts come from TheRock CI
+artifacts for one `develop` commit in October 2026. Every tuning pull request changes them, so they
+are a dated snapshot rather than a standing fact.
+
+| Architecture | Solutions | First-pass result |
+| --- | --- | --- |
+| gfx90a | 24,625 | 22,380 pass all four problems. 4 fault the GPU; see [the write-up below](#how-this-one-was-learned-tuned-kernels-no-test-selected). The other 2,241 are kernel types the smoke profile does not build yet |
+| gfx942 | 360,667 | 6 return wrong answers and are in triage: 4 bf16, and 2 that mix fp8 and f16 inputs. About 110,000 run only on other gfx942 devices or partition modes, so the MI300X used could not reach them. 43,040 are kernel types the smoke profile does not build yet |
+| gfx950 | 84,370 | Being rerun, with better handling of which solutions belong to which gfx950 device. The first run found bf16 solutions returning about half the right answer, which look like the ROCM-32151 family |
+| gfx1100, gfx1101 | 2,077 and 1,566 | Clean |
+| gfx1200, gfx1201 | 85,880 and 52,632 | Clean |
+| gfx1150 | Not counted | Not run: the test client hangs at startup |
+| gfx1250 | About 3,000 per variant | Not run yet. The cluster used for the first pass has no gfx1250 hardware |
+
+A pass runs about 110 problems a second on an MI210, and 24 to 67 a second on the larger gfx950 and
+gfx120X libraries. That puts a full smoke pass at minutes to hours of GPU time per architecture. The
+smoke profile is affordable only because fast_check checks a GEMM exactly in a few milliseconds.
+
+**Phases.** The work after the first pass comes in four phases:
+
+1. **Finish the first pass and triage it.** Run the remaining architectures, and explain or file a
+   ticket for every family of failing or refused solutions.
+2. **Widen the per-kernel tests.**
+   - A boundary profile tests each solution at the edges of what its predicates accept, on both sides.
+     Just inside, the solution must give the right answer. Just outside, the library must refuse it.
+     A predicate that is too loose lets a kernel run where it is wrong, and one that is too strict
+     quietly discards a working kernel. Nothing tests either today.
+   - Stress profiles catch silent corruption that depends on timing, repetition, or buffer placement;
+     see [Silent corruption: what our tests own](#silent-corruption-what-our-tests-own).
+   - The kernel types the first pass skips get covered: grouped GEMM, gradient epilogues, the E
+     output, pre-swizzled inputs, and MX formats. A small sample per solution is also checked against
+     the CPU reference on realistic data, because fast_check proves exactness on integers but says
+     nothing about accuracy.
+3. **Land it in CI.** Measure what each profile costs, place each one at a cadence (see
+   [Cadence contract](#cadence-contract)), and select per pull request the kernels a change can affect
+   (design rule 4). Nightly and weekly runs come first. Presubmit and postsubmit follow, report-only
+   until false alarms are near zero.
+4. **Retire what it makes redundant.** Record which kernel every existing client case runs, compare
+   that with corpus coverage, and run both side by side before retiring anything. Kernel-level cases
+   then retire one pull request at a time, each with its evidence, as described under
+   [Who tests what](#who-tests-what). Running the same kernel is not enough on its own to retire a
+   case; philosophy rule 7 lists what the remaining tests must still exercise.
+
+**Which GPUs can reach which kernels.** Some solutions run only on one device, chosen by chip ID or by
+compute-unit count, and partition modes change the compute-unit count. The library skips those
+solutions anywhere else. So "every kernel" means about 25 device configurations, not one per
+architecture. CI has one runner type per architecture family:
+
+| Architecture | Device configurations its solutions target | CI runner | Solutions CI can reach |
+| --- | --- | --- | --- |
+| gfx90a | MI210 and MI250 | Not yet identified | Not yet measured |
+| gfx942 | MI300X or MI325X, MI300A, MI308X, and four smaller compute-unit counts, probably partition modes (to be confirmed) | MI300X | About 70% (250,928 of 360,667) |
+| gfx950 | MI350X, MI355X, a third chip ID (possibly MI350P), and one partition mode | MI350X | About 89% (75,112 of 84,370). The 8,660 solutions built for MI355X never run in CI |
+| gfx1250 | A base configuration and two variants | gfx1250 runners | Nearly all |
+| gfx110X, gfx115X, gfx120X | One device per architecture | One per family | One architecture per family |
+| gfx908, gfx1152 | One device each | None | None |
+
+The cluster used for the first pass has several of the devices CI lacks: MI355X, MI300A, MI308X,
+MI250, and three Radeon parts. The plan is a weekly cluster sweep for those devices, alongside the
+weekly CI pass. Every report will show three numbers per architecture: solutions tested in CI,
+solutions tested only on the cluster, and solutions not testable on any hardware we have.
+
+**Known failures in the corpus.** The corpus needs a way to record "this kernel is known broken, and
+here's the ticket," so that one bad kernel doesn't turn every run red. The proposal follows the four
+rules under [Keep it honest](#keep-it-honest), and borrows its structure from the TensileLogic list:
+
+- Each entry names an architecture and a solution, by a name that survives retuning, optionally
+  narrowed to one problem or one profile.
+- Each entry has a ticket and a review date.
+- A known-failing solution still runs on every pass. The report shows it as a known failure, and it
+  does not fail the run.
+- A known-failing solution that passes fails the run, with a message to remove the entry. A fix can't
+  go unnoticed.
+- An entry past its review date fails the run too, so nothing sits in the list forever.
+- The report lists every entry and its age.
+
+The first entries will be ROCM-33314 and whichever ROCM-32151 cases the first pass confirms. This list
+does not exist yet. It would be the tenth mechanism in
+[Known Bugs and Expected Failures](#known-bugs-and-expected-failures), and the first to meet all four
+rules.
+
+#### Silent corruption: what our tests own
+
+In late September and early October 2026, stress tools run by the hardware validation team found seven
+P1 hipBLASLt defects on gfx1250. Five returned success with a wrong answer, which is the worst failure
+a math library has. The internal gfx1250 nightly ran about 67,500 hipBLASLt tests a night over the same
+period and found none of them. Those tests ran the heuristic's first choice once, at small sizes, with
+no control over where buffers sit in memory. The seven came down to four causes:
+
+| Defect class | Tickets | What catches it | Where it is tested |
+| --- | --- | --- | --- |
+| A missing wait in StinkyTofu's hazard pass let a kernel overwrite a register it was still reading. It fired about once in 2,000 launches, and more often with a particular double-precision workload running beside it | ROCM-31905, ROCM-31901, ROCM-31918, ROCM-32099 | First, an independent static check that every hazard has a covering wait (StinkyTofu). Then repeated launches beside that workload, and enough repeats to catch a once-in-2,000 failure | Static check in StinkyTofu; repeats in the corpus stress profiles, starting on gfx1250 |
+| Persistent kernels reused LDS across tiles too early, with one combination of epilogue options | ROCM-32072 | Exact checks on shapes with several tiles per workgroup, and that option combination | Corpus boundary and stress profiles |
+| A 32-bit add dropped the carry when a buffer crossed a 4 GiB boundary | ROCM-32046 | Buffers placed across 4 GiB boundaries, with poison on either side. Placement makes it fail every time | fast_check placement cases today; the corpus stress profiles next |
+| A crash at one exact buffer size; cause not found | ROCM-32050 | Cases at and around the size thresholds | The client `stress` tier today |
+
+The stress tools find a bad run by repeating one calculation and flagging any answer that differs from
+the first. That's good at catching timing problems, but it can't see an answer that is wrong the same
+way every time. fast_check can. A repeatability check, comparing repeated runs bit for bit, is planned
+as report-only, because hipBLASLt makes no promise that repeated runs give identical results.
+
+Some of what the stress tools do should stay with them, because it screens hardware rather than
+library correctness: power and electrical stress, thermal limits, memory error counters, multi-hour
+soak runs, and whole-system multi-GPU checks.
+
+#### How this one was learned: tuned kernels no test selected
+
+> [!IMPORTANT]
+>
+> **Four gfx90a kernels, tuned for one customer's tall-skinny double-precision sizes, faulted the GPU
+> every time they ran, and no CI lane noticed, because nothing but those exact sizes selects them.**
+>
+> <details>
+> <summary>The full account: how a tuning change shipped kernels no test ran</summary>
+>
+> In October 2026, a tuning pull request
+> ([PR #11798](https://github.com/ROCm/rocm-libraries/pull/11798)) added f64 TN logic for gfx90a,
+> tuned for a customer workload that multiplies a tall, skinny matrix by its own transpose. The
+> selection table maps exactly four sizes, M = N in {1, 3, 5, 15} with K = 1,146,175, to four new
+> solutions. So the default heuristic picks those solutions at those sizes, and nowhere else.
+>
+> Every one of the four faults the GPU, on MI210 and on MI250. Pinned by index, they fault at every K
+> their predicates accept, from 960 up, so the defect is in the kernels rather than in the tuned
+> sizes. A customer running those sizes would hit the fault on the first call.
+>
+> No problem in the client suite uses those sizes, so the suite never selected the kernels, and every
+> lane stayed green. The kernel corpus found them on its first day, in about 15 minutes of GPU time on
+> one MI210, because it runs every shipped solution whether or not anything selects it. It's filed as
+> ROCM-33314.
+>
+> This is the reason the corpus layer exists. A tuning pull request adds kernels for exactly the sizes
+> it was tuned for, and the client suite tests whatever its own problem list happens to select. Those
+> two sets barely overlap, so new tuning is the least tested code in the library on the day it merges.
+> Retesting changed kernels on every pull request (design rule 4) would have run these four before the
+> merge.
+>
+> </details>
+
+### Cadence contract
+
+Each cadence maps to one of the cumulative tiers that the `test_categories.yaml` files in this
+directory already define. The budgets are the targets those files state today.
+
+| Cadence | Tier | Budget | Gates a merge | What it samples |
+| --- | --- | --- | --- | --- |
+| Presubmit | `quick`, then `standard` | About 30 minutes for `standard` | Yes | The highest-risk cases, on every architecture with pull-request runners |
+| Postsubmit | `standard` | Same as presubmit | No | The presubmit sample, on architectures without pull-request capacity |
+| Nightly | `comprehensive` | About two hours for the client suite | No | Broad sampling on every supported architecture, plus the performance lane |
+| Weekly | `full`, plus `stress` and `multi_gpu` | Hours | No | The densest sampling, plus the modes that need large memory, several GPUs, or managed memory |
+
+Prerelease runs use `full` as well. The rule for what runs at presubmit follows from the philosophy: a
+case earns a presubmit slot when its unique coverage of high-risk cases is high relative to its
+runtime. Everything else runs at a slower cadence, where it can afford to be denser.
+
+[Kernel corpus testing](#kernel-corpus-testing) follows the same cadences, with budgets of its own.
+None of it runs in CI yet. The numbers below are starting proposals, to be replaced with measured
+costs per profile and architecture once each profile has been timed.
+
+| Cadence | Corpus work | Budget |
+| --- | --- | --- |
+| Presubmit | The smoke profile on every kernel the change affects, the boundary profile on those up to a cap, and a small sample of each kernel type, on architectures with pull-request runners. A change that affects too many kernels tests a capped sample and says so on the pull request | Inside the existing `standard` budget: under 5 minutes for a change that affects no kernels, a few minutes for a tuning change |
+| Postsubmit | Every kernel changed since the last postsubmit run. It also records the kernel hashes that presubmit compares against | 30 minutes per architecture |
+| Nightly | Recently changed kernels, a rotating seventh of the corpus, and the nightly stress checks | 2 hours of wall time per architecture |
+| Weekly | The smoke profile over the whole corpus, whichever boundary slice is due, deep repeats on gfx1250, and large-buffer cases on large-memory runners. A cluster sweep covers the devices CI lacks | 8 hours of wall time |
+
+### Coverage model
+
+A math library has to be right across far more combinations than any suite can enumerate: types,
+shapes, layouts, batching, epilogues, scalar and value classes, entry points, kernel sources,
+architectures, and process conditions. [test_coverage_model.yaml](test_coverage_model.yaml) names
+those axes, splits each into a small number of classes plus the boundaries between them, and rates
+each class for the likelihood of a defect and the impact of one escaping. The product of the two is a
+priority from 1 to 9. The ratings are ordinal on purpose. They are a starting proposal, to be
+recalibrated against escaped defects: every escape gets tagged with the class it lived in, and a
+high-impact escape from a class rated low means the rating was wrong.
+
+The model also records combinations that are not valid (so they do not count as gaps) and the pairs
+of axes that should be covered pairwise, since most interaction defects involve two factors. Each
+suite in the inventory says which classes it is meant to reach through `covers`. That is a claim
+about intent until it is measured. Three measurements are planned under the Inventory workstream, and
+one of them has started:
+
+- **Static expansion.** Expand the client test data the way the build does, place every generated
+  case in its classes, and report per-class and pairwise coverage by tier and architecture, with the
+  uncovered classes ranked by priority. No GPU is needed.
+- **Kernel coverage (in progress).** For each architecture, the fraction of shipped solutions that
+  any test executes. hipBLASLt is in effect a very large table of generated kernels. The kernel corpus
+  (see [Kernel corpus testing](#kernel-corpus-testing)) tests that table directly, and its reports
+  record which solutions ran, on which device, and which no device we have can reach. What is still
+  unmeasured is how much of the table the client suite and `Tests/common` touch today.
+- **Usage overlay.** Place real calls in the same classes, from the sizes in the library logic YAML,
+  the nightly performance problem lists, and bench-mode traces of framework workloads, so coverage
+  can be weighted by how the library is actually used.
+
+### Workstreams
+
+Five workstreams carry the plan. Every ticket in either Known Risks and Gaps table, in this document
+and in [tensilelite/TESTING.md](tensilelite/TESTING.md#known-risks-and-gaps), belongs to exactly one of
+them. The tactical fixes this section used to list keep their tickets and their detail; they now sit
+under the workstream they serve.
+
+#### Inventory
+
+**Goal.** Know what we have: every suite and lane for both products, what it covers, where and how
+often it runs, whether it gates, what it costs, and who owns it.
+
+**Done when** "where does this run?" and "what covers this?" are answered by looking something up
+rather than by asking around.
+
+- **Keep [test_inventory.yaml](test_inventory.yaml) current.** It lists every suite in both products
+  with where it runs today, with evidence for each placement, and where this plan would put it. A new
+  lane, or a change to what an existing one gates, updates the inventory in the same pull request.
+- **Measure coverage against [test_coverage_model.yaml](test_coverage_model.yaml).** Static
+  expansion first, then kernel coverage, then the usage overlay, as described under
+  [Coverage model](#coverage-model). Tickets for each will be filed under AIHPBLAS-5028.
+- **Publish the required-check list**
+  ([#12996](https://github.com/ROCm/rocm-libraries/issues/12996)). Document which checks actually
+  block a merge, so contributors and reviewers stop guessing. The lane tables in this document and in
+  [tensilelite/TESTING.md](tensilelite/TESTING.md#where-these-tests-actually-run) are a start, and
+  [docs/gardening.md](../../docs/gardening.md) has a list, but it has already drifted. This belongs
+  somewhere it cannot drift from the repository ruleset itself.
+- **Make what Math CI runs visible from this repository** (ROCM-31467). Its configuration lives in an
+  internal repository, so until both products have moved to TheRock CI, this document is the only
+  description a contributor can read.
+
+#### Cadence
+
+**Goal.** Every suite has a tier and a cadence under the [cadence contract](#cadence-contract), and
+each cadence fits its budget.
+
+**Done when** each suite in the inventory names its tier and cadence, presubmit fits its budget, and
+the weekly cadence exists.
+
+- **Prune redundant numerical variants** (AIHPBLAS-5036) in the client suite to buy back runtime,
+  and spend it on architecture breadth per PR. An earlier C++ coverage experiment is the starting
+  point: on an MI210, 60 tests reached the same 5,347 host-source lines as all 24,992 candidates. Two
+  limits travel with that number. Failed tests still contributed coverage, and generated kernels were
+  outside the measurement, so it says nothing about kernel coverage. Equal lines are also not enough
+  on their own to prune a case (philosophy rule 7).
+- **Keep TheRock's `Test tensilelite` job inside its time limit**
+  ([#14049](https://github.com/ROCm/rocm-libraries/issues/14049)). `quick` and `standard` select the
+  same unit tests, and `quick` runs under a 15-minute cap. Several unit tests read the metadata of
+  every shipped custom kernel, so the job's wall time grows with each kernel added. Metadata parsing
+  is now much cheaper, but nothing yet stops the job from growing back past the cap. Tiering the
+  unit tests so `quick` is a real subset is the durable fix.
+- **Shard TheRock's `tensilelite-common` job** (AIHPBLAS-5040). gfx950 is on the pull-request path
+  as of the TheRock pin of 2026-10-02, and the job still runs unsharded with a 180-minute timeout.
+  gfx950 takes about two hours, so the job is already a two-hour gate on pull requests. Split the
+  suite across shards.
+- **Make a sanitizer lane a required check** (AIHPBLAS-1079). The ASAN lanes run on every hipBLASLt
+  pull request, but none of them can block a merge.
+- **Add TSAN and UBSAN as run modes** (AIHPBLAS-5035). TSAN build options exist but no lane uses them,
+  and there is no UBSAN at all.
+
+#### Consolidate
+
+**Goal.** Each suite runs in one home per cadence, TheRock CI, as Math CI is retired.
+
+**Done when** both products' testing has moved off Math CI, and no suite runs in more than one lane at
+the same cadence unless the inventory records why.
+
+- **Move TensileLite's testing to TheRock CI** (AIHPBLAS-3354). This is the main deliverable of the
+  workstream. It resolves the `preliminary` rows in
+  [tensilelite/TESTING.md#ci-visibility-and-gating](tensilelite/TESTING.md#ci-visibility-and-gating)
+  (no signal for rocRoller-only and mxdatagenerator-only changes, and `unit` running ahead of
+  `common`), and it is where the four-lane duplication of the TensileLite suite gets resolved.
+- **Run `Tests/common` on every architecture TensileLite supports**
+  ([#12491](https://github.com/ROCm/rocm-libraries/issues/12491)). In TheRock it runs on gfx90a,
+  gfx942, gfx950, and gfx120X today, and only gfx942 and gfx950 on the pull-request path.
+- **Make the test suite resolve its own toolchain** (AIHPBLAS-5039). Some characterization tests
+  locate `amdclang++` through a bare `shutil.which` with a `/usr/bin` fallback, while others already
+  use `validateToolchain`, which checks `ROCM_PATH` first. For the bare ones, whether they pass
+  depends on how the surrounding lane happened to order `PATH`, so the same tests behave differently
+  in different lanes for reasons that have nothing to do with the code under test. Resolving the
+  toolchain the same way everywhere removes a recurring source of false failures, and it is a
+  precondition for running one suite in one place.
+
+#### Fill the holes
+
+**Goal.** New test investment lands where risk is highest and coverage is lowest, as the coverage
+model describes it, at the cadence the contract assigns.
+
+**Done when** every high-likelihood, high-impact area in the coverage model is covered at some
+cadence, and pull requests get a performance number.
+
+- **Get a performance number onto the change** (AIHPBLAS-5029, with architecture and shape breadth
+  in AIHPBLAS-5030). Pull requests are not benchmarked today, so this builds something new rather
+  than repairing something. The nightly lane already has the pieces worth reusing:
+  version-controlled datasets, a comparison against a baseline, and a runner pool. What we would
+  like, roughly in order:
+
+  - A measurement tied to one commit, on a small and fast problem set, with the result visible to
+    the author on the pull request. Feedback first; gating only once it is stable enough not to
+    become the thing everyone reruns.
+  - Architecture coverage beyond gfx950, prioritized by where the library ships tuned kernels and
+    where customers run.
+  - Shape coverage along the two axes today's sample holds fixed: batch counts, including batched
+    FP8, and padded leading dimensions.
+  - A stability story before a threshold: enable the harness's adaptive sampling, or pin clocks, or
+    both, so the noise floor is a measured quantity rather than an assumption.
+  - Problem lists version controlled in this repository, so a change to what we measure is reviewed
+    like any other change. This is how the nightly lane manages its datasets and is worth copying.
+  - A lane that reports its own failure. One that says nothing when it works and nothing when it
+    breaks will stop working without anyone noticing.
+  - A named owner for the signal.
+
+- **Test every shipped kernel** (AIHPBLAS-3894). Build out the kernel corpus layer through the phases
+  under [Kernel corpus testing](#kernel-corpus-testing): finish and triage the first pass, add the
+  boundary and stress profiles and the skipped kernel types, land them in CI at the cadences above,
+  and then retire the client cases the corpus makes redundant.
+- **Test address and launch-size arithmetic past 32-bit thresholds systematically** (AIHPBLAS-4988).
+  Several defects of this kind returned success with wrong or partly unwritten output, which is the
+  worst failure mode a math library has.
+- **Test the public API itself** (AIHPBLAS-3579): compile the public headers from a C translation
+  unit and with more than one toolchain, and check public macro and type names.
+- **Widen multi-GPU coverage** (AIHPBLAS-4625) beyond its one feature, fused GEMM plus all-to-all.
+- **Create a host-only link target for library internals** (AIHPBLAS-5033), resolving the
+  include-path collision, so C++ unit tests can reach validation, enum and string mapping,
+  tuning-override parsing, and workspace-sizing logic without linking the whole shared library.
+  Everything in the C++ unit-test backlog is blocked behind this one change.
+- **Extract validation ahead of dispatch** (AIHPBLAS-5034) so argument-error paths are reachable
+  without a GPU.
+- **Unify the three parallel enum-to-string tables** (AIHPBLAS-3558), covering the client, library,
+  and test-data YAML tables, or at minimum add a test that asserts they agree. They can drift today,
+  and a drift produces confusing test-selection behavior rather than an obvious failure.
+- **Run derived-parameter assignment in the library logic gate** (AIHPBLAS-3575), so a logic entry
+  that would fail in code generation fails at the gate instead.
+- **Give the chip-ID-arch-lock check coverage everywhere**
+  ([#7481](https://github.com/ROCm/rocm-libraries/issues/7481)). Its pytest copies never run in
+  TheRock, because the installed tree does not ship the logic corpus, and gfx1250 gets no TheRock test
+  stage at all.
+
+#### Keep it honest
+
+**Goal.** The rules that stop the test system from decaying again once it has been regularized.
+
+**Done when** every suppression follows one policy and a report shows what is suppressed and for how
+long, both languages get static analysis on a pull request, and the characterization-to-unit
+migration has a target.
+
+- **Govern known-bug entries as one thing** (AIHPBLAS-5031). Nine mechanisms suppress or record
+  known-bad behavior and none of them share a convention. The proposal, which needs team agreement
+  before it becomes policy, is four rules:
+
+  - Every entry names its ticket in a machine-readable field rather than a comment, so ownership and
+    status live on the ticket where they can be kept current, instead of as a name in a file that
+    goes stale.
+  - Every entry carries a review date.
+  - The suppressed code keeps running wherever the mechanism allows, so a fix can be observed rather
+    than assumed.
+  - A fix fails the build, so the entry deletes itself.
+
+  Some mechanisms cannot satisfy the third rule today, among them the client quarantine list and the
+  coverage-pass filters, so adopting this means changing them or accepting a stated exception. Start
+  by splitting flaky from known-failing in the client quarantine list, which is the largest and
+  blindest surface.
+
+- **Enforce `--strict-known-bugs` in its own lane** (AIHPBLAS-4196). The detection already exists;
+  what is missing is a job that fails on a stale entry. A dedicated GitHub Actions job is the right
+  home for it, because the flag cannot be turned on inside the build without failing local developer
+  builds. Worth extending to orphaned entries, which are silently ignored today.
+- **Put a number on the characterization-to-unit migration** (AIHPBLAS-5041). The split summary
+  card already computes the characterization-only statement count. Track it over time and set a
+  target on it, so the migration has a gate rather than a dashboard nobody is accountable for.
+  Without this, the union floors are fully satisfiable by a codebase that is pinned everywhere and
+  verified nowhere, and the scaffolding has no expiry date.
+- **Graduate mutation testing** (AIHPBLAS-3868) from a report-only pilot to a maintained signal on
+  the modules where it has demonstrated value. This is the companion to the migration item above:
+  until a module has real unit tests, its mutation score is the only evidence that its goldens would
+  actually catch a regression rather than just execute the code.
+- **Introduce real static analysis on the C++ library** (AIHPBLAS-5032). Add a `.clang-tidy` with a
+  deliberately small starting rule set, wire it into the build the way sibling projects in this
+  repository already do, and ratchet it rather than trying to land a clean full-strength run. Adding
+  `cpp` to the CodeQL language matrix is the cheaper first step and would at least produce a weekly
+  signal.
+- **Run the Python linter that already exists** (AIHPBLAS-5037). `tox -e lint` is configured and
+  invoked by nothing.
+- **Type checking on TensileLite** (AIHPBLAS-5038). No type checking exists today despite type hints
+  being a documented style rule. A large dynamically typed code generator with no type verification
+  is a standing risk.
+- **Record every result as evidence** (AIHPBLAS-5245). Give each test scenario a stable identity,
+  and record with each run the source and build versions, the GPU, the flags, why the scenario was
+  selected, whether it ran or was skipped, its runtime, any defect links, and its result artifacts,
+  in a shared results record. That is what lets a pruning or retirement decision cite evidence, and
+  lets a defect be traced back to what was supposed to catch it. Measure feedback time, from a
+  change to its first test signal, alongside escaped regressions, so a faster suite that catches
+  less shows up as a trade rather than a win.
+
+### How this plan develops
+
+Two data files carry the plan's detail, both in this directory and both covering hipBLASLt and
+TensileLite together.
+
+[test_inventory.yaml](test_inventory.yaml) lists every suite and lane: its kind and mode from
+[Target test kinds](#target-test-kinds), where it runs today with evidence for each placement, where
+the plan would put it, and a proposed disposition (keep, merge, migrate, demote, retire, or review)
+with a rationale. Every target and disposition in it is a proposal; a retirement needs the owning
+team's agreement first. Building it surfaced three lanes this document does not describe yet (the
+GEKO component lane, the advisory rocjitsu race check, and an on-demand gfx1250 workflow). Those are
+recorded in the inventory as `review` items rather than settled here. It also surfaced a
+disagreement between the two documents on whether Math CI measures C++ coverage. It does, as
+[Coverage](#coverage) now describes.
+
+[test_coverage_model.yaml](test_coverage_model.yaml) describes the space of ways the library gets
+called, with a risk rating on each part of it (see [Coverage model](#coverage-model)), so that "are we
+testing the odd ways this library gets used?" can get an answer that is more than a feeling.
 
 ## Known Risks and Gaps
 
@@ -1261,8 +1797,8 @@ this document does, and a stale name in a repository file is worse than no name 
 authoritative. Instead each row points at a work item, which is where ownership, status and priority
 can actually be kept current. An empty cell would mean the gap is real, acknowledged, and not yet
 tracked anywhere. As of October 2026 every row has a ticket, and a new row should arrive with one.
-Each ticket tracks one shortcoming rather than a strategy; the testing redesign described under
-[Improvement Roadmap](#improvement-roadmap) will regroup them. Gaps that had no better home are
+Each ticket tracks one shortcoming rather than a strategy, and each one belongs to exactly one
+workstream under [Improvement Roadmap](#improvement-roadmap). Gaps that had no better home are
 collected under the umbrella epic AIHPBLAS-5028.
 
 ### Performance
@@ -1298,6 +1834,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 
 | Gap | Regression risk | Impact | Mitigation today | Tracking |
 | --- | --- | --- | --- | --- |
+| Shipped kernels that no test problem selects never run in CI. The first corpus pass found four on gfx90a that fault the GPU every time (ROCM-33314) | High | High | The client suite runs whichever kernel each of its own problems selects; fast_check's every-solution cases widen that for chosen shapes | AIHPBLAS-3894 |
 | Very little of the C++ library is unit-testable; the blockers are structural | Medium | Medium | Heavy integration coverage compensates, at the cost of slow feedback | AIHPBLAS-5033 |
 | Address, index, and launch-size arithmetic past 32-bit thresholds is not tested systematically. Several defects of this kind returned success with wrong or partly unwritten output | Medium | High | Targeted large-size regression tests for individual past defects | AIHPBLAS-4988 |
 | Nothing tests the public API itself: no test compiles the public headers from a C translation unit or with more than one toolchain, or checks public macro and type names, so several API breaks were found by users first | Medium | Medium | The client suite exercises the API through C++ only | AIHPBLAS-3579 |
