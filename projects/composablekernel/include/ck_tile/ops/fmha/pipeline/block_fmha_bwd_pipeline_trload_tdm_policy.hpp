@@ -118,6 +118,73 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy : BlockFmhaBwdPipelineTrLoadDefaultPo
                                            Problem::BlockFmhaShape::kVHeaddim>();
     }
 
+    // dS @ K^T with the transposed warp C layout: each lane owns a run of
+    // consecutive hdim elements of dQ (instead of a run of rows), so the dQ
+    // epilogue can use 16-byte stores. Only the C layout changes; the A/B
+    // register layouts are the same as the trload policy's.
+    // Transposed C only pays off when dQ can be stored as vectors; with a
+    // 1-element hdim pad keep the trload layout.
+    template <typename Problem>
+    static constexpr bool kDQAlongHdim = Problem::kPadHeadDimQ != 1;
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetSGradKTBlockGemm()
+    {
+        if constexpr(!kDQAlongHdim<Problem>)
+            return BlockFmhaBwdPipelineTrLoadDefaultPolicy::GetSGradKTBlockGemm<Problem>();
+        else
+            return GetSGradKTBlockGemmTransposedC<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetSGradKTBlockGemmTransposedC()
+    {
+        using BlockFmhaShape = typename Problem::BlockFmhaShape;
+        using GemmProblem    = BlockGemmProblem<
+               typename Problem::GemmDataType,
+               typename Problem::KDataType,
+               typename Problem::AccDataType,
+               Problem::kBlockSize,
+               TileGemmShape<
+                   sequence<BlockFmhaShape::kM0, BlockFmhaShape::kQKHeaddim, BlockFmhaShape::kK4>,
+                   typename BlockFmhaShape::Gemm4BlockWarps,
+                   typename BlockFmhaShape::Gemm4WarpTile>>;
+        using WarpGemm = WarpGemmDispatcher< //
+            typename Problem::GemmDataType,
+            typename Problem::KDataType,
+            typename Problem::AccDataType,
+            BlockFmhaShape::Gemm4WarpTile::at(number<0>{}),
+            BlockFmhaShape::Gemm4WarpTile::at(number<1>{}),
+            BlockFmhaShape::Gemm4WarpTile::at(number<2>{}),
+            /*TransposeC=*/true,
+            false,
+            false,
+            WGAttrNumAccessEnum::Default>;
+
+        using BlockGemmPolicy =
+            BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,
+                                                typename Problem::KDataType,
+                                                typename Problem::AccDataType,
+                                                typename BlockFmhaShape::Gemm4BlockWarps,
+                                                WarpGemm>;
+
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    // Vector width of the dQ store, matching the per-lane hdim run of the
+    // transposed gemm_4 C layout above.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetAlignmentQGradStore()
+    {
+        constexpr index_t kVec = 16 / sizeof(typename Problem::QGradDataType);
+        if constexpr(!kDQAlongHdim<Problem>)
+            return 1;
+        else if constexpr(Problem::kPadHeadDimQ > 0)
+            return min(kVec, static_cast<index_t>(Problem::kPadHeadDimQ));
+        else
+            return kVec;
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKTRegBlockDescriptor()
     {

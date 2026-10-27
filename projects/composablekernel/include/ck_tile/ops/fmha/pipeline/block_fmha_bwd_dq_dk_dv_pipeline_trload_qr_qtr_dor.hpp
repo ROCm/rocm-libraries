@@ -89,7 +89,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         kPadHeadDimV ? kPadHeadDimV : Policy::template GetAlignmentV<Problem>();
     static constexpr index_t kAlignmentOGrad =
         kPadHeadDimV ? kPadHeadDimV : Policy::template GetAlignmentOGrad<Problem>();
-    static constexpr index_t kAlignmentQGrad = 1;
+    // The TDM policy lays gemm_4's C out along hdim, so unpadded dQ can be
+    // stored 16 bytes at a time.
+    static constexpr index_t kAlignmentQGrad = [] {
+        if constexpr(Policy::kUsesTdm)
+            return Policy::template GetAlignmentQGradStore<Problem>();
+        else
+            return 1;
+    }();
     static constexpr index_t kAlignmentKGrad =
         kPadHeadDimQ ? kPadHeadDimQ : Policy::template GetAlignmentKGrad<Problem>();
     static constexpr index_t kAlignmentVGrad =
