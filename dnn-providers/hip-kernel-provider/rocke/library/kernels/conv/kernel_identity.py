@@ -550,6 +550,15 @@ def identity_supports_problem(
         if actual is not None and int(actual) != baked:
             return False, f"{name}={baked} but problem has {actual}"
 
+    # A baked stride/dilation (the stride-1 dgrad binary) holds along depth
+    # too: on a 3-D problem it only serves sD == stride_h and dD == dilation_h.
+    if identity.is_3d and not identity.is_direct:
+        for name, attr in (("stride_h", "sD"), ("dilation_h", "dD")):
+            baked = getattr(identity, name)
+            actual = getattr(problem, attr, None)
+            if baked and actual is not None and int(actual) != baked:
+                return False, f"{name}={baked} but problem has {attr}={actual}"
+
     # 0 means runtime here, for direct conv too: the non-grouped direct
     # kernel takes its channel counts as kernargs (cpg == 0 is never a
     # real shape, unlike PAD == 0 above).

@@ -219,6 +219,15 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 # stride-1 capability is built with the tap-outer K loop only (see
 # _dgrad_tap_outer_variants).
 CACHE_GROUPED: Tuple[bool, ...] = (True,)
+# Spatial rank of the cached binaries: False = 2-D (NHWC), True = 3-D (NDHWC).
+# The 3-D kernels decode a depth axis, so they are distinct binaries. Only 2-D
+# is built by default; ROCKE_AOT_SPATIAL=3d (or 2d,3d) adds the 3-D grid.
+import os as _os
+CACHE_SPATIAL_3D: Tuple[bool, ...] = tuple(
+    {"2d": False, "3d": True}[v.strip()]
+    for v in _os.environ.get("ROCKE_AOT_SPATIAL", "2d").split(",")
+    if v.strip()
+)
 # Whether the stride-1 dgrad binaries are built next to the tilde ones.
 CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
 # dY halo binaries (DgradConvSpec.dy_halo): a capped sub-grid, not the
@@ -352,7 +361,12 @@ _WGRAD_EXTRA_TILE_MN = CACHE_WGRAD_EXTRA_TILE_MN
 _WGRAD_EXTRA_WARP_MN = CACHE_WGRAD_EXTRA_WARP_MN
 _WARP_TILE_MN = CACHE_WARP_TILE_MN
 _MAX_ACC_REGS = CACHE_MAX_ACC_REGS
-_VECS = CACHE_VECS
+# ROCKE_AOT_VECS (e.g. "8") narrows the vector widths a scoped cache builds:
+# --run-from-cache only offers the widest widths a problem admits unless
+# --all-vector-sizes, so a cache for known shapes needs no narrower ones.
+_VECS = tuple(
+    int(v) for v in _os.environ.get("ROCKE_AOT_VECS", "").split(",") if v.strip()
+) or CACHE_VECS
 _PIPELINES = CACHE_PIPELINES
 _EPILOGUES = CACHE_EPILOGUES
 _GROUPED = CACHE_GROUPED
@@ -478,17 +492,18 @@ def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
 
 def _layout_caps() -> List[dict]:
     """The grouped capability variants fwd and wgrad build."""
-    return [dict(grouped=g) for g in _GROUPED]
+    return [dict(grouped=g, is_3d=d) for d in CACHE_SPATIAL_3D for g in _GROUPED]
 
 
 def _dgrad_caps() -> List[dict]:
     """dgrad's capability variants: grouped x (tilde, stride 1 / dilation 1)."""
     return [
         (
-            {"grouped": g, "stride": 1, "dilation": 1}
+            {"grouped": g, "stride": 1, "dilation": 1, "is_3d": d}
             if s1
-            else {"grouped": g, "tilde": True}
+            else {"grouped": g, "tilde": True, "is_3d": d}
         )
+        for d in CACHE_SPATIAL_3D
         for s1 in CACHE_DGRAD_STRIDE1
         for g in _GROUPED
     ]
@@ -666,6 +681,7 @@ def _fwd_jobs(
                         dtype_b=db,
                         dtype_d=dd,
                         grouped=grouped,
+                        is_3d=caps.get("is_3d", False),
                         **_async_chunks(cfg, (da, db, dd), caps, arch),
                         **cfg,
                     ),
@@ -965,6 +981,7 @@ def _wgrad_jobs(
                         dtype_b=db,
                         dtype_d=dd,
                         grouped=grouped,
+                        is_3d=caps.get("is_3d", False),
                         **cfg,
                     ),
                     direction="wgrad",
@@ -1186,6 +1203,7 @@ def _dgrad_jobs(
                         dtype_b=db,
                         dtype_d=dd,
                         grouped=grouped,
+                        is_3d=caps.get("is_3d", False),
                         stride_h=caps.get("stride", 0),
                         stride_w=caps.get("stride", 0),
                         dilation_h=caps.get("dilation", 0),
@@ -1564,6 +1582,34 @@ def _direction_jobs(
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
     **kw,
 ) -> Iterator[BuildJob]:
+    jobs = _direction_jobs_all(
+        direction,
+        arch,
+        dtype,
+        target,
+        split_ks,
+        max_sub_gemms,
+        streamk_modes=streamk_modes,
+        streamk_reductions=streamk_reductions,
+        **kw,
+    )
+    # The group-merged, stream-K, halo and patch generators build 2-D
+    # kernels only; drop whatever rank CACHE_SPATIAL_3D did not ask for.
+    return (j for j in jobs if j.identity.is_3d in CACHE_SPATIAL_3D)
+
+
+def _direction_jobs_all(
+    direction: str,
+    arch: str,
+    dtype: str,
+    target,
+    split_ks: Sequence[int],
+    max_sub_gemms: int,
+    *,
+    streamk_modes: Sequence[str] = (),
+    streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    **kw,
+) -> Iterator[BuildJob]:
     wave_size = target.wave_size
     mma_family = "wmma" if wave_size == 32 else "mma"
     if direction == "fwd":
@@ -1647,6 +1693,10 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
         # Merging is depthwise only: cpg = kpg = 1, and 64 groups divide by
         # every merge degree.
         groups, channels = 64, 1
+    depth = {}
+    if caps.get("is_3d"):
+        # NDHWC: same rules along depth, so the binary decodes a real D axis.
+        depth = dict(Di=extent, Z=3, sD=stride, dD=dilation, pD=dilation)
     return ConvProblem(
         N=1,
         Hi=extent,
@@ -1662,6 +1712,7 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
         pH=dilation,
         pW=dilation,
         groups=groups,
+        **depth,
     )
 
 
