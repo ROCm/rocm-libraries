@@ -29,6 +29,14 @@ from rocisa.functions import BranchIfNotZero
 
 from .Common.DataType import DataType
 
+# Result component, A/B components, and the corresponding negation slot.
+COMPLEX_MFMA_TERMS = (
+    ("r", "r", "r", None),
+    ("r", "i", "i", 0),
+    ("i", "i", "r", 1),
+    ("i", "r", "i", 2),
+)
+
 def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
   #TODO: refactor this
   skipGR = tensorcnt > -1

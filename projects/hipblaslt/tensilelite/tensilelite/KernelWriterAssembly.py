@@ -25,6 +25,7 @@
 
 from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
+from .KernelWriterModules import COMPLEX_MFMA_TERMS
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
@@ -10711,7 +10712,7 @@ class KernelWriterAssembly(KernelWriter):
             mStr     = vgpr(mStr, vgprPerInputM)
 
           if kernel["ProblemType"]["DataType"].isComplex():
-            # override because complex mul is emulated by 4 mfma insts
+            complexProduct = Module("complexProduct")
             # TODO: adopt component system
             miInInstType = miOutInstType #"f32" for SingleComplex, "f64" for DoubleComplex
             ccA = kernel["ProblemType"]["ComplexConjugateA"]
@@ -10719,8 +10720,6 @@ class KernelWriterAssembly(KernelWriter):
             ccVgprs = [None]*3 # three terms that can be negated: [real1, imag0, imag1]
             ccInsts = [None]*3
             accImOffset = accVgprImagNumOffset(kernel)
-            accStartSrcImg = accStart+accImOffset
-            accEndSrcImg = accStartSrcImg + accs_per_wave - 1
 
             # vgpr A,B setting. In complex case, numRegistersIn does not match. Use numRegistersOut instead
             # WMMA (non-MFMA) K>1 loads complex operands interleaved as [r0,i0,r1,i1,...];
@@ -10736,8 +10735,8 @@ class KernelWriterAssembly(KernelWriter):
                 reBase = planar
                 imBase = planar + numMIInputA
                 for k in range(numMIInputA):
-                  imod.add(VMovB32(dst=vgpr(reBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersIn)),   comment="deint %s re[%u]"%(tag, k)))
-                  imod.add(VMovB32(dst=vgpr(imBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersIn+1)), comment="deint %s im[%u]"%(tag, k)))
+                  complexProduct.add(VMovB32(dst=vgpr(reBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersIn)),   comment="deint %s re[%u]"%(tag, k)))
+                  complexProduct.add(VMovB32(dst=vgpr(imBase + k), src=vgpr(srcBase + "+%u"%(k*numRegistersIn+1)), comment="deint %s im[%u]"%(tag, k)))
                 return reBase, imBase
               arBase, aiBase = _deinterleave(aStr_base, numRegistersInA, "A")
               brBase, biBase = _deinterleave(bStr_base, numRegistersInB, "B")
@@ -10778,26 +10777,23 @@ class KernelWriterAssembly(KernelWriter):
                 cmt = "Ar=-Ar" if arrayIndex == 2 else "Ai=-Ai"
                 ccInsts[arrayIndex] = _negateOperand(ccVgprs[arrayIndex], srcBase, srcMinus, cmt)
                 zgemmVaddSrcCheck[arrayIndex].append(src)
-            (src0, src1) = (br, ar) if kernel["SourceSwap"] else (ar, br)
             for inst in ccInsts:
               if inst is not None:
-                imod.add(inst)
+                complexProduct.add(inst)
             variant = [kernel["MIBlock"][0], kernel["MIBlock"][1], kernel["MatrixInstK"], kernel["MatrixInstB"]]
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                     comment="Cr += Ar*Br"))
-            (src0, src1) = (bi, (vgpr(ccVgprs[0] + offsetVgpr[0], ccWidth) if ccVgprs[0] else ai)) if kernel["SourceSwap"] else ((vgpr(ccVgprs[0] + offsetVgpr[0], ccWidth) if ccVgprs[0] else ai), bi)
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                     comment="Cr += %sAi*Bi"%("-" if ccVgprs[0] else "")))
-            (src0, src1) = (br, (vgpr(ccVgprs[1] + offsetVgpr[1], ccWidth) if ccVgprs[1] else ai)) if kernel["SourceSwap"] else ((vgpr(ccVgprs[1] + offsetVgpr[1], ccWidth) if ccVgprs[1] else ai), br)
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, (accStart+accImOffset), (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStartSrcImg, (accEndSrcImg-accStartSrcImg+1)), \
-                     comment="Ci += %sAi*Br"%("-" if ccVgprs[1] else "")))
-            (src0, src1) = (bi, (vgpr(ccVgprs[2] + offsetVgpr[2], ccWidth) if ccVgprs[2] else ar)) if kernel["SourceSwap"] else ((vgpr(ccVgprs[2] + offsetVgpr[2], ccWidth) if ccVgprs[2] else ar), bi)
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, (accStart+accImOffset+accStoreCIdx), (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStartSrcImg, (accEndSrcImg-accStartSrcImg+1)), \
-                     comment="Ci += %sAr*Bi"%("-" if ccVgprs[2] else "")))
+            for component, aComponent, bComponent, negateIndex in COMPLEX_MFMA_TERMS:
+              srcA = ar if aComponent == "r" else ai
+              negated = negateIndex is not None and ccVgprs[negateIndex] is not None
+              if negated:
+                srcA = vgpr(ccVgprs[negateIndex] + offsetVgpr[negateIndex], ccWidth)
+              srcB = br if bComponent == "r" else bi
+              (src0, src1) = (srcB, srcA) if kernel["SourceSwap"] else (srcA, srcB)
+              accBase = accStart + (accImOffset if component == "i" else 0)
+              accDst = accBase + (accStoreCIdx if bComponent == "i" else 0)
+              complexProduct.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
+                       acc=self.accVgprReadWriteIndex(kernel, accDst, (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accBase, (accEnd-accStart+1)), \
+                       comment="C%s += %sA%s*B%s"%(component, "-" if negated else "", aComponent, bComponent)))
+            imod.add(complexProduct)
             for v in ccVgprs:
               if v is not None: self.vgprPool.checkIn(v)
             for v in deintTmps:
