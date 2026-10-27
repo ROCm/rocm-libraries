@@ -230,7 +230,8 @@ TEST(ApiExport, StinkyIRConverterPopulateFromParsed) {
     pf.blocks[0]->blockId = "entry";
     Function func("f");
     GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
-    (void)StinkyIRConverter::populateFunctionFromParsed(pf, func, arch);
+    std::vector<Diagnostic> diagnostics;
+    (void)StinkyIRConverter::populateFunctionFromParsed(pf, func, arch, diagnostics);
 }
 
 TEST(ApiExport, StinkyAsmEmitter) {

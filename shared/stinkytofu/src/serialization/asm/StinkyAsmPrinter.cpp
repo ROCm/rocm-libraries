@@ -326,6 +326,16 @@ bool AsmPrinter::printModifierAsDict(const Modifier& mod) {
     return ModifierSerializer::serialize(mod, os);
 }
 
+bool AsmPrinter::printModifier(const Modifier& mod) {
+    std::ostringstream attribute;
+    if (!ModifierSerializer::serialize(mod, attribute)) return false;
+    std::string text = attribute.str();
+    // The serializer writes the ", " that joins attributes on an op line.
+    if (text.rfind(", ", 0) == 0) text.erase(0, 2);
+    os << text;
+    return true;
+}
+
 void AsmPrinter::printDirective(const AsmDirective& directive, int baseIndent) {
     os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
     os << "\"st.asm_directive\"(\"" << directive.name << "\"";

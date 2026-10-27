@@ -35,6 +35,8 @@ enum class StinkyErrorCode : int {
     SUCCESS = 0,
     PASSCTX_EMPTY = 1,
     PARSE_ERROR = 2,
+    /// The text parsed, but an instruction or block edge could not be built for the arch.
+    CONVERT_ERROR = 3,
 };
 
 /// GEMM-specific tile configuration

@@ -635,6 +635,94 @@ st.func @temp() {
     EXPECT_EQ(result.parsedFunction->blocks[0]->instructions[1]->opcodeStr, "s_wait_dscnt");
 }
 
+TEST_F(IRParserTest, ParsesModuleWrapperAndKeepsItsName) {
+    const std::string input = R"(st.module @Cijk_MT16x16_-Qev53+KB1=sp {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+
+  st.func @helper() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    EXPECT_EQ(result.moduleName, "Cijk_MT16x16_-Qev53+KB1=sp");
+    ASSERT_EQ(result.functions.size(), 2u);
+    EXPECT_EQ(result.functions[0]->funcName, "main");
+    EXPECT_EQ(result.functions[1]->funcName, "helper");
+}
+
+TEST_F(IRParserTest, BareFunctionsHaveNoModuleName) {
+    const std::string input = R"(st.func @main() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    EXPECT_TRUE(result.moduleName.empty());
+    EXPECT_EQ(result.functions.size(), 1u);
+}
+
+TEST_F(IRParserTest, RejectsTextAfterAFunction) {
+    // A mistyped keyword used to end the parse, and the second function was lost.
+    const std::string input = R"(st.func @main() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+st.fnuc @helper() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected 'st.func'");
+    EXPECT_EQ(result.diagnostics.front().getLine(), 5u);
+}
+
+TEST_F(IRParserTest, RejectsAnUnclosedModule) {
+    const std::string input = R"(st.module @kernel {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected '}' to close the module");
+}
+
+TEST_F(IRParserTest, RejectsTextAfterTheModule) {
+    const std::string input = R"(st.module @kernel {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+}
+st.func @stray() {
+^entry:
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected end of input after the module");
+}
+
 TEST_F(IRParserTest, ParsesBlockLabelWithCaret) {
     // Flat format with ^blockId: style label
     const std::string input = R"(^entry:

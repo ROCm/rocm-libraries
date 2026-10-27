@@ -34,6 +34,7 @@
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/pipeline/CloneSpec.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
+#include "stinkytofu/support/Diagnostic.hpp"
 
 /*
  * @brief Define the options for the ModuleOptions struct
@@ -157,6 +158,8 @@
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
+struct SignatureBase;
+
 /**
  * @brief Assembly IR Module container
  *
@@ -401,6 +404,20 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @brief Get total instruction size in bytes, or -1 if not set.
      */
     int64_t getTotalInstructionBytes() const;
+
+    /**
+     * @brief Kernel header (`.amdhsa_*` and code object metadata) read from
+     * assembler source. Null for a module loaded from STIR or built in memory.
+     */
+    void setSignature(std::shared_ptr<SignatureBase> signature);
+    std::shared_ptr<SignatureBase> getSignature() const;
+
+    /**
+     * @brief Warnings from the parser and converter of the text load that built
+     * this module. Empty for a module built in memory.
+     */
+    void setLoadWarnings(std::vector<Diagnostic> warnings);
+    const std::vector<Diagnostic>& getLoadWarnings() const;
 
     // ---- Plugin data (opaque key-value store for pass plugins) ----
 

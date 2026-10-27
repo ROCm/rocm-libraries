@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: MIT
 """stinkytofu passes | stinkytofu run FILE [--pass NAME[=args]]...
 
-The command calls the analysis API. It does not run the optimization pipeline
-and it does not emit assembler source. Exit status: 0 success, 2 for a missing
-file, a parse error, or an unknown pass, 1 when a pass refuses the function
-or reports an analysis failure.
+The command calls the analysis API. It does not run the optimization pipeline.
+A .s file, or stdin with --asm, loads as assembler source and prints assembler
+source; anything else loads as STIR and prints STIR. Exit status: 0 success,
+2 for a missing file, a load error, or an unknown pass, 1 when a pass refuses
+the function or reports an analysis failure.
 """
 
 import argparse
@@ -30,7 +31,9 @@ def _arch(text):
     try:
         return tuple(int(part) for part in parts)
     except ValueError as exc:
-        raise ValueError("arch must be major,minor,stepping, for example 12,5,0") from exc
+        raise ValueError(
+            "arch must be major,minor,stepping, for example 12,5,0"
+        ) from exc
 
 
 def cmd_passes():
@@ -41,14 +44,22 @@ def cmd_passes():
 
 def cmd_run(args):
     stinkytofu = _module()
+    arch = _arch(args.arch)
+    is_asm = args.asm or args.input.endswith(".s")
     if args.input == "-":
         text = sys.stdin.read()
-        module = stinkytofu.load_stir(text, arch=_arch(args.arch))
+        load = stinkytofu.load_asm if is_asm else stinkytofu.load_stir
+        module = load(text, arch=arch)
+    elif is_asm:
+        module = stinkytofu.load_asm_file(args.input, arch=arch)
     else:
-        module = stinkytofu.load_stir_file(args.input, arch=_arch(args.arch))
+        module = stinkytofu.load_stir_file(args.input, arch=arch)
     if args.passes:
         module.run_passes(args.passes)
-    out = module.serialize(ssa=args.ssa)
+    if args.emit_asm or (is_asm and not args.ssa):
+        out = module.emit_asm()
+    else:
+        out = module.serialize(ssa=args.ssa)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as handle:
             handle.write(out)
@@ -60,13 +71,21 @@ def cmd_run(args):
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="stinkytofu",
-        description="Load STIR, run named StinkyTofu passes, and print the result.",
+        description="Load STIR or assembler source, run named StinkyTofu passes, "
+        "and print the result.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("passes", help="print one pass name per line")
-    run = sub.add_parser("run", help="load a STIR file, run passes, and print STIR")
-    run.add_argument("input", help="STIR file, or - for stdin")
-    run.add_argument("--arch", default="12,5,0", help="major,minor,stepping (default 12,5,0)")
+    run = sub.add_parser("run", help="load a file, run passes, and print the result")
+    run.add_argument("input", help="STIR file, .s file, or - for stdin")
+    run.add_argument(
+        "--arch", default="12,5,0", help="major,minor,stepping (default 12,5,0)"
+    )
+    run.add_argument(
+        "--asm",
+        action="store_true",
+        help="read the input as assembler source; a .s file always is",
+    )
     run.add_argument(
         "--pass",
         dest="passes",
@@ -75,8 +94,18 @@ def build_parser():
         metavar="NAME[=args]",
         help="pass to run, repeatable, in order. Text after = is the pass argument list",
     )
-    run.add_argument("--ssa", action="store_true", help="print the diagnostic SSA view")
-    run.add_argument("-o", "--output", help="write STIR to this file instead of stdout")
+    output = run.add_mutually_exclusive_group()
+    output.add_argument(
+        "--ssa", action="store_true", help="print the diagnostic SSA view"
+    )
+    output.add_argument(
+        "--emit-asm",
+        action="store_true",
+        help="print assembler source; the default for assembler input",
+    )
+    run.add_argument(
+        "-o", "--output", help="write the result to this file instead of stdout"
+    )
     return parser
 
 

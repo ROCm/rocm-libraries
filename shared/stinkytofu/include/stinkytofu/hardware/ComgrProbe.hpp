@@ -14,6 +14,11 @@ namespace stinkytofu {
 STINKYTOFU_EXPORT bool tryAssembleWithComgr(const std::string& asmString,
                                             const std::string& isaName, uint32_t wavefrontSize);
 
+/// tryAssembleWithComgr, keeping the assembler's messages in \p log. The log
+/// can be empty on failure, for example when comgr is unavailable.
+STINKYTOFU_EXPORT bool assembleWithComgr(const std::string& asmString, const std::string& isaName,
+                                         uint32_t wavefrontSize, std::string& log);
+
 /// Returns true if comgr support was compiled into this build.
 STINKYTOFU_EXPORT bool hasComgrSupport();
 

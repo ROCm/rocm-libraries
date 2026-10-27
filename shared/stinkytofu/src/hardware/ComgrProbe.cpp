@@ -121,10 +121,30 @@ struct ComgrActionInfo {
     }
 };
 
-}  // namespace
+/// The first log object comgr added to \p set, or empty.
+std::string readLog(amd_comgr_data_set_t set) {
+    size_t count = 0;
+    if (amd_comgr_action_data_count(set, AMD_COMGR_DATA_KIND_LOG, &count) !=
+            AMD_COMGR_STATUS_SUCCESS ||
+        count == 0)
+        return {};
+    amd_comgr_data_t log{};
+    if (amd_comgr_action_data_get_data(set, AMD_COMGR_DATA_KIND_LOG, 0, &log) !=
+        AMD_COMGR_STATUS_SUCCESS)
+        return {};
+    std::string text;
+    size_t size = 0;
+    if (amd_comgr_get_data(log, &size, nullptr) == AMD_COMGR_STATUS_SUCCESS && size > 0) {
+        text.resize(size);
+        if (amd_comgr_get_data(log, &size, text.data()) != AMD_COMGR_STATUS_SUCCESS) text.clear();
+    }
+    amd_comgr_release_data(log);
+    return text;
+}
 
-bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaName,
-                          uint32_t wavefrontSize) {
+/// Logging is off when \p log is null; the toolchain probes run many of these.
+bool assemble(const std::string& asmString, const std::string& isaName, uint32_t wavefrontSize,
+              std::string* log) {
 #ifdef _WIN32
     if (!isRocmPathSet()) return false;
 #endif
@@ -151,6 +171,9 @@ bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaNa
     if (amd_comgr_action_info_set_isa_name(actionInfo.handle, isaName.c_str()) !=
         AMD_COMGR_STATUS_SUCCESS)
         return false;
+    if (log != nullptr &&
+        amd_comgr_action_info_set_logging(actionInfo.handle, true) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
 
     std::vector<const char*> options;
     if (wavefrontSize == 64) options.push_back("-mwavefrontsize64");
@@ -162,7 +185,21 @@ bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaNa
 
     auto status = amd_comgr_do_action(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
                                       actionInfo.handle, inputSet.handle, outputSet.handle);
+    if (log != nullptr) *log = readLog(outputSet.handle);
     return status == AMD_COMGR_STATUS_SUCCESS;
+}
+
+}  // namespace
+
+bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaName,
+                          uint32_t wavefrontSize) {
+    return assemble(asmString, isaName, wavefrontSize, nullptr);
+}
+
+bool assembleWithComgr(const std::string& asmString, const std::string& isaName,
+                       uint32_t wavefrontSize, std::string& log) {
+    log.clear();
+    return assemble(asmString, isaName, wavefrontSize, &log);
 }
 
 bool hasComgrSupport() {
@@ -191,6 +228,12 @@ bool comgrSupportsIsa(const std::string& isaName) {
 
 bool tryAssembleWithComgr(const std::string& /*asmString*/, const std::string& /*isaName*/,
                           uint32_t /*wavefrontSize*/) {
+    return false;
+}
+
+bool assembleWithComgr(const std::string& /*asmString*/, const std::string& /*isaName*/,
+                       uint32_t /*wavefrontSize*/, std::string& log) {
+    log.clear();
     return false;
 }
 

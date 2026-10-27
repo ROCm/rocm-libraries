@@ -24,6 +24,7 @@
 #include "stir_api.hpp"
 
 #include <nanobind/stl/array.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/vector.h>
@@ -31,6 +32,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -43,17 +45,22 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ComgrProbe.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
+#include "stinkytofu/serialization/asm/RawAsmParser.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/Diagnostic.hpp"
 #include "stinkytofu/support/PassArguments.hpp"
 
 namespace nb = nanobind;
@@ -67,6 +74,7 @@ struct PyInst {
     std::string opcode;
     nb::list defs;
     nb::list uses;
+    std::vector<std::string> modifiers;
 };
 
 struct PyBlock {
@@ -98,20 +106,6 @@ bool isSsaForm(std::string_view text) {
         if (j < text.size() && text[j] == ':') return true;
     }
     return false;
-}
-
-/// AsmPrinter wraps a module in `st.module @name { ... }`. The parser reads
-/// `st.func` at the top level, so peel one matching wrapper before parsing.
-std::string withoutModuleWrapper(const std::string& text) {
-    size_t i = 0;
-    while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i]))) ++i;
-    if (text.compare(i, 9, "st.module") != 0) return text;
-    const size_t open = text.find('{', i);
-    if (open == std::string::npos) throw std::invalid_argument("st.module is missing '{'");
-    size_t end = text.size();
-    while (end > open + 1 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
-    if (text[end - 1] != '}') throw std::invalid_argument("st.module is missing '}'");
-    return text.substr(open + 1, end - open - 2);
 }
 
 std::string errorText(const std::vector<Diagnostic>& diagnostics) {
@@ -223,53 +217,127 @@ std::string opcodeOf(const StinkyInstruction& inst) {
     return std::string("st.") + (mnemonic != nullptr ? mnemonic : "unknown");
 }
 
-std::unique_ptr<StinkyAsmModule> loadStir(const std::string& text, std::array<int, 3> arch) {
-    if (isSsaForm(text))
-        throw std::invalid_argument(
-            "SSA form does not round-trip; load physical STIR and run LiftAsmRegistersToSSAPass");
-
+GfxArchID checkedArchId(const std::array<int, 3>& arch) {
     if (!BackendRegistry::isArchSupported(arch)) {
         throw std::invalid_argument("unknown arch (" + std::to_string(arch[0]) + ", " +
                                     std::to_string(arch[1]) + ", " + std::to_string(arch[2]) + ")");
     }
-    const GfxArchID archId = getGfxArchID(arch);
+    return getGfxArchID(arch);
+}
 
-    MultiParseResult parsed = parseAllSourceStringsWithDiagnostics(withoutModuleWrapper(text));
-    const std::string errors = errorText(parsed.diagnostics);
+void raiseErrors(const std::vector<Diagnostic>& diagnostics) {
+    const std::string errors = errorText(diagnostics);
     if (!errors.empty()) throw std::invalid_argument(errors);
-    if (parsed.functions.empty()) throw std::invalid_argument("no st.func in STIR text");
+}
 
-    StinkyAsmModule::ModuleOptions options{};
-    auto module =
-        std::make_unique<StinkyAsmModule>(parsed.functions.front()->funcName, arch, options);
+/// Build one function per parsed function, entry first. Every function is
+/// converted before raising, so one error lists every loss. The module keeps the
+/// warnings.
+void populateModule(StinkyAsmModule& module,
+                    std::vector<std::unique_ptr<ParsedFunction>>& parsedFunctions, GfxArchID archId,
+                    std::vector<Diagnostic> diagnostics) {
     bool first = true;
-    for (auto& parsedFunc : parsed.functions) {
+    for (auto& parsedFunc : parsedFunctions) {
         if (parsedFunc == nullptr) continue;
         Function* function = nullptr;
         if (first) {
-            function = &module->getFunction();
+            function = &module.getFunction();
             first = false;
         } else {
-            if (parsedFunc->funcName == module->getFunction().getName() ||
-                module->getFunction(parsedFunc->funcName) != nullptr) {
+            if (parsedFunc->funcName.empty())
+                throw std::invalid_argument("only the first function may be unnamed");
+            if (parsedFunc->funcName == module.getFunction().getName() ||
+                module.getFunction(parsedFunc->funcName) != nullptr) {
                 throw std::invalid_argument("duplicate function '" + parsedFunc->funcName + "'");
             }
-            function = &module->createFunction(parsedFunc->funcName);
+            function = &module.createFunction(parsedFunc->funcName);
         }
-        const StinkyErrorCode result =
-            StinkyIRConverter::populateFunctionFromParsed(*parsedFunc, *function, archId);
-        if (result != StinkyErrorCode::SUCCESS)
-            throw std::invalid_argument("failed to build function '" + parsedFunc->funcName + "'");
+        const StinkyErrorCode result = StinkyIRConverter::populateFunctionFromParsed(
+            *parsedFunc, *function, archId, diagnostics);
+        if (result == StinkyErrorCode::PARSE_ERROR)
+            throw std::invalid_argument("function '" + parsedFunc->funcName + "' has no blocks");
     }
-    return module;
+    raiseErrors(diagnostics);
+    std::vector<Diagnostic> warnings;
+    for (Diagnostic& diagnostic : diagnostics) {
+        if (diagnostic.getLevel() != Diagnostic::Level::Error)
+            warnings.push_back(std::move(diagnostic));
+    }
+    module.setLoadWarnings(std::move(warnings));
 }
 
-std::unique_ptr<StinkyAsmModule> loadStirFile(const std::string& path, std::array<int, 3> arch) {
+std::string readFile(const std::string& path) {
     std::ifstream file(path);
     if (!file) throw std::invalid_argument("cannot read " + path);
     std::ostringstream buffer;
     buffer << file.rdbuf();
-    return loadStir(buffer.str(), arch);
+    return buffer.str();
+}
+
+std::unique_ptr<StinkyAsmModule> loadStir(const std::string& text, std::array<int, 3> arch) {
+    if (isSsaForm(text))
+        throw std::invalid_argument(
+            "SSA form does not round-trip; load physical STIR and run LiftAsmRegistersToSSAPass");
+    const GfxArchID archId = checkedArchId(arch);
+
+    MultiParseResult parsed = parseAllSourceStringsWithDiagnostics(text);
+    raiseErrors(parsed.diagnostics);
+    if (parsed.functions.empty()) throw std::invalid_argument("no st.func in STIR text");
+
+    const std::string& name =
+        parsed.moduleName.empty() ? parsed.functions.front()->funcName : parsed.moduleName;
+    auto module = std::make_unique<StinkyAsmModule>(name, arch, StinkyAsmModule::ModuleOptions{});
+    populateModule(*module, parsed.functions, archId, std::move(parsed.diagnostics));
+    return module;
+}
+
+std::unique_ptr<StinkyAsmModule> loadStirFile(const std::string& path, std::array<int, 3> arch) {
+    return loadStir(readFile(path), arch);
+}
+
+std::unique_ptr<StinkyAsmModule> loadAsm(const std::string& text, std::array<int, 3> arch,
+                                         bool preserveSymbolicRegs, bool preserveComments,
+                                         const std::optional<std::string>& fromLabel,
+                                         const std::optional<std::string>& toLabel) {
+    if (fromLabel.has_value() != toLabel.has_value())
+        throw std::invalid_argument("from_label and to_label must be given together");
+    const GfxArchID archId = checkedArchId(arch);
+
+    RawAsmParserOptions options;
+    options.preserveSymbolicNames = preserveSymbolicRegs;
+    options.preserveComments = preserveComments;
+    RawAsmParseResult parsed = parseRawAsmString(text, archId, options);
+    raiseErrors(parsed.diagnostics);
+
+    std::vector<std::unique_ptr<ParsedFunction>> functions;
+    functions.push_back(std::move(parsed.parsedFunction));
+    if (fromLabel) {
+        std::string error;
+        std::optional<ParsedRegion> cut =
+            cutParsedRegion(*functions.front(), *fromLabel, *toLabel, error);
+        if (!cut) throw std::invalid_argument(error);
+        functions.front() = std::move(cut->region);
+    }
+
+    auto module = std::make_unique<StinkyAsmModule>(functions.front()->funcName, arch,
+                                                    StinkyAsmModule::ModuleOptions{});
+    populateModule(*module, functions, archId, std::move(parsed.diagnostics));
+    if (parsed.signature) {
+        module->getFunction().setMetaData(
+            kSigTotalVgprsMetaKey,
+            static_cast<uint64_t>(parsed.signature->kernelDescriptor.totalVgprs));
+        // A region is not a whole kernel, so it has no header to write back.
+        if (!fromLabel) module->setSignature(std::move(parsed.signature));
+    }
+    return module;
+}
+
+std::unique_ptr<StinkyAsmModule> loadAsmFile(const std::string& path, std::array<int, 3> arch,
+                                             bool preserveSymbolicRegs, bool preserveComments,
+                                             const std::optional<std::string>& fromLabel,
+                                             const std::optional<std::string>& toLabel) {
+    return loadAsm(readFile(path), arch, preserveSymbolicRegs, preserveComments, fromLabel,
+                   toLabel);
 }
 
 std::string serializeModule(const StinkyAsmModule& module, bool ssa) {
@@ -279,6 +347,47 @@ std::string serializeModule(const StinkyAsmModule& module, bool ssa) {
     AsmPrinter printer(out, options);
     printer.print(module);
     return out.str();
+}
+
+std::string emitModuleAsm(const StinkyAsmModule& module, bool comments, bool cycleInfo,
+                          bool symbolicNames, bool signature) {
+    std::ostringstream out;
+    if (signature && module.getSignature()) out << module.getSignature()->toString();
+    AsmEmitterOptions options;
+    options.emitComments = comments;
+    options.emitCycleInfo = cycleInfo;
+    options.useSymbolicNames = symbolicNames;
+    options.indent = 0;
+    StinkyAsmEmitter emitter(options);
+    for (const Function* function : module.getFunctions()) emitter.emit(out, *function);
+    return out.str();
+}
+
+std::optional<std::string> assembleModule(const StinkyAsmModule& module) {
+    if (!hasComgrSupport())
+        throw std::runtime_error("assemble() is unsupported: this build has no amd_comgr");
+    const std::array<int, 3> arch = module.getArch();
+    const ArchHelper::ArchInfo* info = ArchHelper::getInstance().getArchInfo(
+        static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
+        static_cast<uint32_t>(arch[2]));
+    if (info == nullptr) throw std::invalid_argument("unknown arch for this module");
+    const std::string isaName = "amdgcn-amd-amdhsa--" + BackendRegistry::makeArchKey(arch);
+
+    std::string log;
+    const std::string text = emitModuleAsm(module, false, false, false, true);
+    if (assembleWithComgr(text, isaName, info->waveFrontSize, log)) return std::nullopt;
+    if (log.empty()) return std::string("the assembler rejected the text and wrote no log");
+    return log;
+}
+
+std::vector<std::string> modifierTexts(const StinkyInstruction& inst) {
+    std::vector<std::string> out;
+    for (const auto& modifier : inst.getModifiers()) {
+        std::ostringstream text;
+        AsmPrinter printer(text);
+        if (printer.printModifier(*modifier)) out.push_back(text.str());
+    }
+    return out;
 }
 
 void runOnePass(StinkyAsmModule& module, Function& function, const std::string& name,
@@ -351,6 +460,7 @@ PyInst snapshotInstruction(const StinkyInstruction& inst) {
         out.defs = physicalList(inst.getDestRegs());
         out.uses = physicalList(inst.getSrcRegs());
     }
+    out.modifiers = modifierTexts(inst);
     return out;
 }
 
@@ -402,10 +512,30 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
     nb::class_<PyInst>(m, "Instruction")
         .def_prop_ro("opcode", [](const PyInst& inst) { return inst.opcode; })
         .def_prop_ro("defs", [](const PyInst& inst) { return inst.defs; })
-        .def_prop_ro("uses", [](const PyInst& inst) { return inst.uses; });
+        .def_prop_ro("uses", [](const PyInst& inst) { return inst.uses; })
+        .def_prop_ro(
+            "modifiers", [](const PyInst& inst) { return inst.modifiers; },
+            "One `mod.X = { ... }` string per modifier, as serialize() prints them");
 
     cls.def("serialize", &serializeModule, nb::arg("ssa") = false,
             "Print this module. ssa=True is a diagnostic view and does not round-trip");
+    cls.def("emit_asm", &emitModuleAsm, nb::kw_only(), nb::arg("comments") = false,
+            nb::arg("cycle_info") = false, nb::arg("symbolic_names") = false,
+            nb::arg("signature") = true,
+            "Assembler source for every function, entry first. signature writes the kernel "
+            "header load_asm kept");
+    cls.def("assemble", &assembleModule,
+            "Assemble emit_asm() with amd_comgr. None when it assembles, else the assembler's "
+            "messages");
+    cls.def(
+        "load_warnings",
+        [](const StinkyAsmModule& module) {
+            std::vector<std::string> out;
+            for (const Diagnostic& diagnostic : module.getLoadWarnings())
+                out.push_back(diagnostic.format());
+            return out;
+        },
+        "Warnings from the load that built this module, one line each");
     cls.def("run_passes", &runPasses, nb::arg("passes"),
             "Run named catalog passes, in order, on every function");
     cls.def("functions", &moduleFunctions, "Functions in this module, entry first");
@@ -414,6 +544,17 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
           "Parse physical STIR into a module that owns its functions");
     m.def("load_stir_file", &loadStirFile, nb::arg("path"),
           nb::arg("arch") = std::array<int, 3>{12, 5, 0}, "Load physical STIR from a file");
+    m.def("load_asm", &loadAsm, nb::arg("text"), nb::arg("arch") = std::array<int, 3>{12, 5, 0},
+          nb::kw_only(), nb::arg("preserve_symbolic_regs") = false,
+          nb::arg("preserve_comments") = false, nb::arg("from_label") = nb::none(),
+          nb::arg("to_label") = nb::none(),
+          "Parse assembler source into a module. from_label and to_label keep only that region, "
+          "without the kernel header");
+    m.def("load_asm_file", &loadAsmFile, nb::arg("path"),
+          nb::arg("arch") = std::array<int, 3>{12, 5, 0}, nb::kw_only(),
+          nb::arg("preserve_symbolic_regs") = false, nb::arg("preserve_comments") = false,
+          nb::arg("from_label") = nb::none(), nb::arg("to_label") = nb::none(),
+          "Load assembler source from a file");
     m.def(
         "pass_names",
         []() {

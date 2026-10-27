@@ -134,8 +134,9 @@ class IRParser {
         return diagnostics;
     }
 
-    /// Parse all functions in the input.
-    std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions();
+    /// Parse all functions in the input, bare or inside one `st.module` wrapper.
+    /// Sets \p moduleName from the wrapper and leaves it alone otherwise.
+    std::vector<std::unique_ptr<ParsedFunction>> parseAllFunctions(std::string& moduleName);
 
    private:
     //------------------------------------------------------------------
@@ -305,6 +306,8 @@ std::unique_ptr<ParsedInstruction> IRParser::parseInstruction() {
     // format: [destRegs =] "Stinkytofu.mnemonic"(srcRegs) { attributes }
 
     auto inst = std::make_unique<ParsedInstruction>("");
+    inst->line = peek().line;
+    inst->column = peek().column;
 
     // Check if we have destination registers (followed by '=')
     // Look ahead to see if there's an '=' coming
@@ -394,8 +397,8 @@ std::unique_ptr<ParsedFunction> IRParser::parseFunction() {
         emitError("Expected function name (@name)");
         return nullptr;
     }
-    std::string funcName(peek().text);
-    if (funcName.size() > 1) funcName = funcName.substr(1);  // strip @
+    // A lone '@' is an unnamed function, which the printer writes as `st.func @()`.
+    std::string funcName(peek().text.substr(1));
     consume();
 
     if (!expect(TokenKind::LeftParen, "Expected '(' after function name")) return nullptr;
@@ -425,20 +428,53 @@ std::unique_ptr<ParsedFunction> IRParser::parseFunction() {
     return nullptr;
 }
 
-std::vector<std::unique_ptr<ParsedFunction>> IRParser::parseAllFunctions() {
+std::vector<std::unique_ptr<ParsedFunction>> IRParser::parseAllFunctions(std::string& moduleName) {
     std::vector<std::unique_ptr<ParsedFunction>> functions;
-    while (!lexer.isAtEnd() && peek().kind != TokenKind::Eof) {
-        skipNewlines();
-        if (lexer.isAtEnd() || peek().kind == TokenKind::Eof) break;
-        if (peek().kind == TokenKind::Identifier && std::string(peek().text) == "st.func") {
-            auto func = parseFunction();
-            if (func)
-                functions.push_back(std::move(func));
-            else
-                break;
-        } else {
-            break;  // not a function, stop
+    skipNewlines();
+
+    const bool wrapped = check(TokenKind::Identifier) && peek().text == "st.module";
+    if (wrapped) {
+        consume();  // st.module
+        if (!check(TokenKind::Identifier) || peek().text.empty() || peek().text[0] != '@') {
+            emitError("Expected module name (@name)");
+            return functions;
         }
+        // A kernel name carries characters the lexer splits on, such as '-' and
+        // '=', so the name is the raw text between '@' and '{'.
+        const char* nameBegin = peek().text.data() + 1;
+        const char* nameEnd = nameBegin;
+        while (!check(TokenKind::LeftBrace) && !check(TokenKind::Newline) &&
+               !check(TokenKind::Eof)) {
+            nameEnd = peek().text.data() + peek().text.size();
+            consume();
+        }
+        moduleName.assign(nameBegin, nameEnd);
+        if (!expect(TokenKind::LeftBrace, "Expected '{' after the module name")) return functions;
+    }
+
+    while (true) {
+        skipNewlines();
+        if (lexer.isAtEnd() || check(TokenKind::Eof)) break;
+        if (wrapped && check(TokenKind::RightBrace)) break;
+        if (!check(TokenKind::Identifier) || peek().text != "st.func") {
+            // Text that never starts a function is the flat form, which the
+            // caller parses on its own. After a function, it would be dropped.
+            if (wrapped)
+                emitError("Expected 'st.func' or '}' in the module");
+            else if (!functions.empty())
+                emitError("Expected 'st.func'");
+            return functions;
+        }
+        auto func = parseFunction();
+        if (!func) return functions;
+        functions.push_back(std::move(func));
+    }
+
+    if (wrapped) {
+        if (!expect(TokenKind::RightBrace, "Expected '}' to close the module")) return functions;
+        skipNewlines();
+        if (!lexer.isAtEnd() && !check(TokenKind::Eof))
+            emitError("Expected end of input after the module");
     }
     return functions;
 }
@@ -501,6 +537,8 @@ bool IRParser::parseSuccessorsLine(ParsedBlock& block) {
         emitError("Expected 'Successors'");
         return false;
     }
+    block.successorsLine = peek().line;
+    block.successorsColumn = peek().column;
     consume();  // Successors
 
     if (!expect(TokenKind::Colon, "Expected ':' after Successors")) return false;
@@ -1139,7 +1177,7 @@ MultiParseResult parseAllSourceStringsWithDiagnostics(const std::string& sourceS
     lexer.lex();
 
     IRParser parser(lexer);
-    result.functions = parser.parseAllFunctions();
+    result.functions = parser.parseAllFunctions(result.moduleName);
     result.diagnostics = parser.getDiagnostics();
 
     return result;

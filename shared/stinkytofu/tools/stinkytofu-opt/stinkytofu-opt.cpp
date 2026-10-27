@@ -701,17 +701,20 @@ int main(int argc, char** argv) {
     } else {
         // Parse StinkyTofu IR text format
         parsed = stinkytofu::parseAllSourceStringsWithDiagnostics(fileContent);
+        // Fall back to single-function parsing for flat format (no st.func)
+        if (!parsed.hasErrors() && parsed.functions.empty()) {
+            auto singleResult = stinkytofu::parseSourceStringWithDiagnostics(fileContent);
+            parsed.diagnostics.insert(parsed.diagnostics.end(), singleResult.diagnostics.begin(),
+                                      singleResult.diagnostics.end());
+            if (singleResult.parsedFunction)
+                parsed.functions.push_back(std::move(singleResult.parsedFunction));
+        }
         if (parsed.hasErrors()) {
             std::cerr << "Error: Failed to parse input file\n";
             for (const auto& diag : parsed.diagnostics) std::cerr << "  " << diag.format() << "\n";
             return 1;
         }
-        // Fall back to single-function parsing for flat format (no st.func)
-        if (parsed.functions.empty()) {
-            auto singleResult = stinkytofu::parseSourceStringWithDiagnostics(fileContent);
-            if (singleResult.parsedFunction)
-                parsed.functions.push_back(std::move(singleResult.parsedFunction));
-        }
+        for (const auto& diag : parsed.diagnostics) std::cerr << diag.format() << "\n";
     }
 
     // If --from-label / --to-label are given, split the flat ParsedFunction into three
@@ -728,62 +731,16 @@ int main(int argc, char** argv) {
             std::cerr << "Error: --from-label/--to-label requires exactly one function\n";
             return 1;
         }
-        // Take ownership of the original instruction list and name before splitting.
-        // parsed.functions[0] will be replaced below, which would destroy the block
-        // and invalidate any reference into it.
-        std::string origFuncName = parsed.functions[0]->funcName;
-        auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
-
-        // Find from-label and to-label positions (first occurrence, in case a
-        // label name repeats elsewhere in the file).
-        int fromIdx = -1, toIdx = -1;
-        for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (!originalInsts[idx]->isLabel) continue;
-            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
-            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
-        }
-        if (fromIdx < 0) {
-            std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
+        std::string regionError;
+        auto cut =
+            stinkytofu::cutParsedRegion(*parsed.functions[0], fromLabel, toLabel, regionError);
+        if (!cut) {
+            std::cerr << "Error: --from-label/--to-label: " << regionError << "\n";
             return 1;
         }
-        if (toIdx < 0) {
-            std::cerr << "Error: --to-label '" << toLabel << "' not found in assembly\n";
-            return 1;
-        }
-        if (toIdx < fromIdx) {
-            std::cerr << "Error: --to-label appears before --from-label in the assembly\n";
-            return 1;
-        }
-
-        // Build pre: [0, fromIdx)
-        auto preFunc = std::make_unique<stinkytofu::ParsedFunction>();
-        preFunc->funcName = origFuncName + "_pre";
-        auto preBlock = std::make_unique<stinkytofu::ParsedBlock>();
-        preBlock->blockId = "entry";
-        for (int idx = 0; idx < fromIdx; ++idx)
-            preBlock->instructions.push_back(std::move(originalInsts[idx]));
-        preFunc->blocks.push_back(std::move(preBlock));
-        preResult.functions.push_back(std::move(preFunc));
-
-        // Build sched: [fromIdx, toIdx]  (inclusive of both labels)
-        auto schedFunc = std::make_unique<stinkytofu::ParsedFunction>();
-        schedFunc->funcName = origFuncName;
-        auto schedBlock = std::make_unique<stinkytofu::ParsedBlock>();
-        schedBlock->blockId = "entry";
-        for (int idx = fromIdx; idx <= toIdx; ++idx)
-            schedBlock->instructions.push_back(std::move(originalInsts[idx]));
-        schedFunc->blocks.push_back(std::move(schedBlock));
-        parsed.functions[0] = std::move(schedFunc);
-
-        // Build post: (toIdx, end)
-        auto postFunc = std::make_unique<stinkytofu::ParsedFunction>();
-        postFunc->funcName = origFuncName + "_post";
-        auto postBlock = std::make_unique<stinkytofu::ParsedBlock>();
-        postBlock->blockId = "entry";
-        for (int idx = toIdx + 1; idx < (int)originalInsts.size(); ++idx)
-            postBlock->instructions.push_back(std::move(originalInsts[idx]));
-        postFunc->blocks.push_back(std::move(postBlock));
-        postResult.functions.push_back(std::move(postFunc));
+        preResult.functions.push_back(std::move(cut->before));
+        parsed.functions[0] = std::move(cut->region);
+        postResult.functions.push_back(std::move(cut->after));
     }
 
     // Open output stream (-o <file> or stdout)
@@ -811,12 +768,24 @@ int main(int argc, char** argv) {
         }
     };
 
+    // Set when an instruction or block edge could not be built; the run then exits 1.
+    bool loadFailed = false;
+    auto populate = [&](stinkytofu::ParsedFunction& pf, stinkytofu::Function& func) {
+        std::vector<stinkytofu::Diagnostic> diagnostics;
+        const auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(
+            pf, func, archID, diagnostics);
+        for (const auto& diag : diagnostics) std::cerr << diag.format() << "\n";
+        if (result == stinkytofu::StinkyErrorCode::SUCCESS) return true;
+        std::cerr << "Error: Failed to populate function '" << pf.funcName << "'\n";
+        loadFailed = true;
+        return false;
+    };
+
     // Helper: emit a ParsedFunction verbatim (no passes) to the output stream.
     auto emitVerbatim = [&](stinkytofu::MultiParseResult& mr) {
         for (auto& pf : mr.functions) {
             stinkytofu::Function func(pf->funcName);
-            stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*pf, func, archID);
-            emitFunction(func);
+            if (populate(*pf, func)) emitFunction(func);
         }
     };
 
@@ -867,13 +836,7 @@ int main(int argc, char** argv) {
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
-            auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
-                                                                                    func, archID);
-            if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
-                std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
-                          << "'\n";
-                continue;
-            }
+            if (!populate(*parsedFunc, func)) continue;
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
@@ -928,13 +891,7 @@ int main(int argc, char** argv) {
             stinkytofu::Function func(parsedFunc->funcName);
             func.setGemmTileConfig(gemmTileConfig);
 
-            auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
-                                                                                    func, archID);
-            if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
-                std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
-                          << "'\n";
-                continue;
-            }
+            if (!populate(*parsedFunc, func)) continue;
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
@@ -949,5 +906,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return analysisFailed ? 1 : 0;
+    return (analysisFailed || loadFailed) ? 1 : 0;
 }

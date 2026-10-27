@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
@@ -75,6 +76,9 @@ struct StinkyAsmModule::Impl {
 
     // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
     int64_t totalInstructionBytes = -1;
+
+    std::shared_ptr<SignatureBase> signature;
+    std::vector<Diagnostic> loadWarnings;
 
     // Plugin data: opaque key-value stores for pass plugins.
     std::unordered_map<std::string, int64_t> pluginDataI64;
@@ -316,6 +320,22 @@ void StinkyAsmModule::setTotalInstructionBytes(int64_t totalBytes) {
 
 int64_t StinkyAsmModule::getTotalInstructionBytes() const {
     return pImpl->totalInstructionBytes;
+}
+
+void StinkyAsmModule::setSignature(std::shared_ptr<SignatureBase> signature) {
+    pImpl->signature = std::move(signature);
+}
+
+std::shared_ptr<SignatureBase> StinkyAsmModule::getSignature() const {
+    return pImpl->signature;
+}
+
+void StinkyAsmModule::setLoadWarnings(std::vector<Diagnostic> warnings) {
+    pImpl->loadWarnings = std::move(warnings);
+}
+
+const std::vector<Diagnostic>& StinkyAsmModule::getLoadWarnings() const {
+    return pImpl->loadWarnings;
 }
 
 void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {

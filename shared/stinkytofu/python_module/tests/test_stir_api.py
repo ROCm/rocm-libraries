@@ -189,6 +189,136 @@ st.func @k() {
     assert 2 in inst.uses
 
 
+MODULE = """\
+st.module @Cijk_MT16x16_-Qev53=sp {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+
+  st.func @helper() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+}
+"""
+
+ASM = """\
+s_nop 0
+loop_begin:
+s_nop 0
+v_mov_b32 v0, v1
+loop_end:
+s_endpgm
+"""
+
+ROUNDTRIP_KERNEL = os.path.join(
+    os.path.dirname(__file__), "../../tests/filecheck/raw_asm_roundtrip.s"
+)
+
+
+def test_module_name_survives_reload():
+    printed = stinkytofu.load_stir(MODULE).serialize()
+    assert printed.startswith("st.module @Cijk_MT16x16_-Qev53=sp {\n")
+    again = stinkytofu.load_stir(printed)
+    assert again.serialize() == printed
+    assert [fn.name for fn in again.functions()] == ["main", "helper"]
+
+
+def test_unnamed_function_round_trips():
+    text = 'st.func @() {\n^entry:\n  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }\n}\n'
+    printed = stinkytofu.load_stir(text).serialize()
+    again = stinkytofu.load_stir(printed)
+    assert again.serialize() == printed
+    assert again.functions()[0].name == ""
+
+
+def test_typo_in_an_opcode_raises():
+    with pytest.raises(ValueError, match="4:3: error: Unknown mnemonic 'v_add_f33'"):
+        stinkytofu.load_stir(KERNEL.replace("st.v_add_f32", "st.v_add_f33"))
+
+
+def test_dangling_successor_raises():
+    text = """\
+st.func @k() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop
+}
+"""
+    with pytest.raises(ValueError, match=r"Successor '\^loop' of block '\^entry'"):
+        stinkytofu.load_stir(text)
+
+
+def test_load_warnings_keep_what_loaded():
+    module = stinkytofu.load_stir('st.func @k() {\n^entry:\n  "st.s_nop"(0)\n}\n')
+    assert module.load_warnings() == [
+        "3:16: warning: Instruction missing attributes (issueCycles, latencyCycles)"
+    ]
+    assert len(module.functions()[0].blocks()[0].instructions()) == 1
+    assert stinkytofu.load_stir(KERNEL).load_warnings() == []
+
+
+def test_modifiers_are_visible():
+    text = """\
+st.func @k() {
+^entry:
+  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false } }
+}
+"""
+    inst = stinkytofu.load_stir(text).functions()[0].blocks()[0].instructions()[0]
+    assert inst.modifiers == ["mod.ds = { na = 1, offset = 64, gds = false }"]
+
+
+def test_load_asm_runs_passes_and_emits():
+    module = stinkytofu.load_asm(ASM)
+    assert module.load_warnings() == []
+    assert module.emit_asm() == ASM
+    module.run_passes(["StinkyRemoveNopPass"])
+    assert module.emit_asm() == "loop_begin:\nv_mov_b32 v0, v1\nloop_end:\ns_endpgm\n"
+
+
+def test_load_asm_region():
+    module = stinkytofu.load_asm(ASM, from_label="loop_begin", to_label="loop_end")
+    assert module.emit_asm() == "loop_begin:\ns_nop 0\nv_mov_b32 v0, v1\nloop_end:\n"
+    with pytest.raises(ValueError, match="must be given together"):
+        stinkytofu.load_asm(ASM, from_label="loop_begin")
+    with pytest.raises(ValueError, match="end label 'nowhere' not found"):
+        stinkytofu.load_asm(ASM, from_label="loop_begin", to_label="nowhere")
+
+
+def test_unknown_asm_mnemonic_is_kept_as_text():
+    module = stinkytofu.load_asm("s_nop 0\ns_bogus_op 0\n")
+    assert module.load_warnings() == [
+        "2:1: warning: Unknown mnemonic 's_bogus_op'; storing as text"
+    ]
+    assert "s_bogus_op 0" in module.emit_asm()
+
+
+def test_kernel_header_round_trips():
+    module = stinkytofu.load_asm_file(ROUNDTRIP_KERNEL)
+    first = module.emit_asm()
+    assert ".amdhsa_kernel Cijk_Alik_Bljk" in first
+    assert ".amdhsa_kernel" not in module.emit_asm(signature=False)
+    assert stinkytofu.load_asm(first).emit_asm() == first
+    region = stinkytofu.load_asm_file(
+        ROUNDTRIP_KERNEL, from_label="label_LoopBeginL", to_label="label_LoopEndL"
+    )
+    assert ".amdhsa_kernel" not in region.emit_asm()
+
+
+@pytest.mark.skipif(not stinkytofu.hasComgrSupport(), reason="built without amd_comgr")
+def test_assemble_returns_the_assembler_log():
+    assert stinkytofu.load_asm("s_nop 0\ns_endpgm\n").assemble() is None
+    assert "invalid instruction" in stinkytofu.load_asm("s_bogus_op 0\n").assemble()
+
+
+@pytest.mark.skipif(stinkytofu.hasComgrSupport(), reason="built with amd_comgr")
+def test_assemble_needs_comgr():
+    with pytest.raises(RuntimeError, match="no amd_comgr"):
+        stinkytofu.load_asm("s_nop 0\n").assemble()
+
+
 def test_cli_passes(capsys):
     assert main(["passes"]) == 0
     assert "LiftAsmRegistersToSSAPass" in capsys.readouterr().out
@@ -200,6 +330,30 @@ def test_cli_run_round_trips(tmp_path, capsys):
     assert main(["run", str(path), "--pass", "LiftAsmRegistersToSSAPass"]) == 0
     printed = capsys.readouterr().out
     stinkytofu.load_stir(printed)
+
+
+def test_cli_runs_assembler_source(tmp_path, capsys):
+    path = tmp_path / "k.s"
+    path.write_text(ASM)
+    assert main(["run", str(path), "--pass", "StinkyRemoveNopPass"]) == 0
+    assert (
+        capsys.readouterr().out
+        == "loop_begin:\nv_mov_b32 v0, v1\nloop_end:\ns_endpgm\n"
+    )
+
+
+def test_cli_emits_assembly_from_stir(tmp_path, capsys):
+    path = tmp_path / "k.stir"
+    path.write_text(KERNEL)
+    assert main(["run", str(path), "--emit-asm"]) == 0
+    assert "v_mov_b32 v0, v1" in capsys.readouterr().out
+
+
+def test_cli_load_error_exits_2(tmp_path, capsys):
+    path = tmp_path / "k.stir"
+    path.write_text(KERNEL.replace("st.v_add_f32", "st.v_add_f33"))
+    assert main(["run", str(path)]) == 2
+    assert "Unknown mnemonic 'v_add_f33'" in capsys.readouterr().err
 
 
 def test_cli_unknown_pass(tmp_path, capsys):

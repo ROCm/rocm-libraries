@@ -71,6 +71,11 @@ class STINKYTOFU_EXPORT AsmPrinter {
     // Dispatch by IRType: StinkyInstruction, AsmDirective, LogicalIR
     void printIR(const IRBase& ir);
 
+    /// Print one modifier as it appears among an op line's attributes, e.g.
+    /// `mod.ds = { na = 1, ... }`. Returns false, printing nothing, for a
+    /// modifier the text format does not carry.
+    bool printModifier(const Modifier& mod);
+
    private:
     void printFunction(const Function& function, int baseIndent);
     void printBlock(const BasicBlock& bb, size_t blockIndex, int baseIndent);

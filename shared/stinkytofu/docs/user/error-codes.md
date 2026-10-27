@@ -11,6 +11,8 @@ enum class StinkyErrorCode : int
 {
     SUCCESS       = 0,  // Operation completed successfully
     PASSCTX_EMPTY = 1,  // PassContext is invalid or empty
+    PARSE_ERROR   = 2,  // The text does not parse
+    CONVERT_ERROR = 3,  // An instruction or block edge cannot be built for the arch
 };
 '''
 
@@ -20,6 +22,8 @@ enum class StinkyErrorCode : int
 |------|-------|-------------|
 | 'StinkyErrorCode::SUCCESS' | 0 | Operation completed successfully |
 | 'StinkyErrorCode::PASSCTX_EMPTY' | 1 | PassContext is invalid or empty. This typically occurs when trying to use a PassContext that hasn't been properly initialized or has been cleaned up. |
+| 'StinkyErrorCode::PARSE_ERROR' | 2 | The IR text does not parse, or the parsed function has no blocks. |
+| 'StinkyErrorCode::CONVERT_ERROR' | 3 | The text parsed, but an instruction has no opcode or hardware descriptor for the arch, or a successor label names no block. 'populateFunctionFromParsed' reports each one as an error 'Diagnostic' and still builds the rest; do not use that function. |
 
 ### Usage
 
@@ -48,6 +52,7 @@ std::cerr << "Error code: " << errorValue << "\n";
 ### Functions That Return StinkyErrorCode
 
 - 'StinkyIRConverter::populateFunctionFromString()' - Returns error codes when populating an IRList from a string
+- 'StinkyIRConverter::populateFunctionFromParsed()' - Returns 'PARSE_ERROR' or 'CONVERT_ERROR', with the reasons in its diagnostics
 
 ### Error Handling Best Practices
 

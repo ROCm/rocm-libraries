@@ -106,6 +106,9 @@ struct ParsedInstruction {
     /// (text after "//" or ";", with the marker stripped). Empty when no
     /// comment was present or the parser was not asked to capture them.
     std::string comment;
+    /// Source position, for a diagnostic raised after parsing. 0 when unknown.
+    unsigned line = 0;
+    unsigned column = 0;
 
     ParsedInstruction(const std::string& opcode, bool label = false)
         : opcodeStr(opcode), issueCycles(0), latencyCycles(0), isLabel(label) {}
@@ -119,6 +122,9 @@ struct ParsedBlock {
     std::string blockId;
     std::vector<std::unique_ptr<ParsedInstruction>> instructions;
     std::vector<std::string> successorIds;  // ^blockId references
+    /// Position of the `Successors:` line. 0 when the block has none.
+    unsigned successorsLine = 0;
+    unsigned successorsColumn = 0;
 };
 
 /// Parsed function: name + blocks (Function -> BasicBlock -> IRBase hierarchy)
@@ -168,6 +174,8 @@ STINKYTOFU_EXPORT ParseResult parseSourceStringWithDiagnostics(const std::string
 struct MultiParseResult {
     std::vector<std::unique_ptr<ParsedFunction>> functions;
     std::vector<Diagnostic> diagnostics;
+    /// Name from an `st.module @name { ... }` wrapper. Empty for bare `st.func` text.
+    std::string moduleName;
 
     bool hasErrors() const {
         for (const auto& diag : diagnostics)
@@ -176,7 +184,10 @@ struct MultiParseResult {
     }
 };
 
-/// Parse all st.func definitions from a source string.
+/// Parse every st.func in a source string: bare, or inside the one
+/// `st.module @name { ... }` wrapper AsmPrinter writes for a module. Text that
+/// does not start with either is left for parseSourceStringWithDiagnostics,
+/// which reads the flat form.
 STINKYTOFU_EXPORT MultiParseResult
 parseAllSourceStringsWithDiagnostics(const std::string& sourceStr);
 

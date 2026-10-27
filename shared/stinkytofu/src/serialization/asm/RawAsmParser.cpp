@@ -907,7 +907,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     std::string mnemonic(lexer.consume().text);
 
     // Look up the hardware instruction descriptor
-    auto isaOpcode = getMnemonicToIsaOpcode(mnemonic, arch);
+    auto isaOpcode = findMnemonicIsaOpcode(mnemonic, arch);
     const HwInstDesc* hwInstDesc = (isaOpcode != GFX::INVALID)
                                        ? getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch)
                                        : nullptr;
@@ -919,6 +919,8 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     }
 
     auto inst = std::make_unique<ParsedInstruction>(mnemonic);
+    inst->line = lineNo;
+    inst->column = 1;
     inst->issueCycles = hwInstDesc->issue;
     inst->latencyCycles = hwInstDesc->latency;
 
@@ -1698,6 +1700,54 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
     func->blocks.push_back(std::move(block));
     result.parsedFunction = std::move(func);
     return result;
+}
+
+std::optional<ParsedRegion> cutParsedRegion(ParsedFunction& func, const std::string& startLabel,
+                                            const std::string& endLabel, std::string& error) {
+    if (func.blocks.size() != 1) {
+        error = "a label region needs a function with one block";
+        return std::nullopt;
+    }
+    ParsedBlock& block = *func.blocks.front();
+    auto& insts = block.instructions;
+
+    // First occurrence of each, in case a label name repeats later in the file.
+    size_t startIdx = insts.size();
+    size_t endIdx = insts.size();
+    for (size_t idx = 0; idx < insts.size(); ++idx) {
+        if (!insts[idx]->isLabel) continue;
+        if (startIdx == insts.size() && insts[idx]->opcodeStr == startLabel) startIdx = idx;
+        if (endIdx == insts.size() && insts[idx]->opcodeStr == endLabel) endIdx = idx;
+    }
+    if (startIdx == insts.size()) {
+        error = "start label '" + startLabel + "' not found";
+        return std::nullopt;
+    }
+    if (endIdx == insts.size()) {
+        error = "end label '" + endLabel + "' not found";
+        return std::nullopt;
+    }
+    if (endIdx < startIdx) {
+        error = "end label '" + endLabel + "' comes before start label '" + startLabel + "'";
+        return std::nullopt;
+    }
+
+    auto part = [&](const std::string& name, size_t begin, size_t end) {
+        auto out = std::make_unique<ParsedFunction>();
+        out->funcName = name;
+        auto outBlock = std::make_unique<ParsedBlock>();
+        outBlock->blockId = block.blockId;
+        for (size_t idx = begin; idx < end; ++idx)
+            outBlock->instructions.push_back(std::move(insts[idx]));
+        out->blocks.push_back(std::move(outBlock));
+        return out;
+    };
+    ParsedRegion cut;
+    cut.before = part(func.funcName + "_pre", 0, startIdx);
+    cut.region = part(func.funcName, startIdx, endIdx + 1);
+    cut.after = part(func.funcName + "_post", endIdx + 1, insts.size());
+    insts.clear();
+    return cut;
 }
 
 }  // namespace stinkytofu

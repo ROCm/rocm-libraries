@@ -388,7 +388,10 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
 
 STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
 STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+/// The ISA opcode of \p mnemonic on \p arch, or GFX::INVALID after printing an error.
 STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+/// getMnemonicToIsaOpcode without the print, for a caller that reports the miss itself.
+STINKYTOFU_EXPORT uint16_t findMnemonicIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};
