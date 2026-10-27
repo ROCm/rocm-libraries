@@ -66,9 +66,11 @@ namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 #endif
 ```
 
-Do not include NVIDIA's `cudnn.h` or `cudnn_frontend.h` in the same translation unit: the shim declares `cudnnHandle_t`, `cudnnStatus_t`, and the `cudnn*` entry points itself.
+Do not include NVIDIA's `cudnn.h` or `cudnn_frontend.h` in the same translation unit, and drop your own declarations of cuDNN names (for example a cuDNN stub layer) from shim builds. Through `cudnn.h` the shim itself declares `cudnnHandle_t`, `cudnnStatus_t`, the `cudnn*` entry points, the cuDNN backend C enums and types (`cudnnDataType_t`, `cudnnBackendDescriptor_t`, `cudnnFraction_t`, ... with their `CUDNN_*` enumerators), the macro `CUDNN_DIM_MAX`, and `cudnnBackendExecute` and `cudnnGetLastErrorString`. This holds for v9-only code too.
 
-[`samples/cudnn_shim/HipifyConvFprop.cpp`](../samples/cudnn_shim/HipifyConvFprop.cpp) is a complete hipified convolution program. Each line changed from the cuDNN original is marked `// cuDNN: <original line>`. The other samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/) build and validate one node each; the `*V8.cpp` samples use the v0.x builders.
+Upstream declares a global `json` alias for `nlohmann::json`; the shim declares it as `cudnn_frontend::json`. Code that names a bare `json` adds `using json = cudnn_frontend::json;`.
+
+[`samples/cudnn_shim/HipifyConvFprop.cpp`](../samples/cudnn_shim/HipifyConvFprop.cpp) is a complete hipified convolution program. Each line changed from the cuDNN original is marked `// cuDNN: <original line>`. The other v9 samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/) build and validate one node each on the host. The `*V8.cpp` samples use the v0.x builders and run on a GPU: most build one operation, and `ConvBiasReluV8.cpp` and `MatmulBiasActV8.cpp` a three-node fusion. See the [samples README](../samples/README.md#cudnn-compatibility-shim-samples).
 
 ## Known divergences
 
@@ -76,7 +78,7 @@ Details: [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md).
 
 | Area | Shim behavior |
 |---|---|
-| Heuristic modes | Every `HeurMode_t` is accepted. `A` and `B` select hipDNN's prediction policies; `OPENSOURCE` logs a warning on first use and uses hipDNN's default engine selection. |
+| Heuristic modes | Every `HeurMode_t` is accepted. In the v9 graph API, `A` and `B` select hipDNN's prediction policies, and `OPENSOURCE` logs a warning once per process and runs hipDNN's fallback engine selection. The v0.x builders run fallback selection for every mode. |
 | Numerical-note filters | Mostly ignored with a warning. `deselect_numeric_notes(NONDETERMINISTIC)` keeps only engines that claim determinism. `deselect_numeric_notes` with `DOWN_CONVERT_INPUTS` or `REDUCED_PRECISION_REDUCTION`, and `select_numeric_notes(STRICT_NAN_PROP)`, record `GRAPH_NOT_SUPPORTED`. |
 | Behavior-note filters | hipDNN notes filter engines. cuDNN-only notes: `deselect` is ignored with a warning, `select` records `GRAPH_NOT_SUPPORTED`. |
 | Engine filters | Applied after plan creation. `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan; if none survives, plan creation, `check_support()`, and plan builds return `GRAPH_NOT_SUPPORTED`. |
@@ -109,7 +111,7 @@ Supported nodes forward to hipDNN: `batchnorm`, `batchnorm_backward`, `batchnorm
 Not provided (compile error):
 
 - cuDNN backend descriptor C API: `cudnnBackendCreateDescriptor`, `cudnnBackendSetAttribute`, `cudnnBackendGetAttribute`, `cudnnBackendFinalize`, `cudnnBackendDestroyDescriptor`, `CUDNN_ATTR_*`, `CUDNN_TYPE_*`.
-- cuDNN C API beyond handle, stream, error-string and version functions and `cudnnBackendExecute`.
+- cuDNN C API beyond handle, stream, error-string and version functions, `cudnnBackendExecute` and `cudnnGetLastErrorString`.
 - `Graph::scaled_dot_product_flash_attention` and `_backward` (deprecated upstream; use `sdpa` / `sdpa_backward`).
 - `Graph::key`, `get_variant_pack_uids_sorted`, `prepare_variant_pack_template`, `apply_oss_slot_indices_to_plans`.
 - `Graph::set_override_shape_enabled`, unless hipDNN is built with `HIPDNN_ENABLE_SDPA`.
@@ -119,7 +121,8 @@ Not provided (compile error):
 | Symptom | Cause and fix |
 |---|---|
 | `cudnn_frontend` is not declared | Missing namespace alias. Add it after the include. |
-| Redefinition of `cudnnHandle_t` or `cudnnCreate` | NVIDIA cuDNN headers are also included. Remove them from shim builds. |
+| Redefinition of `cudnnHandle_t`, `cudnnCreate` or a `CUDNN_*` enumerator | NVIDIA cuDNN headers, or your own cuDNN declarations, are also included. Remove them from shim builds. |
+| `json` is not declared | The shim declares upstream's global `json` alias as `cudnn_frontend::json`. Add `using json = cudnn_frontend::json;`. |
 | `cudnnBackendCreateDescriptor`, `cudnnBackendSetAttribute` or `CUDNN_ATTR_*` does not compile | The raw backend descriptor API is not provided. Build descriptors with the v0.x builders or the v9 graph API. |
 | `validate()` returns `cuDNN-shim node '<name>' has no hipDNN equivalent yet` | The graph uses an [unsupported node](#unsupported-nodes-and-apis). To request one, open an issue at https://github.com/ROCm/rocm-libraries/issues. |
 | `validate()` returns `Duplicate tensor UID in graph` | Two tensors share a UID. Give each tensor a unique UID. |

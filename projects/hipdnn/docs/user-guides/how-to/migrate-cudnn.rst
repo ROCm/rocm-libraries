@@ -33,16 +33,6 @@ Here's a minimal example of a hipDNN project in ``CMakeLists.txt``:
 
   See `Working examples in the Porting Guide <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/PortingGuide.md#working-examples>`_ for ported code samples.
 
-cuDNN compatibility headers
-===========================
-
-hipDNN also provides cuDNN-spelled headers under ``frontend/include/hipdnn_compatibility/cudnn/``
-(for example, ``#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>``). These headers let hipified
-code keep cuDNN type names. They are installed only when hipDNN is built with
-``HIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON``. Request them with
-``find_package(hipdnn_frontend CONFIG REQUIRED COMPONENTS cudnn_compatibility)``.
-See the samples in `samples/cudnn_shim <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples/cudnn_shim>`_.
-
 Key differences between cuDNN and hipDNN
 ========================================
 
@@ -83,11 +73,21 @@ Compile cuDNN frontend source with the compatibility shim
 =========================================================
 
 Instead of porting to the ``hipdnn_frontend`` API, you can compile existing cuDNN frontend source
-against hipDNN's header-only cuDNN-compatibility shim. Build hipDNN with
-``-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`` to install the shim headers with the ``hipdnn_frontend``
-headers, then link ``hipdnn_frontend`` as shown above. The shim is source compatible only: rebuild
-your code against it. Its C entry points take HIP types (for example, ``cudnnSetStream`` takes a
-``hipStream_t``), so CUDA runtime calls in your source still need porting to HIP.
+against hipDNN's header-only cuDNN-compatibility shim. Its cuDNN-spelled headers live under
+``frontend/include/hipdnn_compatibility/cudnn/`` (for example,
+``#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>``) and are installed with the
+``hipdnn_frontend`` headers only when hipDNN is built with ``-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON``.
+Request them as a package component, so that configuration fails against a hipDNN built without
+them:
+
+.. code:: cmake
+
+    find_package(hipdnn_frontend CONFIG REQUIRED COMPONENTS cudnn_compatibility)
+    target_link_libraries(my_app PRIVATE hipdnn_frontend)
+
+The shim is source compatible only: rebuild your code against it. Its C entry points take HIP types
+(for example, ``cudnnSetStream`` takes a ``hipStream_t``), so CUDA runtime calls in your source still
+need porting to HIP.
 
 Replace the cuDNN include and alias the namespace:
 
@@ -97,6 +97,10 @@ Replace the cuDNN include and alias the namespace:
 
     namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
+Upstream declares a global ``json`` alias for ``nlohmann::json``; the shim declares it as
+``cudnn_frontend::json``. Code that names a bare ``json`` adds ``using json = cudnn_frontend::json;``.
+
+See the samples in `samples/cudnn_shim <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn/samples/cudnn_shim>`_.
 The shim's behavior differs from cuDNN in places. See
 `Known divergences <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md>`__
 for the full list.
@@ -105,7 +109,9 @@ cuDNN v9 graph API
 ------------------
 
 Source written against the v9 graph API (``cudnn_frontend::graph::Graph``) compiles after the include
-change. Every heuristic mode runs hipDNN's fallback engine selection.
+change. ``HeurMode_t::A`` and ``HeurMode_t::B`` select hipDNN's prediction policies (see
+:ref:`Troubleshooting <migrate-cudnn-troubleshooting>`); ``HeurMode_t::OPENSOURCE`` logs a warning
+once per process and runs hipDNN's fallback engine selection.
 
 cuDNN v8 API: v0.x builders
 ---------------------------
@@ -148,8 +154,8 @@ A convolution forward through the builders:
             .build();
     }
 
-    // x, w, y and workspace are device pointers. workspace must hold plan.getWorkspaceSize() bytes.
-    cudnnStatus_t convFprop(cudnnHandle_t handle, void* x, void* w, void* y, void* workspace)
+    // x, w and y are device pointers.
+    cudnnStatus_t convFprop(cudnnHandle_t handle, void* x, void* w, void* y)
     {
         // Packed NCHW: x and y are 16x16x16x16, w is 16x16x3x3; padding 1, stride 1.
         const std::vector<int64_t> xDims = {16, 16, 16, 16}, xStrides = {4096, 256, 16, 1};
@@ -194,6 +200,14 @@ A convolution forward through the builders:
                                                  .setEngineConfig(configs[0], graph.getTag())
                                                  .build();
 
+        // Size the workspace from this plan: the size can differ between builds of one configuration.
+        void* workspace = nullptr;
+        const auto workspaceSize = static_cast<size_t>(plan.getWorkspaceSize());
+        if(workspaceSize > 0 && hipMalloc(&workspace, workspaceSize) != hipSuccess)
+        {
+            return CUDNN_STATUS_ALLOC_FAILED;
+        }
+
         std::array<void*, 3> pointers = {x, w, y};
         const std::array<int64_t, 3> uids = {'x', 'w', 'y'};
         const cudnn_frontend::VariantPack pack = cudnn_frontend::VariantPackBuilder()
@@ -201,7 +215,10 @@ A convolution forward through the builders:
                                                      .setDataPointers(3, pointers.data())
                                                      .setUids(3, uids.data())
                                                      .build();
-        return cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc());
+        const cudnnStatus_t status
+            = cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc());
+        (void)hipFree(workspace); // hipFree waits for the device to finish with the workspace.
+        return status;
     }
 
 ``samples/cudnn_shim/ConvFpropV8.cpp`` in the hipDNN source tree runs this graph end to end.
@@ -214,7 +231,8 @@ has the full list.
 * **Heuristics:** every ``CUDNN_HEUR_MODE_*`` returns the same list, in hipDNN's fallback order
   (`Heuristic modes <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#heuristic-modes>`__).
 * **Handles:** ``OperationGraphBuilder`` needs ``setHandle``; without it ``build()`` returns
-  ``CUDNN_STATUS_BAD_PARAM``. ``cudnnBackendExecute`` runs a plan on whichever handle it is given
+  ``CUDNN_STATUS_BAD_PARAM``. ``cudnnBackendExecute`` runs a plan on whichever handle it is given,
+  provided the handle is on the plan's device
   (`Operation graphs <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#operation-graphs>`__,
   `Engines, plans and execution <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#engines-plans-and-execution>`__).
 * **Convolution mode:** call ``setMathMode(CUDNN_CROSS_CORRELATION)``. A graph that keeps the
@@ -236,6 +254,8 @@ has the full list.
 * **Enum values:** the C enums have cuDNN's names but the shim's own values. Don't store or compare
   raw values produced by cuDNN
   (`Enum values <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#enum-values>`__).
+
+.. _migrate-cudnn-troubleshooting:
 
 Troubleshooting
 ===============
