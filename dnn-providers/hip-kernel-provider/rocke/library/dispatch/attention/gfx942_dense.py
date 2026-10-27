@@ -22,6 +22,7 @@ from __future__ import annotations
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
+from .dense_rules import dense_paged_fields
 from .common import (
     AttentionMaskType,
     AttentionRequest,
@@ -75,8 +76,9 @@ def _base_spec(req: AttentionRequest):
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did.
-    persistent = head_size == 128
+    # D64 the non-persistent grid did. Paged K/V runs on the default grid only.
+    paged = dense_paged_fields(req)
+    persistent = head_size == 128 and not paged
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -96,6 +98,7 @@ def _base_spec(req: AttentionRequest):
         use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
+        **paged,
     )
 
 
@@ -132,9 +135,11 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=_base_spec,
         supports=_supports,
         # Dense: causal, sliding-window and sinks (alone or combined), optional
-        # LSE output; no moving bottom-right diagonal. Head size stays out:
-        # D64/D128 coverage is ``supports_attention_dense``'s call.
-        features=frozenset({"causal", "sliding_window", "sinks", "lse"}),
+        # LSE output, paged K/V; no moving bottom-right diagonal. Head size stays
+        # out: D64/D128 coverage is ``supports_attention_dense``'s call.
+        features=frozenset(
+            {"causal", "sliding_window", "sinks", "lse", "layout_paged"}
+        ),
         # _base_spec picks these from the dtype and head size.
         recorded=frozenset({"persistent", "waves_per_eu"}),
     )

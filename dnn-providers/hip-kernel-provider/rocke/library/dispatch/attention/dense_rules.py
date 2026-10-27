@@ -188,6 +188,26 @@ def resolve_dense_num_persistent(
         ) from None
 
 
+def dense_paged_fields(req) -> dict:
+    """Paged-KV spec fields of a ``layout="paged"`` request; empty for any other.
+
+    The block count is known only from the cache tensor, so this is the smallest
+    cache that holds the request; binding retargets it from ``k.shape[0]``
+    (:meth:`AttentionTuningSpec.with_num_kv_blocks`).
+    """
+    if req.layout.strip().lower() != "paged":
+        return {}
+    block_size = int(req.kv_block_size)
+    if block_size <= 0:
+        raise ValueError(f"kv_block_size must be positive, got {block_size}")
+    pages_per_seq = -(-int(req.seqlen_k) // block_size)
+    return {
+        "paged": True,
+        "block_size": block_size,
+        "num_kv_blocks": int(req.batch) * pages_per_seq,
+    }
+
+
 @lru_cache(maxsize=256)
 def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
     """The declared dense axes that apply to ``base``, with concrete values."""

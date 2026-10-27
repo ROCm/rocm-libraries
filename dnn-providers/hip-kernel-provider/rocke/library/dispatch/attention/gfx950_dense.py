@@ -30,6 +30,7 @@ from .candidate import (
     make_dense_candidate,
 )
 from .common import AttentionRequest, normalize_band
+from .dense_rules import dense_paged_fields
 
 _DENSE_LAYOUT = "default"
 _DENSE_TILE = "default"
@@ -69,7 +70,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        features=_FEATURES | {"causal_bottom_right", "layout_paged"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches.
@@ -78,7 +79,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        features=_FEATURES | {"causal_bottom_right", "layout_paged"},
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -205,6 +206,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
+        **dense_paged_fields(req),
     )
 
 

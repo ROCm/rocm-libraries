@@ -34,7 +34,10 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
-_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {
+    "causal_bottom_right",
+    "layout_paged",
+}
 _RDNA_WMMA_FEATURES = {
     "causal",
     "causal_bottom_right",
@@ -62,7 +65,13 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "sliding_window",
     },
-    "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
+    "attention_gfx942_dense": {
+        "causal",
+        "layout_paged",
+        "lse",
+        "sinks",
+        "sliding_window",
+    },
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
