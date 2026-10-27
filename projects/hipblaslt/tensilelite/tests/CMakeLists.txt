@@ -55,6 +55,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidatorReporting_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TilewrightLaunch_test.cpp"
 )
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
@@ -69,6 +70,8 @@ if(NOT TENSILELITE_ENABLE_YAML)
             # The indexed library layout is msgpack-only: its solution blob is a
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
+            # Loads library files through msgpack to read their kernels without a device.
+            "${CMAKE_CURRENT_SOURCE_DIR}/TilewrightLaunchLibrary_test.cpp"
     )
 endif()
 
@@ -78,6 +81,11 @@ if(TENSILELITE_ENABLE_YAML)
 endif()
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# CachingLibrary_test reads the comparison and the cache key of a problem from this header to
+# check that the key appends every compared field.
+set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp" APPEND PROPERTY
+    COMPILE_DEFINITIONS
+    TENSILELITE_CONTRACTION_PROBLEM_DETAIL_HPP="${CMAKE_CURRENT_SOURCE_DIR}/../include/Tensile/ContractionProblem_Detail.hpp")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/include")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
 
@@ -114,6 +122,29 @@ endif()
 # definition stays PRIVATE on both targets.
 if(HIP_HAS_CLUSTER_LAUNCH)
     target_compile_definitions(tensilelite-tests PRIVATE HIP_HAS_CLUSTER_LAUNCH)
+endif()
+
+# PredictionLibrary_test ranks with MLREC_v2 and MLREC_v3 models that it writes
+# with tilewright's own test writer; it reads no shipped model.
+if(TARGET roc::tilewright)
+    get_target_property(_tensilelite_tests_tilewright_dir roc::tilewright SOURCE_DIR)
+    get_property(_tensilelite_tests_has_tilewright GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT)
+    set(_tensilelite_tests_writer "${_tensilelite_tests_tilewright_dir}/tests/model_writer.cpp")
+    if(_tensilelite_tests_has_tilewright AND EXISTS "${_tensilelite_tests_writer}")
+        target_sources(tensilelite-tests PRIVATE "${_tensilelite_tests_writer}")
+        target_include_directories(tensilelite-tests PRIVATE
+            "${_tensilelite_tests_tilewright_dir}/tests"
+            "${_tensilelite_tests_tilewright_dir}/src/tilewright")
+        target_compile_definitions(tensilelite-tests PRIVATE TILEWRIGHT_TEST_MODEL_WRITER)
+    endif()
+    # The training pipeline's cases for the cache hints of operands the tensor
+    # data mover loads, which the integration must read as the pipeline does.
+    set(_tensilelite_tests_tdm_cases
+        "${_tensilelite_tests_tilewright_dir}/training_pipeline/tests/data/tdm_cache_hint_cases.tsv")
+    if(_tensilelite_tests_has_tilewright AND EXISTS "${_tensilelite_tests_tdm_cases}")
+        target_compile_definitions(tensilelite-tests PRIVATE
+            TILEWRIGHT_TDM_CACHE_HINT_CASES="${_tensilelite_tests_tdm_cases}")
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_OPENMP)

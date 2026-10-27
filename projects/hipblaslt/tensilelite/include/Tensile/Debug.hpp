@@ -60,9 +60,11 @@ namespace TensileLite
         bool printLookupEfficiency() const;
         bool printWinningKernelName() const;
 
-        // Re-reads TENSILE_DB, TENSILE_DB2, and TENSILE_STREAMK5_FORCE_MODE from
-        // the environment and updates cached state.  Only these three fields are
-        // refreshed; all other env-driven settings remain at their initial values.
+        // Re-reads TENSILE_DB, TENSILE_DB2, TENSILE_PREDICTION_LIB,
+        // TENSILE_USE_TILEWRIGHT, TENSILE_TILEWRIGHT_BANK and
+        // TENSILE_STREAMK5_FORCE_MODE from the environment and updates cached
+        // state.  Only these settings are refreshed; all other env-driven
+        // settings remain at their initial values.
         // Intended for tests that call setenv() in-process after the singleton has
         // already been constructed.
         //
@@ -71,6 +73,17 @@ namespace TensileLite
         void reloadDebugBitsForTest();
 
         bool usePredictionLibrary() const;
+
+        bool useTilewright() const;
+
+        // TENSILE_TILEWRIGHT_BANK: 1 when tilewright also ranks the problem type's
+        // Equality kernels, 0 when it ranks only the Prediction kernels, -1 when
+        // unset (the model decides). Re-read by reloadDebugBitsForTest().
+        int tilewrightBank() const;
+
+        // TENSILE_TILEWRIGHT_PREPARE=0: a tilewright ranker builds its per-cell
+        // data on first use instead of when it is made.
+        bool tilewrightPrepare() const;
 
         bool printLibraryLogicIndex() const;
 
@@ -173,6 +186,7 @@ namespace TensileLite
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
         bool        m_predictionLib       = false;
+        bool        m_tilewright          = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;

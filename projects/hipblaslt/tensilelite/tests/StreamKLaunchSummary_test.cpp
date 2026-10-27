@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -2137,6 +2138,22 @@ TEST_F(ClusterStreamKTest, AlignsWorkersBeforeScheduling)
     }
 }
 
+// A device with the default persistent settings launches a static Stream-K
+// cluster in whole clusters too: the kernel does not follow the default
+// persistent launch, so its grid comes from the selection the tests above check,
+// and the physical launch, the packed grid and the workspace agree with it.
+TEST_F(ClusterStreamKTest, DefaultPersistentSettingsKeepWholeClusters)
+{
+    env.device.persistentFixedGrid   = 0;
+    env.device.persistentDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    ASSERT_TRUE(hasDefaultPersistentSettings(env.device));
+    EXPECT_FALSE(solution.followsDefaultPersistentLaunch());
+    auto const launch = solution.resolvePersistentSettings(problem, env.device);
+    EXPECT_TRUE(launch.grid == launch.totalTiles || launch.grid % 4 == 0) << launch.grid;
+    // A whole-tile grid is padded to whole clusters at launch only.
+    expectLaunch(launch.grid, (launch.grid + 3) / 4 * 4, launch.workspaceBytes);
+}
+
 TEST_F(ClusterStreamKTest, RejectsBudgetSmallerThanCluster)
 {
     env.device.persistentFixedGrid = 3;
@@ -2179,4 +2196,111 @@ TEST_F(ClusterStreamKTest, ParallelAlignmentPreservesIntegralSplits)
     expectLaunch(35, 36, 0);
     EXPECT_EQ(solution.resolvePersistentSettings(problem, env.device).reduction,
               origami::reduction_t::tree);
+}
+
+// On a device with the default persistent settings, resolvePersistentSettings() launches a
+// kernel that follows the default persistent launch (resolveDefaultPersistentLaunch(), in
+// DefaultPersistentLaunch.hpp) as TensileLite's general path would: a Stream-K kernel as
+// computeStreamKDecisions() decides from getSKReduction(), getPersistentGridImpl() and the
+// launch-site rules, a DataParallel kernel with getSKGrid()'s grid. A change to the general
+// path that the default launch does not follow fails here. A static Stream-K cluster takes the
+// general path itself.
+TEST(DefaultPersistentLaunchParityTest, MatchesTheGeneralPathUnderDefaultSettings)
+{
+    AnalyticalEnv env;
+    env.device.persistentFixedGrid      = 0;
+    env.device.persistentMaxCUs         = 0;
+    env.device.persistentGridMultiplier = 1;
+    env.device.persistentDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    ASSERT_TRUE(hasDefaultPersistentSettings(env.device));
+
+    struct Kernel
+    {
+        TileProcessingStrategy strategy;
+        WorkAssignment         assignment;
+        int                    occupancy;
+        int                    atomic   = 0;
+        size_t                 clusterX = 1;
+    };
+    std::vector<Kernel> const kernels
+        = {{TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, 1},
+           {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, 2},
+           {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, 1, 1},
+           {TileProcessingStrategy::StreamK, WorkAssignment::DynamicWorkQueue, 2},
+           {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, 1},
+           {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, 4},
+           {TileProcessingStrategy::DataParallel, WorkAssignment::StaticGrid, 2},
+           {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, 1, 0, 4}};
+
+    struct Shape
+    {
+        size_t m, n, k, batch;
+    };
+    std::vector<Shape> const shapes = {
+        {4096, 4096, 512, 1},
+        {128 * 20, 128, 64 * 96, 1}, // few tiles, many iterations: parallel reduction
+        {256, 256, 64 * 64, 1},
+        {128 * 4500, 128, 512, 1}, // more partial tiles than the flag region holds
+        {1024, 1024, 512, 16},
+        {128 * 1884, 128, 512, 1},
+        {128 * 1884, 128, 64, 1}, // one K iteration per tile
+        {4096, 4096, 48, 1},
+        {128 * 300, 128, 64 * 60000, 1}, // tree fix-up bounds
+        {640, 896, 16384, 1},
+    };
+
+    for(auto const& kernel : kernels)
+    {
+        ContractionSolution solution;
+        solution.kernelName = "default-launch-parity";
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.tileProcessingStrategy = kernel.strategy;
+        solution.sizeMapping.workAssignment         = kernel.assignment;
+        solution.sizeMapping.CUOccupancy            = kernel.occupancy;
+        solution.sizeMapping.streamKAtomic          = kernel.atomic;
+        solution.sizeMapping.clusterDim             = TensileLite::dim3(kernel.clusterX, 1, 1);
+        solution.sizeMapping.workGroupMapping       = 1;
+        bool const streamK = kernel.strategy == TileProcessingStrategy::StreamK;
+        EXPECT_EQ(solution.followsDefaultPersistentLaunch(), kernel.clusterX == 1);
+
+        for(auto const& shape : shapes)
+            for(int const budget : {0, 224, 240})
+                for(int const mode : {0, 1, 2})
+                    for(bool const workspace : {true, false})
+                    {
+                        auto problem
+                            = makeBatchedGemmProblem(shape.m, shape.n, shape.k, shape.batch);
+                        problem.setWorkspaceSize(workspace ? std::numeric_limits<size_t>::max()
+                                                           : 0);
+                        problem.setParams().setSmCountTarget(budget);
+                        problem.setParams().setStreamKTileSchedulingMode(mode);
+                        SCOPED_TRACE(::testing::Message()
+                                     << "strategy " << toString(kernel.strategy) << " assignment "
+                                     << toString(kernel.assignment) << " occupancy "
+                                     << kernel.occupancy << " atomic " << kernel.atomic
+                                     << " cluster " << kernel.clusterX << " m " << shape.m << " n "
+                                     << shape.n << " k " << shape.k << " batch " << shape.batch
+                                     << " budget " << budget << " mode " << mode << " workspace "
+                                     << workspace);
+                        ASSERT_FALSE(problem.getParams().uniformSummationOrder());
+
+                        auto const launch = solution.resolvePersistentSettings(problem, env.device);
+                        if(!streamK)
+                        {
+                            EXPECT_EQ(launch.grid,
+                                      solution.getSKGrid(problem,
+                                                         env.device,
+                                                         launch.totalTiles,
+                                                         origami::reduction_t::none));
+                            continue;
+                        }
+                        auto const d = solution.computeStreamKDecisions(problem, env.device);
+                        EXPECT_EQ(launch.grid, d.finalGrid);
+                        EXPECT_EQ(launch.reduction, d.reduction);
+                        EXPECT_EQ(launch.selectedGrid, d.selectedGrid);
+                        EXPECT_EQ(launch.effectiveWorkAssignment
+                                      == WorkAssignment::DynamicWorkQueue,
+                                  d.isDynamic);
+                    }
+    }
 }

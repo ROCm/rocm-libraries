@@ -182,6 +182,18 @@ if(TENSILELITE_ENABLE_HOST)
             ZLIB::ZLIB
     )
 
+    if(HIPBLASLT_ENABLE_TILEWRIGHT AND TARGET roc::tilewright)
+        # tilewright is not installed with TensileLite, so an installed static
+        # TensileLite could not satisfy its references for downstream links.
+        if(NOT BUILD_SHARED_LIBS AND NOT CMAKE_SKIP_INSTALL_RULES)
+            message(STATUS "tensilelite-host: built without tilewright (an installed static TensileLite cannot carry it)")
+        else()
+            target_link_libraries(tensilelite-host PUBLIC $<BUILD_INTERFACE:roc::tilewright>)
+            target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILELITE_HAS_TILEWRIGHT>)
+            set_property(GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT TRUE)
+        endif()
+    endif()
+
     if(TENSILELITE_ENABLE_MXDATAGENERATOR)
         target_link_libraries(tensilelite-host
             PRIVATE $<BUILD_INTERFACE:roc::mxDataGeneratorPreSwizzle>)

@@ -85,6 +85,12 @@ namespace TensileLite
                     size_t periodPos = ctx->filename.rfind('.');
                     lib.suffix       = ctx->filename.substr(periodPos);
 
+                    using Registry = PlaceholderRegistry<MyProblem, MySolution>;
+                    if(!ctx->placeholders)
+                        ctx->placeholders = std::make_shared<Registry>();
+                    lib.placeholders = std::static_pointer_cast<Registry>(ctx->placeholders);
+                    lib.placeholders->byPrefix.emplace(lib.filePrefix, &lib);
+
                     for(auto condition : ctx->preloaded)
                     {
                         std::string pattern = RegexPattern(condition);

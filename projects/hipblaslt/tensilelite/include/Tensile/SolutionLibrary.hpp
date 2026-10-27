@@ -29,6 +29,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 #include <Tensile/Tensile.hpp>
@@ -132,6 +133,107 @@ namespace TensileLite
     using SolutionSet = std::set<std::shared_ptr<MySolution>>;
     template <typename MySolution>
     using SolutionVector = std::vector<std::shared_ptr<MySolution>>;
+
+    /**
+ * Makes the solutions a findTopSolutions call has collected so far visible to
+ * the libraries it calls on the same thread, for as long as it lives. Scopes
+ * nest; contains() searches all of them.
+ */
+    class TENSILELITEHOST_EXPORT SelectedSolutionsScope
+    {
+    public:
+        template <typename MySolution>
+        explicit SelectedSolutionsScope(SolutionVector<MySolution> const& selected)
+            : m_selected(&selected)
+            , m_contains(&containsIndex<MySolution>)
+        {
+            auto& head = innermost();
+            m_outer    = head;
+            head       = this;
+        }
+
+        ~SelectedSolutionsScope()
+        {
+            innermost() = m_outer;
+        }
+
+        SelectedSolutionsScope(SelectedSolutionsScope const&)            = delete;
+        SelectedSolutionsScope& operator=(SelectedSolutionsScope const&) = delete;
+
+        /// Whether an enclosing scope holds a solution with this index.
+        static bool contains(int index)
+        {
+            for(auto const* scope = innermost(); scope != nullptr; scope = scope->m_outer)
+            {
+                if(scope->m_contains(scope->m_selected, index))
+                    return true;
+            }
+            return false;
+        }
+
+    private:
+        template <typename MySolution>
+        static bool containsIndex(void const* selected, int index)
+        {
+            for(auto const& solution : *static_cast<SolutionVector<MySolution> const*>(selected))
+            {
+                if(solution && solution->index == index)
+                    return true;
+            }
+            return false;
+        }
+
+        static SelectedSolutionsScope const*& innermost();
+
+        void const* m_selected;
+        bool (*m_contains)(void const*, int);
+        SelectedSolutionsScope const* m_outer;
+    };
+
+    /**
+ * Makes the predicate of a row that matched the problem visible to the
+ * libraries the row's library calls on the same thread, for as long as it
+ * lives. Scopes nest.
+ */
+    class TENSILELITEHOST_EXPORT MatchedPredicateScope
+    {
+    public:
+        template <typename Predicate>
+        explicit MatchedPredicateScope(Predicate const* predicate)
+            : m_predicate(predicate)
+            , m_type(&typeid(Predicate))
+        {
+            auto& head = innermost();
+            m_outer    = head;
+            head       = this;
+        }
+
+        ~MatchedPredicateScope()
+        {
+            innermost() = m_outer;
+        }
+
+        MatchedPredicateScope(MatchedPredicateScope const&)            = delete;
+        MatchedPredicateScope& operator=(MatchedPredicateScope const&) = delete;
+
+        /// The predicate of the innermost scope when that scope was made from
+        /// a Predicate, or null.
+        template <typename Predicate>
+        static Predicate const* innermostOf()
+        {
+            auto const* scope = innermost();
+            if(scope == nullptr || *scope->m_type != typeid(Predicate))
+                return nullptr;
+            return static_cast<Predicate const*>(scope->m_predicate);
+        }
+
+    private:
+        static MatchedPredicateScope const*& innermost();
+
+        void const*                  m_predicate;
+        std::type_info const*        m_type;
+        MatchedPredicateScope const* m_outer;
+    };
 
     /**
  * \ingroup SolutionLibrary
@@ -250,6 +352,13 @@ namespace TensileLite
         virtual std::string getLibraryFileName() const
         {
             return "";
+        }
+
+        /// Whether a tilewright model ranks this library's kernels, which only
+        /// a Prediction library loaded with TENSILE_USE_TILEWRIGHT can have.
+        virtual bool hasTilewrightModel() const
+        {
+            return false;
         }
     };
 
