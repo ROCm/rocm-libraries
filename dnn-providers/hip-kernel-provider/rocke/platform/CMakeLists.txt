@@ -435,6 +435,22 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
 
+    # Compiler environment for Python entries that compile and disassemble
+    # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
+    # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
+    # bitcode. Emitted once, before every entry that appends
+    # `${_rocke_compiler_env}` to its ENVIRONMENT. ctest resolves it at test
+    # time: empty off Linux or without ROCM_PATH, else ";PATH=...;..." so it
+    # appends straight after the entry's last variable. Where the tools are
+    # supplied, ROCKE_REQUIRE_COMPILER_TOOLS=1 makes the tests that honour it
+    # fail rather than skip: a gate that skips in every shard looks green and
+    # checks nothing.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set(_rocke_compiler_env \"\")\n"
+           "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
+           "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode;ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
+           "endif()\n")
+
     if(ROCKE_INSTALL_PLATFORM_PYTEST)
       # Native helpers some Python tests drive, as paths relative to the
       # CTestTestfile: the portable-IR replay CLI, and the C API program whose
@@ -454,10 +470,6 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set(_rocke_compiler_env \"\")\n"
-             "if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Linux\" AND NOT \"\$ENV{ROCM_PATH}\" STREQUAL \"\")\n"
-             "  set(_rocke_compiler_env \";PATH=\$ENV{ROCM_PATH}/bin:\$ENV{ROCM_PATH}/lib/llvm/bin:\$ENV{PATH};HIP_DEVICE_LIB_PATH=\$ENV{ROCM_PATH}/lib/llvm/amdgcn/bitcode\")\n"
-             "endif()\n"
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"${_rocke_pytest_env}\${_rocke_compiler_env}\"\n"
@@ -543,6 +555,12 @@ if(ROCKE_INSTALL_TESTS)
     # the benchmark shape files. Same PYTHONPATH contract as the conv entry
     # above; the staged library tree carries kernels/mla, dispatch/mla,
     # builders/mla, benchmarks/ and tests/golden/mla_*_ir_sha256.json.
+    # The resource gates in test_mla_decode.py (TestResources) and
+    # test_mla_prefill_gfx942.py (occupancy / agpr_acc guards) compile through
+    # comgr and read the code object with llvm-objdump and llvm-readelf, so the
+    # entry also takes the compiler environment; without it they skip
+    # ("missing tool"), and with it TestResources fails rather than skips if it
+    # still cannot run.
     set(_ROCKE_LIBRARY_MLA_TEST_RELPATHS
         "tests/library/tests/test_mla_prefill_gfx942.py"
         "tests/library/tests/dispatch/mla/test_mla_prefill_gfx942_wiring.py"
@@ -565,7 +583,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\${_rocke_compiler_env}\"\n"
            "  TIMEOUT 900)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

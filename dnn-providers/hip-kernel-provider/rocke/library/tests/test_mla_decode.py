@@ -505,12 +505,19 @@ print(json.dumps({"scratch": res.scratch_bytes, "vgpr": res.vgpr_count,
 """
 
 
+#: Set by the CTest entries that put ROCm's compiler tools on PATH: there, a
+#: probe that cannot compile or inspect is a broken gate, not a missing tool.
+_REQUIRE_ENV = "ROCKE_REQUIRE_COMPILER_TOOLS"
+
+
 class TestResources:
     """Compiled through comgr: the static half of the resource gate.
 
     Zero scratch, and at most 256 VGPRs and 32 KiB of LDS, which is what two
     workgroups of four waves need per CU on both arches. Skipped where comgr,
-    llvm-objdump or the IR flavor's compiler is missing.
+    llvm-objdump or the IR flavor's compiler is missing -- unless
+    ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` (set by the CTest entry when it supplies
+    ROCm's tools), which turns every skip into a failure.
     """
 
     @pytest.mark.parametrize("arch", sorted(SPECS))
@@ -523,25 +530,34 @@ class TestResources:
                 capture_output=True,
                 text=True,
                 env=env,
-                timeout=600,
+                # Under the CTest lane's per-test --timeout=120, so this
+                # failure, with the probe's output, is the one reported.
+                timeout=90,
             )
         except subprocess.TimeoutExpired as exc:
             pytest.fail(
-                f"resource probe timed out after 600 s: {(exc.stderr or '')[-1000:]}"
+                f"resource probe timed out after 90 s: {(exc.stderr or '')[-1000:]}"
             )
         output = (proc.stdout + proc.stderr).strip()
+        reason = None
         if proc.returncode == 77:
             # The probe prints its reason on stdout; stderr may end in an
             # unrelated warning.
-            pytest.skip((proc.stdout.strip().splitlines() or [output])[-1])
-        # comgr's option parser exit(1)s with this message and no Python
-        # traceback; a traceback is a real failure, whatever its text.
-        if (
+            reason = (proc.stdout.strip().splitlines() or [output])[-1]
+        elif (
+            # comgr's option parser exit(1)s with this message and no Python
+            # traceback; a traceback is a real failure, whatever its text.
             proc.returncode == 1
             and "Unknown command line argument" in proc.stderr
             and "Traceback" not in proc.stderr
         ):
-            pytest.skip(f"the loaded comgr rejects a compile option: {output[-300:]}")
+            reason = f"the loaded comgr rejects a compile option: {output[-300:]}"
+        if reason is not None:
+            if os.environ.get(_REQUIRE_ENV) == "1":
+                pytest.fail(
+                    f"{_REQUIRE_ENV}=1, but the resource gate cannot run: {reason}"
+                )
+            pytest.skip(reason)
         assert proc.returncode == 0, output[-2000:]
         res = json.loads(proc.stdout.strip().splitlines()[-1])
         assert res["scratch"] == 0
