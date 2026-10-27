@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <set>
@@ -226,6 +227,19 @@ namespace TensileLite
 
                 auto prediction_result = origami::rank_configs(
                     origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+
+                // Origami currently models individual output tiles. A spatial
+                // StreamK block also launches its padded edge peers; charge for
+                // that footprint before truncating the analytical candidate list.
+                // Index lookup and measured/exact libraries do not use this path.
+                for(auto& r : prediction_result)
+                {
+                    if(r.config.index < solution_list.size())
+                        r.latency /= solution_list[r.config.index].second
+                                         ->streamKClusterUtilization(problem);
+                }
+                std::stable_sort(prediction_result.begin(), prediction_result.end(),
+                                 [](auto const& a, auto const& b) { return a.latency < b.latency; });
 
                 for(const auto& r : prediction_result)
                 {
