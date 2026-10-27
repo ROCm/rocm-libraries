@@ -1235,10 +1235,7 @@ TEST(TestSdpaDiagonalBandParams, RejectsZeroLeftBound)
 {
     const auto bandFor = [](std::optional<int64_t> leftBound) {
         SdpaAttributesT attrs;
-        if(leftBound.has_value())
-        {
-            attrs.left_bound = leftBound.value();
-        }
+        attrs.left_bound = leftBound;
         flatbuffers::FlatBufferBuilder builder;
         builder.Finish(CreateSdpaAttributes(builder, &attrs));
         const auto* parsed = flatbuffers::GetRoot<SdpaAttributes>(builder.GetBufferPointer());
