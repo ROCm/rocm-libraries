@@ -264,16 +264,16 @@ class Fragment:
 
     `tile_desc` and `dtype` are fixed at construction (read-only); `dtype` must be a scalar IR
     `Type` (``F16``, ``F32``, ``TF32``, ``FP4E2M1``, ...) -- a string token or a vector / pointer /
-    LDS type raises ``ValueError``; so does a `tile_desc` that is not a :class:`TileDesc`, or a
-    packed dtype whose ``register_count`` elements do not fill whole 32-bit words. `value` is the one
-    mutable field, because a kernel re-binds it every K step (``accumulator.value = b.mma(...)`` for
-    a single-atom tile -- wave shape == atom shape, one ``b.mma``; a multi-atom tile is driven
-    through `TileMma`). Every write, construction included, must be of type :attr:`storage_type`
-    (``vec<dtype x register_count>`` for every arithmetic dtype); anything else raises
-    ``ValueError`` naming the expected and actual type. A too-short vector would otherwise still lower, and every register
-    slice past its end would extract out-of-range vector elements as LLVM poison -- a silent wrong
-    answer; a too-long one would silently drop its extra registers. A wrong element type mislabels
-    every register.
+    LDS type raises ``TypeError``, as does a `tile_desc` that is not a :class:`TileDesc`; a packed
+    dtype whose ``register_count`` elements do not fill whole 32-bit words raises ``ValueError``.
+    `value` is the one mutable field, because a kernel re-binds it every K step
+    (``accumulator.value = b.mma(...)`` for a single-atom tile -- wave shape == atom shape, one
+    ``b.mma``; a multi-atom tile is driven through `TileMma`). Every write, construction included,
+    must be of type :attr:`storage_type` (``vec<dtype x register_count>`` for every arithmetic
+    dtype); anything else raises ``ValueError`` naming the expected and actual type. A too-short
+    vector would otherwise still lower, and every register slice past its end would extract
+    out-of-range vector elements as LLVM poison -- a silent wrong answer; a too-long one would
+    silently drop its extra registers. A wrong element type mislabels every register.
 
     A fragment constructed without a value is unfilled: reading `value` raises ``ValueError``
     until registers are written (`fill_fragment`, or a checked ``value =`` write), and assigning
@@ -287,13 +287,13 @@ class Fragment:
         self, tile_desc: TileDesc, dtype: Type, value: Value | None = None
     ) -> None:
         if not isinstance(tile_desc, TileDesc):
-            raise ValueError(
+            raise TypeError(
                 "Fragment tile_desc must be a TileDesc (from make_tile_desc, or a TileMma's "
                 f"a_desc / b_desc / c_desc) -- got {type(tile_desc).__name__} {tile_desc!r}"
             )
         ok, why = fragment_dtype_ok(dtype)
         if not ok:
-            raise ValueError(why)
+            raise TypeError(why)
         self._tile_desc = tile_desc
         self._dtype = dtype
         self._storage_type = storage_vector_type(dtype, tile_desc.register_count)
