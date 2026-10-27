@@ -1517,6 +1517,28 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
     assert _use_exp2_fast(head_size, dtype, persistent) is expected
 
 
+def test_exp2_fast_policy_keeps_the_narrow_window_body():
+    """The narrow-window body (window_wave_skip) keeps exp2_fast at bf16 D128 on
+    the default grid; without it the default-grid guard still applies."""
+    assert _use_exp2_fast(128, "bf16", False, window_wave_skip=True) is True
+    assert _use_exp2_fast(128, "bf16", False, window_wave_skip=False) is False
+    spec = Gfx942AttentionDenseSpec(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=16,
+        num_kv_heads=4,
+        head_size=128,
+        dtype="bf16",
+        block_m=128,
+        block_n=32,
+        sliding_window=128,
+        window_wave_skip=True,
+    )
+    assert spec.resolved_use_exp2_fast() is True
+    assert "_e2f" not in gfx942_kernel_name(spec)
+
+
 @pytest.mark.parametrize(
     "head_size, dtype, block_n, expected",
     [
