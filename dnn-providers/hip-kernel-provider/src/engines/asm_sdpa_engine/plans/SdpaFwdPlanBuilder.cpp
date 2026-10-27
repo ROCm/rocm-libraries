@@ -276,6 +276,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    + std::to_string(attrs.dropout_probability().value()) + ")");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.cu_seq_len_q_tensor_uid().has_value()
+                                   || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                               "cu_seq_len_q/cu_seq_len_kv tensors not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), // Change to bias
                                "attn_mask tensor not supported");
 

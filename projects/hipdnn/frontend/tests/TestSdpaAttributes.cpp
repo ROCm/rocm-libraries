@@ -588,3 +588,72 @@ TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
     EXPECT_FALSE(attrs.unfuse_fma_hint);
     EXPECT_FALSE(attrs.hasUnsupportedUsage());
 }
+
+// -- cu_seq_len_q / cu_seq_len_kv: a 1-D (B+1) tensor is promoted to (B+1,1,1,1) in place --
+
+namespace
+{
+std::shared_ptr<TensorAttributes> makeIndexTensor(std::vector<int64_t> dims,
+                                                  std::vector<int64_t> strides = {})
+{
+    auto t = std::make_shared<TensorAttributes>();
+    t->set_dim(std::move(dims));
+    if(!strides.empty())
+    {
+        t->set_stride(std::move(strides));
+    }
+    return t;
+}
+} // namespace
+
+TEST(TestSdpaAttributes, CuSeqLenOneDimIsPromotedToFourDim)
+{
+    SdpaAttributes attrs;
+    auto cuQ = makeIndexTensor({5});
+    auto cuKv = makeIndexTensor({5});
+    attrs.set_cu_seq_len_q(cuQ);
+    attrs.set_cu_seq_len_kv(std::move(cuKv));
+
+    for(const auto& tensor : {attrs.get_cu_seq_len_q(), attrs.get_cu_seq_len_kv()})
+    {
+        EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{5, 1, 1, 1}));
+        EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1, 1, 1, 1}));
+    }
+}
+
+TEST(TestSdpaAttributes, CuSeqLenPromotionMutatesTheCallersTensorInPlace)
+{
+    SdpaAttributes attrs;
+    auto cuQ = makeIndexTensor({5});
+    attrs.set_cu_seq_len_q(cuQ);
+
+    EXPECT_EQ(attrs.get_cu_seq_len_q(), cuQ);
+    EXPECT_EQ(cuQ->get_dim(), (std::vector<int64_t>{5, 1, 1, 1}));
+}
+
+TEST(TestSdpaAttributes, CuSeqLenPromotionKeepsTheLeadingStride)
+{
+    SdpaAttributes attrs;
+    attrs.set_cu_seq_len_q(makeIndexTensor({5}, {4}));
+
+    EXPECT_EQ(attrs.get_cu_seq_len_q()->get_stride(), (std::vector<int64_t>{4, 1, 1, 1}));
+}
+
+TEST(TestSdpaAttributes, CuSeqLenFourDimIsLeftUntouched)
+{
+    SdpaAttributes attrs;
+    attrs.set_cu_seq_len_q(makeIndexTensor({5, 1, 1, 1}, {2, 1, 1, 1}));
+
+    EXPECT_EQ(attrs.get_cu_seq_len_q()->get_dim(), (std::vector<int64_t>{5, 1, 1, 1}));
+    EXPECT_EQ(attrs.get_cu_seq_len_q()->get_stride(), (std::vector<int64_t>{2, 1, 1, 1}));
+}
+
+TEST(TestSdpaAttributes, CuSeqLenWithoutDimsIsAccepted)
+{
+    SdpaAttributes attrs;
+    auto cuQ = std::make_shared<TensorAttributes>();
+    attrs.set_cu_seq_len_q(cuQ);
+
+    EXPECT_EQ(attrs.get_cu_seq_len_q(), cuQ);
+    EXPECT_TRUE(cuQ->get_dim().empty());
+}

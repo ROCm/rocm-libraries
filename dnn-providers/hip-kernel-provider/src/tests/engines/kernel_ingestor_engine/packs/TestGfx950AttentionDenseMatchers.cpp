@@ -229,6 +229,8 @@ struct GraphSpec
     std::optional<int64_t> scaleTensorUid;
     std::optional<int64_t> seqLenQUid;
     std::optional<int64_t> seqLenKvUid;
+    std::optional<int64_t> cuSeqLenQUid;
+    std::optional<int64_t> cuSeqLenKvUid;
     std::optional<int64_t> seedUid;
     std::optional<int64_t> offsetUid;
     std::optional<int64_t> dropoutMaskUid;
@@ -383,6 +385,14 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
         if(spec.seqLenKvUid.has_value())
         {
             attributesBuilder.add_seq_len_kv_tensor_uid(*spec.seqLenKvUid);
+        }
+        if(spec.cuSeqLenQUid.has_value())
+        {
+            attributesBuilder.add_cu_seq_len_q_tensor_uid(*spec.cuSeqLenQUid);
+        }
+        if(spec.cuSeqLenKvUid.has_value())
+        {
+            attributesBuilder.add_cu_seq_len_kv_tensor_uid(*spec.cuSeqLenKvUid);
         }
         if(spec.seedUid.has_value())
         {
@@ -1952,6 +1962,21 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesVarlen)
     GraphSpec spec;
     spec.seqLenQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCuSeqLenBothSpellings)
+{
+    // Control: the unmodified graph matches. padding_mask stays false in GraphSpec, so only
+    // the cu_seq_len decline can reject the graphs below.
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+
+    GraphSpec q;
+    q.cuSeqLenQUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(q).has_value());
+
+    GraphSpec kv;
+    kv.cuSeqLenKvUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(kv).has_value());
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPagedKv)

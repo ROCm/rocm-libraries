@@ -19,6 +19,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+
 using namespace hipdnn_backend;
 using hipdnn_backend::test_utilities::ScopedBackendDescriptor;
 
@@ -1222,6 +1225,124 @@ TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
         GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
 
     EXPECT_TRUE(fromJson.hasRaggedTensors());
+}
+
+// ============================================================================
+// GraphDescriptor::hasCuSeqLen() (SDPA cumulative sequence lengths)
+// ============================================================================
+
+namespace
+{
+flatbuffers::FlatBufferBuilder makeSdpaFwdGraph(bool withCuSeqLen)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const std::vector<int64_t> dims = {2, 8, 16, 64};
+    const std::vector<int64_t> strides = {8192, 1024, 64, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               dims,
+                                                               strides,
+                                                               DataType::HALF,
+                                                               DataType::FLOAT,
+                                                               /*withAttnMask=*/false,
+                                                               /*withScale=*/false,
+                                                               /*withStats=*/false,
+                                                               /*alibiMask=*/false,
+                                                               /*paddingMask=*/withCuSeqLen,
+                                                               /*causalMask=*/false,
+                                                               /*overrideShapeEnabled=*/false,
+                                                               DataType::UNSET,
+                                                               withCuSeqLen);
+}
+
+hipdnn_data_sdk::utilities::Version stampedVersion(GraphDescriptor& descriptor)
+{
+    descriptor.buildSerializedGraph();
+    const auto serialized = descriptor.getSerializedGraph();
+    const auto* graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(
+        static_cast<const uint8_t*>(serialized.ptr));
+    return hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version());
+}
+} // namespace
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForEmptyDescriptor)
+{
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForSdpaGraphWithoutCuSeqLen)
+{
+    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/false);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+    EXPECT_LT(stampedVersion(descriptor),
+              hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenFalseForNonSdpaGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenTrueAndStampsCuSeqLenFloorForSdpaGraphWithCuSeqLen)
+{
+    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasCuSeqLen());
+    EXPECT_EQ(stampedVersion(descriptor),
+              hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION});
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesSerializationRoundTrip)
+{
+    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(revived.hasCuSeqLen());
+}
+
+TEST_F(TestGraphDescriptor, HasCuSeqLenSurvivesJsonRoundTrip)
+{
+    auto builder = makeSdpaFwdGraph(/*withCuSeqLen=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    EXPECT_TRUE(fromJson.hasCuSeqLen());
 }
 
 // The ragged-offset aux must be re-emitted into the tensor list when the graph

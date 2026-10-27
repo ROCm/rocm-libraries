@@ -303,9 +303,11 @@ public:
             }
         }
 
-        // The padded seq-lens variant is not supported. Lengths come from ragged_offset alone.
+        // The padded and cumulative seq-lens variants are not supported. Lengths come from ragged_offset alone.
         if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
+           || nodeAttributes->seq_len_kv_tensor_uid().has_value()
+           || nodeAttributes->cu_seq_len_q_tensor_uid().has_value()
+           || nodeAttributes->cu_seq_len_kv_tensor_uid().has_value())
         {
             return false;
         }

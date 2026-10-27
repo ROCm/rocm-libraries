@@ -720,6 +720,8 @@ std::optional<BoundTokens> gfx1151WmmaAttentionGraphMatches(const MatchContext& 
     // of their own; see the catalog config) are declined, as is everything else.
     if(attributes.seq_len_q_tensor_uid().has_value()
        || attributes.seq_len_kv_tensor_uid().has_value() || attributes.seed_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value()
        || attributes.offset_tensor_uid().has_value()
        || attributes.dropout_mask_tensor_uid().has_value()
        || attributes.dropout_scale_tensor_uid().has_value()

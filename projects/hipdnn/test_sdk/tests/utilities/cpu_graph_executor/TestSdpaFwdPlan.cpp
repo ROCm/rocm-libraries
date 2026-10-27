@@ -526,6 +526,40 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsSumExpStats)
         << "SdpaFwdPlanBuilder must reject nodes requesting the sum_exp softmax-stats output";
 }
 
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
+{
+    // The reference does not implement cu_seq_len_*. padding_mask stays false so only the
+    // cu_seq_len reject can decline the graph and keep it from running as full-length attention.
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    // Control: the same graph without cu_seq_len is accepted, so the reject below declines it.
+    {
+        auto baseline = makeRawSdpaFwdGraph(SdpaAttributesT{});
+        const GraphWrapper baselineWrapper(baseline.GetBufferPointer(), baseline.GetSize());
+        ASSERT_TRUE(
+            planBuilder.isApplicable(baselineWrapper.getNode(0), baselineWrapper.getTensorMap()));
+    }
+
+    for(const bool useKv : {false, true})
+    {
+        SdpaAttributesT attrs;
+        if(useKv)
+        {
+            attrs.cu_seq_len_kv_tensor_uid = 52;
+        }
+        else
+        {
+            attrs.cu_seq_len_q_tensor_uid = 52;
+        }
+        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+        EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+            << "SdpaFwdPlanBuilder must reject cu_seq_len_" << (useKv ? "kv" : "q");
+    }
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
 {
     // A graph configured to emit the softmax log-sum-exp (LSE) stats output is supported.

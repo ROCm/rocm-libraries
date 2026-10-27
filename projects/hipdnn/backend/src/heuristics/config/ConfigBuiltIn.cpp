@@ -239,7 +239,11 @@ public:
                || !appendOptionalUid(key, config_tensor::DESCALE_V, sdpa->descale_v_tensor_uid())
                || !appendOptionalUid(key, config_tensor::DESCALE_S, sdpa->descale_s_tensor_uid())
                || !appendOptionalUid(key, config_tensor::SCALE_S, sdpa->scale_s_tensor_uid())
-               || !appendOptionalUid(key, config_tensor::SCALE_O, sdpa->scale_o_tensor_uid()))
+               || !appendOptionalUid(key, config_tensor::SCALE_O, sdpa->scale_o_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::CU_SEQ_LEN_Q, sdpa->cu_seq_len_q_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::CU_SEQ_LEN_KV, sdpa->cu_seq_len_kv_tensor_uid()))
             {
                 return std::nullopt;
             }

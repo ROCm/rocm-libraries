@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Node.hpp"
+#include <array>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -163,6 +164,74 @@ public:
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
+        }
+
+        // Rule 6c: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.25+).
+        // - Each side (Q, KV) uses either seq_len_* or cu_seq_len_*, never both. The sides may
+        //   differ; cuDNN 9.24 required cu on both.
+        // - If either side is cumulative: padding_mask is required, both sides need a length
+        //   tensor, and each cu tensor is INT32 (B+1,1,1,1) prefix sums starting at 0.
+        // - A 1-D (B+1) tensor is promoted to that shape by SdpaAttributes::set_cu_seq_len_*.
+        const auto cuSeqLenQ = attributes.get_cu_seq_len_q();
+        const auto cuSeqLenKv = attributes.get_cu_seq_len_kv();
+        const auto seqLenQ = attributes.get_seq_len_q();
+        const auto seqLenKv = attributes.get_seq_len_kv();
+        HIPDNN_RETURN_IF_TRUE(cuSeqLenQ && seqLenQ,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: seq_len_q and cu_seq_len_q cannot both be set");
+        HIPDNN_RETURN_IF_TRUE(cuSeqLenKv && seqLenKv,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: seq_len_kv and cu_seq_len_kv cannot both be set");
+        if(cuSeqLenQ || cuSeqLenKv)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                attributes.padding_mask,
+                ErrorCode::INVALID_VALUE,
+                std::string("SdpaFwdNode: cu_seq_len_q/kv require padding_mask=true"));
+            HIPDNN_RETURN_IF_TRUE(
+                static_cast<bool>(cuSeqLenQ || seqLenQ)
+                    != static_cast<bool>(cuSeqLenKv || seqLenKv),
+                ErrorCode::INVALID_VALUE,
+                "SdpaFwdNode: a Q-side and a KV-side sequence length tensor must be provided "
+                "together (each side via seq_len_* or cu_seq_len_*)");
+
+            const auto expectedFirstDim = qDims[0] + 1;
+            const std::array<std::pair<const char*, const std::shared_ptr<TensorAttributes>*>, 2>
+                cuTensors{{{"cu_seq_len_q", &cuSeqLenQ}, {"cu_seq_len_kv", &cuSeqLenKv}}};
+            for(const auto& [cuName, cuTensor] : cuTensors)
+            {
+                if(!*cuTensor)
+                {
+                    continue;
+                }
+                const auto& cuDims = (*cuTensor)->get_dim();
+                const std::string prefix = std::string("SdpaFwdNode: ") + cuName;
+                HIPDNN_RETURN_IF_NE(
+                    cuDims.size(),
+                    reqRank,
+                    ErrorCode::INVALID_VALUE,
+                    prefix
+                        + " must be rank-4 (a 1-D tensor is promoted when set, so set its "
+                          "dims before set_"
+                        + cuName + "), got rank=" + std::to_string(cuDims.size()));
+                HIPDNN_RETURN_IF_NE(cuDims[0],
+                                    expectedFirstDim,
+                                    ErrorCode::INVALID_VALUE,
+                                    prefix + " dim[0] must equal batch + 1 ("
+                                        + std::to_string(expectedFirstDim) + "), got "
+                                        + std::to_string(cuDims[0]));
+                for(size_t i = 1; i < reqRank; ++i)
+                {
+                    HIPDNN_RETURN_IF_NE(cuDims[i],
+                                        static_cast<int64_t>(1),
+                                        ErrorCode::INVALID_VALUE,
+                                        prefix + " dim[" + std::to_string(i) + "] must be 1, got "
+                                            + std::to_string(cuDims[i]));
+                }
+                HIPDNN_RETURN_IF_TRUE((*cuTensor)->get_data_type() != DataType::INT32,
+                                      ErrorCode::INVALID_VALUE,
+                                      prefix + " must have INT32 data type");
+            }
         }
 
         // Rule 7: If O has dims already set, validate them

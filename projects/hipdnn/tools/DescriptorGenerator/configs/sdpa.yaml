@@ -156,6 +156,18 @@ operation:
         required: false
         getter_name: "get_sink_token"
         setter_name: "set_sink_token"
+      - name: "cu_seq_len_q"
+        enum_name: "CU_SEQ_LEN_Q"
+        enum_value: 21
+        required: false
+        getter_name: "get_cu_seq_len_q"
+        setter_name: "set_cu_seq_len_q"
+      - name: "cu_seq_len_kv"
+        enum_name: "CU_SEQ_LEN_KV"
+        enum_value: 22
+        required: false
+        getter_name: "get_cu_seq_len_kv"
+        setter_name: "set_cu_seq_len_kv"
     outputs:
       - name: "o"
         enum_name: "O"
@@ -288,6 +300,18 @@ operation:
       attr_suffix: "SINK_TOKEN_EXT"
       required: false
       frontend_getter: "get_sink_token()"
+
+    - name: "cu_seq_len_q"
+      fbs_field: "cu_seq_len_q_tensor_uid"
+      attr_suffix: "CU_SEQ_LEN_QDESC"
+      required: false
+      frontend_getter: "get_cu_seq_len_q()"
+
+    - name: "cu_seq_len_kv"
+      fbs_field: "cu_seq_len_kv_tensor_uid"
+      attr_suffix: "CU_SEQ_LEN_KVDESC"
+      required: false
+      frontend_getter: "get_cu_seq_len_kv()"
 
     # FP8 input tensors
     - name: "descale_q"
@@ -553,6 +577,8 @@ operation:
       rng_dump: 1825
       amax_s: 1826
       amax_o: 1827
+      cu_seq_len_q: 1828
+      cu_seq_len_kv: 1829
     tensor_configs:
       q: { dims: [1, 8, 128, 64], strides: [65536, 8192, 64, 1] }
       k: { dims: [1, 8, 128, 64], strides: [65536, 8192, 64, 1] }
@@ -582,4 +608,6 @@ operation:
       rng_dump: { dims: [1, 8, 128, 128], strides: [131072, 16384, 128, 1] }
       amax_s: { dims: [1, 1, 1, 1], strides: [1, 1, 1, 1] }
       amax_o: { dims: [1, 1, 1, 1], strides: [1, 1, 1, 1] }
+      cu_seq_len_q: { dims: [2, 1, 1, 1], strides: [1, 1, 1, 1] }
+      cu_seq_len_kv: { dims: [2, 1, 1, 1], strides: [1, 1, 1, 1] }
     field_values: {}

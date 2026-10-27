@@ -574,3 +574,192 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
     EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
 }
+
+// -- Rule 6c: cu_seq_len_q / cu_seq_len_kv --
+
+namespace
+{
+std::shared_ptr<TensorAttributes> makeCuSeqLen(std::vector<int64_t> dims,
+                                               DataType dataType = DataType::INT32)
+{
+    auto t = std::make_shared<TensorAttributes>();
+    t->set_dim(std::move(dims));
+    t->set_data_type(dataType);
+    return t;
+}
+
+// batch=2 attributes with valid (3,1,1,1) INT32 cu_seq_len tensors and padding_mask.
+SdpaAttributes makeCuSeqLenAttrs()
+{
+    auto attrs = makeMinimalAttrs(
+        makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+    attrs.set_padding_mask(true);
+    attrs.set_cu_seq_len_q(makeCuSeqLen({3, 1, 1, 1}));
+    attrs.set_cu_seq_len_kv(makeCuSeqLen({3, 1, 1, 1}));
+    return attrs;
+}
+
+Error preValidate(SdpaAttributes&& attrs)
+{
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    return node.pre_validate_node();
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsWithCuSeqLen)
+{
+    auto err = preValidate(makeCuSeqLenAttrs());
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+// cuDNN 9.25+ mixed form: each side carries its lengths as seq_len_* or cu_seq_len_*.
+TEST(TestSdpaFwdNode, PreValidateSucceedsWithCuSeqLenQAndSeqLenKv)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_KV);
+    attrs.set_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsWithSeqLenQAndCuSeqLenKv)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_Q);
+    attrs.set_seq_len_q(makeCuSeqLen({2, 1, 1, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsMixedFormWithoutPaddingMask)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_KV);
+    attrs.set_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
+    attrs.set_padding_mask(false);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("padding_mask"), std::string::npos) << err.err_msg;
+}
+
+// A cumulative side needs a length tensor on the other side too, in either form.
+TEST(TestSdpaFwdNode, PreValidateFailsWhenKvSideHasNoLengths)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_KV);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("provided together"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsWhenQSideHasNoLengths)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.inputs.erase(SdpaAttributes::InputNames::CU_SEQ_LEN_Q);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("provided together"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenWithoutPaddingMask)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_padding_mask(false);
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("padding_mask"), std::string::npos) << err.err_msg;
+}
+
+// One side may not carry both forms.
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenQWithSeqLenQ)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_seq_len_q(makeCuSeqLen({2, 1, 1, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("seq_len_q and cu_seq_len_q cannot both be set"), std::string::npos)
+        << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenKvWithSeqLenKv)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("seq_len_kv and cu_seq_len_kv cannot both be set"),
+              std::string::npos)
+        << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenFirstDimEqualsBatch)
+{
+    // A per-batch lengths tensor (B,1,1,1) is the seq_len_* shape, not the cu_seq_len one.
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_cu_seq_len_kv(makeCuSeqLen({2, 1, 1, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("cu_seq_len_kv dim[0]"), std::string::npos) << err.err_msg;
+}
+
+// cuDNN's 1-D (B+1) form is promoted to (B+1,1,1,1) by set_cu_seq_len_*, so it validates.
+TEST(TestSdpaFwdNode, PreValidateSucceedsWithOneDimCuSeqLen)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_cu_seq_len_q(makeCuSeqLen({3}));
+    attrs.set_cu_seq_len_kv(makeCuSeqLen({3}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+// The promoted 1-D tensor still has to be B+1 long.
+TEST(TestSdpaFwdNode, PreValidateFailsOneDimCuSeqLenOfWrongLength)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_cu_seq_len_q(makeCuSeqLen({2}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("cu_seq_len_q dim[0]"), std::string::npos) << err.err_msg;
+}
+
+// Only rank 1 is promoted; any other non-4 rank is rejected.
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotRank4)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_cu_seq_len_q(makeCuSeqLen({3, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("cu_seq_len_q must be rank-4"), std::string::npos) << err.err_msg;
+}
+
+// Promotion happens at set time, so dims given afterwards are not promoted.
+TEST(TestSdpaFwdNode, PreValidateFailsOneDimCuSeqLenWhoseDimsAreSetAfterTheSetter)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    auto cuQ = std::make_shared<TensorAttributes>();
+    cuQ->set_data_type(DataType::INT32);
+    attrs.set_cu_seq_len_q(cuQ);
+    cuQ->set_dim({3});
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("cu_seq_len_q must be rank-4"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenTrailingDimNotOne)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_cu_seq_len_q(makeCuSeqLen({3, 1, 2, 1}));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("cu_seq_len_q dim[2]"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotInt32)
+{
+    auto attrs = makeCuSeqLenAttrs();
+    attrs.set_cu_seq_len_kv(makeCuSeqLen({3, 1, 1, 1}, DataType::INT64));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("cu_seq_len_kv must have INT32"), std::string::npos) << err.err_msg;
+}

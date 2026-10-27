@@ -156,6 +156,8 @@ public:
     virtual bool hasRaggedTensors() const;
     virtual bool hasNonDefaultTensorAlignment() const;
     virtual bool hasRaggedOffsetMultiplier() const;
+    /// True when any SDPA forward operation carries cu_seq_len_q / cu_seq_len_kv.
+    virtual bool hasCuSeqLen() const;
     virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
