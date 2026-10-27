@@ -3001,11 +3001,11 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     The default load path puts the full byte offset (incl.
     ``physical_block * block_stride``) in a 32-bit buffer voffset, bounded at
     ``_I32_KV_BUFFER_BYTES``; past that, loads silently return zeros. When the
-    cache is that large we fold the per-block offset into a
-    64-bit buffer base (a tiny, wave-uniform ``make_buffer_rsrc`` per
-    block; measured within ~1-2% of the i32 path). Below the cap we keep
-    the fast i32 path. ``num_kv_blocks == 0`` means the cache size is
-    unknown (caller did not supply it) -> assume small / fast path.
+    cache is that large we fold the per-block offset into a 64-bit buffer
+    base (a wave-uniform ``make_buffer_rsrc`` per block; the gfx942 tiled 2D
+    K/V copies build one per page of a tile, not one per copy). Below the cap
+    we keep the i32 path. ``num_kv_blocks == 0`` means the cache size is
+    unknown (caller did not supply it) -> assume small / i32 path.
     """
     return kv_cache_needs_i64_addr(problem.num_kv_blocks, _kv_block_bytes(problem))
 
