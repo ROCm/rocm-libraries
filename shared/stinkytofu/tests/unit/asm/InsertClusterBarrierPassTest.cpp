@@ -606,13 +606,14 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     // Run with STINKY_TEST_DUMP=1 to print the block before and after the pass.
     void runPass(int rule3SignalLeadCycles = 100, bool splitWaveLoop = false,
                  bool streamKMulticast = false, int pgrValue = 1,
-                 bool reduceClusterBarrierPerLoop = false) {
+                 bool reduceClusterBarrierPerLoop = false, bool girFramePipeline = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         auto pass = createInsertClusterBarrierPass(
             streamKMulticast, pgrValue, rule3SignalLeadCycles,
             /*splitWaveLoop=*/splitWaveLoop,
-            /*reduceClusterBarrierPerLoop=*/reduceClusterBarrierPerLoop);
+            /*reduceClusterBarrierPerLoop=*/reduceClusterBarrierPerLoop,
+            /*girFramePipeline=*/girFramePipeline);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (before InsertClusterBarrierPass):" << blockListing(*bb)
                       << "\n";
@@ -1293,7 +1294,9 @@ TEST_F(InsertClusterBarrierPassTest, Rule3SignalDoesNotClimbAcrossEarlierTensorR
     createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
     closeLoop();
 
-    runPass(/*rule3SignalLeadCycles=*/200);
+    // The drain hard stop reads a FrameMap publication point, so it is GIR-pipeline only.
+    runPass(/*rule3SignalLeadCycles=*/200, /*splitWaveLoop=*/false, /*streamKMulticast=*/false,
+            /*pgrValue=*/1, /*reduceClusterBarrierPerLoop=*/false, /*girFramePipeline=*/true);
 
     StinkyInstruction* clusterCmp = findClusterWaveCmpAfter(indexOf(rawWait));
     ASSERT_NE(clusterCmp, nullptr) << blockListing(*bb);

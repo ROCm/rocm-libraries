@@ -841,7 +841,7 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
     int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
-    StinkyInstruction* loopHead) {
+    StinkyInstruction* loopHead, bool girFramePipeline) {
     if (leadCycles <= 0) return {defaultAnchor, 0};
     auto refIt = cycleMap.find(referenceAnchor);
     if (refIt == cycleMap.end()) return {defaultAnchor, 0};
@@ -1001,8 +1001,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
             return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
         // A Rule 3 phase may not straddle a tensor-counter drain. The drain is the physical
         // publication point selected from FrameMap; settle after its workgroup fence so every
-        // wave has crossed that RAW before wave 0 opens the cluster phase.
-        if (inst->is(InstFlag::IF_WaitTensorCnt))
+        // wave has crossed that RAW before wave 0 opens the cluster phase. FrameMap only exists
+        // under the GIR frame pipeline, and without it this moves the legacy signal placement.
+        if (girFramePipeline && inst->is(InstFlag::IF_WaitTensorCnt))
             return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
             return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
@@ -1850,12 +1851,14 @@ class InsertClusterBarrierPassImpl : public Pass {
     static char ID;
 
     InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
-                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop)
+                                 bool splitWaveLoop, bool reduceClusterBarrierPerLoop,
+                                 bool girFramePipeline)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
           rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
           splitWaveLoop_(splitWaveLoop),
-          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop) {}
+          reduceClusterBarrierPerLoop_(reduceClusterBarrierPerLoop),
+          girFramePipeline_(girFramePipeline) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -2103,7 +2106,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
                     site.waitAnchorInst, tSegBegin, /*defaultAnchor=*/site.waitAnchor, cycleMap,
                     rule3SignalLeadCycles_, kRule3SignalMaxLeadCycles, priorWaitAnchors,
-                    maxSegmentHops, head);
+                    maxSegmentHops, head, girFramePipeline_);
                 // Read the exit label and climb the preheader now: once the handshakes
                 // go in, the body is full of this pass's own skip branches and
                 // barriers, and neither the loop's real exit nor an unspoken-for
@@ -2247,6 +2250,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const int rule3SignalLeadCycles_ = 100;
     const bool splitWaveLoop_ = false;
     const bool reduceClusterBarrierPerLoop_ = false;
+    const bool girFramePipeline_ = false;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -2255,10 +2259,11 @@ char InsertClusterBarrierPassImpl::ID = 0;
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
                                                      int rule3SignalLeadCycles, bool splitWaveLoop,
-                                                     bool reduceClusterBarrierPerLoop) {
-    return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles, splitWaveLoop,
-                                                          reduceClusterBarrierPerLoop);
+                                                     bool reduceClusterBarrierPerLoop,
+                                                     bool girFramePipeline) {
+    return std::make_unique<InsertClusterBarrierPassImpl>(
+        streamKMulticast, pgrValue, rule3SignalLeadCycles, splitWaveLoop,
+        reduceClusterBarrierPerLoop, girFramePipeline);
 }
 
 namespace cluster_barrier {
@@ -2268,10 +2273,10 @@ Rule3SignalAnchorResult findRule3SignalAnchorByCycleLeadForUnitTest(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
     int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
-    StinkyInstruction* loopHead) {
+    StinkyInstruction* loopHead, bool girFramePipeline) {
     const Rule3SignalAnchor found = findRule3SignalAnchorByCycleLead(
         referenceAnchor, segBegin, defaultAnchor, cycleMap, leadCycles, maxLeadCycles,
-        priorWaitAnchors, maxHops, loopHead);
+        priorWaitAnchors, maxHops, loopHead, girFramePipeline);
     return {found.anchor, found.hops, found.crossedLoopHead, found.outOfSegmentNomination};
 }
 
