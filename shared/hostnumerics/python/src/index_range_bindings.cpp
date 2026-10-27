@@ -14,21 +14,19 @@ namespace roc::hostnumerics::python_bindings {
 void registerIndexRangeBindings(nb::module_& module) {
     nb::class_<LastDimensionFastest>(module, "LastDimensionFastest").def(nb::init<>());
     nb::class_<IndexRange>(module, "IndexRange", R"doc(
-Flat indices first + ordinal * stride, with at most max_elements entries.
+Flat indices start + ordinal * stride, all less than the exclusive end.
 All three constructor arguments are required, and stride must be nonzero.
-count(end) and indices(end) use an exclusive end bound: entries at or beyond
-end are omitted, and a starting index at or beyond end yields an empty range.
+The argument order is (start, end, stride). A start at or beyond end yields
+an empty range. count() and indices() use the bound stored in the range.
 )doc")
-        .def(nb::init<size_t, size_t, size_t>(), "first"_a, "stride"_a, "max_elements"_a)
-        .def_ro("first", &IndexRange::first)
+        .def(nb::init<size_t, size_t, size_t>(), "start"_a, "end"_a, "stride"_a)
+        .def_ro("start", &IndexRange::start)
+        .def_ro("end", &IndexRange::end)
         .def_ro("stride", &IndexRange::stride)
-        .def_ro("max_elements", &IndexRange::maxElements)
-        .def("count", &IndexRange::count, "end"_a,
-             "Count entries below end, clipped to max_elements, without enumerating them.")
-        .def("indices", &IndexRange::indices, "end"_a,
-             "Return an owning list of entries below end, clipped to max_elements.")
-        .def_static("all", &IndexRange::all,
-                    "A range starting at zero with stride one and no maximum-count restriction.");
+        .def("count", &IndexRange::count, "Count entries without enumerating them.")
+        .def("indices", &IndexRange::indices, "Return an owning list of the range's entries.")
+        .def_static("all", &IndexRange::all, "end"_a,
+                    "A range from zero to the exclusive end, with stride one.");
     module.def("prime_index_range", &primeIndexRange, "logical_elements"_a, "allocated_elements"_a,
                "requested_elements"_a, R"doc(
 Choose a prime stride from allocated_elements / requested_elements.
