@@ -133,17 +133,10 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     //                      gemm_3 / dQ atomics.
     //   other schedules -> a barrier in front of the store; it is nearly free
     //                      there, while the larger LDS footprint is not.
-    // CK_TILE_FMHA_BWD_DS_FIX_MODE forces one choice: 1 barrier, 2 double
-    // buffer, 0 automatic (default).
-#ifndef CK_TILE_FMHA_BWD_DS_FIX_MODE
-#define CK_TILE_FMHA_BWD_DS_FIX_MODE 0
-#endif
-    static constexpr index_t kDSFixMode = CK_TILE_FMHA_BWD_DS_FIX_MODE;
     static constexpr bool kDSRaceExposed =
         Policy::template GetQDOSlots<Problem>() >= 2 &&
         BiasEnum != BlockAttentionBiasEnum::ELEMENTWISE_BIAS && !kHasBiasGrad;
-    static constexpr bool kDSDoubleBuf =
-        kDSRaceExposed && (kDSFixMode == 2 || (kDSFixMode == 0 && kTunedSched));
+    static constexpr bool kDSDoubleBuf = kDSRaceExposed && kTunedSched;
     static constexpr bool kDSPreBarrier = kDSRaceExposed && !kDSDoubleBuf;
     static constexpr index_t kDSSecondBufOffset =
         integer_least_multiple(Policy::template GetSmemSize<Problem>(), 128);
