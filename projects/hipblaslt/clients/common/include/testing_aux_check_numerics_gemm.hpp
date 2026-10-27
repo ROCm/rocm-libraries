@@ -451,8 +451,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // the last batch so a scanner that only looks at batch 0 also fails.
     // 128x128x128 fp32 matches matmul_pointer_array_distinct_c_d_layout_smoke,
     // which has pointer-array solutions on every architecture that runs it.
-    constexpr int kNoNanBatch = -1;
-    auto run_pointer_array_scenario = [&](int       nan_batch,
+    constexpr int kNoNanBatch                = -1;
+    auto          run_pointer_array_scenario = [&](int       nan_batch,
                                           int64_t   d_offset,
                                           bool      prefix_nan,
                                           bool      use_cpp,
@@ -492,8 +492,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             CHECK_HIP_ERROR(hipMemcpy(
                 hD[b], D_initial.data(), sizeof(float) * D_initial.size(), hipMemcpyHostToDevice));
             const float* srcA = (b == nan_batch) ? A_dirty.data() : A_clean.data();
-            CHECK_HIP_ERROR(
-                hipMemcpy(hA[b], srcA, sizeof(float) * M * K, hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy(hA[b], srcA, sizeof(float) * M * K, hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(
                 hipMemcpy(hB[b], B_h.data(), sizeof(float) * K * N, hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemset(hC[b], 0, sizeof(float) * M * N));
@@ -551,10 +550,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
         uint64_t ws_size = 32ull * 1024ull * 1024ull;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &ws_size,
-                                                  sizeof(ws_size)),
+            hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws_size, sizeof(ws_size)),
             HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatmulHeuristicResult_t heur[1]{};
@@ -663,8 +660,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 
         reset_env();
         setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        run_pointer_array_scenario(
-            kNoNanBatch, kDOffset, /*prefix_nan=*/true, use_cpp, &reported);
+        run_pointer_array_scenario(kNoNanBatch, kDOffset, /*prefix_nan=*/true, use_cpp, &reported);
         EXPECT_EQ(reported, 0u) << "NaNs before offset pointer-array output must be ignored";
     }
 
