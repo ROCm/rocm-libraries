@@ -32,39 +32,36 @@ using hipdnn_shim_v8_test::jsonEngineId;
 using hipdnn_shim_v8_test::lastError;
 using hipdnn_shim_v8_test::statusOf;
 
-constexpr std::int64_t K_X_UID = 1;
-constexpr std::int64_t K_Y_UID = 2;
-const std::vector<std::int64_t> K_DIMS = {2, 4, 8, 8};
-constexpr std::size_t K_TENSOR_BYTES = std::size_t{2} * 4 * 8 * 8 * sizeof(float);
+using hipdnn_shim_v8_test::floatTensorBytes;
+using hipdnn_shim_v8_test::RELU_X_UID;
+using hipdnn_shim_v8_test::RELU_Y_UID;
+using hipdnn_shim_v8_test::X_DIMS;
 
-class IntegrationCudnnShimV8BuilderEngineCount : public hipdnn_tests::IntegrationTestFixture
+class IntegrationCudnnShimV8BuilderEngines : public hipdnn_tests::IntegrationTestFixture
 {
 protected:
     std::int64_t engineCount()
     {
         const v8fe::OperationGraph_v8 graph
-            = hipdnn_shim_v8_test::reluGraph(_handle, K_X_UID, K_Y_UID, K_DIMS);
+            = hipdnn_shim_v8_test::reluGraph(_handle, RELU_X_UID, RELU_Y_UID, X_DIMS);
         return graph.getEngineCount();
     }
 };
 
-TEST_F(IntegrationCudnnShimV8BuilderEngineCount, GoodPluginHasOneEngine)
+TEST_F(IntegrationCudnnShimV8BuilderEngines, GoodPluginHasOneEngine)
 {
     EXPECT_EQ(engineCount(), 1);
 }
 
-TEST_F(IntegrationCudnnShimV8BuilderEngineCount, RepeatedQueriesAgree)
+TEST_F(IntegrationCudnnShimV8BuilderEngines, RepeatedQueriesAgree)
 {
     const v8fe::OperationGraph_v8 graph
-        = hipdnn_shim_v8_test::reluGraph(_handle, K_X_UID, K_Y_UID, K_DIMS);
+        = hipdnn_shim_v8_test::reluGraph(_handle, RELU_X_UID, RELU_Y_UID, X_DIMS);
     EXPECT_EQ(graph.getEngineCount(), 1);
     EXPECT_EQ(graph.getEngineCount(), 1);
 }
 
-// The hashed-name plugin accessor exists only where the target defines its name.
-#ifdef TEST_HASHED_NAME_PLUGIN_NAME
-class IntegrationCudnnShimV8BuilderEngineCountThreePlugins
-    : public IntegrationCudnnShimV8BuilderEngineCount
+class IntegrationCudnnShimV8BuilderEnginesThreePlugins : public IntegrationCudnnShimV8BuilderEngines
 {
 protected:
     std::vector<std::string> getPluginPaths() const override
@@ -75,14 +72,12 @@ protected:
     }
 };
 
-TEST_F(IntegrationCudnnShimV8BuilderEngineCountThreePlugins, EveryLoadedEngineCounted)
+TEST_F(IntegrationCudnnShimV8BuilderEnginesThreePlugins, EveryLoadedEngineCounted)
 {
     EXPECT_EQ(engineCount(), 3);
 }
-#endif
 
-class IntegrationCudnnShimV8BuilderEngineCountNoEngines
-    : public IntegrationCudnnShimV8BuilderEngineCount
+class IntegrationCudnnShimV8BuilderEnginesNoEngines : public IntegrationCudnnShimV8BuilderEngines
 {
 protected:
     std::vector<std::string> getPluginPaths() const override
@@ -91,7 +86,7 @@ protected:
     }
 };
 
-TEST_F(IntegrationCudnnShimV8BuilderEngineCountNoEngines, ZeroIsNotAnError)
+TEST_F(IntegrationCudnnShimV8BuilderEnginesNoEngines, ZeroIsNotAnError)
 {
     EXPECT_EQ(engineCount(), 0);
 }
@@ -101,7 +96,7 @@ constexpr std::int64_t K_ENGINE_COUNT = 4;
 constexpr std::int64_t K_CONTEXT_FAILS_INDEX = 0;
 constexpr std::int64_t K_EXECUTE_FAILS_INDEX = 3;
 
-class IntegrationCudnnShimV8BuilderMultiEngine : public hipdnn_tests::IntegrationTestFixture
+class IntegrationCudnnShimV8BuilderEnginesMultiEngine : public hipdnn_shim_v8_test::ReluGraphFixture
 {
 protected:
     std::vector<std::string> getPluginPaths() const override
@@ -110,28 +105,9 @@ protected:
                 plugin_constants::testExecuteFailsPluginPath(),
                 plugin_constants::testCudnnShimV8PluginPath()};
     }
-
-    void SetUp() override
-    {
-        IntegrationTestFixture::SetUp();
-        if(IsSkipped())
-        {
-            return;
-        }
-        _graph.emplace(hipdnn_shim_v8_test::reluGraph(_handle, K_X_UID, K_Y_UID, K_DIMS));
-    }
-
-    // The graph owns plugin state, so it goes before the handle that loaded the plugin.
-    void TearDown() override
-    {
-        _graph.reset();
-        IntegrationTestFixture::TearDown();
-    }
-
-    std::optional<v8fe::OperationGraph_v8> _graph;
 };
 
-TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, IndexFollowsSignedEngineId)
+TEST_F(IntegrationCudnnShimV8BuilderEnginesMultiEngine, IndexFollowsSignedEngineId)
 {
     ASSERT_EQ(_graph->getEngineCount(), K_ENGINE_COUNT);
 
@@ -150,7 +126,7 @@ TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, IndexFollowsSignedEngineId)
 
 // A plan's tag names its config's dense index; the one config whose plan cannot be
 // built is the context-failing engine's.
-TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, ResultsFollowHeuristicRank)
+TEST_F(IntegrationCudnnShimV8BuilderEnginesMultiEngine, ResultsFollowHeuristicRank)
 {
     v8fe::EngineConfigList configs = hipdnn_shim_v8_test::heuristicConfigs(*_graph);
     ASSERT_EQ(static_cast<std::int64_t>(configs.size()), K_ENGINE_COUNT);
@@ -180,7 +156,7 @@ TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, ResultsFollowHeuristicRank)
     EXPECT_NE(rankedIndices, indexOrder);
 }
 
-TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, ContextFailureFailsOnlyItsPlan)
+TEST_F(IntegrationCudnnShimV8BuilderEnginesMultiEngine, ContextFailureFailsOnlyItsPlan)
 {
     for(std::int64_t index = 0; index < K_ENGINE_COUNT; ++index)
     {
@@ -198,16 +174,16 @@ TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, ContextFailureFailsOnlyItsPlan)
     }
 }
 
-TEST_F(IntegrationCudnnShimV8BuilderMultiEngine, ExecuteFailureReported)
+TEST_F(IntegrationCudnnShimV8BuilderEnginesMultiEngine, ExecuteFailureReported)
 {
     const v8fe::ExecutionPlan_v8 plan
         = hipdnn_shim_v8_test::planFor(*_graph, K_EXECUTE_FAILS_INDEX);
 
-    const DeviceBuffer x(K_TENSOR_BYTES);
-    const DeviceBuffer y(K_TENSOR_BYTES);
+    const DeviceBuffer x(floatTensorBytes(X_DIMS));
+    const DeviceBuffer y(floatTensorBytes(X_DIMS));
     const DeviceBuffer workspace(static_cast<std::size_t>(plan.getWorkspaceSize()));
-    const v8fe::VariantPack_v8 pack
-        = hipdnn_shim_v8_test::variantPack({K_X_UID, K_Y_UID}, {x.get(), y.get()}, workspace.get());
+    const v8fe::VariantPack_v8 pack = hipdnn_shim_v8_test::variantPack(
+        {RELU_X_UID, RELU_Y_UID}, {x.get(), y.get()}, workspace.get());
 
     EXPECT_NE(cudnnBackendExecute(_handle, plan.get_raw_desc(), pack.get_raw_desc()),
               CUDNN_STATUS_SUCCESS);

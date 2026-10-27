@@ -65,13 +65,15 @@
       "source": "aten/src/ATen/native/cudnn/MHA.cpp",
       "compiled": "aten/src/ATen/native/cudnn/hip/MHA.cpp",
       "tier": "COMPILE_ASIS",
+      "canary": "at::native::check_cudnn_sdpa_execution",
       "requires_sdpa": true
     },
     {
       "id": "hipdnn_handle",
       "source": "aten/src/ATen/hipdnn/Handle.cpp",
       "compiled": "aten/src/ATen/hipdnn/Handle.cpp",
-      "tier": "COMPILE_ASIS"
+      "tier": "COMPILE_ASIS",
+      "canary": "at::native::createHipdnnHandle"
     },
     {
       "id": "conv_v7",

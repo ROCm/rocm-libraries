@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -31,26 +32,9 @@ using hipdnn_shim_v8_test::appendKnob;
 using hipdnn_shim_v8_test::lastError;
 using hipdnn_shim_v8_test::statusOf;
 
-class IntegrationCudnnShimV8BuilderKnobsBase : public hipdnn_tests::IntegrationTestFixture
+class IntegrationCudnnShimV8BuilderKnobsBase : public hipdnn_shim_v8_test::ReluGraphFixture
 {
 protected:
-    void SetUp() override
-    {
-        IntegrationTestFixture::SetUp();
-        if(IsSkipped())
-        {
-            return;
-        }
-        _graph.emplace(hipdnn_shim_v8_test::reluGraph(_handle, 1, 2, {2, 4, 8, 8}));
-    }
-
-    // The graph owns plugin state, so it goes before the handle that loaded the plugin.
-    void TearDown() override
-    {
-        _graph.reset();
-        IntegrationTestFixture::TearDown();
-    }
-
     v8fe::Engine_v8 engine(std::int64_t index) const
     {
         return hipdnn_shim_v8_test::engine(*_graph, index);
@@ -62,8 +46,6 @@ protected:
             [[maybe_unused]] auto config = v8fe::EngineConfigBuilder_v8().setEngine(built).build();
         });
     }
-
-    std::optional<v8fe::OperationGraph_v8> _graph;
 };
 
 // The shim's index orders engines by signed id: the context-failing engine (-32)
@@ -104,11 +86,17 @@ protected:
         return {hipdnn_tests::plugin_constants::testCudnnShimV8PluginPath()};
     }
 
-    // The knob engine with TILE_SIZE chosen.
+    // The knob engine with TILE_SIZE chosen. Throws rather than writing through
+    // front() of an empty list, so a lost knob fails this test instead of the binary.
     v8fe::Engine_v8 tileSizeEngine(std::int64_t tileSize) const
     {
         v8fe::Engine_v8 built = engine(K_KNOB_ENGINE_INDEX);
-        EXPECT_EQ(built.getSupportedKnobs().size(), 1U);
+        if(built.getSupportedKnobs().size() != 1U)
+        {
+            throw std::runtime_error("knob engine reports "
+                                     + std::to_string(built.getSupportedKnobs().size())
+                                     + " knobs, expected 1");
+        }
         built.getSupportedKnobs().front().setChoice(static_cast<std::uint64_t>(tileSize));
         return built;
     }

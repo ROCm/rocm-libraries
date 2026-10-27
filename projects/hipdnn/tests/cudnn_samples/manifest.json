@@ -2,6 +2,7 @@
   "corpus": {
     "repo": "https://github.com/NVIDIA/cudnn-frontend.git",
     "tag": "v1.24.0",
+    "commit": "c4a97621eca52fa0c3a1862a411a16be580b25c6",
     "cpp_path": "samples/cpp",
     "sparse_paths": [
       "samples/cpp",
@@ -717,19 +718,19 @@
         ]
       },
       "Conv Scale": {
-        "tier": "RUN",
+        "tier": "VACUOUS",
         "reason": "vacuous: the sample's Hopper gate throws ARCH_MISMATCH (fp8_sample.cpp:47-50), which the catch accepts for major < 9 (fp8_sample.cpp:166-178); never reaches the shim"
       },
       "Conv Descale Descale Amax Scale sample": {
-        "tier": "RUN",
+        "tier": "VACUOUS",
         "reason": "vacuous, as 'Conv Scale' (fp8_sample.cpp:203, :372-384)"
       },
       "Scale transpose convert amax sample": {
-        "tier": "RUN",
+        "tier": "VACUOUS",
         "reason": "vacuous, as 'Conv Scale' (fp8_sample.cpp:401, :533-544)"
       },
       "Dgrad Descale Descale Amax Scale sample": {
-        "tier": "RUN",
+        "tier": "VACUOUS",
         "reason": "SKIPs: not Hopper or Blackwell (fp8_sample.cpp:569-571)"
       },
       "BN BWD Weights sample": {

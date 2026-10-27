@@ -18,9 +18,10 @@ has to be drawn here rather than by ctest.
 
 A case passes only when its outcome is the one the manifest predicts for its tier:
 clean and free of the forbidden text for RUN_CLEAN, anything but crashed or run-failed
-for RUN, and for XFAIL_RUN one `expect` entry's outcome with its anchor present and its
-forbid absent. Every other result, including an XFAIL_RUN case that now runs clean,
-fails it.
+for VACUOUS, and for XFAIL_RUN one `expect` entry's outcome with its anchor present and
+its forbid absent. Every other result, including an XFAIL_RUN case that runs clean
+without a ran-clean expectation, fails it. A VACUOUS case never reaches the shim, so
+when it meets its tier it exits 77 (SKIP_RETURN_CODE) instead of passing.
 """
 
 import argparse
@@ -45,13 +46,14 @@ _CASES_RE = re.compile(r"test cases:\s+(\d+)\s*\|([^\n]*)", re.IGNORECASE)
 _FAILED_RE = re.compile(r"(\d+)\s+failed", re.IGNORECASE)
 _SKIPPED_RE = re.compile(r"(\d+)\s+skipped", re.IGNORECASE)
 _CASE_COUNT_RE = re.compile(r"in (\d+) test case|test cases:\s+(\d+)", re.IGNORECASE)
+# Printed under --warn UnmatchedTestSpec. The exit code cannot stand in for it: before
+# Catch2 3.8 a run exits with its failed-assertion count, so 3 failures also exit 3.
 _NO_MATCH_TEXT = "No test cases matched"
-# Catch2's exit code under --warn UnmatchedTestSpec when the test spec matched nothing.
-_UNMATCHED_SPEC_EXIT = 3
 # Windows surfaces crashes as a 0xC0000005-style exception code rather than a signal.
 _WINDOWS_EXCEPTION_MIN = 0xC0000000
 
-_LEGACY_TIERS = ("RUN_CLEAN", "RUN", "XFAIL_RUN")
+_LEGACY_TIERS = ("RUN_CLEAN", "VACUOUS", "XFAIL_RUN")
+_SKIP_EXIT = 77
 
 
 class RunResult(NamedTuple):
@@ -267,7 +269,7 @@ def case_verdict(tier, forbid, expect, result, returncode, output):
             return False, None, f"forbidden output present: {hit.group(0)!r}"
         return True, None, None
 
-    if tier == "RUN":
+    if tier == "VACUOUS":
         if outcome == "crashed":
             return False, None, describe(result, returncode)
         return True, None, None
@@ -305,7 +307,7 @@ def case_mode(args, command) -> int:
     # Where Catch2 never reported, the case count is unknown rather than wrong, so the
     # earlier run-failed reason is the more useful one.
     if result.outcome != "crashed":
-        unmatched = _NO_MATCH_TEXT in output or returncode == _UNMATCHED_SPEC_EXIT
+        unmatched = _NO_MATCH_TEXT in output
         if unmatched or (result.outcome != "run-failed" and case_count(output) != 1):
             result = result._replace(outcome="run-failed", reason="case not registered")
 
@@ -333,6 +335,9 @@ def case_mode(args, command) -> int:
     if not expected:
         print(f"::error title=cuDNN legacy case unexpected::{args.case}: {reason}")
         return 1
+    if tier == "VACUOUS":
+        print(f"cuDNN legacy case skipped, never reaches the shim: {reason}")
+        return _SKIP_EXIT
     if result.outcome == "crashed":
         print(
             f"::notice title=cuDNN legacy case crashed as expected::{args.case}: "

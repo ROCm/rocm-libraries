@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -26,13 +27,12 @@ namespace
 {
 namespace v8fe = hipdnn_frontend::compatibility::cudnn_frontend;
 using hipdnn_shim_v8_test::DeviceBuffer;
+using hipdnn_shim_v8_test::floatTensorBytes;
 using hipdnn_shim_v8_test::jsonEngineId;
 using hipdnn_shim_v8_test::lastError;
-
-constexpr std::int64_t K_X_UID = 1;
-constexpr std::int64_t K_Y_UID = 2;
-const std::vector<std::int64_t> K_DIMS = {2, 4, 8, 8};
-constexpr std::size_t K_TENSOR_BYTES = std::size_t{2} * 4 * 8 * 8 * sizeof(float);
+using hipdnn_shim_v8_test::RELU_X_UID;
+using hipdnn_shim_v8_test::RELU_Y_UID;
+using hipdnn_shim_v8_test::X_DIMS;
 
 // Device buffers for the graph's two tensors and a plan's workspace.
 struct Buffers
@@ -45,39 +45,27 @@ struct Buffers
     v8fe::VariantPack_v8 pack() const
     {
         return hipdnn_shim_v8_test::variantPack(
-            {K_X_UID, K_Y_UID}, {x.get(), y.get()}, workspace.get());
+            {RELU_X_UID, RELU_Y_UID}, {x.get(), y.get()}, workspace.get());
     }
 
-    DeviceBuffer x{K_TENSOR_BYTES};
-    DeviceBuffer y{K_TENSOR_BYTES};
+    DeviceBuffer x{floatTensorBytes(X_DIMS)};
+    DeviceBuffer y{floatTensorBytes(X_DIMS)};
     DeviceBuffer workspace;
 };
 
-class IntegrationCudnnShimV8BuilderExecute : public hipdnn_tests::IntegrationTestFixture
+class IntegrationCudnnShimV8BuilderExecute : public hipdnn_shim_v8_test::ReluGraphFixture
 {
 protected:
-    void SetUp() override
-    {
-        IntegrationTestFixture::SetUp();
-        if(IsSkipped())
-        {
-            return;
-        }
-        _graph.emplace(hipdnn_shim_v8_test::reluGraph(_handle, K_X_UID, K_Y_UID, K_DIMS));
-    }
-
-    // The graph owns plugin state, so it goes before the handle that loaded the plugin.
-    void TearDown() override
-    {
-        _graph.reset();
-        IntegrationTestFixture::TearDown();
-    }
-
-    // The plan of the one engine the heuristics return.
+    // The plan of the one engine the heuristics return. Throws rather than reading
+    // front() of an empty list, so a lost engine fails this test instead of the binary.
     v8fe::ExecutionPlan_v8 heuristicPlan()
     {
         v8fe::EngineConfigList configs = hipdnn_shim_v8_test::heuristicConfigs(*_graph);
-        EXPECT_EQ(configs.size(), 1U);
+        if(configs.size() != 1U)
+        {
+            throw std::runtime_error("heuristics returned " + std::to_string(configs.size())
+                                     + " engine configs, expected 1");
+        }
         return v8fe::ExecutionPlanBuilder_v8()
             .setEngineConfig(configs.front(), _graph->getTag())
             .build();
@@ -89,8 +77,6 @@ protected:
     {
         return cudnnBackendExecute(handle, plan.get_raw_desc(), pack.get_raw_desc());
     }
-
-    std::optional<v8fe::OperationGraph_v8> _graph;
 };
 
 TEST_F(IntegrationCudnnShimV8BuilderExecute, HeuristicPlanExecutes)
@@ -190,12 +176,12 @@ protected:
     // caller left it: a foreign-handle run must neither fail nor touch the tensors.
     static void fill(const DeviceBuffer& buffer, int byte)
     {
-        ASSERT_EQ(hipMemset(buffer.get(), byte, K_TENSOR_BYTES), hipSuccess);
+        ASSERT_EQ(hipMemset(buffer.get(), byte, floatTensorBytes(X_DIMS)), hipSuccess);
     }
 
     static bool holds(const DeviceBuffer& buffer, unsigned char byte)
     {
-        std::vector<unsigned char> host(K_TENSOR_BYTES);
+        std::vector<unsigned char> host(floatTensorBytes(X_DIMS));
         EXPECT_EQ(hipMemcpy(host.data(), buffer.get(), host.size(), hipMemcpyDeviceToHost),
                   hipSuccess);
         return std::all_of(

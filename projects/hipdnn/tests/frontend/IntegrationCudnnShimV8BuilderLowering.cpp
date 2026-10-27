@@ -5,82 +5,22 @@
 // finalizing against the real hipDNN backend. Graph finalize needs no device,
 // so this suite does not skip on device-less hosts.
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_backend.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_OperationGraph.h>
-#include <test_plugins/TestPluginConstants.hpp>
+#include "CudnnShimV8BuilderGraph.hpp"
 
 namespace
 {
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
+using namespace hipdnn_shim_v8_test;
 
 using fe::DataType_t;
 using fe::DescriptorType_t;
 using fe::PointwiseMode_t;
-
-using Dims = std::vector<std::int64_t>;
-
-const Dims X_DIMS = {2, 4, 8, 8};
-const Dims W_DIMS = {8, 4, 3, 3};
-const Dims Y_DIMS = {2, 8, 8, 8};
-const Dims CHANNEL_DIMS = {1, 4, 1, 1};
-const Dims SCALAR_DIMS = {1, 1, 1, 1};
-// Per-sample statistics of a norm over C, H and W.
-const Dims SAMPLE_DIMS = {2, 1, 1, 1};
-const Dims FEATURE_DIMS = {1, 4, 8, 8};
-const Dims POOLED_DIMS = {2, 4, 4, 4};
-
-Dims packedStrides(const Dims& dims)
-{
-    Dims strides(dims.size(), 1);
-    for(std::size_t i = dims.size() - 1; i > 0; --i)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
-
-struct TensorOptions
-{
-    DataType_t dataType = DataType_t::FLOAT;
-    bool isVirtual = false;
-    bool isByValue = false;
-};
-
-fe::Tensor tensor(std::int64_t uid, const Dims& dims, const TensorOptions& options = {})
-{
-    const Dims strides = packedStrides(dims);
-    return fe::TensorBuilder()
-        .setDataType(options.dataType)
-        .setDim(static_cast<std::int64_t>(dims.size()), dims.data())
-        .setStride(static_cast<std::int64_t>(strides.size()), strides.data())
-        .setId(uid)
-        .setAlignment(16)
-        .setVirtual(options.isVirtual)
-        .setByValue(options.isByValue)
-        .build();
-}
-
-fe::Tensor virtualTensor(std::int64_t uid, const Dims& dims)
-{
-    TensorOptions options;
-    options.isVirtual = true;
-    return tensor(uid, dims, options);
-}
-
-fe::Tensor scalar(std::int64_t uid)
-{
-    TensorOptions options;
-    options.isByValue = true;
-    return tensor(uid, SCALAR_DIMS, options);
-}
 
 fe::Tensor indexTensor(std::int64_t uid)
 {
@@ -89,67 +29,10 @@ fe::Tensor indexTensor(std::int64_t uid)
     return tensor(uid, POOLED_DIMS, options);
 }
 
-fe::ConvDesc convDesc()
-{
-    const std::array<std::int64_t, 2> ones = {1, 1};
-    return fe::ConvDescBuilder()
-        .setComputeType(DataType_t::FLOAT)
-        .setMathMode(CUDNN_CROSS_CORRELATION)
-        .setSpatialDimCount(2)
-        .setPrePadding(2, ones.data())
-        .setPostPadding(2, ones.data())
-        .setDilation(2, ones.data())
-        .setSpatialStride(2, ones.data())
-        .build();
-}
-
-fe::Operation convForward(const fe::Tensor& x, const fe::Tensor& w, const fe::Tensor& y)
-{
-    return fe::OperationBuilder(DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-        .setxDesc(x)
-        .setwDesc(w)
-        .setyDesc(y)
-        .setcDesc(convDesc())
-        .build();
-}
-
-fe::PointWiseDesc pointwiseDesc(PointwiseMode_t mode)
-{
-    return fe::PointWiseDescBuilder().setMode(mode).setComputeType(DataType_t::FLOAT).build();
-}
-
-fe::Operation
-    pointwise(PointwiseMode_t mode, const fe::Tensor& x, const fe::Tensor* b, const fe::Tensor& y)
-{
-    fe::OperationBuilder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-    builder.setpwDesc(pointwiseDesc(mode)).setxDesc(x).setyDesc(y);
-    if(b != nullptr)
-    {
-        builder.setbDesc(*b);
-    }
-    return builder.build();
-}
-
 fe::Operation relu(std::int64_t xUid, std::int64_t yUid)
 {
     return pointwise(
         PointwiseMode_t::RELU_FWD, tensor(xUid, X_DIMS), nullptr, tensor(yUid, X_DIMS));
-}
-
-// 2x2 window and stride, no padding; max pooling pads with -inf.
-fe::ResampleDesc_v8 resampleDesc(cudnnResampleMode_t mode)
-{
-    const std::array<std::int64_t, 2> window = {2, 2};
-    const std::array<std::int64_t, 2> zeros = {0, 0};
-    return fe::ResampleDescBuilder_v8()
-        .setResampleMode(mode)
-        .setComputeType(DataType_t::FLOAT)
-        .setPaddingMode(mode == CUDNN_RESAMPLE_MAXPOOL ? CUDNN_NEG_INF_PAD : CUDNN_ZERO_PAD)
-        .setSpatialDim(2, window.data())
-        .setPrePadding(2, zeros.data())
-        .setPostPadding(2, zeros.data())
-        .setSpatialStride(2, window.data())
-        .build();
 }
 
 cudnnStatus_t buildStatus(fe::OperationGraphBuilder& builder)
@@ -164,50 +47,15 @@ cudnnStatus_t buildStatus(fe::OperationGraphBuilder& builder)
     }
 }
 
-class IntegrationCudnnShimV8BuilderLowering : public ::testing::Test
+class IntegrationCudnnShimV8BuilderLowering : public DevicelessGraphFixture
 {
 protected:
-    void SetUp() override
-    {
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-        ASSERT_EQ(cudnnCreate(&_handle), CUDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            EXPECT_EQ(cudnnDestroy(_handle), CUDNN_STATUS_SUCCESS);
-        }
-    }
-
-    void expectGraphBuilds(const std::vector<fe::Operation>& ops)
-    {
-        try
-        {
-            fe::OperationGraphBuilder builder;
-            builder.setHandle(_handle).setOperationGraph(ops);
-            const fe::OperationGraph graph = builder.build();
-            EXPECT_EQ(graph.get_status(), CUDNN_STATUS_SUCCESS) << graph.get_error();
-        }
-        catch(const fe::cudnnException& e)
-        {
-            ADD_FAILURE() << e.what();
-        }
-    }
-
     void expectGraphRejected(const std::vector<fe::Operation>& ops, cudnnStatus_t status)
     {
         fe::OperationGraphBuilder builder;
         builder.setHandle(_handle).setOperationGraph(ops);
         EXPECT_EQ(buildStatus(builder), status);
     }
-
-    cudnnHandle_t _handle = nullptr;
 };
 
 TEST_F(IntegrationCudnnShimV8BuilderLowering, ConvolutionBackwardData)

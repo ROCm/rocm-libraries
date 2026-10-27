@@ -14,11 +14,17 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hipdnn_backend.h>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <test_plugins/TestPluginConstants.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <numeric>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -29,6 +35,18 @@ namespace hipdnn_shim_v8_test
 
 namespace v8fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
+using Dims = std::vector<std::int64_t>;
+
+inline const Dims X_DIMS = {2, 4, 8, 8};
+inline const Dims W_DIMS = {8, 4, 3, 3};
+inline const Dims Y_DIMS = {2, 8, 8, 8};
+inline const Dims CHANNEL_DIMS = {1, 4, 1, 1};
+inline const Dims SCALAR_DIMS = {1, 1, 1, 1};
+// Per-sample statistics of a norm over C, H and W.
+inline const Dims SAMPLE_DIMS = {2, 1, 1, 1};
+inline const Dims FEATURE_DIMS = {1, 4, 8, 8};
+inline const Dims POOLED_DIMS = {2, 4, 4, 4};
+
 inline std::string lastError()
 {
     std::array<char, 1024> message{};
@@ -36,14 +54,22 @@ inline std::string lastError()
     return message.data();
 }
 
-inline std::vector<std::int64_t> packedStrides(const std::vector<std::int64_t>& dims)
+inline Dims packedStrides(const Dims& dims)
 {
-    std::vector<std::int64_t> strides(dims.size(), 1);
-    for(std::size_t i = dims.size() - 1; i > 0; --i)
+    Dims strides(dims.size(), 1);
+    for(std::size_t i = dims.size(); i > 1; --i)
     {
-        strides[i - 1] = strides[i] * dims[i];
+        strides[i - 2] = strides[i - 1] * dims[i - 1];
     }
     return strides;
+}
+
+// Bytes of a dense FLOAT tensor of `dims`.
+inline std::size_t floatTensorBytes(const Dims& dims)
+{
+    return sizeof(float)
+           * static_cast<std::size_t>(
+               std::accumulate(dims.begin(), dims.end(), std::int64_t{1}, std::multiplies<>()));
 }
 
 // The decimal engine id a plan's JSON representation carries in "engine":{"id":"..."}.
@@ -112,17 +138,146 @@ cudnnStatus_t statusOf(Action&& action)
     return CUDNN_STATUS_SUCCESS;
 }
 
-inline v8fe::Tensor_v8 tensor(std::int64_t uid, const std::vector<std::int64_t>& dims)
+struct TensorOptions
 {
-    const std::vector<std::int64_t> strides = packedStrides(dims);
+    v8fe::DataType_t dataType = v8fe::DataType_t::FLOAT;
+    bool isVirtual = false;
+    bool isByValue = false;
+};
+
+inline v8fe::Tensor_v8 tensor(std::int64_t uid, const Dims& dims, const TensorOptions& options = {})
+{
+    const Dims strides = packedStrides(dims);
     return v8fe::TensorBuilder_v8()
-        .setDataType(v8fe::DataType_t::FLOAT)
+        .setDataType(options.dataType)
         .setDim(static_cast<std::int64_t>(dims.size()), dims.data())
         .setStride(static_cast<std::int64_t>(strides.size()), strides.data())
         .setId(uid)
         .setAlignment(16)
+        .setVirtual(options.isVirtual)
+        .setByValue(options.isByValue)
         .build();
 }
+
+inline v8fe::Tensor_v8 virtualTensor(std::int64_t uid, const Dims& dims)
+{
+    TensorOptions options;
+    options.isVirtual = true;
+    return tensor(uid, dims, options);
+}
+
+inline v8fe::Tensor_v8 scalar(std::int64_t uid)
+{
+    TensorOptions options;
+    options.isByValue = true;
+    return tensor(uid, SCALAR_DIMS, options);
+}
+
+inline v8fe::ConvDesc_v8 convDesc()
+{
+    const std::array<std::int64_t, 2> ones = {1, 1};
+    return v8fe::ConvDescBuilder_v8()
+        .setComputeType(v8fe::DataType_t::FLOAT)
+        .setMathMode(CUDNN_CROSS_CORRELATION)
+        .setSpatialDimCount(2)
+        .setPrePadding(2, ones.data())
+        .setPostPadding(2, ones.data())
+        .setDilation(2, ones.data())
+        .setSpatialStride(2, ones.data())
+        .build();
+}
+
+inline v8fe::Operation_v8
+    convForward(const v8fe::Tensor_v8& x, const v8fe::Tensor_v8& w, const v8fe::Tensor_v8& y)
+{
+    return v8fe::OperationBuilder_v8(
+               v8fe::DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+        .setxDesc(x)
+        .setwDesc(w)
+        .setyDesc(y)
+        .setcDesc(convDesc())
+        .build();
+}
+
+inline v8fe::PointWiseDesc_v8 pointwiseDesc(v8fe::PointwiseMode_t mode)
+{
+    return v8fe::PointWiseDescBuilder_v8()
+        .setMode(mode)
+        .setComputeType(v8fe::DataType_t::FLOAT)
+        .build();
+}
+
+inline v8fe::Operation_v8 pointwise(v8fe::PointwiseMode_t mode,
+                                    const v8fe::Tensor_v8& x,
+                                    const v8fe::Tensor_v8* b,
+                                    const v8fe::Tensor_v8& y)
+{
+    v8fe::OperationBuilder_v8 builder(v8fe::DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
+    builder.setpwDesc(pointwiseDesc(mode)).setxDesc(x).setyDesc(y);
+    if(b != nullptr)
+    {
+        builder.setbDesc(*b);
+    }
+    return builder.build();
+}
+
+// 2x2 window and stride, no padding; max pooling pads with -inf.
+inline v8fe::ResampleDesc_v8 resampleDesc(cudnnResampleMode_t mode)
+{
+    const std::array<std::int64_t, 2> window = {2, 2};
+    const std::array<std::int64_t, 2> zeros = {0, 0};
+    return v8fe::ResampleDescBuilder_v8()
+        .setResampleMode(mode)
+        .setComputeType(v8fe::DataType_t::FLOAT)
+        .setPaddingMode(mode == CUDNN_RESAMPLE_MAXPOOL ? CUDNN_NEG_INF_PAD : CUDNN_ZERO_PAD)
+        .setSpatialDim(2, window.data())
+        .setPrePadding(2, zeros.data())
+        .setPostPadding(2, zeros.data())
+        .setSpatialStride(2, window.data())
+        .build();
+}
+
+// Lowers graphs against the real backend with the good test plugin. Graph lowering
+// needs no device, so suites on this fixture do not skip on device-less hosts.
+class DevicelessGraphFixture : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        const std::array<const char*, 1> paths
+            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(cudnnCreate(&_handle), CUDNN_STATUS_SUCCESS);
+        lastError();
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            EXPECT_EQ(cudnnDestroy(_handle), CUDNN_STATUS_SUCCESS);
+        }
+    }
+
+    void expectGraphBuilds(const std::vector<v8fe::Operation_v8>& ops)
+    {
+        try
+        {
+            v8fe::OperationGraphBuilder_v8 builder;
+            builder.setHandle(_handle).setOperationGraph(ops);
+            const v8fe::OperationGraph_v8 graph = builder.build();
+            EXPECT_EQ(graph.get_status(), CUDNN_STATUS_SUCCESS) << graph.get_error();
+        }
+        catch(const v8fe::cudnnException& e)
+        {
+            ADD_FAILURE() << e.what();
+        }
+    }
+
+    cudnnHandle_t _handle = nullptr;
+};
 
 // y = relu(x) on `handle`.
 inline v8fe::OperationGraph_v8 reluGraph(cudnnHandle_t handle,
@@ -146,6 +301,34 @@ inline v8fe::OperationGraph_v8 reluGraph(cudnnHandle_t handle,
         .setOperationGraph(static_cast<std::int64_t>(ops.size()), ops.data())
         .build();
 }
+
+// The UIDs of the X_DIMS relu graph ReluGraphFixture builds.
+constexpr std::int64_t RELU_X_UID = 1;
+constexpr std::int64_t RELU_Y_UID = 2;
+
+// IntegrationTestFixture with y = relu(x) built on its handle.
+class ReluGraphFixture : public hipdnn_tests::IntegrationTestFixture
+{
+protected:
+    void SetUp() override
+    {
+        IntegrationTestFixture::SetUp();
+        if(IsSkipped())
+        {
+            return;
+        }
+        _graph.emplace(reluGraph(_handle, RELU_X_UID, RELU_Y_UID, X_DIMS));
+    }
+
+    // The graph owns plugin state, so it goes before the handle that loaded the plugin.
+    void TearDown() override
+    {
+        _graph.reset();
+        IntegrationTestFixture::TearDown();
+    }
+
+    std::optional<v8fe::OperationGraph_v8> _graph;
+};
 
 // Every engine config the heuristics return, in rank order.
 inline v8fe::EngineConfigList heuristicConfigs(v8fe::OperationGraph_v8& graph,

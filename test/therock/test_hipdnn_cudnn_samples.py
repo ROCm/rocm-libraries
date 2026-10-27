@@ -290,6 +290,9 @@ def load_sidecars(report_dir: Path):
     all, so sidecars and tests do not correspond one-to-one. Each translation
     unit must still own exactly one sidecar; a second one would be counted
     twice, so it is an anomaly.
+
+    The legacy corpus writes its sidecars to a subdirectory, one per Catch2
+    case, so the directory is read recursively.
     """
     entries = []
     anomalies = []
@@ -299,30 +302,31 @@ def load_sidecars(report_dir: Path):
         anomalies.append(f"No sidecar directory at {report_dir}")
         return entries, anomalies
 
-    sidecars = sorted(report_dir.glob("*.json"))
+    sidecars = sorted(report_dir.rglob("*.json"))
     if not sidecars:
         anomalies.append(f"No sidecars found in {report_dir}")
 
-    for sidecar in sidecars:
+    for path in sidecars:
+        sidecar = path.relative_to(report_dir).as_posix()
         try:
-            entry = json.loads(sidecar.read_text(encoding="utf-8"))
+            entry = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            anomalies.append(f"{sidecar.name}: unreadable ({exc})")
+            anomalies.append(f"{sidecar}: unreadable ({exc})")
             continue
         if not isinstance(entry, dict):
-            anomalies.append(f"{sidecar.name}: expected a JSON object")
+            anomalies.append(f"{sidecar}: expected a JSON object")
             continue
         if not entry.get("tu"):
-            anomalies.append(f"{sidecar.name}: missing 'tu'")
-            entry["tu"] = sidecar.stem
+            anomalies.append(f"{sidecar}: missing 'tu'")
+            entry["tu"] = path.stem
         if normalize_outcome(entry.get("outcome", "")) not in KNOWN_OUTCOMES:
             anomalies.append(
                 f"{entry['tu']}: unrecognized outcome {entry.get('outcome')!r}"
             )
-        previous = sidecar_by_tu.setdefault(entry["tu"], sidecar.name)
-        if previous != sidecar.name:
+        previous = sidecar_by_tu.setdefault(entry["tu"], sidecar)
+        if previous != sidecar:
             anomalies.append(
-                f"{entry['tu']}: reported by both {previous} and {sidecar.name}"
+                f"{entry['tu']}: reported by both {previous} and {sidecar}"
             )
         entries.append(entry)
 
@@ -339,6 +343,7 @@ def summarize(entries: list) -> dict:
         "ran-no-assertions": 0,
         "ran-with-assertion-failures": 0,
         "xfail-still-failing": 0,
+        "unexpected": 0,
     }
     for entry in entries:
         outcome = normalize_outcome(entry.get("outcome", ""))
@@ -354,6 +359,10 @@ def summarize(entries: list) -> dict:
             counts["ran-with-assertion-failures"] += 1
         if outcome == OUTCOME_XFAIL_STILL_FAILING:
             counts["xfail-still-failing"] += 1
+        # Only legacy cases carry a verdict: their outcome is judged against a
+        # per-case expectation, so an expected crash is not a failure.
+        if entry.get("verdict") == "unexpected":
+            counts["unexpected"] += 1
     return counts
 
 
@@ -397,8 +406,8 @@ def format_report(entries: list, anomalies: list, counts: dict) -> str:
             lines.append(f"- `{entry.get('tu', '?')}`")
         lines.append("")
 
-    lines.append("| TU | Tier | Outcome | Assertion failures / reason |")
-    lines.append("| --- | --- | --- | --- |")
+    lines.append("| TU | Tier | Outcome | Verdict | Assertion failures / reason |")
+    lines.append("| --- | --- | --- | --- | --- |")
     for entry in entries:
         outcome = entry.get("outcome", "?")
         if normalize_outcome(outcome) == OUTCOME_XFAIL_NOW_COMPILES:
@@ -407,10 +416,11 @@ def format_report(entries: list, anomalies: list, counts: dict) -> str:
             f"| {_cell(entry.get('tu', '?'))} "
             f"| {_cell(entry.get('tier', '?'))} "
             f"| {_cell(outcome)} "
+            f"| {_cell(entry.get('verdict', '-'))} "
             f"| {_cell(_detail(entry))} |"
         )
     if not entries:
-        lines.append("| _(no sidecars)_ | - | - | - |")
+        lines.append("| _(no sidecars)_ | - | - | - | - |")
 
     if anomalies:
         lines.append("")

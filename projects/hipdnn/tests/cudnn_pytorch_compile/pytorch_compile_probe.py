@@ -10,8 +10,17 @@ Usage: pytorch_compile_probe.py --pytorch-root DIR --pytorch-build DIR
 Preconditions: a PyTorch ROCm build of a tree with aten/src/ATen/hipdnn/, current
 hipified copies and compile_commands.json; a hipDNN install with the cuDNN shim ON
 (HIPDNN_ENABLE_CUDNN_COMPATIBILITY); on Windows, a vcvars64 environment. Writes only
-under --out. Exit 0: all entries met their tier; 1: compile failure or PyTorch tree
-changed; 2: preflight error.
+under --out. Exit 0: all entries met their tier; 1: an entry missed it (a compile
+failure, or an XFAIL_COMPILE entry that now compiles) or the PyTorch tree's git status
+changed during the run; 2: preflight error, or the post-run git status is unreadable.
+
+A COMPILE verdict is not "the file compiles as PyTorch would build it": the file is
+compiled with the tree's flags, AT_CUDNN_ENABLED() forced to 1, and two substitutions
+(listed per entry in the report as "substitutions"). ATen/cudnn/Descriptors.h is
+replaced by a copy truncated before its v7 descriptor wrappers, which need the v7
+descriptor C API the shim does not provide, and ATen/cudnn/Handle.h by the overlay that
+forwards to the hipDNN integration header. COMPILE_ASIS entries compile unmodified.
+Every compiled entry must define its canary, so a body preprocessed out fails.
 """
 
 import argparse
@@ -45,6 +54,11 @@ HIPDNN_INCLUDE_LEAVES = ("frontend", "data_sdk", "backend")
 INCLUDE_FLAGS = ("-isystem", "-imsvc", "/imsvc", "-I", "/I")
 DESCRIPTORS_BEGIN = "namespace at::native {"
 DESCRIPTORS_END = "template <typename T, cudnnStatus_t (*dtor)(T*)>"
+# What a FORCED_TIERS compile substitutes for the tree's own headers.
+FORCED_SUBSTITUTIONS = (
+    "ATen/cudnn/Descriptors.h: truncated before its v7 descriptor wrappers",
+    "ATen/cudnn/Handle.h: replaced by the hipDNN integration header",
+)
 COMPILE_TIMEOUT_S = 900
 
 
@@ -99,8 +113,8 @@ def load_manifest() -> dict:
         seen.add(eid)
         if tier not in TIERS:
             raise ProbeError("P-COMPLETE", f"'{eid}': unknown tier '{tier}'")
-        if tier == "COMPILE" and not entry.get("canary"):
-            raise ProbeError("P-COMPLETE", f"'{eid}': COMPILE requires a canary")
+        if tier in ("COMPILE", "COMPILE_ASIS") and not entry.get("canary"):
+            raise ProbeError("P-COMPLETE", f"'{eid}': {tier} requires a canary")
         if tier == "XFAIL_COMPILE" and not (
             entry.get("anchor") and entry.get("reason")
         ):
@@ -499,20 +513,24 @@ def generate_descriptors(root: Path, out: Path) -> None:
 
 
 def write_wrapper(root: Path, out: Path, entry: dict) -> Path:
-    lines = [
-        "#if __has_include(<ATen/cuda/CUDAConfig.h>)",
-        "#include <ATen/cuda/CUDAConfig.h>",
-        "#endif",
-        "#include <ATen/hip/HIPConfig.h>",
-        "#undef AT_CUDNN_ENABLED",
-        "#define AT_CUDNN_ENABLED() 1",
-        f'#include "{fwd(root / entry["compiled"])}"',
-        "#if !AT_CUDNN_ENABLED()",
-        '#error "AT_CUDNN_ENABLED() was reset; the probed file compiled to nothing"',
-        "#endif",
-        "static_assert(sizeof(cudnn_frontend::ExecutionPlan) > 0);",
-    ]
-    if entry["tier"] == "COMPILE":
+    source = f'#include "{fwd(root / entry["compiled"])}"'
+    if entry["tier"] == "COMPILE_ASIS":
+        lines = [source]
+    else:
+        lines = [
+            "#if __has_include(<ATen/cuda/CUDAConfig.h>)",
+            "#include <ATen/cuda/CUDAConfig.h>",
+            "#endif",
+            "#include <ATen/hip/HIPConfig.h>",
+            "#undef AT_CUDNN_ENABLED",
+            "#define AT_CUDNN_ENABLED() 1",
+            source,
+            "#if !AT_CUDNN_ENABLED()",
+            '#error "AT_CUDNN_ENABLED() was reset; the probed file compiled to nothing"',
+            "#endif",
+            "static_assert(sizeof(cudnn_frontend::ExecutionPlan) > 0);",
+        ]
+    if "canary" in entry:
         lines.append(
             f"[[maybe_unused]] static const auto hipdnn_probe_canary = &{entry['canary']};"
         )
@@ -535,16 +553,14 @@ def build_command(
     extra = ["-DHIPDNN_FRONTEND_SKIP_JSON_LIB"] if config["skip_json_lib"] else []
     if entry["tier"] in FORCED_TIERS:
         extra += ["-I" + fwd(OVERLAY_DIR), "-I" + fwd(out / "generated")]
-        source = norm(cc_dir / cc["file"])
-        positions = [
-            i for i, a in enumerate(args) if i > 0 and norm(cc_dir / a) == source
-        ]
-        if len(positions) != 1:
-            raise ProbeError(
-                "E-CC",
-                f"'{eid}': source token for {cc['file']} found {len(positions)} times",
-            )
-        args[positions[0]] = fwd(write_wrapper(root, out, entry))
+    source = norm(cc_dir / cc["file"])
+    positions = [i for i, a in enumerate(args) if i > 0 and norm(cc_dir / a) == source]
+    if len(positions) != 1:
+        raise ProbeError(
+            "E-CC",
+            f"'{eid}': source token for {cc['file']} found {len(positions)} times",
+        )
+    args[positions[0]] = fwd(write_wrapper(root, out, entry))
     args = [args[0], *extra, *args[1:]]
     args, obj = rewrite_outputs(args, cc_dir, out, eid)
     return args, cc_dir, obj
@@ -589,7 +605,7 @@ def run_compile(entry: dict, args: list, cc_dir: Path, obj: Path, log: Path) -> 
 
     if entry["tier"] == "XFAIL_COMPILE":
         if ok:
-            outcome = "xfail-now-passes"
+            outcome = "xfail-now-compiles"
         elif re.search(entry["anchor"], output):
             outcome = "xfail-still-failing"
         else:
@@ -629,15 +645,17 @@ def main() -> int:
         config = preflight_prefix(prefix)
         preflight_tree(root, build, out)
         status_before = tree_status(root)
-        hipify_checks = preflight_hipify(root, out, selected)
-        preflight_complete(root, manifest)
-
+        # Before the hipify preflight, which would otherwise demand a current hipified
+        # copy of an entry that is about to be skipped.
         for entry in selected:
             if entry.get("requires_sdpa") and not config["sdpa"]:
                 entry["tier"], entry["reason"] = (
                     "EXCLUDED",
                     "install built with HIPDNN_ENABLE_SDPA OFF",
                 )
+                print(f"skipped  {entry['id']}: {entry['reason']}", flush=True)
+        hipify_checks = preflight_hipify(root, out, selected)
+        preflight_complete(root, manifest)
 
         for sub in ("obj", "logs", "wrappers", "generated"):
             (out / sub).mkdir(parents=True, exist_ok=True)
@@ -673,6 +691,8 @@ def main() -> int:
         for key in ("canary", "anchor", "reason"):
             if key in entry:
                 record[key] = entry[key]
+        if entry["tier"] in FORCED_TIERS:
+            record["substitutions"] = list(FORCED_SUBSTITUTIONS)
         if entry["tier"] == "EXCLUDED":
             record.update(outcome="excluded", seconds=0.0)
         else:

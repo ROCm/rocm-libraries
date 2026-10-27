@@ -71,6 +71,11 @@ if(NOT hipdnn_frontend_cudnn_compatibility_FOUND)
 endif()
 
 set(PROBE "${CMAKE_CURRENT_SOURCE_DIR}/sample_probe.py")
+# The probe decides every legacy verdict, so its own rules are checked in every
+# label-filtered run.
+add_test(NAME sample_probe_selftest
+         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_sample_probe.py")
+set_tests_properties(sample_probe_selftest PROPERTIES LABELS "cudnn_samples;compile;run")
 
 # ---------------------------------------------------------------------------------------
 # Catch2
@@ -80,10 +85,10 @@ set(PROBE "${CMAKE_CURRENT_SOURCE_DIR}/sample_probe.py")
 find_package(Catch2 3.3.0 QUIET)
 if(NOT Catch2_FOUND)
     message(STATUS "Catch2 >= 3.3.0 not found; fetching v3.13.0")
+    # Pinned by commit (v3.13.0), not by tag: a tag can be moved.
     FetchContent_Declare(Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.13.0
-        GIT_SHALLOW TRUE)
+        GIT_TAG 29c9844f688acb27c87338c39cd186ebfe41aa19)
     FetchContent_MakeAvailable(Catch2)
 endif()
 
@@ -94,6 +99,7 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json" MANIFEST)
 
 string(JSON CORPUS_REPO GET "${MANIFEST}" corpus repo)
 string(JSON CORPUS_TAG GET "${MANIFEST}" corpus tag)
+string(JSON CORPUS_COMMIT GET "${MANIFEST}" corpus commit)
 string(JSON CORPUS_CPP_PATH GET "${MANIFEST}" corpus cpp_path)
 string(JSON _sparse_len LENGTH "${MANIFEST}" corpus sparse_paths)
 math(EXPR _last "${_sparse_len} - 1")
@@ -122,8 +128,15 @@ else()
             set(_corpus_complete FALSE)
         endif()
     endforeach()
-    # A cached clone from before a sparse path was added is re-cloned rather than re-sparsed:
-    # one code path, and a depth-1 blob-less clone is cheap.
+    execute_process(
+        COMMAND git -C "${CORPUS_ROOT}" rev-parse HEAD
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _cached_head ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _rc EQUAL 0 OR NOT _cached_head STREQUAL CORPUS_COMMIT)
+        set(_corpus_complete FALSE)
+    endif()
+    # A cached clone from before a sparse path was added, or of another commit, is re-cloned
+    # rather than updated: one code path, and a depth-1 blob-less clone is cheap.
     if(NOT _corpus_complete)
         message(STATUS "Cloning ${CORPUS_REPO} ${CORPUS_TAG} (sparse)")
         file(REMOVE_RECURSE "${CORPUS_ROOT}")
@@ -143,6 +156,32 @@ else()
             message(FATAL_ERROR "E22 CORPUS: sparse-checkout failed\n${_out}")
         endif()
     endif()
+endif()
+
+# The tag is how the corpus is fetched; the commit is what it is pinned to. A moved tag
+# would otherwise compile a different corpus than the one the manifest was triaged against.
+# Without the .git check, git would report the commit of whatever repository encloses an
+# exported corpus.
+set(_rc 1)
+set(_out "no .git")
+if(EXISTS "${CORPUS_ROOT}/.git")
+    execute_process(
+        COMMAND git -C "${CORPUS_ROOT}" rev-parse HEAD
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _corpus_head ERROR_VARIABLE _out
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
+if(NOT _rc EQUAL 0)
+    # Only a supplied checkout can get here (an export, or a repository git refuses to
+    # read); the version check below still applies to it.
+    if(NOT HIPDNN_CUDNN_SAMPLES_CORPUS_DIR)
+        message(FATAL_ERROR "E22 CORPUS: cannot read the commit of ${CORPUS_ROOT}\n${_out}")
+    endif()
+    message(WARNING "E22 CORPUS: ${CORPUS_ROOT} is not a readable git checkout (${_out}); "
+                    "its commit cannot be checked against ${CORPUS_COMMIT}")
+elseif(NOT _corpus_head STREQUAL CORPUS_COMMIT)
+    message(FATAL_ERROR
+        "E22 CORPUS: ${CORPUS_ROOT} is at ${_corpus_head}, manifest pins ${CORPUS_TAG} "
+        "to ${CORPUS_COMMIT}")
 endif()
 
 set(CORPUS_CPP "${CORPUS_ROOT}/${CORPUS_CPP_PATH}")
@@ -309,9 +348,28 @@ endif()
 # still absent from the installed tree.
 get_target_property(_fe_includes hipdnn_frontend INTERFACE_INCLUDE_DIRECTORIES)
 
-# The superbuild test launcher stages an app-local amd_comgr.dll into <build>/bin; without
-# it the MIOpen JIT loads the system copy, so executables must sit beside it.
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+# Writes an EXCLUDED entry's report sidecar now: there is no ctest case to write it later,
+# and the report must still account for every manifest entry. CASE and VERDICT are
+# optional; TU, CASE and REASON are escaped for their JSON strings.
+function(write_excluded_sidecar path)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "TU;CASE;VERDICT;REASON" "")
+    foreach(_field TU CASE REASON)
+        if(DEFINED arg_${_field})
+            string(REPLACE "\\" "\\\\" arg_${_field} "${arg_${_field}}")
+            string(REPLACE "\"" "\\\"" arg_${_field} "${arg_${_field}}")
+        endif()
+    endforeach()
+    set(_json "{\n  \"tu\": \"${arg_TU}\",\n")
+    if(DEFINED arg_CASE)
+        string(APPEND _json "  \"case\": \"${arg_CASE}\",\n")
+    endif()
+    string(APPEND _json "  \"tier\": \"EXCLUDED\",\n  \"outcome\": \"excluded\",\n")
+    if(DEFINED arg_VERDICT)
+        string(APPEND _json "  \"verdict\": \"${arg_VERDICT}\",\n")
+    endif()
+    string(APPEND _json "  \"reason\": \"${arg_REASON}\"\n}\n")
+    file(WRITE "${path}" "${_json}")
+endfunction()
 
 set(SEEN_SOURCES "")
 if(NOT SAMPLE_COUNT MATCHES "^[1-9][0-9]*$")
@@ -388,10 +446,7 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
                 endforeach()
             endif()
         endif()
-        # Static outcome, so the sidecar is written now: there is no ctest case to write it
-        # later, and the report must still account for every manifest entry.
-        file(WRITE "${sidecar}"
-             "{\n  \"tu\": \"${tu}\",\n  \"tier\": \"EXCLUDED\",\n  \"outcome\": \"excluded\",\n  \"reason\": \"${reason}\"\n}\n")
+        write_excluded_sidecar("${sidecar}" TU "${tu}" REASON "${reason}")
         continue()
     endif()
 
@@ -480,7 +535,7 @@ message(STATUS "cuDNN sample corpus: ${_staged_count} staged, ${SAMPLE_COUNT} ma
 # Legacy samples
 # ---------------------------------------------------------------------------------------
 # Upstream links samples/legacy_samples into one Catch2 binary. Each TEST_CASE runs in its
-# own process against its manifest entry: most of them crash in upstream code on an empty
+# own process against its manifest entry: many of them crash in upstream code on an empty
 # engine list, and one crash must not hide the other outcomes.
 set(LEGACY_SRC "${CORPUS_ROOT}/${LEGACY_PATH}")
 # Never on the same include path as staged/cpp: both trees include their own
@@ -556,6 +611,9 @@ target_include_directories(tu_legacy_samples PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/legacy/overlay" "${CMAKE_CURRENT_SOURCE_DIR}/overlay"
     "${LEGACY_STAGE}")
 target_link_libraries(tu_legacy_samples PRIVATE hipdnn_frontend Catch2::Catch2WithMain)
+if(TARGET stage_shadowed_rocm_dlls)
+    add_dependencies(tu_legacy_samples stage_shadowed_rocm_dlls)
+endif()
 add_test(NAME compile_legacy_samples
          COMMAND ${Python3_EXECUTABLE} "${PROBE}"
                  --mode compile --tu legacy_samples --tier RUN
@@ -572,7 +630,7 @@ endif()
 math(EXPR _last "${_case_count} - 1")
 set(_legacy_names "")
 set(_legacy_ids "")
-foreach(_t RUN_CLEAN RUN XFAIL_RUN EXCLUDED)
+foreach(_t RUN_CLEAN VACUOUS XFAIL_RUN EXCLUDED)
     set(_n_${_t} 0)
 endforeach()
 foreach(i RANGE 0 ${_last} 1)
@@ -593,7 +651,7 @@ foreach(i RANGE 0 ${_last} 1)
 
     string(JSON _case GET "${MANIFEST}" legacy cases "${name}")
     string(JSON tier GET "${_case}" tier)
-    if(NOT tier MATCHES "^(RUN_CLEAN|RUN|XFAIL_RUN|EXCLUDED)$")
+    if(NOT tier MATCHES "^(RUN_CLEAN|VACUOUS|XFAIL_RUN|EXCLUDED)$")
         message(FATAL_ERROR "E26 LEGACY: case '${name}' has unknown tier '${tier}'")
     endif()
     math(EXPR _n_${tier} "${_n_${tier}} + 1")
@@ -635,26 +693,30 @@ foreach(i RANGE 0 ${_last} 1)
 
     set(sidecar "${REPORT_DIR}/legacy/${id}.json")
     if(tier STREQUAL "EXCLUDED")
-        set(_json_name "${name}")
-        set(_json_reason "${reason}")
-        foreach(_v _json_name _json_reason)
-            string(REPLACE "\\" "\\\\" ${_v} "${${_v}}")
-            string(REPLACE "\"" "\\\"" ${_v} "${${_v}}")
-        endforeach()
-        file(WRITE "${sidecar}" "{\n  \"tu\": \"legacy_samples::${_json_name}\",\n  \"case\": \"${_json_name}\",\n  \"tier\": \"EXCLUDED\",\n  \"outcome\": \"excluded\",\n  \"verdict\": \"expected\",\n  \"reason\": \"${_json_reason}\"\n}\n")
+        write_excluded_sidecar(
+            "${sidecar}"
+            TU "legacy_samples::${name}"
+            CASE "${name}"
+            VERDICT "expected"
+            REASON "${reason}"
+        )
         continue()
     endif()
 
-    # --warn UnmatchedTestSpec turns a renamed case into exit 3 rather than "No tests ran";
-    # --allow-running-no-tests keeps a case that SKIPs from exiting 4.
+    # --warn UnmatchedTestSpec makes a renamed case report "No test cases matched" rather
+    # than run nothing quietly; --allow-running-no-tests keeps a case that SKIPs from
+    # exiting 4.
     add_test(NAME run_legacy_${id}
              COMMAND ${Python3_EXECUTABLE} "${PROBE}" --mode case
                      --manifest "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json" --case "${name}"
                      --sidecar "${sidecar}"
                      -- $<TARGET_FILE:tu_legacy_samples> "${name}"
                         --warn UnmatchedTestSpec --allow-running-no-tests)
+    # A VACUOUS case that ran without crashing exits 77: it never reached the shim, so it
+    # must not count as a pass.
     set_tests_properties(run_legacy_${id} PROPERTIES
         FIXTURES_REQUIRED fx_legacy_samples
+        SKIP_RETURN_CODE 77
         TIMEOUT 300
         LABELS "cudnn_samples;run")
 endforeach()
@@ -672,5 +734,5 @@ foreach(_name IN LISTS _legacy_scraped)
 endforeach()
 
 message(STATUS
-    "cuDNN legacy samples: ${_case_count} cases (${_n_RUN_CLEAN} RUN_CLEAN, ${_n_RUN} RUN, "
+    "cuDNN legacy samples: ${_case_count} cases (${_n_RUN_CLEAN} RUN_CLEAN, ${_n_VACUOUS} VACUOUS, "
     "${_n_XFAIL_RUN} XFAIL_RUN, ${_n_EXCLUDED} EXCLUDED)")
