@@ -135,6 +135,7 @@ struct HarnessPolicy
 
     /// Set by --benchmark: time each verified graph with these settings.
     std::optional<BenchmarkSettings> benchmark;
+    bool benchmarkReference = false;
 
     bool useDevice() const
     {

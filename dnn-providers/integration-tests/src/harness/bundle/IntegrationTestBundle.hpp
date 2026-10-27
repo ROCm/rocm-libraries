@@ -92,10 +92,35 @@ struct IntegrationTestBundle
     // of a type that has no tensor.
     TensorMap loadTensors() const
     {
+        auto tensors = loadInputs();
+        loadGoldenOutputs(tensors);
+        return tensors;
+    }
+
+    TensorMap loadInputs() const
+    {
         TensorMap tensors;
+        if(blobs.has_value())
+        {
+            loadTensorUids(tensors, blobs->inputUids);
+        }
+        return tensors;
+    }
+
+    void loadGoldenOutputs(TensorMap& tensors) const
+    {
+        if(blobs.has_value())
+        {
+            loadTensorUids(tensors, blobs->outputUids);
+        }
+    }
+
+private:
+    void loadTensorUids(TensorMap& tensors, const std::vector<int64_t>& uids) const
+    {
         if(!blobs.has_value())
         {
-            return tensors;
+            return;
         }
 
         const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuffer.data());
@@ -108,7 +133,7 @@ struct IntegrationTestBundle
 
         // Ragged tensors are constructed from their offset tensor, so they load last.
         // Offset tensors are always inputs, so an output's offset is already loaded.
-        const auto loadUids = [&](const std::vector<int64_t>& uids) {
+        const auto loadUids = [&] {
             std::vector<int64_t> raggedUids;
             for(const int64_t uid : uids)
             {
@@ -141,9 +166,7 @@ struct IntegrationTestBundle
             }
         };
 
-        loadUids(blobs->inputUids);
-        loadUids(blobs->outputUids);
-        return tensors;
+        loadUids();
     }
 };
 

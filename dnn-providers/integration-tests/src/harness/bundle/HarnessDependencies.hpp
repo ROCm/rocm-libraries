@@ -35,6 +35,7 @@ struct HarnessDependencies
     /// every input is filled on the host.
     std::shared_ptr<DeviceInputFiller> deviceFiller;
     HarnessPolicy policy;
+    ReferenceBenchmarkTimer referenceTimer;
 };
 
 /// The real collaborators, with the process-wide reference-executor pool.
