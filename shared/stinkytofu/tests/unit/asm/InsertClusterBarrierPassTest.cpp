@@ -1311,9 +1311,12 @@ TEST_F(InsertClusterBarrierPassTest, Rule3SignalDoesNotClimbAcrossEarlierTensorR
     for (IRBase& ir : *bb) {
         if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
         auto* inst = cast<StinkyInstruction>(&ir);
-        if (idx > indexOf(clusterCmp) && idx < indexOf(clusterWait))
+        // Braces: EXPECT_FALSE expands to an if/else, so a brace-less body here is an
+        // ambiguous dangling else under GCC's -Werror=dangling-else.
+        if (idx > indexOf(clusterCmp) && idx < indexOf(clusterWait)) {
             EXPECT_FALSE(inst->is(InstFlag::IF_WaitTensorCnt))
                 << "no tensorcnt may lie inside a cluster phase:" << blockListing(*bb);
+        }
         ++idx;
     }
 }
