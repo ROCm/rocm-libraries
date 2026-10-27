@@ -68,6 +68,27 @@ INSTANCE_UUID_NAMESPACE = uuid.UUID("6b0d3b8e-6a58-5d0f-9f43-3c6f5f2a9c11")
 #: names; another engine name (a test-only subset of the catalog) borrows them.
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
 
+#: The shipped engine of each packaged arch. One catalog per arch, one engine
+#: over it: gfx950's was first, gfx942 ships the same rocKE sweeps built for
+#: gfx942 through its own engine and its own descriptors. An instance_id already
+#: pins the arch (it is the identity's stable_hash()), so the two catalogs share
+#: no kernel and need no namespace of their own.
+PRODUCT_ENGINES = {
+    "gfx950": PRODUCT_ENGINE,
+    "gfx942": "hipkernel:Gfx942ConvFwdAot",
+}
+
+
+def product_engine(arch: str) -> str:
+    """The engine that ships ``arch``'s catalog."""
+    try:
+        return PRODUCT_ENGINES[arch]
+    except KeyError:
+        raise SystemExit(
+            f"no AOT forward engine is packaged for arch {arch!r}; "
+            f"packaged: {sorted(PRODUCT_ENGINES)}"
+        ) from None
+
 #: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -251,19 +272,22 @@ PACKAGED_DIRECT_ALGORITHMS = {
 }
 #: The generator variant (kernel name) of each direct variant. std and spatial keep
 #: the name they had when they were the only direct instances.
+#: ``{slug}`` is the shipping engine's slug, so gfx950 keeps exactly the names
+#: it shipped with and gfx942's kernels are named for its own engine.
 _DIRECT_VARIANT_NAMES = {
-    "std": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
-    "spatial": "gfx950_conv_fwd_aot_dw_{dtype}_{instance_id}",
-    "tiled": "gfx950_conv_fwd_aot_dwtiled_{dtype}_{instance_id}",
-    "col": "gfx950_conv_fwd_aot_dwcol_{dtype}_{instance_id}",
-    "grouped": "gfx950_conv_fwd_aot_grouped_{dtype}_{instance_id}",
-    "nongrouped": "gfx950_conv_fwd_aot_nongrouped_{dtype}_{instance_id}",
-    "grouped_halo": "gfx950_conv_fwd_aot_groupedhalo_{dtype}_{instance_id}",
+    "std": "{slug}_dw_{dtype}_{instance_id}",
+    "spatial": "{slug}_dw_{dtype}_{instance_id}",
+    "tiled": "{slug}_dwtiled_{dtype}_{instance_id}",
+    "col": "{slug}_dwcol_{dtype}_{instance_id}",
+    "grouped": "{slug}_grouped_{dtype}_{instance_id}",
+    "nongrouped": "{slug}_nongrouped_{dtype}_{instance_id}",
+    "grouped_halo": "{slug}_groupedhalo_{dtype}_{instance_id}",
 }
-#: The generator variant of a group-merged implicit-GEMM instance and of a
-#: split-C non-grouped one.
-_MERGED_VARIANT_NAME = "gfx950_conv_fwd_aot_merged_{dtype}_{instance_id}"
-_SPLIT_C_VARIANT_NAME = "gfx950_conv_fwd_aot_nongroupedsplit_{dtype}_{instance_id}"
+#: The generator variant of a plain implicit-GEMM instance, a group-merged one
+#: and a split-C non-grouped one.
+_IMPLICIT_VARIANT_NAME = "{slug}_{dtype}_{instance_id}"
+_MERGED_VARIANT_NAME = "{slug}_merged_{dtype}_{instance_id}"
+_SPLIT_C_VARIANT_NAME = "{slug}_nongroupedsplit_{dtype}_{instance_id}"
 #: The dispatch a split-C pack names (``hipkernel.gfx950_conv_fwd_aot.split_c_dispatch``):
 #: its kernels launch twice, the conv pass and the fold, so its handler declares
 #: the launches ``conv`` and ``reduce`` and every other pack keeps the engine's
@@ -409,6 +433,14 @@ def build_config(
         for name, default in {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}.items()
     ]
     metadata = list(DIRECT_SPEC_ORDER + tuple(DIRECT_KNOB_FIELDS))
+    # Every spec of one catalog is one arch's: the pack declares it, and the
+    # kernel names follow the engine that ships that arch, whatever engine_name
+    # the caller emits them under.
+    archs = sorted({spec.identity().arch for spec in specs})
+    if len(archs) != 1:
+        raise ValueError(f"one catalog is one arch, got {archs}")
+    arch = archs[0]
+    slug = engine_slug(product_engine(arch))
     shards = collections.defaultdict(list)
     for spec in specs:
         shards[shard_name(spec, sharding)].append(spec)
@@ -419,12 +451,24 @@ def build_config(
         if implicit:
             variants.append(
                 _variant(
-                    "gfx950_conv_fwd_aot_{dtype}_{instance_id}", SPEC_ORDER, implicit
+                    _IMPLICIT_VARIANT_NAME.format(
+                        slug=slug, dtype="{dtype}", instance_id="{instance_id}"
+                    ),
+                    SPEC_ORDER,
+                    implicit,
                 )
             )
         merged = [s for s in shards[shard] if s.is_merged]
         if merged:
-            variants.append(_variant(_MERGED_VARIANT_NAME, MERGED_SPEC_ORDER, merged))
+            variants.append(
+                _variant(
+                    _MERGED_VARIANT_NAME.format(
+                        slug=slug, dtype="{dtype}", instance_id="{instance_id}"
+                    ),
+                    MERGED_SPEC_ORDER,
+                    merged,
+                )
+            )
         # std and spatial share one variant, as before the other direct variants.
         for group in (
             ("std", "spatial"),
@@ -442,7 +486,9 @@ def build_config(
             if members:
                 variants.append(
                     _variant(
-                        _DIRECT_VARIANT_NAMES[group[0]],
+                        _DIRECT_VARIANT_NAMES[group[0]].format(
+                            slug=slug, dtype="{dtype}", instance_id="{instance_id}"
+                        ),
                         spec_order(members[0]),
                         members,
                     )
@@ -450,14 +496,20 @@ def build_config(
         split = [s for s in shards[shard] if s.is_split_c]
         if split:
             variants.append(
-                _variant(_SPLIT_C_VARIANT_NAME, spec_order(split[0]), split)
+                _variant(
+                    _SPLIT_C_VARIANT_NAME.format(
+                        slug=slug, dtype="{dtype}", instance_id="{instance_id}"
+                    ),
+                    spec_order(split[0]),
+                    split,
+                )
             )
         defaults = {
             "kind": "rocke",
             "source": "builders/common/convolution_forward.py",
             "builder": "build_gfx950_conv_fwd_aot",
         }
-        pack = {"name": shard, "arch": ["gfx950"]}
+        pack = {"name": shard, "arch": [arch]}
         if split:
             if len(split) != len(shards[shard]):
                 raise ValueError(
@@ -474,8 +526,8 @@ def build_config(
         "knobs": list(ENGINE_KNOBS),
         "heuristic": "native",
     }
-    if engine_name != PRODUCT_ENGINE:
-        engine["native_symbols_from"] = PRODUCT_ENGINE
+    if engine_name != product_engine(arch):
+        engine["native_symbols_from"] = product_engine(arch)
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
@@ -569,7 +621,7 @@ def kernel_uuid(instance_id: str, engine_name: str = PRODUCT_ENGINE) -> str:
     catalog never carries the same kernel id into one process twice.
     """
     namespace = INSTANCE_UUID_NAMESPACE
-    if engine_name != PRODUCT_ENGINE:
+    if engine_name not in PRODUCT_ENGINES.values():
         namespace = uuid.uuid5(INSTANCE_UUID_NAMESPACE, engine_name)
     return str(uuid.uuid5(namespace, instance_id))
 
@@ -607,10 +659,10 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--engine-name",
-        default=PRODUCT_ENGINE,
+        default=None,
         help="Engine the bundle declares, and whose kernel ids --stabilize-ids "
-        "derives (default: %(default)s). Another name borrows that engine's native "
-        "symbols.",
+        "derives (default: the engine that ships the catalog's arch, "
+        f"{PRODUCT_ENGINES}). Another name borrows that engine's native symbols.",
     )
     parser.add_argument(
         "--authored-subpath",
@@ -640,8 +692,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.stabilize_ids:
+        # A pack name cannot tell a product engine from a test engine over the
+        # same slug, so --stabilize-ids never guesses: name the engine whose
+        # catalog the KDP holds, as the gfx942 bundle's regeneration does.
         for kdp in args.stabilize_ids:
-            count = stabilize_ids(kdp, args.engine_name)
+            count = stabilize_ids(kdp, args.engine_name or PRODUCT_ENGINE)
             print(f"{kdp}: stabilized {count} kernel id(s)")
         return 0
     if not (args.rocke_root and args.instances and args.output):
@@ -686,7 +741,8 @@ def main(argv=None) -> int:
         f"# Generated by tools/make_conv_aot_config.py from {sources}; "
         "do not edit by hand.\n"
     )
-    config = build_config(specs, args.engine_name, args.authored_subpath, args.sharding)
+    engine_name = args.engine_name or product_engine(specs[0].identity().arch)
+    config = build_config(specs, engine_name, args.authored_subpath, args.sharding)
     args.output.write_text(header + dump_config(config))
     print(
         f"{len(specs)} instance(s) written to {args.output} "

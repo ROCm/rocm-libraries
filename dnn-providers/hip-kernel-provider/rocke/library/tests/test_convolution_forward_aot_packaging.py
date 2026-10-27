@@ -328,8 +328,10 @@ def test_identities_off_the_sweep_or_with_unmodeled_fields_are_refused(sweep_job
         ({"chiplet_swizzle": True}, "chiplet_swizzle=True is not packaged"),
         ({"is_3d": True}, "is_3d=True is not packaged"),
         ({"streamk": "dp_sk"}, "streamk='dp_sk' is not packaged"),
-        ({"direction": "dgrad"}, "not a gfx950 forward"),
-        ({"arch": "gfx942"}, "not a gfx950 forward"),
+        ({"direction": "dgrad"}, "forward implicit-GEMM or direct identity"),
+        # gfx942 is packaged too (hipkernel:Gfx942ConvFwdAot), so the arch that
+        # stands for "not packaged here" has to be one that is not.
+        ({"arch": "gfx90a"}, "forward implicit-GEMM or direct identity"),
         ({"dtype_b": "bf16"}, "mixed operand dtypes"),
         # Valid for the builder, but the AOT sweep never builds it: "basic" emits
         # the code of "mem".
@@ -342,6 +344,38 @@ def test_identities_off_the_sweep_or_with_unmodeled_fields_are_refused(sweep_job
     other = _spec(replace(identity, epilogue="default", vector_size_c=1))
     ok, why = supports_gfx950_conv_fwd_aot(replace(spec, instance_id=other.instance_id))
     assert not ok and "is not the stable_hash()" in why, why
+
+
+def test_gfx942_identities_package_under_their_own_arch():
+    """The adapter packages gfx942 as well as gfx950 (hipkernel:Gfx942ConvFwdAot).
+
+    An instance records no arch of its own: ``instance_id`` is the identity's
+    ``stable_hash()``, which pins it, so the round trip through the spec has to
+    recover gfx942 and the kernel symbol has to carry it. gfx950's symbols must
+    not move, which the rest of this module checks for gfx950 identities.
+    """
+    arch = "gfx942"
+    target = ArchTarget.from_gfx(arch)
+    jobs = kernel_sweep._direction_jobs("fwd", arch, "bf16", target, (2,), 64)
+    identities = [
+        job.identity
+        for job in jobs
+        if _unmerged(job.identity) and kernel_sweep._spec_is_valid(job, arch, "bf16")
+    ]
+    assert identities, "the gfx942 forward AOT sweep is empty"
+    for identity in identities[:8]:
+        spec, why = gfx950_conv_fwd_aot_spec_for_identity(identity)
+        assert spec is not None, (identity.label(), why)
+        # The spec spells the identity it came from, gfx942 included.
+        assert spec.identity() == identity
+        assert spec.kernel_symbol_prefix().startswith(f"hkp_conv_fwd_aot_{arch}_")
+        ok, why = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+        assert ok, why
+    # An arch outside AOT_ARCHES is still refused, with the arch in the reason.
+    spec, why = gfx950_conv_fwd_aot_spec_for_identity(
+        replace(identities[0], arch="gfx90a")
+    )
+    assert spec is None and "gfx90a" in why, why
 
 
 def test_packaged_ir_is_the_sweep_kernel_up_to_its_symbol(sweep_jobs):

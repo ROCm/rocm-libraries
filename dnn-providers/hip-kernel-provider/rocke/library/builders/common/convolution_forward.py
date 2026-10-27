@@ -87,6 +87,19 @@ from rocke.core.ir import KernelDef
 from rocke.core.lower_llvm import LLVM_FLAVORS
 
 _ARCH = "gfx950"
+#: The architectures the shape-generic AOT engines are packaged for, newest
+#: first. gfx950 ships as ``hipkernel:Gfx950ConvFwdAot`` and gfx942 as
+#: ``hipkernel:Gfx942ConvFwdAot``; both package the same rocKE sweeps through
+#: this one adapter, because the launch the native pack computes is the same.
+#: An instance carries no arch field of its own: ``instance_id`` is the
+#: identity's ``stable_hash()``, which already pins the arch, so
+#: :func:`_aot_identity` recovers it the same way it recovers the LLVM flavor
+#: and no descriptor had to grow a field. ``_ARCH`` stays the default of every
+#: ``arch`` keyword, so an existing gfx950 call site reads as it did.
+#:
+#: The exact-shape engine ``hipkernel:Gfx950ConvFwd`` is gfx950 only and keeps
+#: checking ``_ARCH`` exactly.
+AOT_ARCHES = ("gfx950", "gfx942")
 _INT32_MAX = (1 << 31) - 1
 _MAX_GRID_DIM_Z = 65535
 # rocKE's grid bounds for the direct kernels: every axis at most 65535.
@@ -1468,10 +1481,13 @@ class Gfx950ConvFwdAotSpec:
 
     def kernel_symbol_prefix(self) -> str:
         # rocKE appends the probe problem and tuning to this; the instance id
-        # alone already makes the symbol unique.
+        # alone already makes the symbol unique. The arch is the one
+        # instance_id pins, so a gfx950 instance keeps the symbol it shipped
+        # with and a gfx942 one cannot collide with it.
+        arch = self.identity().arch
         if self.is_direct:
-            return f"hkp_conv_fwd_dw_aot_gfx950_{self.instance_id[:24]}"
-        return f"hkp_conv_fwd_aot_gfx950_{self.instance_id[:24]}"
+            return f"hkp_conv_fwd_dw_aot_{arch}_{self.instance_id[:24]}"
+        return f"hkp_conv_fwd_aot_{arch}_{self.instance_id[:24]}"
 
     def kernel_name(self) -> str:
         if self.is_direct:
@@ -1628,10 +1644,10 @@ class Gfx950ConvFwdAotSpec:
         )
 
 
-def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
+def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec, arch: str = _ARCH) -> dict:
     """The ``KernelIdentity`` fields ``spec`` spells, all but ``llvm_flavor``."""
     values = dict(
-        arch=_ARCH,
+        arch=arch,
         dtype_a=spec.dtype,
         dtype_b=spec.dtype,
         dtype_d=spec.dtype,
@@ -1669,12 +1685,20 @@ def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
 
 @functools.lru_cache(maxsize=1 << 18)
 def _aot_identity(spec: Gfx950ConvFwdAotSpec) -> KernelIdentity:
-    values = _aot_identity_fields(spec)
-    for flavor in LLVM_FLAVORS:
-        identity = KernelIdentity(**values, llvm_flavor=flavor)
-        if identity.stable_hash() == spec.instance_id:
-            return identity
-    return KernelIdentity(**values, llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR)
+    # An instance records no arch: instance_id is the identity's stable_hash(),
+    # which pins both the arch and the LLVM flavor, so both are recovered by
+    # spelling each candidate and keeping the one that hashes to it. gfx950
+    # comes first, so a spec whose id matches nothing still falls back to the
+    # arch and flavor this adapter has always assumed.
+    for arch in AOT_ARCHES:
+        values = _aot_identity_fields(spec, arch)
+        for flavor in LLVM_FLAVORS:
+            identity = KernelIdentity(**values, llvm_flavor=flavor)
+            if identity.stable_hash() == spec.instance_id:
+                return identity
+    return KernelIdentity(
+        **_aot_identity_fields(spec, _ARCH), llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR
+    )
 
 
 @functools.lru_cache(maxsize=1 << 14)
@@ -1688,7 +1712,7 @@ def _aot_sweep_job(spec: Gfx950ConvFwdAotSpec):
         return job_for_identity(identity)
     except LookupError as exc:
         raise ValueError(
-            f"not an identity of rocKE's {_ARCH} forward AOT sweep: {exc}"
+            f"not an identity of rocKE's {identity.arch} forward AOT sweep: {exc}"
         ) from None
 
 
@@ -1860,8 +1884,8 @@ def supports_gfx950_conv_fwd_aot(
     the sweep builds (``job_for_identity`` / ``direct_job_for_identity``), whose
     ``stable_hash()`` is ``instance_id``.
     """
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
+    if arch not in AOT_ARCHES:
+        return False, f"this adapter packages {AOT_ARCHES}, got {arch!r}"
     if not isinstance(spec, Gfx950ConvFwdAotSpec):
         return False, "expected Gfx950ConvFwdAotSpec"
     if spec.dtype not in ("fp16", "bf16"):
@@ -1921,7 +1945,7 @@ def supports_gfx950_conv_fwd_aot(
         if type(value) is not int or not 0 < value <= _INT32_MAX:
             return False, f"{name} must be a positive signed 32-bit integer"
     if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {arch}"
     if spec.pipeline not in _AOT_PIPELINES:
         return False, (
             f"the packaged forward contract supports pipelines {_AOT_PIPELINES}, "
@@ -1975,9 +1999,9 @@ def gfx950_conv_fwd_aot_spec_for_identity(
 ) -> tuple[Gfx950ConvFwdAotSpec | None, str]:
     """``(instance, "")`` for a packageable rocKE identity, else ``(None, reason)``.
 
-    Packageable: a gfx950 forward identity in fp16 or bf16 of rocKE's sweeps,
-    with no feature the packaged launch does not model. Refused, each with its
-    reason:
+    Packageable: a forward identity of rocKE's sweeps in fp16 or bf16, for one
+    of :data:`AOT_ARCHES`, with no feature the packaged launch does not model.
+    Refused, each with its reason:
 
     * implicit GEMM with any identity field off its ``KernelIdentity`` default
       that the instance does not carry (``AOT_IMPLICIT_GEMM_CARRIED`` and
@@ -1990,8 +2014,8 @@ def gfx950_conv_fwd_aot_spec_for_identity(
     if not isinstance(identity, KernelIdentity):
         return None, "expected a KernelIdentity"
     kind = f"({identity.arch}, {identity.direction}, {identity.algorithm})"
-    if identity.arch != _ARCH:
-        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
+    if identity.arch not in AOT_ARCHES:
+        return None, f"not a {AOT_ARCHES} forward implicit-GEMM or direct identity {kind}"
     if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
         return None, "mixed operand dtypes are not packaged"
     if identity.direction == "direct_fwd_helper":
@@ -2037,8 +2061,8 @@ def gfx950_conv_fwd_aot_spec_for_identity(
             **values,
         )
     else:
-        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
+        return None, f"not a {AOT_ARCHES} forward implicit-GEMM or direct identity {kind}"
+    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=identity.arch)
     if not ok:
         return None, reason
     if spec.identity() != identity:
@@ -2341,8 +2365,8 @@ def supports_gfx950_conv_fwd_aot_problem(
     problem: Gfx950ConvFwdSpec, *, arch: str = _ARCH
 ) -> tuple[bool, str]:
     """The graph contract of hipkernel:Gfx950ConvFwdAot (the profile's predicate)."""
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
+    if arch not in AOT_ARCHES:
+        return False, f"this adapter packages {AOT_ARCHES}, got {arch!r}"
     if not isinstance(problem, Gfx950ConvFwdSpec):
         return False, "expected Gfx950ConvFwdSpec"
     error = _problem_error(problem, decline_grouped_pointwise=False)

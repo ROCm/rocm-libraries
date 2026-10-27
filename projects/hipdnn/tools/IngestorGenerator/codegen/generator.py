@@ -1299,7 +1299,10 @@ def _report(
         total += 1
         emitted.add(document["id"])
         reused["packs"] += document["id"] in known
-        if config.is_multi_pack:
+        # Only an engine whose packs narrow the graph_match has operation UMDs;
+        # a multi-pack engine that is one catalog sharded across KDPs has none,
+        # and mint_ids minted no id for it.
+        if config.has_operation_matchers:
             total += 1
             reused["operation_umds"] += ids[("operation_umd", index)] in known
         for entry in document["kernelDescriptors"]:
