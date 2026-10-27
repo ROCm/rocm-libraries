@@ -36,7 +36,7 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | Surface | What it is | Constructed with `b`? | Default source |
 |---|---|---|---|
 | `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor, global or LDS (sec 3) | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip); axes in the one convention (sec 3) |
-| `make_window(tensor, origin, bounds=None)` | positioned + bounded window | no | `bounds` = clip per axis (overrides the desc lengths); `None` = desc lengths |
+| `make_window(tensor, origin)` / `TensorWindow.with_origin(axis, origin)` | a tile's position on a tensor: one origin per tensor axis (int or i32 IR value; negative allowed) | no | no length of its own: the valid region is the tensor's `lengths`; `with_origin` moves one axis |
 | `check_gemm_shapes(a, b, c=None)` | build-time check that one GEMM's tensors agree on their extents (sec 3) | no (emits no IR) | reads A `(M, K)`, B `(N, K)`, C `(M, N)` positionally, batch axes first |
 | `make_tile_desc(shape=, thread_dist=, thread_tile=, ...)` | author a logical->register layout (quantity-major) | no | for MMA operands use `mma.a/b/c_desc` instead |
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
@@ -74,8 +74,8 @@ for tile_k_base in range(0, K_LEN, 16):
     acc = mma(b, a_frag, b_frag, acc)
 store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)   # drops OOB
 ```
-(The clip defaults to the `TensorDesc` `lengths`; for a full, tile-aligned matrix that is a
-no-op, byte-identical to no-clip. Pass `bounds=` to override the clip per axis.)
+(The clip is the `TensorDesc` `lengths`; for a full, tile-aligned matrix that is a no-op,
+byte-identical to no-clip. A narrower region is a narrower tensor description.)
 
 What you did **not** have to say (all MMA-driven): the concrete intrinsic (`op_id`), the wave
 size, the per-lane register counts, the lane->element mapping, the number of atoms, or the
@@ -86,7 +86,7 @@ accumulator width. See sec 8 for the full "you didn't have to say it" list.
 ## 3. `TensorDesc` -- ptr-free strided memory descriptor
 
 Built with `make_tensor_desc(lengths, strides, dtype)`; `ptr` binds later at the verb. `lengths`
-are the valid (compute) extent and double as the default clip bound; `strides` are the physical
+are the valid (compute) extent and the only clip a window has; `strides` are the physical
 layout (a stride-1 axis is the memory-contiguous one). The same description serves global memory
 and LDS: an element's index is `sum(position * stride)` in both (see "LDS buffers" below).
 
@@ -108,9 +108,8 @@ and nothing in the tiling layer reads what an axis means (there are no axis labe
   axis is the contiguous one.
 - **A rank-`r` tile covers the tensor's LAST `r` axes.** For a rank-`R` tensor, tile axis `i` is
   tensor axis `R - r + i`. Each leading axis is positioned by the window origin alone: tile extent 1,
-  address term `origin * stride`, not clipped (its origin is trusted to lie inside its length). A tile
-  whose rank exceeds the tensor's is refused, and so is a window `bounds` entry for a leading axis: with
-  extent 1 a tile is wholly inside or outside it, so there is nothing to clip.
+  address term `origin * stride` (its origin is trusted to lie below its length; a negative origin
+  masks the whole tile). A tile whose rank exceeds the tensor's is refused.
 - **Another axis order goes through `permute`** -- a strides view of the same bytes. Anything more
   general (merged or split axes, an implicit-GEMM convolution) goes through a transform graph.
 
@@ -418,24 +417,23 @@ a_frag = load_fragment(b, a_ptr, make_window(a_bf16, (m, k)), a_desc, lane)
 ## 5b. Clipping / bounds -- partial tiles at M/N/K edges (Part C, BUILT)
 
 rocWMMA limit #5: `load/store_matrix_sync` assume a full tile, so a matrix that is not a multiple
-of the tile forces tensor padding or a separate edge kernel. Here clipping is **auto-enabled by a
-window bound** -- no separate remainder path.
+of the tile forces tensor padding or a separate edge kernel. Here clipping follows from the
+**tensor's lengths** -- no separate remainder path.
 
-- The clip coordinate rides the **window** (per-tile), not the descriptor (shared). The upper clip
-  defaults to the `TensorDesc` `lengths`; pass `bounds=` to override per axis.
-- **Presence of a clip bound auto-enables it, default = ZERO-PAD:** an OOB load contributes 0, an
-  OOB store is dropped. `load_fragment(..., pad=0)` is the default; `pad != 0` (constant fill) is
+- The window carries only the position; the valid region is the `TensorDesc` `lengths` (the one home
+  of a length). A narrower region is a narrower tensor description; a negative origin (a convolution
+  halo) reads 0 and writes nothing before the tensor start.
+- **Default = ZERO-PAD:** an OOB load contributes 0, an OOB store is dropped. `load_fragment(..., pad=0)` is the default; `pad != 0` (constant fill) is
   reserved and raises today.
-- **Per-axis, compile-time fast path:** an axis whose bound is a compile-time multiple of the tile
+- **Per-axis, compile-time fast path:** an axis whose length is a compile-time multiple of the tile
   can never overhang, so NO compare is emitted -- byte-identical to no-clip. A K-only-ragged GEMM
   checks K only.
-- The predicate is on the **logical coordinate** (`origin + coord < bound`), per axis -- so it is
+- The predicate is on the **logical coordinate** (`origin + coord < length`), per axis -- so it is
   correct even for a tile that overhangs mid-tensor (not just the contiguous tail).
 
 ```python
 # ragged 255x255x255 over a 256^3 tile: the edge CTAs clip internally, zero-padded load / dropped store.
-a_win = make_window(a_td, (m, k))                 # clip defaults to a_td.lengths (the compute extent)
-a_win = make_window(a_td, (m, k), bounds=(M, K))  # or state the bound explicitly per axis
+a_win = make_window(a_td, (m, k))                 # the clip is a_td.lengths (the compute extent)
 a_frag = load_fragment(b, a_ptr, a_win, mma.a_desc, lane)     # OOB -> 0
 store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)  # OOB writes dropped
 ```
@@ -627,7 +625,7 @@ designed-in seam, not yet implemented.
 | wave tile size | == atom | any integer multiple of atom (M and/or N and/or K) | BUILT |
 | subtile order | `"MNK"` | any of 6 `MNK` permutations | BUILT |
 | target | -- | any gfx via `target=` / `arch=` (agnostic authorship) | BUILT (gfx90a proven; RDNA resolves) |
-| clipping / bounds | desc `lengths` (auto) | `make_window(tensor, origin, bounds)` -> zero-pad load / drop store | BUILT (bit-exact incl within a valid space) |
+| clipping | desc `lengths` (auto) | a narrower `make_tensor_desc` -> zero-pad load / drop store | BUILT (bit-exact incl within a valid space) |
 | clip fill | 0 (zero-pad) | `pad=` on load (`constant(value)`) | RESERVED (`pad!=0` raises) |
 | C transpose | off | `c_transpose=True` on `TileMma` (-> C^T, `c_desc` = (N,M)) | PLANNED (analyzed; Part D) |
 | interleaved layout | `style=` (default `CanonicalStyle`) | `TileMma(..., style=InterleavedStyle())` | BUILT (dense square atoms; see `tiling_interleaving_design.md`) |
@@ -717,7 +715,7 @@ and you can always see the one the MMA object produced.
 | operand desc | `mma.a/b/c_desc` | `make_tile_desc(...)` (author it) / `TileDesc(shape, layout)` (self-composed) |
 | operand dtype | from `a/b/c=` + desc | any typed `make_tensor_desc` + `Fragment` dtype |
 | data layout | -- | `make_tensor_desc(..., strides)` (+ `.permute([...])`) |
-| clipping | desc `lengths` (auto zero-pad) | `make_window(tensor, origin, bounds)` |
+| clipping | desc `lengths` (auto zero-pad) | a narrower `make_tensor_desc` |
 | target | -- | `target=`/`arch=` (agnostic) |
 | coherency | default | `coherency=` (reserved) |
 | memory space | global | LDS: `TensorDesc` + flat `smem_alloc(td.dtype, [td.element_span])` |

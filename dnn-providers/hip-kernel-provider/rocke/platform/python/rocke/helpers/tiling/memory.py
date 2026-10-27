@@ -197,15 +197,7 @@ def lds_store(
     c). The store width follows the fragment's contiguous run (``ds_write_b{32,64,128}``).
     """
     _fit_or_raise("cooperative LDS store", fragment.tile_desc, n_lanes, lds_tensor_desc)
-    window = make_window(
-        lds_tensor_desc, origin
-    )  # no bounds -- masking LDS is unrepresentable
-    if window.bounds is not None:  # invariant b: the LDS window can never carry a clip
-        raise ValueError(
-            "cooperative LDS access window carries a clip -- invariant (b) violated: masking LDS is "
-            "unrepresentable (the full-width store/read stays unmasked). Enforced here (survives -O) as "
-            "the sibling extent guard _fit_or_raise is."
-        )
+    window = make_window(lds_tensor_desc, origin)  # a window has no clip of its own
     store_fragment(b, ptr, window, fragment, thread, lds_swizzle=False)
 
 
@@ -224,11 +216,5 @@ def lds_read(
     caller applies any MMA-ready register reorder (that is a register transform, not a memory access).
     """
     _fit_or_raise("cooperative LDS read", tile_desc, n_lanes, lds_tensor_desc)
-    window = make_window(lds_tensor_desc, origin)  # no bounds
-    if window.bounds is not None:  # invariant b: the LDS window can never carry a clip
-        raise ValueError(
-            "cooperative LDS access window carries a clip -- invariant (b) violated: masking LDS is "
-            "unrepresentable (the full-width store/read stays unmasked). Enforced here (survives -O) as "
-            "the sibling extent guard _fit_or_raise is."
-        )
+    window = make_window(lds_tensor_desc, origin)  # a window has no clip of its own
     return load_fragment(b, ptr, window, tile_desc, thread)

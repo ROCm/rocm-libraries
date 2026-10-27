@@ -11,7 +11,7 @@ mapping, then composes them: cuBLASLt `cublasLtMatrixLayout_t`, cuTENSOR
 of this layer is that you can read it.
 
 This module is the MEMORY side of the surface -- it is pure data (no IRBuilder, no dtype
-casting). It says WHERE a tensor sits and WHICH sub-box a tile covers; the IR verbs in
+casting). It says WHERE a tensor sits and WHERE a tile is placed on it; the IR verbs in
 :mod:`rocke.helpers.tiling.emit` turn a window into actual loads/stores.
 
 - :class:`TensorDesc` -- the pure, ptr-free memory layout (lengths + strides + dtype). A length or a
@@ -20,8 +20,8 @@ casting). It says WHERE a tensor sits and WHICH sub-box a tile covers; the IR ve
   through ``KernelLauncher.from_artifact``) or a Value ``b.gpu_checked_value`` returned (checked on
   the GPU). The facts are read with
   ``rocke.core.facts.stated_facts_of``; nothing here restates them.
-- :class:`TensorWindow` -- a `TensorDesc` positioned at an `origin` (+ optional per-axis clip
-  `bounds`): the 'where' handed to load/store.
+- :class:`TensorWindow` -- a `TensorDesc` positioned at an `origin` (no length of its own: the
+  valid region is the tensor's): the 'where' handed to load/store.
 
 One axis convention, no axis labels. A tensor is written batch axes first and its reduction axis
 last, with the memory layout only in the strides. A rank-``r`` tile covers the tensor's LAST ``r``
@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import numbers
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rocke.core.facts import has_stated_facts, stated_facts_of
 from rocke.core.ir import GPU_CHECKED_VALUE_WRITER, I32, Value, marker_facts
@@ -48,6 +48,9 @@ from rocke.core.param_facts import LOWER_WORDS
 from rocke.core.value_sources import ASSUME_RANGE_OP, value_text
 
 from .tensor_transforms.walk import wave_uniform
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "TensorDesc",
@@ -62,8 +65,8 @@ __all__ = [
 class TensorDesc:
     """Pure, ptr-free memory-layout descriptor: per-axis `lengths` + `strides` + element `dtype`.
 
-    In a window the `lengths` are the valid extent (the default clip bound) and `strides` are the
-    physical layout (so a stride-1 axis is the memory-contiguous one); the ptr binds later, at
+    The `lengths` are the valid extent (a window has no lengths of its own) and `strides` are
+    the physical layout (so a stride-1 axis is the memory-contiguous one); the ptr binds later, at
     load/store. The same holds in global memory and in LDS: an element's index is
     ``sum(position * stride)`` in both, and an LDS buffer is a flat allocation sized by
     :attr:`element_span`. Axes are positional: batch axes first, the reduction axis last.
@@ -283,66 +286,86 @@ def _check_contiguous_axis(strides: tuple[Any, ...]) -> None:
     )
 
 
+# The kinds of value a window origin may be, named in the origin type error.
+_ORIGIN_KINDS = "an int or an i32 IR value"
+
+
+def _origin_type_text(origin: Any) -> str:
+    """How an origin of the wrong kind is named in its error: its IR type for an IR value."""
+    if isinstance(origin, Value):
+        return f"Value of type {origin.type.name}"
+    return type(origin).__name__
+
+
+def _checked_origin(where: str, origin: Any) -> int | Value:
+    """One axis's origin as the window keeps it: an int, or an i32 IR value. ``where`` names the
+    argument in the type error."""
+    if _is_compile_time_integer(origin):
+        return int(origin)
+    if isinstance(origin, Value) and origin.type == I32:
+        return origin
+    raise TypeError(
+        f"{where} is a {_origin_type_text(origin)} -- an origin is {_ORIGIN_KINDS}"
+    )
+
+
 @dataclass(frozen=True)
 class TensorWindow:
-    """A :class:`TensorDesc` positioned at an `origin`, with an OPTIONAL per-axis clip `bounds`
-    -- the 'where' handed to load/store.
+    """A :class:`TensorDesc` positioned at an `origin` -- the 'where' handed to load / store.
 
-    The upper clip defaults to the tensor's own `lengths` (its valid extent): an element whose
-    global position ``origin + coord`` reaches that length is clipped. `bounds` overrides the
-    clip per axis (a `None` entry falls back to the length). Build it with :func:`make_window`;
-    the ptr is passed to load/store, never carried here.
+    A window has one job: place a tile on a tensor. It holds no length (the valid region is the
+    tensor's ``lengths``, the one home of a length), no pointer (the verbs take it) and no memory
+    choice. Build it with :func:`make_window`; move it along one axis with :meth:`with_origin`.
 
-    The window has one origin per tensor axis. A rank-``r`` tile covers its last ``r`` axes (tile
-    axis ``i`` is tensor axis ``rank - r + i``); each leading axis sits at its origin, so its
-    address term is ``origin * stride``. A leading axis is not clipped: its origin is trusted to
-    lie inside its length, and load / store refuse a `bounds` entry for it.
+    The window has one origin per tensor axis: an int or an i32 IR value. A rank-``r`` tile covers its last ``r`` axes (tile axis ``i`` is
+    tensor axis ``rank - r + i``); each leading axis sits at its origin, so its address term is
+    ``origin * stride``. An origin may be negative: a convolution's halo is a window placed
+    before the tensor start, whose elements outside the tensor read 0 and are not written.
     """
 
     tensor: TensorDesc
-    origin: tuple[Any, ...]
-    bounds: tuple[Any, ...] | None = None
+    origin: tuple[int | Value, ...]
 
     def __post_init__(self) -> None:
-        # origin and bounds both index the tensor's axes, so both agree with its rank.
         rank = self.tensor.rank
         if len(self.origin) != rank:
             raise ValueError(
-                f"window origin rank {len(self.origin)} != tensor rank {rank}"
+                f"make_window got {len(self.origin)} origins for a rank-{rank} tensor -- give one "
+                "origin per tensor axis (a rank-t tile covers the last t axes; leading axes are "
+                "positioned by their origin)"
             )
-        if self.bounds is not None and len(self.bounds) != rank:
+        origin = tuple(
+            _checked_origin(f"make_window origin[{axis}]", value)
+            for axis, value in enumerate(self.origin)
+        )
+        object.__setattr__(self, "origin", origin)
+
+    def with_origin(self, axis: int, origin: int | Value) -> TensorWindow:
+        """The same window with tensor axis ``axis``'s origin replaced by ``origin``; every other
+        axis keeps its origin. Moves a window along one axis, e.g. the K step of a loop::
+
+            a_k = a_window.with_origin(1, k)      # A (M, K): the same M origin, K at k
+        """
+        rank = self.tensor.rank
+        if not (_is_compile_time_integer(axis) and 0 <= axis < rank):
             raise ValueError(
-                f"window bounds rank {len(self.bounds)} != tensor rank {rank}"
+                f"with_origin: axis {axis} does not exist on a rank-{rank} window"
             )
-        # A negative COMPILE-TIME origin places the tile before the buffer start, so an element at
-        # ``origin + coord`` can address memory ahead of the tensor -- and a tile-aligned negative
-        # origin (e.g. ``-tile_extent``) takes the clip's compare-free fast path, emitting that
-        # out-of-bounds address unmasked. Reject it here at the window boundary. Runtime (SSA) origins
-        # are trusted grid-aligned (the deferred mid-tile/sliding-window case) and are not checked.
-        for axis, origin in enumerate(self.origin):
-            if isinstance(origin, int) and origin < 0:
-                raise ValueError(
-                    f"negative window origin on axis {axis} (origin={origin}) -- a tile placed before "
-                    "the buffer start generates out-of-bounds addresses; window origins must be "
-                    "nonnegative"
-                )
+        moved = _checked_origin(f"with_origin origin for axis {axis}", origin)
+        return TensorWindow(
+            self.tensor, self.origin[:axis] + (moved,) + self.origin[axis + 1 :]
+        )
 
 
-def make_window(
-    tensor: TensorDesc,
-    origin: tuple[Any, ...],
-    bounds: tuple[Any, ...] | None = None,
-) -> TensorWindow:
-    """Free factory (ck_tile's ``make_tile_window`` shape): a `tensor` desc positioned at
-    `origin`, one origin per tensor axis (a rank-t tile covers the last t axes; leading axes are
-    positioned by their origin). The upper clip defaults to `tensor.lengths`; pass `bounds` to
-    override it per axis (a `None` entry keeps the length). Where an element's global position
-    reaches its clip, load zero-pads and store drops it; tile-aligned bounds are skipped at build
-    time (byte-identical).
+def make_window(tensor: TensorDesc, origin: Sequence[Any]) -> TensorWindow:
+    """Free factory (ck_tile's ``make_tile_window`` shape): `tensor` positioned at `origin`, one
+    origin per tensor axis -- an int or an i32 IR value, negative allowed. A rank-t tile covers the last t axes; each leading axis is positioned by its origin.
+
+    The valid region is the tensor's own lengths: where an element's position ``origin + coord``
+    falls outside ``[0, length)`` on an axis, load reads 0 and store drops it. To narrow the
+    region, describe a narrower tensor.
     """
-    return TensorWindow(
-        tensor, tuple(origin), tuple(bounds) if bounds is not None else None
-    )
+    return TensorWindow(tensor, tuple(origin))
 
 
 # The reading every check_gemm_shapes extent message ends with: how GEMM tensors are read, and how to

@@ -94,33 +94,46 @@ def test_a_tile_of_higher_rank_than_its_window_is_refused(verb: str) -> None:
     )
 
 
-@pytest.mark.parametrize("verb", ["load_fragment", "store_fragment"])
-def test_a_bound_on_a_leading_axis_is_refused(verb: str) -> None:
-    # The batch axis has tile extent 1: a tile is wholly inside or outside a bound on it, so the clip
-    # has nothing to mask there. A bound is refused rather than silently ignored.
-    b = IRBuilder("leading_bound")
-    ptr = b.param("P", PtrType(F16, "global"))
-    tid = b.thread_id_x()
+def test_the_tensor_lengths_are_the_only_clip() -> None:
+    # A tile-multiple length needs no compare; a narrower region is a narrower tensor, whose ragged
+    # tile axis is masked.
     td = make_tensor_desc((3, 32, 64), (32 * 64, 64, 1), F16)
-    window = make_window(td, (2, 0, 0), bounds=(2, None, None))
-    with pytest.raises(ValueError, match="window bounds axis 0, a leading axis"):
-        if verb == "load_fragment":
-            load_fragment(b, ptr, window, _TILE, tid)
-        else:
-            store_fragment(b, ptr, window, make_fragment(_TILE, F16), tid)
-
-
-def test_bounds_on_the_tile_axes_are_still_honoured() -> None:
-    # Only leading-axis entries are refused: a ragged bound on a tile axis still masks.
-    td = make_tensor_desc((3, 32, 64), (32 * 64, 64, 1), F16)
-    kernel = _copy_kernel(td, td, lambda b: [(1, 0, 0)], name="tile_axis_bound")
+    kernel = _copy_kernel(td, td, lambda b: [(1, 0, 0)], name="tile_axis_length")
     assert "icmp" not in lower_kernel_to_llvm(kernel, arch="gfx90a")
-    b = IRBuilder("tile_axis_bound_ragged")
+    narrow = make_tensor_desc((3, 30, 64), (32 * 64, 64, 1), F16)
+    b = IRBuilder("tile_axis_length_ragged")
     ptr = b.param("P", PtrType(F16, "global"))
-    window = make_window(td, (1, 0, 0), bounds=(None, 30, None))
-    load_fragment(b, ptr, window, _TILE, b.thread_id_x())
+    load_fragment(b, ptr, make_window(narrow, (1, 0, 0)), _TILE, b.thread_id_x())
     b.ret()
     assert "icmp slt" in lower_kernel_to_llvm(b.kernel, arch="gfx90a")
+
+
+def _negative_origin_kernel(origin):
+    b = IRBuilder("negative_origin")
+    b.kernel.attrs["max_workgroup_size"] = _WAVE
+    ptr = b.param("P", PtrType(F16, "global"))
+    td = make_tensor_desc((3, 32, 64), (32 * 64, 64, 1), F16)
+    load_fragment(b, ptr, make_window(td, origin), _TILE, b.thread_id_x())
+    b.ret()
+    return b.kernel
+
+
+def test_a_negative_tile_axis_origin_masks_the_elements_before_the_tensor() -> None:
+    # A tile-aligned negative origin is inside the far end, so only the lower compare is needed; it
+    # makes every load scalar and masked, never an unmasked wide read before the tensor start.
+    kernel = _negative_origin_kernel((1, -16, 0))
+    llvm = lower_kernel_to_llvm(kernel, arch="gfx90a")
+    assert "icmp sge" in llvm and "icmp slt" not in llvm
+    assert _load_forms(kernel) == {"half": _TILE.register_count}
+
+
+def test_a_negative_leading_axis_origin_masks_the_whole_tile() -> None:
+    # A leading axis is read at its origin alone: a negative one puts every element before the
+    # tensor, so every load is masked by the compare of that origin.
+    kernel = _negative_origin_kernel((-1, 0, 0))
+    llvm = lower_kernel_to_llvm(kernel, arch="gfx90a")
+    assert "icmp sge i32 -1, 0" in llvm
+    assert _load_forms(kernel) == {"half": _TILE.register_count}
 
 
 # ---- the address fold order --------------------------------------------------------------------------
@@ -349,3 +362,44 @@ def test_rank_3_load_then_store_is_bit_exact(batch_origin: str) -> None:
         whole[~written] == _DST_INIT
     ), "a write landed outside the output tensor"
     assert not np.any(dst == _SRC_GUARD), "a read came from outside the input tensor"
+
+
+@_needs_gfx90a
+def test_a_negative_origin_reads_zeros_and_writes_nothing_before_the_tensor() -> None:
+    # A halo read: the (16, 32) tile of each batch is loaded at row -8 and stored at row 0, so DST
+    # rows 0..7 hold the 0 read before the tensor and rows 8..15 hold SRC rows 0..7. The same
+    # fragment stored at row -16 (wholly before the tensor) and a tile at batch -1 (loaded and
+    # stored) touch nothing. Every guard stays intact and no read reaches the SRC guard.
+    g_len, m_len, n_len = 2, 32, 64
+    td = make_tensor_desc((g_len, m_len, n_len), (m_len * n_len, n_len, 1), F16)
+    b = IRBuilder("negative_origin_copy")
+    b.kernel.attrs["max_workgroup_size"] = _WAVE
+    src = b.param("SRC", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    dst = b.param("DST", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    tid = b.thread_id_x()
+    n0 = b.mul(b.block_id_x(), b.const_i32(_TILE.shape[1]))
+    for g in range(g_len):
+        window = make_window(td, (g, -8, n0))
+        fragment = load_fragment(b, src, window, _TILE, tid)
+        store_fragment(b, dst, window.with_origin(1, 0), fragment, tid)
+        store_fragment(b, dst, window.with_origin(1, -16), fragment, tid)
+    outside = make_window(td, (-1, 0, n0))
+    store_fragment(b, dst, outside, load_fragment(b, src, outside, _TILE, tid), tid)
+    b.ret()
+
+    rng = np.random.default_rng(1)
+    source = rng.integers(1, 1000, size=(g_len, m_len, n_len)).astype(np.float16)
+    whole = _run_guarded(
+        b.kernel, source, td.element_span, (n_len // _TILE.shape[1], 1, 1)
+    )
+    out = whole[_GUARD : _GUARD + td.element_span].reshape(g_len, m_len, n_len)
+    for g in range(g_len):
+        np.testing.assert_array_equal(out[g, :8], 0, err_msg=f"batch {g}: halo rows")
+        np.testing.assert_array_equal(out[g, 8:16], source[g, :8], err_msg=f"batch {g}")
+        assert np.all(
+            out[g, 16:] == _DST_INIT
+        ), f"batch {g}: a write landed past the tile"
+    assert np.all(
+        whole[:_GUARD] == _DST_INIT
+    ), "a write landed before the output tensor"
+    assert np.all(whole[_GUARD + td.element_span :] == _DST_INIT)

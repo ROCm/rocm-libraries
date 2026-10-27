@@ -208,24 +208,6 @@ def _check_tile_rank(verb: str, window: TensorWindow, tile_desc: TileDesc) -> No
         )
 
 
-def _check_leading_bounds(verb: str, window: TensorWindow, tile_desc: TileDesc) -> None:
-    """Fail fast on a clip bound for a leading axis. A leading axis has tile extent 1, so a tile is
-    wholly inside or wholly outside any bound on it; the clip only masks a tile that partly overhangs,
-    and keeping a tile off positions wholly outside is the caller's job on every axis. A bound there
-    would mask nothing, so it is refused rather than ignored."""
-    if window.bounds is None:
-        return
-    lead = _leading_rank(window, len(tile_desc.shape))
-    clipped = [axis for axis in range(lead) if window.bounds[axis] is not None]
-    if clipped:
-        raise ValueError(
-            f"{verb}: the window bounds axis {clipped[0]}, a leading axis of this rank-"
-            f"{len(tile_desc.shape)} tile -- a leading axis is placed by its origin and is never "
-            f"clipped; pass None for it and keep the origin inside the tensor (guard the index "
-            f"before the access if it can fall outside)"
-        )
-
-
 def _positions(b: Any, window: TensorWindow, coords: tuple[Any, ...]) -> list[Any]:
     """Per-tile-axis GLOBAL position = origin + coord (the basis of both the address and the clip).
     Tile axis ``i`` lies on tensor axis ``_leading_rank + i``, so it takes that axis's origin.
@@ -383,34 +365,45 @@ def _origin_misaligned(origin: Any, extent: int) -> bool:
     return isinstance(origin, int) and origin % extent != 0
 
 
+def _origin_before_start(origin: Any) -> bool:
+    """True when `origin` is a COMPILE-TIME int below 0 (a convolution halo): the tile then starts
+    before the tensor, so its elements on that axis need the lower compare ``position >= 0``. A
+    runtime origin is trusted to be at least 0, as it is trusted grid-aligned."""
+    return isinstance(origin, int) and origin < 0
+
+
 def _clip_mask(
     b: Any, window: TensorWindow, positions: list[Any], tile_shape: tuple[int, ...]
 ) -> Any:
     """In-bounds predicate (i1) for an element at the tile axes' `positions`, or `None` when no axis
-    needs a compare. The per-axis upper bound defaults to ``window.tensor.lengths`` (a runtime length
-    is its Value) and is overridden by ``window.bounds`` (a `None` entry keeps the
-    length). Predicate = AND over checked axes of
-    ``position < bound``. A tile-aligned compile-time bound AT a grid-aligned origin can NEVER overhang,
-    so it is SKIPPED at build time -- an aligned kernel emits no compare and stays byte-identical to
-    no-clip; a compile-time MID-TILE origin is NOT skipped (it could straddle the boundary). Only the
-    tile axes are checked: a leading axis (tile extent 1, positioned by its origin) is not clipped.
+    needs a compare. The valid region is the tensor's own ``lengths`` (a runtime length is its
+    Value). Predicate = AND over checked tile axes of ``position < length``, then AND
+    ``position >= 0`` on every axis whose origin is a negative int (a leading axis's position is its
+    origin, so a negative one masks the whole tile). A tile-aligned compile-time length AT a
+    grid-aligned origin can NEVER overhang, so it is SKIPPED at build time -- an aligned kernel emits
+    no compare and stays byte-identical to no-clip; a compile-time MID-TILE origin is NOT skipped (it
+    could straddle the boundary). The upper end of a leading axis (tile extent 1, positioned by its
+    origin) is not checked: its origin is trusted to lie below its length.
     """
     lead = _leading_rank(window, len(positions))
     mask: Any = None
     for tile_axis, position in enumerate(positions):
         axis = lead + tile_axis
-        bound = window.bounds[axis] if window.bounds is not None else None
-        if bound is None:
-            bound = window.tensor.lengths[axis]
+        length = window.tensor.lengths[axis]
         extent = tile_shape[tile_axis]
         if (
-            isinstance(bound, int)
-            and bound % extent == 0
+            isinstance(length, int)
+            and length % extent == 0
             and not _origin_misaligned(window.origin[axis], extent)
         ):
             continue
-        in_axis = b.cmp_lt(position, _as_value(b, bound))
+        in_axis = b.cmp_lt(position, _as_value(b, length))
         mask = in_axis if mask is None else b.land(mask, in_axis)
+    for axis, origin in enumerate(window.origin):
+        if _origin_before_start(origin):
+            position = b.const_i32(origin) if axis < lead else positions[axis - lead]
+            in_axis = b.cmp_ge(position, b.const_i32(0))
+            mask = in_axis if mask is None else b.land(mask, in_axis)
     return mask
 
 
@@ -441,11 +434,11 @@ def _contiguous_run(
     `smem_load_vN`. Width is the largest supported vector size for the dtype (8/4/2) dividing the run.
 
     A wide GLOBAL load is UNMASKED, so it is emitted only for a tile that is FULLY IN BOUNDS on the
-    stride-1 run axis: the effective clip there (`window.bounds[axis]` or the tensor length) must be a
-    COMPILE-TIME multiple of the tile extent, so no tile overhangs the tensor. A ragged/odd tensor, or
-    a runtime clip that can't be proven aligned, falls to the SCALAR path (which masks against the
-    length) -- never an out-of-bounds wide read (the page-fault risk Principle 4 kills). LDS is EXEMPT:
-    the verbs check that the flat buffer holds the descriptor's whole span (:func:`_check_lds_buffer`)
+    stride-1 run axis: the tensor length there must be a COMPILE-TIME multiple of the tile extent, so
+    no tile overhangs the tensor. A ragged/odd tensor, a runtime length that can't be proven aligned,
+    or a compile-time origin before the tensor start falls to the SCALAR path (which masks against
+    the region) -- never an out-of-bounds wide read (the page-fault risk Principle 4 kills). LDS is
+    EXEMPT: the verbs check that the flat buffer holds the descriptor's whole span (:func:`_check_lds_buffer`)
     and LDS accesses are unclipped, so the gate applies to global only. Because both spaces address
     an element by ``sum(position * stride)``, consecutive registers of a run on a stride-1 axis are
     consecutive elements in LDS exactly as in global memory.
@@ -475,26 +468,23 @@ def _contiguous_run(
     if not is_lds:
         # Fully-in-bounds gate (global only): a wide load is UNMASKED, so it is safe only if the tile
         # overhangs NO axis it spans -- not just the stride-1 run axis. A wide K-run at a fixed but
-        # OOB M row (odd M, aligned K) is just as out of bounds as an overhanging run. So EVERY axis's
-        # effective clip must be a compile-time multiple of the tile extent on that axis; otherwise
-        # some tile overhangs and the unmasked read faults -> scalarize (the masked path is safe).
-        # Every axis's effective clip must be a compile-time tile multiple AND the tile origin must be on
-        # the tile grid: a COMPILE-TIME mid-tile origin is caught (it could straddle the boundary and
-        # overhang); a runtime (SSA) origin is TRUSTED grid-aligned (every caller: block_id*tile). This
-        # is a PARTIAL guard -- an SSA mid-tile origin (attention) is not caught; that is DEFERRED with
-        # attention support (see _origin_misaligned). Only the tile axes are checked: a leading axis
-        # is positioned by its origin and not clipped, exactly as in _clip_mask.
+        # OOB M row (odd M, aligned K) is just as out of bounds as an overhanging run. So EVERY tile
+        # axis's length must be a compile-time multiple of the tile extent on that axis AND the tile
+        # origin must be on the tile grid; otherwise some tile overhangs and the unmasked read faults
+        # -> scalarize (the masked path is safe). A COMPILE-TIME mid-tile origin is caught (it could
+        # straddle the boundary and overhang); a runtime (SSA) origin is TRUSTED grid-aligned (every
+        # caller: block_id*tile). This is a PARTIAL guard -- an SSA mid-tile origin (attention) is not
+        # caught; that is DEFERRED with attention support (see _origin_misaligned). A compile-time
+        # origin before the tensor start, on any axis, needs the masked lower compare of _clip_mask.
         for tile_axis, extent in enumerate(tile_desc.shape):
             ax = lead + tile_axis
-            clip = (
-                window.bounds[ax]
-                if window.bounds is not None and window.bounds[ax] is not None
-                else window.tensor.lengths[ax]
-            )
-            if not (isinstance(clip, int) and clip % extent == 0):
+            length = window.tensor.lengths[ax]
+            if not (isinstance(length, int) and length % extent == 0):
                 return 1
             if _origin_misaligned(window.origin[ax], extent):
                 return 1
+        if any(_origin_before_start(origin) for origin in window.origin):
+            return 1
     length = layout.bucket_length(majors[-1], minors[-1])
     max_vw = (
         16 // _BYTE_WIDTH[dtype.name]
@@ -690,10 +680,10 @@ def load_fragment(
     TensorDesc (strides) + the tile_desc. `ptr` is the SOURCE the fragment is loaded from: a global
     ``ptr<...>`` (VMEM) OR an LDS ``smem<...>`` buffer from ``smem_alloc`` -- the load op is chosen
     from the source (:func:`_is_lds`), so the same verb stages global<->register and LDS<->register.
-    The fragment's dtype IS ``window.tensor.dtype`` (nothing is baked in). Where the window clips (an
-    element past its bound), OOB elements are filled with `pad` (`masked_global_load`); otherwise the
-    plain `global_load` fast path (byte-identical to no-clip). In both spaces an element's index is
-    ``sum(position * stride)`` over the window's descriptor. An LDS buffer is flat
+    The fragment's dtype IS ``window.tensor.dtype`` (nothing is baked in). An element outside the
+    tensor's ``[0, length)`` on an axis is filled with `pad` (`masked_global_load`); a tile proven
+    inside takes the plain `global_load` fast path (byte-identical to no-clip). In both spaces an
+    element's index is ``sum(position * stride)`` over the window's descriptor. An LDS buffer is flat
     (``b.smem_alloc(td.dtype, [lds_element_span(td, lds_swizzle)])``) and the descriptor is its
     layout: the buffer must be rank 1, hold the tensor's dtype and hold that span (refused
     otherwise); LDS loads are unclipped.
@@ -703,7 +693,6 @@ def load_fragment(
     leading axis is read at its origin.
     """
     _check_tile_rank("load_fragment", window, tile_desc)
-    _check_leading_bounds("load_fragment", window, tile_desc)
     dtype = window.tensor.dtype
     align = _align_of(dtype)
     lds = _is_lds(ptr)
@@ -770,15 +759,14 @@ def store_fragment(
 
     M1 keeps the explicit per-element scatter + cast; the general MMA->memory relayout is
     reserved -- this is not a transparent memcpy. `ptr` is the DEST: a global ``ptr<...>`` OR an LDS
-    ``smem<...>`` buffer -- the store op is chosen from the dest (:func:`_is_lds`). If the window has
-    a clip, OOB global writes are **dropped** (guarded by ``scf_if``); C2's branchless buffer
+    ``smem<...>`` buffer -- the store op is chosen from the dest (:func:`_is_lds`). A global write
+    outside the tensor's ``[0, length)`` on an axis is **dropped** (guarded by ``scf_if``); C2's branchless buffer
     ``_OOB_SENTINEL`` drop is the reserved efficient path. LDS stores address the flat buffer through
     the window's strides, exactly like global stores, after the same buffer checks as
     :func:`load_fragment` (unclipped). A rank-t fragment covers the window's last t axes, as in
     :func:`load_fragment`.
     """
     _check_tile_rank("store_fragment", window, fragment.tile_desc)
-    _check_leading_bounds("store_fragment", window, fragment.tile_desc)
     out_dtype = window.tensor.dtype
     align = _align_of(out_dtype)
     lds = _is_lds(ptr)

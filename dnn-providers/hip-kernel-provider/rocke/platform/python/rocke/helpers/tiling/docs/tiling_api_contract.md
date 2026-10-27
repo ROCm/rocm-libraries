@@ -157,10 +157,9 @@ Clipping is BUILT and bit-exact on the masked path (`tiling_api_surface.md` 5b).
   clipped-but-unmasked read would otherwise index another workgroup's LDS); zeros flow through LDS and
   contribute nothing to the MAC. "Coalescing verdict provisional" is a global-load-only caveat; LDS
   store/read are invariant under predication (`lds_banks.md`).
-- **Trigger:** the wide-load path predicates on **effective-clip-vs-tile-alignment**
-  (`(bounds[axis] or lengths[axis]) % tile_extent`), NOT on `bounds is not None`. Refuse
-  "odd tensor + vectorized + no predicate." The tile-aligned-bound mask-skip also requires a
-  tile-aligned ORIGIN.
+- **Trigger:** the wide-load path predicates on **length-vs-tile-alignment**
+  (`lengths[axis] % tile_extent`); a window has no clip of its own. Refuse "odd tensor + vectorized +
+  no predicate." The tile-aligned-length mask-skip also requires a tile-aligned, non-negative ORIGIN.
 - **Wide load is for fully-in-bounds tiles only.** A tile whose free/stride-1 run overhangs the tensor
   **scalarizes** (an unmasked wide load would read OOB). For the interleaved recipe the free dim IS the
   stride-1 axis, so an M/N-ragged edge scalarizes. "No OOB global read" is an emit-level guard, not only a
