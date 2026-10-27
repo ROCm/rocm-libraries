@@ -1007,3 +1007,51 @@ TEST(internal_level3_bsrsm, copy_scale_single_block_grid)
     ASSERT_NO_FATAL_FAILURE(copy_scale_on_grid(1, got));
     expect_exact_copy(got, 1);
 }
+
+// ---------------------------------------------------------------------------
+// The leading dimension checks of rocsparse_Xbsrsm_solve.
+// ---------------------------------------------------------------------------
+
+// mb * block_dim = 2^31 does not fit in rocsparse_int, so with trans_X = none
+// every rocsparse_int ldb is too small. The argument checks read only the handle,
+// descr and alpha, so the matrix and vector pointers are placeholders that are
+// never dereferenced. temp_buffer is null: if the ldb check let ldb through, the
+// call would stop at the temp_buffer check instead of running the solve.
+TEST(internal_level3_bsrsm, solve_rejects_ldb_below_mb_times_block_dim_past_int32)
+{
+    constexpr rocsparse_int mb        = 65536;
+    constexpr rocsparse_int block_dim = 32768;
+    static_assert(static_cast<int64_t>(mb) * block_dim > std::numeric_limits<rocsparse_int>::max(),
+                  "mb * block_dim must not fit in rocsparse_int");
+
+    bsrsm_public_objects o;
+    ASSERT_EQ(rocsparse_create_handle(&o.handle), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_mat_descr(&o.descr), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_mat_info(&o.info), rocsparse_status_success);
+
+    const test_T  alpha = static_cast<test_T>(1);
+    test_T        placeholder_val[1]{};
+    rocsparse_int placeholder_ind[1]{};
+
+    EXPECT_EQ(rocsparse_sbsrsm_solve(o.handle,
+                                     rocsparse_direction_row,
+                                     rocsparse_operation_none,
+                                     rocsparse_operation_none,
+                                     mb,
+                                     1,
+                                     1,
+                                     &alpha,
+                                     o.descr,
+                                     placeholder_val,
+                                     placeholder_ind,
+                                     placeholder_ind,
+                                     block_dim,
+                                     o.info,
+                                     placeholder_val,
+                                     1,
+                                     placeholder_val,
+                                     1,
+                                     rocsparse_solve_policy_auto,
+                                     nullptr),
+              rocsparse_status_invalid_size);
+}
