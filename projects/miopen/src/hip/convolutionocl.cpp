@@ -121,16 +121,31 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     /// example, to avoid applicability checks for MLIR solvers, since these may involve running the
     /// MIIR compiler, which is very slow.
     ///
+    /// The workspace size recorded in find-db is not trusted: shipped find-dbs have been found
+    /// with wrong values, and the record may come from another library version. The solver's own
+    /// requirement (the value returned by GetWorkspaceSize/GetSolutionWorkspaceSize) is used
+    /// instead, both for the IsEnoughWorkspace() check and for the value returned to the caller.
+    ///
     /// The loop below does all the above at once.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
     auto n_copied = 0;
-    for(const auto& s : interim)
+    for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
-        if(!solver_id.GetSolver().IsApplicable(ctx, problem))
+        const auto& solver   = solver_id.GetSolver();
+        if(!solver.IsApplicable(ctx, problem))
             continue;
+        const auto workspace_size =
+            solver.MayNeedWorkspace() ? solver.GetWorkspaceSize(ctx, problem) : 0;
+        if(workspace_size != s.workspace_size)
+        {
+            MIOPEN_LOG_I2(solver_id.ToString()
+                          << ": find-db workspace " << s.workspace_size << " differs from required "
+                          << workspace_size << ", using the latter");
+            s.workspace_size = workspace_size;
+        }
         if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
             continue;
         out.push_back(s);
