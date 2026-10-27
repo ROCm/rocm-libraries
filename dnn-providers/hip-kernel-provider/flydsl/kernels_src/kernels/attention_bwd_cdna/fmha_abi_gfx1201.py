@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025 FlyDSL Project Contributors
-# Vendored from AOTriton (https://github.com/ROCm/aotriton, MIT; this file's Apache-2.0 header is
-# FlyDSL Project Contributors'): `modules/flash/flyc/fmha_abi_gfx1201.py`, as the FlyDSL SDPA backward
-# sweep carries it (the AOTriton revision is not recorded; `../attention_rdna4/README.md` pins the
-# one that copy follows). Differs from `../attention_rdna4/fmha_abi_gfx1201.py` in the package imports
+#
+# Vendored from: https://github.com/ROCm/aotriton
+#   commit:   b5e8cfb909e554c62081f56055b11d6ba3fd6bfa
+#   path:     modules/flash/flyc/fmha_abi_gfx1201.py
+#
+# Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_abi_gfx1201.py` in the package imports
 # (`attention_bwd_cdna`) and in `prep_tensors`, which has no `v_heads_own` option (V's heads equal K's).
 
 
