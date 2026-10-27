@@ -437,8 +437,45 @@ consteval f8f6f4_args make_f8f6f4_args()
 }
 constexpr auto k_f8f6f4_args = make_f8f6f4_args();
 
+/* gfx950 f8f6f4 MFMA -> f32 at 16x16x128 and at 32x32x64 for every format
+ * pair with a 6-bit or 4-bit operand (Python _gfx950_f8f6f4_mfma): (A, B, C,
+ * format A, format B, scale selector A, scale A, scale selector B, scale B),
+ * the format codes the pair's and every scale argument 0, which makes the
+ * instruction the unscaled f8f6f4 MFMA. A and B each take the operand form of
+ * their own format in <8 x i32>. Both declaration keys are the hand-written
+ * nine-argument declarations the 16x16x128 builder ops (the fp8 MFMA, the MX
+ * op and the unscaled all-format op) and the scaled 32x32x64 MFMA already
+ * use. */
+constexpr auto k_gfx950_f8f6f4_16x16_ids
+    = rocke_make_narrow_f8f6f4_op_ids("mfma_f32_16x16x128_f8f6f4");
+constexpr auto k_gfx950_f8f6f4_32x32_ids
+    = rocke_make_narrow_f8f6f4_op_ids("mfma_f32_32x32x64_f8f6f4");
+struct gfx950_f8f6f4_args
+{
+    rocke_matrix_arg_t args[k_f8f6f4_count][9];
+};
+consteval gfx950_f8f6f4_args make_gfx950_f8f6f4_args()
+{
+    gfx950_f8f6f4_args result{};
+    for(int i = 0; i < k_f8f6f4_count; ++i)
+    {
+        const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
+        result.args[i][0] = {ROCKE_MATRIX_ARG_A, NULL, 0, false};
+        result.args[i][1] = {ROCKE_MATRIX_ARG_B, NULL, 0, false};
+        result.args[i][2] = {ROCKE_MATRIX_ARG_C, NULL, 0, false};
+        result.args[i][3] = {ROCKE_MATRIX_ARG_IMM, "i32", pair.a, true};
+        result.args[i][4] = {ROCKE_MATRIX_ARG_IMM, "i32", pair.b, true};
+        result.args[i][5] = {ROCKE_MATRIX_ARG_IMM, "i32", 0, true};
+        result.args[i][6] = {ROCKE_MATRIX_ARG_IMM, "i32", 0, false};
+        result.args[i][7] = {ROCKE_MATRIX_ARG_IMM, "i32", 0, true};
+        result.args[i][8] = {ROCKE_MATRIX_ARG_IMM, "i32", 0, false};
+    }
+    return result;
+}
+constexpr auto k_gfx950_f8f6f4_args = make_gfx950_f8f6f4_args();
+
 constexpr int k_listed_count = (int)(sizeof(k_listed_calls) / sizeof(k_listed_calls[0]));
-constexpr int k_call_count = k_listed_count + k_f8f6f4_count + 1;
+constexpr int k_call_count = k_listed_count + k_f8f6f4_count + 1 + 2 * k_f8f6f4_count;
 struct matrix_call_table
 {
     rocke_matrix_call_entry_t entries[k_call_count];
@@ -472,6 +509,27 @@ consteval matrix_call_table make_matrix_call_table()
             as_is(reg("f32", 16)),
             as_is(reg("f32", 16)),
             NULL}};
+    for(int shape = 0; shape < 2; ++shape)
+    {
+        const bool m16 = shape == 0;
+        const rocke_matrix_register_t acc = reg("f32", m16 ? 4 : 16);
+        for(int i = 0; i < k_f8f6f4_count; ++i)
+        {
+            const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
+            result.entries[k_listed_count + k_f8f6f4_count + 1 + shape * k_f8f6f4_count + i]
+                = {m16 ? k_gfx950_f8f6f4_16x16_ids.ids[i] : k_gfx950_f8f6f4_32x32_ids.ids[i],
+                   {m16 ? "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+                        : "llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
+                    k_gfx950_f8f6f4_args.args[i],
+                    9,
+                    f8f6f4_operand_form(pair.a, reg("i32", 8)),
+                    f8f6f4_operand_form(pair.b, reg("i32", 8)),
+                    as_is(acc),
+                    as_is(acc),
+                    m16 ? "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+                        : "mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32"}};
+        }
+    }
     return result;
 }
 /* op_id -> call, for every MMA instruction lowered from data (Python
