@@ -409,6 +409,21 @@ class StreamK(TileProcessingStrategy):
                 return kernel[key]
         return kernel["DepthU"]
 
+    @staticmethod
+    def _swizzleKScale(kernel, tc):
+        """Elements per K step in a pre-swizzled (SwizzleTensorA/B) operand.
+
+        The swizzled layout interleaves MI_M (A) / MI_N (B) rows per K block, so
+        a K offset of n elements is n*MI elements into the buffer; GSU's
+        computeLoadSrd applies the same scale.
+        """
+        problemType = kernel["ProblemType"]
+        if tc == "A" and problemType.get("SwizzleTensorA", False):
+            return kernel["MatrixInstM"]
+        if tc == "B" and problemType.get("SwizzleTensorB", False):
+            return kernel["MatrixInstN"]
+        return 1
+
     def shiftSrd(self, writer, srdIdx) -> Module:
       module = Module("shiftSrd")
       if writer.states.version[:2] == (12, 5):
@@ -877,7 +892,7 @@ class StreamK(TileProcessingStrategy):
 
         tileStart = sTmp + 2
         tc = tP["tensorChar"]
-        depthU = self._depthUForTc(kernel, tc)
+        depthU = self._depthUForTc(kernel, tc) * self._swizzleKScale(kernel, tc)
         # StreamK partial tile - offset to tile start index
         module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU, comment="StreamK tile start offset"))
         strideL = self._summationStride(writer, kernel, tc)
@@ -959,7 +974,7 @@ class StreamK(TileProcessingStrategy):
         # offset; the global-read address is just Address{tc} (no StreamKLocalStart
         # SGPR to read).
 
-        depthU = self._depthUForTc(kernel, tc)
+        depthU = self._depthUForTc(kernel, tc) * self._swizzleKScale(kernel, tc)
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
