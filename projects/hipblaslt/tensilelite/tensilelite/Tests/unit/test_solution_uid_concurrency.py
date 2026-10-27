@@ -293,6 +293,34 @@ def test_rewrite_solution_uid_preserves_yaml_item_and_comment(tmp_path, monkeypa
     )
 
 
+def test_rewrite_solution_uid_strips_quotes_and_preserves_eof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quoted UID lines are compared unquoted, and a missing final newline stays missing.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest fixture used to make the replacement UID deterministic.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If quotes remain, the duplicate is kept, or a newline is added.
+    """
+    monkeypatch.setattr("tensilelite.Common.SolutionIdGen.generate_solution_id", lambda: 6)
+    path = tmp_path / "logic.yaml"
+    text = "SolutionUID: \"0U5\" # kept\nSolutionUID: '0u5' # duplicate"
+    assert not text.endswith("\n")
+    path.write_text(text, encoding="utf-8")
+
+    assert rewrite_colliding_solution_uids([path]) == 2
+    written = path.read_text(encoding="utf-8")
+    assert written == "SolutionUID: 0u5 # kept\nSolutionUID: 0u6 # duplicate"
+    assert not written.endswith("\n")
+
+
 def test_claim_solution_uid_regenerates_a_collision() -> None:
     """A UID already in ``seen`` is replaced.
 
