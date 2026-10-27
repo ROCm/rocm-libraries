@@ -4,7 +4,7 @@
 ################################################################################
 # P7 DESIGNED config for gfx1250 LocalReadMFMA transposed-LDSTr (HasWMMA_V3) paths.
 #
-# Target missing ranges in Tensile/Components/LocalRead.py:
+# Target missing ranges in tensilelite/Components/LocalRead.py:
 #   835-883  : enableLDSTr + HasWMMA_V3 + bpeDS==1  (FP8, HasLDSTrB64B8=1)
 #   884-942  : enableLDSTr + HasWMMA_V3 + bpeDS==2  (FP16/BF16, HasLDSTrB128B16=1)
 #

@@ -77,7 +77,7 @@ const char* const ROCKE_HIP_PROLOGUE
       "_ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);\n"
       "_ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);\n"
       "_ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);\n"
-      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);\n"
+      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);\n"
       "_ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);\n"
       "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);\n"
       "_ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);\n"
@@ -107,10 +107,6 @@ const char* const ROCKE_HIP_PROLOGUE
       "__device__ extern \"C\" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(\n"
       " const __attribute__((address_space(3))) void*)\n"
       " __asm(\"llvm.amdgcn.ds.read.tr16.b64\");\n"
-      "typedef short i16x8_raw __attribute__((ext_vector_type(8)));\n"
-      "__device__ extern \"C\" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(\n"
-      " const __attribute__((address_space(3))) void*)\n"
-      " __asm(\"llvm.amdgcn.ds.read.tr16.b128\");\n"
       "// ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to\n"
       "// {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},\n"
       "// which is what async-DMA pipelines (compv4 / split-KV attention) need.\n"
@@ -276,6 +272,26 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v)
         return copy ? copy : "";
     }
     return n;
+}
+
+/* The unsigned HIP spelling of a scalar integer type (Python
+ * _HIP_UNSIGNED_INT_TYPE); NULL for any other type. */
+const char* rocke_h_unsigned_int_type(const rocke_type_t* t)
+{
+    const char* name = t ? t->name : NULL;
+    if(!name)
+        return NULL;
+    if(strcmp(name, "i1") == 0)
+        return "bool";
+    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0)
+        return "uint8_t";
+    if(strcmp(name, "i16") == 0)
+        return "uint16_t";
+    if(strcmp(name, "i32") == 0)
+        return "uint32_t";
+    if(strcmp(name, "i64") == 0)
+        return "uint64_t";
+    return NULL;
 }
 
 /* The raw _HIP_TYPE dict: scalar IR name -> HIP scalar spelling. NULL if

@@ -88,6 +88,7 @@ operation:
       attr_suffix: "FIRST_TOKEN_OFFSET_DESC"
       required: true
       expected_data_type: "INT32"
+      work_data_dependent: true
     - name: "token_index"
       fbs_field: "token_index_tensor_uid"
       attr_suffix: "TOKEN_INDEX_DESC"

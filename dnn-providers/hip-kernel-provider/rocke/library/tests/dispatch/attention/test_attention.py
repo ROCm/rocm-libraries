@@ -21,8 +21,11 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # edit on an existing one) fails ``test_declared_features_are_frozen`` until it
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
-# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
-# kernels write LSE, so every other candidate must keep declining it.
+# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only candidates
+# whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_3d`` and the
+# ``_u3d_`` split-KV tuning candidates) declare it, so every other candidate
+# must keep declining it. The generated ``_u3d_`` candidates are not in this map;
+# their feature set is checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
@@ -61,6 +64,7 @@ EXPECTED_FEATURES = {
     },
     "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
@@ -97,6 +101,8 @@ EXPECTED_FEATURES = {
         "fp8",
         "sinks",
         "sliding_window",
+        # Split-KV only: the 2D path writes no LSE (see attention_unified_2d).
+        "lse",
     },
 }
 
@@ -381,11 +387,12 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
+            # Only split-KV (u3d) geometries write the optional LSE output.
+            expected = set(ATTENTION_FEATURES) | (
+                {"lse"} if "_u3d_" in candidate.name else set()
+            )
             with self.subTest(candidate=candidate.name):
-                self.assertEqual(
-                    set(candidate.capability.supports_features),
-                    set(ATTENTION_FEATURES),
-                )
+                self.assertEqual(set(candidate.capability.supports_features), expected)
 
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the

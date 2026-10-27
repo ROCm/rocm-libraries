@@ -164,6 +164,11 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name);
  * element) is refused with one message wherever it is met. */
 const char* rocke_h_require_hip_scalar(rocke_h_lowerer_t* lw, const char* ir_type_name);
 
+/* The unsigned HIP spelling of a scalar integer type (Python
+ * _HIP_UNSIGNED_INT_TYPE): "bool" / "uint8_t" / "uint16_t" / "uint32_t" /
+ * "uint64_t" for i1 / i8 and u8 / i16 / i32 / i64. Returns NULL for any other type. */
+const char* rocke_h_unsigned_int_type(const rocke_type_t* t);
+
 /* The "f16x"/"bf16x"/"f32x"/"i32x"/"i16x"/"i8x" vector-name prefix for an IR
  * scalar element name, used by the smem/global vN load/store handlers. Returns
  * the Python fallback "f16x" for names not in the small map (matching the

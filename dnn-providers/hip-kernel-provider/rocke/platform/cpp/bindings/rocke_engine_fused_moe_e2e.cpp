@@ -84,14 +84,21 @@ struct Store
     }
 };
 
-std::string take_ll(rocke_status_t st, char* ll, const char* err, const char* fn)
+/* `err` is taken by reference, not as a pointer, so that no call site can pass
+ * nullptr: an arch-domain refusal lowered through the err-less
+ * rocke_lower_kernel_to_llvm used to reach Python as an ArchDomainError with an
+ * empty message, losing the intrinsic, target and flavor that explain it. Lower
+ * through the _ex entry. */
+std::string
+    take_ll(rocke_status_t st, char* ll, const char (&err)[ROCKE_ERR_MSG_CAP], const char* fn)
 {
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
             free(ll);
+        throw_if_arch_domain(st, err);
         std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
-                          + "): " + (err && err[0] ? err : "unknown error");
+                          + "): " + (err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(ll);

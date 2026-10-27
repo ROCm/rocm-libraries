@@ -101,14 +101,21 @@ struct Store
     }
 };
 
-std::string take_ll(rocke_status_t st, char* ll, const char* err, const char* fn)
+/* `err` is taken by reference, not as a pointer, so that no call site can pass
+ * nullptr: an arch-domain refusal lowered through the err-less
+ * rocke_lower_kernel_to_llvm used to reach Python as an ArchDomainError with an
+ * empty message, losing the intrinsic, target and flavor that explain it. Lower
+ * through the _ex entry. */
+std::string
+    take_ll(rocke_status_t st, char* ll, const char (&err)[ROCKE_ERR_MSG_CAP], const char* fn)
 {
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
             free(ll);
+        throw_if_arch_domain(st, err);
         std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
-                          + "): " + (err && err[0] ? err : "unknown error");
+                          + "): " + (err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(ll);
@@ -315,8 +322,10 @@ std::string fmma_lower(const py::dict& d, const std::string& arch)
     if(!k)
         throw std::runtime_error("rocke_engine.fmha_mfma_lower_llvm build failed");
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, flavor, a, &ll);
-    return take_ll(s2, ll, nullptr, "rocke_engine.fmha_mfma_lower_llvm");
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k, flavor, a, &ll, err, sizeof err);
+    return take_ll(s2, ll, err, "rocke_engine.fmha_mfma_lower_llvm");
 }
 std::string fmma_serialize(const py::dict& d, const std::string& arch)
 {
@@ -838,9 +847,12 @@ std::string t942_lower(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t s2
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_ll(s2, ll, nullptr, "rocke_engine.gfx942_attention_tiled_2d_lower_llvm");
+    return take_ll(s2, ll, err, "rocke_engine.gfx942_attention_tiled_2d_lower_llvm");
 }
 std::string t942_serialize(const py::dict& d, const std::string& arch)
 {
@@ -896,9 +908,12 @@ std::string t950_lower(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t s2
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_ll(s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_2d_lower_llvm");
+    return take_ll(s2, ll, err, "rocke_engine.gfx950_attention_tiled_2d_lower_llvm");
 }
 std::string t950_serialize(const py::dict& d, const std::string& arch)
 {
@@ -993,10 +1008,12 @@ std::string fkv_lower(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t s2
+        = rocke_lower_kernel_to_llvm_ex(k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
     guard.reset();
-    return take_ll(
-        s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_2d_fastkv_regp_lower_llvm");
+    return take_ll(s2, ll, err, "rocke_engine.gfx950_attention_tiled_2d_fastkv_regp_lower_llvm");
 }
 std::string fkv_serialize(const py::dict& d, const std::string& arch)
 {
@@ -1117,10 +1134,10 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
         throw std::runtime_error(message);
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
-    rocke_status_t status
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), target, &ll);
+    rocke_status_t status = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), target, &ll, err, sizeof err);
     guard.reset();
-    return take_ll(status, ll, nullptr, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+    return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
 {
@@ -1195,8 +1212,11 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         }
         auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
         char* ll = nullptr;
-        rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
-        out += take_ll(s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_3d_lower_llvm");
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+            k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+        out += take_ll(s2, ll, err, "rocke_engine.gfx950_attention_tiled_3d_lower_llvm");
         guard.reset();
     }
     /* reduce: derived from the segment spec, exactly as the standalone emitter */
@@ -1222,8 +1242,11 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         }
         auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
         char* ll = nullptr;
-        rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
-        out += take_ll(s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_3d_lower_llvm");
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+            k, resolve_python_llvm_flavor(), a, &ll, err, sizeof err);
+        out += take_ll(s2, ll, err, "rocke_engine.gfx950_attention_tiled_3d_lower_llvm");
         guard.reset();
     }
     return out;

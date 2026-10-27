@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "3da51e29-c4b6-43f7-8fa1-e092a51bdd3a",
+  "name": "MultiLaunch selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.multi_launch.score"
+  }
+}

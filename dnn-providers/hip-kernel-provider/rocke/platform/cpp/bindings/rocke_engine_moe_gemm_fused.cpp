@@ -149,15 +149,22 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch.c_str(), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    /* The _ex entry, not the err-less one: an arch-domain refusal says which
+     * intrinsic the target cannot lower only in this buffer, and only
+     * throw_if_arch_domain turns it into the error Python expects. */
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
             free(ll);
+        throw_if_arch_domain(st, err);
         throw std::runtime_error("rocke_engine.moe_gemm_fused_lower_llvm lower failed (status="
-                                 + std::to_string((int)st) + ")");
+                                 + std::to_string((int)st)
+                                 + "): " + (err[0] ? err : "unknown error"));
     }
     std::string out(ll);
     free(ll);

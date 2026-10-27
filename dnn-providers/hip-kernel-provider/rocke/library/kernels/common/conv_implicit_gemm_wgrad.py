@@ -2080,30 +2080,32 @@ def build_implicit_gemm_conv_wgrad(
 
     Pipeline and epilogue options mirror the forward builder.
 
-    When ``spec.split_k == -1`` the split-K degree is chosen automatically
-    using the CK formula (``helpers.split_k.select_split_k_wgrad``):
-    ``floor((waves_per_cu * num_cus) / base_grid)`` clamped to ``[1, wg_K]``.
+    When ``spec.split_k == -1`` the degree is chosen by the shared conv
+    split-K resolver (:func:`kernels.common.conv_split_k.resolve_conv_split_k`)
+    for the packed-atomic reduction this builder emits; it may resolve to 1 (a
+    plain store). The two-stage path has its own builder.
     """
     # Resolve split_k=-1 (auto) before validate() so validation sees the real value.
     if spec.split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
-        from dataclasses import replace as _dc_replace
+        from kernels.common.conv_split_k import resolve_conv_split_k
 
-        decision = select_split_k_wgrad(
-            wg_M=_wg_M(spec.problem),
-            wg_N=_wg_N(spec.problem),
-            wg_K=_wg_K(spec.problem),
+        resolved = resolve_conv_split_k(
+            "wgrad",
+            spec.problem,
+            arch=arch,
+            dtype=spec.data.dtype_d,
             tile_m=spec.tile_m,
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
-            arch=arch,
-            # grid_groups, not problem.groups: a merged spec launches one
-            # workgroup per group_merge conv groups, so that is the real CTA
-            # multiplier the degree has to be sized against. Equal at gm == 1.
-            groups=spec.grid_groups,
             block_size=spec.block_size,
+            group_merge=spec.group_merge,
+            ws_replicas=spec.ws_replicas,
+            reduction="workspace" if spec.two_stage else "atomic",
+            epilogue=None if spec.two_stage else spec.epilogue,
+            # A two-stage spec is a split-K kernel: degree 1 would not validate.
+            allow_unsplit=not spec.two_stage,
         )
-        spec = _dc_replace(spec, split_k=decision.split_k)
+        spec = dc_replace(spec, split_k=resolved.split_k)
 
     spec.validate()
     ok, why = is_valid_wgrad_spec(spec, arch=arch)
@@ -2501,7 +2503,7 @@ def build_implicit_gemm_conv_wgrad(
             # so that run is exactly Gm, a build-time constant: fold it and its
             # magic pair here instead of reading the kernargs. The epilogue
             # keeps the true cpg through ``params``.
-            from rocke.helpers.transforms import calculate_magic_numbers
+            from rocke.helpers.magic_division import calculate_magic_numbers
 
             _merged_cpg = p_load.cpg
             _mult, _shift = calculate_magic_numbers(_merged_cpg)

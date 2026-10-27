@@ -29,6 +29,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "rocke/ir.h" /* rocke_status_t */
+
 /* The gfx target every binding lowers or builds for. Required: there is no
  * default target on either engine. An empty string used to stand for each
  * family's "usual" arch (gfx950, gfx942, gfx1151 or gfx1201), so a caller that
@@ -43,6 +45,24 @@ inline const char* require_arch(const std::string& arch)
                                     "pass arch=... (there is no default)");
     }
     return arch.c_str();
+}
+
+/* A lowering the arch-domain lane refused (ROCKE_ERR_ARCH_DOMAIN): a verdict
+ * about the kernel, not an engine failure. The module registers it as
+ * rocke_engine.ArchDomainError, a NotImplementedError carrying the engine's
+ * message verbatim -- the same bytes the Python lowerer raises -- so the cpp
+ * backend can re-raise it rather than fall back to the Python lowerer. */
+struct ArchDomainRefusal : std::runtime_error
+{
+    using std::runtime_error::runtime_error;
+};
+
+inline void throw_if_arch_domain(rocke_status_t st, const char* err)
+{
+    if(st == ROCKE_ERR_ARCH_DOMAIN)
+    {
+        throw ArchDomainRefusal(err != nullptr ? err : "");
+    }
 }
 
 /* serialize-IR body for a family whose kernel is built with a local IRBuilder

@@ -351,6 +351,8 @@ static int test_scale_layouts_and_families()
 {
     CHECK(!rocke_arch_mma_op_id_family(NULL));
     CHECK(!rocke_arch_mma_op_id_family("unknown"));
+    CHECK(!rocke_arch_mma_op_by_id(NULL));
+    CHECK(!rocke_arch_mma_op_by_id("unknown"));
     int num_arches = 0;
     const char* const* arches = rocke_known_arches(&num_arches);
     int scaled = 0;
@@ -361,6 +363,10 @@ static int test_scale_layouts_and_families()
         {
             const auto* op = &arch->mma.ops[j];
             CHECK(strcmp(rocke_arch_mma_op_id_family(op->op_id), op->family) == 0);
+            /* The target-free lookup finds the same atom from its op_id alone. */
+            const auto* found = rocke_arch_mma_op_by_id(op->op_id);
+            CHECK(found && strcmp(found->op_id, op->op_id) == 0
+                  && strcmp(found->family, op->family) == 0);
             if(!op->a_scale_dtype)
             {
                 CHECK(op->a_scale_frag_len == 0 && op->b_scale_frag_len == 0);

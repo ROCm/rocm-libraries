@@ -47,11 +47,19 @@ spellings, topology and shape magnitude. Read workload manifests before exclusio
 and all source occurrences per [workloads.md](workloads.md). Malformed or
 unrepresentable inputs remain explicit outcomes.
 
-Read the current reference limits — the **What the reference executors cannot verify**
-section, documented from the repository root in
-`dnn-providers/integration-tests/README.md` — and the actual plan predicates. Both
-current CPU and GPU SDPA plans reject `sink_token_tensor_uid`; **CPU is not a sink
-fallback**. Representation does not establish reference support, and `auto` may exhaust
+Read the current reference limits from the reference plans themselves: each reference
+executor admits a graph only through its plan's `isApplicable`, so that predicate is the
+capability list. For SDPA forward they are, from the repository root,
+`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/GpuSdpaFwdPlan.hpp`
+(GPU) and
+`projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdPlan.hpp`
+(CPU); read the same `*Plan.hpp` pair for other operations. The GPU SDPA plan declines
+ALiBi and padding masks, variable sequence lengths, dropout, paged KV, block masks, sink
+tokens, FP8 descale/scale/amax tensors and the max/sum-exp stats outputs; the log-sum-exp
+stats tensor is supported. Both current CPU and GPU SDPA plans reject
+`sink_token_tensor_uid`; **CPU is not a sink fallback**. How a run picks its reference is
+the **Verification modes** section of `dnn-providers/integration-tests/README.md`.
+Representation does not establish reference support, and `auto` may exhaust
 golden/GPU/CPU choices and skip, validating nothing. Missing capable independent
 numerics blocks the feature. Do not fabricate golden data or copy the implementation
 into a private reference.

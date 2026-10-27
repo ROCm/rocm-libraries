@@ -36,14 +36,14 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Activation import ActivationType
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-import Tensile.LibraryIO as LibraryIO
+from tensilelite.Activation import ActivationType
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Problem import ProblemType
+from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
+import tensilelite.LibraryIO as LibraryIO
 
 # Reuse the LibraryIO suite's committed, vendored logic fixture (read-only).
 _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_HSS_BH.yaml"

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,6 @@
 
 struct gpu_config
 {
-    char name[32];
     long memory_MB;
     long clockRate_MHz;
     long major;
@@ -43,7 +42,6 @@ struct gpu_config
 
     explicit gpu_config(const hipDeviceProp_t& prop)
     {
-        strcpy(this->name, prop.name);
         this->memory_MB            = (prop.totalGlobalMem >> 20);
         this->clockRate_MHz        = prop.clockRate / 1000;
         this->major                = prop.major;

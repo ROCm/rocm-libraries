@@ -60,7 +60,7 @@ namespace
 #endif
 
                 // type filters
-                return static_cast<bool>(FILTER<T...>{});
+                return FILTER<T...>::value;
             }
         };
 
