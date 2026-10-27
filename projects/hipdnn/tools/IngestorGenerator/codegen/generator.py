@@ -257,7 +257,7 @@ def mint_ids(
         name = f"{config.engine.namespace}:{config.kdp_stem(pack)}"
         matched = prior_packs.get(name) or supplement_packs.get(name)
         ids[("pack", pack_index)] = take(matched.id if matched else None)
-        if config.is_multi_pack:
+        if config.has_operation_matchers:
             ids[("operation_umd", pack_index)] = take(
                 matched.operation_umd_id if matched else None
             )
@@ -463,8 +463,9 @@ def _check_metadata_resolved(
     ``kernel_source.spec``.
 
     An absent knob takes the KMD ``default_value`` as its catalog key while the
-    binary was built from the builder dataclass's default. Mandatory fields are
-    left to the config loader.
+    binary was built from the builder dataclass's default, unless the KMD field
+    declares ``builder_default`` (the two defaults are the same value). Mandatory
+    fields are left to the config loader.
     """
     # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
     prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
@@ -484,10 +485,15 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # A `builder_default` field is declared to share its default with the
+    # builder's dataclass, so leaving it out of both layers decides it.
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and not f.builder_default
+        and f.name not in metadata
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (
@@ -640,7 +646,7 @@ def build_operation_umd(
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
     the engine has more than one pack. A single-pack engine gets zero
     graph-scoped UMDs."""
-    if not config.is_multi_pack:
+    if not config.has_operation_matchers:
         return None
     return {
         "version": "1.0",
@@ -711,7 +717,7 @@ def build_kdp(
     """
     pack_index = _pack_index(config, pack)
     matchers = [ids["kernel_match"]]
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
     # tuple is a duplicate only when arch coverage competes: the same candidate
@@ -934,12 +940,12 @@ def _check_sibling_mode(config: IngestorConfig) -> None:
             "is its own pack root, so a satellite's engine, dispatch and matcher "
             "references could not resolve there."
         )
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         raise prior_ids.NotOverridable(
-            "sibling bundles need a single-pack bundle: a multi-pack engine's "
-            "operation matcher names a symbol only that bundle's own Native.cpp "
-            "registers. Another bundle of this engine, named to the run or found "
-            "beside this one in the provider tree, puts the config in sibling mode."
+            "sibling bundles need a bundle without operation matchers: a matcher "
+            "names a symbol only that bundle's own Native.cpp registers. Another "
+            "bundle of this engine, named to the run or found beside this one in "
+            "the provider tree, puts the config in sibling mode."
         )
 
 
@@ -1275,7 +1281,7 @@ def _report(
         total += 1
         emitted.add(document["id"])
         reused["packs"] += document["id"] in known
-        if config.is_multi_pack:
+        if config.has_operation_matchers:
             total += 1
             reused["operation_umds"] += ids[("operation_umd", index)] in known
         for entry in document["kernelDescriptors"]:
@@ -1424,7 +1430,7 @@ class IngestorGenerator:
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
         for pack in config.packs:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
-            if config.is_multi_pack:
+            if config.has_operation_matchers:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")

@@ -54,6 +54,28 @@ class TestEngineNameCheck:
         config = make_minimal_config(engine=make_engine(name="hipkernel:Pointwise"))
         _check_engine_name_scoped(config)  # does not raise
 
+    @pytest.mark.parametrize(
+        "borrowed", ["Unscoped", "hipkernel:Test", 3], ids=["unscoped", "self", "int"]
+    )
+    def test_native_symbols_from_must_name_another_scoped_engine(self, borrowed):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(
+            engine=make_engine(name="hipkernel:Test", native_symbols_from=borrowed)
+        )
+        with pytest.raises(ConfigError, match="native_symbols_from"):
+            _check_engine_name_scoped(config)
+
+    def test_native_symbols_from_another_engine_accepted(self):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+            )
+        )
+        _check_engine_name_scoped(config)  # does not raise
+
     def test_invalid_heuristic_value_rejected(self):
         from codegen.config_loader import _check_engine_name_scoped
 
@@ -88,18 +110,28 @@ class TestEngineNameCheck:
             load_config(path)
 
 
-class TestKnobsIntTypedCheck:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field."""
+class TestKnobsAddressableCheck:
+    """Pre-mint check #2: every knob names a declared int- or string-typed KMD field."""
 
     def test_undeclared_knob_rejected(self):
-        from codegen.config_loader import _check_knobs_int_typed
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(engine=make_engine(knobs=["nonexistent"]))
         with pytest.raises(ConfigError, match="no kmd_fields entry declares"):
-            _check_knobs_int_typed(config)
+            _check_knobs_addressable(config)
 
-    def test_non_int_knob_rejected(self):
-        from codegen.config_loader import _check_knobs_int_typed
+    def test_float_knob_rejected(self):
+        from codegen.config_loader import _check_knobs_addressable
+
+        config = make_minimal_config(
+            kmd_fields=[make_kmd_field(name="scale", type="float", default_value=None)],
+            engine=make_engine(knobs=["scale"]),
+        )
+        with pytest.raises(ConfigError, match="int-typed fields"):
+            _check_knobs_addressable(config)
+
+    def test_string_knob_accepted_as_ordinal(self):
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(
             kmd_fields=[
@@ -107,14 +139,13 @@ class TestKnobsIntTypedCheck:
             ],
             engine=make_engine(knobs=["dtype"]),
         )
-        with pytest.raises(ConfigError, match="int-typed"):
-            _check_knobs_int_typed(config)
+        _check_knobs_addressable(config)  # does not raise
 
     def test_int_typed_knob_accepted(self):
-        from codegen.config_loader import _check_knobs_int_typed
+        from codegen.config_loader import _check_knobs_addressable
 
         config = make_minimal_config(engine=make_engine(knobs=["block_size"]))
-        _check_knobs_int_typed(config)  # does not raise
+        _check_knobs_addressable(config)  # does not raise
 
 
 class TestKernelMetadataAgainstKmdCheck:
@@ -409,6 +440,13 @@ class TestPackDiscriminatorsCheck:
         )
         with pytest.raises(ConfigError, match="discriminator"):
             _check_pack_discriminators(config)
+
+    def test_multi_pack_with_no_discriminator_is_a_sharded_catalog(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(packs=[make_pack(name="a"), make_pack(name="b")])
+        _check_pack_discriminators(config)
+        assert config.is_multi_pack and not config.has_operation_matchers
 
     def test_single_pack_with_discriminator_rejected(self):
         from codegen.config_loader import _check_pack_discriminators
@@ -1140,10 +1178,41 @@ def _parse(text):
     return yaml.load(text, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
 
+def _duplicate_key_loaders():
+    from codegen import config_loader
+
+    loaders = [pytest.param(config_loader._PyDuplicateKeySafeLoader, id="python")]
+    if getattr(yaml, "__with_libyaml__", False):
+        loaders.append(
+            pytest.param(config_loader._CDuplicateKeySafeLoader, id="libyaml")
+        )
+    return loaders
+
+
+def test_the_config_loader_parses_with_libyaml_when_pyyaml_has_it():
+    from codegen import config_loader
+
+    if getattr(yaml, "__with_libyaml__", False):
+        assert issubclass(config_loader._DuplicateKeySafeLoader, yaml.CSafeLoader)
+    else:
+        assert config_loader._DuplicateKeySafeLoader is (
+            config_loader._PyDuplicateKeySafeLoader
+        )
+
+
 class TestRepeatedYamlKeys:
     """Stock PyYAML keeps the last of two equal mapping keys and drops the other
     silently, so the value an author reads first is not the one generated. Merge keys,
-    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them."""
+    aliases and YAML's scalar resolution stay what stock SafeLoader makes of them.
+
+    Every case runs over both parsers: libyaml's, which the loader takes when PyYAML
+    was built with it, and the pure-Python fallback."""
+
+    @pytest.fixture(autouse=True, params=_duplicate_key_loaders())
+    def _loader(self, request, monkeypatch):
+        from codegen import config_loader
+
+        monkeypatch.setattr(config_loader, "_DuplicateKeySafeLoader", request.param)
 
     def _load(self, tmp_path, text):
         path = tmp_path / "c.yaml"
@@ -2351,6 +2420,18 @@ class TestRuntimeContractRejections:
                 ),
                 r"default_value \[1, 'two'\], which contradicts its declared type 'int_list'",
                 id="kmd-default-value-mixed-int-list",
+            ),
+            pytest.param(
+                lambda r: r["kmd_fields"].append(
+                    {"name": "dtype", "type": "string", "builder_default": True}
+                ),
+                r"entry 'dtype' declares builder_default without a default_value",
+                id="kmd-builder-default-on-mandatory-field",
+            ),
+            pytest.param(
+                lambda r: r["kmd_fields"][0].__setitem__("builder_default", "yes"),
+                r"entry 'block_size' declares builder_default 'yes'; it must be true",
+                id="kmd-builder-default-not-bool",
             ),
             # T1(b) -- requireNoDuplicates, DescriptorLoader.hpp:634-645, 750, 753.
             pytest.param(
