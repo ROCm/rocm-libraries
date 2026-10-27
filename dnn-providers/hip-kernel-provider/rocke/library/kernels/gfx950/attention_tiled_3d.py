@@ -1741,11 +1741,15 @@ def supports_tiled_reduce_spec(
             "tiled reduce kernel needs head_size divisible by "
             f"{_REDUCE_THREADS} (got {spec.head_size})",
         )
-    if spec.num_kv_heads < 1 or spec.num_query_heads % spec.num_kv_heads != 0:
+    if (
+        spec.num_kv_heads < 1
+        or spec.num_query_heads < 1
+        or spec.num_query_heads % spec.num_kv_heads != 0
+    ):
         return (
             False,
-            "tiled reduce kernel needs num_query_heads divisible by num_kv_heads "
-            f"(got {spec.num_query_heads} / {spec.num_kv_heads})",
+            "tiled reduce kernel needs a positive num_query_heads divisible by "
+            f"num_kv_heads (got {spec.num_query_heads} / {spec.num_kv_heads})",
         )
     if spec.num_segments > _REDUCE_MAX_SEGMENTS:
         return (
