@@ -27,33 +27,31 @@ math than the attention itself. Both halves fold out of the loop instead::
     O[q]   = sum_k P[q,k] * V[k]
            = (sum_k P[q,k] * C[k]) @ W_UK[head,:,d_nope:]
 
-so the head projection is applied **once per workgroup** -- to ``Q`` in the
+so the head projection is applied **once per wave** -- to ``Q`` in the
 prologue and to the latent output accumulator in the epilogue -- and the key
 loop runs entirely in the 512-wide latent space. Both rewrites are exact: the
 online-softmax rescale and the ``1/l`` normalisation are linear, so they
 commute with the ``W_UV`` projection.
 
-Data flow for one workgroup, which owns one ``(q-block, head)`` pair::
+The forward kernel runs one wave per ``(head, 16-row query tile)``: a
+workgroup holds ``heads_per_wg`` heads x ``q_tiles_per_wg`` tiles, so every
+staged key tile feeds all of them. Dispatch packs two heads x two tiles for an
+even head count and one head x four tiles for an odd one. Data flow for one
+wave::
 
-    q_nope  <- q[token, head, :d_nope]        registers    absorb A operand
-    for window in range(Bq / 16):                            -- Q absorb
-        qa_lds[:, rope cols] <- q[token, head, d_nope:]    Q_rope, if here
-        for r_slice in window:
-            wq_lds  <- W_UK[head, r_slice, :d_nope]       [r_tile, d_nope]
-            qa_lds[:, r_slice] <- q_nope @ wq_lds^T
-        qa      <- qa_lds                     registers    the window's waves
+    q_nope, q_rope <- q[token, head]           registers    B fragments
+    qaᵀ     <- W_UK[head, :, :d_nope] · q_nopeᵀ  registers    absorb, per r-tile
+    qr_lds  <- q_rope                          parked; re-read every key tile
     for k_tile in range(n_k_tiles):                          -- latent loop
-        kv_lds[:, :r_kv] <- c_kv[page]        [Bk, r_KV]   paged latent
+        kv_lds[:, :r_kv] <- c_kv[page]        [Bk, r_KV]   shared by the waves
         kv_lds[:, r_kv:] <- k_rope[page]      [Bk, 64]     head-shared RoPE
-        S       <- scale * (qa @ kv_lds^T)                 one K=576 GEMM
-        P       <- online_softmax(mask(S))
-        acc     += P @ kv_lds[:, :r_kv]                    latent-space PV
-    for wave_part in range(num_warps):                       -- V absorb
-        accl_lds <- acc[:, wave_part]         [Bq, r_KV / num_warps]
-        for r_slice in wave_part:
-            wt_lds <- transpose(W_UK[head, r_slice, d_nope:])  [d_v, r_tile]
-            out    += accl_lds[:, r_slice] @ wt_lds
-    out      <- out * (1/l)                   [Bq, d_v]
+        Sᵀ      <- [C | K_rope] · qaᵀ                      one K=576 GEMM
+        P       <- online_softmax(mask(S))                 one query per lane
+        accᵀ    += Cᵀ · Pᵀ                                 latent-space PV
+    for latent block, v window:                              -- V absorb
+        wt_lds  <- W_UV[heads, block, window]ᵀ   staged by the whole workgroup
+        outᵀ    += W_UVᵀ · accᵀ
+    out      <- out * (1/l)                   [16, d_v] per wave
 
 gfx942 constraints that shape the emission:
 
@@ -62,16 +60,12 @@ gfx942 constraints that shape the emission:
   * **No transpose read.** ``ds_read_*_tr_*`` is gfx950-only, so a B operand
     that is not already stored as ``[n][k]`` must be transposed by hand. The
     PV GEMM wants ``C`` as ``[r][key]`` while ``kv_lds`` holds it as
-    ``[key][r]`` for the score GEMM; its B operand is gathered from
-    ``kv_lds`` one bf16 per key (a read-path transpose), which beat keeping a
-    second, store-transposed copy. The ``W_UK`` V-half is transposed on the
-    store path in the epilogue. The Q-absorb B operand needs **no** transpose:
-    ``W_UK[head, r, :d_nope]`` is already stored as ``[r][nope]``, which is
-    exactly ``[n][k]`` for that GEMM.
-  * **LDS round-trips between GEMMs are mandatory.** The MFMA C decode lands
-    a result at ``[m = c_row(lane, reg)][n = n_tile*16 + lane%16]``, the
-    transpose of what an A operand read wants, so a register-level handoff
-    from one GEMM to the next is impossible. Hence ``qa_lds`` and ``accl_lds``.
+    ``[key][r]`` for the score GEMM; the PV gathers it with 8 B key-row reads
+    through a latent-row permutation the epilogue undoes. The ``W_UV`` slice is
+    transposed on the store path in the epilogue.
+  * **Transposed frame.** The loop computes ``Sᵀ`` and ``accᵀ``, so the C
+    fragment of each GEMM is already the next one's B operand and no
+    inter-GEMM result round-trips through LDS.
 
 **Query input contract.** Both kernels take the query **already projected and
 RoPE-rotated** (``[total_q, H_q, d_nope + d_rope]``): ``q[..., :d_nope]`` is
@@ -85,25 +79,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from rocke.core.ir import BF16, F32, KernelDef
+from rocke.core.ir import BF16, KernelDef
 from rocke.helpers.attention import safe_inv_l
 
 from kernels.common._read_ahead import read_ahead
 from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
 from kernels.mla._mla_body import (
-    C_PER_LANE,
     MFMA_K,
     MFMA_M,
     MFMA_N,
     WAVE_SIZE,
     AgprAcc,
-    KvRegStager,
     KvSharedStager,
     KvTileDma,
     PageTable,
-    ScorePartials,
-    absorb_query,
     absorb_query_t,
     acc_iter_args,
     causal_k_tiles,
@@ -111,11 +101,9 @@ from kernels.mla._mla_body import (
     clamp_tile,
     copy_rows_to_lds,
     epilogue_lane_row,
-    expand_latent,
+    expand_k_nope,
     full_k_tiles,
     fwd_kernel_args,
-    gather_keys_t,
-    in_window,
     kernel_signature,
     key_mask,
     lane_ids,
@@ -140,30 +128,24 @@ from kernels.mla._mla_body import (
     reversed_q_block,
     row_of,
     run_k_loops,
-    scale_frag,
     seq_len_k,
     shift,
     softmax_consts,
     softmax_iter_args,
-    split_k_scores,
     split_softmax_state,
     stage_q_cols,
-    store_acc_t,
     store_c_frag,
     store_latent_out,
     store_lse,
     store_out_frag,
     store_probe_scores,
-    take_window_frags,
     tile_ahead,
     tile_pairs,
     varlen_tile,
     w_head_base,
     wave_head,
-    wave_k_col,
     wave_q_start,
     wave_tile_row,
-    window_rank,
     zero_tiles,
 )
 
@@ -171,6 +153,7 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "MlaPrefillSpec",
     "supports_mla_prefill",
     "require_mla_prefill",
+    "supports_mla_score_probe",
     "check_mla_prefill_extents",
     "MLA_BINARY_SEARCH_ITERS",
     "MLA_MAX_NUM_SEQS",
@@ -190,20 +173,15 @@ __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
 # would misalign every row. 0 restores the natural (bank-conflicting) layout.
 WT_PAD = 4
 
-# Same idea as ``WT_PAD``, for buffers that are *written* with 8-wide (16 B) bf16
-# vector stores. ``smem_store_vN`` declares ``align = n * elem_bytes``, so an
-# 8-wide bf16 store promises 16 B alignment; a pad of 4 would leave odd rows only
-# 8 B-aligned and the promise would be a lie. 8 keeps every row start at 16 B.
-V8_PAD = 8
-
 # Width, in bf16 elements, of one lane's slice when staging ``c_kv`` into
 # ``kv_lds``. This is 4, not 8, and the narrower store is what lets ``kv_lds``
-# carry ``WT_PAD`` instead of ``V8_PAD`` -- which is the whole point.
+# carry ``WT_PAD`` instead of a pad of 8 -- which is the whole point. (An 8-wide
+# bf16 store declares 16 B alignment, so its rows need a pad of 8.)
 #
 # ``kv_lds`` is the B operand of the score GEMM, and that read is the hottest
 # LDS access in the kernel (``SCORE_K_ITERS * K_TILES`` of them per k-tile).
 # Lane ``l`` of a 16-lane group reads row ``a = l % 16``, so the bank it lands
-# on is ``(stride_dwords * a + const) % 32``. With ``V8_PAD`` the stride is 292
+# on is ``(stride_dwords * a + const) % 32``. With a pad of 8 the stride is 292
 # dwords == 4 mod 32, whose period over ``a`` is only 8: lanes ``a`` and
 # ``a + 8`` collide on every read, 2-way, for the whole loop. ``WT_PAD`` puts
 # the stride at 290 == 2 mod 32, period 16, so all sixteen lanes land on
@@ -226,36 +204,14 @@ V8_PAD = 8
 # conflict-free as well.
 C_STAGE_W = 4
 
-# k-steps per scheduler-ordered block in the score GEMM.
-#
-# That GEMM is LDS-read-bound, not MFMA-bound: at BQ == BK == MFMA_M == MFMA_N
-# there is one M tile and one K tile, so each of its ``SCORE_K_ITERS`` steps is
-# two ``ds_read``s feeding a single MFMA -- and every MFMA accumulates into the
-# *same* register, so the MFMA chain is serial. Covering that chain needs the
-# reads to run well ahead of it.
-#
-# Emitting a (DS_READ x 2G, MFMA x G) pair every G steps asks the post-RA
-# scheduler for exactly that: a block of reads hoisted above the MFMAs they
-# feed, G steps deep. G must divide the per-wave step count evenly -- a
-# remainder leaves the tail steps unhinted and measured worse than any dividing
-# value. The score K reduction is split across waves, so that count is
-# ``SCORE_K_ITERS / num_warps`` (9 at the default geometry), and G = 9 hoists
-# the whole wave's reads in one block. It is a scheduling hint only, so a wrong
-# value costs speed and never correctness.
-#
-# This is mutually exclusive with ``iglp_opt``, which owns the whole-loop
-# schedule. Both of its canned patterns were measured here and both regressed.
-SCORE_SGB_GROUP = 9
-
-# AGPR budget of the one-wave-per-head layout, as for the one-head kernel: no
-# AGPRs. A wave holds its head's whole latent accumulator, 128 VGPRs at
+# AGPR budget of the forward kernel: no AGPRs. A wave holds its head's whole latent accumulator, 128 VGPRs at
 # block_q == 16, and left free the backend parks it in AGPRs and pays a
 # v_accvgpr_read / v_accvgpr_write pair per register for the per-tile rescale.
 # Without them the kernel fits 256 VGPRs, two waves per SIMD. At block_q == 32
 # the accumulator alone is 256 VGPRs and the kernel spills either way.
 HPW_AGPR_ALLOC = (0, 0)
 
-# Software pipelining of the one-wave-per-head k-loop. The loop sits at the
+# Software pipelining of the k-loop. The loop sits at the
 # 256-VGPR line that keeps two workgroups per CU, so the backend scheduler
 # cannot find registers to run LDS reads ahead on its own: left alone it waits
 # on every read just before the MFMA that consumes it. The loop is therefore
@@ -301,7 +257,7 @@ AGPR_DMA_PER_FENCE = 4
 # groups in L2 -- and large enough that it holds only a few heads' weights.
 XCD_CHUNK = 16
 
-# v columns of W_UV staged per epilogue round in the one-wave-per-head layout.
+# v columns of W_UV staged per epilogue round.
 # Each round holds a 64-row latent block for every head: 32 columns keep that
 # at 17408 B, under the loop phase's pool.
 EPI_VQ = 32
@@ -329,12 +285,13 @@ KV_RSRC_BYTES = 0x7FFF0000
 class MlaPrefillSpec:
     """Immutable description of one gfx942 MLA prefill configuration.
 
-    The defaults are the tuned single-head layout (``block_q`` and
-    ``r_kv_tile`` were measured; see their comments), which dispatch keeps as
-    its fallback. A caller normally sets only ``num_heads`` (128 for a
-    DeepSeek-V3 shaped model, 64 for a Kimi-K2 shaped one); dispatch sets the
-    one-wave-per-head layout fields (``heads_per_wg``, ``q_tiles_per_wg``,
-    ``num_warps``, ``block_q``, ``agpr_acc``, ``num_xcds``) per request.
+    The forward layout -- ``heads_per_wg``, ``q_tiles_per_wg``,
+    ``num_warps``, ``block_q``, ``agpr_acc``, ``num_xcds`` -- is chosen per
+    request by dispatch (two heads x two query tiles for an even head count,
+    one head x four tiles for an odd one), and the defaults of those fields do
+    not form one: :func:`supports_mla_prefill` refuses a spec that leaves them
+    alone. A caller building the forward kernel directly sets them; the score
+    probe uses the defaults with ``block_q=16``.
     """
 
     num_heads: int
@@ -342,14 +299,12 @@ class MlaPrefillSpec:
     d_rope: int = 64
     d_v: int = 128
     r_kv: int = 512
-    # Two M tiles: every key tile staged into LDS feeds two query tiles' score
-    # and PV GEMMs. The prologue and epilogue stage one M tile at a time, so
-    # the LDS pool does not grow with it.
+    # Query rows per workgroup: 16 (or 32 with agpr_acc) per wave x
+    # q_tiles_per_wg in the forward kernel; 16 for the score probe.
     block_q: int = 32
     block_k: int = 16
-    # 32, not the bring-up 64: it is the widest slice that keeps the prologue,
-    # the LDS peak, under 32 KB, so two workgroups fit per CU -- which measured
-    # faster than 64 on every shape tried.
+    # Latent columns per W_UK slice the score probe stages through LDS while
+    # expanding K_nope. The forward kernel does not use it.
     r_kv_tile: int = 32
     num_warps: int = 4
     page_block_size: int = 16
@@ -357,29 +312,25 @@ class MlaPrefillSpec:
     # Fixed at MLA_BINARY_SEARCH_ITERS, which serves up to MLA_MAX_NUM_SEQS
     # sequences; admission refuses any other value (it is not in the name).
     binary_search_iters: int = MLA_BINARY_SEARCH_ITERS
-    # Heads packed into one workgroup, one wave per head. At 1 (the default) a
-    # workgroup owns one head and its waves split that head's work. Above 1 a
-    # workgroup owns ``heads_per_wg`` consecutive heads: every key tile is staged
-    # into LDS once and read by all of them, and each wave runs its own head's
-    # score, softmax and latent PV end to end -- no split-K partials and no
-    # cross-wave combine. The query absorb and the W_UV projection then stay
-    # inside the wave as well. Requires
+    # Heads packed into one workgroup, one wave per (head, query tile): every
+    # key tile is staged into LDS once and read by all of them, and each wave
+    # runs its own head's score, softmax and latent PV end to end -- no split-K
+    # partials and no cross-wave combine. The query absorb and the W_UV
+    # projection stay inside the wave as well. Requires
     # ``num_warps == heads_per_wg * q_tiles_per_wg``.
     heads_per_wg: int = 1
-    # Query row tiles per workgroup in the one-wave-per-head layout: the
-    # workgroup holds heads_per_wg heads x q_tiles_per_wg tiles of 16 queries,
+    # Query row tiles per workgroup: the workgroup holds heads_per_wg heads x q_tiles_per_wg tiles of 16 queries,
     # one wave per (head, tile), so block_q == 16 * q_tiles_per_wg and
     # num_warps == heads_per_wg * q_tiles_per_wg. Waves sharing a head share its
     # W_UK / W_UV fetches, which cuts the per-row weight traffic.
     q_tiles_per_wg: int = 1
     # XCDs the device deals workgroups across (6 on a 228-CU gfx942, 8 on a
-    # 304-CU one); 0
-    # keeps launch order. One-wave-per-head layout only. In launch order each
+    # 304-CU one); 0 keeps launch order. In launch order each
     # XCD's resident workgroups span every head group, so its L2 holds all of
     # their W_UK / W_UV; with the XCD count the kernel reorders workgroups so
     # an XCD walks a few heads at a time. A wrong count costs speed only.
     num_xcds: int = 0
-    # Latent accumulator in AGPRs (one-wave-per-head layout). It lets a wave
+    # Latent accumulator in AGPRs. It lets a wave
     # own 32 query rows -- two M tiles, a 256-register accumulator -- at one
     # workgroup per CU; see ``_mla_body.AgprAcc``. Needs the llvm22 or llvm23
     # flavor.
@@ -389,9 +340,7 @@ class MlaPrefillSpec:
     # itself. True takes the absorbed query ``Qa = [Q_nope @ W_UK_nopeᵀ |
     # Q_rope]`` (``[total_q, H, r_kv + d_rope]``) and writes the normalized
     # latent output (``[total_q, H, r_kv]``) plus the LSE; the caller runs both
-    # projections as batched GEMMs. One-wave-per-head layout only
-    # (``heads_per_wg > 1`` or ``q_tiles_per_wg > 1``). See
-    # :func:`mla_prefill_fwd_signature`.
+    # projections as batched GEMMs. See :func:`mla_prefill_fwd_signature`.
     absorbed_query: bool = False
 
     def __post_init__(self) -> None:
@@ -525,79 +474,35 @@ class MlaPrefillSpec:
 def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
     """Predict the LDS pool :func:`build_mla_prefill_fwd` will ask for.
 
-    The lowerer pools the six buffers by liveness, so the pool is *not* their
-    arithmetic sum -- see the LDS comment block in the builder for the achieved
-    layout. The three phases never share a live buffer: the prologue pair
-    (``wq_lds``, ``qa_lds``) is dead before the k-loop starts (the score A
-    operand is read into registers first), and by the epilogue everything
-    earlier is dead. Each phase therefore packs from the base on its own and
-    the pool is the widest phase.
-
-    ``qa_lds`` holds one wave-aligned window of ``1 / M_TILES`` of the absorbed
-    columns for every M tile, and ``accl_lds`` one wave's ``1 / num_warps`` of
-    the latent columns for every M tile.
-
-    The packer reuses a dead slot only from its start offset. Each later phase
-    allocates its small buffer first (``s_part``, ``accl_lds``) so it takes the
-    ``wq_lds`` slot at the base, and the large one lands on the ``qa_lds``
-    slot. When the small buffer outgrows ``wq_lds`` the large one is pushed
-    past the prologue. Erring high is the point: this gates admission, so it
-    must never under-predict. It is a model of observed behaviour rather than a
-    guarantee, so check the emitted pool whenever a new geometry is introduced.
+    The loop holds the shared ``kv_lds`` plus every wave's parked Q_rope, and
+    the epilogue one 64-row latent block of W_UV for every head, which pools
+    onto them -- the lowerer pools buffers by liveness, so the pool is the
+    wider of the two phases, not their sum. Erring high is the point: this
+    gates admission, so it must never under-predict. It is a model of
+    observed behaviour rather than a guarantee, so check the emitted pool
+    whenever a new geometry is introduced.
     """
     elem = 2  # bf16
-    qa_cols = spec.r_kv + spec.d_rope
-    if _one_wave_per_head(spec):
-        # One wave per head: the loop holds the shared kv_lds plus every
-        # wave's parked Q_rope, and the epilogue one 64-row latent block of
-        # W_UV for every head, which pools onto them.
-        kv_lds = elem * spec.block_k * (qa_cols + WT_PAD)
-        if spec.agpr_acc:
-            # The DMA'd key tile is double-buffered, with the RoPE columns in
-            # their own unpadded buffer: two latent slots plus two RoPE slots.
-            kv_lds = 2 * elem * spec.block_k * (spec.r_kv + WT_PAD + spec.d_rope)
-        rows = spec.block_q // spec.q_tiles_per_wg
-        qr_lds = elem * spec.num_warps * rows * (spec.d_rope + WT_PAD)
-        # With absorbed_query there is no epilogue buffer: the latent goes
-        # straight from registers to global.
-        wt_all = (
-            0
-            if spec.absorbed_query
-            else elem * spec.heads_per_wg * EPI_VQ * spec.q_tiles_per_wg * (64 + WT_PAD)
-        )
-        return -(-max(kv_lds + qr_lds, wt_all) // 16) * 16
-    m_tiles = max(1, spec.block_q // MFMA_M)
-    wq_lds = elem * spec.r_kv_tile * (spec.d_nope + V8_PAD)
-    qa_lds = elem * spec.block_q * (qa_cols // m_tiles + WT_PAD)
-    kv_lds = elem * spec.block_k * (qa_cols + WT_PAD)
-    s_part = 4 * spec.num_warps * spec.block_q * spec.block_k
-    accl_lds = elem * spec.block_q * (spec.r_kv // spec.num_warps + WT_PAD)
-    wt_lds = elem * spec.d_v * (spec.r_kv_tile + WT_PAD)
-
-    prologue = wq_lds + qa_lds
-
-    def _phase(small: int, large: int) -> int:
-        return (wq_lds if small <= wq_lds else max(small, prologue)) + large
-
-    loop = _phase(s_part, kv_lds)
-    epilogue = _phase(accl_lds, wt_lds)
+    kv_lds = elem * spec.block_k * (spec.r_kv + spec.d_rope + WT_PAD)
+    if spec.agpr_acc:
+        # The DMA'd key tile is double-buffered, with the RoPE columns in
+        # their own unpadded buffer: two latent slots plus two RoPE slots.
+        kv_lds = 2 * elem * spec.block_k * (spec.r_kv + WT_PAD + spec.d_rope)
+    rows = spec.block_q // spec.q_tiles_per_wg
+    qr_lds = elem * spec.num_warps * rows * (spec.d_rope + WT_PAD)
+    # With absorbed_query there is no epilogue buffer: the latent goes
+    # straight from registers to global.
+    wt_all = (
+        0
+        if spec.absorbed_query
+        else elem * spec.heads_per_wg * EPI_VQ * spec.q_tiles_per_wg * (64 + WT_PAD)
+    )
     # The lowerer rounds the pool up to 16 B.
-    return -(-max(prologue, loop, epilogue) // 16) * 16
+    return -(-max(kv_lds + qr_lds, wt_all) // 16) * 16
 
 
-def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
-    """Admission check for the gfx942 MLA prefill family.
-
-    Returns ``(ok, reason)``; ``reason`` is empty when ``ok``. Every rejection
-    names the offending field and the value that would be acceptable, so a
-    caller never has to read this function to understand the refusal.
-
-    Only arch- and atom-specific admission lives here, so a dispatcher can fall
-    through to another family on a ``False``. Specs that are impossible on any
-    arch are rejected earlier, by :meth:`MlaPrefillSpec.__post_init__`, which
-    means this function may assume positivity and the bf16/page/warp-count
-    invariants already hold.
-    """
+def _supports_common(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
+    """Admission shared by the forward kernel and the score probe."""
     if not arch.startswith("gfx942"):
         return False, f"MLA prefill is gfx942-only for now, got arch={arch!r}"
     # Dispatch admits up to MLA_MAX_NUM_SEQS sequences without knowing which
@@ -612,11 +517,9 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
             f"num_seqs up to {MLA_MAX_NUM_SEQS}, and the count is not in the "
             "kernel name, so any other value would collide with the default's"
         )
-    # Register blocking: the kernel body is written over M_TILES = block_q /
-    # MFMA_M and K_TILES = block_k / MFMA_N, so any multiple of the atom is
-    # expressible. The cost of a larger block_q is the latent accumulator,
-    # which holds (block_q / MFMA_M) * (r_kv / MFMA_N) / num_warps VGPRs per
-    # lane -- 32 at block_q=16, 64 at block_q=32 with the default geometry.
+    # Register blocking: both kernels are written over M_TILES = block_q /
+    # MFMA_M and K_TILES = block_k / MFMA_N. MFMA_K == MFMA_N == 16, so these
+    # checks also cover every K-dimension requirement.
     if spec.block_q % MFMA_M != 0:
         return False, f"block_q must be a multiple of {MFMA_M}, got {spec.block_q}"
     if spec.block_k % MFMA_N != 0:
@@ -625,96 +528,99 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
         value = getattr(spec, name)
         if value % MFMA_N != 0:
             return False, f"{name} must be a multiple of {MFMA_N}, got {value}"
-    if spec.r_kv_tile % MFMA_K != 0:
-        return False, f"r_kv_tile must be a multiple of {MFMA_K}, got {spec.r_kv_tile}"
-    # MFMA_K == MFMA_N == 16 here, so the checks above already cover every
-    # K-dimension requirement; there is nothing extra to demand for the K axis.
-    if _one_wave_per_head(spec):
-        return _supports_heads_per_wg(spec, arch=arch)
-    if spec.absorbed_query:
-        return False, (
-            "absorbed_query is implemented for the one-wave-per-head layout "
-            f"only, got heads_per_wg={spec.heads_per_wg}"
-        )
-    if spec.num_xcds or spec.agpr_acc:
-        return False, (
-            "num_xcds and agpr_acc are implemented for the one-wave-per-head "
-            "layout only, "
-            f"got heads_per_wg={spec.heads_per_wg}"
-        )
-    #
-    # Each of the three GEMMs whose n-axis is split across waves needs that
-    # split to be exact -- a wave owns [w * per_wave, (w+1) * per_wave) with no
-    # remainder lane.
-    # The query absorb is exempt when its slice is narrower than the
-    # workgroup: it then runs one n-tile on each of the first r_kv_tile / 16
-    # waves and gates the rest off.
-    warp_splits = {
-        "r_kv (PV latent n-tiles)": spec.r_kv,
-        "d_v (epilogue n-tiles)": spec.d_v,
-    }
-    absorb_n_tiles = spec.r_kv_tile // MFMA_N
-    if absorb_n_tiles >= spec.num_warps:
-        warp_splits["r_kv_tile (query-absorb n-tiles)"] = spec.r_kv_tile
-    for name, value in warp_splits.items():
-        n_tiles = value // MFMA_N
-        if n_tiles % spec.num_warps != 0:
-            return False, (
-                f"{name}: {value}/{MFMA_N} = {n_tiles} n-tiles must divide "
-                f"evenly across num_warps={spec.num_warps}"
-            )
-    # The score GEMM splits its K reduction, not an n-axis: each wave owns an
-    # equal run of the (r_kv + d_rope) / MFMA_K k-steps.
-    score_k_steps = (spec.r_kv + spec.d_rope) // MFMA_K
-    if score_k_steps % spec.num_warps != 0:
-        return False, (
-            f"score K: {spec.r_kv + spec.d_rope}/{MFMA_K} = {score_k_steps} k-steps "
-            f"must divide evenly across num_warps={spec.num_warps}"
-        )
-    # The prologue stages the absorbed query in M_TILES column windows, each
-    # covering the score k-steps of a whole number of waves and a whole number
-    # of absorb r-slices; the epilogue stages the latent one wave's PV tiles at
-    # a time, so each wave's run of r-slices must be whole.
-    m_tiles = spec.block_q // MFMA_M
-    if spec.num_warps % m_tiles != 0:
-        return False, (
-            f"block_q={spec.block_q} stages the absorbed query in {m_tiles} "
-            f"wave-aligned windows, which num_warps={spec.num_warps} must divide"
-        )
-    qa_win = (spec.r_kv + spec.d_rope) // m_tiles
-    if m_tiles > 1 and (
-        qa_win % spec.r_kv_tile != 0 or qa_win * (m_tiles - 1) > spec.r_kv
-    ):
-        return False, (
-            f"the absorbed-query window of {qa_win} columns must be a multiple of "
-            f"r_kv_tile={spec.r_kv_tile} and leave d_rope in the last window"
-        )
-    if (spec.r_kv // spec.r_kv_tile) % spec.num_warps != 0:
-        return False, (
-            f"r_kv/r_kv_tile = {spec.r_kv // spec.r_kv_tile} epilogue slices must "
-            f"divide evenly across num_warps={spec.num_warps}"
-        )
-    # Every global->LDS staging loop below hands each thread a fixed number of
-    # fixed-width vector chunks with no remainder handling, so the element
-    # count must divide by threads * width -- not merely by threads.
-    threads = spec.threads
-    stages = {
-        # Q_nope is read straight into MFMA fragments, so it has no staging.
-        "Q_rope tile": (spec.block_q * spec.d_rope, 4),
-        "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
-        "k_rope tile": (spec.block_k * spec.d_rope, 4),
-        "W_UK absorb slice": (spec.r_kv_tile * spec.d_nope, 8),
-        "W_UV epilogue slice": (spec.r_kv_tile * spec.d_v, 8),
-    }
+    return True, ""
+
+
+def _divides_staging(threads: int, stages: dict) -> Tuple[bool, str]:
+    """Every staging loop hands each thread a fixed number of fixed-width
+    chunks with no remainder handling, so each element count must divide by
+    ``threads * width`` -- not merely by ``threads``."""
     for name, (count, width) in stages.items():
         if count % (threads * width) != 0:
             return False, (
                 f"{name} has {count} elements, which does not divide evenly "
                 f"across {threads} threads at {width} elements per chunk"
             )
-    # The prologue and epilogue buffers hold a column window of every M tile,
-    # so block_q reaches LDS mostly through s_part; kv_lds scales with block_k.
-    # Both still have to fit the layout's per-CU share of LDS.
+    return True, ""
+
+
+def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
+    """Admission check for :func:`build_mla_prefill_fwd`.
+
+    Returns ``(ok, reason)``; ``reason`` is empty when ``ok``. Every rejection
+    names the offending field and the value that would be acceptable, so a
+    caller never has to read this function to understand the refusal.
+
+    Only arch- and atom-specific admission lives here, so a dispatcher can fall
+    through to another family on a ``False``. Specs that are impossible on any
+    arch are rejected earlier, by :meth:`MlaPrefillSpec.__post_init__`, which
+    means this function may assume positivity and the bf16/page/warp-count
+    invariants already hold.
+
+    No GEMM axis is split across waves -- each wave owns one (head, query
+    tile) end to end -- so the only cross-wave work is the cooperative
+    key-tile staging and the cooperative W_UV staging in the epilogue.
+    """
+    ok, why = _supports_common(spec, arch=arch)
+    if not ok:
+        return ok, why
+    qpw = spec.q_tiles_per_wg
+    if spec.num_warps != spec.heads_per_wg * qpw:
+        return False, (
+            f"heads_per_wg={spec.heads_per_wg} x q_tiles_per_wg={qpw} runs one "
+            f"wave per (head, query tile), so num_warps must be their product, "
+            f"got num_warps={spec.num_warps}"
+        )
+    # A wave holds its head's whole latent accumulator: 128 VGPRs at 16 rows.
+    # At 32 rows it is 256 registers, which only fits held in AGPRs.
+    rows = 32 if spec.agpr_acc else MFMA_M
+    if spec.block_q != rows * qpw:
+        return False, (
+            f"the forward kernel needs block_q={rows * qpw} "
+            f"({rows} rows per wave x q_tiles_per_wg={qpw}), got "
+            f"block_q={spec.block_q}"
+        )
+    if spec.agpr_acc:
+        from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
+
+        flavor = _resolve_llvm_flavor()
+        if not _is_modern_flavor(flavor):
+            return False, (
+                "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
+                f"keep the backend out of the AGPR file), got {flavor}"
+            )
+    # The PV gathers four latent tiles per read and the epilogue stages W_UV
+    # in 64-row latent blocks and EPI_VQ-wide v windows.
+    if spec.r_kv % 64 != 0:
+        return False, f"the forward kernel needs r_kv a multiple of 64, got {spec.r_kv}"
+    if spec.d_v % (EPI_VQ * qpw) != 0:
+        return False, (
+            f"the forward kernel needs d_v a multiple of "
+            f"{EPI_VQ * qpw}, got {spec.d_v}"
+        )
+    threads = spec.threads
+    kr_w = 4 if (spec.block_k * spec.d_rope) % (threads * 4) == 0 else 2
+    ok, why = _divides_staging(
+        threads,
+        {
+            "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
+            "k_rope tile": (spec.block_k * spec.d_rope, kr_w),
+            "W_UV epilogue block": (spec.heads_per_wg * 64 * EPI_VQ * qpw, 32),
+        },
+    )
+    if not ok:
+        return ok, why
+    # The key-tile staging shifts each thread's chunk by whole rows, so a row's
+    # chunks must divide the thread count.
+    for name, cols, width in (
+        ("c_kv", spec.r_kv, C_STAGE_W),
+        ("k_rope", spec.d_rope, kr_w),
+    ):
+        if threads % (cols // width) != 0:
+            return False, (
+                f"a {name} row is {cols // width} chunks of {width}, which "
+                f"must divide the {threads} threads"
+            )
     return _fits_lds(spec, arch=arch)
 
 
@@ -744,83 +650,62 @@ def _fits_lds(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
             f"the forward kernel needs about {lds} B of LDS at "
             f"heads_per_wg={spec.heads_per_wg}, q_tiles_per_wg="
             f"{spec.q_tiles_per_wg}, block_q={spec.block_q}, "
-            f"block_k={spec.block_k}, r_kv_tile={spec.r_kv_tile}, which exceeds "
+            f"block_k={spec.block_k}, which exceeds "
             f"the {budget} B that {wgs} workgroup(s) per CU allow"
         )
     return True, ""
 
 
-def _one_wave_per_head(spec: MlaPrefillSpec) -> bool:
-    """True for the one-wave-per-head layout (:func:`_build_mla_prefill_fwd_heads`)."""
-    return spec.heads_per_wg > 1 or spec.q_tiles_per_wg > 1 or spec.agpr_acc
+def supports_mla_score_probe(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]:
+    """Admission check for :func:`build_mla_prefill_score_probe`.
 
-
-def _supports_heads_per_wg(spec: MlaPrefillSpec, *, arch: str) -> tuple[bool, str]:
-    """Admission for the one-wave-per-head layout (:func:`_one_wave_per_head`).
-
-    No GEMM axis is split across waves -- each wave owns one head end to end --
-    so the only cross-wave work is the cooperative key-tile staging and the
-    cooperative W_UV staging in the epilogue.
+    The probe is a single-tile debug aid: it was never generalized over
+    M_TILES/K_TILES, and it expands the latent in-kernel, so the d_nope
+    n-tiles split across waves. The forward-layout fields
+    (``heads_per_wg``, ``q_tiles_per_wg``, ``agpr_acc``, ``num_xcds``) do not
+    apply to it.
     """
-    qpw = spec.q_tiles_per_wg
-    if spec.num_warps != spec.heads_per_wg * qpw:
+    ok, why = _supports_common(spec, arch=arch)
+    if not ok:
+        return ok, why
+    if spec.block_q != MFMA_M or spec.block_k != MFMA_N:
         return False, (
-            f"heads_per_wg={spec.heads_per_wg} x q_tiles_per_wg={qpw} runs one "
-            f"wave per (head, query tile), so num_warps must be their product, "
-            f"got num_warps={spec.num_warps}"
+            "the MLA score probe is single-tile only: block_q must be "
+            f"{MFMA_M} and block_k must be {MFMA_N}, got "
+            f"block_q={spec.block_q}, block_k={spec.block_k}"
         )
-    # A wave holds its head's whole latent accumulator: 128 VGPRs at 16 rows.
-    # At 32 rows it is 256 registers, which only fits held in AGPRs.
-    rows = 32 if spec.agpr_acc else MFMA_M
-    if spec.block_q != rows * qpw:
+    if spec.absorbed_query:
+        return False, "the MLA score probe takes the projected query only"
+    if spec.r_kv_tile % MFMA_K != 0:
+        return False, f"r_kv_tile must be a multiple of {MFMA_K}, got {spec.r_kv_tile}"
+    if (spec.d_nope // MFMA_N) % spec.num_warps != 0:
         return False, (
-            f"the one-wave-per-head layout needs block_q={rows * qpw} "
-            f"({rows} rows per wave x q_tiles_per_wg={qpw}), got "
-            f"block_q={spec.block_q}"
+            f"the MLA score probe expands the latent in-kernel, so "
+            f"d_nope/{MFMA_N} = {spec.d_nope // MFMA_N} n-tiles must divide "
+            f"evenly across num_warps={spec.num_warps}"
         )
-    if spec.agpr_acc:
-        from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
-
-        flavor = _resolve_llvm_flavor()
-        if not _is_modern_flavor(flavor):
-            return False, (
-                "agpr_acc needs the llvm22 or llvm23 flavor (llvm20 does not "
-                f"keep the backend out of the AGPR file), got {flavor}"
-            )
-    # The PV gathers four latent tiles per read and the epilogue stages W_UV
-    # in 64-row latent blocks and EPI_VQ-wide v windows.
-    if spec.r_kv % 64 != 0:
-        return False, f"heads_per_wg > 1 needs r_kv a multiple of 64, got {spec.r_kv}"
-    if spec.d_v % (EPI_VQ * qpw) != 0:
-        return False, (
-            f"the one-wave-per-head layout needs d_v a multiple of "
-            f"{EPI_VQ * qpw}, got {spec.d_v}"
-        )
-    threads = spec.threads
-    kr_w = 4 if (spec.block_k * spec.d_rope) % (threads * 4) == 0 else 2
-    stages = {
-        "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
-        "k_rope tile": (spec.block_k * spec.d_rope, kr_w),
-        "W_UV epilogue block": (spec.heads_per_wg * 64 * EPI_VQ * qpw, 32),
-    }
-    for name, (count, width) in stages.items():
-        if count % (threads * width) != 0:
-            return False, (
-                f"{name} has {count} elements, which does not divide evenly "
-                f"across {threads} threads at {width} elements per chunk"
-            )
-    # The key-tile staging shifts each thread's chunk by whole rows, so a row's
-    # chunks must divide the thread count.
-    for name, cols, width in (
-        ("c_kv", spec.r_kv, C_STAGE_W),
-        ("k_rope", spec.d_rope, kr_w),
-    ):
-        if threads % (cols // width) != 0:
-            return False, (
-                f"a {name} row is {cols // width} chunks of {width}, which "
-                f"must divide the {threads} threads"
-            )
-    return _fits_lds(spec, arch=arch)
+    hdqk = spec.head_dim_qk
+    ok, why = _divides_staging(
+        spec.threads,
+        {
+            "Q tile": (spec.block_q * hdqk, 4),
+            "c_kv tile": (spec.block_k * spec.r_kv, 8),
+            "k_rope tile": (spec.block_k * spec.d_rope, 4),
+            "W_UK slice": (spec.r_kv_tile * spec.d_nope, 8),
+        },
+    )
+    if not ok:
+        return ok, why
+    elem = 2  # bf16; q_lds, kt_lds, c_lds and wt_lds are all live at once.
+    lds = elem * (
+        (spec.block_q + spec.block_k) * hdqk
+        + spec.block_k * spec.r_kv
+        + spec.d_nope * spec.r_kv_tile
+    )
+    budget = attention_lds_capacity_bytes(arch)
+    if lds > budget:
+        return False, f"the score probe needs {lds} B of LDS, past the {budget} B"
+    return True, ""
 
 
 def require_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> None:
@@ -929,24 +814,9 @@ def build_mla_prefill_score_probe(
     that is in range. No causal mask is applied -- the oracle is called with
     ``causal=False`` to match.
     """
-    require_mla_prefill(spec, arch=arch)
-    # Unlike the forward kernel, this probe is a single-tile debug aid: it was
-    # never generalized over M_TILES/K_TILES, and it still expands the latent
-    # in-kernel, so it also needs the d_nope n-tiles to split across waves.
-    # supports_mla_prefill() admits multi-tile specs for the forward kernel, so
-    # reject them here rather than emitting a silently-wrong probe.
-    if spec.block_q != MFMA_M or spec.block_k != MFMA_N:
-        raise NotImplementedError(
-            "the MLA score probe is single-tile only: block_q must be "
-            f"{MFMA_M} and block_k must be {MFMA_N}, got "
-            f"block_q={spec.block_q}, block_k={spec.block_k}"
-        )
-    if (spec.d_nope // MFMA_N) % spec.num_warps != 0:
-        raise NotImplementedError(
-            f"the MLA score probe expands the latent in-kernel, so "
-            f"d_nope/{MFMA_N} = {spec.d_nope // MFMA_N} n-tiles must divide "
-            f"evenly across num_warps={spec.num_warps}"
-        )
+    ok, reason = supports_mla_score_probe(spec, arch=arch)
+    if not ok:
+        raise NotImplementedError(reason)
 
     dtype = BF16
     BQ = spec.block_q
@@ -1047,29 +917,21 @@ def build_mla_prefill_score_probe(
     # [w*N_TILES_PER_WAVE, (w+1)*N_TILES_PER_WAVE). The weight is transposed
     # on the store path: gfx942 has no ds_read_tr to do it on the read side,
     # and a strided read-side gather would cost 8x more ds_reads.
-    acc = zero_tiles(b, 1, N_TILES_PER_WAVE)
-    (acc,) = expand_latent(
+    acc = zero_tiles(b, N_TILES_PER_WAVE)
+    acc = expand_k_nope(
         b,
         w_uk=args.w_uk,
         c_lds=c_lds,
         wt_lds=wt_lds,
-        tid=lanes.tid,
-        wave=lanes.wave,
-        lane_row=lanes.lane_row,
-        lane_kq=lanes.lane_kq,
+        lanes=lanes,
         w_head_base=w_head_base(b, head, R_KV, W_COLS),
-        col_offset=None,
-        dtype=dtype,
-        threads=THREADS,
-        slices=range(N_SLICES),
-        c_col_base=0,
-        r_tile=R_TILE,
-        d_out=D_NOPE,
-        w_cols=W_COLS,
-        exp_k_iters=R_TILE // MFMA_K,
-        n_tiles_per_wave=N_TILES_PER_WAVE,
-        swizzle=False,
         acc=acc,
+        n_slices=N_SLICES,
+        r_tile=R_TILE,
+        d_nope=D_NOPE,
+        w_cols=W_COLS,
+        threads=THREADS,
+        dtype=dtype,
     )
 
     # Write the expanded K_nope into the nope half of KT_lds. The C decode
@@ -1149,575 +1011,16 @@ def mla_prefill_fwd_signature(spec: MlaPrefillSpec):
 def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> KernelDef:
     """Emit the chunked MLA prefill forward kernel, with ``W_UK`` absorbed.
 
-    One workgroup owns one ``(query tile, head)`` pair and loops over the key
-    tiles its causal window reaches, carrying ``(m, l, acc_latent)`` in ``scf.for`` iteration
-    arguments. The per-head up-projection never enters that loop: it is folded
-    into the query on the way in and into the output on the way out, so the
-    k-loop only ever touches the compressed latent.
-
-    Prologue, once per workgroup:
-
-    1. read ``Q_nope`` into registers as the absorb's A operand, and stage
-       ``Q_rope`` into the ``qa_lds`` columns of ``[r_kv, r_kv + d_rope)``;
-    2. absorb -- ``Qa[q, r] = sum_n Q_nope[q, n] * W_UK[head, r, n]`` -- into
-       ``qa_lds`` columns ``[0, r_kv)``, staging ``W_UK`` r-slices through
-       ``wq_lds``, one wave-aligned column window at a time. Each wave keeps
-       its score K-steps of ``Qa`` in registers. ``S[q, k] = sum_r C[k, r] *
-       Qa[q, r]`` then reproduces the expanded score exactly.
-
-    Per key tile:
-
-    3. stage ``c_kv[page]`` into ``kv_lds`` columns ``[0, r_kv)`` and
-       ``k_rope[page]`` into columns ``[r_kv, r_kv + d_rope)``;
-    4. score ``S = scale * (Qa @ [C | K_rope]ᵀ)`` -- one ``K = r_kv + d_rope``
-       reduction -- then mask and online-softmax update;
-    5. accumulate ``acc_latent[q, r] += sum_k P[q, k] * C[k, r]``.
-
-    Epilogue, once per workgroup:
-
-    6. ``out[q, v] = (sum_r acc_latent[q, r] * W_UV[r, v]) * (1/l[q])``, where
-       ``W_UV = w_uk[head, :, d_nope:]``. The rescale and ``1/l`` are linear and
-       commute with the projection, so applying ``1/l`` to the ``[q][v]`` result
-       is exact.
-
-    The MFMA B operand is read ``[n][k]``: for the latent PV GEMM ``n`` is the
-    latent dim and ``k`` is the key, the transpose of how ``kv_lds`` holds
-    ``C``. gfx942 has no ``ds_read_tr``, so the PV gathers its B operand from
-    ``kv_lds`` one bf16 per key. That read-path transpose measured faster than
-    the store-path alternative -- a second, transposed copy of the tile written
-    element-wise -- which also cost 20 KB of LDS.
-
-    The k-loop works in the transposed frame: it computes ``Sᵀ`` and
-    ``acc_latentᵀ``, swapping the A and B operands of the same fragments. In
-    that frame a lane owns one query, so the softmax row reduce is mostly
-    in-lane (two cross-lane stages instead of four per row), P comes out of the
-    softmax already laid out as the PV GEMM's B operand and never round-trips
-    through LDS, and the rescale by ``alpha`` is lane-local. The epilogue's
-    ``W_UV`` GEMM is transposed the same way, so each lane normalizes its own
-    query and writes four consecutive output columns at once.
-
-    The score GEMM's K reduction is split across waves and the partials are
-    summed through LDS in a fixed order, so every wave ends up holding the same
-    full score tile. Every wave then redundantly computes the softmax state.
-    That is deliberate: ``scf.if`` carries no results, so loop-carried state
-    cannot be produced inside a wave-gated region, and a barrier inside one
-    would hang. The state is bit-identical in every wave, so only the latent
-    accumulator tiles are split across waves and only the final stores are
-    predicated.
-    """
-    require_mla_prefill(spec, arch=arch)
-    if _one_wave_per_head(spec):
-        return _build_mla_prefill_fwd_heads(spec)
-
-    dtype = BF16
-    BQ = spec.block_q
-    BK = spec.block_k
-    D_NOPE = spec.d_nope
-    D_ROPE = spec.d_rope
-    D_V = spec.d_v
-    HDQK = spec.head_dim_qk
-    R_KV = spec.r_kv
-    R_TILE = spec.r_kv_tile
-    W_COLS = spec.w_uk_cols
-    PAGE = spec.page_block_size
-    THREADS = spec.threads
-    H = spec.num_heads
-
-    # Tiling of the (query, key) score tile across MFMA atoms.
-    M_TILES = BQ // MFMA_M
-    K_TILES = BK // MFMA_N
-
-    # The absorbed query lives in [r_kv | d_rope]; one reduction covers both.
-    QA_COLS = R_KV + D_ROPE
-    SCORE_K_ITERS = QA_COLS // MFMA_K
-    NUM_WARPS = spec.num_warps
-    SCORE_K_PER_WAVE = SCORE_K_ITERS // NUM_WARPS
-
-    # Latent PV accumulator: N_R_PER_WAVE * C_PER_LANE accumulator VGPRs per lane.
-    N_R_TILES = R_KV // MFMA_N
-    N_R_PER_WAVE = N_R_TILES // spec.num_warps
-
-    # Epilogue W_UV projection, r_kv -> d_v.
-    N_V_TILES = D_V // MFMA_N
-    N_V_PER_WAVE = N_V_TILES // spec.num_warps
-    N_SLICES = R_KV // R_TILE
-    EXP_K_ITERS = R_TILE // MFMA_K
-
-    # Prologue Q-absorb, d_nope -> r_kv, one r-slice at a time.
-    ABSORB_N_TILES = R_TILE // MFMA_N
-    if ABSORB_N_TILES >= spec.num_warps:
-        ABSORB_N_PER_WAVE = ABSORB_N_TILES // spec.num_warps
-        ABSORB_ACTIVE_WAVES = None
-    else:
-        # A slice narrower than the workgroup: one n-tile on each of the first
-        # ABSORB_N_TILES waves. This is what lets r_kv_tile drop to 32, which
-        # brings the prologue -- the LDS peak -- under the two-workgroups-per-CU
-        # line.
-        ABSORB_N_PER_WAVE = 1
-        ABSORB_ACTIVE_WAVES = ABSORB_N_TILES
-    ABSORB_K_ITERS = D_NOPE // MFMA_K
-
-    # No AGPRs. Left free, the backend parks the PV accumulators in AGPRs, and
-    # the online-softmax rescale of those accumulators then costs a
-    # v_accvgpr_read / v_accvgpr_write pair per register on every key tile.
-    # gfx942 MFMAs read and write arch VGPRs directly, and the whole register
-    # budget still fits the 256 that two waves per SIMD allow.
-    b, args = open_kernel(
-        spec.fwd_kernel_name(), THREADS, fwd_kernel_args(spec), agpr_alloc=(0, 0)
-    )
-
-    # ---- prologue: identify (sequence, query tile, head) ---------------------
-    q_block_global_idx, head = reversed_q_block(b, args, block_q=BQ)
-    lanes = lane_ids(b)
-    wave, lane_row, lane_kq = lanes.wave, lanes.lane_row, lanes.lane_kq
-    tile = varlen_tile(
-        b, args, q_block_global_idx, block_q=BQ, iters=spec.binary_search_iters
-    )
-    qb_start = tile.qb_start
-    keys = causal_keys(b, args, tile)
-    n_k_tiles = causal_k_tiles(b, qb_start, tile, keys, block_q=BQ, block_k=BK)
-
-    # ---- LDS ---------------------------------------------------------------
-    # No allocation is exclusive, so the lowerer pools them by liveness. The
-    # three phases below never overlap. qa_lds holds one column window and
-    # accl_lds one wave's latent columns, each for every M tile:
-    #
-    #   prologue  wq_lds   + qa_lds                   (BQ=32, BK=16:  27392 B)
-    #   loop      s_part   + kv_lds                   (BQ=32, BK=16:  27264 B)
-    #   epilogue  accl_lds + wt_lds                   (BQ=32, BK=16:  17920 B)
-    #
-    # The prologue is the peak, and the pool emitted is exactly that, 27392 B
-    # -- under 32768, so two workgroups fit per CU. qa_lds is dead before the
-    # loop (each wave reads its score A operand into registers first), so every
-    # phase packs from the base. Within a phase the small buffer is allocated
-    # first: the packer reuses a dead slot only from its base, so the small
-    # buffer takes the wq_lds slot and the large one the qa_lds slot. Achieved
-    # layout:
-    #
-    #   0      wq_lds / s_part / accl_lds
-    #   8704   qa_lds / kv_lds / wt_lds    -> 27392 B total
-    #
-    # **Each buffer is allocated at the point its phase begins, not all up
-    # front.** The lowerer seeds a live interval at the ``tile.smem_alloc`` op
-    # itself, not at first use, so hoisting every allocation to the top of the
-    # kernel would start all six intervals before anything runs and defeat
-    # pooling entirely -- the pool becomes the arithmetic sum (71808 B here,
-    # well over the 64 KB limit). Keep each ``smem_alloc`` next to the code that
-    # first touches it.
-    #
-    # Pooling means a later buffer may land on an earlier one's bytes, so every
-    # phase boundary needs a barrier before its first write: the k-loop body
-    # opens with one (fencing the prologue's qa_lds readers against the kv_lds
-    # writes) and the epilogue opens with one of its own.
-    #
-    # Two different pads appear, and the difference is not cosmetic:
-    #
-    # ``WT_PAD`` columns are never written or read. They exist only to move the
-    # row stride off a multiple of the 32-bank LDS width: at the natural
-    # [D_V, R_TILE] shape the stride is R_TILE * 2 == 128 B == exactly 32
-    # dwords, so every row starts on bank 0. Both accesses walk the row index
-    # -- the staging store steps ``n0`` by 8 rows and the MFMA B-operand read
-    # steps ``b_row`` by one per lane -- so without the pad each collapses onto
-    # a handful of banks.
-    #
-    # ``V8_PAD`` is an *alignment* requirement, not a tuning knob. ``wq_lds`` is
-    # filled with 8-wide bf16 vector stores, and ``smem_store_vN`` declares
-    # ``align = n * elem_bytes`` == 16 B. A row stride that is not a multiple of
-    # 8 bf16 elements would put odd rows at 8 mod 16 and make that declaration a
-    # lie. V8_PAD == 8 keeps the stride 16 B-aligned and lands the buffer off
-    # bank 0 (68 dwords, 4 mod 32).
-    #
-    # ``kv_lds`` used to take ``V8_PAD`` for the same reason and no longer does.
-    # Off bank 0 is necessary but not sufficient: a stride of 4 mod 32 has
-    # period 8 over the row index, so the score GEMM's 16-lane B read collided
-    # 2-way on every issue. It now stages at ``C_STAGE_W`` == 4 and carries
-    # ``WT_PAD``, putting the stride at 2 mod 32 -- period 16, conflict-free.
-    # See the ``C_STAGE_W`` comment for why the pad could not move on its own.
-    #
-    # Pads are a layout choice only; every index expression keeps its logical
-    # range, so the kernel computes the same values either way.
-    #
-    # qa_lds carries WT_PAD too: its row stride is then 18 mod 32 dwords at
-    # BQ == 32 (2 mod 32 at BQ == 16), period 16 over the row index either
-    # way, so the score-fragment read's 16 rows land on distinct banks.
-    #
-    # The absorb's Q_nope A operand comes straight from global into registers,
-    # so there is no q_lds, and every W_UK slice is staged into wq_lds once and
-    # fed to all M tiles. qa_lds holds every M tile but only one window of the
-    # absorbed columns at a time: a full BQ == 32 qa_lds would be 37120 B on
-    # its own. The windows are wave-aligned -- each covers the score K-steps
-    # of NUM_WARPS / M_TILES waves -- so after each window the waves that own
-    # it take their score fragments into registers.
-    # supports_mla_prefill guarantees the windows divide evenly.
-    QA_PARTS = M_TILES
-    QA_WIN = QA_COLS // QA_PARTS
-    WAVES_PER_QA = NUM_WARPS // QA_PARTS
-    wq_lds = b.smem_alloc(
-        dtype, [R_TILE, D_NOPE + V8_PAD], name_hint="wq_lds"
-    )  # 8704 B
-    qa_lds = b.smem_alloc(dtype, [BQ, QA_WIN + WT_PAD], name_hint="qa_lds")  # 18688 B
-
-    # ---- load Q once (loop-invariant) --------------------------------------
-    # Q_nope is read as the absorb's A fragment (row = lane % 16, four
-    # consecutive columns at lane_kq). Q_rope rides along in the absorbed
-    # query, at the qa_lds columns of [R_KV, R_KV + D_ROPE), so the score GEMM
-    # is one K = R_KV + D_ROPE reduction.
-    qrows = query_rows(b, tile, head, H)
-    q_frags = [
-        load_q_frags(
-            b,
-            args.q,
-            qrows.lane_q_offset(qb_start, lane_row, mt, HDQK, lane_kq),
-            n=ABSORB_K_ITERS,
-            dtype=dtype,
-        )
-        for mt in range(M_TILES)
-    ]
-    w_base = w_head_base(b, head, R_KV, W_COLS)
-
-    # Each wave's score A operand is its own SCORE_K_PER_WAVE-step slice of the
-    # absorbed query, and it is loop-invariant: it is read into registers once
-    # (one bf16x4 per k-step and M tile) instead of from qa_lds every key tile.
-    # qa_lds is then dead before the loop, so the loop's buffers can reuse its
-    # bytes. The column inside the window is the wave's rank in its window.
-    wave_in_win = window_rank(b, wave, WAVES_PER_QA, QA_PARTS)
-    score_col = wave_k_col(b, wave, SCORE_K_PER_WAVE, lane_kq)
-    win_col = (
-        score_col
-        if QA_PARTS == 1
-        else wave_k_col(b, wave_in_win, SCORE_K_PER_WAVE, lane_kq)
-    )
-    qa_frags = [[None] * M_TILES for _ in range(SCORE_K_PER_WAVE)]
-    rope_win = R_KV // QA_WIN
-    for p in range(QA_PARTS):
-        lo = p * QA_WIN
-        hi = min(lo + QA_WIN, R_KV)
-        if p > 0:
-            # WAR: the previous window's fragment reads of qa_lds must retire
-            # before this window's writes.
-            b.sync_lds_only()
-        if p == rope_win:
-            stage_q_cols(
-                b,
-                args.q,
-                qa_lds,
-                qrows,
-                tid=lanes.tid,
-                threads=THREADS,
-                rows=BQ,
-                cols=D_ROPE,
-                row_cols=HDQK,
-                src_col=D_NOPE,
-                dst_col=R_KV - lo,
-                dtype=dtype,
-            )
-
-        # ---- absorb W_UK into this window of Q, every M tile at once --------
-        absorb_query(
-            b,
-            w_uk=args.w_uk,
-            q_frags=q_frags,
-            wq_lds=wq_lds,
-            qa_lds=qa_lds,
-            tid=lanes.tid,
-            lane=lanes.lane,
-            wave=wave,
-            lane_row=lane_row,
-            lane_kq=lane_kq,
-            w_head_base=w_base,
-            dtype=dtype,
-            threads=THREADS,
-            slices=range(lo // R_TILE, hi // R_TILE),
-            qa_col_base=lo,
-            r_tile=R_TILE,
-            d_nope=D_NOPE,
-            w_cols=W_COLS,
-            absorb_k_iters=ABSORB_K_ITERS,
-            n_tiles_per_wave=ABSORB_N_PER_WAVE,
-            active_waves=ABSORB_ACTIVE_WAVES,
-            m_tiles=M_TILES,
-        )
-
-        # Publish the window. Every wave reads it -- scf.if carries no
-        # results -- and keeps the value only if the window is its own.
-        b.sync()
-        take_window_frags(
-            b,
-            qa_lds,
-            qa_frags,
-            lane_row,
-            win_col,
-            in_win=in_window(b, wave, WAVES_PER_QA, QA_PARTS, p),
-            first=p == 0,
-            dtype=dtype,
-        )
-
-    consts = softmax_consts(b, args.scale)
-    iter_args = softmax_iter_args(consts, M_TILES)
-    iter_args += acc_iter_args(b, M_TILES, N_R_PER_WAVE)
-
-    # Loop-phase buffers: allocated here so they pool onto wq_lds / qa_lds,
-    # whose last readers are the prologue above and are fenced by the loop's
-    # opening barrier.
-    N_SCORE_TILES = M_TILES * K_TILES
-    # Per-wave score partials, one f32x4 C fragment per lane per score tile,
-    # lane-major: every wave stores and loads the same layout, so the exchange
-    # needs no index remap. Allocated before kv_lds on purpose: the packer
-    # reuses a dead slot only from its base, so the small buffer takes the base
-    # slot and kv_lds lands at the start of the dead qa_lds slot, below the
-    # prologue peak. In the other order the small buffer finds every dead slot
-    # overlapping kv_lds and opens a new one above the pool.
-    s_part = b.smem_alloc(
-        F32, [NUM_WARPS * N_SCORE_TILES, WAVE_SIZE * C_PER_LANE], name_hint="s_part"
-    )  # 8192 B
-    kv_lds = b.smem_alloc(dtype, [BK, QA_COLS + WT_PAD], name_hint="kv_lds")  # 18560 B
-    partials = ScorePartials(
-        b, s_part, lanes, num_warps=NUM_WARPS, n_tiles=N_SCORE_TILES
-    )
-
-    # ---- k-loop staging, split so the loads can run ahead ------------------
-    # Splitting the stage into a load half and a store half lets tile ``i+1``'s
-    # global loads issue before tile ``i``'s compute and retire under it,
-    # instead of sitting exposed between the two barriers. One stage is in
-    # flight: ``c_chunks`` vectors of ``C_STAGE_W`` plus ``kr_chunks`` of 4 --
-    # 18 VGPR at BK=16, against 160 of 256 in use.
-    #
-    # The equivalent pipeline in ``attention_tiled_2d`` hides the same latency
-    # with a two-slot LDS double buffer, so its staged registers never cross an
-    # iteration boundary. When this was built the pool was near the 64 KB limit
-    # and a second slot did not fit, so the stage is carried in ``iter_args``
-    # instead.
-    #
-    # The tile loads are buffer loads. Each thread's byte offset inside a page
-    # is loop-invariant and computed once; the page base is workgroup-uniform
-    # and rides in the SGPR soffset. Each k-tile then costs no VALU address
-    # math -- a 64-bit global address per load otherwise. The rsrc range check
-    # applies to voffset alone, which stays inside one page.
-    stager = KvRegStager(
-        b,
-        args,
-        kv_lds,
-        lanes,
-        threads=THREADS,
-        block_k=BK,
-        r_kv=R_KV,
-        d_rope=D_ROPE,
-        page_size=PAGE,
-        c_width=C_STAGE_W,
-        num_records=KV_RSRC_BYTES,
-        dtype=dtype,
-    )
-    pages = PageTable(b, args.block_table, tile.seq_idx, args.bt_stride)
-
-    # Prime the pipeline with tile 0.
-    has_tiles = b.cmp_gt(n_k_tiles, b.const_i32(0))
-    prologue = stager.loads(pages.load(b.const_i32(0), guard=has_tiles))
-    n_stage = len(prologue)
-    iter_args += [(f"stg{j}", v) for j, v in enumerate(prologue)]
-    # The page the first iteration's run-ahead stages (tile 1, clamped to the
-    # last tile), looked up a tile early -- see the run-ahead in the body.
-    last_tile = b.sub(n_k_tiles, b.const_i32(1))
-    iter_args += [("pgn", pages.load(clamp_tile(b, 1, last_tile), guard=has_tiles))]
-
-    def _k_tile_body(k_tile, state, masked: bool):
-        """One key tile. ``masked=False`` drops the per-element causal and
-        ragged masks, for tiles every query row of this tile can fully see."""
-        ms, ls, accs = split_softmax_state(state, M_TILES, N_R_PER_WAVE)
-        staged = list(state[-(n_stage + 1) : -1])
-        pg_next = state[-1]
-        kb_start = b.mul(k_tile, b.const_i32(BK))
-
-        # WAR: the previous iteration's readers of kv_lds must retire
-        # before this iteration overwrites them.
-        b.sync()
-
-        # ---- drain this tile's stage into LDS ------------------------------
-        # The data is already in registers: it was loaded either by the
-        # prologue (tile 0) or by the previous iteration, under that
-        # iteration's compute.
-        stager.store(staged)
-        b.sync()
-
-        # ---- run ahead: issue the next tile's global loads -----------------
-        # These retire under the score GEMM below rather than sitting exposed
-        # between the two barriers. Their page was looked up one iteration
-        # earlier, so they issue without waiting on the block table: a lookup
-        # issued here would need a vmcnt(0) before its readfirstlane, exposing
-        # one load latency per tile and holding the KV loads back until after
-        # the score GEMM. The lookup for the tile after next is issued now and
-        # retires under this whole iteration. Indices are clamped rather than
-        # predicated: past the end they re-read the last tile's page, which is
-        # known to be mapped, and the value is never consumed.
-        staged_next = stager.loads(pg_next)
-        pg_after = pages.load(tile_ahead(b, k_tile, 2, n_k_tiles))
-
-        # ---- S = scale * (Qa @ [C | K_rope]ᵀ); C decodes as (query, key) ---
-        # The K reduction is split across waves: wave w sums k-steps
-        # [w * SCORE_K_PER_WAVE, (w + 1) * SCORE_K_PER_WAVE) and the partials
-        # are combined through s_part below.
-        s_acc = split_k_scores(
-            b,
-            kv_lds,
-            qa_frags,
-            lane_row,
-            score_col,
-            k_steps=SCORE_K_PER_WAVE,
-            m_tiles=M_TILES,
-            k_tiles=K_TILES,
-            sgb_group=SCORE_SGB_GROUP,
-            dtype=dtype,
-        )
-        # Every wave sums the partials in the same order, so the full S -- and
-        # with it the softmax state below -- stays bit-identical across waves.
-        s_acc = partials.combine(s_acc)
-
-        # ---- online softmax, one query per lane ----------------------------
-        mask = key_mask(b, kb_start, lane_kq, keys, k_tiles=K_TILES) if masked else None
-        new_ms = []
-        new_ls = []
-        p_frags = []
-        for mt in range(M_TILES):
-            row = online_softmax_row(
-                b,
-                s_acc[mt],
-                ms[mt],
-                ls[mt],
-                consts,
-                mask=mask,
-                q_abs=row_of(b, qb_start, lane_row, mt) if masked else None,
-            )
-            new_ms.append(row.m)
-            new_ls.append(row.l)
-            # accᵀ holds this lane's query in every register, so the rescale is
-            # one lane-local alpha for all of them.
-            accs[mt] = [scale_frag(b, a, row.alpha) for a in accs[mt]]
-            p_frags.append(pack_p(b, row.p, K_TILES, rne=False))
-
-        # ---- accᵀ += Cᵀ · Pᵀ ------------------------------------------------
-        for kt in range(K_TILES):
-            a_col = shift(b, kt * MFMA_N, lane_kq)
-            for t in range(N_R_PER_WAVE):
-                b_row = wave_tile_row(b, wave, N_R_PER_WAVE, t, lane_row)
-                c_t = gather_keys_t(b, kv_lds, a_col, b_row, dtype)
-                for mt in range(M_TILES):
-                    accs[mt][t] = mfma_16x16x16(
-                        b, dtype, c_t, p_frags[mt][kt], accs[mt][t]
-                    )
-
-        flat_acc = [a for row in accs for a in row]
-        return [*new_ms, *new_ls, *flat_acc, *staged_next, pg_after]
-
-    n_full = full_k_tiles(b, qb_start, keys, n_k_tiles, block_k=BK)
-    res = run_k_loops(
-        b,
-        iter_args,
-        n_full=n_full,
-        tail=(n_full, n_k_tiles),
-        step=1,
-        body=_k_tile_body,
-    )
-
-    # ---- epilogue: normalize, then project the latent out with W_UV -------
-    ms, ls, accs = split_softmax_state(res, M_TILES, N_R_PER_WAVE)
-    inv = [safe_inv_l(b, ls[mt]) for mt in range(M_TILES)]
-
-    # Epilogue buffers: allocated after the loop so they pool onto the loop's
-    # slots. That aliasing is why the barrier below is mandatory -- the loop's
-    # last readers have to retire before accl_lds is written.
-    #
-    # accl_lds holds every M tile but only one wave's latent columns at a time:
-    # a full BQ == 32 accl_lds would be 33024 B on its own. The latent goes
-    # through it one wave's PV tiles at a time, and the W_UV projection walks
-    # only that part's r-slices -- so each weight slice is staged once and
-    # feeds every M tile. supports_mla_prefill guarantees the parts divide.
-    #
-    # accl_lds first: it fits the dead wq_lds slot at the base, and wt_lds then
-    # takes the dead qa_lds slot.
-    R_PART = N_R_PER_WAVE * MFMA_N
-    SLICES_PER_PART = N_SLICES // NUM_WARPS
-    accl_lds = b.smem_alloc(
-        dtype, [BQ, R_PART + WT_PAD], name_hint="accl_lds"
-    )  # 8448 B
-    wt_lds = b.smem_alloc(dtype, [D_V, R_TILE + WT_PAD], name_hint="wt_lds")  # 9216 B
-
-    out_acc = None
-    for p in range(NUM_WARPS):
-        # WAR: the loop's last kv_lds readers (p == 0), or the previous part's
-        # accl_lds / wt_lds readers, must retire before the stores.
-        b.sync()
-        # Wave p owns this part.
-        store_acc_t(b, accl_lds, accs, lanes, owner=p)
-
-        # out_raw[q, v] = sum_r acc_latent[q, r] * W_UV[r, v],
-        # W_UV = w_uk[.., D_NOPE:]. 1/l is linear and commutes with this
-        # projection, so it is applied after. ``expand_latent`` opens each
-        # slice with its own barrier, which fences both the accl_lds stores
-        # above and the WAR on wt_lds.
-        out_acc = expand_latent(
-            b,
-            w_uk=args.w_uk,
-            c_lds=accl_lds,
-            wt_lds=wt_lds,
-            tid=lanes.tid,
-            wave=wave,
-            lane_row=lane_row,
-            lane_kq=lane_kq,
-            w_head_base=w_base,
-            col_offset=D_NOPE,
-            dtype=dtype,
-            threads=THREADS,
-            slices=range(p * SLICES_PER_PART, (p + 1) * SLICES_PER_PART),
-            c_col_base=p * R_PART,
-            r_tile=R_TILE,
-            d_out=D_V,
-            w_cols=W_COLS,
-            exp_k_iters=EXP_K_ITERS,
-            n_tiles_per_wave=N_V_PER_WAVE,
-            m_tiles=M_TILES,
-            out_transposed=True,
-            acc=out_acc,
-        )
-
-    # outᵀ: lane holds query ``lane % 16`` and four consecutive ``v``, so it
-    # normalizes by its own 1/l and writes them as one 8 B store.
-    for t in range(N_V_PER_WAVE):
-        col = wave_tile_row(b, wave, N_V_PER_WAVE, t, lane_kq)
-        for mt in range(M_TILES):
-            store_out_frag(
-                b,
-                args.out,
-                out_acc[mt][t],
-                inv[mt],
-                qrows,
-                q_local=row_of(b, qb_start, lane_row, mt),
-                col=col,
-                d_v=D_V,
-            )
-
-    # One writer per query: wave 0's first 16-lane group holds every query of
-    # each M tile once.
-    store_lse(
-        b,
-        args.lse,
-        ms,
-        ls,
-        qrows,
-        q_start=qb_start,
-        lane_row=lane_row,
-        lane=lanes.lane,
-        wave=wave,
-    )
-    return b.kernel
-
-
-def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
-    """:func:`build_mla_prefill_fwd` with ``heads_per_wg`` heads per workgroup.
-
-    The workgroup owns one query tile of ``heads_per_wg`` consecutive heads and
-    wave ``w`` owns head ``heads_per_wg * blockIdx.y + w`` outright. In the
-    absorbed formulation the latent key tile is shared by every head, so each
-    staged ``kv_lds`` tile feeds all of the workgroup's heads -- the head-in-M
-    packing of the AITER MLA kernels, with M split across waves one head each.
+    A workgroup owns one query block of ``heads_per_wg`` consecutive heads,
+    split into ``q_tiles_per_wg`` row tiles, and runs one wave per
+    ``(head, tile)``: wave ``w`` serves head ``heads_per_wg * blockIdx.y +
+    w // q_tiles_per_wg``. In the absorbed formulation the latent key tile is
+    shared by every head, so each staged ``kv_lds`` tile feeds all of the
+    workgroup's waves -- the head-in-M packing of the AITER MLA kernels, with
+    M split across waves. Each wave loops over the key tiles its causal window
+    reaches, carrying ``(m, l, acc_latent)`` in ``scf.for`` iteration
+    arguments; the per-head up-projections are folded into the query on the
+    way in and into the output on the way out.
 
     Owning a whole head lets every inter-GEMM handoff stay in registers:
 
@@ -1731,7 +1034,12 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
       the W_UV projection's B operand, so it never round-trips through LDS
       either. Only the W_UV slice itself is staged, transposed, because MFMA
       wants ``r`` contiguous and global memory has ``v`` contiguous.
+
+    The loop works in the transposed frame, so each lane owns one query: the
+    softmax row reduce is mostly in-lane, P comes out already laid out as the
+    PV GEMM's B operand, and the rescale by ``alpha`` is lane-local.
     """
+    require_mla_prefill(spec, arch=arch)
     dtype = BF16
     # One wave owns BQ query rows (16, or 32 with agpr_acc) of one head; a
     # workgroup holds heads_per_wg heads x q_tiles_per_wg such row tiles.
@@ -1774,7 +1082,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
     )
 
     # ---- prologue: identify (sequence, query tile, head group) --------------
-    # Same reversed, heaviest-first block walk as the one-head kernel, made
+    # Block ids are walked in reverse, heaviest query tiles first, made
     # chiplet-aware when the spec carries the XCD count.
     q_block_global_idx, head_grp = reversed_q_block(
         b,
@@ -2048,7 +1356,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
             ),
         )
 
-        # ---- online softmax, one query per lane (as in the one-head kernel) ---
+        # ---- online softmax, one query per lane ------------------------------
         mask = key_mask(b, kb_start, lane_kq, keys, k_tiles=K_TILES) if masked else None
         new_ms = []
         new_ls = []
@@ -2078,7 +1386,7 @@ def _build_mla_prefill_fwd_heads(spec: MlaPrefillSpec) -> KernelDef:
                 accs[mt] = rescale_if_any(
                     b, accs[mt], row.alpha, row.any_need, tag=f"{int(masked)}{slot}{mt}"
                 )
-            p_frags.append(pack_p(b, row.p, K_TILES, rne=True))
+            p_frags.append(pack_p(b, row.p, K_TILES))
 
         # ---- accᵀ += Cᵀ · Pᵀ over every latent tile -------------------------
         for gi, (kt, w) in enumerate(pv_groups):

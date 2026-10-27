@@ -44,8 +44,6 @@ from rocke.helpers.attention import mfma_16x16x16_for_dtype as mfma_16x16x16
 from rocke.helpers.attention_fwd_ext import LOG2E, natural_lse_from_log2_stats
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.grid import chiplet_transform_chunked_dynamic
-from rocke.helpers.schedule import DS_READ as SGB_DS_READ
-from rocke.helpers.schedule import MFMA as SGB_MFMA
 from rocke.helpers.spec import SignatureBuilder
 
 from kernels.common._bf16_rne import bf16x4_rne_finite
@@ -112,31 +110,6 @@ def mfma_16x16_c_row(b: IRBuilder, lane, reg: int):
         b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
     )
     return row
-
-
-def wt_swizzle(b: IRBuilder, row: Value, col: Value, r_tile: int) -> Value:
-    """Permute ``wt_lds`` 4-column groups by ``(row >> 4) & mask``.
-
-    ``wt_lds`` is the epilogue's transposed ``W_UV`` slice, ``[d_v, r_tile]``,
-    written one bf16 at a time and read as the MFMA B operand. Within a 16-lane group
-    the store's column ``rl`` is uniform and its row is ``lane * 8 + e``, so at
-    the ``WT_PAD`` stride (2 mod 32 dwords) the row term ``lane * 16`` reaches
-    only two banks. XORing the column group with row bits 4 and up -- lane bits
-    1-3, disjoint from the stride's lane bit 0 -- spreads it across 16.
-
-    On the read side ``row >> 4`` is the MFMA n-tile, constant across the 16
-    lanes of one read, so the twist only relabels which groups a tile reads and
-    the read keeps its conflict-free bank pattern. Groups of four keep the
-    ``n=4`` read contiguous and 8 B-aligned. The mask is the widest power of two
-    (at most 8) dividing the group count, so the XOR never leaves the row.
-    """
-    groups = r_tile // 4
-    mask = 1
-    while mask < 8 and groups % (mask * 2) == 0:
-        mask *= 2
-    twist = b.land(b.lshr(row, b.const_i32(4)), b.const_i32(mask - 1))
-    grp = b.xor(b.lshr(col, b.const_i32(2)), twist)
-    return b.lor(b.shl(grp, b.const_i32(2)), b.land(col, b.const_i32(3)))
 
 
 def on_wave(b: IRBuilder, wave: Value, w: int):
@@ -711,209 +684,53 @@ def w_slice_index(
     return b.add(row, n0 if col_offset is None else b.add(n0, b.const_i32(col_offset)))
 
 
-def expand_latent(
+def expand_k_nope(
     b: IRBuilder,
     *,
-    w_uk,
+    w_uk: Value,
     c_lds,
     wt_lds,
-    tid,
-    wave,
-    lane_row,
-    lane_kq,
-    w_head_base,
-    col_offset: int | None,
-    dtype,
-    threads: int,
-    slices: range,
-    c_col_base: int,
-    r_tile: int,
-    d_out: int,
-    w_cols: int,
-    exp_k_iters: int,
-    n_tiles_per_wave: int,
-    m_tiles: int = 1,
-    out_transposed: bool = False,
-    swizzle: bool = True,
-    acc=None,
-):
-    """``C_lds @ W_UK[head, :, col_offset : col_offset + d_out]``, in registers.
-
-    Only the r-slices in ``slices`` are walked; ``C_lds`` holds latent column
-    ``r`` at column ``r - c_col_base``, and the products accumulate onto
-    ``acc`` (zeros when ``None``) -- so a caller can stage the latent through
-    ``C_lds`` one column range at a time.
-
-    Walks the latent dimension in ``r_tile`` slices, staging each slice of the
-    weight through ``wt_lds`` transposed on the store path (MFMA reads the B
-    operand as ``[n][k]``, and gfx942 has no ``ds_read_tr``). The caller owns the
-    C-layout writeback, and the barrier that opens each slice lives here so a
-    caller that shares the ``wt_lds`` slot with something else needs no extra
-    fencing of its own.
-
-    ``m_tiles`` register-blocks the M axis: the weight slice in ``wt_lds`` is
-    read once and fed to every M tile, so a taller ``C_lds`` costs extra MFMAs
-    and accumulators but no extra LDS traffic on the B side.
-
-    ``swizzle`` applies :func:`wt_swizzle` to the ``wt_lds`` columns; the
-    score probe stages without it. A ``col_offset`` of ``None`` is column 0
-    with no offset add emitted.
-
-    Returns ``acc[m_tile][n_tile]``, one f32x4 per (M tile, n-tile owned by the
-    calling wave).
-    """
-    if acc is None:
-        acc = zero_tiles(b, m_tiles, n_tiles_per_wave)
-    wt_chunks = (r_tile * d_out) // (threads * 8)
-    wt_chunks_per_row = d_out // 8
-    for s in slices:
-        r_base = s * r_tile
-        b.sync()  # WAR: previous slice's (or previous GEMM's) readers must retire
-        for j in range(wt_chunks):
-            rl, n0 = chunk_coords(b, tid, j, threads, wt_chunks_per_row, 8)
-            idx = w_slice_index(b, w_head_base, rl, r_base, w_cols, n0, col_offset)
-            v8 = b.global_load_vN(w_uk, idx, dtype, 8)
-            for e in range(8):
-                row = b.add(n0, b.const_i32(e))
-                b.smem_store_vN(
-                    wt_lds,
-                    [row, wt_swizzle(b, row, rl, r_tile) if swizzle else rl],
-                    b.vec_extract(v8, e),
-                    1,
-                )
-        b.sync()
-        for kk in range(exp_k_iters):
-            a_col = b.add(b.const_i32(r_base - c_col_base + kk * MFMA_K), lane_kq)
-            a_vs = [
-                b.smem_load_vN(
-                    c_lds, shift(b, mt * MFMA_M, lane_row), a_col, dtype=dtype, n=4
-                )
-                for mt in range(m_tiles)
-            ]
-            b_col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-            for t in range(n_tiles_per_wave):
-                b_row = wave_tile_row(b, wave, n_tiles_per_wave, t, lane_row)
-                b_v = b.smem_load_vN(
-                    wt_lds,
-                    b_row,
-                    wt_swizzle(b, b_row, b_col, r_tile) if swizzle else b_col,
-                    dtype=dtype,
-                    n=4,
-                )
-                for mt in range(m_tiles):
-                    if out_transposed:
-                        # outᵀ = W_UVᵀ · accᵀ: the same two fragments, swapped,
-                        # so the C fragment is (m = v, n = query).
-                        acc[mt][t] = mfma_16x16x16(b, dtype, b_v, a_vs[mt], acc[mt][t])
-                    else:
-                        acc[mt][t] = mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
-    return acc
-
-
-def absorb_query(
-    b: IRBuilder,
-    *,
-    w_uk,
-    q_frags,
-    wq_lds,
-    qa_lds,
-    tid,
-    lane,
-    wave,
-    lane_row,
-    lane_kq,
-    w_head_base,
-    dtype,
-    threads: int,
-    slices: range,
-    qa_col_base: int,
+    lanes: Lanes,
+    w_head_base: Value,
+    acc: list[Value],
+    n_slices: int,
     r_tile: int,
     d_nope: int,
     w_cols: int,
-    absorb_k_iters: int,
-    n_tiles_per_wave: int,
-    m_tiles: int,
-    active_waves: int | None = None,
-):
-    """``Qa[q, r] = sum_n Q_nope[q, n] * W_UK[head, r, n]``, written to ``qa_lds``.
+    threads: int,
+    dtype,
+) -> list[Value]:
+    """``K_nope = C_lds @ W_UK[head, :, :d_nope]`` onto ``acc``, in registers.
 
-    ``q_frags[mt][kk]`` is the ``Q_nope`` A operand, already in registers.
-    Only the r-slices in ``slices`` are computed, and latent column ``r`` lands
-    in ``qa_lds`` column ``r - qa_col_base``. Each weight slice is staged once
-    and fed to every M tile.
-
-    The W_UK absorption of the query side. Because
-    ``S[q,k] = Q_nope[q] . K_nope[k] = Q_nope[q] . (C[k] @ W_UK_nope)``
-    equals ``Qa[q] . C[k]``, folding ``W_UK`` into ``Q`` once per workgroup lets
-    the whole key loop run in the 512-wide latent space.
-
-    Unlike :func:`expand_latent` this needs **no** store-path transpose: MFMA
-    reads the B operand as ``[n][k]``, here ``[r][nope]``, which is exactly how
-    ``w_uk[head, r, :d_nope]`` is already laid out. The weight slice therefore
-    goes to LDS with contiguous 8-wide stores.
-
-    Walks ``r`` in ``r_tile`` slices. Each slice's accumulator is complete after
-    the full ``K = d_nope`` reduction, so it is written straight through to
-    ``qa_lds`` and the registers are reused by the next slice.
+    Walks the latent dimension in ``r_tile`` slices, staging each slice of the
+    weight through ``wt_lds`` transposed on the store path (MFMA reads the B
+    operand as ``[n][k]``, and gfx942 has no ``ds_read_tr``); every slice opens
+    with the barrier that retires the previous slice's readers. Wave ``w``
+    owns ``len(acc)`` consecutive 16-wide n-tiles; ``acc[t]`` is one f32x4 C
+    fragment (``m = key``, ``n = d_nope``).
     """
-    wq_chunks_per_row = d_nope // 8
-    for s in slices:
+    n_tiles = len(acc)
+    per_row = d_nope // 8
+    for s in range(n_slices):
         r_base = s * r_tile
-        b.sync()  # WAR on wq_lds; also publishes the Q_rope staging on the first
-        for j in range((r_tile * d_nope) // (threads * 8)):
-            rl, n0 = chunk_coords(b, tid, j, threads, wq_chunks_per_row, 8)
-            idx = w_slice_index(b, w_head_base, rl, r_base, w_cols, n0)
-            b.smem_store_vN(wq_lds, [rl, n0], b.global_load_vN(w_uk, idx, dtype, 8), 8)
         b.sync()
-
-        # With fewer n-tiles than waves (``active_waves``), only the first
-        # ``active_waves`` waves compute; the rest skip to the next slice's
-        # barrier. The gated region holds no barrier and its only outputs are
-        # qa_lds stores, so carrying no results out of the ``scf.if`` is fine.
-        def _slice_compute(r_base: int):
-            acc = zero_tiles(b, m_tiles, n_tiles_per_wave)
-            for kk in range(absorb_k_iters):
-                col = b.add(b.const_i32(kk * MFMA_K), lane_kq)
-                a_vs = [q_frags[mt][kk] for mt in range(m_tiles)]
-                for t in range(n_tiles_per_wave):
-                    b_row = wave_tile_row(b, wave, n_tiles_per_wave, t, lane_row)
-                    b_v = b.smem_load_vN(wq_lds, b_row, col, dtype=dtype, n=4)
-                    for mt in range(m_tiles):
-                        acc[mt][t] = mfma_16x16x16(b, dtype, a_vs[mt], b_v, acc[mt][t])
-            # C decodes as [m = q][n = r - r_base]; scatter it into the latent query.
-            for t in range(n_tiles_per_wave):
-                col = shift(
-                    b,
-                    r_base - qa_col_base,
-                    wave_tile_row(b, wave, n_tiles_per_wave, t, lane_row),
-                )
-                for mt in range(m_tiles):
-                    store_c_frag(
-                        b, qa_lds, acc[mt][t], lane, col=col, row_off=mt * MFMA_M
-                    )
-
-        if active_waves is None:
-            _slice_compute(r_base)
-        else:
-            with b.scf_if(b.cmp_lt(wave, b.const_i32(active_waves))):
-                _slice_compute(r_base)
-
-
-def gather_keys_t(b: IRBuilder, kv_lds, a_col: Value, b_row: Value, dtype) -> Value:
-    """``Cᵀ[r][key]`` A fragment gathered from ``kv_lds`` (``[key][r]``).
-
-    Four keys at a time, one bf16 per key: the transpose happens on the read
-    path, because gfx942 has no ``ds_read_tr``.
-    """
-    return b.vec_pack(
-        [
-            b.vec_extract(
-                b.smem_load_vN(kv_lds, shift(b, i, a_col), b_row, dtype=dtype, n=1), 0
-            )
-            for i in range(4)
-        ],
-        dtype,
-    )
+        for j in range((r_tile * d_nope) // (threads * 8)):
+            rl, n0 = chunk_coords(b, lanes.tid, j, threads, per_row, 8)
+            idx = w_slice_index(b, w_head_base, rl, r_base, w_cols, n0)
+            v8 = b.global_load_vN(w_uk, idx, dtype, 8)
+            for e in range(8):
+                row = b.add(n0, b.const_i32(e))
+                b.smem_store_vN(wt_lds, [row, rl], b.vec_extract(v8, e), 1)
+        b.sync()
+        for kk in range(r_tile // MFMA_K):
+            a_col = b.add(b.const_i32(r_base + kk * MFMA_K), lanes.lane_kq)
+            a_v = b.smem_load_vN(c_lds, lanes.lane_row, a_col, dtype=dtype, n=4)
+            b_col = b.add(b.const_i32(kk * MFMA_K), lanes.lane_kq)
+            for t in range(n_tiles):
+                b_row = wave_tile_row(b, lanes.wave, n_tiles, t, lanes.lane_row)
+                b_v = b.smem_load_vN(wt_lds, b_row, b_col, dtype=dtype, n=4)
+                acc[t] = mfma_16x16x16(b, dtype, a_v, b_v, acc[t])
+    return acc
 
 
 def _agpr_clobbers(base: int, n: int) -> str:
@@ -1177,21 +994,17 @@ def scale_frag(b: IRBuilder, frag: Value, alpha: Value) -> Value:
     return frag
 
 
-def pack_p(b: IRBuilder, p: Sequence[Value], k_tiles: int, *, rne: bool) -> list[Value]:
-    """P as bf16 B fragments, one per key tile.
+def pack_p(b: IRBuilder, p: Sequence[Value], k_tiles: int) -> list[Value]:
+    """P as bf16 B fragments, one per key tile, rounded by
+    :func:`bf16x4_rne_finite`.
 
     The Sᵀ fragment is already the PV GEMM's B operand layout (k = key,
-    n = query), so P never leaves registers. ``rne`` rounds with
-    :func:`bf16x4_rne_finite` instead of ``fptrunc``.
+    n = query), so P never leaves registers.
     """
-    out = []
-    for kt in range(k_tiles):
-        vals = p[kt * C_PER_LANE : (kt + 1) * C_PER_LANE]
-        if rne:
-            out.append(bf16x4_rne_finite(b, vals))
-        else:
-            out.append(b.vec_trunc_f32_to_bf16(b.vec_pack(vals, F32)))
-    return out
+    return [
+        bf16x4_rne_finite(b, p[kt * C_PER_LANE : (kt + 1) * C_PER_LANE])
+        for kt in range(k_tiles)
+    ]
 
 
 def run_k_loops(
@@ -1362,248 +1175,7 @@ def store_probe_scores(
 
 
 # ---------------------------------------------------------------------------
-# One-head layout phases (``build_mla_prefill_fwd``)
-# ---------------------------------------------------------------------------
-
-
-def wave_k_col(b: IRBuilder, rank: Value, k_steps: int, lane_kq: Value) -> Value:
-    """First column of the ``rank``-th run of ``k_steps`` 16-wide k-steps."""
-    return b.add(b.mul(rank, b.const_i32(k_steps * MFMA_K)), lane_kq)
-
-
-def window_rank(b: IRBuilder, wave: Value, waves_per_win: int, parts: int) -> Value:
-    """The wave's rank inside its ``qa_lds`` window."""
-    return wave if parts == 1 else b.mod(wave, b.const_i32(waves_per_win))
-
-
-def in_window(
-    b: IRBuilder, wave: Value, waves_per_win: int, parts: int, p: int
-) -> Value | None:
-    """Whether window ``p`` is the wave's own; ``None`` with a single window."""
-    if parts == 1:
-        return None
-    return b.cmp_eq(b.div(wave, b.const_i32(waves_per_win)), b.const_i32(p))
-
-
-def take_window_frags(
-    b: IRBuilder,
-    qa_lds,
-    qa_frags,
-    lane_row: Value,
-    win_col: Value,
-    *,
-    in_win: Value | None,
-    first: bool,
-    dtype,
-) -> None:
-    """Read the published ``qa_lds`` window into ``qa_frags[kk][mt]``.
-
-    Every wave reads it -- ``scf.if`` carries no results -- and keeps the value
-    only where ``in_win`` (the window is its own); the first window seeds the
-    fragments unconditionally.
-    """
-    for kk, frags in enumerate(qa_frags):
-        for mt in range(len(frags)):
-            v = b.smem_load_vN(
-                qa_lds,
-                shift(b, mt * MFMA_M, lane_row),
-                shift(b, kk * MFMA_K, win_col),
-                dtype=dtype,
-                n=4,
-            )
-            frags[mt] = v if in_win is None or first else b.select(in_win, v, frags[mt])
-
-
-def split_k_scores(
-    b: IRBuilder,
-    kv_lds,
-    qa_frags,
-    lane_row: Value,
-    score_col: Value,
-    *,
-    k_steps: int,
-    m_tiles: int,
-    k_tiles: int,
-    sgb_group: int,
-    dtype,
-):
-    """This wave's ``k_steps``-step partial of ``Sᵀ`` (``m = key``, ``n = query``).
-
-    ``kv_lds`` is the A operand and the query fragment the B operand -- the
-    same two fragments as ``S``, swapped. Every ``sgb_group`` steps the next
-    group's LDS reads are hoisted above the MFMAs they feed; the hint is
-    skipped when the group does not divide the trip count -- a partial
-    trailing block measured worse than no hint.
-    """
-    s_acc = zero_tiles(b, m_tiles, k_tiles)
-    for kk in range(k_steps):
-        col = shift(b, kk * MFMA_K, score_col)
-        a_vs = qa_frags[kk]
-        for kt in range(k_tiles):
-            b_v = b.smem_load_vN(
-                kv_lds, shift(b, kt * MFMA_N, lane_row), col, dtype=dtype, n=4
-            )
-            for mt in range(m_tiles):
-                s_acc[mt][kt] = mfma_16x16x16(b, dtype, b_v, a_vs[mt], s_acc[mt][kt])
-        if k_steps % sgb_group == 0 and (kk + 1) % sgb_group == 0:
-            b.sched_group_barrier(SGB_DS_READ, sgb_group * k_tiles, 0)
-            b.sched_group_barrier(SGB_MFMA, sgb_group * m_tiles * k_tiles, 0)
-    return s_acc
-
-
-class ScorePartials:
-    """Cross-wave sum of split-K score partials through ``s_part``.
-
-    One f32x4 C fragment per lane per score tile, lane-major: every wave
-    stores and loads the same layout, so the exchange needs no index remap.
-    Every wave sums the partials in the same order, so the full S stays
-    bit-identical across waves. The partial rows' previous readers retire
-    before the k-loop's opening barrier, so only the RAW side is fenced.
-    """
-
-    def __init__(
-        self, b: IRBuilder, s_part, lanes: Lanes, *, num_warps: int, n_tiles: int
-    ):
-        self.b, self.s_part = b, s_part
-        self.num_warps, self.n_tiles = num_warps, n_tiles
-        self.part_row = b.mul(lanes.wave, b.const_i32(n_tiles))
-        self.lane_part = b.mul(lanes.lane, b.const_i32(C_PER_LANE))
-
-    def combine(self, s_acc):
-        b = self.b
-        k_tiles = len(s_acc[0])
-        for mt, row_tiles in enumerate(s_acc):
-            for kt, frag in enumerate(row_tiles):
-                row = shift(b, mt * k_tiles + kt, self.part_row)
-                b.smem_store_vN(self.s_part, [row, self.lane_part], frag, C_PER_LANE)
-        b.sync_lds_only()
-        out = []
-        for mt in range(len(s_acc)):
-            out.append([])
-            for kt in range(k_tiles):
-                total = None
-                for w in range(self.num_warps):
-                    part = b.smem_load_vN(
-                        self.s_part,
-                        b.const_i32(w * self.n_tiles + mt * k_tiles + kt),
-                        self.lane_part,
-                        dtype=F32,
-                        n=C_PER_LANE,
-                    )
-                    total = part if total is None else b.fadd(total, part)
-                out[mt].append(total)
-        return out
-
-
-class KvRegStager:
-    """Register-staged key tile: buffer loads now, LDS stores next iteration.
-
-    Each thread's byte offset inside a page is loop-invariant and computed
-    once; the page base rides in the SGPR ``soffset``.
-    """
-
-    def __init__(
-        self,
-        b: IRBuilder,
-        args: KernelArgs,
-        kv_lds,
-        lanes: Lanes,
-        *,
-        threads: int,
-        block_k: int,
-        r_kv: int,
-        d_rope: int,
-        page_size: int,
-        c_width: int,
-        num_records: int,
-        dtype,
-    ):
-        self.b, self.kv_lds, self.tid, self.dtype = b, kv_lds, lanes.tid, dtype
-        self.threads, self.r_kv, self.d_rope, self.page_size = (
-            threads,
-            r_kv,
-            d_rope,
-            page_size,
-        )
-        self.c_width = c_width
-        self.c_chunks = (block_k * r_kv) // (threads * c_width)
-        self.c_per_row = r_kv // c_width
-        self.kr_chunks = (block_k * d_rope) // (threads * 4)
-        self.kr_per_row = d_rope // 4
-        self.c_rsrc, self.kr_rsrc = kv_buffer_rsrcs(b, args, num_records)
-        self.c_voffs = []
-        for j in range(self.c_chunks):
-            m, r0 = chunk_coords(b, self.tid, j, threads, self.c_per_row, c_width)
-            self.c_voffs.append(byte_offset(b, m, r_kv, r0))
-        self.kr_voffs = []
-        for j in range(self.kr_chunks):
-            m, d0 = chunk_coords(b, self.tid, j, threads, self.kr_per_row, 4)
-            self.kr_voffs.append(byte_offset(b, m, d_rope, d0))
-
-    def loads(self, page: Value) -> list[Value]:
-        """Issue one tile's global loads into registers. Touches no LDS.
-
-        ``page`` is the tile's raw block-table entry from :meth:`PageTable.load`.
-        """
-        b = self.b
-        c_soff, kr_soff = page_offsets(
-            b, page, page_size=self.page_size, r_kv=self.r_kv, d_rope=self.d_rope
-        )
-        staged = [
-            b.buffer_load_vN(self.c_rsrc, voff, c_soff, self.dtype, self.c_width)
-            for voff in self.c_voffs
-        ]
-        staged += [
-            b.buffer_load_vN(self.kr_rsrc, voff, kr_soff, self.dtype, 4)
-            for voff in self.kr_voffs
-        ]
-        return staged
-
-    def store(self, staged: Sequence[Value]) -> None:
-        """Drain a staged tile into ``kv_lds``, ``[key][r]``.
-
-        That is the natural layout for the score GEMM's B operand. The latent
-        PV reads the same buffer transposed, one bf16 per key.
-        """
-        b = self.b
-        for j in range(self.c_chunks):
-            m, r0 = chunk_coords(
-                b, self.tid, j, self.threads, self.c_per_row, self.c_width
-            )
-            b.smem_store_vN(self.kv_lds, [m, r0], staged[j], self.c_width)
-        for j in range(self.kr_chunks):
-            m, d0 = chunk_coords(b, self.tid, j, self.threads, self.kr_per_row, 4)
-            b.smem_store_vN(
-                self.kv_lds,
-                [m, b.add(d0, b.const_i32(self.r_kv))],
-                staged[self.c_chunks + j],
-                4,
-            )
-
-
-def store_acc_t(b: IRBuilder, lds, accs, lanes: Lanes, *, owner: int) -> None:
-    """Wave ``owner`` writes its ``accᵀ`` back to ``lds`` as ``[query][r]`` bf16.
-
-    ``accᵀ`` puts one query and four consecutive latent columns in each lane,
-    so each fragment is a single 8 B store. Stores only, no barrier: safe in
-    the wave-gated region.
-    """
-    with on_wave(b, lanes.wave, owner):
-        _store_acc_t(b, lds, accs, lanes.lane_row, lanes.lane_kq)
-
-
-def _store_acc_t(b, lds, accs, lane_row, lane_kq):
-    for t in range(len(accs[0])):
-        col = shift(b, t * MFMA_N, lane_kq)
-        for mt, row_tiles in enumerate(accs):
-            row = shift(b, mt * MFMA_M, lane_row)
-            b.smem_store_vN(
-                lds, [row, col], b.vec_trunc_f32_to_bf16(row_tiles[t]), C_PER_LANE
-            )
-
-
-# ---------------------------------------------------------------------------
-# One-wave-per-head layout phases (``_build_mla_prefill_fwd_heads``)
+# Forward-kernel phases (``build_mla_prefill_fwd``)
 # ---------------------------------------------------------------------------
 
 
