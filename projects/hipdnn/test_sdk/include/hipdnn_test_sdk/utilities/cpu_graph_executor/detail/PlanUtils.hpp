@@ -19,16 +19,19 @@ struct DiagonalBandParams
 };
 
 /// Extracts diagonal band mask parameters from SDPA attributes (forward or backward).
-/// Handles deprecated causal_mask / causal_mask_bottom_right flags.
+/// A deprecated causal_mask / causal_mask_bottom_right flag is merged the way cuDNN's setters
+/// compose: it sets right_bound=0 (and BOTTOM_RIGHT alignment for causal_mask_bottom_right), then
+/// any left_bound, right_bound other than -1, and (for causal_mask) diagonal_alignment apply on
+/// top. Setting both flags is rejected.
 /// Works with both SdpaAttributes and SdpaBackwardAttributes FlatBuffers types
 /// (they expose identical accessor signatures for mask fields).
 template <typename SdpaAttributesType>
 DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttributes,
                                              const char* planName)
 {
-    int64_t leftBound
+    const int64_t leftBound
         = nodeAttributes.left_bound().has_value() ? nodeAttributes.left_bound().value() : -1;
-    int64_t rightBound
+    const int64_t rightBound
         = nodeAttributes.right_bound().has_value() ? nodeAttributes.right_bound().value() : -1;
 
     if(leftBound < -1 || rightBound < -1)
@@ -38,29 +41,22 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
             + std::to_string(leftBound) + ", right_bound=" + std::to_string(rightBound) + ")");
     }
 
-    bool isTopLeft = nodeAttributes.diagonal_alignment()
-                     == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    const bool isTopLeft = nodeAttributes.diagonal_alignment()
+                           == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    const bool causalDeprecated = nodeAttributes.causal_mask();
+    const bool bottomRightDeprecated = nodeAttributes.causal_mask_bottom_right();
 
-    // Validate mutually exclusive deprecated attributes
-    if(nodeAttributes.causal_mask() && nodeAttributes.causal_mask_bottom_right())
+    if(causalDeprecated && bottomRightDeprecated)
     {
-        throw std::invalid_argument("Cannot set both causal_mask and causal_mask_bottom_right. "
-                                    "Use diagonal_alignment={TOP_LEFT|BOTTOM_RIGHT} with "
-                                    "left_bound=-1, right_bound=0 instead.");
+        throw std::invalid_argument(std::string(planName)
+                                    + ": cannot set both causal_mask and causal_mask_bottom_right. "
+                                      "Use diagonal_alignment={TOP_LEFT|BOTTOM_RIGHT} with "
+                                      "left_bound=-1, right_bound=0 instead.");
     }
 
-    // Check deprecated attributes
-    if(nodeAttributes.causal_mask())
+    if(causalDeprecated || bottomRightDeprecated)
     {
-        leftBound = -1;
-        rightBound = 0;
-        isTopLeft = true;
-    }
-    if(nodeAttributes.causal_mask_bottom_right())
-    {
-        leftBound = -1;
-        rightBound = 0;
-        isTopLeft = false;
+        return {leftBound, rightBound >= 0 ? rightBound : 0, causalDeprecated && isTopLeft};
     }
 
     return {leftBound, rightBound, isTopLeft};

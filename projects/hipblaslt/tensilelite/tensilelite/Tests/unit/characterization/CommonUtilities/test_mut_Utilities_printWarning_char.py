@@ -4,14 +4,14 @@
 ################################################################################
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.Utilities.printWarning``.
+``tensilelite.Common.Utilities.printWarning``.
 
 Pins the EXACT warning line emitted to stdout so that mutations to the format
 string (e.g. wrapping it in ``XX...XX`` sentinels) are detected. The existing
 ``in``-based assertion survives such mutations because the original prefix is
 still a substring of the mutated output."""
 
-from Tensile.Common.Utilities import printWarning
+from tensilelite.Common.Utilities import printWarning
 
 import pytest
 

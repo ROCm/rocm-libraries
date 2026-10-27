@@ -21,7 +21,7 @@
  * of the Python MFMA_ATOMS tuple:
  *
  *     MFMA_ATOMS = MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS
- *                  + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+ *                  + MFMA_FP8_ATOMS
  *
  *   MFMA_F16_ATOMS  = (f16_4x4x4, f16_16x16x16, f16_16x16x32,
  *                      f16_32x32x8, f16_32x32x16)
@@ -30,7 +30,6 @@
  *                      bf16_32x32x16)
  *   MFMA_FP8_ATOMS  = (fp8_16x16x32, fp8_32x32x16, bf8_16x16x32,
  *                      bf8_32x32x16, fp8_16x16x128)
- *   MFMA_MX_ATOMS   = (fp4_16x16x128, fp6_16x16x96)
  *
  * _BY_SHAPE keys each by (dtype_in, m, n, k). All keys are unique, so the linear
  * scan below is order-independent for correctness, but the catalog order is
@@ -61,9 +60,6 @@ static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
     {16, 16, 32, 8, 8, 4, "bf8e5m2", "f32", "mfma_f32_16x16x32_bf8"},
     {32, 32, 16, 8, 8, 16, "bf8e5m2", "f32", "mfma_f32_32x32x16_bf8"},
     {16, 16, 128, 32, 32, 4, "fp8e4m3", "f32", "mfma_f32_16x16x128_fp8"},
-    /* ---- MFMA_MX_ATOMS ---- */
-    {16, 16, 128, 16, 16, 4, "fp4", "f32", "mfma_f32_16x16x128_fp4"},
-    {16, 16, 96, 12, 12, 4, "fp6", "f32", "mfma_f32_16x16x96_fp6"},
 };
 
 #define ROCKE_NUM_MFMA_ATOMS ((int)(sizeof(ROCKE_MFMA_ATOMS) / sizeof(ROCKE_MFMA_ATOMS[0])))

@@ -137,7 +137,7 @@ static bool isRemovedDsPacingFlag(const std::string& a) {
     for (const char* flag : {"--ds-read-throttle-latency", "--ds-read-throttle-transition-factor",
                              "--ds-read-throttle-transition-entries", "--ds-read-per-cap",
                              "--ds-issue-cap-span-cycles", "--ds-issue-cap-mode", "--ds-slot-first",
-                             "--enable-wmma-hide-budget-prescan"}) {
+                             "--enable-wmma-hide-budget-prescan", "--barrier-half-slack"}) {
         const std::string f = flag;
         if (a == f || a.starts_with(f + "=")) return true;
     }
@@ -202,7 +202,9 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
-                arg == "--ds-spread" || arg.starts_with("--wmma-barrier-cover-cycles=") ||
+                arg == "--ds-spread" || arg == "--no-ds-spread" ||
+                arg.starts_with("--barrier-half-slack=") ||
+                arg.starts_with("--wmma-barrier-cover-cycles=") ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
                 arg.starts_with("--ds-read-cycles-per-load=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
@@ -212,7 +214,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--enable-wmma-hide-budget-prescan" ||
                 arg == "--enable-esm2-track-valu-vsrc" ||
                 arg.starts_with("--wait-alu-hold-strict-count=") ||
-                arg.starts_with("--prefetch-lead-wmmas=") ||
+                arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
@@ -593,6 +595,8 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.enableESM2TrackValuVsrc = true;
         } else if (a.starts_with("--wait-alu-hold-strict-count=")) {
             passFeatureConfig.dagFeatures.waitAluHoldStrictCount = std::stoi(a.substr(29));
+        } else if (a == "--wait-alu-scoreboard") {
+            passFeatureConfig.dagFeatures.waitAluScoreboard = true;
         } else if (a.starts_with("--prefetch-lead-wmmas=")) {
             passFeatureConfig.dagFeatures.prefetchLeadWmmas = std::stoi(a.substr(22));
         } else if (a.starts_with("--prefetch-lead-min-stage-wmmas=")) {

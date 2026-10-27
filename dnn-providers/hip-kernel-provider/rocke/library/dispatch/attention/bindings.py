@@ -83,6 +83,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         problem.fp8_fnuz
     ):
         raise ValueError("request FP8 encoding disagrees with attention problem")
+    if bool(request.emit_lse) != problem.emit_lse:
+        raise ValueError(
+            f"request.emit_lse={bool(request.emit_lse)} disagrees with "
+            f"problem.emit_lse={problem.emit_lse}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -339,6 +344,24 @@ def bind_dense_attention_torch(
     )
 
 
+_ADDITIVE_BIAS_INPUTS = (
+    "additive_bias",
+    "additive_bias_batch_stride",
+    "additive_bias_head_stride",
+    "additive_bias_sq_stride",
+)
+
+
+def _reject_additive_bias_inputs(inputs: Mapping[str, Any], where: str) -> None:
+    supplied = [name for name in _ADDITIVE_BIAS_INPUTS if name in inputs]
+    if supplied:
+        raise ValueError(
+            "explicit tuning bindings do not support additive bias; got "
+            + ", ".join(supplied)
+            + f" in {where}"
+        )
+
+
 def bind_tuning_attention_torch(
     request, spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -367,6 +390,20 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
+    # The caller-owned LSE buffer must be bound exactly when the problem asks
+    # for it, so misuse fails here and not at the first launch. Its shape,
+    # dtype, device and overlap are validated by the runner, which needs torch.
+    has_lse = tensors.get("lse") is not None
+    if problem.emit_lse and not has_lse:
+        raise ValueError("emit_lse=True requires tensors['lse']")
+    if has_lse and not problem.emit_lse:
+        raise ValueError("tensors['lse'] was given but emit_lse is off")
+    # Explicit specs are built without additive bias (the spec makers reject
+    # it), so refuse a bias-on problem or bias inputs here instead of launching
+    # a kernel that would silently ignore them.
+    if problem.use_additive_bias:
+        raise ValueError("explicit tuning bindings do not support additive bias")
+    _reject_additive_bias_inputs(tensors, "tensors")
     unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
     num_blocks = validate_tuning_attention_tensors(
         problem,
@@ -384,6 +421,7 @@ def bind_tuning_attention_torch(
         scale = 1.0 / math.sqrt(int(problem.head_size))
 
     def launch(**_kw):
+        _reject_additive_bias_inputs(_kw, "launch kwargs")
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],
@@ -401,6 +439,7 @@ def bind_tuning_attention_torch(
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,
+            lse=_kw.get("lse", tensors.get("lse")),
         )
 
     return TorchBinding(

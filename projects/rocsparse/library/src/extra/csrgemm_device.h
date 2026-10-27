@@ -156,17 +156,11 @@ namespace rocsparse
         // clang-format on
     }
 
-    template <uint32_t HASHSIZE, typename J>
-    constexpr bool exceeding_smem_nnz(uint32_t shared_mem_optin)
-    {
-        return (sizeof(J) * HASHSIZE) > shared_mem_optin;
-    }
-
     template <uint32_t HASHSIZE, typename J, typename T>
-    constexpr bool exceeding_smem(uint32_t shared_mem_optin)
+    constexpr bool csrgemm_exceeding_smem(uint32_t shared_mem_optin)
     {
-        return (((sizeof(J) + sizeof(T)) * HASHSIZE + sizeof(J) * (1024 / 32 + 1))
-                > shared_mem_optin);
+        return shared_memory_is_too_small(
+            (sizeof(J) + sizeof(T)) * HASHSIZE + sizeof(J) * (1024 / 32 + 1), shared_mem_optin);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I, typename J>
@@ -204,10 +198,10 @@ namespace rocsparse
         else if(nprod <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 3]; int_prod[row] = 3; }
         else if(nprod <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 4]; int_prod[row] = 4; }
         else if(nprod <=  4096) { ++sdata[hipThreadIdx_x * GROUPS + 5]; int_prod[row] = 5; }
-        else if(nprod <=  8192) { ++sdata[hipThreadIdx_x * GROUPS + 6]; int_prod[row] = 6; }
-        else if(nprod <=  16384 && !exceeding_smem_nnz<16384, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 7]; int_prod[row] = 7; }
-        else if(nprod <=  32768 && !exceeding_smem_nnz<32768, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 8]; int_prod[row] = 8; }
-        else if(nprod <=  65536 && !exceeding_smem_nnz<65536, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 9]; int_prod[row] = 9; }
+        else if(nprod <=  8192 && !shared_memory_is_too_small<8192, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 6]; int_prod[row] = 6; }
+        else if(nprod <=  16384 && !shared_memory_is_too_small<16384, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 7]; int_prod[row] = 7; }
+        else if(nprod <=  32768 && !shared_memory_is_too_small<32768, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 8]; int_prod[row] = 8; }
+        else if(nprod <=  65536 && !shared_memory_is_too_small<65536, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 9]; int_prod[row] = 9; }
         else                    { ++sdata[hipThreadIdx_x * GROUPS + 10]; int_prod[row] = 10; }
             // clang-format on
         }
@@ -261,10 +255,10 @@ namespace rocsparse
         else if(nnz <=   512) { ++sdata[hipThreadIdx_x * GROUPS + 3]; workspace[row] = 3; }
         else if(nnz <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 4]; workspace[row] = 4; }
         else if(nnz <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 5]; workspace[row] = 5; }
-        else if(nnz <=  4096 && !exceeding_smem<4096, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
-        else if(nnz <=  8192 && !exceeding_smem<8192, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 7]; workspace[row] = 7; }
-        else if(nnz <=  16384 && !exceeding_smem<16384, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 8]; workspace[row] = 8; }
-        else if(nnz <=  32768 && !exceeding_smem<32768, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 9]; workspace[row] = 9; }
+        else if(nnz <=  4096 && !csrgemm_exceeding_smem<4096, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
+        else if(nnz <=  8192 && !csrgemm_exceeding_smem<8192, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 7]; workspace[row] = 7; }
+        else if(nnz <=  16384 && !csrgemm_exceeding_smem<16384, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 8]; workspace[row] = 8; }
+        else if(nnz <=  32768 && !csrgemm_exceeding_smem<32768, J, T>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 9]; workspace[row] = 9; }
         else                  { ++sdata[hipThreadIdx_x * GROUPS + 10]; workspace[row] = 10; }
             // clang-format on
         }

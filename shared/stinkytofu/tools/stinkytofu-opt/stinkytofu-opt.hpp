@@ -22,7 +22,9 @@
  * ************************************************************************ */
 #pragma once
 
+#include <filesystem>
 #include <functional>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,6 +36,7 @@
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/support/PassArguments.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -41,6 +44,7 @@
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
@@ -71,8 +75,10 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/TieExecMaskedWritesPass.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
@@ -89,108 +95,6 @@ struct PassInfo {
     std::function<std::unique_ptr<Pass>(const std::vector<std::string>& args)> creator;
 };
 
-// Helper: returns true if `args` contains the literal flag name `flag`
-// (case-sensitive, exact match).
-inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
-    for (const auto& a : args)
-        if (a == flag) return true;
-    return false;
-}
-
-// Helper: value of `key=value` in `args`, or `defaultValue` when absent.
-inline std::string passArgValue(const std::vector<std::string>& args, const char* key,
-                                std::string defaultValue = {}) {
-    const std::string prefix = std::string(key) + "=";
-    for (const auto& a : args) {
-        if (a.starts_with(prefix)) return a.substr(prefix.size());
-    }
-    return defaultValue;
-}
-
-// Helper: every value of `key=value` in `args`, in order.
-//
-// Pass arguments are comma-separated, so a comma cannot also separate items
-// inside one value. A list is therefore written either as repeated keys
-// (`rules=A,rules=B`) or joined with '+' (`rules=A+B`); both are accepted.
-inline std::vector<std::string> passArgValues(const std::vector<std::string>& args,
-                                              const char* key) {
-    const std::string prefix = std::string(key) + "=";
-    std::vector<std::string> values;
-    for (const auto& a : args) {
-        if (!a.starts_with(prefix)) continue;
-        const std::string rest = a.substr(prefix.size());
-        size_t start = 0;
-        while (start <= rest.size()) {
-            const size_t plus = rest.find('+', start);
-            std::string tok =
-                rest.substr(start, plus == std::string::npos ? std::string::npos : plus - start);
-            if (!tok.empty()) values.push_back(std::move(tok));
-            if (plus == std::string::npos) break;
-            start = plus + 1;
-        }
-    }
-    return values;
-}
-
-// Helper: parse a class list like "vs", "v", or "s" into a RegClassSet. Used for
-// both the lift scope and the allocation scope. Returns nullopt for an unknown
-// class letter, so a typo is reported rather than silently selecting something
-// else.
-inline std::optional<RegClassSet> parseRegClasses(const std::string& spec) {
-    RegClassSet classes;
-    for (char c : spec) {
-        switch (c) {
-            case 'v':
-                classes.add(RegType::V);
-                break;
-            case 's':
-                classes.add(RegType::S);
-                break;
-            default:
-                return std::nullopt;
-        }
-    }
-    if (classes.empty()) return std::nullopt;
-    return classes;
-}
-
-// Helper: parse "s0" as one register or "s0:19" as the inclusive run s0..s19.
-// Returns nullopt for anything else, so a typo is reported rather than holding
-// registers nobody named.
-inline std::optional<AllocationScope::HeldRange> parseHeldRange(const std::string& spec) {
-    if (spec.size() < 2) return std::nullopt;
-    RegType type = RegType::UNKNOWN;
-    if (spec[0] == 's')
-        type = RegType::S;
-    else if (spec[0] == 'v')
-        type = RegType::V;
-    else
-        return std::nullopt;
-
-    const auto digits = [](const std::string& text) -> std::optional<uint32_t> {
-        if (text.empty()) return std::nullopt;
-        uint32_t value = 0;
-        for (char c : text) {
-            if (c < '0' || c > '9') return std::nullopt;
-            value = value * 10 + static_cast<uint32_t>(c - '0');
-        }
-        return value;
-    };
-
-    const std::string body = spec.substr(1);
-    const size_t colon = body.find(':');
-    if (colon == std::string::npos) {
-        const std::optional<uint32_t> only = digits(body);
-        if (!only.has_value()) return std::nullopt;
-        return AllocationScope::HeldRange{type, *only, *only};
-    }
-
-    const std::optional<uint32_t> start = digits(body.substr(0, colon));
-    const std::optional<uint32_t> end = digits(body.substr(colon + 1));
-    if (!start.has_value() || !end.has_value() || *end < *start) return std::nullopt;
-    return AllocationScope::HeldRange{type, *start, *end};
-}
-
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
@@ -201,6 +105,7 @@ const std::vector<PassInfo> availablePasses = {
      }},
     {"StinkyMergeBarrierPass", [](const auto&) { return createStinkyMergeBarrierPass(); }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
+    {"TieExecMaskedWritesPass", [](const auto&) { return createTieExecMaskedWritesPass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
     {"SwInstructionPrefetchRelDynamicPass",
@@ -248,6 +153,9 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
+    // Collapses every block back into the flat entry block, undoing
+    // CFGBuilderPass. Labels survive, so a later CFGBuilderPass splits again.
+    {"FlattenCFGPass", [](const auto&) { return createFlattenCFGPass(); }},
     // Erases blocks not reachable from the entry along CFG successor edges.
     // Run after CFGBuilderPass / LongBranchLoweringPass; an incomplete CFG
     // would make this delete live targets.
@@ -275,8 +183,17 @@ const std::vector<PassInfo> availablePasses = {
          options.verify = !hasPassArg(args, "noVerify");
          return createLiftAsmRegistersToSSAPass(options);
      }},
-    // RegisterAllocationPass accepts:
-    //   allocator=<name>  — registry name: greedy (default) or legacy
+    // RegisterAllocationPass reads the configuration every caller shares
+    // (RegisterAllocationConfig.hpp; docs/developer/register-allocation.md,
+    // "Configuring allocation"), with the tool's defaults: shadow, classes=v,
+    // allocator=greedy. A mode word may come anywhere in the list:
+    //   shadow (default), apply, force, or 0..3 -- apply writes the colouring
+    //                       through destroyAttachedSSA (also runs
+    //                       syncRegisterSymbols; see
+    //                       docs/developer/register-allocation.md §11.1)
+    //   allocator=<name>  — registry name: greedy (default), greedy-compact,
+    //                       legacy, ... Join several with '+' to try them in
+    //                       turn; the first that colours the function is used
     //   classes=<vs>      — classes the policy may move (default v). Anything else
     //                       keeps the register it was lifted from, so classes=s
     //                       reallocates SGPRs and leaves every VGPR alone. Must be
@@ -286,52 +203,47 @@ const std::vector<PassInfo> availablePasses = {
     //   pinReg=<range>    — leave these registers exactly as found: each keeps
     //                       the value lifted into it and takes no other. One as
     //                       pinReg=s0, an inclusive run as pinReg=s0:19. Repeat
-    //                       the key for disjoint runs
-    //   apply             — write the colouring through destroyAttachedSSA
-    //                       (also runs syncRegisterSymbols; see
-    //                       docs/developer/register-allocation.md §11.1)
+    //                       the key or join with '+' for disjoint runs
+    //   unbankable=auto|hold|allocate — what to do about an operand whose field
+    //                       cannot select a VGPR bank. allocate places it under
+    //                       a ceiling, before the free blocks; hold keeps the
+    //                       register the producer chose; auto (default) tries
+    //                       allocate and falls back to hold
+    //   quadrant=any|prefer — prefer searches the VGPR bank the producer used
+    //                       for each block before the rest of the file
     //   report            — emit the shadow comparison (peak, highest, regionPeak)
     //   emitRegisterMap   — after apply, insert a producer→allocated TEXTBLOCK
     //   emitSymbolBreadcrumbs — after apply, append "// s18 was sgprTmp" comments
     //                       on operands whose symbolic name was stripped
+    //   dumpBlocks=<prefix> — write each attempt's placement table to
+    //                       <prefix><allocator>.<allocate|hold>.tsv, creating
+    //                       the directory; only the greedy allocators write one
     //   noVerify          — skip AllocationVerifier
     //   rules=<name>      — force this architecture rule Active, ignoring the
     //                       chip's own capability gate. Repeat the key or join
     //                       with '+' for several; an unknown name is an error,
     //                       because a test that enables nothing still passes
     //   rules=all         — force every rule the triple declares
+    //   noRule=<name>     — force this rule Off, so a rule the chip ships
+    //                       Active can be compared against without a rebuild.
+    //                       Same spelling of lists as rules=
     //   ruleAudit         — force every declared rule to Audit, which reports
     //                       against the producer's colouring without enforcing
     //   noRules           — behave as if the chip declared no rules
     {"RegisterAllocationPass",
      [](const std::vector<std::string>& args) -> std::unique_ptr<Pass> {
-         RegisterAllocationOptions options;
-         options.allocator = passArgValue(args, "allocator", options.allocator);
-         const std::optional<RegClassSet> classes =
-             parseRegClasses(passArgValue(args, "classes", "v"));
-         if (!classes.has_value()) return nullptr;
-         options.allocate = *classes;
-         options.regionEnd = passArgValue(args, "regionEnd", "");
-         for (const std::string& name : passArgValues(args, "pinReg")) {
-             const std::optional<AllocationScope::HeldRange> range = parseHeldRange(name);
-             if (!range.has_value()) return nullptr;
-             options.pinRegisters.push_back(*range);
+         Expected<RegisterAllocationConfig> config =
+             parseRegisterAllocationConfig(args, RegisterAllocationDialect::Tool);
+         if (config.hasError()) {
+             std::cerr << "Error: RegisterAllocationPass: " << config.getError() << "\n";
+             return nullptr;
          }
-         options.applyToOperands = hasPassArg(args, "apply");
-         options.report = hasPassArg(args, "report");
-         options.emitRegisterMap = hasPassArg(args, "emitRegisterMap");
-         options.emitSymbolBreadcrumbs = hasPassArg(args, "emitSymbolBreadcrumbs");
-         options.verify = !hasPassArg(args, "noVerify");
-         options.rules.disableAll = hasPassArg(args, "noRules");
-         options.rules.auditAll = hasPassArg(args, "ruleAudit");
-         for (std::string& name : passArgValues(args, "rules")) {
-             if (name == "all") {
-                 options.rules.activateAll = true;
-                 continue;
-             }
-             options.rules.activate.push_back(std::move(name));
+         if (const std::string& prefix = config->options.blockDumpPrefix; !prefix.empty()) {
+             std::error_code ignored;
+             std::filesystem::create_directories(std::filesystem::path(prefix).parent_path(),
+                                                 ignored);
          }
-         return createRegisterAllocationPass(std::move(options));
+         return createRegisterAllocationPass(std::move(config->options));
      }},
     // DumpStinkyModulePass accepts:
     //   ssaForm  — print attached SSA values instead of physical registers

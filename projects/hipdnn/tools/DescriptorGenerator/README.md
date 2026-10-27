@@ -28,11 +28,26 @@ python3 -m venv .venv
 .venv/bin/python generate.py \
     --config configs/matmul.yaml \
     --output-dir ../../
+
+# Preview the files a mode would write, without writing them
+.venv/bin/python generate.py \
+    --config configs/matmul.yaml \
+    --output-dir /tmp/codegen-output \
+    --mode full --dry-run
 ```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--config PATH` | YAML config file (required) |
+| `--output-dir PATH` | Output root directory (required) |
+| `--mode {backend,frontend,full}` | `backend` (default): descriptor, packer, unpacker, backend and integration tests, backend fragments. `frontend`: Attributes header, Node header, frontend tests, frontend fragments. `full`: both. |
+| `--dry-run` | List the files that the mode would generate. Do not write files. |
 
 ## Output
 
-Each run generates:
+Each `--mode backend` run generates:
 
 | File | Purpose |
 |------|---------|
@@ -45,7 +60,11 @@ Each run generates:
 | `tests/frontend/Integration<Op>DescriptorLifting.cpp` | Lifting round-trip, tensor sharing, no-finalization, and per-scalar tests |
 | `frontend/include/hipdnn_frontend/detail/<Op>Unpacker.hpp` | Frontend unpacker (inverse of packer) |
 | `backend/tests/descriptors/Test<Op>OperationFromNode.cpp` | fromNode() round-trip tests |
-| `fragments/*.txt` | Code snippets for manual insertion into existing files |
+| `fragments/*.txt` | Code snippets for manual insertion into existing files, including the work-model fragments: `fbs_tensor_fields.txt` (schema annotations), `node_flops_overload.txt`, `logical_flops_case.txt` and `work_model_test_case.txt` |
+| `test_sdk/include/hipdnn_test_sdk/constants/<Op>Constants.hpp` | Shared test constants (only when `test_data.constants_include` is not set) |
+| `backend/include/<header>.h`, `fragments/mode_*_<field>.txt` | Mode enum header and plumbing fragments (only for `mode` fields with an `enum_def`) |
+
+A `--mode frontend` run generates the Attributes header (`frontend/include/hipdnn_frontend/attributes/`), the Node header (`frontend/include/hipdnn_frontend/node/`, unless `frontend.generate_node: false`), frontend tests (`frontend/tests/`), and the frontend fragments.
 
 See `CLAUDE.md` for post-generation integration steps.
 
@@ -62,15 +81,16 @@ The end-to-end workflow for adding a new operation type:
 7. **Update CMake** build files
 8. **Build and test** to verify everything compiles and passes
 9. **Review the generated integration tests** — both `Integration<Op>DescriptorLowering.cpp` and `Integration<Op>DescriptorLifting.cpp` now ship with full round-trip + per-scalar coverage; add operation-specific tests (multi-input variants, multi-op graphs) on top following the ConvFprop reference at `tests/frontend/IntegrationConvFpropDescriptorLowering.cpp`
+10. **Add the work model** — annotate the schema (`fbs_tensor_fields.txt`), regenerate `node_operands_generated.h`, and give the op a FLOP formula or a `NO_COUNTING_CONVENTION` entry (`node_flops_overload.txt`, `logical_flops_case.txt`, `work_model_test_case.txt`)
 
-See `CLAUDE.md` for detailed integration steps (especially steps 4-7).
+See `CLAUDE.md` for detailed integration steps (especially steps 4-7 and 12).
 
 ### Creating a YAML Config from an FBS Schema
 
 The YAML config maps FBS schema fields to hipDNN backend API concepts. To create a new config:
 
 1. Read the FBS schema in `flatbuffers_sdk/schemas/`
-2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`
+2. Identify tensor UID fields (`*_tensor_uid: long`) → `tensor_fields`; a field annotated `work_data_dependent` sets `work_data_dependent: true`
 3. Identify data fields (vectors, enums, scalars) → `data_fields`
 4. Look at existing frontend node/attributes classes for naming conventions
 5. Use `convolution_fwd.yaml` as the reference config
@@ -112,12 +132,15 @@ operation:
       # accessor name (a trailing "()" is stripped) when the backend tensor
       # name does not map to any frontend tensor — e.g., SDPA's `attn_mask`
       # uses `frontend_getter: "get_bias"`. See "Recent Changes" for details.
+      work_data_dependent: false      # true when the tensor's contents, not its shape,
+                                      # decide the node's work (valid lengths, page tables,
+                                      # routing offsets); emits the schema annotation
 
   data_fields:
     - name: "alpha"
       fbs_field: "alpha"
       attr_name: "HIPDNN_ATTR_MY_OP_ALPHA"
-      type: "scalar_float"            # vector_int64 | enum | scalar_float | scalar_int64 | bool
+      type: "scalar_float"            # vector_int64 | mode | enum (legacy) | scalar_float | scalar_int32 | scalar_int64 | bool
       required: true
       frontend_getter: "get_alpha()"  # data_fields[].frontend_getter is still honored
       shared: false                   # true if attribute enum already exists from another op
@@ -135,6 +158,7 @@ operation:
       required: false
       test_uids: [100, 101]           # UIDs for test tensor descriptors
       test_label: "PeerStats"          # Label used in generated test case names
+      work_data_dependent: false      # as for tensor_fields
 
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_MY_OP_COMP_TYPE"
@@ -162,6 +186,12 @@ operation:
 | `batchnorm_inference.yaml` | Batch normalization inference |
 | `batchnorm_inference_variance_ext.yaml` | Batch normalization inference (variance extension) |
 | `reduction.yaml` | Reduction operations |
+| `layernorm_backward.yaml` | Layer normalization backward |
+| `rmsnorm_backward.yaml` | RMS normalization backward |
+| `resample_fwd.yaml` | Resample forward |
+| `resample_bwd.yaml` | Resample backward |
+| `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication (checked-in `finalize()` is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
+| `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
 | `sdpa.yaml` | Scaled dot-product attention forward (packer/unpacker only; Attributes class is hand-maintained — see `CLAUDE.md` "Hand-maintained ops") |
 
 ## Third-Party Libraries
@@ -187,7 +217,9 @@ The codegen overhaul added some YAML keys, removed others, and folded `--mode li
 | YAML `type` | C++ Storage | Backend API Type | Use For |
 |-------------|-------------|------------------|---------|
 | `vector_int64` | `std::vector<int64_t>` | `HIPDNN_TYPE_INT64` | Padding, strides, dimensions |
-| `enum` | FBS enum type | `HIPDNN_TYPE_INT64` | Mode selections (ConvMode, etc.) |
+| `mode` | FBS enum type | Dedicated mode type tag (e.g., `HIPDNN_TYPE_CONVOLUTION_MODE`) | Enum fields in new operations (see `CLAUDE.md` "Enum Field Types") |
+| `enum` | FBS enum type | `HIPDNN_TYPE_INT64` | Legacy enum fields only; do not use for new operations |
 | `scalar_float` | `float` | `HIPDNN_TYPE_FLOAT` | Alpha/beta scaling factors |
+| `scalar_int32` | `int32_t` | `HIPDNN_TYPE_INT32` | 32-bit scalars |
 | `scalar_int64` | `int64_t` | `HIPDNN_TYPE_INT64` | Axis indices, counts |
 | `bool` | `bool` | `HIPDNN_TYPE_BOOLEAN` | Feature flags |

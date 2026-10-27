@@ -208,19 +208,25 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
 
     // The rung itself needs a named engine to check applicability against; claim
     // enforcement already ran in TestBody() and is not affected by this return.
+    //
+    // Worded after whichever asked for the rung, so a --skip-graph-validation run is
+    // not told about an enforcement_level its bundle never set.
+    const bool fromFlag = _deps.policy.skipGraphValidation;
     if(!_engineUnderTest.has_value())
     {
-        return unverifiable("enforcement_level requires --test-engine");
+        return unverifiable(std::string(fromFlag ? "--skip-graph-validation" : "enforcement_level")
+                            + " requires --test-engine");
     }
 
     const std::string rung
         = level == EnforcementLevel::APPLICABILITY ? "applicability" : "buildable";
+    const std::string asked = fromFlag ? "--skip-graph-validation" : "enforcement_level=" + rung;
 
     // Same applicability answer the claim verdict and the executor read.
     if(!session.engines.accepted)
     {
-        return unverifiable("Engine " + _engineUnderTest->name
-                            + " does not support this graph (enforcement_level=" + rung + ")");
+        return unverifiable("Engine " + _engineUnderTest->name + " does not support this graph ("
+                            + asked + ")");
     }
 
     if(level == EnforcementLevel::APPLICABILITY)
@@ -317,9 +323,15 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
                                            "from_binary failed: " + session.buildError);
     }
 
-    if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
+    // --skip-graph-validation caps every bundle at the applicability rung, the same one
+    // a bundle can ask for with enforcement_level. Claim enforcement has already run in
+    // TestBody() and is not affected: a broken claim fails before this is reached.
+    const EnforcementLevel level = _deps.policy.skipGraphValidation
+                                       ? EnforcementLevel::APPLICABILITY
+                                       : _bundle->metadata.enforcementLevel;
+    if(level != EnforcementLevel::FULL)
     {
-        return enforceAtLevel(_bundle->metadata.enforcementLevel, session);
+        return enforceAtLevel(level, session);
     }
 
     if(_bundle->outputTensorUids.empty())
@@ -480,7 +492,9 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     {
         return engineDidNotRun(engine);
     }
-    return compareAgainstGolden(engine.outputs);
+    auto outcome = compareAgainstGolden(engine.outputs);
+    benchmarkIfVerified(session, engine.outputs, outcome);
+    return outcome;
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(GraphSession& session)
@@ -495,17 +509,26 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
 
     auto oracles = resolveOracles(_deps.policy.mode);
+    std::optional<VerificationOutcome> outcome;
     if(oracles.mode == VerificationMode::AUTO)
     {
         // Golden data is auto mode's first oracle; when the bundle has it, no
         // reference is consulted.
         if(_bundle->hasGoldenOutputs)
         {
-            return compareAgainstGolden(engine.outputs);
+            outcome = compareAgainstGolden(engine.outputs);
         }
-        oracles.declined("golden (absent)");
+        else
+        {
+            oracles.declined("golden (absent)");
+        }
     }
-    return runOracleChain(engine.outputs, oracles);
+    if(!outcome.has_value())
+    {
+        outcome = runOracleChain(engine.outputs, oracles);
+    }
+    benchmarkIfVerified(session, engine.outputs, *outcome);
+    return *outcome;
 }
 
 VerificationOutcome
@@ -858,6 +881,30 @@ IntegrationBundleVerificationHarness::RefRunResult
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
 {
     detail::markOutputsModified(outputs, _deps.policy.useDevice());
+}
+
+void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& session,
+                                                               OutputTensors& engineOutputs,
+                                                               const VerificationOutcome& outcome)
+{
+    if(!_deps.policy.benchmark.has_value() || outcome.status != OutcomeStatus::PASSED
+       || outcome.depth != VerificationDepth::VERIFIED)
+    {
+        return;
+    }
+    // A throw here must not reach TestBody()'s catch: it would replace the verified
+    // PASS with a harness failure and change the support-claim verdict.
+    try
+    {
+        auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
+        _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
+    }
+    catch(const std::exception& e)
+    {
+        hipdnn_frontend::AutotuneResult failed;
+        failed.errorMessage = e.what();
+        _benchmark = failed;
+    }
 }
 
 // ---- comparison ------------------------------------------------------------

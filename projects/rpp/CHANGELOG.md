@@ -17,7 +17,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
   spectrogram returns `RPP_ERROR_NOT_IMPLEMENTED` when `librocfft.so.0` cannot be loaded; all other
   functions are unaffected
 
-## RPP for ROCm 10.2.0
+## RPP 3.2.0 for ROCm 10.2.0
 
 ### Added
 

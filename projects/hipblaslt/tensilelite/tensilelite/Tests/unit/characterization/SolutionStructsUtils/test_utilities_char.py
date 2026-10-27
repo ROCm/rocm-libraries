@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.SolutionStructs.Utilities`` — the small
+"""Characterization tests for ``tensilelite.SolutionStructs.Utilities`` — the small
 pure helpers: ``getMiInputType`` (the 3 MI-operand-type branches), ``reject``
 (the rejection-state machine), ``pvar``, ``roundupRatio``, and the
 ``.value``-based ``getRealDataType{A,B}`` mix-type mappers.
@@ -32,8 +32,8 @@ pure helpers: ``getMiInputType`` (the 3 MI-operand-type branches), ``reject``
 import pytest
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Common.DataType import DataType
-import Tensile.SolutionStructs.Utilities as U
+from tensilelite.Common.DataType import DataType
+import tensilelite.SolutionStructs.Utilities as U
 
 pytestmark = pytest.mark.unit
 
