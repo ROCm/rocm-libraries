@@ -5847,8 +5847,6 @@ def _build_gfx942_4warp_gqa_lean(
     NK = HD // K
     NDdim = HD // 32
     NKpv = BN // K
-    # V-fill: elements per thread (256 = 4 wave64 threads), 8-wide loads.
-    v_fill_epw = (BN * HD) // 256
     ITERS = spec.binary_search_iters
 
     b = IRBuilder(spec.kernel_name() + "_4wgqa")
@@ -5920,7 +5918,11 @@ def _build_gfx942_4warp_gqa_lean(
     ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
         b.ret()
 
-    V_lds = b.smem_alloc(dtype, [BN, HD], name_hint="Vlds")
+    # V is staged key-chunk-major, [BN/4][HD][4]: each PV operand (4 consecutive
+    # keys of one head-dim row) is a single 8-byte LDS read at a per-lane base
+    # plus a compile-time offset, and the lanes of one read hit consecutive
+    # 8-byte slots. The fill writes 2 head dims x 4 keys per 16-byte store.
+    V_lds = b.smem_alloc(dtype, [BN // 4, HD * 4], name_hint="Vlds")
     q_desc = TensorDescriptor.naive(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
@@ -5964,17 +5966,38 @@ def _build_gfx942_4warp_gqa_lean(
         l_old = carry[1]
         accs = list(carry[2:])
         b.sync()  # WAR: prev iter's PV reads of V_lds must finish before this tile overwrites it
-        for c in range(v_fill_epw // 8):
-            lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
-            key = b.div(lin, b.const_i32(HD))
-            hd = b.mod(lin, b.const_i32(HD))
-            pk = phys_key(kv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
-            b.smem_store_vN(
-                V_lds, [key, hd], b.global_load_vN(Vp, velem, dtype, 8, align=16), 8
-            )
+
+        def _v_fill_unit(u):
+            # One unit = 4 consecutive keys x 8 head dims: four 16-byte row loads,
+            # regrouped into four 16-byte key-chunk-major stores.
+            hd0 = b.mul(b.mod(u, b.const_i32(HD // 8)), b.const_i32(8))
+            kg = b.div(u, b.const_i32(HD // 8))
+            rows = []
+            for r in range(4):
+                key = b.add(b.mul(kg, b.const_i32(4)), b.const_i32(r))
+                pk = phys_key(kv, key)
+                velem = b.add(
+                    b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)),
+                    hd0,
+                )
+                rows.append(b.global_load_vN(Vp, velem, dtype, 8, align=16))
+            for e in range(0, 8, 2):
+                val = b.vec_pack(
+                    [b.vec_extract(rows[r], e) for r in range(4)]
+                    + [b.vec_extract(rows[r], e + 1) for r in range(4)],
+                    dtype,
+                )
+                col = b.mul(b.add(hd0, b.const_i32(e)), b.const_i32(4))
+                b.smem_store_vN(V_lds, [kg, col], val, 8)
+
+        v_units = (BN * HD) // 32
+        for i in range((v_units + 255) // 256):
+            u = b.add(tid, b.const_i32(i * 256))
+            if (i + 1) * 256 > v_units:
+                with b.scf_if(b.cmp_lt(u, b.const_i32(v_units))):
+                    _v_fill_unit(u)
+            else:
+                _v_fill_unit(u)
         b.sync()
         S_T = [at.zero_acc(b) for _ in range(NKEYT)]
         pk_kt = [
@@ -6039,32 +6062,15 @@ def _build_gfx942_4warp_gqa_lean(
         )
         newaccs = []
         for nt in range(NDdim):
+            # Keep each head-dim tile's V reads next to its MFMAs: hoisting all
+            # of them ahead of the PV loop overflows the register budget.
+            b.sched_barrier(0)
             pv = at.zero_acc(b)
             for kk in range(NKpv):
-                va = b.vec_pack(
-                    [
-                        b.vec_extract(
-                            b.smem_load_vN(
-                                V_lds,
-                                b.add(
-                                    b.mul(b.const_i32(kk), b.const_i32(K)),
-                                    b.add(
-                                        b.mul(ld.k_blk, b.const_i32(APL)),
-                                        b.const_i32(j),
-                                    ),
-                                ),
-                                b.add(
-                                    b.mul(b.const_i32(nt), b.const_i32(32)),
-                                    ld.m_in_atom,
-                                ),
-                                dtype=dtype,
-                                n=1,
-                            ),
-                            0,
-                        )
-                        for j in range(APL)
-                    ],
-                    dtype,
+                hd_r = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), ld.m_in_atom)
+                c4 = b.add(b.mul(b.const_i32(kk), b.const_i32(K // 4)), ld.k_blk)
+                va = b.smem_load_vN(
+                    V_lds, c4, b.mul(hd_r, b.const_i32(4)), dtype=dtype, n=APL
                 )
                 pv = at.emit(b, va, Bp[kk], pv)
             na = b.vec_pack(
