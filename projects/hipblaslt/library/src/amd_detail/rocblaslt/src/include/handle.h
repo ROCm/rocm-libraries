@@ -306,7 +306,28 @@ struct _rocblaslt_matrix_layout
     int64_t          batch_offset = 0;
     hipblasLtOrder_t order        = HIPBLASLT_ORDER_COL;
     // Batch Mode
-    hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;    
+    hipblasLtBatchMode_t batch_mode = HIPBLASLT_BATCH_MODE_STRIDED;
+
+    // HIPBLASLT_BATCH_MODE_GROUPED only. The arrays are device pointers with group_count
+    // elements; a null array means m, n, or ld applies to every group.
+    int32_t     group_count         = 0;
+    const void* rows_array          = nullptr;
+    const void* cols_array          = nullptr;
+    const void* ld_array            = nullptr;
+    int32_t     rows_cols_int_width = HIPBLASLT_INTEGER_WIDTH_32;
+    int32_t     ld_int_width        = HIPBLASLT_INTEGER_WIDTH_32;
+};
+
+// Grouped GEMM size hints from the HIPBLASLT_MATMUL_PREF_GROUPED_* attributes. 0 means not set.
+struct rocblaslt_grouped_hints
+{
+    int64_t avg_rows       = 0;
+    int64_t avg_cols       = 0;
+    int64_t avg_k          = 0;
+    int64_t max_rows       = 0;
+    int64_t max_cols       = 0;
+    int64_t max_total_rows = 0;
+    int64_t max_total_cols = 0;
 };
 
 /********************************************************************************
@@ -381,6 +402,16 @@ struct _rocblaslt_matmul_desc
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
 
+    // Grouped GEMM only: 0 = one alpha/beta for all groups, 1 = per-group pointer array.
+    int64_t alpha_batch_stride = 0;
+    int64_t beta_batch_stride  = 0;
+
+    // Grouped GEMM: hipblasLtMatmul gets no preference, so the heuristic records the
+    // hints here. grouped_launch caches launch state built from them.
+    rocblaslt_grouped_hints grouped_hints;
+    bool                    grouped_hints_set = false;
+    std::shared_ptr<void>   grouped_launch;
+
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Fused epilogue attached via ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. Non-owning:
     // the descriptor is the caller's and must outlive every matmul using this desc.
@@ -421,6 +452,11 @@ struct _rocblaslt_matmul_desc
         this->uniform_summation_order = src.uniform_summation_order;
         this->int4_encoding_a_ext     = src.int4_encoding_a_ext;
         this->bias_stride             = src.bias_stride;
+        this->alpha_batch_stride      = src.alpha_batch_stride;
+        this->beta_batch_stride       = src.beta_batch_stride;
+        this->grouped_hints           = src.grouped_hints;
+        this->grouped_hints_set       = src.grouped_hints_set;
+        this->grouped_launch.reset();
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
 #endif
@@ -447,6 +483,8 @@ struct _rocblaslt_matmul_preference
     // hint. 0 (default) means "no constraint; use all CUs the device exposes".
     // Negative values are rejected by the setter.
     int32_t sm_count_target = 0;
+
+    rocblaslt_grouped_hints grouped;
 
     int64_t alg_config_id     = 0;
     int64_t alg_max_id        = 0;

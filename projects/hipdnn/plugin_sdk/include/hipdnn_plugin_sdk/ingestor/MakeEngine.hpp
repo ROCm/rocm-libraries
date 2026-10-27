@@ -161,6 +161,14 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
                      {"toc_key", kernel.source.tocKey},
                      {"symbol", kernel.source.symbol},
                      {"sha256", kernel.source.sha256}};
+            // A multi-launch kernel keeps no `source`: each launch's code object is part of
+            // what the selector's ranking was trained against.
+            for(const auto& [launch, source] : kernel.sources)
+            {
+                value["sources"][launch] = {{"toc_key", source.tocKey},
+                                            {"symbol", source.symbol},
+                                            {"sha256", source.sha256}};
+            }
             for(const auto& [name, metadata] : kernel.metadata)
             {
                 value["metadata"][name] = detail::metadataValueToJson(metadata);

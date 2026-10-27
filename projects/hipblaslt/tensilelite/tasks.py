@@ -12,17 +12,17 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
-# Ensure the Tensile package (shipped next to this file) is importable when
+# Ensure the TensileLite package (shipped next to this file) is importable when
 # invoke runs from the tensilelite root, regardless of cwd/sys.path state.
 if str(_TASKS_DIR) not in sys.path:
     sys.path.insert(0, str(_TASKS_DIR))
 
-from Tensile.RocisaStatus import _rocisa_install_status
+from tensilelite.RocisaStatus import _rocisa_install_status
 
-# Architecture detection, steppings included, lives in the packaged Tensile tree
+# Architecture detection, steppings included, lives in the packaged TensileLite tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
 # wrappers only expose it on the invoke command line.
-from Tensile.GpuArch import cmake_gpu_target, detect_gpu_arch
+from tensilelite.GpuArch import cmake_gpu_target, detect_gpu_arch
 
 
 def _cmake_bool(value):
@@ -77,6 +77,7 @@ def get_gpu_arch(c):
     detected = detect_gpu_arch()
     if detected:
         print(cmake_gpu_target(detected))
+
 
 
 @task(

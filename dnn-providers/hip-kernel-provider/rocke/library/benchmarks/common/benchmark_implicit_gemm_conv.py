@@ -50,7 +50,6 @@ import re
 import sys
 from dataclasses import dataclass
 from dataclasses import replace as dc_replace
-from collections.abc import Sequence
 from typing import NamedTuple
 from typing import List
 
@@ -105,6 +104,21 @@ _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 # The spec split_k that builds the wgrad split-K kernel. Any value > 1 builds
 # the same kernel (the degree is a kernarg); this one is only its label.
 _SPLIT_K_BUILD = 2
+# Forces the degree of auto (-1) wgrad/dgrad requests: auto | off | <n>. The
+# conv split-K resolver reads no environment; this benchmark maps the variable
+# onto its explicit ``override`` argument.
+_ENV_CONV_SPLIT_K = "ROCKE_CONV_SPLIT_K"
+
+
+def _conv_split_k_override() -> int | None:
+    """``ROCKE_CONV_SPLIT_K`` as the resolver's ``override`` (None = auto)."""
+    from kernels.common.conv_split_k import parse_split_k_override
+
+    try:
+        return parse_split_k_override(os.environ.get(_ENV_CONV_SPLIT_K))
+    except ValueError as e:
+        raise ValueError(f"{_ENV_CONV_SPLIT_K}: {e}") from None
+
 
 # Data types the benchmark accepts (--dtype) ...
 _DTYPES = ("fp16", "bf16", "fp32")
@@ -1233,15 +1247,28 @@ def main() -> int:
         metavar="N",
         help=(
             "wgrad split-K degree: "
-            "0 = sweep all degrees in %(auto)s, "
+            "0 = sweep the degrees of --split-k-degrees plus the one the "
+            "split-K resolver picks for each kernel, "
             "1 = disabled, "
             ">1 = fixed degree, "
-            "-1 = auto (CK formula per tile config). "
+            "-1 = auto (the resolver dispatch uses, per kernel). "
             "Applies to --run-from-cache too, where the degree is a kernarg "
             "and the cached binary is launched at whichever degree this "
             "selects; there 1 selects nothing, since the non-split-K kernel "
             "is a separate binary."
-        ).replace("%(auto)s", str(list(_SPLIT_K_AUTO))),
+        ),
+    )
+    parser.add_argument(
+        "--split-k-degrees",
+        type=lambda v: tuple(int(x) for x in v.split(",") if x.strip()),
+        default=_SPLIT_K_AUTO,
+        dest="split_k_degrees",
+        metavar="LIST",
+        help=(
+            "comma-separated split-K degrees swept by --split-k 0 and timed for "
+            "each cached split-K binary under --run-from-cache (default: "
+            "%(auto)s). The degree the split-K resolver picks is always added."
+        ).replace("%(auto)s", ",".join(map(str, _SPLIT_K_AUTO))),
     )
 
     parser.add_argument(
@@ -1250,10 +1277,12 @@ def main() -> int:
         choices=["auto", "always", "never"],
         dest="two_stage",
         help=(
-            "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce): "
-            "auto = enable when C/groups is odd (atomics require even channel count); "
-            "also applies to --run-from-cache; "
-            "always = force two-stage for all split_k>1 configs; "
+            "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
+            "also for --run-from-cache: "
+            "auto = two-stage only when C/groups is odd (where the packed atomic "
+            "cannot be built); "
+            "always = time the two-stage kernels alongside the packed-atomic ones "
+            "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
         ),
     )
@@ -1527,6 +1556,13 @@ def main() -> int:
     # and both exiting 0, which reads as a successful run that found nothing.
     if args.csv_top < 1:
         print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
+        return 2
+    # Checked up front: the per-combo resolver calls skip a combo on
+    # ValueError, which would hide a bad value as an empty sweep.
+    try:
+        _conv_split_k_override()
+    except ValueError as e:
+        print(e, file=sys.stderr)
         return 2
 
     if args.ckprofiler is not None and args.ckprofiler_script is None:
@@ -2045,30 +2081,28 @@ def _build_wgrad_one(args_tuple):
         async_dma=async_dma,
         wave_size=target.wave_size,
     )
-    if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
+    from kernels.common.conv_split_k import resolve_conv_split_k
 
-        resolved_split_k = select_split_k_wgrad(
-            wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
+    # The dispatcher's resolver: an auto (-1) degree comes out as dispatch
+    # would launch it, and an explicit one is held inside gridDim.z. A combo
+    # it cannot serve is skipped, like any other invalid combo.
+    try:
+        resolved_split_k = resolve_conv_split_k(
+            "wgrad",
+            problem,
+            arch=arch,
+            dtype=dtype,
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
-            arch=arch,
-            groups=problem.groups,
             block_size=warp_m * warp_n * target.wave_size,
+            override=_conv_split_k_override(),
+            group_merge=group_merge,
+            split_k=split_k,
+            reduction="atomic",
         ).split_k
-    else:
-        # split_k=1 (no split) or > 1 (split-K, degree chosen at launch).
-        resolved_split_k = split_k
-    if resolved_split_k > 1:
-        # See the note in _build_wgrad_two_stage_one: groups*split_k must fit
-        # gridDim.z, and the clamp belongs with the spec so the baked degree and
-        # the launch geometry cannot disagree.
-        resolved_split_k = max(
-            1, min(resolved_split_k, _MAX_GRID_DIM_Z // max(1, problem.groups))
-        )
+    except ValueError:
+        return None
 
     spec = WgradConvSpec(
         problem=problem,
@@ -2180,31 +2214,27 @@ def _build_wgrad_two_stage_one(args_tuple):
         return None
 
     warp_tile_k = atom.k
-    if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
+    from kernels.common.conv_split_k import resolve_conv_split_k
 
-        resolved_split_k = select_split_k_wgrad(
-            wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
+    try:
+        resolved_split_k = resolve_conv_split_k(
+            "wgrad",
+            problem,
+            arch=arch,
+            dtype=dtype,
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
-            arch=arch,
-            groups=problem.groups,
             block_size=warp_m * warp_n * target.wave_size,
+            override=_conv_split_k_override(),
+            group_merge=group_merge,
+            ws_replicas=ws_replicas,
+            split_k=split_k,
+            reduction="workspace",
+            allow_unsplit=False,
         ).split_k
-    else:
-        resolved_split_k = split_k
-
-    # The group and the K-slice share gridDim.z (z = groups*split_k), and the
-    # CK formula sizes split_k from the per-group GEMM without seeing the groups
-    # factor. On a grouped problem it therefore asks for a degree that overflows
-    # the z limit and the launch fails with hipErrorInvalidValue. Clamp with the
-    # spec, not at the grid, so the baked degree and the launch geometry agree.
-    resolved_split_k = max(
-        1, min(resolved_split_k, _MAX_GRID_DIM_Z // max(1, problem.groups))
-    )
+    except ValueError:
+        return None  # nothing to split: the two-stage leg does not apply
 
     # Two-stage only makes sense for split_k > 1.
     if resolved_split_k <= 1:
@@ -2360,16 +2390,18 @@ def _build_dgrad_one(args_tuple):
         if _mma_family == "wmma":
             resolved_split_k = 1
         else:
-            from rocke.helpers.split_k import select_split_k_wgrad
+            from kernels.common.conv_split_k import resolve_conv_split_k
 
-            resolved_split_k = select_split_k_wgrad(
-                wg_M=problem.N * problem.Hi * problem.Wi,
-                wg_N=problem.cpg,
-                wg_K=problem.Y * problem.X * problem.kpg,
+            resolved_split_k = resolve_conv_split_k(
+                "dgrad",
+                problem,
+                arch=arch,
+                dtype=dtype,
                 tile_m=tile_m,
                 tile_n=tile_n,
                 tile_k=tile_k,
-                arch=arch,
+                block_size=warp_m * warp_n * target.wave_size,
+                override=_conv_split_k_override(),
             ).split_k
     else:
         resolved_split_k = split_k
@@ -3528,7 +3560,18 @@ def _run_wgrad_sweep(
             continue
 
         _launch_degrees = (
-            _split_k_degrees(p, spec.tile_m, spec.tile_n, spec.tile_k)
+            _split_k_degrees(
+                p,
+                arch=arch,
+                dtype=dtype,
+                tile_m=spec.tile_m,
+                tile_n=spec.tile_n,
+                tile_k=spec.tile_k,
+                block_size=spec.block_size,
+                group_merge=spec.group_merge,
+                two_stage=False,
+                degrees=args.split_k_degrees,
+            )
             if _sweep
             else (resolved_split_k,)
         )
@@ -3769,7 +3812,19 @@ def _run_wgrad_sweep(
             # Under --split-k 0 the one Stage 1 binary is timed at every usable
             # degree (the degree is a kernarg); otherwise at its combo's degree.
             _launch_degrees_2s = (
-                _split_k_degrees(p, spec.tile_m, spec.tile_n, spec.tile_k)
+                _split_k_degrees(
+                    p,
+                    arch=arch,
+                    dtype=dtype,
+                    tile_m=spec.tile_m,
+                    tile_n=spec.tile_n,
+                    tile_k=spec.tile_k,
+                    block_size=spec.block_size,
+                    group_merge=spec.group_merge,
+                    two_stage=True,
+                    degrees=args.split_k_degrees,
+                    ws_replicas=spec.ws_replicas,
+                )
                 if args.split_k == 0
                 else (resolved_split_k,)
             )
@@ -4150,7 +4205,7 @@ def _run_dgrad_sweep(
     # Pre-compute dgrad AOT args.
     # Built per spec below; see the forward sweep.
 
-    split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
+    split_k_values = args.split_k_degrees if args.split_k == 0 else (args.split_k,)
 
     combos = [
         c
@@ -4561,7 +4616,8 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # Same rule as the JIT sweep's --two-stage: by default the
                 # two-stage (scratch + reduce) kernels only run when C/groups
                 # is odd -- the case the packed-atomic epilogue cannot cover;
-                # "never" drops them outright.
+                # "never" drops them outright; "always" keeps them alongside
+                # the packed-atomic ones, so both reductions compete.
                 odd = (problem.C // max(1, problem.groups)) % 2 != 0
                 if args.two_stage == "never" or not odd:
                     candidates = [c for c in candidates if not c[0].two_stage]
@@ -4731,7 +4787,9 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                 # (the degree is a kernarg), so --split-k decides whether it
                 # is timed at one degree or at each degree it can use.
                 if direction == "wgrad" and ident.split_k > 1:
-                    degrees = _runtime_split_ks(problem, ident, args.split_k)
+                    degrees = _runtime_split_ks(
+                        problem, ident, args.split_k, args.split_k_degrees
+                    )
                     if not degrees:
                         print(
                             f"  [skip] {ident.label()}: "
@@ -5279,24 +5337,37 @@ def _cached_streamk_run(
 
 def _split_k_degrees(
     problem,
+    *,
+    arch: str,
+    dtype: str,
     tile_m: int,
     tile_n: int,
     tile_k: int,
-    candidates: Sequence[int] | None = None,
+    block_size: int,
+    group_merge: int,
+    two_stage: bool,
+    degrees: tuple = _SPLIT_K_AUTO,
+    ws_replicas: int = 0,
+    include_resolved: bool = True,
 ) -> tuple:
-    """Split-K degrees to launch a wgrad split-K kernel with.
+    """Split-K degrees to launch a wgrad split-K kernel with, largest first.
 
     The degree is a kernarg, so one split-K binary is timed at every degree of
-    ``_SPLIT_K_AUTO`` that is > 1 (degree 1 is the separate non-atomic
-    kernel), does not exceed the number of K tiles (a larger degree only adds
-    empty slices), and keeps ``groups * degree`` inside the grid's z limit.
+    ``degrees`` (``--split-k-degrees``) and at the degree the split-K resolver
+    picks for this binary -- the degree dispatch launches it at, so the sweep
+    always measures what production would run. A degree is kept if it is > 1
+    (degree 1 is the separate non-split kernel), does not exceed the number of
+    K tiles (a larger degree only adds empty slices), and keeps
+    ``(groups / group_merge) * degree`` inside the grid's z limit.
 
-    ``candidates`` replaces the ladder, for a caller that has already picked a
-    degree. The validity rules still apply to it -- they are a property of the
-    problem, not of how the degree was chosen -- so a pinned degree the shape
-    cannot take drops out here rather than failing at launch.
+    ``include_resolved=False`` leaves the resolver's degree out, for a caller
+    that has already pinned one. The validity rules still apply to it -- they
+    are a property of the problem, not of how the degree was chosen -- so a
+    pinned degree the shape cannot take drops out here rather than failing at
+    launch.
     """
     from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_split_k import resolve_conv_split_k
 
     wg_k = ConvArgs.from_problem(
         problem,
@@ -5306,64 +5377,71 @@ def _split_k_degrees(
         tile_k=tile_k,
     ).gemm_k
     k_tiles = -(-wg_k // tile_k)
-    groups = max(1, problem.groups)
+    grid_groups = max(1, problem.groups // max(1, group_merge))
+    candidates = set(degrees)
+    if include_resolved:
+        try:
+            candidates.add(
+                resolve_conv_split_k(
+                    "wgrad",
+                    problem,
+                    arch=arch,
+                    dtype=dtype,
+                    tile_m=tile_m,
+                    tile_n=tile_n,
+                    tile_k=tile_k,
+                    block_size=block_size,
+                    override=_conv_split_k_override(),
+                    group_merge=group_merge,
+                    ws_replicas=ws_replicas,
+                    reduction="workspace" if two_stage else "atomic",
+                    allow_unsplit=False,
+                ).split_k
+            )
+        except ValueError:
+            pass  # this binary's reduction cannot serve the problem; nothing to add
     return tuple(
         sk
-        for sk in (_SPLIT_K_AUTO if candidates is None else candidates)
-        if 1 < sk <= k_tiles and groups * sk <= _MAX_GRID_DIM_Z
+        for sk in sorted(candidates, reverse=True)
+        if 1 < sk <= k_tiles and grid_groups * sk <= _MAX_GRID_DIM_Z
     )
 
 
-def _runtime_split_ks(problem, ident, requested: int = 0) -> tuple:
+def _runtime_split_ks(
+    problem, ident, requested: int = 0, degrees: tuple = _SPLIT_K_AUTO
+) -> tuple:
     """Degrees to launch a cached split-K wgrad binary at.
 
     ``requested`` is ``--split-k``, with the same meaning it has on the JIT
-    sweep: 0 sweeps the ladder, -1 resolves the CK formula for this tile
-    config, and a positive value pins that degree. The cache records
-    ``split_k=2`` only as a marker that the binary is the split-K one -- the
-    degree itself is a kernarg -- so nothing here is baked in and every mode
-    is reachable at launch.
+    sweep: 0 sweeps ``degrees`` (``--split-k-degrees``) plus the resolver's
+    pick, -1 launches at the resolver's pick only, and a positive value pins
+    that degree. The cache records ``split_k=2`` only as a marker that the
+    binary is the split-K one -- the degree itself is a kernarg -- so nothing
+    here is baked in and every mode is reachable at launch.
 
     Degree 1 is not among them: that is the separate non-atomic kernel, a
     different binary, so ``--split-k 1`` yields no degree and the caller skips
     the entry rather than silently timing it at some other degree.
     """
     if requested == 0:
-        return _split_k_degrees(problem, ident.tile_m, ident.tile_n, ident.tile_k)
-    if requested == -1:
-        from kernels.common.conv_args import ConvArgs
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        if ident.group_merge > 1:
-            from dataclasses import replace as dc_replace
-
-            # Resolve and validate against the geometry the cached kernel launches.
-            problem = dc_replace(problem, groups=problem.groups // ident.group_merge)
-        args_ = ConvArgs.from_problem(
-            problem,
-            direction="wgrad",
-            tile_m=ident.tile_m,
-            tile_n=ident.tile_n,
-            tile_k=ident.tile_k,
-        )
-        degree = select_split_k_wgrad(
-            wg_M=args_.gemm_m,
-            wg_N=args_.gemm_n,
-            wg_K=args_.gemm_k,
-            tile_m=ident.tile_m,
-            tile_n=ident.tile_n,
-            tile_k=ident.tile_k,
-            arch=ident.arch,
-            groups=problem.groups,
-            block_size=ident.warp_m * ident.warp_n * ident.wave_size,
-        ).split_k
-        # Same clamp the JIT path applies after resolving: groups * degree has
-        # to fit gridDim.z.
-        degree = max(1, min(degree, _MAX_GRID_DIM_Z // max(1, problem.groups)))
+        swept, include_resolved = degrees, True
+    elif requested == -1:
+        swept, include_resolved = (), True
     else:
-        degree = requested
+        swept, include_resolved = (requested,), False
     return _split_k_degrees(
-        problem, ident.tile_m, ident.tile_n, ident.tile_k, (degree,)
+        problem,
+        arch=ident.arch,
+        dtype=ident.dtype_d,
+        tile_m=ident.tile_m,
+        tile_n=ident.tile_n,
+        tile_k=ident.tile_k,
+        block_size=ident.warp_m * ident.warp_n * ident.wave_size,
+        group_merge=max(1, ident.group_merge),
+        two_stage=ident.two_stage,
+        degrees=swept,
+        ws_replicas=ident.ws_replicas,
+        include_resolved=include_resolved,
     )
 
 
@@ -5495,7 +5573,23 @@ def _cached_bind(
         stream=0,
     )
     run = launcher.bind(values, config=cfg)
-    if direction == "wgrad" and ident.two_stage:
+    if (
+        direction == "wgrad"
+        and ident.split_k > 1
+        and not ident.two_stage
+        and ident.streamk == "off"
+    ):
+        # The packed-atomic split-K epilogue accumulates into dW, so every
+        # launch needs dW zeroed first -- part of the algorithm's cost, as the
+        # JIT sweep times it and as the two-stage leg below times its scratch
+        # clear.
+        _launch = run
+
+        def run(_launch=_launch, dw_ptr=ptrs[2], dw_bytes=sizes[2]):
+            rt.memset(dw_ptr, 0, dw_bytes)
+            _launch()
+
+    elif direction == "wgrad" and ident.two_stage:
         # Two-stage is three steps and all of them are the algorithm's cost:
         # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
         # into dW.

@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 TestParameters:
+  streamk_schedules: [{grid: 128, reduction: tree}]
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict, skip-stinkytofu] # gfx1250 only
 
 GlobalParameters:
@@ -90,3 +91,41 @@ BenchmarkProblems:
           - Exact: [1024, 1024, 1, 7168]
         - ActivationArgs:
           - [Enum: none]
+
+    # Clustered subtile completion, including deferred epilogues on ragged peers.
+    - BenchmarkCommonParameters: &subtile_cluster_defaults
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 3, 3, 2, 2]]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - LDSTrInst: [true]
+        - SourceSwap: [true]
+        - UseSubtileImpl: [true]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - ClusterDim: [[2, 2]]
+        - PrefetchAcrossPersistent: [0]
+        - PrefetchLocalRead: [1]
+        - ForceDisableShadowInit: [true]
+        - ScheduleIterAlg: [3]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - ExpandPointerSwap: [false]
+        - 1LDSBuffer: [0]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      ForkParameters:
+        - PrefetchGlobalRead: [0, 1]
+        - StreamKFixupTreeReduction: [0]
+      BenchmarkFinalParameters: &subtile_cluster_problems
+        - ProblemSizes:
+          - Exact: [97, 193, 2, 1031]
+          - Exact: [384, 384, 2, 8192]
+    - BenchmarkCommonParameters: *subtile_cluster_defaults
+      ForkParameters:
+        - PrefetchGlobalRead: [2]
+        - StreamKFixupTreeReduction: [1]
+      BenchmarkFinalParameters: *subtile_cluster_problems

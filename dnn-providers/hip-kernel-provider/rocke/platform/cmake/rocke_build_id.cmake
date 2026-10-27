@@ -22,6 +22,16 @@ function(rocke_build_id_inputs out_var root_dir)
        "${root_dir}/cpp/*.hpp")
   list(FILTER _rocke_all EXCLUDE REGEX "/cpp/bindings/")
 
+  # The engine's arch-domain table is generated from these at build time
+  # (tools/gen_arch_domain_cpp.py), so they change what the engine does as
+  # surely as its sources do. Keep this list mirrored in online.py.
+  file(GLOB _rocke_arch_domain
+       "${root_dir}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
+  list(APPEND _rocke_all ${_rocke_arch_domain}
+       "${root_dir}/python/rocke/core/arch/data/arch_domain_waivers.json"
+       "${root_dir}/python/rocke/core/arch/domain.py"
+       "${root_dir}/tools/gen_arch_domain_cpp.py")
+
   # Include the CLI frontend and the build recipes that select, stamp, compile,
   # and link the two native artifacts. Keep this list mirrored in online.py.
   foreach(_rocke_input

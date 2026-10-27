@@ -42,6 +42,7 @@ from .ir import (
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _is_flag_ptr,
+    _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
     Region,
@@ -508,6 +509,9 @@ class _Verifier:
                         f"type {init.type.name}",
                         op,
                     )
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            self.err(descriptor_error, op)
 
         # body scope: copy + iv + iter-arg block values
         body_scope = dict(scope)

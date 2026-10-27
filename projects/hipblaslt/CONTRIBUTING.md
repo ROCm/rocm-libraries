@@ -37,7 +37,7 @@ You need a ROCm install (e.g. `/opt/rocm`) and Python 3.8+. For `GPU_TARGETS`, s
 
 ## GPU targets: one, several, or all
 
-**`GPU_TARGETS`** (CMake) controls which AMD GPU architectures are built (Tensile device libraries and any arch-specific code).
+**`GPU_TARGETS`** (CMake) controls which AMD GPU architectures are built (TensileLite device libraries and any arch-specific code).
 
 - **One GPU:** e.g. `-DGPU_TARGETS=gfx90a`
 - **Multiple GPUs:** semicolon-separated, quoted: `-DGPU_TARGETS="gfx90a;gfx942;gfx950"`
@@ -47,16 +47,24 @@ Supported names are in `cmake/tensilelite_supported_architectures.cmake`.
 
 ---
 
-## Device libraries (Tensile): required for matmul tests
 
-hipBLASLt uses a **build-time** generator (Tensile, in-repo) to produce GPU kernel libraries (`.dat` + `.hsaco`/`.co`), and a **runtime** (TensileLite host) that loads those artifacts when you call the matmul API. Most `hipblaslt-test` cases are matmul tests, so at runtime the library needs that Tensile device library for your GPU. If it's missing, matmul tests fail. You must either:
+## Device libraries (TensileLite): required for matmul tests
+
+hipBLASLt uses a **build-time** generator (TensileLite, in-repo) to produce GPU kernel libraries (`.dat` + `.hsaco`/`.co`), and a **runtime** (TensileLite host) that loads those artifacts when you call the matmul API. Most `hipblaslt-test` cases are matmul tests, so at runtime the library needs that TensileLite device library for your GPU. If it's missing, matmul tests fail. You must either:
+
+1. **Build the device libraries** in this repo (target `tensilelite-device-libraries`), which populates `build/Tensile/library/`, or  
+2. **Use an existing ROCm install** and set `HIPBLASLT_TENSILE_LIBPATH` to the directory that contains `TensileLibrary_lazy_<arch>.dat` and the code objects.
+
+## Device libraries (TensileLite): required for matmul tests
+
+hipBLASLt uses a **build-time** generator (TensileLite, in-repo) to produce GPU kernel libraries (`.dat` + `.hsaco`/`.co`), and a **runtime** (TensileLite host) that loads those artifacts when you call the matmul API. Most `hipblaslt-test` cases are matmul tests, so at runtime the library needs that TensileLite device library for your GPU. If it's missing, matmul tests fail. You must either:
 
 1. **Build the device libraries** in this repo (target `tensilelite-device-libraries`), which populates `build/Tensile/library/`, or  
 2. **Use an existing ROCm install** and set `HIPBLASLT_TENSILE_LIBPATH` to the directory that contains `TensileLibrary_lazy_<arch>.dat` and the code objects.
 
 ### Python environment for building device libraries
 
-The `tensilelite-device-libraries` target runs a Python script (`Tensile.TensileCreateLibrary`) that needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the Tensile requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
+The `tensilelite-device-libraries` target runs a Python script (`tensilelite.TensileCreateLibrary`) that needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the TensileLite requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
 
 ```bash
 cd projects/hipblaslt
@@ -126,7 +134,11 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). When `hipblaslt-test` starts, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is left out before registration. It does not appear in `--gtest_list_tests` output or in the `[ SKIPPED ]` summary. Entries with no `known_bug_platforms` are left out on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). When `hipblaslt-test` starts, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry is left out before registration when the entry applies to the current GPU. It does not appear in `--gtest_list_tests` output or in the `[ SKIPPED ]` summary. There are two flavors:
+  - **All platforms:** an entry with no `known_bug_platforms` is tagged `category: known_bug` by `hipblaslt_gentest.py` when `hipblaslt_gtest.data` is built, and the case is left out on every platform.
+  - **Per-GPU:** an entry with `known_bug_platforms` is left out only when the current GPU `gcnArchName` matches one of the listed architectures. On other GPUs the case registers and runs normally.
+
+  Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
 
 ---

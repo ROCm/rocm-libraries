@@ -109,8 +109,9 @@ TEST(TestGfx950AttentionDenseGeometry, SingleHeadSingleBatchIsAOneDeepGrid)
 }
 
 /// Representative launches, read off attention_dense_grid/_block for each
-/// block_m. The same graph launches differently per selected tile, so a prepare() that
-/// used one tile's block_m for another's binary produces exactly one of these mismatches.
+/// block_m, at the qb_minor non-persistent block order. The same graph launches
+/// differently per selected tile, so a prepare() that used one tile's block_m for
+/// another's binary produces exactly one of these mismatches.
 TEST(TestGfx950AttentionDenseGeometry, WitnessLaunchesDependOnTheSelectedBlockM)
 {
     // BF16/D128/H32/8 causal, B3, Sq=Skv=1536.

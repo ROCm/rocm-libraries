@@ -32,6 +32,7 @@ from kernels.common.attention_unified import (
     _enable_gfx942_flash_q_direct,
     _enable_gfx942_fp16_flash,
     _enable_i64_kv_addr,
+    _enable_i64_kv_addr_3d,
     _enable_k_single_buffer,
     _enable_mfma_32x32,
     _enable_register_pv,
@@ -396,7 +397,7 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size_override=tile_size_override,
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
-        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr_3d(problem, arch),
         use_decode_grid=_use_decode_grid(problem, arch),
         # Additive bias is gfx950-only for now; gfx942's spec has no such field.
         **(

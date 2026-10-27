@@ -13,6 +13,10 @@
  *
  * The expected strings must stay byte-identical to the Python engine's -- that
  * equality is the parity contract this gate exists to defend.
+ *
+ * Each case lowers for a target that has its intrinsic, as the Python cases do:
+ * the arch-domain lane refuses a kernel lowered for a target that cannot lower
+ * what it demands, so lower_one's gfx950 default only suits gfx950 intrinsics.
  */
 #include <cstdio>
 #include <cstdlib>
@@ -774,9 +778,10 @@ void case_dpp_ops_reject_untyped_raw_op()
 /* ---- mov_dpp8 ---- */
 void case_mov_dpp8_i32()
 {
-    const std::string ir = lower_one("dpp8i", [](rocke_ir_builder_t* b) {
-        rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x765432);
-    });
+    const std::string ir = lower_one(
+        "dpp8i",
+        [](rocke_ir_builder_t* b) { rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x765432); },
+        "gfx1201");
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)");
     /* 0x765432 == 7754802, passed through as the 24-bit lane-select imm. */
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)");
@@ -784,9 +789,10 @@ void case_mov_dpp8_i32()
 
 void case_mov_dpp8_f32()
 {
-    const std::string ir = lower_one("dpp8f", [](rocke_ir_builder_t* b) {
-        rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x765432);
-    });
+    const std::string ir = lower_one(
+        "dpp8f",
+        [](rocke_ir_builder_t* b) { rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x765432); },
+        "gfx1201");
     EXPECT_IR(ir, "declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)");
     EXPECT_IR(ir, "call float @llvm.amdgcn.mov.dpp8.f32(float");
 }
@@ -795,10 +801,13 @@ void case_mov_dpp8_both_types_coexist()
 {
     /* Both variants used to declare a bare @llvm.amdgcn.mov.dpp8, so a kernel
      * using each type emitted two conflicting declares for one symbol. */
-    const std::string ir = lower_one("dpp8_both", [](rocke_ir_builder_t* b) {
-        rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x11);
-        rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x11);
-    });
+    const std::string ir = lower_one(
+        "dpp8_both",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x11);
+            rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x11);
+        },
+        "gfx1201");
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.mov.dpp8.i32(");
     EXPECT_IR(ir, "declare float @llvm.amdgcn.mov.dpp8.f32(");
     EXPECT_NO_IR(ir, "@llvm.amdgcn.mov.dpp8(");
@@ -889,15 +898,18 @@ void case_writelane()
 /* ---- permlane16 / permlane64 / permlane32_swap ---- */
 void case_permlane16()
 {
-    const std::string ir = lower_one("pl16", [](rocke_ir_builder_t* b) {
-        rocke_b_permlane16(b,
-                           rocke_b_const_i32(b, 0),
-                           rocke_b_const_i32(b, 1),
-                           rocke_b_const_i32(b, 2),
-                           rocke_b_const_i32(b, 3),
-                           false,
-                           false);
-    });
+    const std::string ir = lower_one(
+        "pl16",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_permlane16(b,
+                               rocke_b_const_i32(b, 0),
+                               rocke_b_const_i32(b, 1),
+                               rocke_b_const_i32(b, 2),
+                               rocke_b_const_i32(b, 3),
+                               false,
+                               false);
+        },
+        "gfx1201");
     /* The data type is an overloaded position, so the mangled name carries its
      * suffix. LLVM accepts the bare "permlane16" and auto-upgrades it, but
      * rewrites it to this on the way out, so the bare form is the one that
@@ -912,15 +924,18 @@ void case_permlane16()
 
 void case_permlane16_flags()
 {
-    const std::string ir = lower_one("pl16_flags", [](rocke_ir_builder_t* b) {
-        rocke_b_permlane16(b,
-                           rocke_b_const_i32(b, 0),
-                           rocke_b_const_i32(b, 1),
-                           rocke_b_const_i32(b, 2),
-                           rocke_b_const_i32(b, 3),
-                           true,
-                           true);
-    });
+    const std::string ir = lower_one(
+        "pl16_flags",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_permlane16(b,
+                               rocke_b_const_i32(b, 0),
+                               rocke_b_const_i32(b, 1),
+                               rocke_b_const_i32(b, 2),
+                               rocke_b_const_i32(b, 3),
+                               true,
+                               true);
+        },
+        "gfx1201");
     EXPECT_IR(ir,
               "call i32 @llvm.amdgcn.permlane16.i32"
               "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)");
@@ -1289,7 +1304,7 @@ void case_av_store_b128()
 void case_s_alloc_vgpr()
 {
     const std::string ir
-        = lower_one("valloc", [](rocke_ir_builder_t* b) { rocke_b_s_alloc_vgpr(b, 8); });
+        = lower_one("valloc", [](rocke_ir_builder_t* b) { rocke_b_s_alloc_vgpr(b, 8); }, "gfx1250");
     EXPECT_IR(ir, "declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)");
     EXPECT_IR(ir, "call i1 @llvm.amdgcn.s.alloc.vgpr(i32 8)");
     /* The intrinsic returns i1; the IR value is an i32, so a zext is required. */
@@ -1315,17 +1330,20 @@ void case_wait_asyncmark()
 void case_s_wait_event()
 {
     const std::string ir
-        = lower_one("sevt", [](rocke_ir_builder_t* b) { rocke_b_s_wait_event(b, 1); });
+        = lower_one("sevt", [](rocke_ir_builder_t* b) { rocke_b_s_wait_event(b, 1); }, "gfx1201");
     EXPECT_IR(ir, "declare void @llvm.amdgcn.s.wait.event(i16 immarg)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.event(i16 1)");
 }
 
 void case_s_prefetch_inst()
 {
-    const std::string ir = lower_one("sprefetch", [](rocke_ir_builder_t* b) {
-        rocke_b_s_prefetch_inst(
-            b, global_ptr_param(b, "code", rocke_i32()), rocke_b_const_i32(b, 64));
-    });
+    const std::string ir = lower_one(
+        "sprefetch",
+        [](rocke_ir_builder_t* b) {
+            rocke_b_s_prefetch_inst(
+                b, global_ptr_param(b, "code", rocke_i32()), rocke_b_const_i32(b, 64));
+        },
+        "gfx1250");
     /* The operand is llvm_anyptr_ty, so the call and its declare have to name
      * the pointer's real space. A bare `ptr` for this addrspace(1) param is
      * what LLVM rejects with "'%code' defined with type 'ptr addrspace(1)' but
@@ -3048,21 +3066,24 @@ void case_global_load_async_to_lds_b8()
     /* width_bytes=1 selects the LLVM 23 `.b8` async copy. The opcode is a
      * gfx1250 one, but its lowering is arch-independent, so this runs on the
      * default gfx950 backend -- the C++ engine has no gfx1250 ISA backend. */
-    const std::string ir = lower_one("gl_async_b8", [](rocke_ir_builder_t* b) {
-        rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
-        const int shape[] = {64};
-        rocke_value_t* lds = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage");
-        rocke_value_t* const idx[] = {rocke_b_const_i32(b, 0)};
-        rocke_b_global_load_async_to_lds(b,
-                                         src,
-                                         rocke_b_const_i32(b, 0),
-                                         lds,
-                                         idx,
-                                         /*num_lds_indices=*/1,
-                                         /*width_bytes=*/1,
-                                         /*coherency=*/0,
-                                         /*offset_bytes=*/0);
-    });
+    const std::string ir = lower_one(
+        "gl_async_b8",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* src = global_ptr_param(b, "src", rocke_i32());
+            const int shape[] = {64};
+            rocke_value_t* lds = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage");
+            rocke_value_t* const idx[] = {rocke_b_const_i32(b, 0)};
+            rocke_b_global_load_async_to_lds(b,
+                                             src,
+                                             rocke_b_const_i32(b, 0),
+                                             lds,
+                                             idx,
+                                             /*num_lds_indices=*/1,
+                                             /*width_bytes=*/1,
+                                             /*coherency=*/0,
+                                             /*offset_bytes=*/0);
+        },
+        "gfx1250");
     EXPECT_IR(ir,
               "declare void @llvm.amdgcn.global.load.async.to.lds.b8("
               "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, "
@@ -3319,10 +3340,12 @@ void case_lowbit_dtype_aliases()
         if(strcmp(rocke_normalize_dtype(pair[0], scratch, sizeof(scratch)), pair[1]) != 0
            || strcmp(rocke_normalize_dtype(pair[1], scratch, sizeof(scratch)), pair[1]) != 0)
             fail("low-bit alias must resolve to explicit catalog key", __LINE__);
+        // The catalog lists fp4 and fp6 only as the scaled 32x32x64 atoms.
+        const rocke_mma_scale_filter_t e8m0_k32 = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
         const auto* arch = rocke_arch_target_from_gfx("gfx950");
-        const int k = strcmp(pair[0], "fp4") == 0 ? 128 : 96;
         if((strcmp(pair[0], "fp4") == 0 || strcmp(pair[0], "fp6") == 0)
-           && !rocke_mma_catalog_has_shape(&arch->mma, "mma", pair[0], pair[1], "fp32", 16, 16, k))
+           && !rocke_mma_catalog_has_shape(
+               &arch->mma, "mfma_scaled", pair[0], pair[1], "fp32", 32, 32, 64, &e8m0_k32))
             fail("low-bit aliases must resolve native catalog rows", __LINE__);
     }
 }

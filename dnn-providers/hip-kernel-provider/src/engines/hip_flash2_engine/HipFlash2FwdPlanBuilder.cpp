@@ -69,6 +69,7 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(), "page_table_k not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()

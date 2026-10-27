@@ -13,6 +13,7 @@
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -264,6 +265,39 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestHipFlash2FwdPlanBuilder, RejectsSinkToken)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // The same graph is accepted without the sink and declined with it: the flash2 kernel
+    // cannot add the sink logit to the softmax denominator.
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto base = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto withSinkBuilder = asm_sdpa_engine::addSinkToken(base);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withoutSink(
+        base.GetBufferPointer(), base.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withSink(
+        withSinkBuilder.GetBufferPointer(), withSinkBuilder.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, withoutSink));
+    EXPECT_FALSE(_builder.isApplicable(_handle, withSink));
 }
 
 using asm_sdpa_engine::DeprecatedCausalMaskCase;

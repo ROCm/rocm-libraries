@@ -67,12 +67,32 @@ namespace
         return key;
     }
 
-    TunedEntry tunedEntry(int32_t index, const std::string& kernel)
+    TuningSearch rankedSearch(int32_t maxCandidates)
+    {
+        TuningSearch search;
+        search.allKernels     = false;
+        search.maxCandidates  = maxCandidates;
+        search.workspaceBytes = 32 << 20;
+        search.coldIters      = 2;
+        search.hotIters       = 5;
+        search.flushICache    = true;
+        search.rotatingMb     = 160;
+        return search;
+    }
+
+    TunedEntry tunedEntry(int32_t             index,
+                          const std::string&  kernel,
+                          bool                complete = true,
+                          int64_t             budgetMs = 0,
+                          const TuningSearch& search   = rankedSearch(16))
     {
         TunedEntry entry;
         entry.solutionIndex = index;
         entry.kernelName    = kernel;
         entry.schemaVersion = kCurrentTuningSchemaVersion;
+        entry.complete      = complete;
+        entry.budgetMs      = budgetMs;
+        entry.search        = search;
         entry.winnerTimeUs  = 12.5;
         return entry;
     }
@@ -253,7 +273,7 @@ namespace
         key.smCountTarget         = 80;
         key.uniformSummationOrder = true;
 
-        TunedEntry written             = tunedEntry(4321, "Cijk_Alik_Bljk_HHS_MT64x32x64");
+        TunedEntry written = tunedEntry(4321, "Cijk_Alik_Bljk_HHS_MT64x32x64", false, 1000);
         written.requiredWorkspaceBytes = 4096;
 
         OverrideMap map;
@@ -271,6 +291,10 @@ namespace
         EXPECT_EQ(read.buildStamp, kStamp);
         EXPECT_EQ(read.requiredWorkspaceBytes, 4096u);
         EXPECT_DOUBLE_EQ(read.winnerTimeUs, 12.5);
+        EXPECT_FALSE(read.complete);
+        EXPECT_EQ(read.budgetMs, 1000);
+        ASSERT_TRUE(read.search.has_value());
+        EXPECT_TRUE(*read.search == *written.search);
     }
 
     TEST_F(TuningStore, ApplicationLocaleDoesNotChangeWrittenRows)
@@ -445,12 +469,22 @@ namespace
         }
     }
 
+    // Whether tune mode revisits a row depends on its completion column, and a
+    // missing value can no longer be told apart from a finished search.
+    TEST_F(TuningStore, RowWithoutItsCompletionColumnIsRejected)
+    {
+        OverrideMap map;
+        const auto  row = withoutColumn(tunedRow(halfKey(), tunedEntry(7, "kernel")), "complete");
+        EXPECT_EQ(loadInto(map, fileOf({row})).accepted, 0u);
+    }
+
     // A value line cut short keeps a well-formed prefix, which must not be read
-    // as the whole row.
+    // as the whole row, least of all as a finished search.
     TEST_F(TuningStore, RowCutShortIsRejected)
     {
-        const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
-        for(const char* column : {"kernel_name", "required_workspace", "us"})
+        const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel", false, 1000));
+        for(const char* column :
+            {"kernel_name", "required_workspace", "complete", "budget_ms", "rotating_mb"})
         {
             SCOPED_TRACE(std::string("value row cut before ") + column);
             OverrideMap map;
@@ -672,10 +706,191 @@ namespace
                       .accepted,
                   2u);
 
-        std::vector<std::string> names;
-        for(const auto& entry : renamed.find(key))
-            names.push_back(entry.kernelName.value_or(""));
-        EXPECT_EQ(names, (std::vector<std::string>{"NotARealKernelName", "kernel"}));
+        const auto found = renamed.find(key);
+        ASSERT_EQ(found.size(), 2u);
+        EXPECT_EQ(found[0].kernelName, std::optional<std::string>("kernel"));
+    }
+
+    // Rows written before the search and completion columns existed are
+    // finished searches with none recorded, so they close the gate like any
+    // other finished row.
+    TEST_F(TuningStore, VersionOneRowsReadAsFinishedSearches)
+    {
+        const ProblemOverride key = halfKey();
+
+        std::string row = withCell(tunedRow(key, tunedEntry(7, "kernel")), "schema_version", "1");
+        for(const char* column : {"complete",
+                                  "budget_ms",
+                                  "search_all_kernels",
+                                  "search_max_candidates",
+                                  "search_workspace",
+                                  "cold_iters",
+                                  "hot_iters",
+                                  "flush_icache",
+                                  "rotating_mb"})
+            row = withoutColumn(row, column);
+
+        OverrideMap map;
+        ASSERT_EQ(loadInto(map, fileOf({row})).accepted, 1u);
+
+        const auto found = map.find(key);
+        ASSERT_EQ(found.size(), 1u);
+        EXPECT_EQ(found[0].schemaVersion, TuningSchemaVersion::V1);
+        EXPECT_TRUE(found[0].complete);
+        EXPECT_FALSE(found[0].search.has_value());
+        EXPECT_FALSE(map.needsRetune(key, rankedSearch(16), 0));
+    }
+
+    // The file is append-only, so the run that finishes a truncated search
+    // leaves its winner behind the partial one. Replay takes the first entry
+    // that validates, so the completed row has to come first, whichever of the
+    // two was written last.
+    TEST_F(TuningStore, CompleteRowWinsOverPartialRows)
+    {
+        const ProblemOverride key = halfKey();
+
+        OverrideMap finishedLater;
+        loadInto(finishedLater,
+                 fileOf({tunedRow(key, tunedEntry(1, "partial", false, 1000)),
+                         tunedRow(key, tunedEntry(2, "finished", true, 0))}));
+        EXPECT_EQ(indexesOf(finishedLater.find(key)), (std::vector<int32_t>{2, 1}));
+
+        OverrideMap partialLater;
+        loadInto(partialLater,
+                 fileOf({tunedRow(key, tunedEntry(1, "finished", true, 0)),
+                         tunedRow(key, tunedEntry(2, "partial", false, 1000))}));
+        EXPECT_EQ(indexesOf(partialLater.find(key)), (std::vector<int32_t>{1, 2}));
+    }
+
+    // Among rows of the same completeness the newest wins, whatever ceilings
+    // they were written under.
+    TEST_F(TuningStore, NewestRowWinsWithinEachGroup)
+    {
+        const ProblemOverride key = halfKey();
+
+        OverrideMap partials;
+        loadInto(partials,
+                 fileOf({tunedRow(key, tunedEntry(1, "older", false, 60000)),
+                         tunedRow(key, tunedEntry(2, "newer", false, 1000))}));
+        EXPECT_EQ(indexesOf(partials.find(key)), (std::vector<int32_t>{2, 1}));
+
+        OverrideMap completes;
+        loadInto(
+            completes,
+            fileOf({tunedRow(key, tunedEntry(1, "older")), tunedRow(key, tunedEntry(2, "newer"))}));
+        EXPECT_EQ(indexesOf(completes.find(key)), (std::vector<int32_t>{2, 1}));
+    }
+
+    // Re-tuning a partial row is worth a stall only when this run can get
+    // further: a more generous ceiling, or a different search. Under the same
+    // ceiling it would stop in the same place and append an identical row.
+    TEST_F(TuningStore, PartialRowIsRetunedOnlyWhenThisRunCanGetFurther)
+    {
+        const ProblemOverride key    = halfKey();
+        const TuningSearch    search = rankedSearch(16);
+        OverrideMap           map;
+        loadInto(map, fileOf({tunedRow(key, tunedEntry(7, "kernel", false, 1000, search))}));
+
+        EXPECT_FALSE(map.needsRetune(key, search, 1000));
+        EXPECT_FALSE(map.needsRetune(key, search, 500));
+        EXPECT_TRUE(map.needsRetune(key, search, 2000));
+        EXPECT_TRUE(map.needsRetune(key, search, 0)) << "an unlimited run can finish any search";
+        EXPECT_TRUE(map.needsRetune(key, rankedSearch(32), 1000));
+    }
+
+    // Once a completed row covers the search, the superseded partial row beside
+    // it must not keep the shape looking untuned.
+    TEST_F(TuningStore, PartialRowBesideCompleteRowDoesNotRetune)
+    {
+        const ProblemOverride key    = halfKey();
+        const TuningSearch    search = rankedSearch(16);
+        OverrideMap           map;
+        loadInto(map,
+                 fileOf({tunedRow(key, tunedEntry(1, "partial", false, 1000, search)),
+                         tunedRow(key, tunedEntry(2, "finished", true, 0, search))}));
+
+        EXPECT_FALSE(map.needsRetune(key, search, 1000));
+    }
+
+    // A finished search of a ranked prefix says nothing about the kernels past
+    // it, so a wider run re-tunes the shape; a narrower one has nothing to add.
+    TEST_F(TuningStore, FinishedSearchIsWidenedButNotRepeated)
+    {
+        const ProblemOverride key = halfKey();
+
+        OverrideMap narrow;
+        loadInto(narrow,
+                 fileOf({tunedRow(key, tunedEntry(7, "kernel", true, 0, rankedSearch(2)))}));
+        EXPECT_TRUE(narrow.needsRetune(key, rankedSearch(16), 0));
+        EXPECT_FALSE(narrow.needsRetune(key, rankedSearch(2), 0));
+
+        OverrideMap wide;
+        loadInto(wide, fileOf({tunedRow(key, tunedEntry(7, "kernel", true, 0, rankedSearch(16)))}));
+        EXPECT_FALSE(wide.needsRetune(key, rankedSearch(2), 0));
+
+        TuningSearch everyKernel = rankedSearch(0);
+        everyKernel.allKernels   = true;
+        EXPECT_TRUE(wide.needsRetune(key, everyKernel, 0));
+
+        TuningSearch moreWorkspace   = rankedSearch(16);
+        moreWorkspace.workspaceBytes = 256 << 20;
+        EXPECT_TRUE(wide.needsRetune(key, moreWorkspace, 0))
+            << "a result filtered by a smaller workspace was treated as final";
+    }
+
+    // A row that records no search, and a legacy row, are final: reading them as
+    // unfinished would re-tune every shape of an existing file.
+    TEST_F(TuningStore, RowsWithoutARecordedSearchAreFinal)
+    {
+        const ProblemOverride key = halfKey();
+
+        OverrideMap unrecorded;
+        TunedEntry  entry = tunedEntry(7, "kernel");
+        entry.search.reset();
+        unrecorded.addIfAbsent(key, entry);
+        EXPECT_FALSE(unrecorded.needsRetune(key, rankedSearch(16), 0));
+
+        OverrideMap legacy;
+        loadInto(legacy, fileOf({legacyRow(key, 7, "kernel")}));
+        EXPECT_FALSE(legacy.needsRetune(key, rankedSearch(16), 0));
+    }
+
+    TEST_F(TuningStore, BudgetComparison)
+    {
+        EXPECT_TRUE(tuningBudgetIsMoreGenerous(1000, -1)) << "a row that did not record one";
+        EXPECT_TRUE(tuningBudgetIsMoreGenerous(0, 1000));
+        EXPECT_TRUE(tuningBudgetIsMoreGenerous(2000, 1000));
+        EXPECT_FALSE(tuningBudgetIsMoreGenerous(1000, 1000));
+        EXPECT_FALSE(tuningBudgetIsMoreGenerous(500, 1000));
+        EXPECT_FALSE(tuningBudgetIsMoreGenerous(0, 0)) << "nothing beats an unlimited run";
+        EXPECT_FALSE(tuningBudgetIsMoreGenerous(5000, 0));
+    }
+
+    TEST_F(TuningStore, SearchCoverage)
+    {
+        TuningSearch everyKernel = rankedSearch(0);
+        everyKernel.allKernels   = true;
+
+        EXPECT_TRUE(tuningSearchCovers(everyKernel, rankedSearch(16)));
+        EXPECT_TRUE(tuningSearchCovers(rankedSearch(16), rankedSearch(2)));
+        EXPECT_FALSE(tuningSearchCovers(rankedSearch(2), rankedSearch(16)));
+        EXPECT_FALSE(tuningSearchCovers(rankedSearch(16), everyKernel));
+
+        auto less = [](auto change) {
+            TuningSearch search = rankedSearch(16);
+            change(search);
+            return search;
+        };
+        EXPECT_FALSE(tuningSearchCovers(less([](TuningSearch& s) { s.workspaceBytes = 0; }),
+                                        rankedSearch(16)));
+        EXPECT_FALSE(
+            tuningSearchCovers(less([](TuningSearch& s) { s.coldIters = 0; }), rankedSearch(16)));
+        EXPECT_FALSE(
+            tuningSearchCovers(less([](TuningSearch& s) { s.hotIters = 1; }), rankedSearch(16)));
+        EXPECT_FALSE(tuningSearchCovers(less([](TuningSearch& s) { s.flushICache = false; }),
+                                        rankedSearch(16)));
+        EXPECT_FALSE(
+            tuningSearchCovers(less([](TuningSearch& s) { s.rotatingMb = 0; }), rankedSearch(16)));
     }
 
     TEST_F(TuningStore, AppendAfterInterruptedLineKeepsTheNewRow)
@@ -712,16 +927,17 @@ namespace
     }
 
     // A process in a secure execution context (set-user-ID and the like) must
-    // not let an inherited environment choose a file for it to read.
+    // not let an inherited environment choose a file for it to write and
+    // minutes of GPU work for it to spend.
     TEST_F(TuningStore, PrivilegedProcessIgnoresTheTuningEnvironment)
     {
-        setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+        setenv("HIPBLASLT_TUNING_MODE", "tune", 1);
         setenv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
 
         const auto ordinary = TuningModeConfig::fromEnvironment(false);
-        EXPECT_EQ(ordinary.mode, TuningMode::Cache);
+        EXPECT_EQ(ordinary.mode, TuningMode::Tune);
         EXPECT_EQ(ordinary.cachePath, "tuning.txt");
-        EXPECT_TRUE(ordinary.reads());
+        EXPECT_TRUE(ordinary.writes());
         EXPECT_FALSE(ordinary.suppressedForSecurity);
 
         const auto privileged = TuningModeConfig::fromEnvironment(true);
@@ -731,7 +947,8 @@ namespace
         EXPECT_TRUE(privileged.suppressedForSecurity);
     }
 
-    // An unknown mode is off, and a mode with no path reads nothing.
+    // An unknown mode is off, only tune writes, and a mode with no path does
+    // nothing.
     TEST_F(TuningStore, ModeNeedsAKnownValueAndAPath)
     {
         setenv("HIPBLASLT_TUNING_MODE", "online", 1);
@@ -739,11 +956,137 @@ namespace
         EXPECT_EQ(TuningModeConfig::fromEnvironment(false).mode, TuningMode::Off);
 
         setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+        const auto cache = TuningModeConfig::fromEnvironment(false);
+        EXPECT_TRUE(cache.reads());
+        EXPECT_FALSE(cache.writes());
+
+        setenv("HIPBLASLT_TUNING_MODE", "tune", 1);
         unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
         const auto noPath = TuningModeConfig::fromEnvironment(false);
-        EXPECT_EQ(noPath.mode, TuningMode::Cache);
+        EXPECT_EQ(noPath.mode, TuningMode::Tune);
         EXPECT_FALSE(noPath.reads());
+        EXPECT_FALSE(noPath.writes());
         EXPECT_FALSE(noPath.suppressedForSecurity);
+    }
+
+    // The tuner adds each winner beside the rows it found, as the file appends
+    // it, so the process that tuned and a later one reading the file back
+    // choose the same entry: a finished search over a partial one, and the
+    // newest finished search over an older one.
+    TEST_F(TuningStore, LiveEntriesChooseAsTheReloadedFileDoes)
+    {
+        const ProblemOverride key          = halfKey();
+        const TunedEntry      narrow       = tunedEntry(1, "narrow", true, 0, rankedSearch(2));
+        const TunedEntry      widerPartial = tunedEntry(2, "wider", false, 1000, rankedSearch(16));
+        const TunedEntry      widerDone    = tunedEntry(3, "widest", true, 0, rankedSearch(16));
+
+        const std::vector<std::pair<std::vector<TunedEntry>, std::vector<int32_t>>> cases
+            = {{{narrow, widerPartial}, {1, 2}}, {{narrow, widerPartial, widerDone}, {3, 1, 2}}};
+        for(const auto& [entries, order] : cases)
+        {
+            SCOPED_TRACE(entries.size());
+            OverrideMap              live;
+            std::vector<std::string> rows;
+            for(const auto& entry : entries)
+            {
+                live.addIfAbsent(key, entry);
+                rows.push_back(tunedRow(key, entry));
+            }
+
+            OverrideMap reopened;
+            ASSERT_EQ(loadInto(reopened, fileOf(rows)).accepted, entries.size());
+            EXPECT_EQ(indexesOf(live.find(key)), order);
+            EXPECT_EQ(indexesOf(reopened.find(key)), order);
+        }
+
+        // Read back, the partial row still records its search, so a run with
+        // the same search and ceiling does not repeat it.
+        OverrideMap reopened;
+        loadInto(reopened, fileOf({tunedRow(key, narrow), tunedRow(key, widerPartial)}));
+        EXPECT_FALSE(reopened.needsRetune(key, rankedSearch(16), 1000));
+    }
+
+    TEST_F(TuningStore, RefreshedWinnerIsNewestWithinItsGroup)
+    {
+        const ProblemOverride key = halfKey();
+        for(const bool complete : {false, true})
+        {
+            SCOPED_TRACE(complete);
+            const auto  first     = tunedEntry(1, "first", complete, 1000, rankedSearch(2));
+            const auto  second    = tunedEntry(2, "second", complete, 1000, rankedSearch(4));
+            const auto  refreshed = tunedEntry(1, "first", complete, 2000, rankedSearch(16));
+            OverrideMap live;
+            ASSERT_TRUE(live.addIfAbsent(key, first));
+            ASSERT_TRUE(live.addIfAbsent(key, second));
+            ASSERT_FALSE(live.addIfAbsent(key, refreshed));
+            EXPECT_EQ(indexesOf(live.find(key)), (std::vector<int32_t>{1, 2}));
+            ASSERT_TRUE(live.find(key).front().search.has_value());
+            EXPECT_EQ(live.find(key).front().search->maxCandidates, 16);
+
+            OverrideMap reopened;
+            EXPECT_EQ(
+                loadInto(
+                    reopened,
+                    fileOf({tunedRow(key, first), tunedRow(key, second), tunedRow(key, refreshed)}))
+                    .accepted,
+                2u);
+            EXPECT_EQ(indexesOf(reopened.find(key)), (std::vector<int32_t>{1, 2}));
+        }
+
+        OverrideMap legacy;
+        loadInto(legacy,
+                 fileOf({legacyRow(key, 1, "first"),
+                         legacyRow(key, 2, "second"),
+                         legacyRow(key, 1, "first")}));
+        EXPECT_EQ(indexesOf(legacy.findLegacy(key)), (std::vector<int32_t>{1, 2}));
+    }
+
+    TEST_F(TuningStore, PartialRefreshKeepsTheSameKernelsCompletedSearch)
+    {
+        const ProblemOverride key      = halfKey();
+        const auto            complete = tunedEntry(1, "same", true, 0, rankedSearch(2));
+        const auto            partial  = tunedEntry(1, "same", false, 1000, rankedSearch(16));
+        OverrideMap           live;
+        live.addIfAbsent(key, complete);
+        live.addIfAbsent(key, partial);
+        OverrideMap reopened;
+        loadInto(reopened, fileOf({tunedRow(key, complete), tunedRow(key, partial)}));
+        for(const auto* map : {&live, &reopened})
+        {
+            const auto found = map->find(key);
+            ASSERT_EQ(found.size(), 2u);
+            EXPECT_TRUE(found[0].complete);
+            EXPECT_FALSE(found[1].complete);
+            ASSERT_TRUE(found[0].search.has_value());
+            EXPECT_EQ(found[0].search->maxCandidates, 2);
+            EXPECT_FALSE(map->needsRetune(key, rankedSearch(2), 0));
+            EXPECT_FALSE(map->needsRetune(key, rankedSearch(16), 1000));
+            EXPECT_TRUE(map->needsRetune(key, rankedSearch(16), 0));
+        }
+
+        OverrideMap competing;
+        competing.addIfAbsent(key, tunedEntry(2, "older", true, 0, rankedSearch(2)));
+        competing.addIfAbsent(key, complete);
+        competing.addIfAbsent(key, partial);
+        EXPECT_EQ(competing.find(key).front().solutionIndex, 1);
+    }
+
+    // Refreshing a row updates the metadata that replay caches.
+    // The generation moves for it as it does for an addition.
+    TEST_F(TuningStore, RefreshingAnEntryMovesTheGeneration)
+    {
+        const ProblemOverride key = halfKey();
+
+        OverrideMap map;
+        ASSERT_TRUE(map.addIfAbsent(key, tunedEntry(1, "kernel", false, 1000)));
+        const uint64_t added = map.generation();
+
+        EXPECT_FALSE(map.addIfAbsent(key, tunedEntry(1, "kernel", false, 2000)));
+        EXPECT_NE(map.generation(), added);
+        const auto found = map.find(key);
+        ASSERT_EQ(found.size(), 1u);
+        EXPECT_FALSE(found[0].complete);
+        EXPECT_EQ(found[0].budgetMs, 2000);
     }
 
     // The file starts with the build stamp once, and every appended row reads

@@ -66,6 +66,10 @@ struct WaitAluNeed {
     }
 };
 
+/// An op the scoreboard counts toward hiding a wait: a WMMA hides a va_vdst, an op in the LDS
+/// or TEX FIFO hides a vm_vsrc (a flat_* is in both).
+enum class WaitAluHideOp { Wmma, Lds, Tex, Flat };
+
 /// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
 /// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
 /// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
@@ -79,6 +83,15 @@ class STINKYTOFU_EXPORT WaitAluTracker {
 
     /// The wait `inst` would need if it were issued next.
     WaitAluNeed query(const StinkyInstruction& inst) const;
+    /// How many more `op`s must issue before `inst` no longer needs the wait `op` hides
+    /// (va_vdst for Wmma, vm_vsrc otherwise). 0: it needs no wait on that counter now; -1: no
+    /// number of `op`s hides it, only a wait drains it. The WMMA form the va_vdst hide counts is
+    /// the one already issued, else `formWmma`'s (an XDL WMMA).
+    int untilFree(const StinkyInstruction& inst, WaitAluHideOp op,
+                  const StinkyInstruction* formWmma = nullptr) const;
+    /// untilFree() for `consumer` right after `producer`, with nothing else in flight.
+    int requiredGap(const StinkyInstruction& producer, const StinkyInstruction& consumer,
+                    WaitAluHideOp op, const StinkyInstruction* formWmma = nullptr) const;
     /// Issue `inst`: apply the wait it needs, then record what it produces.
     void commit(const StinkyInstruction& inst);
 

@@ -41,7 +41,7 @@ Mnemonics are resolved against the target architecture at pass run time.
 Unknown names are skipped with a `PASS_DEBUG` message; if no valid opcode
 remains, the pass is a no-op.
 
-### Via Tensile / rocisa (`ModuleOptions`)
+### Via TensileLite / rocisa (`ModuleOptions`)
 
 Set `RemoveInstructions` in the `options` dict passed to
 `rocisa.toStinkyTofuModule()`. In `KernelWriter.py`, add it to

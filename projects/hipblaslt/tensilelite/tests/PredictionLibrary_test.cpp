@@ -40,6 +40,7 @@
 
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 
 #if defined(TENSILE_MSGPACK)
@@ -284,4 +285,36 @@ TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
     EXPECT_TRUE(lib.origami_config_list[0].non_temporal_b_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
+}
+
+TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLookup)
+{
+    auto clustered = makeMappedSolution(42, TensileLite::dim3(8, 1, 1));
+    auto plain = makeMappedSolution(7);
+    for(auto const& solution : {clustered, plain})
+    {
+        solution->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = WorkAssignment::StaticGrid;
+        solution->hardwarePredicate = std::make_shared<Predicates::True<Hardware>>();
+        solution->problemPredicate = std::make_shared<Predicates::True<ContractionProblemGemm>>();
+    }
+    clustered->internalArgsSupport.persistentLoopArgsVersion = 2;
+    SolutionMap<ContractionSolution> solutions{{42, clustered}, {7, plain}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42, 7}, solutions, lib);
+    hip::HipAMDGPU device;
+    device.computeUnitCount = 256;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
+        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1, 8192, 8192, 1, 8192, 1, 1.0, false, 1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    const auto ranked = lib.findTopSolutions(problem, device, 2);
+    ASSERT_EQ(ranked.size(), 2u);
+    EXPECT_EQ(ranked[0], plain);
+    EXPECT_EQ(ranked[1], clustered);
+    EXPECT_EQ(lib.getSolutionByIndex(problem, device, 42), clustered);
+    EXPECT_EQ(clustered->sizeMapping.clusterDim.x, 8u);
 }

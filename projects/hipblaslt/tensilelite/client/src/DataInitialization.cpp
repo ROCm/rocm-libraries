@@ -973,8 +973,8 @@ namespace TensileLite
         {
             {
                 hipDeviceProp_t prop;
-                int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
-                HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
+                HIP_CHECK_EXC(hipGetDevice(&m_deviceId));
+                HIP_CHECK_EXC(hipGetDeviceProperties(&prop, m_deviceId));
                 m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
             }
 
@@ -3589,6 +3589,10 @@ namespace TensileLite
                 problem.tensors()[ContractionProblemGemm::TENSOR::METADATA].totalAllocatedBytes(),
                 offset,
                 stream);
+            for(auto t : {ContractionProblemGemm::TENSOR::D,
+                          ContractionProblemGemm::TENSOR::E,
+                          ContractionProblemGemm::TENSOR::BIAS})
+                newInputs.maxElements[t] = problem.tensors()[t].totalAllocatedElements();
             return newInputs;
         }
 

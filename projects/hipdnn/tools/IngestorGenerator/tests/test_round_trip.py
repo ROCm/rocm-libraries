@@ -105,6 +105,31 @@ def test_valid_fixture_validates_clean(validator):
     assert payload["expected_engines_missing"] == []
 
 
+def test_multi_launch_fixture_loads_and_keeps_its_kernels(validator):
+    """Kernels carrying `sources` load under the stub handler that declares their
+    launch names: the engine is neither dropped nor missing, one kernel under two
+    launch names included."""
+    engine = "hipkernel:ValidateFixtureMultiLaunch"
+    result = subprocess.run(
+        [
+            str(validator),
+            str(FIXTURE_ROOT / "multi_launch"),
+            "--expect-engine",
+            engine,
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert payload["success"] is True
+    assert payload["engines"] == [engine]
+    assert payload["expected_engines_missing"] == []
+    assert "0 dropped" in " ".join(d["message"] for d in payload["diagnostics"])
+
+
 @pytest.mark.parametrize(
     "name,marker", MALFORMED_FIXTURES, ids=[n for n, _ in MALFORMED_FIXTURES]
 )

@@ -42,13 +42,13 @@ hiptensorStatus_t hiptensorElementwisePermuteReference(const void*              
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    float alphaF;
+    double alphaD;
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
 
-    auto refCandidates = instances->query({alphaF},
+    auto refCandidates = instances->query({alphaD},
                                           descA->mLengths,
                                           {descA->mType},
                                           {descB->mType},
@@ -59,7 +59,7 @@ hiptensorStatus_t hiptensorElementwisePermuteReference(const void*              
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs({alphaF},
+        if(refCandidate->initArgs({alphaD},
                                   {descA->mLengths},
                                   {descA->mStrides},
                                   {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},

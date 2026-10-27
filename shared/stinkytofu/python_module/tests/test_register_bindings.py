@@ -2,7 +2,7 @@
 rocisa→stinkytofu adapter.
 
 Scope: every surface the rocisa-shaped adapter wrapper needs in order to
-back the RegisterContainer + RegName shapes that Tensile KernelWriter
+back the RegisterContainer + RegName shapes that TensileLite KernelWriter
 expects. KernelWriter call sites this file pins down:
 
   * RegisterContainer.setMinus(True)          (Components/GSU.py:466)
@@ -399,7 +399,7 @@ class TestCopy:
 
 
 class TestKernelWriterScenarios:
-    """Each test maps to a concrete call site in Tensile (cited in test name).
+    """Each test maps to a concrete call site in TensileLite (cited in test name).
     These are the contracts the rocisa-shaped adapter wrapper relies on; if
     any of these break, the wrapper breaks in turn."""
 

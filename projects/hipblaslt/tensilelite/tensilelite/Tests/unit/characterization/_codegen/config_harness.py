@@ -8,13 +8,13 @@ This is *not* a test module (no ``test_`` prefix, not collected). It exercises
 the **config-driven** solution-generation surface that the logic-driven
 :mod:`codegen_harness` does not touch:
 
-    Tensile config YAML  ->  BenchmarkProcess (BenchmarkStructs)
+    TensileLite config YAML  ->  BenchmarkProcess (BenchmarkStructs)
                          ->  constructForkPermutations
                          ->  _generateForkedSolutions  ->  Solution(s)
                          ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
                          ->  processKernelSource  ->  assembly text
 
-A Tensile ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
+A TensileLite ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
 pair. The ``ForkParameters`` block is a cartesian product of single-element
 value lists, so each fork permutation yields exactly one ``Solution`` (CPU-only;
 no GPU, no benchmarking, no compile). We then hand the resulting ``Solution``
@@ -115,7 +115,7 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 
 def _load_config(config_path):
-    """Read a Tensile config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
+    """Read a TensileLite config YAML into a dict (GlobalParameters/BenchmarkProblems)."""
     from tensilelite import LibraryIO
 
     return LibraryIO.read(str(resolve_tensile_path(config_path)))
@@ -611,6 +611,77 @@ def assert_assembles(src, base):
             assembler(target.group(1), waveSize, srcPath, os.path.join(tmpDir, "kernel.o"))
         except RuntimeError as exc:
             pytest.fail(f"Kernel {base!r} does not assemble for {target.group(1)}: {exc}")
+
+
+_SYMBOL_BREADCRUMB_RE = re.compile(
+    r"([sv](?:\d+|\[\d+:\d+\])) was (\w+(?:\+-?\d+)*) \((?:unresolved \.set|split)\)"
+)
+# Same operand and the same ``was``, any reason: catches a reason string the
+# allocator grows that the pattern above does not know, which would otherwise
+# leave the operand numeric and fail an assertion for a reason nobody can see.
+_BREADCRUMB_SHAPE_RE = re.compile(r"[sv](?:\d+|\[\d+:\d+\]) was \S+ \([^)]*\)")
+_OPERAND_RE = re.compile(r"(?<!\w)[sv](?:\d+|\[\d+:\d+\])(?!\w)")
+
+
+def with_symbol_names(src):
+    """Return ``src`` with allocator-renumbered operands spelled by name again.
+
+    A kernel with ``StinkyTofuRegisterAllocation >= 2`` compacts SGPRs, and an operand it moves
+    loses its symbolic name whenever the name's ``.set`` cannot be resolved --
+    which is most of them, because TensileLite ends a name's scope with a second
+    ``.set NAME, UNDEF``. So ``s[sgprMulticastMaskA]`` prints as ``s0``. The
+    instruction is unchanged; only the spelling is, and every assertion that
+    matches assembly text by name stops matching.
+
+    The allocator records what it renamed in a trailing ``s0 was
+    sgprMulticastMaskA (unresolved .set)`` note, so the original spelling is
+    recoverable: substitute each renamed operand back on the line that documents
+    it. With no such notes -- allocation off, or an arch that does not emit them
+    -- the text is returned byte-identical, so an assertion reads the same in
+    both modes.
+
+    Match names against this view and assemble the real text
+    (``assert_assembles``), which is the only check that can tell the two apart.
+    """
+    out = []
+    for line in src.splitlines(keepends=True):
+        code, sep, note = line.partition("//")
+        crumbs = _SYMBOL_BREADCRUMB_RE.findall(note)
+        shapes = len(_BREADCRUMB_SHAPE_RE.findall(note))
+        assert shapes == len(crumbs), (
+            f"unrecognized allocator breadcrumb, so this operand would stay "
+            f"numeric and every name-matching assertion on it would fail "
+            f"silently: {note.strip()!r}"
+        )
+        if not crumbs:
+            out.append(line)
+            continue
+
+        # One physical register can carry two names on one line, e.g. a
+        # destination the allocator moved to where a source's symbol also
+        # landed. The allocator writes its notes in operand order (destinations
+        # then sources, and one note per distinct fact), so consume them in that
+        # order rather than substituting a name everywhere it fits -- which
+        # would spell the second operand with the first operand's symbol.
+        pending = {}
+        for physical, name in crumbs:
+            pending.setdefault(physical, []).append(name)
+
+        def spell(match):
+            names = pending.get(match.group(0))
+            if not names:
+                return match.group(0)
+            # A single note covers every occurrence: it is either the only use
+            # or two uses the allocator deduplicated because they agree.
+            name = names.pop(0) if len(names) > 1 else names[0]
+            span = re.fullmatch(r"([sv])\[(\d+):(\d+)\]", match.group(0))
+            if span:
+                width = int(span.group(3)) - int(span.group(2))
+                return f"{span.group(1)}[{name}:{name}+{width}]"
+            return f"{match.group(0)[0]}[{name}]"
+
+        out.append(_OPERAND_RE.sub(spell, code) + sep + note)
+    return "".join(out)
 
 
 def assert_split_multicast_masks(src, base):

@@ -37,7 +37,7 @@ from types import SimpleNamespace
 import pytest
 
 # Prime the component registry before StreamK imports (avoids circular import).
-from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
 from rocisa.code import Module
 from rocisa.container import ContinuousRegister, vgpr
@@ -51,15 +51,15 @@ from rocisa.instruction import (
     VReadfirstlaneB32,
 )
 
-import Tensile.Components.StreamK as skmod
-import Tensile.KernelWriter as kwmod
-from Tensile.Components.StreamK import (
+import tensilelite.Components.StreamK as skmod
+import tensilelite.KernelWriter as kwmod
+from tensilelite.Components.StreamK import (
     _SK_USO_BIT,
     StreamK,
     StreamKHybrid,
     StreamKTwoTileDPFirst,
 )
-from Tensile.Components.WorkAssignment import Hybrid, StaticGrid
+from tensilelite.Components.WorkAssignment import Hybrid, StaticGrid
 
 pytestmark = pytest.mark.unit
 
@@ -107,6 +107,13 @@ class _Pool:
 def _writer(inVgprs):
     """Minimal stand-in for KernelWriterAssembly for StreamK helper codegen."""
     pool = _Pool()
+
+    def readback(kernel, dst, name):
+        module = Module("readback %s" % name)
+        if inVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(_SK_CONST_VGPRS[name])))
+        return module
+
     return SimpleNamespace(
         # gfx1250 hands back a scratch index; everyone else the named SGPR.
         acquirePersistentConstSgpr=lambda k, name: pool.checkOut(1, name) if inVgprs else name,

@@ -19,6 +19,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -83,9 +84,25 @@ struct ValidatorHandle
 /// A stub dispatch handler. DispatchRegistry only stores a pointer to it, resolved
 /// during the native-symbol pre-flight, so the bodies are trivial. Static storage
 /// duration: the registry holds a non-owning pointer.
+///
+/// It declares the launch names its pack's kernels carry (see HarvestedSymbols::dispatch),
+/// so the state manager's launch-name check reports only a real disagreement inside a
+/// pack, never the stub's own ignorance of what the real handler launches.
 class StubDispatchHandler : public IKernelDispatchHandler<ValidatorHandle>
 {
 public:
+    StubDispatchHandler() = default;
+
+    explicit StubDispatchHandler(std::set<std::string> launches)
+        : _launches(std::move(launches))
+    {
+    }
+
+    std::set<std::string> launchNames() const override
+    {
+        return _launches;
+    }
+
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*tokens*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -108,6 +125,9 @@ public:
     {
         // Never called: the validator never builds a real plan.
     }
+
+private:
+    std::set<std::string> _launches;
 };
 
 /// The stub `GraphMatchFn`. Must return an engaged optional: `nullopt` is the
@@ -249,12 +269,18 @@ void forEachRoleModel(const std::map<std::string, std::vector<DescriptorId>>& re
 /// `dispatches[].dispatchSymbol`, and the `native.symbol` of every native UHD any role
 /// map binds, for every architecture. Harvested from pass 1's unresolved-symbol sets,
 /// before any stub is registered.
+///
+/// `dispatch` also carries, per symbol, the launch names (the keys of `sources`) of the
+/// first kernel found under a pack that binds it, `nullopt` until one is found. The stub
+/// for the symbol declares exactly that set, so a kernel of the same pack with a
+/// different set is still dropped and reported, and a bundle of multi-launch kernels is
+/// not rejected only because a stub cannot know what a real handler launches.
 struct HarvestedSymbols
 {
     std::set<std::string> graphMatch;
     std::set<std::string> graphCriterion;
     std::set<std::string> kernelMatcher;
-    std::set<std::string> dispatch;
+    std::map<std::string, std::optional<std::set<std::string>>> dispatch;
     /// ScoreRegistry comparators: a ranking model with no feature signature.
     std::set<std::string> score;
     /// uhd::NativeScorerRegistry scorers: every `predict_engine` model, and any ranking
@@ -285,7 +311,27 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         }
         for(const auto& dispatch : set.dispatches)
         {
-            harvested.dispatch.insert(dispatch.dispatchSymbol);
+            harvested.dispatch.try_emplace(dispatch.dispatchSymbol);
+        }
+        for(const auto& pack : set.packs)
+        {
+            const auto bound = std::find_if(
+                set.dispatches.begin(), set.dispatches.end(), [&](const DispatchDescriptor& d) {
+                    return d.id == pack.dispatchId;
+                });
+            if(bound == set.dispatches.end() || pack.kernels.empty())
+            {
+                continue;
+            }
+            auto& launches = harvested.dispatch[bound->dispatchSymbol];
+            if(!launches.has_value())
+            {
+                launches.emplace();
+                for(const auto& launch : pack.kernels.front().sources)
+                {
+                    launches->insert(launch.first);
+                }
+            }
         }
         // Every role, architecture and metric: the real provider registers all of them, so a
         // model left unregistered here would be falsely disabled.
@@ -308,7 +354,7 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
     return harvested;
 }
 
-StubDispatchHandler stubDispatchHandler;
+std::map<std::string, StubDispatchHandler> stubDispatchHandlers;
 
 /// Registers a no-op stub per unique harvested name into each registry. `harvestSymbols`
 /// pre-dedupes into `std::set`s, which is required: two descriptor sets may legally
@@ -338,9 +384,11 @@ void registerStubs(const HarvestedSymbols& harvested)
                 throw std::logic_error("Descriptor validation never executes stub native scorers");
             });
     }
-    for(const auto& symbol : harvested.dispatch)
+    for(const auto& [symbol, launches] : harvested.dispatch)
     {
-        DispatchRegistry<ValidatorHandle>::registerSymbol(symbol, &stubDispatchHandler);
+        const auto stub = stubDispatchHandlers.try_emplace(
+            symbol, StubDispatchHandler(launches.value_or(std::set<std::string>{})));
+        DispatchRegistry<ValidatorHandle>::registerSymbol(symbol, &stub.first->second);
     }
 }
 

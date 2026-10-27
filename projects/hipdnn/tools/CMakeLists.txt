@@ -1,6 +1,29 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Headers both command-line tools below share; tools-internal, never installed.
+    add_library(hipdnn_tools_common INTERFACE)
+    target_include_directories(hipdnn_tools_common
+        INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
+    target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk)
+
+    # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
+    # training tooling.
+    add_subdirectory(bench)
+
+    # Both evaluate UHD descriptor expressions through plugin_sdk's heuristics/uhd/, which
+    # exists only with the kernel ingestor.
+    add_subdirectory(corpus_gen)
+
+    add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
+    target_compile_options(hipdnn_uhd_features PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
+    target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
+    clang_tidy_check(hipdnn_uhd_features)
+    install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
@@ -14,6 +37,103 @@ set_target_properties(
     hipdnn_list_engines PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
 )
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# uhd_gen's Python tests pin the features_hash contract against the C++ FeatureExtractor, and
+# mine_shapes mines the shapes the IngestorGenerator consumes; both are ingestor tooling, so
+# a build without the ingestor, or with HIPDNN_SKIP_TESTS, registers neither. The suites self-skip (pytest.importorskip)
+# when lightgbm/flatbuffers/numpy/pandas are absent; HIPDNN_REQUIRE_UHD_GEN_TESTS turns
+# the skips of all four suites into failures (uhd_gen/conftest.py, which the two suites outside
+# uhd_gen/ load with `-p`) and a missing pytest into a configure error.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
+    set(_uhd_gen_missing_severity ${HIPDNN_UHD_GEN_MISSING_SEVERITY})
+
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        # Probe for pytest: `python -m pytest` exits 1 when it is missing, which is
+        # indistinguishable from a test failure.
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import pytest"
+            RESULT_VARIABLE UHD_GEN_PYTEST_PROBE
+            OUTPUT_QUIET ERROR_QUIET)
+        if(UHD_GEN_PYTEST_PROBE EQUAL 0)
+            add_test(
+                NAME uhd_gen_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                        ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/tests
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            # pytest exits 5 when it collects nothing (the importorskip guards skipped
+            # everything).
+            set_tests_properties(uhd_gen_tests PROPERTIES
+                SKIP_RETURN_CODE 5
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            # Separate test because the suite above does not collect uhd_gen/dataset/tests,
+            # and this one needs no ML dependencies.
+            add_test(
+                NAME uhd_gen_dataset_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                        ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5)
+
+            # Only this file: the rest of IngestorGenerator/tests needs PyYAML/Jinja2 via its
+            # conftest. --noconftest because test_mine_shapes.py must not inherit those
+            # imports.
+            add_test(
+                NAME mine_shapes_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider --noconftest -p uhd_gen.conftest
+                        ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/test_mine_shapes.py
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5)
+
+            # The hipdnn-uhd skill's scripts, against a fake hipdnn_bench. Its uhd_gen-backed
+            # cases (promotion into a candidate tree) need the evaluator too.
+            add_test(
+                NAME uhd_skill_scripts_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider -p uhd_gen.conftest
+                        ${CMAKE_CURRENT_SOURCE_DIR}/ai/tests/test_uhd_skill_scripts.py
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(uhd_skill_scripts_tests PROPERTIES
+                SKIP_RETURN_CODE 5
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+                set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                             uhd_skill_scripts_tests APPEND PROPERTY
+                             ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+            endif()
+            # LightGBM takes every core by default, which stalls these suites for many
+            # minutes beside a parallel ctest. Bytecode and pytest's cache stay out of the
+            # source tree.
+            set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                         uhd_skill_scripts_tests APPEND PROPERTY
+                         ENVIRONMENT "OMP_NUM_THREADS=4" "PYTHONDONTWRITEBYTECODE=1")
+
+            # The two suites that run hipdnn_uhd_features load the sanitizer, ROCm and build
+            # DLL directories the C++ tests do (PATH prepends on Windows, via
+            # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced).
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                set_tests_properties(uhd_gen_tests uhd_skill_scripts_tests PROPERTIES
+                                     ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+            endif()
+
+            # Build tree only: none of the four is installed.
+            _apply_hipdnn_test_category_labels(uhd_gen_tests)
+            _apply_hipdnn_test_category_labels(uhd_gen_dataset_tests)
+            _apply_hipdnn_test_category_labels(mine_shapes_tests)
+            _apply_hipdnn_test_category_labels(uhd_skill_scripts_tests)
+        else()
+            message(${_uhd_gen_missing_severity}
+                    "uhd_gen tests NOT registered: pytest is not importable by "
+                    "${Python3_EXECUTABLE}. These pin the features_hash contract between "
+                    "tools/uhd_gen and the C++ FeatureExtractor; install pytest (plus "
+                    "${HIPDNN_UHD_GEN_PYTHON_MODULES}) so they run.")
+        endif()
+    else()
+        message(${_uhd_gen_missing_severity}
+                "uhd_gen tests NOT registered: no Python3 interpreter found")
+    endif()
+endif()
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
 # own engine name rather than a hexadecimal fallback.
@@ -126,6 +246,52 @@ endif()
     endif()
 
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
+endif()
+
+# DescriptorGenerator pytest suite, then the IngestorGenerator one below. Build tree only, like
+# the smoke tests above. Both run under the hipdnn_strict_skips plugin: ctest reports a suite
+# whose cases all skip as a pass, so a missing compiler or binary would otherwise go unnoticed.
+if(HIPDNN_ENABLE_TOOLING_TESTS AND HIPDNN_SKIP_TESTS)
+    message(STATUS "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS is ignored because HIPDNN_SKIP_TESTS is ON")
+endif()
+if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
+    if(NOT Python3_FOUND)
+        message(FATAL_ERROR "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON needs a Python3 interpreter")
+    endif()
+    if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+        message(
+            FATAL_ERROR
+                "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON also needs HIPDNN_ENABLE_KERNEL_INGESTOR=ON: "
+                "the IngestorGenerator suite runs the hipdnn_validate_descriptors tool that option "
+                "builds. Enable it, or configure with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
+        )
+    endif()
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import pytest, yaml, jinja2"
+        RESULT_VARIABLE _hipdnn_tooling_imports
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT _hipdnn_tooling_imports EQUAL 0)
+        message(
+            FATAL_ERROR
+                "hipDNN: pytest, PyYAML and Jinja2 are not all importable by "
+                "${Python3_EXECUTABLE}, so the tooling tests cannot run. Install "
+                "tools/IngestorGenerator/requirements.txt for that interpreter, or configure "
+                "with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
+        )
+    endif()
+    set(HIPDNN_STRICT_SKIPS_PLUGIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/pytest_plugins")
+    add_test(
+        NAME hipdnn_descriptor_generator_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
+                "${CMAKE_CURRENT_SOURCE_DIR}/DescriptorGenerator/tests" -v
+    )
+    set_tests_properties(
+        hipdnn_descriptor_generator_pytest
+        PROPERTIES ENVIRONMENT_MODIFICATION
+                   "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR}"
+    )
+    _apply_hipdnn_test_category_labels(hipdnn_descriptor_generator_pytest)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
@@ -287,6 +453,25 @@ endforeach()
         )
         set(HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke)
 
+        # The multi-launch bundle: kernels carrying a `sources` map, one pair naming two
+        # kernels and one naming a kernel under both launch names. It has its own engine,
+        # and the same driver script. A validator that stopped declaring the pack's launch
+        # names drops this engine and fails here, which the single-launch root cannot show.
+        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT
+            "${HIPDNN_VALIDATE_DESCRIPTORS_FIXTURES}/multi_launch"
+        )
+        set(HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE "hipkernel:ValidateFixtureMultiLaunch")
+        add_test(
+            NAME hipdnn_validate_descriptors_smoke_multi_launch
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_TOOL=$<TARGET_FILE:hipdnn_validate_descriptors>"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ROOT=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ROOT}"
+                "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_MULTI_LAUNCH_ENGINE}"
+                -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake"
+        )
+        list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
+
         # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
@@ -353,5 +538,101 @@ endforeach()
         endif()
 
         _apply_hipdnn_test_category_labels(${HIPDNN_VALIDATE_DESCRIPTORS_TESTS})
+
+        # IngestorGenerator pytest suite. It is registered here, after the validator target:
+        # tests/test_round_trip.py runs that binary (HIPDNN_VALIDATE_DESCRIPTORS) and
+        # tests/test_native_stub.py needs the include list written below.
+        if(HIPDNN_ENABLE_TOOLING_TESTS)
+            # TestAgainstTheRealBuild gates a build packed with the gfx950 attention engine; the
+            # lanes pack other descriptors, so it would fail there.
+            add_test(
+                NAME hipdnn_ingestor_generator_pytest
+                COMMAND
+                    "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
+                    "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests" -v
+                    --deselect=tests/test_coverage_gate.py::TestAgainstTheRealBuild
+            )
+
+            set(_hipdnn_ingestor_pytest_env
+                "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
+            )
+
+            # test_verify_variant_sets_multi_launch_rocke.py packs with the real compiler and
+            # fails without one. Name the hipcc find_package(hip) resolved, as the packaging
+            # suite's own ctest entries do: the ROCm bin directory is not on every lane's PATH.
+            if(HIP_HIPCC_EXECUTABLE)
+                list(APPEND _hipdnn_ingestor_pytest_env "HKP_HIPCC=${HIP_HIPCC_EXECUTABLE}")
+            endif()
+
+            # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
+            # follow ALIAS targets, so resolve to the real target.
+            set(_hipdnn_stub_include_exprs "")
+            foreach(_stub_dep flatbuffers::flatbuffers hip::host hip::amdhip64)
+                if(TARGET ${_stub_dep})
+                    get_target_property(_stub_real ${_stub_dep} ALIASED_TARGET)
+                    if(NOT _stub_real)
+                        set(_stub_real ${_stub_dep})
+                    endif()
+                    string(
+                        APPEND
+                        _hipdnn_stub_include_exprs
+                        "$<JOIN:$<TARGET_PROPERTY:${_stub_real},INTERFACE_INCLUDE_DIRECTORIES>,\n>\n"
+                    )
+                endif()
+            endforeach()
+            file(
+                GENERATE
+                OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+                CONTENT "${_hipdnn_stub_include_exprs}"
+            )
+            list(
+                APPEND
+                _hipdnn_ingestor_pytest_env
+                "HIPDNN_INGESTOR_STUB_INCLUDE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ingestor_stub_include_dirs.txt"
+            )
+
+            # test_packs_formatting.py takes the formatter from HIPDNN_CLANG_FORMAT, else PATH.
+            # The lanes install clang-format into the interpreter's own environment, whose
+            # scripts directory is not on PATH, so name it here.
+            get_filename_component(_hipdnn_py_dir "${Python3_EXECUTABLE}" DIRECTORY)
+            find_program(
+                HIPDNN_INGESTOR_CLANG_FORMAT
+                NAMES clang-format
+                HINTS "${_hipdnn_py_dir}"
+                NO_DEFAULT_PATH
+            )
+            if(HIPDNN_INGESTOR_CLANG_FORMAT)
+                list(APPEND _hipdnn_ingestor_pytest_env
+                     "HIPDNN_CLANG_FORMAT=${HIPDNN_INGESTOR_CLANG_FORMAT}"
+                )
+            endif()
+
+            if(DEFINED TEST_ENVIRONMENT)
+                list(APPEND _hipdnn_ingestor_pytest_env ${TEST_ENVIRONMENT})
+            endif()
+            set_tests_properties(
+                hipdnn_ingestor_generator_pytest PROPERTIES ENVIRONMENT
+                                                            "${_hipdnn_ingestor_pytest_env}"
+            )
+
+            # PYTHONPATH makes the plugin named by -p importable.
+            set(_hipdnn_ingestor_pytest_env_mod
+                "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR}"
+            )
+            if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+                list(APPEND _hipdnn_ingestor_pytest_env_mod ${TEST_ENVIRONMENT_MODIFICATION})
+            endif()
+            # Give test_native_stub.py the compiler that builds this tree; its lib/llvm/bin is not
+            # on the lanes' PATH.
+            get_filename_component(_hipdnn_stub_cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+            list(APPEND _hipdnn_ingestor_pytest_env_mod
+                 "PATH=path_list_prepend:${_hipdnn_stub_cxx_dir}")
+            set_tests_properties(
+                hipdnn_ingestor_generator_pytest PROPERTIES ENVIRONMENT_MODIFICATION
+                                                            "${_hipdnn_ingestor_pytest_env_mod}"
+            )
+
+            _apply_hipdnn_test_category_labels(hipdnn_ingestor_generator_pytest)
+        endif()
     endif()
 endif()

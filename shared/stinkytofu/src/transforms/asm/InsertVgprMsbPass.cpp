@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -34,6 +35,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/support/OptimizationRemark.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -50,20 +52,50 @@ bool isMsbComputableClass(const StinkyInstruction& inst) {
              inst.is(InstFlag::IF_HasSideEffect));
 }
 
-// Set offset = -msb*256 on each VGPR operand so the emitter prints byte form
-// (`v[idx + offset]` evaluates to idx ≤ 255).
+// Give each VGPR operand the offset its index calls for, so `v[idx + offset]`
+// lands in 0-255. Assigned unconditionally, bank 0 included: the offset is
+// derived from an index other passes rewrite, and skipping it there leaves a
+// register that moved down out of bank 1 holding a bias it no longer earns.
 void encodeVgprOperands(StinkyInstruction* inst) {
     auto rewrite = [](StinkyRegister& reg) {
         if (reg.dataType != StinkyRegister::Type::Register) return;
         if (reg.reg.type != RegType::V) return;
-        int msb = static_cast<int>(reg.reg.idx) / 256;
-        if (msb == 0) return;  // already byte-form; nothing to do
-        int wantOffset = -msb * 256;
-        if (reg.reg.offset == wantOffset) return;  // already encoded (rocisa path)
-        reg.reg.offset = static_cast<int16_t>(wantOffset);
+        // Nothing upstream carries the bias, so an operand arrives unbiased or
+        // already agreeing with its index because this pass ran before.
+        assert((reg.reg.offset == 0 || reg.reg.offset == getMsbOffsetForVgpr(reg)) &&
+               "VGPR offset disagrees with its index; something stored a bias upstream");
+        reg.reg.offset = static_cast<int16_t>(getMsbOffsetForVgpr(reg));
     };
     for (auto& src : const_cast<std::vector<StinkyRegister>&>(inst->getSrcRegs())) rewrite(src);
     for (auto& dst : const_cast<std::vector<StinkyRegister>&>(inst->getDestRegs())) rewrite(dst);
+}
+
+/// The text an operand of \p inst prints, for a diagnostic that has to name a
+/// range rather than a base.
+std::string vgprOperandText(const StinkyRegister& reg) {
+    const uint32_t width = std::max<uint32_t>(1, reg.reg.num);
+    const std::string base = std::to_string(reg.reg.idx);
+    if (width == 1) return "v" + base;
+    return "v[" + base + ":" + std::to_string(reg.reg.idx + width - 1) + "]";
+}
+
+/// Describe each operand of \p inst that its field cannot name.
+///
+/// Reported from here because this is where the bias is applied, so no operand
+/// reaches the emitter without passing this point, whatever chose its register.
+void collectUnbankableOperands(const StinkyInstruction& inst, const std::string& function,
+                               std::vector<std::string>& found) {
+    forEachUnencodableVgprOperand(
+        inst, [&](const StinkyRegister& reg, size_t operand, bool isDest) {
+            const HwInstDesc* desc = inst.getHwInstDesc();
+            const char* mnemonic =
+                desc != nullptr && desc->mnemonic != nullptr ? desc->mnemonic : "<unknown>";
+            found.push_back("@" + function + ": " + (isDest ? "dest[" : "src[") +
+                            std::to_string(operand) + "] of '" + mnemonic + "' is " +
+                            vgprOperandText(reg) +
+                            ", but that field has no VGPR bank selector and reaches v0-v" +
+                            std::to_string(kVgprBankSize - 1) + " only");
+        });
 }
 
 bool emitVgprMsbIfNeeded(int requiredSetVal, bool hasVgpr, int& currentMsb, AsmIRBuilder& irBuilder,
@@ -123,12 +155,24 @@ class InsertVgprMsbPassImpl : public Pass {
         VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
         if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
-        runOnFunction(func, archId, msbMode);
+        // Reported, not asserted. A slotless field certainly cannot name a bank,
+        // but which bank it then reads is not settled -- one kernel emits eight
+        // such operands and validates -- so aborting here would stop a build on
+        // something that may work. Whoever chose the register is upstream; this
+        // says only that the choice is not encodable, and says it per operand so
+        // a release build names them rather than emitting them in silence.
+        std::vector<std::string> unbankable;
+        runOnFunction(func, archId, msbMode, unbankable);
+        for (const std::string& operand : unbankable) {
+            emitRemark(passCtx, {OptimizationRemark::Kind::Missed, "InsertVgprMsb",
+                                 "UnbankableOperand", operand});
+        }
         return preserveCFGAnalyses();
     }
 
    private:
-    static void runOnFunction(Function& func, GfxArchID archId, VgprMsbMode msbMode) {
+    static void runOnFunction(Function& func, GfxArchID archId, VgprMsbMode msbMode,
+                              std::vector<std::string>& unbankable) {
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
@@ -172,6 +216,7 @@ class InsertVgprMsbPassImpl : public Pass {
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 bool emittedVgprMsb = emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb,
                                                           irBuilder, archId, insertBefore, msbMode);
+                collectUnbankableOperands(*inst, func.getName(), unbankable);
                 encodeVgprOperands(inst);
                 if (emittedVgprMsb || isMsbComputableClass(*inst)) preferredInsertBefore = nullptr;
 
