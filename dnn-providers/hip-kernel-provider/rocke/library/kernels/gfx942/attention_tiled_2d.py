@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
 from rocke.core.ir import (
     BF16,
@@ -161,6 +161,11 @@ def _sched_group_pin_mfma_step(b, ds_reads: int, mfma_count: int, sgid: int) -> 
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
+    # Problem fields this body reads as trailing i32 kernargs instead of baking
+    # them, in ABI order. The launch signature, the argument pack and the cache
+    # key read the same tuple (``_runtime_kernarg_fields``).
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ()
+
     head_size: int
     block_size: int
     num_query_heads: int
@@ -5824,6 +5829,9 @@ def _build_gfx942_4warp_gqa_lean(
     b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
+    # Unused here; declared so every later param sits where the shared 2D
+    # launch signature packs it.
+    b.param("qq_bias_stride_0", I32)
 
     tid = b.thread_id_x()
     wid = b.div(tid, b.const_i32(64))
@@ -6113,6 +6121,9 @@ def build_gfx942_4warp_gqa(
     b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
+    # Unused here; declared so every later param sits where the shared 2D
+    # launch signature packs it.
+    b.param("qq_bias_stride_0", I32)
 
     tid = b.thread_id_x()
     wid = b.div(tid, b.const_i32(64))

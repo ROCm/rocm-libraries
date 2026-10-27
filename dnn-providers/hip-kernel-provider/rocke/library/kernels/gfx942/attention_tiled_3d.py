@@ -31,7 +31,7 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
@@ -102,6 +102,11 @@ class UnifiedAttention3DTiledSpec:
     Field-compatible with the gfx950 ``UnifiedAttention3DTiledSpec`` so the
     dispatcher and harnesses can construct it identically.
     """
+
+    # Problem fields this body reads as trailing i32 kernargs instead of baking
+    # them, in ABI order. The launch signature, the argument pack and the cache
+    # key read the same tuple (``_runtime_kernarg_fields``).
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ()
 
     head_size: int
     block_size: int
@@ -1238,6 +1243,11 @@ def build_unified_attention_3d_tiled(
 
 @dataclass(frozen=True)
 class UnifiedAttentionReduceTiledSpec:
+    # Problem fields this body reads as trailing i32 kernargs instead of baking
+    # them, in ABI order. The launch signature, the argument pack and the cache
+    # key read the same tuple (``_runtime_kernarg_fields``).
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = ()
+
     head_size: int
     num_query_heads: int
     num_kv_heads: int

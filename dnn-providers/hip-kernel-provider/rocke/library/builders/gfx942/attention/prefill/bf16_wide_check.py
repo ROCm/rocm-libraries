@@ -39,7 +39,7 @@ from kernels import build_unified_attention_2d_tiled  # noqa: E402
 from kernels.gfx942.attention_tiled_2d import (  # noqa: E402
     UnifiedAttention2DTiledSpec,
 )
-from kernels.common.attention_unified import _attn_signature  # noqa: E402
+from kernels.common.attention_unified import _tiled_2d_signature  # noqa: E402
 from rocke.runtime import KernelLauncher  # noqa: E402
 
 BS = H.BLOCK_SIZE
@@ -136,9 +136,7 @@ def build_launcher(s, spec, kind):
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
-        signature=_attn_signature(
-            s.dtype, include_bt_stride=True, include_qq_bias_stride=True
-        ),
+        signature=_tiled_2d_signature("gfx942", s.dtype),
         cache_key=("bf16wide", spec.kernel_name(), kind),
     )
     return launcher

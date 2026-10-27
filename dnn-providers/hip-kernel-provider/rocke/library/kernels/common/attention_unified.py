@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
@@ -4057,12 +4057,76 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     return base
 
 
+def _runtime_kernarg_fields(spec_cls) -> Tuple[str, ...]:
+    """The problem fields a tiled spec class reads as i32 kernargs, in ABI order.
+
+    The spec class declares them (``RUNTIME_KERNARG_FIELDS``) so its body's
+    params, the launch signature and the cache key read one tuple. A class
+    declaring none bakes those fields into its IR.
+    """
+    return tuple(getattr(spec_cls, "RUNTIME_KERNARG_FIELDS", ()))
+
+
+def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:
+    """Every runtime shape kernarg a tiled body can declare. The launcher packs
+    only the ones its signature names."""
+    return {
+        "num_query_heads": int(problem.num_query_heads),
+        "num_kv_heads": int(problem.num_kv_heads),
+        "sliding_window": int(problem.sliding_window),
+    }
+
+
+def _tiled_2d_signature(
+    arch: str,
+    dtype: str,
+    *,
+    kv_dtype: Optional[str] = None,
+    include_additive_bias: bool = False,
+):
+    """Launch signature of the tiled 2D kernels built for ``arch``."""
+    spec_cls, _, _ = _tiled_2d_impl(arch)
+    return _attn_signature(
+        dtype,
+        include_bt_stride=True,
+        include_qq_bias_stride=True,
+        include_additive_bias=include_additive_bias,
+        kv_dtype=kv_dtype,
+        runtime_fields=_runtime_kernarg_fields(spec_cls),
+    )
+
+
+def _tiled_3d_signatures(
+    arch: str,
+    dtype: str,
+    *,
+    kv_dtype: Optional[str] = None,
+    strided_kv: bool = False,
+    include_additive_bias: bool = False,
+    emit_lse: bool = False,
+):
+    """Launch signatures of the tiled 3D segment and reduce kernels for ``arch``."""
+    segment_cls, reduce_cls, _, _, _ = _tiled_3d_impl(arch)
+    segment = _3d_signature(
+        dtype,
+        kv_dtype=kv_dtype,
+        strided_kv=strided_kv,
+        include_additive_bias=include_additive_bias,
+        runtime_fields=_runtime_kernarg_fields(segment_cls),
+    )
+    reduce = _reduce_signature(
+        dtype, emit_lse=emit_lse, runtime_fields=_runtime_kernarg_fields(reduce_cls)
+    )
+    return segment, reduce
+
+
 def _3d_signature(
     dtype: str,
     *,
     kv_dtype: Optional[str] = None,
     strided_kv: bool = False,
     include_additive_bias: bool = False,
+    runtime_fields: Sequence[str] = (),
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -4090,6 +4154,8 @@ def _3d_signature(
         .scalar("block_table_stride", "i32")
         .scalar("qq_bias_stride_0", "i32")
     )
+    for name in runtime_fields:
+        sb.scalar(name, "i32")
     # Conditional params, in the kernel's declaration order (bias, then strided KV).
     if include_additive_bias:
         append_additive_bias_signature(sb)
@@ -4102,7 +4168,9 @@ def _3d_signature(
     return sb.build()
 
 
-def _reduce_signature(dtype: str, *, emit_lse: bool = False):
+def _reduce_signature(
+    dtype: str, *, emit_lse: bool = False, runtime_fields: Sequence[str] = ()
+):
     from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
@@ -4114,6 +4182,8 @@ def _reduce_signature(dtype: str, *, emit_lse: bool = False):
         .ptr("segm_expsum_ptr", "f32")
         .ptr("seq_lens_ptr", "i32")
     )
+    for name in runtime_fields:
+        sig = sig.scalar(name, "i32")
     if emit_lse:
         sig = sig.ptr("lse_ptr", "f32")
     return sig.build()
@@ -4126,6 +4196,7 @@ def _attn_signature(
     include_qq_bias_stride: bool = False,
     include_additive_bias: bool = False,
     kv_dtype: Optional[str] = None,
+    runtime_fields: Sequence[str] = (),
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -4157,6 +4228,8 @@ def _attn_signature(
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
         sb.scalar("qq_bias_stride_0", "i32")
+    for name in runtime_fields:
+        sb.scalar(name, "i32")
     # Appended last, matching the kernel's conditional param declarations.
     if include_additive_bias:
         append_additive_bias_signature(sb)
@@ -4217,6 +4290,7 @@ def _attn_values(
         "out_scale": float(out_scale),
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
+        **_runtime_kernarg_values(problem),
     }
     if include_bt_stride:
         vals["block_table_stride"] = int(bt_stride)
@@ -4550,6 +4624,7 @@ def _run_3d_tiled_on_stream(
         "additive_bias_batch_stride": int(additive_bias_batch_stride),
         "additive_bias_head_stride": int(additive_bias_head_stride),
         "additive_bias_sq_stride": int(additive_bias_sq_stride),
+        **_runtime_kernarg_values(problem),
     }
     if kv_cache_layout is not None:
         seg_vals.update(kv_cache_layout.arguments())
@@ -4559,6 +4634,7 @@ def _run_3d_tiled_on_stream(
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
+        **_runtime_kernarg_values(problem),
     }
     if problem.emit_lse:
         red_vals["lse_ptr"] = lse
@@ -5232,6 +5308,41 @@ def _shape_key(cache_key: tuple, problem: UnifiedAttentionProblem) -> tuple:
     )
 
 
+def _tiled_3d_kernels(
+    problem: UnifiedAttentionProblem,
+    arch: str,
+    num_segments: int,
+    *,
+    strided_kv: bool = False,
+):
+    """The tiled 3D segment and reduce ``KernelDef``s the production path builds."""
+    (
+        _,
+        UnifiedAttentionReduceTiledSpec,
+        build_unified_attention_3d_tiled,
+        build_unified_attention_reduce_tiled,
+        _,
+    ) = _tiled_3d_impl(arch)
+    if strided_kv:
+        segment_spec, reduce_spec = _strided_3d_specs_from_problem(problem, arch=arch)
+    else:
+        segment_spec = _tiled_3d_spec_from_problem(problem, arch)
+        reduce_spec = UnifiedAttentionReduceTiledSpec(
+            head_size=problem.head_size,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            dtype=problem.dtype,
+            num_segments=num_segments,
+            waves_per_eu=_select_3d_waves_per_eu(problem, arch),
+            # Only when on: gfx1250's reduce spec has no such field.
+            **({"emit_lse": True} if problem.emit_lse else {}),
+        )
+    return (
+        build_unified_attention_3d_tiled(segment_spec, arch=arch),
+        build_unified_attention_reduce_tiled(reduce_spec, arch=arch),
+    )
+
+
 def _get_3d_pipeline(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -5256,31 +5367,9 @@ def _get_3d_pipeline(
         if tuning_spec is not None:
             seg_kernel, red_kernel = tuning_spec.build(arch)
         else:
-            (
-                _,
-                UnifiedAttentionReduceTiledSpec,
-                build_unified_attention_3d_tiled,
-                build_unified_attention_reduce_tiled,
-                _,
-            ) = _tiled_3d_impl(arch)
-            if strided_kv:
-                segment_spec, reduce_spec = _strided_3d_specs_from_problem(
-                    problem, arch=arch
-                )
-            else:
-                segment_spec = _tiled_3d_spec_from_problem(problem, arch)
-                reduce_spec = UnifiedAttentionReduceTiledSpec(
-                    head_size=problem.head_size,
-                    num_query_heads=problem.num_query_heads,
-                    num_kv_heads=problem.num_kv_heads,
-                    dtype=problem.dtype,
-                    num_segments=num_segments,
-                    waves_per_eu=_select_3d_waves_per_eu(problem, arch),
-                    # Only when on: gfx1250's reduce spec has no such field.
-                    **({"emit_lse": True} if problem.emit_lse else {}),
-                )
-            seg_kernel = build_unified_attention_3d_tiled(segment_spec, arch=arch)
-            red_kernel = build_unified_attention_reduce_tiled(reduce_spec, arch=arch)
+            seg_kernel, red_kernel = _tiled_3d_kernels(
+                problem, arch, num_segments, strided_kv=strided_kv
+            )
         seg_art = compile_kernel(seg_kernel, arch=arch, capture_ir_text=False)
         red_art = compile_kernel(red_kernel, arch=arch, capture_ir_text=False)
         _ATTN_3D_TILED_CACHE[cache_key] = (
@@ -5290,28 +5379,31 @@ def _get_3d_pipeline(
             red_art.kernel_name,
         )
     seg_hsaco, seg_kname, red_hsaco, red_kname = _ATTN_3D_TILED_CACHE[cache_key]
+    # problem.emit_lse matches the built reduce: an explicit tuning spec must
+    # agree with it (paged: run_unified_attention_torch; strided:
+    # _validate_strided_3d_spec refuses an LSE reduce).
+    seg_signature, red_signature = _tiled_3d_signatures(
+        arch,
+        problem.dtype,
+        strided_kv=strided_kv,
+        kv_dtype=(
+            tuning_spec.kernel_spec.kv_storage_dtype
+            if tuning_spec is not None
+            else _kv_storage_dtype(problem)
+        ),
+        include_additive_bias=problem.use_additive_bias,
+        emit_lse=problem.emit_lse,
+    )
     seg_launcher = KernelLauncher(
         hsaco=seg_hsaco,
         kernel_name=seg_kname,
-        signature=_3d_signature(
-            problem.dtype,
-            strided_kv=strided_kv,
-            kv_dtype=(
-                tuning_spec.kernel_spec.kv_storage_dtype
-                if tuning_spec is not None
-                else _kv_storage_dtype(problem)
-            ),
-            include_additive_bias=problem.use_additive_bias,
-        ),
+        signature=seg_signature,
         cache_key=("3d_seg",) + cache_key,
     )
     red_launcher = KernelLauncher(
         hsaco=red_hsaco,
         kernel_name=red_kname,
-        # problem.emit_lse matches the built reduce: an explicit tuning spec
-        # must agree with it (paged: run_unified_attention_torch; strided:
-        # _validate_strided_3d_spec refuses an LSE reduce).
-        signature=_reduce_signature(problem.dtype, emit_lse=problem.emit_lse),
+        signature=red_signature,
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
@@ -5437,6 +5529,20 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     return "llvm"
 
 
+def _tiled_2d_kernel(problem: UnifiedAttentionProblem, arch: str):
+    """The tiled 2D ``KernelDef`` the production path builds for ``problem``."""
+    _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+    spec = _tiled_spec_from_problem(problem, arch)
+    route = _gfx942_4warp_route(problem, arch)
+    if route is not None:
+        # Distinct 4-warp GQA paged builder (keyed separately in
+        # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
+        # ABI as the default builder. Parity+ with AITER @Sq4096/8192
+        # (vs the 1-warp std-QK's 0.55x).
+        return route.builder(spec, arch=arch)
+    return build_unified_attention_2d_tiled(spec, arch=arch)
+
+
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -5459,17 +5565,7 @@ def _get_2d_launcher(
             kernel = tuning_spec.build(arch)
             backend = tuning_spec.compile_backend
         else:
-            _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-            spec = _tiled_spec_from_problem(problem, arch)
-            route = _gfx942_4warp_route(problem, arch)
-            if route is not None:
-                # Distinct 4-warp GQA paged builder (keyed separately in
-                # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
-                # ABI as the default builder. Parity+ with AITER @Sq4096/8192
-                # (vs the 1-warp std-QK's 0.55x).
-                kernel = route.builder(spec, arch=arch)
-            else:
-                kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+            kernel = _tiled_2d_kernel(problem, arch)
             backend = _select_2d_compile_backend(problem, arch)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
@@ -5482,10 +5578,9 @@ def _get_2d_launcher(
     launcher = KernelLauncher(
         hsaco=hsaco,
         kernel_name=kname,
-        signature=_attn_signature(
+        signature=_tiled_2d_signature(
+            arch,
             problem.dtype,
-            include_bt_stride=True,
-            include_qq_bias_stride=True,
             include_additive_bias=problem.use_additive_bias,
             kv_dtype=(
                 tuning_spec.kernel_spec.kv_storage_dtype
