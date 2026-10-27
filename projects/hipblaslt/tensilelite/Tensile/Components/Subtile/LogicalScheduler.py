@@ -3644,7 +3644,8 @@ class LogicalScheduler:
         )
         from Tensile.Components.Subtile.WaitAluInsertion import (
             insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu,
-            hoistLRSwapAboveWaitTDM)
+            hoistLRSwapAboveWaitTDM, spreadLRSwapAcrossPriorMfma,
+            spreadPreFreeTDMSALU, spreadPostReadyDsLoads)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3713,10 +3714,17 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        module = spreadPreFreeTDMSALU(module, writer, kernel)
         module = hoistLRSwapAboveWaitTDM(module, writer, kernel)
+        module = spreadLRSwapAcrossPriorMfma(module, writer, kernel)
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
+        # Hide post-READY A/B b128 prefetch behind the following WMMAs (MAINLOOP
+        # only — NGLL/tail has different live scale regs and fails validate).
+        if label.startswith("MAINLOOP"):
+            module = spreadPostReadyDsLoads(module, writer, kernel)
+            # splitWaitLRPerTile: tried; regresses ~1% — leave off for now.
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
         module = setMatrixReuse(module, writer, kernel, 'a')
         module = setMatrixReuse(module, writer, kernel, 'b')

@@ -73,6 +73,7 @@ from Tensile.Common.ValidParameters import validParameters, \
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.SolutionStructs.segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
+from Tensile.Components.Subtile.LdsV7Layout import tdmSingleIssuerApplicable
 from Tensile.Toolchain.Component import Assembler
 from Tensile.Components.CustomSchedule import hasCustomSchedule
 
@@ -6199,6 +6200,15 @@ class Solution(collections.abc.Mapping):
       state["LDSSegmentInterleave"] = (2 if _segRequested == 2 else 1) if _segApplicable else 0
       if _segRequested in (1, 2) and not _segApplicable:
         reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason))
+
+    # gemm_wt-style single-issuer TDM (A0/A1/B0/B1 segments). Mutually exclusive
+    # with LDSSegmentInterleave; only the DU512 MXF4 subtile [2,2] shape is wired.
+    if state.get("TDMSingleIssuer"):
+      _siOk, _siWhy = tdmSingleIssuerApplicable(state)
+      if not _siOk:
+        reject(state, printRejectionReason, "TDMSingleIssuer requested but not applicable: %s" % _siWhy)
+      elif state.get("LDSSegmentInterleave", 0) != 0:
+        reject(state, printRejectionReason, "TDMSingleIssuer incompatible with LDSSegmentInterleave")
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future

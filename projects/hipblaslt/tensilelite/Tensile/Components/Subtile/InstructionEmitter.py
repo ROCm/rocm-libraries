@@ -273,7 +273,8 @@ class InstructionEmitter:
                             and not placement.tdmDescHoisted):
                         module.add(refreshTDMDescriptorSubtile(
                             self.writer, self.kernel, tensor))
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
+                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
+                                                    writer=self.writer))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             if (self.kernel.get("UseSubtileImpl")
@@ -295,8 +296,19 @@ class InstructionEmitter:
         force_drain = getattr(source, 'force_drain', False)
 
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
-            tdmCnt = 0 if force_drain else (counts.A + counts.B + counts.SA + counts.SB)
-            label = "full drain" if force_drain else "tensor_load_to_lds"
+            # TDMSingleIssuer: match ldsv7-w1 — wait=1 only on mainloop READY while
+            # PGR still has fills outstanding; prologue/tail drain (wait=0). LR swaps
+            # (A/B xor + scale ring) are hoisted above the wait.
+            if force_drain:
+                tdmCnt = 0
+                label = "full drain"
+            elif self.kernel.get("TDMSingleIssuer"):
+                outstanding = counts.A + counts.B + counts.SA + counts.SB
+                tdmCnt = 1 if outstanding > 0 else 0
+                label = "single-issuer READY" if tdmCnt else "single-issuer READY drain"
+            else:
+                tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+                label = "tensor_load_to_lds"
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
                                    comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 

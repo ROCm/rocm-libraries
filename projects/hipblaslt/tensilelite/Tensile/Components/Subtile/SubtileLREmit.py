@@ -468,7 +468,13 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     elif tc == 'B' and wgM > 1:
       module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wgM.bit_length()-1), src=vgpr(waveId), comment="waveIdN = waveId / %d" % wgM))
     # LDS offset per axis wave uses the same block-padding rule as TDM.
-    if writer.ldsSegCompStride:
+    # B's absolute matrix base (ldsStartOffsetB / B0) is applied later.
+    lay = getattr(writer, "ldsV7", None)
+    if lay is not None:
+      # A0/A1 or B0/B1 spacing: waveIdAxis * (half1 - half0).
+      assert numWavesThisAxis == 2, "TDMSingleIssuer needs 2 waves on the %s axis" % tc
+      ldsPerWave = lay.inc_a if tc == "A" else lay.inc_b
+    elif writer.ldsSegCompStride:
       # Segment interleave: each axis wave's half sits in its own 64 KiB segment.
       assert numWavesThisAxis == 2, "segment interleave needs 2 waves on the %s axis" % tc
       ldsPerWave = writer.ldsSegCompStride

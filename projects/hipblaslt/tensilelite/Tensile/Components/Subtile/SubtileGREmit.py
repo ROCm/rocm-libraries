@@ -19,20 +19,21 @@
 import math
 from functools import singledispatch
 
-from rocisa.code import Module
+from rocisa.code import Module, Label
 from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr, mgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
     SNop, SOrB32, SSubI32, SSubU32, SXorB32,
-    SCBranchSCC1, SCmpEQU32, SCmpGeU32, SCSelectB32, SEndpgm,
+    SCBranchSCC0, SCBranchSCC1, SCmpEQU32, SCmpGeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
 )
+from .LdsV7Layout import HALF_ROWS, ISSUER_A, ISSUER_B, ISSUER_MXSA, ISSUER_MXSB
 
 from .SubtileGeometry import (
     RegList,
@@ -41,7 +42,6 @@ from .SubtileGeometry import (
 from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
-from rocisa.code import Label
 from ...Common import INDEX_CHARS
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
 from ...Common.DataType import DataType
@@ -862,7 +862,7 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
@@ -872,6 +872,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tileInfo: TileInfo or TileInfo for the tensor component
       sId0:     Subtile row index
       sId1:     Subtile column index (K-dimension)
+      writer:   Optional KernelWriter for unique TDMSingleIssuer skip labels
   """
   module = Module()
 
@@ -881,11 +882,23 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tc = tileInfo.tc
       group0 = "tdm%sGroup0" % tc
       group1 = "tdm%sGroup1" % tc
-      isSubtileIter = _isSubtileIterateMode(kernel, tc)
+      singleIssuer = bool(kernel.get("TDMSingleIssuer"))
+      isSubtileIter = _isSubtileIterateMode(kernel, tc) or singleIssuer
       group2 = sgpr("tdm%sGroup2" % tc, 4) if isSubtileIter else None
       group3 = sgpr("tdm%sGroup3" % tc, 4) if isSubtileIter else None
+      if singleIssuer:
+        issuer = ISSUER_A if tc == "A" else ISSUER_B
+        name = (writer.labels.getUniqueNamePrefix("tdm_si_%s" % tc)
+                if writer is not None else "tdm_si_%s" % tc)
+        skip = Label(name, "")
+        module.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=issuer,
+                             comment="TDMSingleIssuer: %s issuer = wave %d" % (tc, issuer)))
+        module.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                                comment="other waves skip %s TDM" % tc))
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
                                  comment="TDM: global->LDS for %s" % tc))
+      if singleIssuer:
+        module.add(skip)
     return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
@@ -923,7 +936,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
 
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1])
+  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1], writer=writer)
 
 ##################################################
 # Subroutine to generate GR load code
@@ -999,20 +1012,28 @@ def _subtileTileInfo(writer, tc):
   raise ValueError(f"unknown subtile tensor {tc}")
 
 
+def _tdmSwapParams(tc, writer):
+  """(nBuffers, strideBytes) for this tensor's LDS buffer advance."""
+  lay = getattr(writer, "ldsV7", None)
+  if lay is not None and tc.startswith("MX"):
+    return lay.sc_nbuf, lay.sc_buf
+  if lay is not None and tc in ("A", "B"):
+    return 2, lay.buf
+  return writer.states.numLDSBlk, writer.ldsTotalSize
+
+
 def _tdmSwapLdsBuffer(tc, writer, kernel):
   module = Module()
   ldsAddrSgpr = "tdmLdsAddr%s" % tc
   swapSgpr = "tdmLdsSwapMask%s" % tc
   # refreshTDMDescriptorSubtile copies tdmLdsAddr{tc} into the descriptor before every load.
-  n = writer.states.numLDSBlk
+  n, stride = _tdmSwapParams(tc, writer)
   if n < 3:
     module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
     module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
     return module
-  # numLDSBlk >= 3 (TDMPlusLdsBuf): the xor toggle cannot express a 3-way
-  # rotation, so advance the write address by one buffer and wrap past the
-  # last one. swapSgpr holds the per-tensor ceiling (base + N*ldsTotalSize).
-  stride = writer.ldsTotalSize
+  # n >= 3: rotate write address by one buffer and wrap past the last one.
+  # swapSgpr holds the per-tensor ceiling (base + n*stride).
   module.addComment0("TDM: rotate %s LDS write buffer (+1 of %d, wrap at ceiling)" % (tc, n))
   with writer.allocTmpSgpr(1) as tmpRes:
     tmp = tmpRes.idx
@@ -1081,7 +1102,8 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
     mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
                      comment="*= wgId"))
 
-    if numWaves > 1:
+    # TDMSingleIssuer: issuer wave owns the whole tile from row 0; skip per-wave split.
+    if numWaves > 1 and not kernel.get("TDMSingleIssuer"):
       mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"), comment="first tId"))
       mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
                                shiftHex=hex(int(ceil(log2(wavelen)))), comment=f"wId = tId / {wavelen}"))
@@ -1194,7 +1216,8 @@ def _tdmGlobalOffsetSubtileMX(writer, kernel, tP):
                      src1=int(mxUnit * mt * bpe),
                      comment=f"wgId * mxUnit({mxUnit}) * MT({mt}) * bpe({bpe})"))
 
-    if numWaves > 1:
+    # TDMSingleIssuer: scale issuer starts at K group 0 / span 0 and ITERATEs.
+    if numWaves > 1 and not kernel.get("TDMSingleIssuer"):
       kGroup = tmp + 1
       shape.emitWaveSplit(mod, kernel["WavefrontSize"], kGroup, waveOff)
       mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=shape.spanBytes,
@@ -1229,27 +1252,40 @@ def _tdmGlobalOffsetSubtileMX(writer, kernel, tP):
 def _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, ldsTotalSize, writer):
   """Save the per-wave LDS write address and the buffer-swap helper sgpr.
 
-  numLDSBlk == 2 : tdmLdsSwapMask = addr ^ (addr + ldsTotalSize)   (xor toggle)
-  numLDSBlk >= 3 : tdmLdsSwapMask = addr + numLDSBlk*ldsTotalSize  (rotate ceiling)
+  n == 2 : tdmLdsSwapMask = addr ^ (addr + stride)   (xor toggle)
+  n >= 3 : tdmLdsSwapMask = addr + n*stride          (rotate ceiling)
   """
   ldsTrackSgpr = f"tdmLdsAddr{tc}"
   swapMaskSgpr = f"tdmLdsSwapMask{tc}"
-  n = writer.states.numLDSBlk
+  n, stride = _tdmSwapParams(tc, writer)
+  # ldsTotalSize arg kept for call-site compatibility; v7 overrides via _tdmSwapParams.
+  if n < 3 and getattr(writer, "ldsV7", None) is None:
+    stride = ldsTotalSize
   mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx),
                   comment=f"init {ldsTrackSgpr} for buffer tracking"))
   if n >= 3:
-    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=n * ldsTotalSize,
-                    comment=f"ceiling = addr + {n}*ldsTotalSize({ldsTotalSize})"))
+    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=n * stride,
+                    comment=f"ceiling = addr + {n}*stride({stride})"))
     return
-  mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize,
-                  comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+  mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=stride,
+                  comment=f"addr + stride({stride})"))
   mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr),
-                  comment="swapMask = addr XOR (addr + ldsTotalSize)"))
+                  comment="swapMask = addr XOR (addr + stride)"))
 
 
 def _emitSubtileDataLdsTracking(writer, tc, mt, du, bpe, numWaves, wavelen,
                                 ldsConstOffset, padIntervalBytes, padAmountBytes):
   mod = Module(f"TDM LDS tracking {tc}")
+  lay = getattr(writer, "ldsV7", None)
+  if lay is not None:
+    # Single issuer owns the whole operand: LDS base is A0/B0 (buf0 of half0).
+    base = lay.a0 if tc == "A" else lay.b0
+    with writer.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx = tmpSgprRes.idx
+      mod.add(SMovB32(sgpr(waveOffsetSgprIdx), base,
+              f"TDMSingleIssuer: {tc} LDS base {'A0' if tc == 'A' else 'B0'}={base}"))
+      _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, lay.buf, writer)
+    return mod
   compStride = writer.ldsSegCompStride
   with writer.allocTmpSgpr(2 if compStride else 1) as tmpSgprRes:
     waveOffsetSgprIdx = tmpSgprRes.idx
@@ -1295,6 +1331,15 @@ def _emitSubtileDataLdsTracking(writer, tc, mt, du, bpe, numWaves, wavelen,
 def _emitSubtileMxLdsTracking(writer, kernel, tc, ldsConstOffset):
   shape = _MxScaleTdmShape(writer, kernel, tc)
   mod = Module(f"TDM LDS tracking {tc}")
+  lay = getattr(writer, "ldsV7", None)
+  if lay is not None:
+    # Single issuer covers all K groups via ITERATE from ring base (column 0).
+    with writer.allocTmpSgpr(1) as tmpSgprRes:
+      waveOffsetSgprIdx = tmpSgprRes.idx
+      mod.add(SMovB32(sgpr(waveOffsetSgprIdx), ldsConstOffset,
+              f"TDMSingleIssuer: {tc} scale ring base {ldsConstOffset}"))
+      _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, lay.sc_buf, writer)
+    return mod
   with writer.allocTmpSgpr(2) as tmpSgprRes:
     waveOffsetSgprIdx = tmpSgprRes.idx
     kGroup = tmpSgprRes.idx + 1
@@ -1389,7 +1434,10 @@ def initTDMDescriptorSubtile(writer, kernel, tP, refresh=False):
   mt = kernel[f"MacroTile{ti}"]
   du = kernel["DepthU"]
   bpe = tP["bpeGR"]
-  isSubtileIter = _isSubtileIterateMode(kernel, tc)
+  singleIssuer = bool(kernel.get("TDMSingleIssuer"))
+  # Pad-overflow iterate (row-by-row) is separate from single-issuer half-tile iterate.
+  isPadIter = _isSubtileIterateMode(kernel, tc) and not singleIssuer
+  isSubtileIter = isPadIter or singleIssuer
 
   numWaves = prod(kernel["MIWaveGroup"])
   wavelen = kernel["WavefrontSize"]
@@ -1411,9 +1459,9 @@ def initTDMDescriptorSubtile(writer, kernel, tP, refresh=False):
   padAmountBytes = int(getattr(tileInfoForTc, "ldsRowPadBytes", 0))
   padIntervalBytes = int(getattr(tileInfoForTc, "ldsBlockSizePerPadBytes", 0)) if padAmountBytes else 0
 
-  # Iterate mode stores no padding in Group1+0.
-  padInterval = 0 if isSubtileIter else padIntervalBytes
-  padAmount = 0 if isSubtileIter else padAmountBytes
+  # Pad-overflow iterate stores no padding in Group1+0; half-tile iterate keeps pad.
+  padInterval = 0 if isPadIter else padIntervalBytes
+  padAmount = 0 if isPadIter else padAmountBytes
   _emitSubtileGroup1Base(
       mod, comp, writer, kernel, descSgprName(0), descSgprName(1), tc, dtype,
       padInterval, padAmount, isSubtileIter)
@@ -1443,7 +1491,10 @@ def initTDMDescriptorSubtile(writer, kernel, tP, refresh=False):
   mod.add(SOrB32(sgpr(f"{g1}+3"), sgpr(f"{g1}+3"), hex(((sizeTile0 >> sizeShifterTile) & 0xFFFF) << 16),
                  f"tile0 = {sizeTile0 >> sizeShifterTile}"))
 
-  if isSubtileIter:
+  if singleIssuer:
+    # Half-tile iterate: 128 rows into A0/B0, then +inc into A1/B1.
+    mod.add(comp.setTensorTile1(descSgprName(1), HALF_ROWS, writer, overwrite=True))
+  elif isPadIter:
     # Iterate mode: one row per iteration.
     mod.add(comp.setTensorTile1(descSgprName(1), 1, writer, overwrite=True))
   else:
@@ -1461,7 +1512,19 @@ def initTDMDescriptorSubtile(writer, kernel, tP, refresh=False):
   mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile, zeroHigh=False))
   mod.add(SMovB64(sgpr(f"{descSgprName(1)}+6", 2), 0, comment="Group1+6/+7 reserved"))
 
-  if isSubtileIter:
+  if singleIssuer:
+    lay = writer.ldsV7
+    lds_inc = lay.inc_a if tc == "A" else lay.inc_b
+    with writer.allocTmpSgpr(2) as tmp:
+      sIter, sGInc = tmp.idx, tmp.idx + 1
+      # 128 rows * bpe; fp4 packed -> bytes = 128 * stride * 0.5 = 64 * stride elems.
+      mod.add(SMulI32(sgpr(sGInc), sgpr(strideRefName()), HALF_ROWS // (2 if dtype.isFloat4() else 1),
+                      f"global_inc = {HALF_ROWS} rows * bpe"))
+      mod.add(SMovB32(sgpr(f"{descSgprName(2)}+0"), 1, "tensor_dim2 = 1"))
+      mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, sGInc))
+      mod.add(SMovB32(sgpr(sIter), 1, "iter_count=1 (2 halves)"))
+      mod.add(comp.setIterations(descSgprName(2), sIter))
+  elif isPadIter:
     dss = comp.dataSizeShift(dtype)
     lds_inc = (padIntervalBytes + padAmountBytes) >> dss
     iter_count = sizeTile1 // numWaves
@@ -1490,18 +1553,19 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh=False):
   chunk = shape.chunk
   ldsConstOffset = getattr(writer, f"ldsStartOffset{tc}", 0)
   sizeName = f"Size{INDEX_CHARS[tIdx]}"
-  wgName = f"WorkGroup{tIdx}"
+  singleIssuer = bool(kernel.get("TDMSingleIssuer"))
   mod = Module(f"Init TDM Descriptor Subtile {tc}")
 
   def descSgprName(idx):
     return f"tdm{tc}Group{idx}"
 
   # The wave's span is read as a dense (chunk, rowsPerSpan) tensor; LDS padding
-  # leaves room for the other K groups' chunks between rows.
+  # leaves room for the other K groups' chunks between rows. Single-issuer
+  # ITERATE keeps that pad and steps lds_inc=chunk across K-group columns.
   padAmountBytes = chunk * (shape.numKGroups - 1)
   _emitSubtileGroup1Base(
       mod, comp, writer, kernel, descSgprName(0), descSgprName(1), tc, dtype,
-      chunk if padAmountBytes else 0, padAmountBytes, False)
+      chunk if padAmountBytes else 0, padAmountBytes, singleIssuer)
 
   ldsTrackSgpr = f"tdmLdsAddr{tc}"
   if not refresh:
@@ -1509,12 +1573,34 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh=False):
   mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
 
   mod.add(SMovB32(sgpr(f"{descSgprName(1)}+1"), hex(chunk << 16), f"dim0 = {chunk}"))
-  mod.add(SMovB32(sgpr(f"{descSgprName(1)}+2"), sgpr(f"tdmClamp{tc}"),
-          "dim1 = clamped rows (initTDMClampSubtile)"))
+  if singleIssuer:
+    # Full MT span (issuer covers all K groups); dim1 = rows of one span.
+    rows = shape.rowBytes // chunk
+    mod.add(SMovB32(sgpr(f"{descSgprName(1)}+2"), hex(rows << 16),
+            f"dim1 = {rows} (full MT scale rows)"))
+  else:
+    mod.add(SMovB32(sgpr(f"{descSgprName(1)}+2"), sgpr(f"tdmClamp{tc}"),
+            "dim1 = clamped rows (initTDMClampSubtile)"))
   mod.add(SMovB32(sgpr(f"{descSgprName(1)}+3"), hex(chunk << 16), f"tile0 = {chunk}"))
-  mod.add(SMovB32(sgpr(f"{descSgprName(1)}+4"), shape.rowsPerSpan, f"tile1 = {shape.rowsPerSpan}"))
+  mod.add(SMovB32(sgpr(f"{descSgprName(1)}+4"), shape.rowsPerSpan if not singleIssuer else (shape.rowBytes // chunk),
+          f"tile1 = scale rows"))
   mod.add(SMovB32(sgpr(f"{descSgprName(1)}+5"), chunk, f"row stride = {chunk}"))
   mod.add(SMovB64(sgpr(f"{descSgprName(1)}+6", 2), 0, comment="Group1+6/+7 reserved"))
+
+  if singleIssuer:
+    # ITERATE over K groups: lds_inc=chunk, global_inc=Size*kGroupRowBytes.
+    # Group2 is aliased onto the host A/B descriptor's Group2.
+    host = "A" if tc == "MXSA" else "B"
+    g2 = f"tdm{host}Group2"
+    with writer.allocTmpSgpr(2) as tmp:
+      sIter, sGInc = tmp.idx, tmp.idx + 1
+      mod.add(SMulI32(sgpr(sGInc), sgpr(sizeName), shape.kGroupRowBytes,
+                      f"global_inc = Size * mxUnit*bpe ({shape.kGroupRowBytes})"))
+      mod.add(SMovB32(sgpr(f"{g2}+0"), 1, "tensor_dim2 = 1"))
+      mod.add(comp.setIterationIncrements(g2, chunk, sGInc))
+      mod.add(SMovB32(sgpr(sIter), shape.numKGroups - 1,
+                      f"iter_count={shape.numKGroups}-1"))
+      mod.add(comp.setIterations(g2, sIter))
   return mod
 
 

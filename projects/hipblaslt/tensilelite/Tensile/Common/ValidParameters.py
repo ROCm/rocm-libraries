@@ -426,6 +426,10 @@ validParameters = { # we need to make sure this matches develop
     #        run a main-loop copy that reads B before A, so the two ports never share a segment.
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1, 2],
+    # gfx1250 subtile MXF4: gemm_wt-style A0/A1/B0/B1 segment LDS + one TDM issuer
+    # per operand (wave0 A, wave1 B, wave2 MXSA, wave3 MXSB) with READY wait_tensorcnt=1.
+    # Only UseSubtileImpl + TDMInst=3 + MIWaveGroup[2,2] + MT256/DU512 MX. Off by default.
+    "TDMSingleIssuer": [0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

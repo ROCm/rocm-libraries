@@ -53,6 +53,7 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLREmit import emitWmma32x16AccRowFixup, subtileTdmLdsSpanBytes
+from .Components.Subtile.LdsV7Layout import make_lds_v7_layout
 from .SolutionStructs.segment_interleave import SEG as LDS_SEGMENT_BYTES
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
@@ -2914,8 +2915,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Subtile computes wave offsets from vgpr("Serial") inline, so WaveIdx
     # is only needed during kernel-arg init.  Free it before graWorkGroup
     # to reduce SGPR pressure for StreamK temp allocations.
+    # TDMSingleIssuer gates tensor_load_to_lds on WaveIdx in the main loop, so
+    # keep it live (same as ClusterBarrier).
     if kernel.get("UseSubtileImpl") and (kernel["enableTDMA"] or kernel["enableTDMB"]) \
-        and "WaveIdx" in self.sgprs and not kernel.get("ClusterBarrier"):
+        and "WaveIdx" in self.sgprs \
+        and not kernel.get("ClusterBarrier") \
+        and not kernel.get("TDMSingleIssuer"):
       module.add(self.undefineSgpr("WaveIdx"))
 
     # work-group assignments
@@ -7536,8 +7541,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # gfx1250 TDM uses a different LDS layout without swizzling).
     self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
     # Subtile iterate mode: DepthU * bpeGR > 1024B pad_interval limit.
+    # TDMSingleIssuer also needs Group2 SGPRs for half-tile / scale ITERATE.
     for tc in ("A", "B"):
-      setattr(self.states, "subtileIterateMode%s" % tc, isSubtileIterateMode(kernel, tc))
+      setattr(self.states, "subtileIterateMode%s" % tc,
+              isSubtileIterateMode(kernel, tc) or bool(kernel.get("TDMSingleIssuer")))
     self.vgprs  = StateVgprs()
     self.sgprs  = collections.OrderedDict()
     self.kernelArgDefs = []
@@ -7627,6 +7634,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         initSubTileInfo('MXSB')
 
       self.ldsStartOffsetA = 0
+      self.ldsV7 = None
       aTileInfo = self.states.a.tileInfo
       bTileInfo = self.states.b.tileInfo
       numASubtiles = int(aTileInfo.globalSubtileGrid[0] * aTileInfo.globalSubtileGrid[1])
@@ -7642,7 +7650,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
       sizeB = int(((numBSubtiles * bTileInfo.subtileSize + padB + readSize-1) // readSize) * readSize)
       self.ldsStartOffsetB = sizeA
       self.ldsSegCompStride = 0
-      if kernel.get("LDSSegmentInterleave") == 1:
+      if kernel.get("TDMSingleIssuer"):
+        # gemm_wt A0/A1/B0/B1 in distinct 64 KB segments; A/B xor-swap by buf;
+        # scales use a depth-3 ring after the data groups.
+        lay = make_lds_v7_layout()
+        self.ldsV7 = lay
+        self.ldsStartOffsetA = lay.a0
+        self.ldsStartOffsetB = lay.b0
+        self.ldsStartOffsetMXSA = lay.sc_mxsa
+        self.ldsStartOffsetMXSB = lay.sc_mxsb
+        # A/B double-buf xor stride (not the whole footprint).
+        self.ldsTotalSize = lay.buf
+        sizeA = lay.buf
+        sizeB = 0
+        sizeMXSA = lay.sc_ring
+        sizeMXSB = lay.sc_ring
+        # LDS footprint already includes both A/B buffers and the scale rings.
+        kernel["LdsNumBytes"] = lay.end
+      elif kernel.get("LDSSegmentInterleave") == 1:
         # [A0][B0] and [A1][B1] each start on a 64 KiB LDS segment. Wave bit 0 picks both the
         # LDS read port and the A half, so the two ports never read A from the same segment.
         compA = subtileTdmLdsSpanBytes(kernel, aTileInfo, "A", 2)
@@ -7651,9 +7676,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.ldsStartOffsetB = compA
         sizeA = self.ldsSegCompStride + compA + compB
         sizeB = 0
-      sizeMXSA = 0
-      sizeMXSB = 0
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
+        sizeMXSA = 0
+        sizeMXSB = 0
+      else:
+        sizeMXSA = 0
+        sizeMXSB = 0
+      if not kernel.get("TDMSingleIssuer") and \
+         kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
         mxsaTileInfo = self.states.mxsa.tileInfo
         mxsbTileInfo = self.states.mxsb.tileInfo
 
@@ -7670,23 +7699,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.ldsStartOffsetMXSA = sizeA + sizeB
         self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
 
-      self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
-      if kernel.get("LDSSegmentInterleave") == 2:
-        # [A][MXSA] fill one 64 KiB segment and [B][MXSB] the next, so a wave reading A-side data
-        # and a wave reading B-side data never share a segment. The main loop has the two LDS read
-        # ports walk the segments in opposite order.
-        assert sizeA + sizeMXSA <= LDS_SEGMENT_BYTES and sizeB + sizeMXSB <= LDS_SEGMENT_BYTES, \
-          "LDSSegmentInterleave=2 needs A+MXSA and B+MXSB to each fit one LDS segment"
-        self.ldsStartOffsetB = LDS_SEGMENT_BYTES
-        if sizeMXSA or sizeMXSB:
-          self.ldsStartOffsetMXSA = sizeA
-          self.ldsStartOffsetMXSB = LDS_SEGMENT_BYTES + sizeB
-        self.ldsTotalSize = 2 * LDS_SEGMENT_BYTES
-      if self.ldsSegCompStride:
-        # Keep the second LDS buffer's components segment-aligned too.
-        self.ldsTotalSize = -(-self.ldsTotalSize // LDS_SEGMENT_BYTES) * LDS_SEGMENT_BYTES
+      if not kernel.get("TDMSingleIssuer"):
+        self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
+        if kernel.get("LDSSegmentInterleave") == 2:
+          # [A][MXSA] fill one 64 KiB segment and [B][MXSB] the next, so a wave reading A-side data
+          # and a wave reading B-side data never share a segment. The main loop has the two LDS read
+          # ports walk the segments in opposite order.
+          assert sizeA + sizeMXSA <= LDS_SEGMENT_BYTES and sizeB + sizeMXSB <= LDS_SEGMENT_BYTES, \
+            "LDSSegmentInterleave=2 needs A+MXSA and B+MXSB to each fit one LDS segment"
+          self.ldsStartOffsetB = LDS_SEGMENT_BYTES
+          if sizeMXSA or sizeMXSB:
+            self.ldsStartOffsetMXSA = sizeA
+            self.ldsStartOffsetMXSB = LDS_SEGMENT_BYTES + sizeB
+          self.ldsTotalSize = 2 * LDS_SEGMENT_BYTES
+        if self.ldsSegCompStride:
+          # Keep the second LDS buffer's components segment-aligned too.
+          self.ldsTotalSize = -(-self.ldsTotalSize // LDS_SEGMENT_BYTES) * LDS_SEGMENT_BYTES
 
-      kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
+        kernel["LdsNumBytes"] = max(1, int(self.ldsTotalSize * kernel["NumLdsBlk"]))
       if kernel["LdsNumBytes"] > self.states.archCaps["DeviceLDS"]:
         self.states.overflowedResources = 8
 

@@ -248,6 +248,17 @@ def emitScaleGRLDSSwap(ti, writer, kernel):
   return module
 
 
+def _lrSwapParams(writer, tcName=""):
+  """(nBuffers, strideBytes) for LR buffer advance of this tensor."""
+  lay = getattr(writer, "ldsV7", None)
+  tc = (tcName or "").replace("scale", "")
+  if lay is not None and tc in ("MXSA", "MXSB"):
+    return lay.sc_nbuf, lay.sc_buf
+  if lay is not None and tc in ("A", "B"):
+    return 2, lay.buf
+  return writer.states.numLDSBlk, writer.ldsTotalSize
+
+
 def emitLRBufferSwapOffsets(module, writer, kernel, offsets, swaps, tcName=""):
   """Advance LR read offsets to the next LDS buffer.
 
@@ -257,32 +268,31 @@ def emitLRBufferSwapOffsets(module, writer, kernel, offsets, swaps, tcName=""):
   With triple+ buffering (numLDSBlk >= 3, TDMPlusLdsBuf) the xor trick cannot
   express a 3-way rotation, so we rotate explicitly::
 
-      offset += ldsTotalSize                 # step to the next buffer
-      if offset >= swaps[i]:                 # swaps[i] = origOffset + N*ldsTotalSize
-          offset -= numLDSBlk * ldsTotalSize # wrap back to buffer 0
+      offset += stride                       # step to the next buffer
+      if offset >= swaps[i]:                 # swaps[i] = origOffset + N*stride
+          offset -= n * stride               # wrap back to buffer 0
 
   The compare is per-lane (each lane carries its own ceiling in ``swaps[i]``),
   so the rotation is self-contained: no shared counter and no assumption about
   the order in which the per-tensor swaps are emitted.
   """
-  n      = writer.states.numLDSBlk
-  stride = writer.ldsTotalSize
+  n, stride = _lrSwapParams(writer, tcName)
   if n < 3:
     for vOff, vSwap in zip(offsets, swaps):
       module.add(VXorB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vSwap),
                          comment="%s LR buffer toggle" % tcName))
     return
+  # Imm form matches ldsv7-w1: drop the two s_mov per rotate so the READY
+  # swap block is VALU-only and shorter on the critical path before ds_load.
+  span = n * stride
   laneCnt = 1 if kernel["WavefrontSize"] == 32 else 2
-  with writer.allocTmpSgpr(laneCnt + 1) as tmpRes:
+  with writer.allocTmpSgpr(laneCnt) as tmpRes:
     maskSgpr = tmpRes.idx
-    cstSgpr  = tmpRes.idx + laneCnt
     vTmp = writer.vgprPool.checkOut(1, tag="emitLRBufferSwapOffsets_wrap")
     for vOff, vSwap in zip(offsets, swaps):
-      module.add(SMovB32(dst=sgpr(cstSgpr), src=stride, comment="LDS buffer stride"))
-      module.add(VAddU32(dst=vgpr(vOff), src0=vgpr(vOff), src1=sgpr(cstSgpr),
+      module.add(VAddU32(dst=vgpr(vOff), src0=vgpr(vOff), src1=hex(stride),
                          comment="%s LR -> next LDS buffer" % tcName))
-      module.add(SMovB32(dst=sgpr(cstSgpr), src=n * stride, comment="span of %d LDS buffers" % n))
-      module.add(VSubU32(dst=vgpr(vTmp), src0=vgpr(vOff), src1=sgpr(cstSgpr),
+      module.add(VSubU32(dst=vgpr(vTmp), src0=vgpr(vOff), src1=hex(span),
                          comment="wrapped-to-buffer0 candidate"))
       module.add(VCmpGEU32(sgpr(maskSgpr, laneCnt), vgpr(vOff), vgpr(vSwap),
                            comment="past the last LDS buffer?"))
@@ -294,11 +304,10 @@ def emitLRBufferSwapOffsets(module, writer, kernel, offsets, swaps, tcName=""):
 def initLRBufferSwapCeil(module, writer, kernel, offsets, swaps, cstSgpr, tcName=""):
   """Initialise the per-lane LR swap register.
 
-  numLDSBlk == 2 : swaps[i] = origOffset ^ (origOffset + ldsTotalSize)  (xor mask)
-  numLDSBlk >= 3 : swaps[i] = origOffset + numLDSBlk*ldsTotalSize       (wrap ceiling)
+  n == 2 : swaps[i] = origOffset ^ (origOffset + stride)  (xor mask)
+  n >= 3 : swaps[i] = origOffset + n*stride               (wrap ceiling)
   """
-  n      = writer.states.numLDSBlk
-  stride = writer.ldsTotalSize
+  n, stride = _lrSwapParams(writer, tcName)
   span   = (n * stride) if n >= 3 else stride
   module.add(SMovB32(dst=sgpr(cstSgpr), src=span,
                      comment="%s LR buffer span (%d)" % (tcName, span)))
@@ -507,11 +516,29 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
     return module
 
   if kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False):
+    from rocisa.code import Label
+    from rocisa.instruction import SCmpEQU32, SCBranchSCC0
+    from .LdsV7Layout import ISSUER_MXSA, ISSUER_MXSB
     group0 = "tdm%sGroup0" % tc
     group1 = "tdm%sGroup1" % tc
+    singleIssuer = bool(kernel.get("TDMSingleIssuer"))
+    # Scale ITERATE reuses the host A/B Group2 (MX descriptors alias Group0/1 only).
+    host = "A" if tc == "MXSA" else "B"
+    group2 = sgpr("tdm%sGroup2" % host, 4) if singleIssuer else None
+    group3 = sgpr("tdm%sGroup3" % host, 4) if singleIssuer else None
     module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % tc)
-    module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
+    if singleIssuer:
+      issuer = ISSUER_MXSA if tc == "MXSA" else ISSUER_MXSB
+      name = writer.labels.getUniqueNamePrefix("tdm_si_%s" % tc)
+      skip = Label(name, "")
+      module.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=issuer,
+                           comment="TDMSingleIssuer: %s issuer = wave %d" % (tc, issuer)))
+      module.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                              comment="other waves skip %s TDM" % tc))
+    module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
                                comment="TDM: global->LDS for %s" % tc))
+    if singleIssuer:
+      module.add(skip)
     return module
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
