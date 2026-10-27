@@ -679,7 +679,10 @@ namespace
                        Type::F32,
                        HIPTENSOR_OP_MAX});
         out.push_back({"permute_f16_to_f32", 1, {16, 33}, {{0, 1}}, Type::F16, Type::F32});
-        out.push_back({"permute_f32", 1, {48, 40, 3}, {{2, 1, 0}}, Type::F32, Type::F32});
+        // the input's fastest mode moves: a vector form with gathered loads only, which is not
+        // promoted by default
+        out.push_back(
+            {"permute_f32_transposing", 1, {48, 40, 3}, {{2, 1, 0}}, Type::F32, Type::F32});
         out.push_back(
             {"permute_f16_inner_kept", 1, {64, 9, 11}, {{0, 2, 1}}, Type::F16, Type::F16});
         out.push_back({"trinary_f32",
@@ -723,7 +726,9 @@ TEST(RockeJit, DefaultSpecializesExactly)
             auto j = runCase(c, HIPTENSOR_JIT_MODE_DEFAULT, rng);
             ASSERT_TRUE(j.found) << c.name << ": the library has no rocKE JIT";
             EXPECT_EQ(j.launches, 1) << c.name;
-            EXPECT_EQ(j.specialized, c.name.find("odd") == std::string::npos ? 1 : 0) << c.name;
+            bool const promoted = c.name.find("odd") == std::string::npos
+                                  && c.name.find("transposing") == std::string::npos;
+            EXPECT_EQ(j.specialized, promoted ? 1 : 0) << c.name;
         }
         auto j = runContraction(HIPTENSOR_JIT_MODE_DEFAULT, rng, skew);
         EXPECT_TRUE(j.found);
@@ -1084,7 +1089,7 @@ namespace
     {
         return {
             {"file_binary_f16", 2, {96, 40, 3}, {{0, 1, 2}, {0, 1, 2}}, Type::F16, Type::F16},
-            {"file_permute_f32", 1, {40, 36, 4}, {{1, 0, 2}}, Type::F32, Type::F32},
+            {"file_permute_f32", 1, {40, 36, 4}, {{0, 2, 1}}, Type::F32, Type::F32},
             {"file_trinary_f32",
              3,
              {36, 28, 2},
@@ -1387,8 +1392,10 @@ TEST(RockeJitLatency, DISABLED_Report)
          Type::F32},
         {"lat_permute_f16_to_f32", 1, {2048, 512, 64}, {{0, 1, 2}}, Type::F16, Type::F32},
     };
-    auto now = [] { return std::chrono::steady_clock::now(); };
-    auto ms
+    // every launch JIT-compiled, also those the default rule leaves on the pack kernel
+    ScopedEnvironmentVariable all("HIPTENSOR_ROCKE_JIT", "all");
+    auto                      now = [] { return std::chrono::steady_clock::now(); };
+    auto                      ms
         = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
     for(auto const& c : shapes)
     {

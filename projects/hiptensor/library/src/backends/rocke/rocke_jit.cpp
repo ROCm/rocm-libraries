@@ -1381,9 +1381,17 @@ namespace hiptensor
                 {
                     return false;
                 }
-                if(cls.vec == 1 && !promoteAll)
+                // Promotion: a vector form with at least one input read with vector loads. A
+                // vector form whose inputs are all gathered (a permutation that moves the fastest
+                // mode) measured no gain over the pack kernel, and a loss on some targets, so it
+                // is not promoted; HIPTENSOR_ROCKE_JIT=all promotes every launch
+                bool const vectorInput
+                    = std::find(cls.vectorTensor.begin(), cls.vectorTensor.end() - 1, true)
+                      != cls.vectorTensor.end() - 1;
+                if(!promoteAll && (cls.vec == 1 || !vectorInput))
                 {
-                    reason = "no vector form for this layout";
+                    reason = cls.vec == 1 ? "no vector form for this layout"
+                                          : "no input is read with vector loads (transposing)";
                     return false;
                 }
                 auto const* recipe = store.find(cls.key);
