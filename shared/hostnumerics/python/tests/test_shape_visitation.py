@@ -21,8 +21,8 @@ class ShapeVisitationTests(unittest.TestCase):
             hn.Shape([2]).selected_coordinates(hn.IndexRange.all(2))
         with self.assertRaisesRegex(RuntimeError, "stride must be nonzero"):
             hn.IndexRange(0, 3, 0)
-        interval = hn.IndexRange(start=1, end=7, stride=2)
-        self.assertEqual((interval.start, interval.end, interval.stride), (1, 7, 2))
+        interval = hn.IndexRange(start=1, stop=7, stride=2)
+        self.assertEqual((interval.start, interval.stop, interval.stride), (1, 7, 2))
         self.assertEqual(interval.indices(), [1, 3, 5])
 
     def test_coordinates_against_numpy(self):
@@ -122,15 +122,41 @@ class ShapeVisitationTests(unittest.TestCase):
             (128, 121, 1, 127),
             (20, 0, 3, 2),
         ):
-            interval = hn.prime_index_range(logical, allocated, requested)
+            interval = hn.prime_index_range(
+                logical_elements=logical,
+                allocated_elements=allocated,
+                requested_elements=requested,
+            )
             self.assertEqual(
-                (interval.start, interval.end, interval.stride), (0, logical, stride)
+                (interval.start, interval.stop, interval.stride), (0, logical, stride)
             )
             self.assertEqual(interval.indices(), list(range(0, logical, stride)))
         for requested in (0, 10, 11):
-            self.assertEqual(hn.prime_index_range(10, SIZE_MAX, requested).count(), 10)
+            self.assertEqual(
+                hn.prime_index_range(
+                    logical_elements=10,
+                    allocated_elements=SIZE_MAX,
+                    requested_elements=requested,
+                ).count(),
+                10,
+            )
         with self.assertRaisesRegex(RuntimeError, "Prime-stride"):
-            hn.prime_index_range(2, SIZE_MAX, 1)
+            hn.prime_index_range(
+                logical_elements=2, allocated_elements=SIZE_MAX, requested_elements=1
+            )
+        with self.assertRaises(TypeError):
+            hn.prime_index_range(10, 10, 3)
+
+    def test_ranges_are_values(self):
+        interval = hn.IndexRange(1, 8, 3)
+        self.assertEqual(list(interval), [1, 4, 7])
+        self.assertEqual(len(interval), 3)
+        self.assertEqual(len(hn.IndexRange(5, 5, 1)), 0)
+        self.assertEqual(repr(interval), "IndexRange(start=1, stop=8, stride=3)")
+        self.assertEqual(interval, hn.IndexRange(1, 8, 3))
+        self.assertNotEqual(interval, hn.IndexRange(1, 9, 3))
+        self.assertEqual(len({interval, hn.IndexRange(1, 8, 3)}), 1)
+        self.assertEqual(list(hn.IndexRange(SIZE_MAX - 2, SIZE_MAX, 2)), [SIZE_MAX - 2])
 
 
 if __name__ == "__main__":
