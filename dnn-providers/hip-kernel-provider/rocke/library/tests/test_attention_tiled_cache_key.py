@@ -821,3 +821,30 @@ def test_runtime_trip_count_covers_every_batch():
             ), n
         else:
             assert n.bit_length() <= trip <= n.bit_length() + 1, n
+
+
+def test_gfx942_i64_kv_addressing_is_in_the_kernel_name(routing_env):
+    # i64 K/V addressing changes the 2D loaders, so a binary is identified by
+    # it: the name, not only the in-process key, must tell the two apart.
+    base = dict(
+        total_q=2048,
+        num_seqs=2,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=1024,
+        max_seqlen_k=1024,
+        dtype="bf16",
+        num_cus=304,
+    )
+    block_bytes = 16 * 8 * 128 * 2
+    small = P(num_kv_blocks=64, **base)
+    large = P(num_kv_blocks=(1 << 31) // block_bytes + 1, **base)
+    assert not au._enable_i64_kv_addr(small) and au._enable_i64_kv_addr(large)
+    names = [
+        au._tiled_spec_from_problem(p, "gfx942").kernel_name() for p in (small, large)
+    ]
+    assert "i64" not in names[0].split("_")
+    assert "i64" in names[1].split("_")
+    assert names[0].replace("_bf16_", "_bf16_i64_", 1) == names[1]

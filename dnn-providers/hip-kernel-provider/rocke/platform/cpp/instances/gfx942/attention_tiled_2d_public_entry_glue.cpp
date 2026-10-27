@@ -585,6 +585,8 @@ static rocke_status_t
             /* Python emits "fnuz" under the *same* condition as the kv part,
              * not under a format test, so it keys off kv_buf being non-empty. */
             kv_buf[0] ? "fnuz" : "",
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
