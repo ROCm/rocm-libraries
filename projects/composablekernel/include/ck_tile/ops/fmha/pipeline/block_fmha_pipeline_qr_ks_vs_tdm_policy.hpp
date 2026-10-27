@@ -217,9 +217,10 @@ inline constexpr bool is_qr_tdm_padding_supported_arch_v =
     false;
 #endif
 
-// fp8 at its own 16x16x128 geometry, kept separate so the bf16/fp16 predicate below is
-// provably unchanged. Those geometry gates are tuning, not correctness: padding only
-// transforms LDS addresses, and writer and reader derive it from one LdsPaddingConfig.
+// fp8 at its own geometry (gemm0 in one K step on 16x16x64 or 16x16x128 WMMA), kept
+// separate so the bf16/fp16 predicate below is provably unchanged. Those geometry gates are
+// tuning, not correctness: padding only transforms LDS addresses, and writer and reader
+// derive it from one LdsPaddingConfig.
 // Unpadded, a 128 B fp8 row is half the 256 B wrap of the 64 banks, so the 16 rows of
 // a transpose tile start on only two banks -- an 8-way conflict.
 template <typename Problem>
@@ -228,10 +229,10 @@ inline constexpr bool is_qr_tdm_fp8_padding_enabled_problem_v =
     std::is_same_v<typename Problem::KDataType, fp8_t> &&
     std::is_same_v<typename Problem::VDataType, fp8_t> && Problem::BlockFmhaShape::NumWarps == 4 &&
     (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
-    Problem::BlockFmhaShape::kN0 == 128 && Problem::BlockFmhaShape::kK0 == 128 &&
+    Problem::BlockFmhaShape::kN0 == 128 &&
+    Problem::BlockFmhaShape::kK0 == Problem::BlockFmhaShape::kQKHeaddim &&
     Problem::BlockFmhaShape::kK1 == 128 &&
     Problem::BlockFmhaShape::kSubQKHeaddim == Problem::BlockFmhaShape::kQKHeaddim &&
-    Problem::BlockFmhaShape::kQKHeaddim < 256 &&
     (Problem::BlockFmhaShape::kQKHeaddim * sizeof(typename Problem::KDataType)) %
             kQrTdmLdsAccessBytes ==
         0 &&
@@ -240,7 +241,8 @@ inline constexpr bool is_qr_tdm_fp8_padding_enabled_problem_v =
     Problem::BlockFmhaShape::IsVLayoutRowMajor &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
-    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 128>> &&
+    (std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 64>> ||
+     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 128>>) &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 128>>;
 
 template <typename Problem>
@@ -1031,8 +1033,14 @@ struct QrTdmLdsArenaLayout
                   (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
     static_assert(!kUseDoubleKVLdsBuffer || !VPadding::kEnabled ||
                   (kV1Offset - kV0Offset) % VPadding::kIntervalBytes == 0);
-    static_assert(kArenaBytes <= 128 * 1024);
-    static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * 2 <= 320 * 1024);
+    // A gfx1250 workgroup may use up to 320 KiB of LDS (CDNA5 ISA). fp8 d256 adds 64
+    // VGPRs of o_acc to d128's ~480, so registers already cap it at one workgroup per CU;
+    // its padded double K/V arena (136 KiB) is budgeted for one. Everything else keeps two.
+    static constexpr index_t kLdsOccupancyTarget =
+        sizeof(typename Problem::KDataType) == 1 && Shape::kQKHeaddim >= 256 ? 1 : 2;
+    static_assert(kArenaBytes <= (kLdsOccupancyTarget == 2 ? 128 * 1024 : 320 * 1024));
+    static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * kLdsOccupancyTarget <=
+                  320 * 1024);
 };
 
 template <typename TensorTag, typename Problem, bool LoadOnce>

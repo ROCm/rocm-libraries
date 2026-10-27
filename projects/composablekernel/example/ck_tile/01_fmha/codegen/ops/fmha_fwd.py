@@ -1599,21 +1599,27 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             })  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
+            # bk0max is the head dim each tile holds. fp8 WMMA has K = 64 or 128 only, so
+            # d32 is the one head dim that takes the padded (dpad/dvpad) path.
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
+                ( 32,  32) : [FmhaFwdTileSize( 64, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
                               FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
                               FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
-                #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8FP32:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
+                ( 32,  32) : [FmhaFwdTileSize( 64, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, _gfx125_qr_tdm_crossover_constraint((128, 128))),
                               FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
@@ -1697,7 +1703,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
-            if (hdim, hdim_v) in ((128, 128), (64, 64)):
+            if (hdim, hdim_v) in ((32, 32), (64, 64), (128, 128), (256, 256)):
                 # The simplified mask keeps both window bounds live in the mainloop, so plain
                 # causal gets the one-bound kernel. t:l,r and b:l,r also arrive as
                 # top-left/bottom-right; the constraint sends those windows to s_mask.
