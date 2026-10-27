@@ -9,7 +9,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rocjitsu_shape_queue import Queue, read_progress
+from rocjitsu_shape_queue import Queue, ordered_jobs, read_progress
 
 
 CHILD = """
@@ -44,6 +44,32 @@ raise SystemExit(1 if outcome == 'failed' else 0)
 
 
 class ShapeQueueTest(unittest.TestCase):
+    def test_measured_order_changes_claims_without_changing_jobs(self):
+        jobs = [
+            dict(id="large", nodeid="large", work=100, estimated_seconds=1),
+            dict(id="slow", nodeid="slow", work=1, estimated_seconds=20),
+            dict(id="tie", nodeid="tie", work=10, estimated_seconds=20),
+        ]
+        self.assertEqual(
+            [j["id"] for j in ordered_jobs(dict(jobs=jobs))], ["large", "tie", "slow"]
+        )
+        plan = dict(jobs=jobs, excluded=[], ordering="measured-wall-seconds")
+        plan["jobs"] = ordered_jobs(plan)
+        with tempfile.TemporaryDirectory() as temporary:
+            queue = Queue(plan, Path(temporary), [], 5)
+            self.assertEqual(
+                [queue.claim()["id"] for _ in jobs], ["slow", "tie", "large"]
+            )
+            self.assertIsNone(queue.claim())
+        self.assertEqual(jobs[0]["id"], "large")
+        for cost in (None, True, 0, -1, float("nan"), float("inf")):
+            with self.subTest(cost=cost):
+                plan["jobs"][0]["estimated_seconds"] = cost
+                with self.assertRaisesRegex(ValueError, "positive finite cost"):
+                    ordered_jobs(plan)
+        with self.assertRaisesRegex(ValueError, "unknown queue ordering"):
+            ordered_jobs(dict(jobs=jobs, ordering="random"))
+
     def run_queue(self, identifiers, workers=2, timeout=5):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

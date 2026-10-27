@@ -101,10 +101,10 @@ jobs:
           (( SUITE_TIMEOUT_SECONDS > 0 && SUITE_TIMEOUT_SECONDS <= 19800 )) || { echo "::error::suite_seconds must be 1..19800"; exit 1; }
           [[ "${MAX_WORK}" =~ ^[0-9]+$ ]] && (( MAX_WORK > 0 )) || { echo "::error::max_work must be a positive integer"; exit 1; }
           [[ "${PER_JOB_SECONDS}" =~ ^[0-9]+$ ]] && (( PER_JOB_SECONDS > 0 && PER_JOB_SECONDS <= SUITE_TIMEOUT_SECONDS )) || { echo "::error::per_job_seconds must be 1..suite_seconds"; exit 1; }
-          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix|allocation|partition|gated-allocation)$ ]] || { echo "::error::invalid strategy"; exit 1; }
+          [[ "${STRATEGY}" =~ ^(shape|reference|paired|safety|matrix|allocation|partition|gated-allocation|priority)$ ]] || { echo "::error::invalid strategy"; exit 1; }
           trials=1
           [[ "${STRATEGY}" != paired && "${STRATEGY}" != safety ]] || trials=2
-          [[ "${STRATEGY}" != matrix && "${STRATEGY}" != partition ]] || trials=3
+          [[ "${STRATEGY}" != matrix && "${STRATEGY}" != partition && "${STRATEGY}" != priority ]] || trials=3
           if [[ "${STRATEGY}" == allocation || "${STRATEGY}" == gated-allocation ]]; then
             IFS=',' read -ra pairs <<< "${REQUESTED_ALLOCATIONS}"
             trials=${#pairs[@]}

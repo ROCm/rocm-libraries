@@ -22,7 +22,7 @@ on:
       strategy:
         type: choice
         description: "Matrix compares worker counts; allocation compares dispatch widths; partition compares shape and benchmark-group jobs"
-        options: [shape, reference, paired, safety, matrix, allocation, partition, gated-allocation]
+        options: [shape, reference, paired, safety, matrix, allocation, partition, gated-allocation, priority]
         default: shape
       dispatch_threads:
         type: string

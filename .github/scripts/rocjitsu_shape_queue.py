@@ -21,6 +21,27 @@ import xml.etree.ElementTree as ET
 from rocjitsu_pytest import descendants, supervise, write_json
 
 
+def ordered_jobs(plan):
+    metric = plan.get("ordering", "declared-work")
+    if metric == "declared-work":
+        return sorted(plan["jobs"], key=lambda job: (-job["work"], job["nodeid"]))
+    if metric != "measured-wall-seconds":
+        raise ValueError(f"unknown queue ordering: {metric}")
+    for job in plan["jobs"]:
+        seconds = job.get("estimated_seconds")
+        if (
+            type(seconds) not in (int, float)
+            or not math.isfinite(seconds)
+            or seconds <= 0
+        ):
+            raise ValueError(
+                "measured ordering requires a positive finite cost per job"
+            )
+    return sorted(
+        plan["jobs"], key=lambda job: (-job["estimated_seconds"], job["nodeid"])
+    )
+
+
 def read_progress(directory):
     """Recover events newer than the snapshot, retaining errors from a torn write."""
     progress = json.loads((directory / "progress.json").read_text())
@@ -331,10 +352,12 @@ def main():
     plan = json.loads(args.plan.read_text())
     if plan.get("version") != 1 or not plan["jobs"]:
         parser.error("a nonempty version-1 shape plan is required")
-    if plan["jobs"] != sorted(
-        plan["jobs"], key=lambda job: (-job["work"], job["nodeid"])
-    ):
-        parser.error("shape jobs must be sorted largest first")
+    try:
+        expected_order = ordered_jobs(plan)
+    except ValueError as error:
+        parser.error(str(error))
+    if plan["jobs"] != expected_order:
+        parser.error("jobs must be sorted largest first by the declared queue metric")
     if len({job["nodeid"] for job in plan["jobs"] + plan["excluded"]}) != len(
         plan["jobs"] + plan["excluded"]
     ):

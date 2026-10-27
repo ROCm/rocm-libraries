@@ -108,6 +108,80 @@ class CompareTest(unittest.TestCase):
         self.assertIn("CpuThreads=1", " ".join(candidate))
         self.assertIn("rocjitsu_shape_queue.py", " ".join(reference))
 
+    def test_priority_uses_unchanged_groups_and_rejects_stale_costs(self):
+        self.assertEqual(
+            rocjitsu_experiment.trial_specifications("priority", 16, 16, 4),
+            [
+                ("gated-reference", "gated-reference", 16, 4),
+                ("groups-work-16-dispatch4", "shape", 16, 4),
+                ("groups-cost-16-dispatch4", "shape", 16, 4),
+            ],
+        )
+        runtime = {k: k for k in rocjitsu_experiment.COST_RUNTIME_FIELDS}
+        jobs = [
+            dict(
+                id="large",
+                nodeid="large",
+                work=100,
+                source_sha256="source1",
+                yaml_sha256="yaml1",
+            ),
+            dict(
+                id="slow",
+                nodeid="slow",
+                work=1,
+                source_sha256="source2",
+                yaml_sha256="yaml2",
+            ),
+        ]
+        plan = dict(
+            partition="benchmark-group",
+            ceiling=1024**3,
+            jobs=jobs,
+            excluded=[dict(reason="gate")],
+        )
+        costs = [dict(job, wall_seconds=seconds) for job, seconds in zip(jobs, [1, 20])]
+        catalogue = dict(schema=1, ceiling=1024**3, runtime=runtime, jobs=costs)
+        ordered = rocjitsu_experiment.measured_group_plan(plan, catalogue, runtime)
+        self.assertEqual([j["id"] for j in ordered["jobs"]], ["slow", "large"])
+        self.assertEqual(ordered["excluded"], plan["excluded"])
+        self.assertEqual(
+            sorted(
+                [
+                    {k: v for k, v in j.items() if k != "estimated_seconds"}
+                    for j in ordered["jobs"]
+                ],
+                key=lambda j: j["id"],
+            ),
+            jobs,
+        )
+        self.assertNotIn("estimated_seconds", jobs[0])
+        for field in rocjitsu_experiment.COST_RUNTIME_FIELDS:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, "registered gate and runtime"):
+                    rocjitsu_experiment.measured_group_plan(
+                        plan, catalogue, runtime | {field: "changed"}
+                    )
+        for field in ("source_sha256", "yaml_sha256", "work"):
+            with self.subTest(field=field):
+                changed = copy.deepcopy(catalogue)
+                changed["jobs"][0][field] = "changed"
+                with self.assertRaisesRegex(
+                    ValueError, "source or admitted YAML changed"
+                ):
+                    rocjitsu_experiment.measured_group_plan(plan, changed, runtime)
+        for selected in (costs[:1], costs + [costs[0]]):
+            with self.assertRaisesRegex(ValueError, "exactly the admitted group jobs"):
+                rocjitsu_experiment.measured_group_plan(
+                    plan, catalogue | dict(jobs=selected), runtime
+                )
+        for cost in (True, 0, -1, float("nan"), float("inf")):
+            with self.subTest(cost=cost):
+                changed = copy.deepcopy(catalogue)
+                changed["jobs"][0]["wall_seconds"] = cost
+                with self.assertRaisesRegex(ValueError, "positive finite seconds"):
+                    rocjitsu_experiment.measured_group_plan(plan, changed, runtime)
+
     def item(self, root, nodeid, sizes, candidate):
         output = root / "output" / nodeid.replace("/", "_")
         group = "sample_00_00" if candidate else "sample_01_02"

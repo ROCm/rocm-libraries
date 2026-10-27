@@ -4,9 +4,11 @@
 """Run bounded reference/shape trials against one frozen artifact workload."""
 
 import argparse
+import copy
 import csv
 import itertools
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -21,6 +23,61 @@ from rocjitsu_check_suite import memory_lines
 from rocjitsu_evidence import digest, source_name
 from rocjitsu_pytest import write_json
 from rocjitsu_shape_plan import benchmark_group_plan, whole_yaml_plan
+from rocjitsu_shape_queue import ordered_jobs
+
+
+COST_RUNTIME_FIELDS = (
+    "artifact_run_id",
+    "target",
+    "profile",
+    "workers",
+    "cpu_thread_budget",
+    "reference_threads",
+    "seed",
+    "client_sha256",
+    "mirage_sha256",
+    "compiler_sha256",
+    "config_sha256",
+)
+
+
+def measured_group_plan(plan, catalogue, runtime):
+    if (
+        catalogue.get("schema") != 1
+        or plan.get("partition") != "benchmark-group"
+        or catalogue["ceiling"] != plan["ceiling"]
+        or any(
+            runtime[field] != catalogue["runtime"][field]
+            for field in COST_RUNTIME_FIELDS
+        )
+    ):
+        raise ValueError(
+            "measured costs require the registered gate and runtime controls"
+        )
+    costs = {entry["id"]: entry for entry in catalogue["jobs"]}
+    if len(costs) != len(catalogue["jobs"]) or set(costs) != {
+        job["id"] for job in plan["jobs"]
+    }:
+        raise ValueError("measured costs must cover exactly the admitted group jobs")
+    result = copy.deepcopy(plan)
+    for job in result["jobs"]:
+        entry = costs[job["id"]]
+        if any(
+            entry[field] != job[field]
+            for field in ("source_sha256", "yaml_sha256", "work")
+        ):
+            raise ValueError("measured cost source or admitted YAML changed")
+        seconds = entry["wall_seconds"]
+        if (
+            type(seconds) not in (int, float)
+            or not math.isfinite(seconds)
+            or seconds <= 0
+        ):
+            raise ValueError("measured costs must be positive finite seconds")
+        job["estimated_seconds"] = seconds
+    result["ordering"] = "measured-wall-seconds"
+    result["jobs"] = ordered_jobs(result)
+    return result
 
 
 def commands(strategy, root, plan, env, workers, seconds, suite):
@@ -161,7 +218,6 @@ def trial(
         plan = whole_yaml_plan(plan, root / "shape-yamls")
     # Paths inside the plan are immutable original inputs. Retained copies in
     # each report allow later offline hash verification without the runner.
-    write_json(root / "shape-plan.json", plan)
     config = json.loads((parent / "artifact-config.json").read_text())
     budget = (
         dispatch_threads
@@ -206,6 +262,13 @@ def trial(
             TOKIO_WORKER_THREADS=1,
         ),
     )
+    if label and label.startswith("groups-cost-"):
+        path = Path(__file__).with_name("rocjitsu_group_costs_1024.json")
+        shutil.copyfile(path, root / "cost-catalogue.json")
+        plan = measured_group_plan(plan, json.loads(path.read_text()), runtime)
+        runtime["cost_catalogue_sha256"] = digest(path)
+    runtime["ordering"] = plan.get("ordering", "declared-work")
+    write_json(root / "shape-plan.json", plan)
     command = commands(strategy, root, plan, env, workers, seconds, suite)
     runtime["command"] = command
     write_json(root / "runtime.json", runtime)
@@ -266,6 +329,22 @@ def trial_specifications(
     dispatch_threads=1,
     allocations="48:1,32:2,16:4",
 ):
+    if strategy == "priority":
+        return [
+            ("gated-reference", "gated-reference", reference_workers, dispatch_threads),
+            (
+                f"groups-work-{workers}-dispatch{dispatch_threads}",
+                "shape",
+                workers,
+                dispatch_threads,
+            ),
+            (
+                f"groups-cost-{workers}-dispatch{dispatch_threads}",
+                "shape",
+                workers,
+                dispatch_threads,
+            ),
+        ]
     if strategy == "gated-allocation":
         specifications = trial_specifications(
             "allocation", workers, reference_workers, dispatch_threads, allocations
@@ -410,6 +489,7 @@ def benchmark_report(parent, reports, comparisons):
         "Whole-YAML reference arms retain the original generator settings and use one engine, automatic dispatch and a reference thread budget based on available CPUs divided by workers. Shape arms use serial generation and references with the reported dispatch width. These are comparisons of complete strategies in a common harness; shape arms with the same dispatch width isolate outer concurrency. Allocation comparisons vary workers and dispatch together. All arms use the same artifacts, fixed seed, verdict reporting and Mirage startup-pool limit.",
         "Partition mode compares single-shape jobs with admitted shapes bundled by original benchmark group, at the same worker/dispatch allocation. Grouped GEMM and search-dependent configurations remain indivisible. The gate applies before bundling; a bundle's summed work may exceed the per-case ceiling. Queue-job counts describe granularity; requested descriptors, accepted solutions and numerical verdicts must still match.",
         "Gated-allocation mode filters the whole-YAML control to exactly the admitted source cases, preserving original group identities after removal. Its other arms bundle those same cases by benchmark group and vary worker/dispatch allocation. The grouped pair can hold nominal dispatch capacity constant while varying how many independent clients claim work. Setup, references and actual CPU demand can still differ.",
+        "Priority mode holds grouped worker and dispatch settings fixed and changes only queue ordering. The cost arm uses previously measured job durations with the same admitted YAML hashes, gate and runtime controls; the work arm orders by declared matrix work. Earlier measurements predict costs, but current audited workload timings determine the result.",
         "",
         "| Strategy | Queue jobs | Workers | Dispatch width | Workload(s) | Average CPU cores | CPU capacity fraction | Numerical PASSED | Applicability rejections | Timeouts/incomplete | Audit errors |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -440,6 +520,7 @@ def main():
             "allocation",
             "partition",
             "gated-allocation",
+            "priority",
         ),
         default="shape",
     )
