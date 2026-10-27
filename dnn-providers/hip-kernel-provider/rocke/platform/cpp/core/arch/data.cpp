@@ -1642,7 +1642,7 @@ static const rocke_layout_map_t lm_mfma_scaled_sa
 static const rocke_layout_map_t lm_mfma_scaled_sb
     = {ROCKE_MMA_ROLE_B_SCALE, 1, 64, mfma_scaled_scale_b};
 
-static const rocke_mma_op_t k_mma_gfx950[] = {
+static constexpr rocke_mma_op_t k_mma_gfx950_listed[] = {
     {"mfma_scaled",
      "fp8e4m3",
      "fp8e4m3",
@@ -2601,6 +2601,89 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      "mfma_f32_32x32x16_bf16"},
 };
 
+/* gfx950 f8f6f4 operand maps: 32 values per lane in K runs of 16 (8-bit
+ * formats) or 32 (6-bit and 4-bit formats), over four groups of 16 lanes at
+ * 16x16x128 and two groups of 32 at 32x32x64 (the public CDNA4 ISA operand
+ * tables). */
+static const rocke_layout_map_t lm_mfma_f8f6f4_16x16_run16_a
+    = {ROCKE_MMA_ROLE_A, 32, 64, _fragment_layout_a<16, 4, 16>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_16x16_run16_b
+    = {ROCKE_MMA_ROLE_B, 32, 64, _fragment_layout_b<16, 4, 16>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_16x16_run32_a
+    = {ROCKE_MMA_ROLE_A, 32, 64, _fragment_layout_a<32, 4, 16>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_16x16_run32_b
+    = {ROCKE_MMA_ROLE_B, 32, 64, _fragment_layout_b<32, 4, 16>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_32x32_run16_a
+    = {ROCKE_MMA_ROLE_A, 32, 64, _fragment_layout_a<16, 2, 32>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_32x32_run16_b
+    = {ROCKE_MMA_ROLE_B, 32, 64, _fragment_layout_b<16, 2, 32>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_32x32_run32_a
+    = {ROCKE_MMA_ROLE_A, 32, 64, _fragment_layout_a<32, 2, 32>};
+static const rocke_layout_map_t lm_mfma_f8f6f4_32x32_run32_b
+    = {ROCKE_MMA_ROLE_B, 32, 64, _fragment_layout_b<32, 2, 32>};
+
+namespace
+{
+/* f8f6f4 -> f32 at 16x16x128 and at 32x32x64, every format pair with a 6-bit
+ * or 4-bit operand (Python narrow_f8f6f4_op_ids): 32 values of A and of B per
+ * lane, each in the operand layout of its own format, and the shape's f32
+ * accumulator. Appended after the listed rows. */
+constexpr int k_gfx950_f8f6f4_pairs = 21;
+static_assert(k_rocke_narrow_matrix_format_pairs.count == k_gfx950_f8f6f4_pairs);
+constexpr auto k_gfx950_f8f6f4_16x16_ids
+    = rocke_make_narrow_f8f6f4_op_ids("mfma_f32_16x16x128_f8f6f4");
+constexpr auto k_gfx950_f8f6f4_32x32_ids
+    = rocke_make_narrow_f8f6f4_op_ids("mfma_f32_32x32x64_f8f6f4");
+constexpr const rocke_layout_map_t* gfx950_f8f6f4_map(int format, bool for_b, bool m16)
+{
+    const bool run16 = rocke_matrix_format_bits(format) == 8;
+    if(m16)
+        return run16 ? (for_b ? &lm_mfma_f8f6f4_16x16_run16_b : &lm_mfma_f8f6f4_16x16_run16_a)
+                     : (for_b ? &lm_mfma_f8f6f4_16x16_run32_b : &lm_mfma_f8f6f4_16x16_run32_a);
+    return run16 ? (for_b ? &lm_mfma_f8f6f4_32x32_run16_b : &lm_mfma_f8f6f4_32x32_run16_a)
+                 : (for_b ? &lm_mfma_f8f6f4_32x32_run32_b : &lm_mfma_f8f6f4_32x32_run32_a);
+}
+constexpr int k_gfx950_listed_count
+    = (int)(sizeof(k_mma_gfx950_listed) / sizeof(k_mma_gfx950_listed[0]));
+
+struct gfx950_catalog
+{
+    rocke_mma_op_t ops[k_gfx950_listed_count + 2 * k_gfx950_f8f6f4_pairs];
+};
+consteval gfx950_catalog make_gfx950_catalog()
+{
+    gfx950_catalog result{};
+    for(int i = 0; i < k_gfx950_listed_count; ++i)
+        result.ops[i] = k_mma_gfx950_listed[i];
+    for(int shape = 0; shape < 2; ++shape)
+    {
+        const bool m16 = shape == 0;
+        for(int i = 0; i < k_gfx950_f8f6f4_pairs; ++i)
+        {
+            const rocke_matrix_format_pair& pair = k_rocke_narrow_matrix_format_pairs.pairs[i];
+            result.ops[k_gfx950_listed_count + shape * k_gfx950_f8f6f4_pairs + i]
+                = {"mma",
+                   k_rocke_matrix_formats[pair.a],
+                   k_rocke_matrix_formats[pair.b],
+                   "fp32",
+                   m16 ? 16 : 32,
+                   m16 ? 16 : 32,
+                   m16 ? 128 : 64,
+                   m16 ? k_gfx950_f8f6f4_16x16_ids.ids[i] : k_gfx950_f8f6f4_32x32_ids.ids[i],
+                   32,
+                   32,
+                   m16 ? 4 : 16,
+                   64,
+                   gfx950_f8f6f4_map(pair.a, false, m16),
+                   gfx950_f8f6f4_map(pair.b, true, m16),
+                   m16 ? &lm_mfma_16x16x16_c : &lm_mfma_32x32x8_c};
+        }
+    }
+    return result;
+}
+constexpr auto k_mma_gfx950 = make_gfx950_catalog();
+} // namespace
+
 /* One integer WMMA catalog row: wave32, 16 x 16 x `k`, an i32 accumulator of
  * eight values per lane, `ab_frag` values of A and B per lane. An instruction
  * has one row per operand signedness (Python integer_mma_op_ids): the signed
@@ -3472,7 +3555,7 @@ static const rocke_arch_target_t k_target_gfx950 = {
     .wave_size = 64,
     .lds_capacity_bytes = 163840,
     .vmcnt_bits = 6,
-    .mma = {.ops = k_mma_gfx950, .num_ops = K_NUM(k_mma_gfx950)},
+    .mma = {.ops = k_mma_gfx950.ops, .num_ops = K_NUM(k_mma_gfx950.ops)},
     .memory = {
         .has_async_lds = true,
         .has_async_global_lds = true,

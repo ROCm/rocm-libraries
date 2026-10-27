@@ -1356,6 +1356,24 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         ).items()
     },
     "wmma_gfx1250_f32_32x16x128_f4": _FragInfo(128, 64, 16, 32),
+    # --- MFMA f8f6f4 16x16x128 and 32x32x64 (wave64, gfx950) ------------------
+    # Each format pair with a 6-bit or 4-bit operand: 32 values of A and of B
+    # per lane in the f8f6f4 operand layout of its own format (8 words; four
+    # groups of 16 lanes at 16x16x128, two groups of 32 at 32x32x64, as the
+    # public CDNA4 ISA operand tables give), and the f32 accumulator of the
+    # shape.
+    **{
+        op_id: _FragInfo(
+            32, 32, 4, 64, *_f8f6f4_operand_maps(a, b, 8, 4, 16), _mfma_acc_16x16
+        )
+        for op_id, (a, b) in narrow_f8f6f4_op_ids("mfma_f32_16x16x128_f8f6f4").items()
+    },
+    **{
+        op_id: _FragInfo(
+            32, 32, 16, 64, *_f8f6f4_operand_maps(a, b, 8, 2, 32), _mfma_acc_32x32
+        )
+        for op_id, (a, b) in narrow_f8f6f4_op_ids("mfma_f32_32x32x64_f8f6f4").items()
+    },
 }
 
 

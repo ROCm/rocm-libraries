@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
+from ..arch.mfma_scale import INTRINSIC_KEY as SCALED_MFMA_INTRINSIC_KEY
 from ..arch.mfma_scale import MATRIX_FORMATS
 from ..arch.target import integer_mma_op_ids, narrow_f8f6f4_op_ids
 from ..dtypes import DTypeCategory, dtype_info, dtype_names
@@ -394,6 +395,54 @@ _GFX1250_F4_32X16X128 = MatrixCall(
     result=AsIs(VectorType(F32, 16)),
 )
 
+
+# gfx950 f8f6f4 MFMA: the intrinsic, its declaration-table key and its
+# accumulator, by (M, N, K). Both keys are the hand-written nine-argument
+# declarations the 16x16x128 builder ops (the fp8 MFMA, the MX op and the
+# unscaled all-format op) and the scaled 32x32x64 MFMA already use.
+_GFX950_F8F6F4_MFMA = {
+    (16, 16, 128): (
+        "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
+        "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
+        VectorType(F32, 4),
+    ),
+    (32, 32, 64): (
+        f"llvm.amdgcn.{SCALED_MFMA_INTRINSIC_KEY}",
+        SCALED_MFMA_INTRINSIC_KEY,
+        VectorType(F32, 16),
+    ),
+}
+
+
+def _gfx950_f8f6f4_mfma(shape: tuple[int, int, int], a: str, b: str) -> MatrixCall:
+    """gfx950 f8f6f4 MFMA at ``shape`` reading format ``a`` x ``b``: (A, B, C,
+    format A, format B, scale selector A, scale A, scale selector B, scale B),
+    the format codes from ``MATRIX_FORMATS`` and every scale argument 0, which
+    makes the instruction the unscaled f8f6f4 MFMA. A and B each take the
+    operand form of their own format in ``<8 x i32>``."""
+    intrinsic, decl_key, accumulator = _GFX950_F8F6F4_MFMA[shape]
+    register = VectorType(I32, 8)
+    return MatrixCall(
+        intrinsic=intrinsic,
+        args=(
+            MatrixOperand.A,
+            MatrixOperand.B,
+            MatrixOperand.C,
+            Imm(I32, MATRIX_FORMATS[a]),
+            Imm(I32, MATRIX_FORMATS[b]),
+            Imm(I32, 0),
+            Imm(I32, 0, immarg=False),
+            Imm(I32, 0),
+            Imm(I32, 0, immarg=False),
+        ),
+        a=f8f6f4_operand_form(a, register),
+        b=f8f6f4_operand_form(b, register),
+        c=AsIs(accumulator),
+        result=AsIs(accumulator),
+        decl_key=decl_key,
+    )
+
+
 # Eight fp8 / bf8 values: two words at LLVM 20, one i64 from LLVM 22 on (the
 # same register types the hand-written fp8 x fp8 and bf8 x bf8 MFMAs use).
 _FP8_X8 = FlavorType(VectorType(I32, 2), ((LLVM_FLAVOR_LLVM22, I64),))
@@ -580,5 +629,14 @@ MATRIX_CALLS: Mapping[str, MatrixCall] = MappingProxyType(
             ).items()
         },
         "wmma_gfx1250_f32_32x16x128_f4": _GFX1250_F4_32X16X128,
+        # gfx950 f8f6f4 -> f32 at 16x16x128 and 32x32x64, every format pair
+        # with a 6-bit or 4-bit operand: 32 values of A and of B per lane.
+        **{
+            op_id: _gfx950_f8f6f4_mfma((m, n, k), a, b)
+            for m, n, k in _GFX950_F8F6F4_MFMA
+            for op_id, (a, b) in narrow_f8f6f4_op_ids(
+                f"mfma_f32_{m}x{n}x{k}_f8f6f4"
+            ).items()
+        },
     }
 )
