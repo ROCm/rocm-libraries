@@ -306,9 +306,10 @@ class TestNumSeqsCap(unittest.TestCase):
             supports_mla_prefill,
         )
 
-        default = MlaPrefillSpec(num_heads=128)
+        layout = dict(heads_per_wg=2, q_tiles_per_wg=2, num_warps=4, block_q=32)
+        default = MlaPrefillSpec(num_heads=128, **layout)
         longer = MlaPrefillSpec(
-            num_heads=128, binary_search_iters=MLA_BINARY_SEARCH_ITERS + 4
+            num_heads=128, binary_search_iters=MLA_BINARY_SEARCH_ITERS + 4, **layout
         )
         self.assertEqual(default.fwd_kernel_name(), longer.fwd_kernel_name())
         self.assertTrue(supports_mla_prefill(default, arch="gfx942")[0])
@@ -457,8 +458,7 @@ class TestDispatchResult(unittest.TestCase):
     def test_layout_selection(self):
         # Dispatch makes one layout choice: two heads x two 16-query tiles per
         # workgroup, one wave per (head, tile), when the head count is even,
-        # else the single-head spec defaults. Every other lever stays at its
-        # default.
+        # else one head x four tiles. Every other lever stays at its default.
         for heads in (128, 64, 6):
             with self.subTest(heads=heads):
                 spec = dispatch_mla(_req(num_heads=heads)).spec
@@ -468,10 +468,14 @@ class TestDispatchResult(unittest.TestCase):
                 self.assertEqual(spec.block_q, 32)
                 self.assertEqual(spec.block_k, 16)
                 self.assertEqual(spec.r_kv_tile, 32)
-        fallback = dispatch_mla(_req(num_heads=5)).spec
-        self.assertEqual(fallback.heads_per_wg, 1)
-        self.assertEqual(fallback.q_tiles_per_wg, 1)
-        self.assertEqual(fallback.num_xcds, 0)
+        odd = dispatch_mla(_req(num_heads=5)).spec
+        self.assertEqual(odd.heads_per_wg, 1)
+        self.assertEqual(odd.q_tiles_per_wg, 4)
+        self.assertEqual(odd.num_warps, 4)
+        self.assertEqual(odd.block_q, 64)
+        self.assertFalse(odd.agpr_acc)
+        # XCD-aware like the even layouts: _req pins 228 CUs, six XCDs.
+        self.assertEqual(odd.num_xcds, 6)
 
     def test_admission_runs_once_per_support_query(self):
         from unittest import mock
@@ -898,7 +902,7 @@ class TestSweepCoverage(unittest.TestCase):
                         self._pin(name, num_heads=5)
                     )
                     self.assertFalse(ok)
-                    self.assertIn("single-head", why)
+                    self.assertIn("one head per workgroup", why)
 
     def test_opt_ins_build(self):
         with _flavor("llvm22"):
@@ -1148,13 +1152,12 @@ class TestAbsorbedQueryRequest(unittest.TestCase):
         absorbed = dispatch_mla(_req(absorbed_query=True)).spec
         self.assertEqual(absorbed, dataclasses.replace(fused, absorbed_query=True))
 
-    def test_single_head_layout_is_refused(self):
+    def test_odd_head_count_is_served(self):
         ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_heads=5, absorbed_query=True))
-        self.assertFalse(ok)
-        self.assertIn("absorbed_query", why)
-        with self.assertRaises(ValueError):
-            dispatch_mla(_req(num_heads=5, absorbed_query=True))
-        self.assertEqual(mla_sweep_space(_req(num_heads=5, absorbed_query=True)), ())
+        self.assertTrue(ok, why)
+        result = dispatch_mla(_req(num_heads=5, absorbed_query=True))
+        self.assertEqual((result.spec.heads_per_wg, result.spec.q_tiles_per_wg), (1, 4))
+        self._check_absorbed(result)
 
     def test_sweep_entry_points_carry_it(self):
         with _flavor("llvm22"):

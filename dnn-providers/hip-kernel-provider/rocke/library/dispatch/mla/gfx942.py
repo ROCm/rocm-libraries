@@ -49,10 +49,16 @@ from .common import (
 )
 
 
-# Shipped one-wave-per-head layout: a workgroup holds _HEADS_PER_WG heads x
-# _Q_TILES_PER_WG tiles of 16 queries, one wave per (head, tile).
+# Shipped layout: a workgroup holds _HEADS_PER_WG heads x _Q_TILES_PER_WG tiles
+# of 16 queries, one wave per (head, tile).
 _HEADS_PER_WG = 2
 _Q_TILES_PER_WG = 2
+# Odd head counts cannot pair heads, so they run one head x _ODD_Q_TILES_PER_WG
+# tiles at 16 rows per wave. Gated sweeps on the 304-CU part measured it faster
+# than the retired single-head kernel on every odd-H shape tried, and faster
+# than one head x two tiles; agpr_acc lost at low head counts there, so the
+# odd layout never takes it.
+_ODD_Q_TILES_PER_WG = 4
 
 # CUs per XCD on CDNA3 (a 228-CU gfx942 has 6 XCDs, a 304-CU one 8).
 _CUS_PER_XCD = 38
@@ -177,19 +183,18 @@ def _spec_for(
       refuses the llvm20 flavor;
     * otherwise 16 rows per wave at two workgroups per CU.
 
-    The workgroup order is XCD-aware when the device's XCD count is known. If
-    the head count is odd, the remaining levers stay at their
-    :class:`MlaPrefillSpec` defaults, the single-head layout. Every layout
-    takes ``absorbed_query`` from the request, and the single-head layout's
-    admission refuses it. Nothing else is tuned per request.
+    An odd head count runs one head x four query tiles at 16 rows per wave
+    (``_ODD_Q_TILES_PER_WG``). The workgroup order is XCD-aware when the
+    device's XCD count is known. Every layout takes ``absorbed_query`` from the
+    request. Nothing else is tuned per request.
 
     Admission runs once per candidate spec here, and the verdict of the spec
     returned is handed back so :func:`support` does not run it again.
 
     ``layout`` pins one two-heads layout instead of applying the rule:
     ``"agpr_acc"`` (refused at llvm20, with no fallback) or ``"row16"`` (16
-    rows per wave). Odd head counts have only the single-head layout, so a
-    pinned layout is refused there.
+    rows per wave). Both pin two heads per workgroup, so a pinned layout is
+    refused for an odd head count.
     """
     if layout is not None and layout not in _LAYOUTS:
         raise ValueError(f"unknown MLA layout {layout!r}; expected one of {_LAYOUTS}")
@@ -202,19 +207,26 @@ def _spec_for(
         page_block_size=req.page_block_size,
         block_k=req.page_block_size,
         dtype=req.dtype.lower(),
-        # Carried into every layout below (they derive from ``base``); the
-        # single-head layout does not implement it, so its admission refuses.
+        # Carried into every layout below (they derive from ``base``).
         absorbed_query=req.absorbed_query,
     )
+    num_cus = _resolve_num_cus(req)
     if req.num_heads % _HEADS_PER_WG:
         if layout is not None:
             why = (
-                f"odd num_heads={req.num_heads} runs the single-head layout; "
+                f"odd num_heads={req.num_heads} runs one head per workgroup; "
                 f"the {layout} two-heads layout needs an even head count"
             )
             return base, (False, why)
-        return base, supports_mla_prefill(base, arch=req.arch)
-    num_cus = _resolve_num_cus(req)
+        spec = dataclasses.replace(
+            base,
+            heads_per_wg=1,
+            q_tiles_per_wg=_ODD_Q_TILES_PER_WG,
+            num_warps=_ODD_Q_TILES_PER_WG,
+            block_q=16 * _ODD_Q_TILES_PER_WG,
+            num_xcds=_num_xcds(num_cus),
+        )
+        return spec, supports_mla_prefill(spec, arch=req.arch)
 
     def packed(agpr: bool) -> MlaPrefillSpec:
         return dataclasses.replace(

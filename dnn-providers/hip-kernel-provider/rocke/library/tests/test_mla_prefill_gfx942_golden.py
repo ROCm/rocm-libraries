@@ -10,9 +10,9 @@ Every flavor in ``LLVM_FLAVORS`` is checked from any host, through the shared
 ``rocke.core.ir_golden`` comparator, so a newly added flavor fails here until
 the fixture is re-blessed.
 
-Covers both entry points in the family and both shipped head counts:
+Covers both entry points in the family, both shipped even head counts and one
+odd head count:
 
-  * ``fwd_*``      -- the chunked forward kernel (online softmax, LSE, mask).
   * ``probe_*``    -- the score-tile probe, which the on-device verify driver
     compares against the numpy oracle. It is a shipped entry point, so its IR
     is pinned too; drift there would silently weaken the parity harness.
@@ -76,11 +76,6 @@ def _cases():
         build_mla_prefill_score_probe,
     )
 
-    def fwd(num_heads):
-        return lambda: build_mla_prefill_fwd(
-            MlaPrefillSpec(num_heads=num_heads), arch=_ARCH
-        )
-
     def agpr(num_heads, absorbed_query=False):
         # The shipped long-key layout, built directly so llvm20's refusal is
         # recorded rather than hidden behind dispatch's fallback.
@@ -128,12 +123,12 @@ def _cases():
 
     return {
         # 128 heads is the DeepSeek-V3 shape; 64 is the smaller supported count.
-        "mla_prefill_gfx942/fwd_h128": fwd(128),
-        "mla_prefill_gfx942/fwd_h64": fwd(64),
         "mla_prefill_gfx942/probe_h128": probe(128),
         "mla_prefill_gfx942/probe_h64": probe(64),
         "mla_prefill_gfx942/dispatch_fwd_h128": dispatched(128),
         "mla_prefill_gfx942/dispatch_fwd_h64": dispatched(64),
+        # An odd head count: one head x four query tiles per workgroup.
+        "mla_prefill_gfx942/dispatch_fwd_h5": dispatched(5),
         # 4096 query rows per sequence: the agpr_acc layout at llvm22 (llvm20
         # refuses it and dispatch falls back to 16 rows per wave).
         "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),

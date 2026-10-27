@@ -95,6 +95,7 @@ from kernels.mla.mla_prefill_gfx942 import (
     mla_prefill_block,
     mla_prefill_score_probe_grid,
     supports_mla_prefill,
+    supports_mla_score_probe,
 )
 from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime, get_device_arch
@@ -187,12 +188,12 @@ _EXTRA = (
         "(130), and S_q/S_k ratios from 0.02 to 0.86 in one launch",
     ),
     Scenario(
-        "single_head",
+        "odd_heads",
         5,
         (40, 24),
         (531, 24),
-        "odd head count: dispatch packs two heads per workgroup only when H is "
-        "even, so H=5 runs the single-head layout",
+        "odd head count: dispatch pairs heads only when H is even, so H=5 runs "
+        "one head x four query tiles per workgroup",
     ),
     Scenario(
         "six_heads",
@@ -1025,27 +1026,13 @@ def _dispatched_spec(
                 absorbed_query=absorbed_query,
             )
         ).spec
-    except ValueError:
-        if absorbed_query and heads % 2 == 0:
-            # A packed-layout absorbed request dispatch refused for a real
-            # reason (e.g. the query extent); the single-head fallback below
-            # would turn that into the single-head SKIP.
-            raise
-        # Nothing admits the request; fall back to the default so the
-        # admission check below reports why.
-        return MlaPrefillSpec(num_heads=heads, absorbed_query=absorbed_query)
     finally:
         _mla_gfx942._AGPR_FORCE = saved
 
 
 def layout_name(spec: MlaPrefillSpec) -> str:
     """Short tag for the forward layout ``spec`` runs, for logs and test ids."""
-    if spec.agpr_acc:
-        kind = "agpr_acc"
-    elif spec.heads_per_wg > 1 or spec.q_tiles_per_wg > 1:
-        kind = "packed"
-    else:
-        kind = "single_head"
+    kind = "agpr_acc" if spec.agpr_acc else "packed"
     return (
         f"{kind}(heads_per_wg={spec.heads_per_wg} q_tiles={spec.q_tiles_per_wg} "
         f"block_q={spec.block_q} xcds={spec.num_xcds}"
@@ -1069,12 +1056,10 @@ def run_case(
     rel_tol: float = OUT_REL_PEAK_TOL,
     lse_tol: float = LSE_ATOL,
     corrupt: tuple[int, int] | None = None,
-) -> bool | None:
+) -> bool:
     """One (shape, heads) case end to end.
 
-    Returns True on pass, False on failure, and None when ``absorbed_query`` is
-    asked of a layout that does not implement it (the single-head layout) --
-    a skip, not a failure, since dispatch never ships that combination.
+    Returns True on pass, False on failure.
 
     ``corrupt=(seq, page)`` is the negative control (``--mode full`` only):
     that page is zeroed in the kernel's inputs but not the oracle's (see
@@ -1082,8 +1067,9 @@ def run_case(
     """
     # The score probe is single-tile (block_q == 16); the forward kernel runs
     # the spec dispatch ships for this case, so parity covers the shipped
-    # layout (two heads per workgroup when the head count is even, the
-    # single-head default otherwise; agpr_acc at >= 320 query rows per sequence).
+    # layout (two heads x two query tiles per workgroup when the head count is
+    # even, one head x four tiles otherwise; agpr_acc at >= 320 query rows per
+    # sequence for an even head count).
     if mode == "scores":
         spec = MlaPrefillSpec(num_heads=heads, block_q=16)
     else:
@@ -1097,11 +1083,9 @@ def run_case(
     # --dry-run reports problem geometry, which is arch-independent, so it stays
     # runnable on a host with no device.
     if not dry_run:
-        ok, reason = supports_mla_prefill(spec, arch=arch)
+        admit = supports_mla_score_probe if mode == "scores" else supports_mla_prefill
+        ok, reason = admit(spec, arch=arch)
         if not ok:
-            if absorbed_query and heads % 2:
-                print(f"[{name}] SKIP absorbed_query: {reason}")
-                return None
             print(f"[{name}] unsupported: {reason}")
             return False
     if agpr and not spec.agpr_acc:
@@ -1219,7 +1203,9 @@ def main(argv=None) -> int:
         # Arch admission does not depend on the scenario's head count, so one
         # check up front keeps "this box cannot run MLA prefill" a skip (2)
         # rather than N case failures (1).
-        ok, reason = supports_mla_prefill(MlaPrefillSpec(num_heads=64), arch=arch)
+        ok, reason = supports_mla_score_probe(
+            MlaPrefillSpec(num_heads=64, block_q=16), arch=arch
+        )
         if not ok:
             print(f"unsupported: {reason}")
             return 2
@@ -1256,12 +1242,9 @@ def main(argv=None) -> int:
             )
         )
 
-    failed = [n for n, passed in results if passed is False]
-    skipped = [n for n, passed in results if passed is None]
-    ran = len(results) - len(skipped)
+    failed = [n for n, passed in results if not passed]
     print(
-        f"SUMMARY mode={args.mode} {ran - len(failed)}/{ran} passed"
-        + (f"; skipped: {', '.join(skipped)}" if skipped else "")
+        f"SUMMARY mode={args.mode} {len(results) - len(failed)}/{len(results)} passed"
         + (f"; failed: {', '.join(failed)}" if failed else "")
     )
     print("PASS" if not failed else "FAIL")

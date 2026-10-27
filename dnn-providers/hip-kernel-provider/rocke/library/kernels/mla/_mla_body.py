@@ -545,21 +545,17 @@ def scale_frag(b: IRBuilder, frag: Value, alpha: Value) -> Value:
     return frag
 
 
-def pack_p(b: IRBuilder, p: Sequence[Value], k_tiles: int, *, rne: bool) -> list[Value]:
-    """P as bf16 B fragments, one per key tile.
+def pack_p(b: IRBuilder, p: Sequence[Value], k_tiles: int) -> list[Value]:
+    """P as bf16 B fragments, one per key tile, rounded by
+    :func:`bf16x4_rne_finite`.
 
     The Sᵀ fragment is already the PV GEMM's B operand layout (k = key,
-    n = query), so P never leaves registers. ``rne`` rounds with
-    :func:`bf16x4_rne_finite` instead of ``fptrunc``.
+    n = query), so P never leaves registers.
     """
-    out = []
-    for kt in range(k_tiles):
-        vals = p[kt * C_PER_LANE : (kt + 1) * C_PER_LANE]
-        if rne:
-            out.append(bf16x4_rne_finite(b, vals))
-        else:
-            out.append(b.vec_trunc_f32_to_bf16(b.vec_pack(vals, F32)))
-    return out
+    return [
+        bf16x4_rne_finite(b, p[kt * C_PER_LANE : (kt + 1) * C_PER_LANE])
+        for kt in range(k_tiles)
+    ]
 
 
 def run_k_loops(
