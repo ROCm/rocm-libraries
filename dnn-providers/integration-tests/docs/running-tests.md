@@ -419,6 +419,15 @@ declared (and placed) at that alignment:
 | `WRONG` | It ran, and the output did not match the oracle. |
 | `UNEXERCISED` | The harness could not set the case up (the `reason` says why). |
 
+What HIP_MLOPS declines (gfx950 probes, `exact` placement):
+
+| Engine / op | Declines a declared alignment | Evidence |
+|---|---|---|
+| BatchNorm (forward training, backward, inference) | below what its kernels' accesses need: per-channel fp32 tensors need 4, x/y need the vector width times the element size | alignments 1 and 2 decline; 4 and above pass |
+| LayerNorm, RMSNorm, Resample | below, or not a multiple of, a tensor's element size | before the check, a float tensor at alignment 1 or 2 gave garbage output; with it, every alignment passes or declines |
+| ASM_SDPA, Gfx950AttentionDense | below 16 (Q, K, V, O) | alignments 1 to 8 decline, 16 and above pass |
+| hipBLASLt, MIOpen | everything but 16, through the plugin API version gate | only alignment 16 is offered to them |
+
 For `under` the case is written to be refused. The harness misaligns the pointer of
 `placement_uid` to half its declared alignment and the engine must accept the graph and then
 reject that pointer:
