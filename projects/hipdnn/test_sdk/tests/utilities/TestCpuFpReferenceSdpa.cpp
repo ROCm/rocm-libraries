@@ -553,35 +553,6 @@ TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
     EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
 }
 
-TEST(TestCpuFpReferenceSdpaFp64, LeftBoundCountsTheDiagonalKey)
-{
-    // cuDNN's left_bound = L keeps L keys up to and including the diagonal (SEM-001):
-    // L = 1 is diagonal only, L = 2 adds one key before it. Q=K=0, so O is the mean of kept V.
-    Tensor<double> q({1, 1, 4, 1});
-    Tensor<double> k({1, 1, 4, 1});
-    Tensor<double> v({1, 1, 4, 1});
-    Tensor<double> o({1, 1, 4, 1});
-    q.fillWithValue(0.0);
-    k.fillWithValue(0.0);
-    for(int64_t i = 0; i < 4; ++i)
-    {
-        v.setHostValue(static_cast<double>(i + 1), 0, 0, i, 0);
-    }
-    const TensorBase<float>* noMask = nullptr;
-
-    CpuFpReferenceSdpa::forward(
-        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(1, 0, true));
-    for(int64_t i = 0; i < 4; ++i)
-    {
-        EXPECT_NEAR(o.getHostValue(0, 0, i, 0), static_cast<double>(i + 1), 1e-12) << "row " << i;
-    }
-
-    CpuFpReferenceSdpa::forward(
-        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(2, 0, true));
-    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-12);
-    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0) / 2.0, 1e-12);
-}
-
 TEST(TestCpuFpReferenceSdpaFp64, SlidingWindowTopLeftSquare)
 {
     // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
@@ -784,15 +755,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn)
     }
 
     const TensorBase<float>* noMask = nullptr;
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/2,
-                                /*rightBound=*/0,
-                                /*topLeftAlignment=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(2, 0, true));
 
     EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 1.0, 1e-5); // keys {0}
     for(int64_t s = 1; s < SEQ; ++s)
@@ -803,15 +767,8 @@ TEST(TestCpuFpReferenceSdpaFp64, LeftBoundKeepsLKeysIncludingDiagonalLikeCudnn)
     }
 
     // L = 1 keeps only the diagonal.
-    CpuFpReferenceSdpa::forward(q,
-                                k,
-                                v,
-                                o,
-                                std::nullopt,
-                                noMask,
-                                /*leftBound=*/1,
-                                /*rightBound=*/0,
-                                /*topLeftAlignment=*/true);
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, SdpaFwdOptions<float>{}.setMask(noMask).setBand(1, 0, true));
     for(int64_t s = 0; s < SEQ; ++s)
     {
         EXPECT_NEAR(o.getHostValue(0, 0, s, 0), static_cast<double>(s + 1), 1e-5) << "query " << s;

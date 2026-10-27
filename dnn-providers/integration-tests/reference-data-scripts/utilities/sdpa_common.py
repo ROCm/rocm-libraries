@@ -102,25 +102,88 @@ def build_bound_mask(s_q, s_kv, left_bound, right_bound, top_left_alignment):
     return keep
 
 
-def causal_window_bounds(causal, window_left, window_right):
+def left_bound_from_window_left(window_left):
+    """Map a FlashAttention-style window_size_left to hipDNN's left_bound.
+
+    hipDNN follows cuDNN: left_bound = L keeps the L keys ending at the diagonal,
+    diagonal included. FlashAttention's window_size_left = W keeps W + 1 keys, so
+    the same window is left_bound = W + 1. -1 (unbounded) stays -1.
+    """
+    return -1 if window_left == -1 else window_left + 1
+
+
+def window_left_from_left_bound(left_bound):
+    """Map hipDNN's (cuDNN) left_bound to FlashAttention's window_size_left.
+
+    The inverse of left_bound_from_window_left: L keys including the diagonal is
+    L - 1 keys before it. -1 (unbounded) stays -1.
+    """
+    return -1 if left_bound == -1 else left_bound - 1
+
+
+def add_left_bound_arguments(parser):
+    """Add the forward generators' mutually exclusive left-bound flags.
+
+    Two names for the same bound, one per convention, so a value is never read in
+    the wrong one: --left-bound is the graph's (cuDNN) left_bound, --window-left is
+    FlashAttention's window_size_left (what --validate passes to AITER). Resolve the
+    parsed value with resolve_left_bound().
+    """
+    left = parser.add_mutually_exclusive_group()
+    left.add_argument(
+        "--left-bound",
+        type=int,
+        default=None,
+        help="Sliding window left bound in the graph's (cuDNN) convention: L keeps the L "
+        "keys ending at the diagonal, diagonal included. Written to the graph unchanged. "
+        "Positive or -1 (unbounded); 0 is rejected, as in hipDNN "
+        "(SdpaSemanticsRegister SEM-005)",
+    )
+    left.add_argument(
+        "--window-left",
+        type=int,
+        default=None,
+        help="Sliding window left size in FlashAttention's window_size_left convention "
+        "(W keeps the W keys before the diagonal plus the diagonal; written to the graph "
+        "as left_bound = W + 1), -1 = unbounded",
+    )
+
+
+def resolve_left_bound(parser, args):
+    """The graph's left_bound for the parsed --left-bound / --window-left (-1 if neither)."""
+    if args.window_left is not None:
+        if args.window_left < -1:
+            parser.error("--window-left must be >= 0 or -1 (unbounded)")
+        return left_bound_from_window_left(args.window_left)
+    if args.left_bound is None:
+        return -1
+    if args.left_bound == 0 or args.left_bound < -1:
+        parser.error("--left-bound must be positive or -1 (unbounded)")
+    return args.left_bound
+
+
+def causal_window_bounds(causal, left_bound, window_right):
     """Map the forward generator's causal/window arguments to band parameters.
 
-    Returns (left_bound, right_bound, top_left_alignment) with -1 meaning
-    unbounded. Resolved exactly as the forward graph serializes them (cuDNN setter
-    composition): causal sets right_bound = 0, and an explicit --window-right
+    left_bound is the graph's (cuDNN) left_bound, -1 for unbounded; window_right is
+    the right bound, which means the same in the cuDNN and FlashAttention
+    conventions. Returns (left_bound, right_bound, top_left_alignment) with -1
+    meaning unbounded. Resolved exactly as the forward graph serializes them (cuDNN
+    setter composition): causal sets right_bound = 0, and an explicit --window-right
     replaces it. Taking the minimum instead would keep right_bound at 0 while the
     graph says window_right.
     """
-    left_bound = window_left if window_left >= 0 else -1
+    left_bound = left_bound if left_bound >= 0 else -1
     right_bound = window_right if window_right >= 0 else (0 if causal != "none" else -1)
     return left_bound, right_bound, causal != "bottom_right"
 
 
-def build_mask(s_q, s_kv, causal, window_left, window_right):
+def build_mask(s_q, s_kv, causal, left_bound, window_right):
     """Construct a boolean keep-mask [S_q, S_kv] for the given causal/window config.
 
     Returns None when no masking applies (the dense attention case), so callers
     can take the fast PyTorch path. The mask is True where attention is allowed.
+    left_bound is the graph's (cuDNN) left_bound (see causal_window_bounds).
     The bound math matches the CPU reference executor's leftBound/rightBound +
     topLeftAlignment semantics so golden output is reproducible on the CPU side.
 
@@ -130,7 +193,7 @@ def build_mask(s_q, s_kv, causal, window_left, window_right):
       - "bottom_right":  diagonal anchored bottom-right; keep skv <= sq + (S_kv - S_q)
     """
     left_bound, right_bound, top_left = causal_window_bounds(
-        causal, window_left, window_right
+        causal, left_bound, window_right
     )
     return build_bound_mask(s_q, s_kv, left_bound, right_bound, top_left)
 

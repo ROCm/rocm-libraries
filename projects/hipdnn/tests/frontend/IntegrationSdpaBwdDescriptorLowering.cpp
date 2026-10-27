@@ -399,7 +399,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.causal_mask = true;
     sdpaAttrs.causal_mask_bottom_right = true;
     sdpaAttrs.set_attn_scale(0.125f);
-    sdpaAttrs.set_diagonal_band_left_bound(2); // cuDNN rejects 0 (keeps no key)
+    sdpaAttrs.set_diagonal_band_left_bound(2); // hipDNN rejects 0 (SEM-005)
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
 

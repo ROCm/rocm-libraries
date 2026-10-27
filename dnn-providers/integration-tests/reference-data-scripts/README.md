@@ -282,7 +282,12 @@ one it uses:
 | hipDNN graph, cuDNN | `left_bound` (`--left-bound`) | the 3 keys ending at the diagonal, diagonal included |
 | FlashAttention, AITER | `window_size_left` (`--window-left`) | the 3 keys before the diagonal, plus the diagonal (4 keys) |
 
-`generate_sdpa_fwd_golden.py --left-bound L` writes `left_bound = L` to the graph.
-`--window-left W` writes `left_bound = W + 1`; it exists for `--validate`, which passes the
-window to AITER. The two flags are mutually exclusive. `left_bound` must be positive or -1
-(unbounded).
+`generate_sdpa_fwd_golden.py` and `generate_sdpa_fwd_paged_golden.py` take either flag:
+`--left-bound L` writes `left_bound = L` to the graph, and `--window-left W` writes
+`left_bound = W + 1` (it exists for windows quoted in FlashAttention terms, and for
+`--validate`, which passes `window_size_left = L - 1` to AITER). The two flags are mutually
+exclusive, and the bundle's `.meta.json` records the graph value as `config.left_bound`.
+`generate_sdpa_bwd_golden.py` takes `--left-bound` only. `left_bound` must be positive or -1
+(unbounded); hipDNN rejects 0 (`SdpaSemanticsRegister.md` SEM-005). The generators' masks
+follow cuDNN's rule (SEM-001), so `generate_golden_data.sh` passes every window as
+`--left-bound`.
