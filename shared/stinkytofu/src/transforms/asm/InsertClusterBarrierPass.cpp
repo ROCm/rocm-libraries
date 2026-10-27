@@ -38,6 +38,7 @@
 #include "stinkytofu/analysis/asm/ScalarBranchFacts.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/AsmTargetRegisters.hpp"
 #include "stinkytofu/ir/asm/AsmSetSymbolMap.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -45,6 +46,7 @@
 #include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPassTestSupport.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 // Enable with StinkyTofuDebugPass: "InsertClusterBarrierPass" in YAML, or
 // PassManagerDebugConfig::addDebugOnly("InsertClusterBarrierPass").
@@ -238,6 +240,96 @@ bool isSccLiveIn(StinkyInstruction* at) {
     return false;
 }
 
+bool touchesSgpr(const StinkyRegister& reg, uint32_t index) {
+    return reg.isRegister() && !reg.isVirtualReg() && reg.reg.type == RegType::S &&
+           index >= reg.reg.idx && index < reg.reg.idx + std::max<uint16_t>(1, reg.reg.num);
+}
+
+/// Physical SGPR liveness at the insertion point. This mirrors the conservative SCC walk above:
+/// an unresolved branch or call keeps the register live, and the first write kills the old value.
+bool isSgprLiveIn(StinkyInstruction* at, uint32_t index) {
+    BasicBlock* parent = at->getParent();
+    if (parent == nullptr) return true;
+
+    std::unordered_map<std::string, StinkyInstruction*> labels;
+    bool labelsBuilt = false;
+    auto branchTarget = [&](const StinkyInstruction& branch) -> StinkyInstruction* {
+        const std::string target = getBranchTarget(branch);
+        if (target.empty()) return nullptr;
+        if (!labelsBuilt) {
+            labelsBuilt = true;
+            for (auto it = parent->begin(); it != parent->end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst == nullptr || !isLabel(*inst)) continue;
+                if (const auto* data = inst->getModifier<LabelData>())
+                    labels.emplace(data->label, inst);
+            }
+        }
+        auto found = labels.find(target);
+        return (found == labels.end()) ? nullptr : found->second;
+    };
+    auto reads = [&](const StinkyInstruction& inst) {
+        return std::any_of(inst.getSrcRegs().begin(), inst.getSrcRegs().end(),
+                           [&](const StinkyRegister& reg) { return touchesSgpr(reg, index); });
+    };
+    auto writes = [&](const StinkyInstruction& inst) {
+        return std::any_of(inst.getDestRegs().begin(), inst.getDestRegs().end(),
+                           [&](const StinkyRegister& reg) { return touchesSgpr(reg, index); });
+    };
+
+    std::vector<BasicBlock::iterator> paths{BasicBlock::iterator(at)};
+    std::unordered_set<const IRBase*> walked;
+    while (!paths.empty()) {
+        auto it = paths.back();
+        paths.pop_back();
+        for (; it != parent->end(); ++it) {
+            if (!walked.insert(it.getNodePtr()).second) break;
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst == nullptr) continue;
+            if (reads(*inst)) return true;
+            if (writes(*inst)) break;
+            if (isCall(*inst)) return true;
+            if (isEndOfFunction(*inst)) break;
+            if (!isBranch(*inst)) continue;
+            StinkyInstruction* target = branchTarget(*inst);
+            if (target == nullptr) return true;
+            paths.push_back(BasicBlock::iterator(target));
+            if (isUnconditionalBranch(*inst)) break;
+        }
+    }
+    return false;
+}
+
+StinkyRegister allocateTemporarySgpr(StinkyInstruction* anchor) {
+    BasicBlock* block = anchor == nullptr ? nullptr : anchor->getParent();
+    Function* function = block == nullptr ? nullptr : block->getParent();
+    if (function == nullptr)
+        STINKY_UNREACHABLE("cluster barrier SCC spill has no containing function");
+
+    AsmTargetRegisters target = AsmTargetRegisters::forFunction(*function);
+    const uint32_t limit = target.indexCount(RegType::S);
+    const uint32_t used = std::min(limit, highestRegisterCount(*function, RegType::S));
+    std::unordered_map<std::string, int64_t> symbols;
+    collectAsmSetSymbolValues(*function, symbols);
+    std::unordered_set<uint32_t> reserved;
+    for (const char* name : {kWaveIdxSymbol, kLoopCounterLSymbol}) {
+        auto found = symbols.find(name);
+        if (found != symbols.end() && found->second >= 0 &&
+            static_cast<uint64_t>(found->second) < limit)
+            reserved.insert(static_cast<uint32_t>(found->second));
+    }
+
+    // Prefer a hole inside the producer's declared range, so the common case changes no metadata.
+    for (uint32_t index = 0; index < used; ++index)
+        if (!reserved.count(index) && !isSgprLiveIn(anchor, index))
+            return StinkyRegister("s", index, 1);
+    // Pressure can require one additional SGPR. Signature refresh accounts for it at emission.
+    for (uint32_t index = used; index < limit; ++index)
+        if (!reserved.count(index) && !isSgprLiveIn(anchor, index))
+            return StinkyRegister("s", index, 1);
+    STINKY_UNREACHABLE("cluster barrier SCC spill has no temporary SGPR");
+}
+
 /// First spot below a live SCC range that the handshake may be planted at, or
 /// null when the range leaves none. What comes back is an anchor -- the
 /// instruction the handshake goes in *front* of -- which is the SCC clobber
@@ -299,15 +391,43 @@ StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     return nullptr;
 }
 
-void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
-                                          GfxArchID archId) {
+void insertSccSaveBefore(IRBase* anchor, const StinkyRegister& spill, AsmIRBuilder& irBuilder,
+                         GfxArchID archId) {
+    const HwInstDesc* cselectDesc = getMCIDByUOp(GFX::s_cselect_b32, archId);
+    assert(cselectDesc && "SCC-preservation opcode is not supported on this architecture");
+    StinkyInstruction* save = irBuilder.create(cselectDesc, anchor);
+    save->addDestReg(spill);
+    save->addSrcReg(StinkyRegister(1));
+    save->addSrcReg(StinkyRegister(0));
+    save->addSrcReg(StinkyRegister::getSCCRegister());
+    save->addModifier<CommentData>(CommentData{"preserve SCC across cluster signal"});
+}
+
+void insertSccRestoreBefore(IRBase* anchor, const StinkyRegister& spill, AsmIRBuilder& irBuilder,
+                            GfxArchID archId) {
+    const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
+    assert(cmpDesc && "SCC-restoration opcode is not supported on this architecture");
+    StinkyInstruction* restore = irBuilder.create(cmpDesc, anchor);
+    restore->addDestReg(StinkyRegister::getSCCRegister());
+    restore->addSrcReg(spill);
+    restore->addSrcReg(StinkyRegister(1));
+    restore->addModifier<CommentData>(CommentData{"restore SCC after cluster signal"});
+}
+
+void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
+                                          bool preserveLiveScc = true) {
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
+    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+    const bool preserveScc = preserveLiveScc && anchorInst != nullptr && isSccLiveIn(anchorInst);
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
     const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     assert(cmpDesc && brDesc && signalDesc &&
            "Cluster-barrier opcodes are not supported on this architecture");
+
+    const StinkyRegister spill = preserveScc ? allocateTemporarySgpr(anchorInst) : StinkyRegister{};
+    if (preserveScc) insertSccSaveBefore(anchor, spill, irBuilder, archId);
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
     // Implicit-operand legalisation has already run, so declare the SCC write
@@ -330,6 +450,8 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
         GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
     lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
+
+    if (preserveScc) insertSccRestoreBefore(anchor, spill, irBuilder, archId);
 }
 
 /// `s_barrier_signal -3` alone. Used when the wave-0 check already happened at
@@ -362,10 +484,15 @@ std::pair<StinkyInstruction*, StinkyInstruction*> insertWorkgroupBarrierSyncBefo
 void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                            GfxArchID archId) {
     const std::string lclLabelName = std::string(kSkipLabelPrefixLCL) + makeRandomHash();
+    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+    const bool preserveScc = anchorInst != nullptr && isSccLiveIn(anchorInst);
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
     const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc1, archId);
     assert(cmpDesc && brDesc && "LoopCounterL gate opcodes are not supported on this architecture");
+
+    const StinkyRegister spill = preserveScc ? allocateTemporarySgpr(anchorInst) : StinkyRegister{};
+    if (preserveScc) insertSccSaveBefore(anchor, spill, irBuilder, archId);
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, anchor);
     // Implicit-operand legalisation has already run, so declare the SCC write
@@ -381,12 +508,14 @@ void insertRule1ClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuild
     brInst->addModifier<CommentData>(CommentData{"skip cluster barrier when LoopCounterL == 0"});
 
     insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId);
-    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+    // The outer Rule 1 gate already owns SCC preservation for the complete nested handshake.
+    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId, /*preserveLiveScc=*/false);
 
     static const HwInstDesc labelMCID{
         GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lclLblInst = irBuilder.create(&labelMCID, anchor);
     lclLblInst->addModifier<LabelData>(LabelData{lclLabelName, /*alignment=*/1});
+    if (preserveScc) insertSccRestoreBefore(anchor, spill, irBuilder, archId);
 }
 
 void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
@@ -769,7 +898,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
         StinkyInstruction* below = findSccDeadAnchorBelow(from, limit);
         if (below != nullptr) return static_cast<IRBase*>(below);
         if (!isSccLiveIn(referenceAnchor)) return defaultAnchor;
-        STINKY_UNREACHABLE("Rule 3 signal anchor: SCC live at the wait");
+        // No placement-only answer exists (typically a live-in or loop-carried value). Retain the
+        // cycle-selected/boundary-constrained anchor; signal emission preserves SCC there.
+        return from;
     };
 
     // A climb that ends up further than maxLeadCycles from the wait has cleared a
@@ -867,6 +998,11 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // which is where the group is gathered again.
     auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
         if (isClusterBarrierWait(*inst))
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+        // A Rule 3 phase may not straddle a tensor-counter drain. The drain is the physical
+        // publication point selected from FrameMap; settle after its workgroup fence so every
+        // wave has crossed that RAW before wave 0 opens the cluster phase.
+        if (inst->is(InstFlag::IF_WaitTensorCnt))
             return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
             return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);

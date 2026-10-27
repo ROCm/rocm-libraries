@@ -218,7 +218,12 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
     return sol, capsys.readouterr().out
 
 
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+# AB_first is left out: it stages a later region, so it needs UseLoopModel and both operands
+# split alike, neither of which this unsplit scaffold solution carries.
+_SCAFFOLD_FUSES = [f for f, name in sorted(TDM_FUSE_GROUPING.items()) if name != "AB_first"]
+
+
+@pytest.mark.parametrize("fuse", _SCAFFOLD_FUSES)
 def test_solution_accepts_each_grouping_at_equal_pair(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse)
@@ -233,7 +238,7 @@ def test_solution_accepts_paired_at_divergent_pair(
     assert sol.get("Valid") is True, out
 
 
-@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+@pytest.mark.parametrize("fuse", _SCAFFOLD_FUSES)
 def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, fuse):
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse, StaggerU=32)
     assert sol.get("Valid") is True, out
@@ -258,8 +263,8 @@ def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, f
          "TDMFuse=2 requires NumWaves=4 for its 2/1/1 split"),
         (2, {"MatrixInstruction": [16, 16, 128, 1, 1, 2, 16, 2, 1], "WorkGroup": [32, 2, 1]},
          "got 2"),
-        (1, {"ProblemType": _NO_MX_ON_B},
-         "TDMFuse=1 requires MX scales on both tensors"),
+        # TDMFuse=1 is absent: with no scale to pair it resolves to `unfused` rather than
+        # refusing -- each data tensor simply keeps its own descriptor.
         (2, {"ProblemType": _NO_MX_ON_B},
          "TDMFuse=2 requires MX scales on both tensors"),
         (1, {"ProblemType": {"Sparse": 1}},
@@ -307,7 +312,7 @@ def ks(fuse=3, **over):
     return state
 
 
-@pytest.mark.parametrize("fuse", [-3, -1, 4, 5, 6, 7, 8])
+@pytest.mark.parametrize("fuse", [-3, -1, 5, 6, 7, 8])
 def test_an_unmapped_integer_raises_instead_of_resolving(fuse):
     """An integer no row claims must raise, not fall back."""
     with pytest.raises(ValueError, match="names no grouping"):
@@ -328,7 +333,10 @@ def test_valid_parameters_and_the_mapping_name_the_same_integers():
 
 
 def test_every_shipped_row_is_reachable():
-    assert set(TF.TDM_GROUPS) == set(TF.TDM_FUSE_GROUPING.values())
+    """`unfused` is the one row no integer names: it is where `paired` lands when there is no
+    scale to pair, so it is reached through that remap rather than from TDMFuse directly."""
+    assert set(TF.TDM_GROUPS) - set(TF.TDM_FUSE_GROUPING.values()) == {"unfused"}
+    assert TF.tdmGroupingName(ks(fuse=1, ProblemType=_NO_MX_ON_B)) == "unfused"
     assert set(TF.TDM_GROUPS) == set(TF._GROUPING_ACCEPTED)
 
 
@@ -368,8 +376,10 @@ def test_four_waves_is_accepted_and_shares_a_mx_entry():
     assert TF._GROUPING_ACCEPTED["B_MX"] is TF._GROUPING_ACCEPTED["A_MX"]
 
 
+# The split is not among these: `TDMSplitA`/`TDMSplitB` are per operand, so a split alone no
+# longer declines a row -- whether a group's members agree on a region count is Solution.py's rule.
 @pytest.mark.parametrize("overrides", [
-    {"TDMInst": 1}, {"TDMSplit": True}, {"UseSubtileImpl": True},
+    {"TDMInst": 1}, {"UseSubtileImpl": True},
     {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}},
     {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}},
 ])

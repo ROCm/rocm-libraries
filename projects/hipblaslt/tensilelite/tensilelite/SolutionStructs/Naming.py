@@ -28,6 +28,7 @@ from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
 from ..Common.Utilities import isMxf4SubtilePath, printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
+from ..Components.LoopModel.Order import FACTOR_PARAM
 
 from .Problem import ProblemType
 
@@ -322,6 +323,30 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.add("ClusterAIDMapping")
     else:
       requiredParametersTemp.discard("ClusterAIDMapping")
+
+    # Registers calculates every value; names describe the final schedule.
+    for _registerParam in ("VgprGroupA", "VgprGroupB", "VgprAllocA", "VgprAllocB"):
+      if state.get("UseLoopModel", False):
+        requiredParametersTemp.add(_registerParam)
+      else:
+        requiredParametersTemp.discard(_registerParam)
+
+    # Same rule for the LoopModel knobs: UseLoopModel=False is every shipped kernel, and the
+    # traversal order only exists on that path, so neither is named off it.
+    if state.get("UseLoopModel", False):
+      requiredParametersTemp.update(("UseLoopModel", "WmmaInnerOrder", "WmmaOuterOrder"))
+    else:
+      requiredParametersTemp.difference_update(
+          ("UseLoopModel", "WmmaInnerOrder", "WmmaOuterOrder"))
+
+    # The factor IS the nest, so it is named whenever it makes an axis -- including where
+    # TDMSplit pins it, which the name would otherwise only imply.  A factor of 1 adds no
+    # axis and naming it would rename every kernel that has none.
+    for _factorParam in FACTOR_PARAM.values():
+      if state.get("UseLoopModel", False) and int(state.get(_factorParam, 1) or 1) > 1:
+        requiredParametersTemp.add(_factorParam)
+      else:
+        requiredParametersTemp.discard(_factorParam)
 
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":

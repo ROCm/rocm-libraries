@@ -41,6 +41,8 @@ Every layout is either tight (no extra LDS) or aligned (padded to a segment boun
 LDS and needs PrefetchGlobalRead=2).
 """
 
+from ..Components import TDMSplit
+
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
 
@@ -101,7 +103,9 @@ def _coarse(state, tc):
 
 def _port_split(state, tc):
     # VW==WaveTile/2 (2 vIdx per port) with TDMSplit. A smaller VW would need a >2-way split.
-    if _coarse(state, tc) or not state.get("TDMSplit"):
+    # Per operand: the two ports ARE this tensor's two split halves, so a kernel-wide reading
+    # gives a one-region tile a within-port stride whenever the OTHER tensor is split.
+    if _coarse(state, tc) or TDMSplit.split_of(state, tc)[0] <= 1:
         return False
     idx = 0 if tc == "A" else 1
     vw = state["VectorWidthA"] if tc == "A" else state["VectorWidthB"]
@@ -167,7 +171,7 @@ def _evaluate_asymmetric(state):
         if bMXSB is not None: o["ldsBaseMXSB"] = bMXSB
         return o
 
-    if state.get("TDMSplit"):
+    if TDMSplit.split_of(state, activeTC)[0] > 1:
         if not (_coarse(state, activeTC) or _port_split(state, activeTC)):
             return _no("TDMSplit asymmetric: active VW must be WaveTile or WaveTile/2")
         # VW==WaveTile splits by read port; VW==WaveTile/2 can't (needs >2-way) so it splits by component.
@@ -433,7 +437,10 @@ def b_rotate_reason(state, persistent=False):
             return "MX: needs MatrixInstN == WavefrontSize/2"
         if wtb // vwb != 2:                                   return "MX: needs MIWaveTile[1]/VectorWidthB == 2"
     if pt.get("Sparse"):                                      return "sparse not supported"
-    for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
+    # Both spellings gate: `TDMSplit` is shorthand for TDMSplitA/B=1, and derivation pops it once
+    # expanded, so testing only the shorthand is blind to every solution that got that far.
+    if state.get("TDMSplit") or TDMSplit.any_split(state):    return "TDMSplit not supported"
+    for key in ("UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
                 "PrefetchAcrossPersistent", "TDMFuse"):
         v = state.get(key)

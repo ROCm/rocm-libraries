@@ -27,6 +27,10 @@
 #include <iterator>
 #include <map>
 #include <ostream>
+#include <set>
+
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 namespace dag {
@@ -100,6 +104,51 @@ RegionDAG buildRegisterDependencyDAG(IRList::iterator regionStart, IRList::itera
     for (IRList::iterator it = regionStart; it != regionEnd; ++it)
         instructions.push_back(&getStinkyInst(it));
     return buildRegisterDependencyDAGImpl(instructions);
+}
+
+/// Order two instructions when both are in this region; a pair split across regions is already
+/// ordered by the region sequence.  A cycle is a frame-model integration error.
+static void orderInRegion(RegionDAG& dag, StinkyInstruction* before, StinkyInstruction* after,
+                          const char* what) {
+    auto from = dag.instToId.find(before);
+    auto to = dag.instToId.find(after);
+    if (from == dag.instToId.end() || to == dag.instToId.end()) return;
+    if (from->second == to->second || dag.graph[from->second].contains(to->second)) return;
+    if (hasPath(dag.graph, to->second, from->second)) STINKY_UNREACHABLE(what);
+    addEdgeById(&dag.nodes[from->second], &dag.nodes[to->second], dag.graph);
+}
+
+/// Keep the pieces of one fence in their emitted order.  The two halves of the barrier share no
+/// register, so nothing else stops the wait from being issued first.
+static void chainGirFencePieces(RegionDAG& dag) {
+    // Pre-schedule GIR placement materializes a physical split barrier without a GirActionData
+    // action. Keep its signal before its wait explicitly, including the case where block-local
+    // scheduling needs no memory token on either half.
+    DAGNode* pendingSignal = nullptr;
+    for (DAGNode& node : dag.nodes) {
+        StinkyInstruction& inst = *node.inst;
+        if (isBarrierSignal(inst) && isSplitBarrierAllWave(inst)) {
+            pendingSignal = &node;
+            continue;
+        }
+        if (isBarrierWait(inst) && isSplitBarrierAllWave(inst) && pendingSignal) {
+            orderInRegion(dag, pendingSignal->inst, node.inst,
+                          "physical GIR split barrier cannot be ordered");
+            pendingSignal = nullptr;
+            continue;
+        }
+        if (isBarrier(inst)) pendingSignal = nullptr;
+    }
+}
+
+void addGirFrameHazardEdges(RegionDAG& dag, const GirFrameHazardAnalysis::Result& hazards,
+                            const GirFrameAnalysis::Result& frames) {
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        if (hazard.gap != 0 || hazard.producer == hazard.consumer) continue;
+        orderInRegion(dag, hazard.producer, hazard.consumer,
+                      "GIR frame hazard introduces a scheduling DAG cycle");
+    }
+    chainGirFencePieces(dag);
 }
 
 void dumpDAGGraph(const RegionDAG& dag, std::ostream& os,
