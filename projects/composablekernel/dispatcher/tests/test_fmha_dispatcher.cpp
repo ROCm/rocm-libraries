@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <vector>
 
 #include "ck_tile/dispatcher.hpp"
 
@@ -673,15 +674,87 @@ TEST(FmhaSignatureMatchTest, NonCombineFamiliesStillCheckSoftCap)
     EXPECT_FALSE(ck_tile::dispatcher::backends::fmha_signature_matches(key, p));
 }
 
+TEST(FmhaSignatureMatchTest, CombineIgnoresPageSizeSplitDoesNot)
+{
+    // A combine copied from a page-128 split still serves a page-16 plan: it
+    // never reads the KV cache. The split it is paired with must match exactly.
+    auto p         = make_splitkv_combine_problem(0);
+    p.use_paged_kv = true;
+    p.page_size    = 16;
+
+    auto combine                   = make_combine_key(0);
+    combine.signature.use_paged_kv = true;
+    combine.signature.page_size    = 128;
+    EXPECT_TRUE(ck_tile::dispatcher::backends::fmha_signature_matches(combine, p));
+
+    auto split             = combine;
+    split.signature.family = FmhaKernelFamily::FwdSplitKv;
+    p.requested_family     = FmhaKernelFamily::FwdSplitKv;
+    EXPECT_FALSE(ck_tile::dispatcher::backends::fmha_signature_matches(split, p));
+}
+
 namespace {
+
+// Features consumed by the split stage alone. A default-constructed value is
+// what the stock instance list stamps on a combine key.
+struct SplitStageFeatures
+{
+    const char* name = "none";
+    int mask_type    = 0;
+    int bias_type    = 0;
+    bool soft_cap    = false;
+    bool sink        = false;
+    bool paged_kv    = false;
+    int page_size    = 1;
+
+    void apply(FmhaProblem& p) const
+    {
+        p.mask_type           = mask_type;
+        p.bias_type           = bias_type;
+        p.has_logits_soft_cap = soft_cap;
+        p.has_sink            = sink;
+        p.use_paged_kv        = paged_kv;
+        p.page_size           = page_size;
+    }
+
+    void apply(FmhaKernelKey& key) const
+    {
+        key.signature.mask_type           = mask_type;
+        key.signature.bias_type           = bias_type;
+        key.signature.has_logits_soft_cap = soft_cap;
+        key.signature.has_sink            = sink;
+        key.signature.use_paged_kv        = paged_kv;
+        key.signature.page_size           = page_size;
+    }
+};
+
+std::vector<SplitStageFeatures> split_stage_feature_cases()
+{
+    std::vector<SplitStageFeatures> cases(6);
+    cases[0].name      = "causal";
+    cases[0].mask_type = 1;
+    cases[1].name      = "elementwise_bias";
+    cases[1].bias_type = 1;
+    cases[2].name      = "alibi";
+    cases[2].bias_type = 2;
+    cases[3].name      = "soft_cap";
+    cases[3].soft_cap  = true;
+    cases[4].name      = "sink";
+    cases[4].sink      = true;
+    cases[5].name      = "paged_kv";
+    cases[5].paged_kv  = true;
+    cases[5].page_size = 16;
+    return cases;
+}
 
 // Selects through the real backend predicate (fmha_signature_matches and
 // fmha_algorithm_supports), unlike MockFmhaKernel.
-FmhaKernelInstancePtr make_generated_kernel(FmhaKernelFamily family, bool soft_cap)
+FmhaKernelInstancePtr make_generated_kernel(FmhaKernelFamily family,
+                                            const SplitStageFeatures& features)
 {
-    auto key                          = make_key(family, "");
-    key.signature.has_lse             = true;
-    key.signature.has_logits_soft_cap = soft_cap;
+    auto key              = make_key(family, "");
+    key.signature.has_lse = true;
+    features.apply(key);
     return std::make_shared<ck_tile::dispatcher::backends::GeneratedFmhaKernelInstance>(
         key,
         "",
@@ -691,40 +764,53 @@ FmhaKernelInstancePtr make_generated_kernel(FmhaKernelFamily family, bool soft_c
 
 } // namespace
 
-TEST(FmhaDispatcherTest, SoftCapSplitKvPlansWithEitherCombine)
+// The stock instance list stamps the combine with every split-stage feature off,
+// while the Python JIT path copies them from the parent split. Either combine
+// must complete the plan.
+TEST(FmhaDispatcherTest, SplitKvPlansWithCombineStampedEitherWay)
 {
-    auto soft_cap_problem                = make_splitkv_problem();
-    soft_cap_problem.has_logits_soft_cap = true;
-
-    for(bool combine_soft_cap : {false, true})
+    for(const auto& features : split_stage_feature_cases())
     {
-        FmhaRegistry registry;
-        ASSERT_TRUE(
-            registry.register_kernel(make_generated_kernel(FmhaKernelFamily::FwdSplitKv, true)));
-        ASSERT_TRUE(registry.register_kernel(
-            make_generated_kernel(FmhaKernelFamily::FwdSplitKvCombine, combine_soft_cap)));
+        auto problem = make_splitkv_problem();
+        features.apply(problem);
 
-        FmhaDispatcher dispatcher(&registry);
-        auto plan = dispatcher.plan(soft_cap_problem);
-        ASSERT_TRUE(plan.is_valid()) << "combine soft_cap=" << combine_soft_cap;
-        ASSERT_EQ(plan.stages.size(), 2u);
-        EXPECT_EQ(plan.stages[0].family, FmhaKernelFamily::FwdSplitKv);
-        EXPECT_EQ(plan.stages[1].family, FmhaKernelFamily::FwdSplitKvCombine);
+        for(bool combine_copies_split : {false, true})
+        {
+            FmhaRegistry registry;
+            ASSERT_TRUE(registry.register_kernel(
+                make_generated_kernel(FmhaKernelFamily::FwdSplitKv, features)));
+            ASSERT_TRUE(registry.register_kernel(
+                make_generated_kernel(FmhaKernelFamily::FwdSplitKvCombine,
+                                      combine_copies_split ? features : SplitStageFeatures{})));
+
+            FmhaDispatcher dispatcher(&registry);
+            auto plan = dispatcher.plan(problem);
+            ASSERT_TRUE(plan.is_valid())
+                << features.name << ", combine copies split=" << combine_copies_split;
+            ASSERT_EQ(plan.stages.size(), 2u);
+            EXPECT_EQ(plan.stages[0].family, FmhaKernelFamily::FwdSplitKv);
+            EXPECT_EQ(plan.stages[1].family, FmhaKernelFamily::FwdSplitKvCombine);
+        }
     }
 }
 
-TEST(FmhaDispatcherTest, SoftCapSplitKvStillRequiresSoftCapSplit)
+// The combine exemption must not reach the split stage: a split built without a
+// feature never serves a problem that needs it.
+TEST(FmhaDispatcherTest, SplitKvStillRequiresMatchingSplit)
 {
     FmhaRegistry registry;
-    ASSERT_TRUE(
-        registry.register_kernel(make_generated_kernel(FmhaKernelFamily::FwdSplitKv, false)));
     ASSERT_TRUE(registry.register_kernel(
-        make_generated_kernel(FmhaKernelFamily::FwdSplitKvCombine, false)));
+        make_generated_kernel(FmhaKernelFamily::FwdSplitKv, SplitStageFeatures{})));
+    ASSERT_TRUE(registry.register_kernel(
+        make_generated_kernel(FmhaKernelFamily::FwdSplitKvCombine, SplitStageFeatures{})));
 
     FmhaDispatcher dispatcher(&registry);
-    auto problem = make_splitkv_problem();
-    EXPECT_TRUE(dispatcher.plan(problem).is_valid());
+    EXPECT_TRUE(dispatcher.plan(make_splitkv_problem()).is_valid());
 
-    problem.has_logits_soft_cap = true;
-    EXPECT_FALSE(dispatcher.plan(problem).is_valid());
+    for(const auto& features : split_stage_feature_cases())
+    {
+        auto problem = make_splitkv_problem();
+        features.apply(problem);
+        EXPECT_FALSE(dispatcher.plan(problem).is_valid()) << features.name;
+    }
 }

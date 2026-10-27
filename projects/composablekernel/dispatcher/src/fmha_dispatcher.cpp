@@ -296,13 +296,11 @@ FmhaProblem FmhaDispatcher::with_family(const FmhaProblem& base, FmhaKernelFamil
     // The combine kernel only merges O (shape [seqlen, hdim_v]) and is generated
     // at hdim_v x hdim_v, so for asymmetric attention (hdim_q != hdim_v) its key
     // carries hdim_q == hdim_v. Align the derived problem or selection rejects it.
-    // It is also mask-agnostic -- masking already happened in the split stage --
-    // while codegen stamps its mask from the parent build, so normalize that too
-    // or a causal parent never matches and the whole two-stage plan is dropped.
+    // The split-stage features (mask, bias, soft cap, sink, paged KV) are left
+    // as they are: fmha_signature_matches() does not compare them for the combine.
     if(family == FmhaKernelFamily::FwdSplitKvCombine)
     {
-        copy.hdim_q    = copy.hdim_v;
-        copy.mask_type = 0;
+        copy.hdim_q = copy.hdim_v;
     }
     copy.requested_family = family;
     return copy;
