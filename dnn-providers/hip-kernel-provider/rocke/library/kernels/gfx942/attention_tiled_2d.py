@@ -5775,6 +5775,9 @@ _4WGQA_LOG2E = 1.4426950408889634
 # lean body keeps Q streamed from global and fits. Other head sizes (e.g. D128)
 # are served by the general 4-warp body and the default tiled builder.
 _4WGQA_LEAN_HEAD_SIZES = (192, 256)
+# k-steps whose Q/K global loads the lean body issues ahead of their QK MFMAs.
+# Larger groups raise register pressure past the waves_per_eu=2 budget.
+_4WGQA_K_GROUP = 2
 
 
 def _online_softmax_rescale(
@@ -5978,23 +5981,33 @@ def _build_gfx942_4warp_gqa_lean(
             phys_key(kv, b.add(b.const_i32(kt * 32), ld.m_in_atom))
             for kt in range(NKEYT)
         ]
-        for h in range(NK):
-            koff = b.add(
-                b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
-            )
-            q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
-            q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
-            q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
-            for kt in range(NKEYT):
-                kelem = b.add(
-                    b.mul(
-                        b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh), b.const_i32(HD)
-                    ),
-                    koff,
+        # Issue the Q/K loads of _4WGQA_K_GROUP consecutive k-steps before their
+        # MFMAs so those global loads overlap instead of each waiting alone.
+        for h0 in range(0, NK, _4WGQA_K_GROUP):
+            staged = []
+            for h in range(h0, min(NK, h0 + _4WGQA_K_GROUP)):
+                koff = b.add(
+                    b.mul(b.const_i32(h), b.const_i32(K)),
+                    b.mul(ld.k_blk, b.const_i32(APL)),
                 )
-                kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
-                S_T[kt] = at.emit(b, kf, q, S_T[kt])
+                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
+                q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+                q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
+                kfs = []
+                for kt in range(NKEYT):
+                    kelem = b.add(
+                        b.mul(
+                            b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh),
+                            b.const_i32(HD),
+                        ),
+                        koff,
+                    )
+                    kfs.append(b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2))
+                staged.append((q, kfs))
+            for q, kfs in staged:
+                for kt in range(NKEYT):
+                    S_T[kt] = at.emit(b, kfs[kt], q, S_T[kt])
         Sm = [[None] * CPL for _ in range(NKEYT)]
         for kt in range(NKEYT):
             for i in range(CPL):
