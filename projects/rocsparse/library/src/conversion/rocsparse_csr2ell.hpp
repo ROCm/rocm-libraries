@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -70,14 +70,16 @@ namespace rocsparse
                                         const rocsparse_mat_descr csr_descr,
                                         const I*                  csr_row_ptr,
                                         const rocsparse_mat_descr ell_descr,
-                                        J*                        ell_width);
+                                        J*                        ell_width,
+                                        rocsparse_pointer_mode    pointer_mode);
     template <typename J>
     rocsparse_status csr2ell_width_quickreturn(rocsparse_handle          handle,
                                                int64_t                   m,
                                                const rocsparse_mat_descr csr_descr,
                                                const void*               csr_row_ptr,
                                                const rocsparse_mat_descr ell_descr,
-                                               J*                        ell_width);
+                                               J*                        ell_width,
+                                               rocsparse_pointer_mode    pointer_mode);
 
     template <typename... P>
     rocsparse_status csr2ell_width_template(P&&... p)

@@ -1254,9 +1254,9 @@ namespace
     }
 
     // rocsparse_sparse_to_sparse reads the nnz (or the ELL width) of the target into a host
-    // variable. In host pointer mode, ELL -> CSR, CSR -> BSR and CSR -> ELL convert empty
-    // matrices and the 4 x 4 identity, with 32-bit and 64-bit row pointers. Device pointer
-    // mode returns rocsparse_status_not_implemented. The handle's pointer mode is unchanged.
+    // variable. ELL -> CSR, CSR -> BSR and CSR -> ELL must convert empty matrices and the
+    // 4 x 4 identity in both pointer modes, with 32-bit and 64-bit row pointers, and leave
+    // the pointer mode of the handle unchanged.
     TEST_F(ConvGebsr, SparseToSparseNnz)
     {
         // Source and target formats, m, n, ELL width of the source (the 4 x 4 identity has
@@ -1359,24 +1359,6 @@ namespace
             ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(
                           &descr, source, target, rocsparse_sparse_to_sparse_alg_default),
                       st_ok);
-            if(mode == rocsparse_pointer_mode_device)
-            {
-                for(auto stage : {rocsparse_sparse_to_sparse_stage_analysis,
-                                  rocsparse_sparse_to_sparse_stage_compute})
-                {
-                    size_t size = 0;
-                    EXPECT_EQ(rocsparse_sparse_to_sparse_buffer_size(
-                                  handle, descr, source, target, stage, &size),
-                              rocsparse_status_not_implemented);
-                    EXPECT_EQ(rocsparse_sparse_to_sparse(
-                                  handle, descr, source, target, stage, 0, nullptr),
-                              rocsparse_status_not_implemented);
-                }
-                rocsparse_pointer_mode after = rocsparse_pointer_mode(-1);
-                EXPECT_EQ(rocsparse_get_pointer_mode(handle, &after), st_ok);
-                EXPECT_EQ(after, mode);
-                return;
-            }
             for(auto stage : {rocsparse_sparse_to_sparse_stage_analysis,
                               rocsparse_sparse_to_sparse_stage_compute})
             {

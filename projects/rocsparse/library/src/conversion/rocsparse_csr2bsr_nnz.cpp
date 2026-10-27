@@ -85,7 +85,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
                                                     J                         block_dim,
                                                     const rocsparse_mat_descr bsr_descr,
                                                     I*                        bsr_row_ptr,
-                                                    I*                        bsr_nnz)
+                                                    I*                        bsr_nnz,
+                                                    rocsparse_pointer_mode    pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -93,7 +94,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
     {
         if(bsr_nnz != nullptr)
         {
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
+            if(pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
                     rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
@@ -130,7 +131,8 @@ namespace rocsparse
                                                  J                         block_dim, //7
                                                  const rocsparse_mat_descr bsr_descr, //8
                                                  I*                        bsr_row_ptr, //9
-                                                 I*                        bsr_nnz) //10
+                                                 I*                        bsr_nnz, //10
+                                                 rocsparse_pointer_mode    pointer_mode) //11
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -151,7 +153,8 @@ namespace rocsparse
                                                                            block_dim,
                                                                            bsr_descr,
                                                                            bsr_row_ptr,
-                                                                           bsr_nnz);
+                                                                           bsr_nnz,
+                                                                           pointer_mode);
         if(status != rocsparse_status_continue)
         {
             RETURN_IF_ROCSPARSE_ERROR(status);
@@ -204,7 +207,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
                                              J                         block_dim,
                                              const rocsparse_mat_descr bsr_descr,
                                              I*                        bsr_row_ptr,
-                                             I*                        bsr_nnz)
+                                             I*                        bsr_nnz,
+                                             rocsparse_pointer_mode    pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -233,7 +237,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     {
         if(bsr_nnz != nullptr)
         {
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
+            if(pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_HIP_ERROR(
                     rocsparse_hipMemsetAsync(bsr_nnz, 0, sizeof(I), handle->stream));
@@ -276,7 +280,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     // If block dimension is one then BSR is equal to CSR
     if(block_dim == 1)
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
+        if(pointer_mode == rocsparse_pointer_mode_device)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csr2bsr_nnz_block_dim_equals_one_kernel<256, I, J>),
                                                dim3(m / 256 + 1),
@@ -434,7 +438,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
     }
 
     // Compute bsr_nnz
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
+    if(pointer_mode == rocsparse_pointer_mode_device)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(csr2bsr_nnz_compute_nnz_total_kernel<1>,
                                            dim3(1),
@@ -472,7 +476,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
                                                           J                         block_dim,   \
                                                           const rocsparse_mat_descr bsr_descr,   \
                                                           I*                        bsr_row_ptr, \
-                                                          I*                        bsr_nnz);                           \
+                                                          I*                        bsr_nnz,     \
+                                                          rocsparse_pointer_mode    pointer_mode);  \
     template rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(                                \
         rocsparse_handle          handle,                                                        \
         rocsparse_direction       dir,                                                           \
@@ -484,7 +489,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
         J                         block_dim,                                                     \
         const rocsparse_mat_descr bsr_descr,                                                     \
         I*                        bsr_row_ptr,                                                   \
-        I*                        bsr_nnz)
+        I*                        bsr_nnz,                                                       \
+        rocsparse_pointer_mode    pointer_mode)
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);
@@ -526,6 +532,7 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_nnz_impl(handle,
                                                           dir,
                                                           m,
@@ -536,7 +543,8 @@ try
                                                           block_dim,
                                                           bsr_descr,
                                                           bsr_row_ptr,
-                                                          bsr_nnz));
+                                                          bsr_nnz,
+                                                          handle->pointer_mode));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

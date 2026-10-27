@@ -45,6 +45,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+        // nnzb is a host variable. The scalar pointer mode is host, not the handle's.
         switch(csr_col_ind_indextype)
         {
         // LCOV_EXCL_START
@@ -54,21 +55,22 @@ namespace rocsparse
         }
         // LCOV_EXCL_STOP
 
-#define CASE(VAL, TYPE)                                                                     \
-    case VAL:                                                                               \
-    {                                                                                       \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_nnz_template(handle,                   \
-                                                                  direction,                \
-                                                                  (TYPE)m,                  \
-                                                                  (TYPE)n,                  \
-                                                                  csr_descr,                \
-                                                                  csr_row_ptr,              \
-                                                                  (const TYPE*)csr_col_ind, \
-                                                                  (TYPE)block_dim,          \
-                                                                  bsr_descr,                \
-                                                                  bsr_row_ptr,              \
-                                                                  nnzb));                   \
-        return rocsparse_status_success;                                                    \
+#define CASE(VAL, TYPE)                                                                          \
+    case VAL:                                                                                    \
+    {                                                                                            \
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_nnz_template(handle,                        \
+                                                                  direction,                     \
+                                                                  (TYPE)m,                       \
+                                                                  (TYPE)n,                       \
+                                                                  csr_descr,                     \
+                                                                  csr_row_ptr,                   \
+                                                                  (const TYPE*)csr_col_ind,      \
+                                                                  (TYPE)block_dim,               \
+                                                                  bsr_descr,                     \
+                                                                  bsr_row_ptr,                   \
+                                                                  nnzb,                          \
+                                                                  rocsparse_pointer_mode_host)); \
+        return rocsparse_status_success;                                                         \
     }
 
             CASE(rocsparse_indextype_i32, int32_t);

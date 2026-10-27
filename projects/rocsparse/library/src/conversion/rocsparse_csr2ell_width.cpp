@@ -35,7 +35,8 @@ rocsparse_status rocsparse::csr2ell_width_quickreturn(rocsparse_handle          
                                                       const rocsparse_mat_descr csr_descr,
                                                       const void*               csr_row_ptr,
                                                       const rocsparse_mat_descr ell_descr,
-                                                      J*                        ell_width)
+                                                      J*                        ell_width,
+                                                      rocsparse_pointer_mode    pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -44,7 +45,7 @@ rocsparse_status rocsparse::csr2ell_width_quickreturn(rocsparse_handle          
     // Quick return if possible
     if(m == 0)
     {
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
+        if(pointer_mode == rocsparse_pointer_mode_device)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(ell_width, 0, sizeof(J), stream));
         }
@@ -65,7 +66,8 @@ namespace rocsparse
                                                    const rocsparse_mat_descr csr_descr, //2
                                                    const void*               csr_row_ptr, //3
                                                    const rocsparse_mat_descr ell_descr, //4
-                                                   J*                        ell_width) //5
+                                                   J*                        ell_width, //5
+                                                   rocsparse_pointer_mode    pointer_mode) //6
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -96,7 +98,7 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(5, ell_width);
 
         const rocsparse_status status = rocsparse::csr2ell_width_quickreturn(
-            handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width);
+            handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width, pointer_mode);
         if(status != rocsparse_status_continue)
         {
             RETURN_IF_ROCSPARSE_ERROR(status);
@@ -113,7 +115,8 @@ rocsparse_status rocsparse::csr2ell_width_core(rocsparse_handle          handle,
                                                const rocsparse_mat_descr csr_descr,
                                                const I*                  csr_row_ptr,
                                                const rocsparse_mat_descr ell_descr,
-                                               J*                        ell_width)
+                                               J*                        ell_width,
+                                               rocsparse_pointer_mode    pointer_mode)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -148,8 +151,8 @@ rocsparse_status rocsparse::csr2ell_width_core(rocsparse_handle          handle,
                                        nblocks,
                                        workspace);
 
-    // Copy ELL width back to host, if handle says so
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
+    // Copy the ELL width to the memory selected by pointer_mode.
+    if(pointer_mode == rocsparse_pointer_mode_device)
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             ell_width, workspace, sizeof(J), hipMemcpyDeviceToDevice, stream));
@@ -170,7 +173,8 @@ rocsparse_status rocsparse::csr2ell_width_core(rocsparse_handle          handle,
         const rocsparse_mat_descr csr_descr,                        \
         const void*               csr_row_ptr,                      \
         const rocsparse_mat_descr ell_descr,                        \
-        J*                        ell_width)
+        J*                        ell_width,                        \
+        rocsparse_pointer_mode    pointer_mode)
 
 INSTANTIATE(int32_t);
 INSTANTIATE(int64_t);
@@ -182,7 +186,8 @@ INSTANTIATE(int64_t);
                                                             const rocsparse_mat_descr csr_descr,   \
                                                             const I*                  csr_row_ptr, \
                                                             const rocsparse_mat_descr ell_descr,   \
-                                                            J*                        ell_width)
+                                                            J*                        ell_width,   \
+                                                            rocsparse_pointer_mode    pointer_mode)
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);
@@ -219,8 +224,9 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csr2ell_width_impl(handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width));
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2ell_width_impl(
+        handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width, handle->pointer_mode));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
