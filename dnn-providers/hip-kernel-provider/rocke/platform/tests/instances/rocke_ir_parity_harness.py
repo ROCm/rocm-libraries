@@ -548,6 +548,58 @@ def build_attention_dense(arch, *, geometry=None, **over):
     return _build
 
 
+def build_swapqk_gfx1151(**over):
+    """gfx1151 transposed-QK prefill (``kernels/gfx1151/wmma_fmha_swapqk``).
+
+    These bodies have no C++ mirror, so this golden is the only pin on their
+    lowered IR. The base spec is the shipping configuration; ``over`` selects the
+    variants that change the emitted code rather than just its constants --
+    ``v_paged`` swaps a dense V read for a block-table gather, ``k_lds`` stages K
+    through LDS, and ``mask_mode`` adds the causal trim.
+    """
+
+    def _build():
+        from kernels.gfx1151.wmma_fmha_swapqk import (
+            SwapQKCfg,
+            build_wmma_fmha_swapqk,
+        )
+
+        spec = dict(head_size=128, num_query_heads=8, num_kv_heads=2)
+        spec.update(over)
+        return build_wmma_fmha_swapqk(SwapQKCfg(**spec), arch="gfx1151")
+
+    return _build
+
+
+def build_paged_decode_splitk_gfx1151(kind, **over):
+    """One of the two gfx1151 paged split-K decode kernels.
+
+    ``kind`` picks the segment kernel (per-split partial attention over the
+    paged cache) or the reduce kernel (softmax-correct fold of those partials).
+    They are separate launches with separate ABIs, so both need pinning. No C++
+    mirror exists for either.
+    """
+
+    def _build():
+        from kernels.gfx1151.paged_decode_splitk import (
+            PagedDecodeCfg,
+            build_paged_decode_splitk_reduce,
+            build_paged_decode_splitk_segment,
+        )
+
+        builders = {
+            "segment": build_paged_decode_splitk_segment,
+            "reduce": build_paged_decode_splitk_reduce,
+        }
+        try:
+            builder = builders[kind]
+        except KeyError as exc:
+            raise ValueError(f"unknown paged decode kernel kind {kind!r}") from exc
+        return builder(PagedDecodeCfg(**over), arch="gfx1151")
+
+    return _build
+
+
 def build_attention_dense_gfx942(**over):
     """Dense flash-attn prefill spec (library ``kernels/gfx942/attention_dense``)."""
 
@@ -3854,6 +3906,45 @@ def cases():
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
     )
+
+    # gfx1151 (Strix Halo, RDNA3.5 wave32) attention. Both families are
+    # python-only -- no C++ emitter mirrors them -- so these goldens are the sole
+    # byte-stability gate on their lowered IR.
+    #
+    # swapqk: the shipping config plus the three variants that change the emitted
+    # body rather than a constant. v_paged replaces the dense V read with a
+    # block-table gather; k_lds stages K through LDS instead of re-reading it per
+    # wave; causal adds the mask trim.
+    for _case, _over in (
+        ("dense_d128_gqa4", {}),
+        ("dense_d128_gqa4_causal", {"mask_mode": "causal"}),
+        ("paged_d128_gqa4", {"v_paged": True, "kv_block_size": 16}),
+        ("dense_d128_gqa4_klds", {"k_lds": True}),
+    ):
+        add(
+            "attention_swapqk",
+            f"attention_swapqk/gfx1151/{_case}",
+            "gfx1151",
+            build_swapqk_gfx1151(**_over),
+        )
+
+    # paged split-K decode: two separate launches with separate ABIs. d_lanes is
+    # the knob the reduce does NOT share (it always spreads D over the full
+    # wave), so the segment kernel is pinned at both the shipping d_lanes=8 and
+    # the 16 it replaced, which emit different swizzle and accumulator counts.
+    for _kind, _case, _over in (
+        ("segment", "segment_d128_gqa4_dl8", {}),
+        ("segment", "segment_d128_gqa4_dl16", {"d_lanes": 16, "block_n": 8}),
+        ("reduce", "reduce_d128_gqa4", {}),
+    ):
+        add(
+            "paged_decode_splitk",
+            f"paged_decode_splitk/gfx1151/{_case}",
+            "gfx1151",
+            build_paged_decode_splitk_gfx1151(
+                _kind, head_size=128, num_q_heads=8, num_kv_heads=2, **_over
+            ),
+        )
 
     # conv_direct: parametric direct grouped convolution.
     # Covers all cpg variants (4c, 8c, 16c, 32c, depthwise) on gfx942 and gfx950.

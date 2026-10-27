@@ -852,6 +852,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    # D16 2-byte buffer load returning `half` DIRECTLY (not i16+bitcast). This is
+    # the enabler for `buffer_load_short_d16` / `buffer_load_short_d16_hi`
+    # selection: when two of these feed an `insertelement <2 x half>`, the AMDGPU
+    # backend packs them into one register's lo/hi half (the buffer analogue of
+    # global_load_d16_b16/_hi_b16) -- recovering the free f16 packing the i16 path
+    # loses (which otherwise needs an explicit v_mov_b16 per element + serializes
+    # the load clause). Same OOB-per-element clamp as the i16 form.
     "raw.ptr.buffer.load.f16": (
         "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
@@ -3575,7 +3582,8 @@ class _Lowerer:
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         self._current().emit(
-            f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
+            f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, "
+            f"align {align}{self._nontemporal_md(op)}"
         )
 
     def _op_memref_global_atomic_add(self, op: Op) -> None:
@@ -6141,6 +6149,10 @@ class _Lowerer:
         """D16-form scalar half buffer load: the raw ``raw.ptr.buffer.load.f16``
         intrinsic returns ``half`` directly (no i16 + bitcast round-trip).
         Port of the pinned PR9710 ``tile.buffer_load_f16_d16`` lowering.
+
+        Lets the backend pack two strided halves into one register's lo/hi lane
+        (buffer_load_short_d16 / _d16_hi) when the results feed an
+        insertelement <2 x half>, instead of the i16-path's explicit v_mov_b16.
         """
         rsrc, voffset, soffset = op.operands
         self._need("raw.ptr.buffer.load.f16")
@@ -6574,6 +6586,20 @@ class _Lowerer:
         self._current().emit(
             f"  {op.result.name} = fptrunc {in_ty} {self._operand(v)} to {out_ty}"
         )
+
+    def _op_vector_ext_to_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fpext {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
+    def _op_vector_undef(self, op: Op) -> None:
+        # freeze(poison): a defined-but-arbitrary vector with nothing to
+        # materialize -> the backend drops the dead zero-init when every lane is
+        # subsequently overwritten (e.g. a full gather).
+        t = _llvm_type(op.result.type)
+        self._current().emit(f"  {op.result.name} = freeze {t} poison")
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands

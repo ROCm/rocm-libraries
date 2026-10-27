@@ -417,3 +417,10 @@ Part 2 and Part 3 experiments on a gfx11 device.
 The production kernels' tests are `library/tests/test_wmma_fmha_fwd_v2_*.py` and
 `library/tests/test_wmma_fmha_decode_*.py`; their inference benchmark is
 [`benchmarks/gfx1151/attention`](../../../benchmarks/gfx1151/attention/).
+
+A second, independent Strix Halo track -- the transposed-QK prefill kernel
+`wmma_fmha_swapqk` and the paged split-K decode kernel `paged_decode_splitk`,
+neither of which the auto route selects -- is documented separately in
+[`SWAPQK_PAGED_DECODE.md`](SWAPQK_PAGED_DECODE.md), along with its verifiers
+(`wmma_fmha_swapqk_verify.py`, `paged_decode_splitk_verify.py`) and its vLLM v1
+backend.

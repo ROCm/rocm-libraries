@@ -522,7 +522,7 @@ class KernelCandidate:
                 "it can be selected but not compiled through the generic "
                 "path. Point build at its real builder to close that gap."
             )
-        return self.build(spec, arch)
+        return self.build(spec, arch=arch)
 
     def bound(self, result: Any, *, verify: bool = False) -> ProblemBinding:
         """Bind ``result`` to a runnable problem, or explain what is missing."""

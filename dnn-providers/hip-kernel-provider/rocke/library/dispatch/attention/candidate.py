@@ -183,7 +183,7 @@ def make_dense_candidate(
         signature=lambda spec: _dense_kernel_module(arch).attention_dense_signature(
             spec.kernel_spec
         ),
-        build=lambda spec, arch_: spec.build(arch_),
+        build=lambda spec, arch: spec.build(arch),
         bind_torch=bind_torch,
         grid=lambda spec, req: spec.launch_grid(),
     )

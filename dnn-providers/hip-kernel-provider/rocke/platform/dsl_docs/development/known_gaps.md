@@ -37,7 +37,88 @@ section for why the gate stays green anyway. They fall into three kinds:
 
 ---
 
-## 1. Fused-MoE end-to-end orchestration (LARGEST GAP)
+## 1. gfx1151 swapqk + paged-decode instance builders, and `vector.ext_to_f32`
+
+**Subsystem:** `instances/gfx1151/`, `core/lower_llvm/`
+
+Two gfx1151 kernel families shipped in library PR #12891 that have no C++
+instance builders, and one IR op they rely on has no C++ lowering handler.
+
+### 1a. `wmma_fmha_swapqk` — no instance builder
+
+`cpp/helpers/wmma_swapqk.cpp` is a **byte-identical C++ port of
+`helpers/wmma_swapqk.py`**, the inner WMMA-FMHA-forward body. It was written
+alongside the existing `wmma_fmha_fwd` family and passes the byte-identity gate
+for that family.
+
+What is missing is **`cpp/instances/gfx1151/wmma_fmha_swapqk.cpp`** — the
+instance builder that mirrors `kernels/gfx1151/wmma_fmha_swapqk.py` (`SwapQKCfg`,
+`build_wmma_fmha_swapqk`, `swapqk_grid`). Without it:
+
+- No `cfgs_gfx1151_wmma_fmha_swapqk` family exists in
+  `cpp/bindings/prove_parity_binding.py`.
+- The C++ engine can lower the inner body (the helper is green) but cannot be
+  invoked as a builder for swapqk specs — the Python-authored kernel is lowered
+  by the C++ lowerer, not built by a C++ instance.
+
+**Precedent:** `cpp/instances/gfx1151/wmma_fmha_fwd.cpp` and
+`wmma_fmha_decode.cpp` are the direct structural analogues to write against.
+
+**Consequence:** gfx1151 swapqk has no instance-builder family in the
+byte-identity gate. The lowerer still handles it (the inner helper is green),
+but a C++ caller cannot construct a `SwapQKCfg` and invoke the builder the way
+the library's parity harness does for `wmma_fmha_fwd`.
+
+**What unblocks it:** Writing `cpp/instances/gfx1151/wmma_fmha_swapqk.cpp`,
+adding a `cfgs_gfx1151_wmma_fmha_swapqk` family to `prove_parity_binding.py`,
+and registering it in the byte-identity gate. The inner helper is already
+byte-identical, so this is purely the builder scaffold.
+
+### 1b. `paged_decode_splitk` — no instance builder or helper port
+
+`kernels/gfx1151/paged_decode_splitk.py` (`PagedDecodeCfg`,
+`build_paged_decode_splitk`) has **no C++ counterpart anywhere in `cpp/`** — no
+helper port, no instance builder, no parity family.
+
+The kernel is decode-only (segment + reduce), uses a distinct grid contract
+(`choose_num_splits`), and ships with its own env-var knobs (`ROCKE_D_LANES`,
+`ROCKE_BLOCK_N`). None of that is reflected in the C++ tree.
+
+**Consequence:** paged-decode is entirely Python-authored and Python-lowered.
+It is absent from every C++ gate: no `-Werror` build contribution, no
+byte-identity family, no differential fuzz coverage.
+
+**What unblocks it:** A new helper port
+(`cpp/helpers/paged_decode_splitk.cpp`) plus the instance builder
+`cpp/instances/gfx1151/paged_decode_splitk.cpp`. The helper should be written
+after the instance interface is stable, following the same byte-faithful
+call-order discipline as `wmma_swapqk.cpp`.
+
+### 1c. `vector.ext_to_f32` — IR op with no C++ lowering handler
+
+`ir.py` emits `vector.ext_to_f32` at three sites (lines 5346, 5353, 5728) as a
+one-line `fpext` into f32. `lower_llvm.py` handles it at line 6336. There are
+**zero hits for `ext_to_f32` anywhere under `cpp/`**.
+
+`wmma_fmha_swapqk` reaches this op when `v_transposed=True` (the default) and
+`dual_gather=True`. It is on the valid-config emission path for swapqk, so the
+byte-identity gate would need a passing `cfgs_gfx1151_wmma_fmha_swapqk` family
+(gap 1a) before it can be green-gated in C++.
+
+Its sibling `vector.undef` has a C++ twin spread across 5 files plus an enum
+entry — the pattern to follow.
+
+**Consequence:** any C++ builder that reaches `ext_to_f32` (currently only
+swapqk via the dual-gather path) will fail at C++ lowering time with a missing
+handler. The Python lowerer is unaffected.
+
+**What unblocks it:** Adding an `EXT_TO_F32` case to the op dispatch in the C++
+lowerer (`core/lower_llvm/`), mirroring the `fpext` Python emits. One site in
+the dispatch, one test config that exercises the dual-gather path.
+
+---
+
+## 2. Fused-MoE end-to-end orchestration (LARGEST GAP)
 
 **Subsystem:** `instances/common/fused_moe_e2e_*`, `helpers/fused_moe_e2e_*`
 
@@ -68,7 +149,7 @@ fabricate device behavior** in the codegen library.
 
 ---
 
-## 2. gfx1250 instance builders (the ISA backend is ported; the builders are not)
+## 3. gfx1250 instance builders (the ISA backend is ported; the builders are not)
 
 **Subsystem:** `cpp/instances/`
 
@@ -173,7 +254,7 @@ performance, so the flag stays opt-in rather than following
 
 ---
 
-## 3. Helpers — buffer-view, epilogue staging dtypes, schedule assertion
+## 4. Helpers — buffer-view, epilogue staging dtypes, schedule assertion
 
 **Subsystem:** `helpers/`
 
@@ -186,7 +267,7 @@ performance, so the flag stays opt-in rather than following
 
 ---
 
-## 4. Instances — GEMM / conv host-side and shared-validator gaps
+## 5. Instances — GEMM / conv host-side and shared-validator gaps
 
 **Subsystem:** `instances/common/` (GEMM + conv families)
 

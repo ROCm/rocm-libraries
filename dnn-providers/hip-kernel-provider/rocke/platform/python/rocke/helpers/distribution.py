@@ -1655,6 +1655,7 @@ def load_wmma_fragment(
     k_offset: int = 0,
     lead: Sequence[Value] = (),
     arch: str = "gfx1151",
+    nontemporal: bool = False,
 ) -> Value:
     """Load one lane's packed WMMA input fragment with a SINGLE vector load.
 
@@ -1686,7 +1687,7 @@ def load_wmma_fragment(
     else:
         raise ValueError(f"role must be 'a' or 'b', got {role!r}")
     idx = list(lead) + [lane_idx, b.const_i32(k_offset)]
-    return window.load_vec(b, *idx, n=atom.a_per_lane)
+    return window.load_vec(b, *idx, n=atom.a_per_lane, nontemporal=nontemporal)
 
 
 def store_wmma_acc(
@@ -1701,6 +1702,7 @@ def store_wmma_acc(
     lead: Sequence[Value] = (),
     align: Optional[int] = None,
     transform: Optional[Callable[[IRBuilder, Value, int, Value, Value], Value]] = None,
+    nontemporal: bool = False,
 ) -> None:
     """Scatter one lane's ``<c_per_lane x f32>`` WMMA accumulator to a window.
 
@@ -1730,6 +1732,7 @@ def store_wmma_acc(
             b.add(c_off, col),
             value=b.cast_f32_to(val, window.dtype),
             align=align,
+            nontemporal=nontemporal,
         )
 
 
@@ -1813,11 +1816,20 @@ def load_wmma_tile(
     k_offset: int = 0,
     lead: Sequence[Value] = (),
     arch: str = "gfx1151",
+    nontemporal: bool = False,
 ) -> WmmaTensor:
     """Tile-level wrapper over :func:`load_wmma_fragment` returning a
     :class:`WmmaTensor`. Same single packed ``load_vec`` — no f32 cast."""
     value = load_wmma_fragment(
-        b, window, atom, lane, role=role, k_offset=k_offset, lead=lead, arch=arch
+        b,
+        window,
+        atom,
+        lane,
+        role=role,
+        k_offset=k_offset,
+        lead=lead,
+        arch=arch,
+        nontemporal=nontemporal,
     )
     return WmmaTensor(atom=atom, role=role, value=value, arch=arch)
 
@@ -1848,6 +1860,7 @@ def store_wmma_tile(
     lead: Sequence[Value] = (),
     align: Optional[int] = None,
     transform: Optional[Callable[[IRBuilder, Value, int, Value, Value], Value]] = None,
+    nontemporal: bool = False,
 ) -> None:
     """Tile-level wrapper over :func:`store_wmma_acc` for the O epilogue."""
     store_wmma_acc(
@@ -1861,4 +1874,5 @@ def store_wmma_tile(
         lead=lead,
         align=align,
         transform=transform,
+        nontemporal=nontemporal,
     )
