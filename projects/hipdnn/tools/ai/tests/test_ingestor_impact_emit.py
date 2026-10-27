@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tests for the hipdnn-deep-review impact_emit.py script.
+"""Tests for the hipdnn-ingestor-impact impact_emit.py script.
 
 A tiny fake provider tree (fake `hkp_pack` and `rocke` packages with the helper names
 the child resolves, a builder module, a KDP) lives in a temporary git repo; the lowering
@@ -20,7 +20,7 @@ import pytest
 SCRIPT = (
     Path(__file__).resolve().parent.parent
     / "skills"
-    / "hipdnn-deep-review"
+    / "hipdnn-ingestor-impact"
     / "scripts"
     / "impact_emit.py"
 )
@@ -108,9 +108,7 @@ def kdp_json(variants=KDP_VARIANTS, arch=("gfx950",), target=None):
 
 @pytest.fixture
 def emit():
-    spec = importlib.util.spec_from_file_location(
-        "hipdnn_deep_review_impact_emit", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("hipdnn_ingestor_impact_emit", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

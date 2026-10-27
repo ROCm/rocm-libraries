@@ -8,7 +8,7 @@ needs subagents; without them, stop and tell the user to run `hipdnn-pr-quality`
 
 `<pr>` is the PR number, `<N>` the round. `<owner>/<repo>` comes from the PR URL, else
 `origin` of `$CLONE`, else `ROCm/rocm-libraries`; pass `-R <owner>/<repo>` to every `gh pr` and
-`gh issue` call. `pin.py`, `partition.py`, `ledger.py`, `comments.py`, `impact.py` and `impact_emit.py` are in `$SKILL/scripts/`;
+`gh issue` call. `pin.py`, `partition.py`, `ledger.py` and `comments.py` are in `$SKILL/scripts/` (the `IMPACT` lane's scripts are in the sibling skill `hipdnn-ingestor-impact`);
 a script name below stands for `python3 "$SKILL/scripts/<name>"` (`python` or `py -3` on Windows, as in SKILL.md *Platforms*). Each prints terse results and
 exits non-zero with a one-line reason. After pinning, commands run from `$EVIDENCE/r<N>/`
 (sourcing `env.sh` changes to it); GNU coreutils, grep and sed are assumed.

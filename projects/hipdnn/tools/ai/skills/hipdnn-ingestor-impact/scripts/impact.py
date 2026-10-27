@@ -5,7 +5,6 @@
 
 Usage: impact.py <files|kernargs|symbols|surfaces|data|report> --repo DIR --base REV --head REV
                  [--target-tip REV] [--json]
-       impact.py <subcommand> --round-dir DIR [--json]
        impact.py report ... --emit FILE.json
 
 Emits facts, never severity beyond the row statuses and the rollup line. Reads git objects only
@@ -20,17 +19,17 @@ and one row stands in for them, `changed` when a conflicted file is on the surfa
 merge that writes no tree skips the merged view as `changed`. A row that holds only in the merged
 view is marked `merged-only`: that is the race class (a parallel PR landed a copy the diff cannot
 see).
-`--round-dir` reads PIN.md (CLONE, BASE, HEAD, TARGET_TIP); a tip equal to BASE gives no merged
-view.
+A tip equal to BASE gives no merged view.
 
 Row status: mismatch (producer and a copy disagree, a removed symbol still has a reader), changed
 (a contract side changed, or static analysis cannot settle it; a surface file not understood is
 always changed), inert (touched, provably without runtime effect), outside (not on the surface;
 counted, never dropped). Test files and CMake are outside for status but are still searched as
-kernarg copies and as symbol readers. CMake and CI test-category lists belong to the BUILD lane,
-`requirements*.txt` to DEPS; the rollup names how many it left to them. A rocKE C++ engine source
-is `inert` while no provider build file outside rocKE links the engine and the packer pins the
-Python lowering backend; any other non-Python rocKE file is not understood.
+kernarg copies and as symbol readers. CMake and CI test-category lists are left to BUILD,
+`requirements*.txt` to DEPS (the hipdnn-deep-review lanes that judge them); the rollup names how
+many it left to each. A rocKE C++ engine source is `inert` while no provider build file outside
+rocKE links the engine and the packer pins the Python lowering backend; any other non-Python rocKE
+file is not understood.
 
 Rollup (last line of `report`):
   Runtime impact: BREAKS | NEEDS-DEVICE <archs> | NONE (<n> files inspected[; not judged here: ...])
@@ -56,8 +55,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import reviewlib as rl  # noqa: E402
+
+class Fail(Exception):
+    """A user-facing failure; main() prints it as one line and exits 1."""
+
 
 # -- Tables -------------------------------------------------------------------
 
@@ -121,8 +122,8 @@ SURFACE_TABLE = (
     ("provider", HKP + "*"),
 )
 OUTSIDE_TAGS = {"carve-out", "test", "test-categories", "cmake", "deps", "other"}
-#: Outside tags another deep-review lane judges; the rollup names them so N/A is not read
-#: as "no impact" for these files.
+#: Outside tags another check judges (named after the hipdnn-deep-review lane); the rollup names
+#: them so N/A is not read as "no impact" for these files.
 OWNER_LANES = {"cmake": "BUILD", "test-categories": "BUILD", "deps": "DEPS"}
 #: Tags whose files are read as copies or readers although they are outside for status.
 SEARCHED_TAGS = {"test"}
@@ -205,7 +206,7 @@ def git(repo, *args, stdin=None, ok=(0,)) -> bytes:
     )
     if done.returncode not in ok:
         err = done.stderr.decode("utf-8", errors="replace").strip()
-        raise rl.Fail(f"git {args[0]}: {err or 'exit ' + str(done.returncode)}")
+        raise Fail(f"git {args[0]}: {err or 'exit ' + str(done.returncode)}")
     return done.stdout
 
 
@@ -217,7 +218,7 @@ def resolve_revs(repo, revs) -> list:
     )
     lines = done.stdout.decode("utf-8", errors="replace").split()
     if done.returncode != 0 or len(lines) != len(args):
-        raise rl.Fail(f"cannot resolve {', '.join(revs)} to a commit")
+        raise Fail(f"cannot resolve {', '.join(revs)} to a commit")
     return list(zip(lines[0::2], lines[1::2]))
 
 
@@ -629,7 +630,7 @@ def load_data(path: str, text: str):
         else:
             data = require_yaml().safe_load(text)
         return json.dumps(data, sort_keys=True, default=repr)
-    except rl.Fail:
+    except Fail:
         raise
     except Exception:  # noqa: BLE001 - any parse failure means "not data-equal"
         return None
@@ -639,7 +640,7 @@ def require_yaml():
     try:
         import yaml  # noqa: PLC0415 - optional until a YAML file needs parsing
     except ImportError:
-        raise rl.Fail(
+        raise Fail(
             "PyYAML is required to read *.yaml (python -m pip install pyyaml)"
         ) from None
     return yaml
@@ -2878,18 +2879,18 @@ def load_emit(path) -> dict:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise rl.Fail(f"cannot read emit file {path}: {exc}") from None
+        raise Fail(f"cannot read emit file {path}: {exc}") from None
     if (
         not isinstance(data, dict)
         or data.get("schema") != EMIT_SCHEMA
         or data.get("tool") != "impact_emit"
     ):
-        raise rl.Fail(
+        raise Fail(
             f"{path} is not impact_emit schema {EMIT_SCHEMA} output; rerun impact_emit.py"
         )
     problem = emit_shape_problem(data)
     if problem:
-        raise rl.Fail(f"emit file {path}: {problem}")
+        raise Fail(f"emit file {path}: {problem}")
     return data
 
 
@@ -3179,17 +3180,9 @@ KINDS = {
 
 def resolve(args):
     """(repo, (base commit, tree), (head commit, tree), (tip commit, tree) or None)."""
-    if args.round_dir:
-        rd = args.round_dir
-        repo = rl.pin_value(rd, "CLONE")
-        base, head = rl.pin_value(rd, "BASE"), rl.pin_value(rd, "HEAD")
-        if not (repo and base and head):
-            raise rl.Fail(f"PIN.md in {rd} lacks CLONE, BASE or HEAD")
-        tip = args.target_tip or rl.pin_value(rd, "TARGET_TIP")
-    else:
-        if not (args.repo and args.base and args.head):
-            raise rl.Fail("give --repo, --base and --head, or --round-dir")
-        repo, base, head, tip = args.repo, args.base, args.head, args.target_tip
+    if not (args.repo and args.base and args.head):
+        raise Fail("give --repo, --base and --head")
+    repo, base, head, tip = args.repo, args.base, args.head, args.target_tip
     found = resolve_revs(repo, [base, head] + ([tip] if tip else []))
     tip_pair = found[2] if tip and found[2][0] != found[0][0] else None
     return repo, found[0], found[1], tip_pair
@@ -3198,14 +3191,14 @@ def resolve(args):
 def run(args):
     repo, (base, base_tree_id), (head, head_tree_id), tip_pair = resolve(args)
     if base_tree_id == head_tree_id:
-        raise rl.Fail("empty diff")
+        raise Fail("empty diff")
     base_tree, head_tree = Tree(repo, base_tree_id), Tree(repo, head_tree_id)
     emit = None
     if args.cmd == "report" and args.emit:
         emit = load_emit(args.emit)
         made_for = (emit["base_tree"], emit["head_tree"])
         if made_for != (base_tree_id, head_tree_id):
-            raise rl.Fail(
+            raise Fail(
                 f"emit file {args.emit} was made for trees {made_for[0][:12]}..{made_for[1][:12]}, "
                 f"not {base_tree_id[:12]}..{head_tree_id[:12]}; run impact_emit.py on this base and head"
             )
@@ -3220,7 +3213,7 @@ def run(args):
     ]
     ctx, rows = analyse_view(base_tree, head_tree, "base..head")
     if not ctx.changes:
-        raise rl.Fail("empty diff")
+        raise Fail("empty diff")
     views[0]["files"] = len(ctx.changes)
     per_view = [rows]
     if tip_pair:
@@ -3333,17 +3326,13 @@ def main(argv=None) -> int:
             "--target-tip",
             help="target branch tip; adds the merged view when it differs from base",
         )
-        p.add_argument(
-            "--round-dir",
-            help="round directory holding PIN.md (CLONE, BASE, HEAD, KEY)",
-        )
         p.add_argument("--json", action="store_true", help="machine-readable output")
         if name == "report":
             p.add_argument("--emit", help="impact_emit.py output to fold in")
     args = parser.parse_args(argv)
     try:
         cmd(args)
-    except rl.Fail as exc:
+    except Fail as exc:
         print(f"impact: {exc}", file=sys.stderr)
         return 1
     return 0

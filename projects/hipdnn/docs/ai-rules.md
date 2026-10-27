@@ -31,8 +31,8 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Deprecated stub that redirects to `hipdnn-pr-quality` (review assist). Same behavior: announce deprecation, then defer.
 - `tools/ai/skills/hipdnn-deep-review/SKILL.md`
   - Runbook for a multi-agent deep review of a hipDNN or provider PR, branch or commit range: scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. Owns its review policy; the review is advisory and never posts without approval.
-  - Suggest this skill when the user asks for a deep, thorough or multi-agent review, or wants to iterate a review until all findings close. Use `hipdnn-pr-quality` for drafting PR text or a single-pass review. Requires subagents and its sibling skills `hipdnn-superbuild` and `hipdnn-superbuild-test`.
-  - Its `IMPACT` lane reports kernel ingestor changes that break at run time while the build stays green: kernel argument lists out of step with their C++ and test copies (also against the target branch's tip, which catches two PRs that each pass alone), dispatch predicates, descriptors and generic targets, and which shipped variants' emitted code changed. Suggest `scripts/impact.py report` from that skill for a quick answer on a hip-kernel-provider, rocKE or ingestor change without a full review.
+  - Suggest this skill when the user asks for a deep, thorough or multi-agent review, or wants to iterate a review until all findings close. Use `hipdnn-pr-quality` for drafting PR text or a single-pass review. Requires subagents and its sibling skills `hipdnn-superbuild`, `hipdnn-superbuild-test` and `hipdnn-ingestor-impact`.
+  - Its `IMPACT` lane runs the `hipdnn-ingestor-impact` scripts and turns their rows into review findings.
 - `tools/ai/skills/hipdnn-superbuild/SKILL.md`
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
@@ -48,6 +48,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/hipdnn-ingestor-engine/SKILL.md`
   - Creates or extends a hipDNN generic-kernel-ingestor integration: graph and kernel contracts, descriptors, native hooks, packaging, host checks, and device correctness.
   - Suggest this skill when the user asks to add or extend an ingestor-based engine.
+- `tools/ai/skills/hipdnn-ingestor-impact/SKILL.md`
+  - Reports kernel ingestor changes that break at run time while the build stays green: kernel argument lists out of step with their C++ and test copies (also against the target branch's tip, which catches two PRs that each pass alone), dispatch predicates, descriptors and generic targets, removed Python symbols still read, and which shipped variants' emitted code changed. Reads git objects; its optional emitter runs rocKE on the CPU. Advisory: it never builds, tests or posts.
+  - Suggest this skill for a quick answer on a hip-kernel-provider, rocKE or ingestor change without a full review, and before turning the ingestor flags ON by default. Use `hipdnn-deep-review` for a full review; its `IMPACT` lane runs the same scripts.
 - `tools/ai/skills/rfc-review/SKILL.md`, with the focused follow-ups `rfc-review-compatibility`, `rfc-review-ops`, and `rfc-review-security`
   - Review a technical RFC or design document and produce a written review report. They are not for implementation PRs.
   - Suggest these skills when the user asks to review an RFC, design doc, ADR, or proposal.

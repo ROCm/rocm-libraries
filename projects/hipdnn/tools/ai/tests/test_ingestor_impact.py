@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the hipdnn-deep-review impact.py helper (kernel ABI and dispatch facts of a diff).
+"""Unit tests for hipdnn-ingestor-impact's impact.py (kernel ABI and dispatch facts of a diff).
 
 Every case builds a throwaway git repository under tmp_path with paths the script classifies, so no
 test depends on this clone's history or on rocKE. Git runs for real with the user's configuration
@@ -18,7 +18,7 @@ import pytest
 SCRIPT = (
     Path(__file__).resolve().parent.parent
     / "skills"
-    / "hipdnn-deep-review"
+    / "hipdnn-ingestor-impact"
     / "scripts"
     / "impact.py"
 )
@@ -92,7 +92,7 @@ KDP_JSON = json.dumps(
 
 @pytest.fixture(scope="module")
 def mod() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("hipdnn_deep_review_impact", SCRIPT)
+    spec = importlib.util.spec_from_file_location("hipdnn_ingestor_impact", SCRIPT)
     assert spec and spec.loader, f"could not load {SCRIPT}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -239,15 +239,6 @@ def test_pin_on_target_tip_only_is_mismatch_in_merged_view_only(mod, capsys, tmp
         "changed"
     ]
     assert data["rollup"] == "Runtime impact: BREAKS"
-    # --round-dir takes the same tip from PIN.md's TARGET_TIP
-    rd = tmp_path / "round"
-    rd.mkdir()
-    (rd / "PIN.md").write_text(
-        f"CLONE: {repo}\nBASE: {base}\nHEAD: {head}\nTARGET_TIP: {tip}\n",
-        encoding="utf-8",
-    )
-    assert mod.main(["report", "--round-dir", str(rd), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["rollup"] == "Runtime impact: BREAKS"
 
 
 def test_merge_conflict_on_a_surface_file_marks_the_merged_view_changed(

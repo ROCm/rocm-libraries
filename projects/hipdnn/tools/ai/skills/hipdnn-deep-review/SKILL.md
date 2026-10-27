@@ -1,6 +1,6 @@
 ---
 name: hipdnn-deep-review
-description: "Multi-agent deep review of a hipDNN or dnn-providers PR, branch or commit range. Scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. Its IMPACT lane reports kernel ingestor changes that break at run time while the build stays green (kernel ABI, dispatch, descriptors), and its script answers that question standalone. For a PR body or a quick single-pass review, use hipdnn-pr-quality."
+description: "Multi-agent deep review of a hipDNN or dnn-providers PR, branch or commit range. Scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. Its IMPACT lane reports kernel ingestor changes that break at run time while the build stays green (kernel ABI, dispatch, descriptors) with the scripts of hipdnn-ingestor-impact, which answers that question without a review. For a PR body or a quick single-pass review, use hipdnn-pr-quality."
 argument-hint: "[<PR URL or number> | branch:<name> | <base>..<head>] evidence:<dir> scratch:<dir> [clone:<dir>] [intent:<file>] [terms:<file>] [knowledge:<dir>] [round:<N>]"
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 ---
@@ -13,11 +13,12 @@ scouts, lanes and verifiers, merge their output and write the report; you do not
 code. Your formats are in [report.md](report.md); [RUNBOOK.md](RUNBOOK.md) *Fan out* says
 what each agent reads, and `lanes/` holds the briefs. `RUN` builds with
 [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) and tests with
-[hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); install those skills alongside this one.
+[hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); `IMPACT` runs the scripts of
+[hipdnn-ingestor-impact](../hipdnn-ingestor-impact/SKILL.md). Install those skills alongside this one.
 
 Prerequisites: network access, an authenticated `gh` with read access, `git` 2.38 or later (`pin.py` uses `git merge-tree --write-tree`), and Python 3 (it runs the scripts under
-`$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. The `IMPACT` lane's `impact.py` needs
-Python 3.10 or newer and PyYAML (it reads the `*.engine.yaml` launch surfaces); its emitter also needs Jinja2. `RUN` and verifiers also need
+`$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. The `IMPACT` lane needs
+Python 3.10 or newer and PyYAML; its emitter also needs Jinja2 ([hipdnn-ingestor-impact](../hipdnn-ingestor-impact/SKILL.md) *Prerequisites*). `RUN` and verifiers also need
 a ROCm install (Linux: `/opt/rocm` or `ROCM_PATH`; Windows: the wheel SDK that [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) provisions), CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
 `test-gap` findings stay `UNVERIFIED` and the review closes only through human
 `ACCEPTED-RISK` decisions, recorded with `ledger.py set` (`PIN.md` records `Build host`).
@@ -26,9 +27,8 @@ Platforms: Linux, macOS and Windows. On Windows run the skill from Git Bash (Git
 `bash`, `awk`, `sed`, `grep` and `comm`. Blocks write the interpreter as `python3`; on Windows that name is the Microsoft Store
 stub, so use `python` or `py -3` instead. Scripts read and write UTF-8 and LF whatever the host's locale.
 
-For a quick answer without a review, `impact.py report --repo <clone> --base <rev> --head <rev>` (add `--target-tip
-<rev>` for an open PR whose target moved) prints the kernel ABI and dispatch contracts a change touches, as the `IMPACT`
-lane ([lanes/runtime-impact.md](lanes/runtime-impact.md)) collects them, ending in a `Runtime impact:` line.
+For a quick answer without a review, use [hipdnn-ingestor-impact](../hipdnn-ingestor-impact/SKILL.md): it runs the
+same scripts as the `IMPACT` lane ([lanes/runtime-impact.md](lanes/runtime-impact.md)) and ends in a `Runtime impact:` line.
 
 ## Entry contract
 
