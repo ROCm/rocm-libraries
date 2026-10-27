@@ -196,12 +196,16 @@ namespace rocsparse
 
                 const rocsparse::numeric_boost* boost = spildlt0_descr->get_boost();
                 RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-                    (boost->get_enable() != 0
-                     && (boost->get_tol() == nullptr || boost->get_val() == nullptr))
+                    (boost->get_enable() != 0 && boost->get_tol() == nullptr)
                         ? rocsparse_status_invalid_pointer
                         : rocsparse_status_success,
                     "rocsparse_spildlt0_input_boost_enable is set, but "
-                    "rocsparse_spildlt0_input_boost_tolerance or "
+                    "rocsparse_spildlt0_input_boost_tolerance is not");
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    (boost->get_enable() != 0 && boost->get_val() == nullptr)
+                        ? rocsparse_status_invalid_pointer
+                        : rocsparse_status_success,
+                    "rocsparse_spildlt0_input_boost_enable is set, but "
                     "rocsparse_spildlt0_input_boost_value is not");
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrildlt0(
