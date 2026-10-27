@@ -1448,8 +1448,9 @@ namespace TensileLite
 
         /// True when the MX scale buffer for A that this caller hands to an
         /// *external* custom kernel is packed with the compact ceil(K/mxBlock)
-        /// leading dimension, even though mxsa() carries the gfx950 padding
-        /// setMXScaleA applies for the Tensile-generated HostPreSwizzle kernels.
+        /// leading dimension. On gfx950 a plain Block_32_UE8M0 mxsa() is itself
+        /// packed, so the flag and the descriptor agree; the flag matters when
+        /// mxsa() is padded and the buffer is not.
         ///
         /// Each operand is declared on its own because hipBLASLt takes the A and
         /// B scale formats independently. hipBLASLt sets it for every MX format

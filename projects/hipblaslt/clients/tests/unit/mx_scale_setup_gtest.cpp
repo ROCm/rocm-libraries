@@ -127,3 +127,26 @@ TEST(HostUnitMXScaleSetup, smoke_PaddingArgumentReachesTheDescriptor)
     EXPECT_TRUE(unpadded.customKernelMXScaleAIsPacked());
     EXPECT_TRUE(unpadded.customKernelMXScaleBIsPacked());
 }
+
+// K=96, block 32: ceil(K/32) is 3. Packed keeps 3. Gfx950 rounds it to 8.
+// The pre-swizzled call is the one that must not claim the buffer is packed.
+TEST(HostUnitMXScaleSetup, smoke_PaddingFollowsTheCallerScaleFormat)
+{
+    auto packed = mxProblem(64, 64, 96);
+    rocblaslt::setHostMXScaleA(packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
+    rocblaslt::setHostMXScaleB(packed, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Packed);
+    EXPECT_EQ(packed.mxsa().strides()[1], 3u);
+    EXPECT_EQ(packed.mxsb().strides()[1], 3u);
+    EXPECT_TRUE(packed.customKernelMXScaleAIsPacked());
+    EXPECT_TRUE(packed.customKernelMXScaleBIsPacked());
+
+    auto preswizzled = mxProblem(64, 64, 96);
+    rocblaslt::setHostMXScaleA(
+        preswizzled, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950, false);
+    rocblaslt::setHostMXScaleB(
+        preswizzled, rocisa::DataType::E8, 32, TensileLite::MXScalePadding::Gfx950, false);
+    EXPECT_EQ(preswizzled.mxsa().strides()[1], 8u);
+    EXPECT_EQ(preswizzled.mxsb().strides()[1], 8u);
+    EXPECT_FALSE(preswizzled.customKernelMXScaleAIsPacked());
+    EXPECT_FALSE(preswizzled.customKernelMXScaleBIsPacked());
+}
