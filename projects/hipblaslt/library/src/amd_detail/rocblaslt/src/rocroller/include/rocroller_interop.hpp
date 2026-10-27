@@ -35,9 +35,9 @@ namespace hipblaslt
      */
     inline rocRoller::DataType hip2RocRollerType(hipDataType type)
     {
-        // Compared as integers because a HIP release that predates these
-        // formats declares them as constants rather than enumerators, which is
-        // how the rest of hipBLASLt reads them too (see utility.cpp).
+        // Compared as integers because some HIP headers declare these formats
+        // as constants rather than enumerators, which is how the rest of
+        // hipBLASLt reads them too (see utility.cpp).
         if(static_cast<int>(type) == HIP_R_6F_E2M3)
             return rocRoller::DataType::FP6;
         if(static_cast<int>(type) == HIP_R_6F_E3M2)
