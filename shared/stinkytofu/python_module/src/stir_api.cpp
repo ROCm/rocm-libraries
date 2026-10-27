@@ -38,18 +38,17 @@
 #include <variant>
 #include <vector>
 
-#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
-#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
@@ -229,9 +228,7 @@ std::unique_ptr<StinkyAsmModule> loadStir(const std::string& text, std::array<in
         throw std::invalid_argument(
             "SSA form does not round-trip; load physical STIR and run LiftAsmRegistersToSSAPass");
 
-    const ArchHelper& arches = ArchHelper::getInstance();
-    if (arches.getArchInfo(static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
-                           static_cast<uint32_t>(arch[2])) == nullptr) {
+    if (!BackendRegistry::isArchSupported(arch)) {
         throw std::invalid_argument("unknown arch (" + std::to_string(arch[0]) + ", " +
                                     std::to_string(arch[1]) + ", " + std::to_string(arch[2]) + ")");
     }
@@ -284,27 +281,9 @@ std::string serializeModule(const StinkyAsmModule& module, bool ssa) {
     return out.str();
 }
 
-/// Same defaults as stinkytofu-opt individual-pass mode
-/// (getPassFeatureConfig in tools/stinkytofu-opt/stinkytofu-opt.hpp).
-PassFeatureConfig optPassFeatureConfig() {
-    PassFeatureConfig config;
-    config.loopConfig.unrollGemm = true;
-    config.dagFeatures.distributeGlobalRead = true;
-    return config;
-}
-
 void runOnePass(StinkyAsmModule& module, Function& function, const std::string& name,
                 const std::vector<std::string>& args) {
-    const std::array<int, 3> arch = module.getArch();
-    PassManager passManager;
-    registerAllAnalyses(passManager.getAnalysisManager());
-    passManager.setPassFeatureConfig(optPassFeatureConfig());
-    GemmTileConfig tile;
-    tile.arch = arch;
-    passManager.setGemmTileConfig(tile);
-    AsmCapsConfig caps = ToolchainCaps::probe(getGfxArchID(arch));
-    applyStandaloneArchCaps(caps, arch);
-    passManager.setAsmCapsConfig(caps);
+    PassManager passManager = makeStandalonePassManager(module.getArch());
     passManager.getPassContext().setRemarksEnabled(true);
 
     bool missed = false;

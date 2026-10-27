@@ -108,6 +108,25 @@ st.func @k() {
         module.run_passes(["HazardGapAnalysisPass"])
 
 
+def test_hazard_pass_gets_gfx1250_caps():
+    text = """\
+st.func @k() {
+^entry:
+  v9 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+    module = stinkytofu.load_stir(text)
+    module.run_passes(["Gfx1250HazardPass"])
+    opcodes = [
+        inst.opcode
+        for fn in module.functions()
+        for block in fn.blocks()
+        for inst in block.instructions()
+    ]
+    assert "st.s_wait_xcnt" in opcodes
+
+
 def test_view_survives_removal():
     module = stinkytofu.load_stir(KERNEL)
     mov = next(

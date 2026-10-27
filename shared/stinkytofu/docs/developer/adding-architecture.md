@@ -206,22 +206,30 @@ Add:
 
 An architecture on a *new* triple needs its own optimization pipeline. Create `src/pipeline/backend/GfxYourArchBackend.cpp` (copy from `Gfx1250Backend.cpp`) containing:
 
-1. A `buildGfxYourArchPipeline()` function that populates a `PassManager`
+1. A `buildGfxYourArchPipeline()` function that populates a `ModulePassManager`
 2. A static registrar struct that calls `BackendRegistry::setArchPipeline()`
 3. An **anchor function** to prevent dead-stripping in static builds
+4. Optionally, a **standalone caps builder** for the archCaps a pass reads from `AsmCapsConfig`
 
 ```cpp
 namespace stinkytofu {
 namespace {
-bool buildGfxYourArchPipeline(PassManager& pm, StinkyAsmModule& module) {
+bool buildGfxYourArchPipeline(ModulePassManager& mpm, StinkyAsmModule& module,
+                              const PassBuilder& PB) {
     // Add passes here...
     return true;
+}
+
+// Optional. Keep in step with rocisa's hardware_caps.hpp.
+void setGfxYourArchStandaloneCaps(AsmCapsConfig& caps) {
+    caps.requiresXCntForVolatileVMEM = true;
 }
 
 struct GfxYourArchRegistrar {
     GfxYourArchRegistrar() {
         BackendRegistry::setArchPipeline(
-            GFXYOURARCH_ARCH, {buildGfxYourArchPipeline, {"group0", "group1"}});
+            GFXYOURARCH_ARCH,
+            {buildGfxYourArchPipeline, {"group0", "group1"}, setGfxYourArchStandaloneCaps});
     }
 };
 static GfxYourArchRegistrar s_gfxYourArchRegistrar;
@@ -232,6 +240,8 @@ void anchorGfxYourArchBackend() {}
 
 }  // namespace stinkytofu
 ```
+
+A rocisa build passes some archCaps to the backend through `ModuleOptions`, for example `RequiresXCntForVolatileVMEM`. Python `run_passes`, `stinkytofu-opt`, and `getHardwareCaps` run without rocisa. They get those fields from `BackendRegistry::applyStandaloneCaps`, which runs this builder; `standaloneAsmCaps` runs it after `ToolchainCaps::probe`. Set only the fields your architecture needs, with the values rocisa's `hardware_caps.hpp` gives it. When the defaults are right, leave the third field out of the registrar.
 
 Then register the anchor in `BackendRegistry.cpp`:
 
@@ -270,6 +280,7 @@ How to fill in a row, Off → Audit → Active, and example rows are [register a
 - [ ] Update `src/conversion/rocisa/RocisaArchInfo.hpp` -- add #include for new arch
 - [ ] Only for a new ISA triple (a new stepping reuses the existing pipeline):
   - [ ] Create `src/pipeline/backend/GfxYourArchBackend.cpp` with pipeline, registrar, and anchor function
+  - [ ] If a pass reads an archCaps flag from `AsmCapsConfig`, register a standalone caps builder that matches rocisa's `hardware_caps.hpp`
   - [ ] Add anchor call to `BackendRegistry::registerAllBackends()` in `BackendRegistry.cpp`
   - [ ] Add source to `src/pipeline/backend/CMakeLists.txt`
   - [ ] Create `src/transforms/asm/ra/target/GfxYourArchAllocationRules.cpp`, add it to that `CMakeLists.txt`, and add the anchor to `AllocationRulesRegistry::registerAll()`

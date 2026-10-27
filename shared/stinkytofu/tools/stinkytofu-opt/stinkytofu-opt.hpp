@@ -31,8 +31,8 @@
 
 using namespace stinkytofu;
 
-// The pass catalog lives in the library (PassCatalog). This header keeps the
-// driver's debug-print and feature-config helpers.
+// The pass catalog and the standalone pass manager live in the library
+// (PassCatalog). This header keeps the driver's debug-print helper.
 /**
  * Create default DebugPrintInstrumentation for stinkytofu-opt.
  */
@@ -44,14 +44,4 @@ std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation
     debugConfig->setDumpStreamBefore(streams->getOrCreate("before.txt"));
     debugConfig->setDumpStreamAfter(streams->getOrCreate("after.txt"));
     return std::make_shared<stinkytofu::DebugPrintInstrumentation>(std::move(debugConfig));
-}
-
-/**
- * Get default PassFeatureConfig configuration.
- */
-stinkytofu::PassFeatureConfig getPassFeatureConfig() {
-    stinkytofu::PassFeatureConfig config;
-    config.loopConfig.unrollGemm = true;
-    config.dagFeatures.distributeGlobalRead = true;
-    return config;
 }

@@ -122,10 +122,23 @@ TEST(ApiExport, BackendRegistryRegisterAllBackends) {
 }
 
 TEST(ApiExport, BackendRegistryGetArchPipeline) {
-    // stinkytofu-opt: getArchPipeline() to validate --arch flag
+    // rocisa: ToStinkyTofuUtils reads the pipeline's group names
     BackendRegistry::registerAllBackends();
     // May return null for unknown arch — that's fine; the symbol must link.
     (void)BackendRegistry::getArchPipeline(kArch);
+}
+
+TEST(ApiExport, BackendRegistryIsArchSupported) {
+    // stinkytofu-opt: isArchSupported() to validate --arch flag
+    BackendRegistry::registerAllBackends();
+    (void)BackendRegistry::isArchSupported(kArch);
+}
+
+TEST(ApiExport, BackendRegistryApplyStandaloneCaps) {
+    // stinkytofu-opt: pipeline mode fills the ModuleOptions archCaps from it
+    BackendRegistry::registerAllBackends();
+    AsmCapsConfig caps;
+    BackendRegistry::applyStandaloneCaps(kArch, caps);
 }
 
 TEST(ApiExport, BackendRegistryParseArchKey) {
@@ -172,6 +185,13 @@ TEST(ApiExport, BackendRunOptimization) {
 TEST(ApiExport, PassManagerConstruction) {
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());
+}
+
+TEST(ApiExport, StandalonePassManager) {
+    BackendRegistry::registerAllBackends();
+    (void)standalonePassFeatureConfig();
+    PassManager pm = makeStandalonePassManager(kArch);
+    (void)pm;
 }
 
 TEST(ApiExport, PassManagerDebugConfig) {

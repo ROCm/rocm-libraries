@@ -53,6 +53,18 @@ const BackendRegistry::ArchPipeline* BackendRegistry::getArchPipeline(
     return nullptr;
 }
 
+bool BackendRegistry::isArchSupported(const std::array<int, 3>& arch) {
+    const ArchHelper::ArchInfo* info = ArchHelper::getInstance().getArchInfo(
+        static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
+        static_cast<uint32_t>(arch[2]));
+    return info != nullptr && getArchPipeline(arch) != nullptr;
+}
+
+void BackendRegistry::applyStandaloneCaps(const std::array<int, 3>& arch, AsmCapsConfig& caps) {
+    const ArchPipeline* pipeline = getArchPipeline(arch);
+    if (pipeline != nullptr && pipeline->standaloneCaps) pipeline->standaloneCaps(caps);
+}
+
 void BackendRegistry::clear() {
     auto& reg = getRegistry();
     reg.pipelines.clear();

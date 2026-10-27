@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include "stinkytofu/Config/Config.h"
-#include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ComgrProbe.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 
@@ -58,18 +57,4 @@ TEST(ToolchainCapsTest, ProbeIsCached) {
     auto caps1 = ToolchainCaps::probe(GfxArchID::Gfx1250);
     auto caps2 = ToolchainCaps::probe(GfxArchID::Gfx1250);
     EXPECT_EQ(caps1.vgprMsbMode, caps2.vgprMsbMode);
-}
-
-TEST(StandaloneArchCapsTest, Gfx1250SetsBothFlags) {
-    AsmCapsConfig caps;
-    applyStandaloneArchCaps(caps, {12, 5, 0});
-    EXPECT_TRUE(caps.requiresXCntForVolatileVMEM);
-    EXPECT_TRUE(caps.enableXnackReplay);
-}
-
-TEST(StandaloneArchCapsTest, OtherArchLeavesFlagsOff) {
-    AsmCapsConfig caps;
-    applyStandaloneArchCaps(caps, {9, 4, 2});
-    EXPECT_FALSE(caps.requiresXCntForVolatileVMEM);
-    EXPECT_FALSE(caps.enableXnackReplay);
 }

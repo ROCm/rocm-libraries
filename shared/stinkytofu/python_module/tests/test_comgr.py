@@ -274,6 +274,8 @@ class TestArchCaps:
         assert arch["MaxSgprPreload"] == 32
         assert arch["LDSBankCount"] == 64
         assert arch["WmmaArbStallBitOffset"] == 2
+        assert arch["RequiresXCntForVolatileVMEM"] == 1
+        assert arch["EnableXnackReplay"] == 1
 
 
 class TestRegCaps:

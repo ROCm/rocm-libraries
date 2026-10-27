@@ -200,12 +200,12 @@ enum class VgprMsbMode : uint8_t {
 };
 
 /// Capabilities forwarded from rocisa (asmCaps and archCaps) by the conversion
-/// layer, or discovered by ToolchainCaps::probe() for the standalone path.
+/// layer. On the standalone path, ToolchainCaps::probe() discovers the toolchain
+/// fields and BackendRegistry::applyStandaloneCaps() adds the arch's archCaps.
 struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 
-    /// rocisa archCaps `RequiresXCntForVolatileVMEM`. A caller with no rocisa
-    /// to ask sets it with applyStandaloneArchCaps.
+    /// rocisa archCaps `RequiresXCntForVolatileVMEM`.
     /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
     /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
     /// rule set (Rules 1–4).
@@ -220,13 +220,4 @@ struct AsmCapsConfig {
     /// See Gfx1250HazardPass for the complete rule definitions.
     bool enableXnackReplay = false;
 };
-
-/// Stand in for rocisa's archCaps when there is no rocisa to ask: gfx1250
-/// needs both flags. Call after ToolchainCaps::probe(), which replaces the
-/// whole struct.
-inline void applyStandaloneArchCaps(AsmCapsConfig& caps, const std::array<int, 3>& arch) {
-    if (arch != std::array<int, 3>{12, 5, 0}) return;
-    caps.requiresXCntForVolatileVMEM = true;
-    caps.enableXnackReplay = true;
-}
 }  // namespace stinkytofu

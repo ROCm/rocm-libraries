@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -29,6 +30,7 @@
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu {
 
@@ -54,5 +56,20 @@ STINKYTOFU_EXPORT const PassInfo* findCatalogPass(const std::string& name);
 /// whose creator then returns null rejected its arguments.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createCatalogPass(const std::string& name,
                                                           const std::vector<std::string>& args);
+
+/// The feature defaults a catalog pass runs with outside the backend pipeline:
+/// GEMM loops unrolled and global reads distributed.
+STINKYTOFU_EXPORT PassFeatureConfig standalonePassFeatureConfig();
+
+/// The caps a catalog pass sees outside the backend pipeline: ToolchainCaps::probe()
+/// for \p arch, then BackendRegistry::applyStandaloneCaps(). Check \p arch with
+/// BackendRegistry::isArchSupported first; the probe asserts on an unknown triple.
+STINKYTOFU_EXPORT AsmCapsConfig standaloneAsmCaps(const std::array<int, 3>& arch);
+
+/// A PassManager for running catalog passes outside the backend pipeline. It has
+/// every analysis registered, standalonePassFeatureConfig(), a GEMM tile with
+/// only \p arch set, and standaloneAsmCaps(). Remarks stay off. Check \p arch
+/// with BackendRegistry::isArchSupported first.
+STINKYTOFU_EXPORT PassManager makeStandalonePassManager(const std::array<int, 3>& arch);
 
 }  // namespace stinkytofu

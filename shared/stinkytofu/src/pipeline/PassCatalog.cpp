@@ -30,11 +30,16 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/core/Types.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/DumpMemTokenIRStructurePass.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/support/PassArguments.hpp"
@@ -330,6 +335,30 @@ std::unique_ptr<Pass> createCatalogPass(const std::string& name,
     const PassInfo* info = findCatalogPass(name);
     if (info == nullptr) return nullptr;
     return info->creator(args);
+}
+
+PassFeatureConfig standalonePassFeatureConfig() {
+    PassFeatureConfig config;
+    config.loopConfig.unrollGemm = true;
+    config.dagFeatures.distributeGlobalRead = true;
+    return config;
+}
+
+AsmCapsConfig standaloneAsmCaps(const std::array<int, 3>& arch) {
+    AsmCapsConfig caps = ToolchainCaps::probe(getGfxArchID(arch));
+    BackendRegistry::applyStandaloneCaps(arch, caps);
+    return caps;
+}
+
+PassManager makeStandalonePassManager(const std::array<int, 3>& arch) {
+    PassManager passManager;
+    registerAllAnalyses(passManager.getAnalysisManager());
+    passManager.setPassFeatureConfig(standalonePassFeatureConfig());
+    GemmTileConfig tile;
+    tile.arch = arch;
+    passManager.setGemmTileConfig(tile);
+    passManager.setAsmCapsConfig(standaloneAsmCaps(arch));
+    return passManager;
 }
 
 }  // namespace stinkytofu

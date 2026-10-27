@@ -34,10 +34,8 @@
 #include <vector>
 
 #include "stinkytofu/Version.h"
-#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
@@ -439,7 +437,7 @@ int main(int argc, char** argv) {
         // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
         // not registered as an identity in this build (no assert), so a plain triple spelling
         // (e.g. gfx942 in a gfx1250 build) falls through to the triple parser, and a stepping name
-        // absent from this build fails cleanly at the getArchPipeline() check below.
+        // absent from this build fails cleanly at the isArchSupported() check below.
         if (const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archStr)) {
             arch = {static_cast<int>(namedInfo->major), static_cast<int>(namedInfo->minor),
                     static_cast<int>(namedInfo->stepping)};
@@ -450,7 +448,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        if (!BackendRegistry::getArchPipeline(arch)) {
+        if (!BackendRegistry::isArchSupported(arch)) {
             std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
             std::cerr << "Supported architectures:";
             for (const auto& key : BackendRegistry::getRegisteredArchKeys())
@@ -473,7 +471,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
+    stinkytofu::PassFeatureConfig passFeatureConfig = stinkytofu::standalonePassFeatureConfig();
 
     // Parse --vgpr-msb-mode=none|msb8|msb16 (override of ToolchainCaps::probe).
     // Useful when running on a host whose comgr doesn't know the target ISA,
@@ -860,6 +858,12 @@ int main(int argc, char** argv) {
             moduleOpts.NumGRM = gemmTileConfig.NumGRM;
             moduleOpts.WaveGroup0 = static_cast<int>(gemmTileConfig.NumWaves);
             moduleOpts.WaveGroup1 = 1;
+            // Backend reads these two from the module options, and there is no
+            // rocisa here to supply them.
+            stinkytofu::AsmCapsConfig standaloneCaps;
+            stinkytofu::BackendRegistry::applyStandaloneCaps(arch, standaloneCaps);
+            moduleOpts.RequiresXCntForVolatileVMEM = standaloneCaps.requiresXCntForVolatileVMEM;
+            moduleOpts.EnableXnackReplay = standaloneCaps.enableXnackReplay;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -881,8 +885,7 @@ int main(int argc, char** argv) {
             emitFunction(func);
         } else {
             // Individual pass mode
-            stinkytofu::PassManager passManager;
-            stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
+            stinkytofu::PassManager passManager = stinkytofu::makeStandalonePassManager(arch);
 
             // Pipeline mode gets its session from Backend (ModuleOptions.TimePasses);
             // here there is no module, so the driver owns it.
@@ -899,10 +902,11 @@ int main(int argc, char** argv) {
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
             passManager.setGemmTileConfig(gemmTileConfig);
-            auto caps = stinkytofu::ToolchainCaps::probe(archID);
-            if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
-            stinkytofu::applyStandaloneArchCaps(caps, arch);
-            passManager.setAsmCapsConfig(caps);
+            if (vgprMsbOverride) {
+                stinkytofu::AsmCapsConfig caps = passManager.getPassContext().getAsmCapsConfig();
+                caps.vgprMsbMode = *vgprMsbOverride;
+                passManager.setAsmCapsConfig(caps);
+            }
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
             for (const auto& rp : requestedPasses) {
