@@ -206,6 +206,7 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "num_seqs": 1,
         "block_table_stride": blocks,
         "qq_bias_stride_0": 0,
+        **au._runtime_kernarg_values(problem),
     }
     reduce_values = {
         "output_ptr": out,
@@ -213,6 +214,7 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seq_lens,
+        **au._runtime_kernarg_values(problem),
     }
     # The launch fences the stream, so ``out`` is complete when it returns.
     au._launch_3d_pipeline(

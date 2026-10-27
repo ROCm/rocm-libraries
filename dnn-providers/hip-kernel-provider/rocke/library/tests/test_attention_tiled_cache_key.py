@@ -703,6 +703,33 @@ def test_launch_meta_separates_num_seqs_under_one_key(routing_env):
     assert grid_b[1] - grid_a[1] == b.num_seqs - a.num_seqs
 
 
+def test_launch_geometry_separates_head_counts_under_one_key(routing_env):
+    # gfx942 reads the head counts as kernargs, so one binary serves 32/8 and
+    # 64/16. The 2D grid spans the kv heads and the 3D workspace the query
+    # heads, so with equal token and sequence counts the launch caches must
+    # still tell them apart.
+    arch = "gfx942"
+    base = dict(
+        total_q=1025,
+        num_seqs=1,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=1025,
+        max_seqlen_k=1025,
+        dtype="bf16",
+        num_cus=304,
+    )
+    a = P(num_query_heads=32, num_kv_heads=8, **base)
+    b = P(num_query_heads=64, num_kv_heads=16, **base)
+    key = au._tiled_cache_key(a, arch)
+    assert key == au._tiled_cache_key(b, arch)
+    assert au._shape_key(key, a) != au._shape_key(key, b)
+    au._2D_LAUNCH_META.clear()
+    grid_a = au._get_2d_launch_meta(a, key, arch=arch).grid
+    grid_b = au._get_2d_launch_meta(b, key, arch=arch).grid
+    assert (grid_a[0], grid_b[0]) == (a.num_kv_heads, b.num_kv_heads)
+
+
 # ---------------------------------------------------------------------------
 # _binary_search_iters mirrors the spec classes
 # ---------------------------------------------------------------------------

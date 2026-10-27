@@ -5411,15 +5411,19 @@ def attention_3d_workspace_nbytes(
 def _shape_key(cache_key: tuple, problem: UnifiedAttentionProblem) -> tuple:
     """Extend a binary cache key with the shape values the launch derives from.
 
-    The tiled binaries are shared across batch counts and token counts, but the
-    grids (``total_q // block_q + num_seqs``), the 3D reduce grid and the 3D
-    workspace are not. Everything cached per launch geometry keys on this.
+    The tiled binaries are shared across batch counts, token counts and, where
+    the body reads them as kernargs, head counts, but the grids (``total_q //
+    block_q + num_seqs`` by the kv or query heads), the 3D reduce grid and the
+    3D workspace are not. Everything cached per launch geometry keys on this.
     """
     return cache_key + (
         "total_q",
         int(problem.total_q),
         "num_seqs",
         int(problem.num_seqs),
+        "heads",
+        int(problem.num_query_heads),
+        int(problem.num_kv_heads),
     )
 
 
