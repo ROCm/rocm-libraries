@@ -10,12 +10,6 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_trload_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
-// Write the per-kv-tile dK/dV of the TDM decode pipeline through an LDS stage
-// and a TDM store instead of per-lane buffer stores.
-#ifndef CK_TILE_FMHA_BWD_DECODE_TDM_DKDV_STORE
-#define CK_TILE_FMHA_BWD_DECODE_TDM_DKDV_STORE 1
-#endif
-
 namespace ck_tile {
 
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineTrLoadDefaultPolicy>
@@ -115,8 +109,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
     // write of kv tile i overlaps the compute of tile i+1 and goes out as whole
     // rows instead of one 16-byte store per lane and row.
     static constexpr bool kTdmStoreDKDV =
-        Policy::kUsesTdm && (CK_TILE_FMHA_BWD_DECODE_TDM_DKDV_STORE != 0) &&
-        std::is_same_v<KGradDataType, VGradDataType>;
+        Policy::kUsesTdm && std::is_same_v<KGradDataType, VGradDataType>;
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSizeDKDVStage()
     {
