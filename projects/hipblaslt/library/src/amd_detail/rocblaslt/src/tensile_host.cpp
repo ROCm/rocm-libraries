@@ -8454,7 +8454,7 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
     }
 
     auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
-    return solution->kernelName;
+    return solution ? solution->kernelName : std::string();
 }
 
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
@@ -8481,7 +8481,7 @@ std::string getSolutionNameFromAlgoIndex(rocblaslt_handle handle, const rocblasl
     }
 
     auto solution = library->getSolutionByIndex(*hardware, *solutionIndex);
-    return solution->solutionName;
+    return solution ? solution->solutionName : std::string();
 }
 
 /***************************************************************
