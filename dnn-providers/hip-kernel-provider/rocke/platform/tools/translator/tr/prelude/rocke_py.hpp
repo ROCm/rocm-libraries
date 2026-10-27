@@ -1,10 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * rocke/rocke_py.hpp -- Python semantics for C++ generated from the Python
- * kernel builders. Written once by hand; the translator emits calls into it so
- * every generated file gets the same floor division, string compare, repr and
- * range behaviour as CPython.
+ * rocke_py.hpp -- Python semantics for C++ translated from the Python kernel
+ * builders. The translator emits calls into it so every translated file gets
+ * the same floor division, string compare, repr and range behaviour as CPython.
+ *
+ * PRIVATE: support for translated sources in this directory; not installed,
+ * not API; EXPERIMENTAL. tools/translator/tr/prelude/ holds the master copy;
+ * tr.regen copies it next to the sources that need it and never over an
+ * existing copy, so a copy in the tree is maintained by hand like its sources.
  */
 #ifndef ROCKE_ROCKE_PY_HPP
 #define ROCKE_ROCKE_PY_HPP

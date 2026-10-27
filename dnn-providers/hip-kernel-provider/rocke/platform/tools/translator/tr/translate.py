@@ -1569,11 +1569,11 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
         "",
         '#include "rocke/error.hpp"',
         '#include "rocke/ir_internal.h"',
-        '#include "rocke/rocke_py.hpp"',
+        '#include "rocke_py.hpp"',
     ]
     joined = "\n".join("\n".join(x) for x in internals + shims)
     if "py_adapt::" in joined:
-        lines.append('#include "rocke/rocke_py_adapters.hpp"')
+        lines.append('#include "rocke_py_adapters.hpp"')
     incs = set()
     for fname in re.findall(r"\b(rocke_\w+)\(", joined):
         f = env.headers.funcs.get(fname)

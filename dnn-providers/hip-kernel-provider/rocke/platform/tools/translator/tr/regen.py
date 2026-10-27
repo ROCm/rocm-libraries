@@ -17,14 +17,17 @@ Steps (the generated ABI; --hand-abi translates against the tree's headers):
 3. If any function is still a hole (no rule and no hand fill), list them and
    write nothing. Otherwise write <m>.cpp into
    platform/cpp/instances/common/ and the generated headers into
-   platform/cpp/include/rocke/ of --into (default: the --rocke tree itself),
-   plus the prelude tr/prelude/rocke_py*.hpp when this copy has one (a copy
-   inside a rocKE tree has none: there platform/cpp/include/rocke/rocke_py*.hpp
-   is the only copy, written by hand).
+   platform/cpp/include/rocke/ of --into (default: the --rocke tree itself).
+4. Support headers: every quoted same-directory include of a written source
+   (#include "rocke_py.hpp", "rocke_py_adapters.hpp") is copied from its
+   master copy (tr/prelude/, else tr/packages/<package>/) into
+   platform/cpp/instances/common/, but never over an existing copy: once in
+   the tree it is hand-maintained like the sources. It is not installed.
 
 --check writes into a temporary tree instead and compares every file it
 would write with the one in --into: exit 1 and the list of files that
-differ when the checked-in generated files are not current. Temporary
+differ when the checked-in generated files are not current (a support
+header already in the tree is not compared). Temporary
 directories (maps, headers, the --check tree) are removed on exit.
 
 Name every module whose generated header the others use in the same command
@@ -35,8 +38,8 @@ attention_bwd_aux).
 from __future__ import annotations
 
 import argparse
-import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -107,7 +110,7 @@ def regen(a, scratch: list) -> int:
 
     from . import abi as A
     from .env import maps_dir, rocke_root
-    from .package import PKG
+    from .package import PKG, support_file
     from .translate import clang_format, set_clang_format, translate
 
     if a.package and PKG.name != a.package:
@@ -149,6 +152,17 @@ def regen(a, scratch: list) -> int:
         print("\n".join(holes))
         return 1
 
+    # support headers the sources include from their own directory
+    support = {}
+    for m, code in out.items():
+        for name in re.findall(r'^#include "([^"/]+)"', code, re.M):
+            path = support_file(name)
+            if path is None:
+                sys.exit(
+                    f"error: {m}.cpp includes {name!r}, which is in neither tr/prelude/ nor {PKG.data_dir}"
+                )
+            support[name] = path
+
     dest = into
     if a.check:
         dest = tempfile.mkdtemp(prefix="tr_check_")
@@ -161,9 +175,14 @@ def regen(a, scratch: list) -> int:
     for m, code in out.items():
         open(os.path.join(dest, SRC, f"{m}.cpp"), "w").write(code)
         written.append(os.path.join(SRC, f"{m}.cpp"))
-    headers = sorted(glob.glob(os.path.join(HERE, "prelude", "rocke_py*.hpp")))
-    headers += generated
-    for h in headers:
+    for name, path in sorted(support.items()):
+        rel = os.path.join(SRC, name)
+        if os.path.exists(os.path.join(into, rel)):
+            print(f"skip    {os.path.join(into, rel)} (exists)")
+            continue
+        shutil.copy(path, os.path.join(dest, rel))
+        written.append(rel)
+    for h in generated:
         shutil.copy(h, os.path.join(dest, INC))
         written.append(os.path.join(INC, os.path.basename(h)))
     if not a.check:

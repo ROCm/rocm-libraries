@@ -18,8 +18,8 @@ Python, a fill under `holes/`, or a rule in `tr/`, then regenerate.
 | Path | What it is |
 |---|---|
 | `tr/` | The translator. `tr/regen.py` is the one command. |
-| `platform/cpp/include/rocke/rocke_py.hpp` | The prelude: hand-written C++ helpers (Python semantics) every generated source includes. This is the only copy; edit it there. `tr.regen` does not write it. |
-| `platform/cpp/include/rocke/rocke_py_adapters.hpp` | A package's adapters between Python helper shapes and their C twins (listed in `tr/adapters.py`). It ships with that package's generated modules; a generated source includes it only when it uses one. |
+| `tr/prelude/rocke_py.hpp` | The prelude: C++ helpers (Python semantics) every generated source includes as `"rocke_py.hpp"`. Master copy. `tr.regen` copies it into `platform/cpp/instances/common/` when a written source needs it and never over an existing copy; that copy is private (not installed, not API) and is maintained there by hand. |
+| `tr/packages/<package>/` | A package's support headers, such as `attention_bwd/rocke_py_adapters.hpp`: adapters between Python helper shapes and their C twins (listed in `tr/adapters.py`). A generated source includes it only when it uses one; `tr.regen` copies it like the prelude. |
 | `tools/` | `cscan.py` (C/C++ declaration scanner), `rsrc.py` and `mine_maps.py` (mine the code maps from the tree). |
 | `designs/generated_abi.md` | The rules that turn a Python module into its C header. |
 | `designs/tagged_values.md` | A value that can be one of several classes becomes one tagged C struct with generated dispatch. |

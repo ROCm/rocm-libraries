@@ -2,7 +2,7 @@
 
 - Contributors: John Afaganis
 - **Status**: Planned
-- **Status notes**: The translator is on a local branch (`platform/tools/translator/`, `platform/cpp/include/rocke/rocke_py.hpp`) and is not merged. It was built and checked on the attention backward C++ port (#14365, open). The four backward modules it generates land after that port.
+- **Status notes**: The translator is on a local branch (`platform/tools/translator/`) and is not merged. It was built and checked on the attention backward C++ port (#14365, open). The four backward modules it generates land after that port.
 - **Last verified**: 2026-10-27 against `develop` (6ca11545199)
 
 ## Table of Contents
@@ -113,7 +113,7 @@ A hole is a function no rule covers. The generated `.cpp` holds `#error "hole: <
 
 ### 4.5 Prelude
 
-`platform/cpp/include/rocke/rocke_py.hpp` holds the C++ helpers with Python semantics that generated code calls: floor division and modulo, negative indexing, `str` indexing and slicing, and `dict` and `list` shapes. It is written once by hand and is the only copy. A package may add an adapters header (`rocke_py_adapters.hpp`) for calls whose C twin has a different shape than the Python; a generated source includes it only when it uses an adapter.
+`rocke_py.hpp` holds the C++ helpers with Python semantics that generated code calls: floor division and modulo, negative indexing, `str` indexing and slicing, and `dict` and `list` shapes. Its master copy ships with the translator in `tools/translator/tr/prelude/`. A package may add an adapters header (`rocke_py_adapters.hpp`, package data in `tr/packages/<package>/`) for calls whose C twin has a different shape than the Python; a generated source includes it only when it uses an adapter. Generated sources include both by a quoted same-directory name. `tr.regen` copies the ones a written source includes into `platform/cpp/instances/common/`, never over an existing copy. There they are private: compiled with the sources, not installed and not API.
 
 ### 4.6 Packages
 
@@ -181,9 +181,9 @@ On the attention backward package:
 - `designs/generated_abi.md`, `designs/tagged_values.md`, `designs/host_clones.md`: the header rules.
 - `HOWTO.md`: setup, the one command, holes, the gate, limits.
 
-`platform/cpp/include/rocke/rocke_py.hpp`
+`platform/tools/translator/tr/prelude/rocke_py.hpp`, `platform/tools/translator/tr/packages/attention_bwd/rocke_py_adapters.hpp`
 
-- The prelude. Only copy.
+- The prelude and the attention backward adapters (master copies; nothing under `platform/cpp`).
 
 Per generated module, added with that module:
 
@@ -193,7 +193,7 @@ Per generated module, added with that module:
 
 ### 9.2 Implementation Order
 
-1. Land the translator alone: `platform/tools/translator/` and `rocke_py.hpp`. No module is generated and no existing file changes.
+1. Land the translator alone: `platform/tools/translator/`, prelude included. No module is generated and no existing file changes.
 2. After #14365 lands: regenerate the four attention backward modules, add their data, fills and the package adapters header, and gate.
 3. Add `tr.regen --check` for the generated modules to CI.
 4. Add a package entry for one forward module on `develop` and regenerate it. Not yet built.

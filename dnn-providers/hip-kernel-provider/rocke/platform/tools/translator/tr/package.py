@@ -9,8 +9,11 @@ package selected here, so another package is one more PACKAGES entry, not an
 edit of the translator. Select one with $TR_PACKAGE (read once, at import;
 tr.regen --package sets it). The default is attention backward.
 
-Per-function adapters stay data keyed by module name (tr/adapters.py, the
-prelude headers); they are not part of this table.
+Per-function adapters stay data keyed by module name (tr/adapters.py); they
+are not part of this table. Support headers the translated sources include by
+a quoted same-directory name come from tr/prelude/ (rocke_py.hpp, generic) or
+tr/packages/<package>/ (package data, such as the attention backward
+rocke_py_adapters.hpp); support_file() finds them.
 """
 
 from __future__ import annotations
@@ -43,6 +46,11 @@ class Package:
         return f"ROCKE_{self.prefix.upper()}_"
 
     @property
+    def data_dir(self) -> str:
+        """tr/packages/<name>/: the package's support headers."""
+        return os.path.join(HERE, "packages", self.name)
+
+    @property
     def iv_t(self) -> str:
         """The C union of a Python `int | Value`."""
         return f"{self.c}iv_t"
@@ -51,6 +59,9 @@ class Package:
     def err_t(self) -> str:
         """The error record a C helper reports a Python raise through."""
         return f"{self.c}err_t"
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 PACKAGES = {
@@ -76,3 +87,13 @@ def select(name: str | None) -> Package:
 
 
 PKG = select(os.environ.get("TR_PACKAGE"))
+
+
+def support_file(name: str, pkg: Package | None = None) -> str | None:
+    """The master copy of support header `name` (tr/prelude/, then the
+    package's data directory), or None if neither has it."""
+    for d in (os.path.join(HERE, "prelude"), (pkg or PKG).data_dir):
+        path = os.path.join(d, name)
+        if os.path.isfile(path):
+            return path
+    return None

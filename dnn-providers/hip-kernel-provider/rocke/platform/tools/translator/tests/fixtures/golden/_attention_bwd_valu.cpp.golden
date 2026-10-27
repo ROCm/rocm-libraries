@@ -17,8 +17,8 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.instances.common._attention_bwd_addr.h"
 #include "rocke/ir_internal.h"
-#include "rocke/rocke_py.hpp"
-#include "rocke/rocke_py_adapters.hpp"
+#include "rocke_py.hpp"
+#include "rocke_py_adapters.hpp"
 
 const char* const ROCKE_ATTN_BWD_BF16_CASTS[ROCKE_ATTN_BWD_BF16_CASTS_N]
     = {"generic", "rne_noguard"};
