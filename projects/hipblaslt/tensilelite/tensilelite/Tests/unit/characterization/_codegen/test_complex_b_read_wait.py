@@ -16,43 +16,63 @@ _CONFIG = Path(__file__).parent / "data/test_data/_designed/gfx942/complex_b_rea
 @pytest.mark.parametrize(
     "conjugate_a,conjugate_b", [(False, False), (False, True), (True, False), (True, True)]
 )
-def test_complex_b_reads_complete_before_first_iteration(conjugate_a, conjugate_b, tmp_path):
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("dtype", ["C", "Z"])
+def test_complex_b_reads_complete_before_use(arch, dtype, conjugate_a, conjugate_b, tmp_path):
     config = yaml.safe_load(_CONFIG.read_text())
-    problem = config["BenchmarkProblems"][0][0]
+    problem, params = config["BenchmarkProblems"][0]
     problem["ComplexConjugateA"] = conjugate_a
     problem["ComplexConjugateB"] = conjugate_b
+    for key in ("DataType", "DestDataType", "ComputeDataType"):
+        problem[key] = dtype
+    if dtype == "Z":
+        # Use a smaller tile and wider LDS padding for double-complex operands.
+        for param in params["ForkParameters"]:
+            if "MatrixInstruction" in param:
+                param["MatrixInstruction"][0][5:7] = [3, 2]
+            if "GlobalReadVectorWidthB" in param:
+                param["GlobalReadVectorWidthB"] = [1]
+            for key in ("LdsBlockSizePerPadA", "LdsBlockSizePerPadB"):
+                if key in param:
+                    param[key] = [256]
     path = tmp_path / "complex.yaml"
     path.write_text(yaml.safe_dump(config))
 
-    states = derive_states(path, arch="gfx942", limit_solutions=1)
+    states = derive_states(path, arch=arch, limit_solutions=1)
     assert len(states) == 1
     state = states[0]
     assert state["UnrollMajorLDSB"]
-    assert state["MIWaveTile"] == [7, 4]
+    assert state["MIWaveTile"] == ([7, 4] if dtype == "C" else [3, 2])
     assert state["PrefetchLocalRead"] == 1
     assert state["ClusterLocalRead"] == 1
 
-    results = emit_kernels_from_config(path, arch="gfx942", limit=1)
+    results = emit_kernels_from_config(path, arch=arch, limit=1)
     assert len(results) == 1
     _name, source, error = results[0]
     assert error == 0
 
-    # All loop variants must wait for the prefetched B tile before arithmetic
-    # can consume its later operands, including the no-load and PGR1 paths.
-    first_iteration_waits = [
-        line
-        for line in source.splitlines()
-        if line.startswith("s_waitcnt") and "for iteration == 0" in line
-    ]
-    assert len(first_iteration_waits) == 4
-    assert all(re.match(r"s_waitcnt lgkmcnt\(0\)", line) for line in first_iteration_waits)
-
     open_loop = source.index("label_openLoopL:")
     prefetch = source[source.index("/* local read prefetch b */") : open_loop]
-    assert prefetch.count("ds_read_b64") == 4
-    for label in ("label_LoopBeginL:", "label_LoopEndL:"):
-        start = source.index(label, open_loop)
-        first_arithmetic = re.search(r"^v_(?:add|mfma)_", source[start:], re.M)
-        assert first_arithmetic is not None
-        before_use = source[start : start + first_arithmetic.start()]
-        assert "s_waitcnt lgkmcnt(0)" in before_use
+    b_reads = re.findall(r"^ds_read_b\d+ v\[([^:]+):", prefetch, re.M)
+    assert len(b_reads) == (4 if dtype == "C" else 2)
+
+    first_waits = list(re.finditer(r"^s_waitcnt[^\n]*for iteration == 0[^\n]*", source, re.M))
+    assert len(first_waits) == (4 if dtype == "C" else 5)
+    for index, wait in enumerate(first_waits):
+        assert wait[0].startswith(f"s_waitcnt lgkmcnt({len(b_reads) - 1})")
+        end = first_waits[index + 1].start() if index + 1 < len(first_waits) else len(source)
+        body = source[wait.end() : end]
+        first_later_b_use = re.search(r"^v_mfma_.*v\[" + re.escape(b_reads[1]) + r"\+", body, re.M)
+        assert first_later_b_use is not None
+
+        # The last prefetched B read must be complete before B[1] is consumed.
+        # At a wait, its younger LDS operations determine the safe counter value.
+        younger_ds = 0
+        b_ready = False
+        for line in body[: first_later_b_use.start()].splitlines():
+            if re.match(r"ds_(?:read|write)_", line):
+                younger_ds += 1
+            second_wait = re.match(r"s_waitcnt lgkmcnt\((\d+)\)", line)
+            if second_wait and int(second_wait[1]) <= younger_ds:
+                b_ready = True
+        assert b_ready

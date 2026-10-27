@@ -2216,9 +2216,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               waitDsRead = SWaitCnt(dscnt=numDsInsts, comment="Wait for dependent lr")
               iterCode.add(waitDsRead)
         else:
-          if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) \
-              and not kernel["UseF32XEmulation"] and not kernel["ProblemType"]["DataType"].isComplex():
-            if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
+          if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
+            # Complex products use four MFMAs before advancing B. Negations add
+            # scheduler slots, so waiting at index 4 also covers every conjugation.
+            secondWaitIndex = 4 if kernel["ProblemType"]["DataType"].isComplex() else kernel["MIWaveTileA"] // kernel["numSubTiles"]
+            if iteration == 0 and i == secondWaitIndex:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
               waitCode2.dscnt = localReadsIssuedInThisIter
@@ -2788,12 +2790,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               localReads -= self.states.numReadsPerIterMetadata
 
           localReads += localReadsWaitcnt
-          if iteration == 0 and kernel["UnrollMajorLDSB"] \
-              and not kernel["ProblemType"]["DataType"].isComplex() \
-              and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"]):
+          if iteration == 0 and kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"]):
             # We issued LR with A[0]->B[0]->A[1:]->B[1:] order.
             # We need to calculate how many B[N:] needed by 1st mfma.
-            # Complex multiplication uses later B operands before the extra wait.
             # If not UnrollMajorLDSB, we have packB which will be issued ahead.
             # If ConvertAfterDS and DataTypeB=FP8, we have cvtB which will be issued ahead.
             localReadsNotWaited = (self.states.numReadsPerIterB//kernel["InnerUnroll"] - self.states.numReadsPerUnrollB) * readFactorB
