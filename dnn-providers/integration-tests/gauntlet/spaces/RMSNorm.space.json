@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "RMSNorm",
-  "description": "RMSNorm forward (inference, scale and bias) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16, mixed precision with a low-precision x and float y/scale/bias as in the quick sweeps, scale and bias covering a trailing suffix of the dims (leading dims 1). Template: quick RMSNorm/Variant4.",
+  "description": "RMSNorm forward (inference, scale and bias) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16, mixed precision with a low-precision x and float y/scale/bias as in the quick sweeps, scale and bias covering a trailing suffix of the dims (leading dims 1). Template: quick RMSNorm/Variant4. The domain axis fills x (uid 4); the nan and inf domains put the special fill on scale and bias (uids 3 and 1), which a normalized element meets only elementwise, and leave x at free(-1,1), because a non-finite x element would spread over its whole normalized row through the mean of squares; every other domain fills scale and bias free(-1,1), the harness default.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/RMSNorm/Variant4/graph.template.json",
   "axes": {
@@ -15,7 +15,7 @@
     "h":       {"range": [1, 128], "boundaries": [1, 2, 3, 64, 128]},
     "w":       {"range": [1, 512], "boundaries": [1, 2, 31, 32, 33, 64, 127, 128, 129, 256, 512]},
     "k":       {"values": [1, 2, 3, 4]},
-    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant"], "late": true}
+    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true}
   },
   "derive": {
     "d":       "d3 if ndim == 5 else 1",
@@ -38,10 +38,16 @@
     "ps_n":    "pc * pd * ph * pw",
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain))",
     "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
     "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
-    "dom_value": "0.5 if domain == 'constant' else 0"
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "32 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "dom_x_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "dom_p_kind": "'special' if domain in ['nan', 'inf'] else 'free'"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes"},
@@ -61,8 +67,11 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "4": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+        "1": {"kind": "${dom_p_kind}", "lo": -1, "hi": 1, "value": 0, "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_p_kind}", "lo": -1, "hi": 1, "value": 0, "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "4": {"kind": "${dom_x_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
     }
   }

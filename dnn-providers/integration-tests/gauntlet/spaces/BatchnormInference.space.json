@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "BatchnormInference",
-  "description": "BatchNorm forward inference (spatial mode, estimated mean and inverse variance as inputs) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x with float scale, bias, mean and inv-variance, y in x's dtype or widened to float (the 'upcast' sweep cases; the inference kernel takes its output type separately, BatchNormFwdInferSpatial.cpp:8, and the reference signature keys register y in {x dtype, float} only, GpuBatchnormFwdInfSignatureKey.hpp:113-147), hw and c swept around the vector-width cut points (inCstride % 4, c % 4, % 2 in computeVectorSize, PlanUtils.hpp:69-84) and powers of two +-1. N*H*W may be 1: inference uses stored statistics (BatchnormInferenceNode.hpp:119). Template: quick BatchnormInference/Default (the only inference topology; BatchnormInferenceVarianceExt is a separate op). The quick sweep sets no metadata.inputs, so the harness op defaults (mean -0.1..0.1, inv_variance 0.5..1.5, FillInputs.cpp:94-95) apply to the other inputs. The last axis, domain (default/narrow/wide/positive/constant), renders the fill of x (uid 1); default is the harness default -1..1.",
+  "description": "BatchNorm forward inference (spatial mode, estimated mean and inverse variance as inputs) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x with float scale, bias, mean and inv-variance, y in x's dtype or widened to float (the 'upcast' sweep cases; the inference kernel takes its output type separately, BatchNormFwdInferSpatial.cpp:8, and the reference signature keys register y in {x dtype, float} only, GpuBatchnormFwdInfSignatureKey.hpp:113-147), hw and c swept around the vector-width cut points (inCstride % 4, c % 4, % 2 in computeVectorSize, PlanUtils.hpp:69-84) and powers of two +-1. N*H*W may be 1: inference uses stored statistics (BatchnormInferenceNode.hpp:119). Template: quick BatchnormInference/Default (the only inference topology; BatchnormInferenceVarianceExt is a separate op). The quick sweep sets no metadata.inputs, so the harness op defaults (mean -0.1..0.1, inv_variance 0.5..1.5, FillInputs.cpp:94-95) apply to the other inputs. The last axis, domain (default/narrow/wide/positive/constant/nonzero/zeros/large/subnormal/nan/inf), renders the fill of x (uid 1); default is the harness default -1..1; large keeps scale 32. Inference is elementwise in x, so nan and inf put the special fill (5% of elements, at least one) on x itself: only those y positions are non-finite and the rest stay finite (only a one-element x makes y entirely non-finite, which fails under match_nonfinite by design). The validator is match_nonfinite exactly for nan and inf.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/BatchnormInference/Default/graph.template.json",
   "axes": {
@@ -14,7 +14,7 @@
     "hw":      {"range": [1, 8192], "boundaries": [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 255, 256, 257, 1024, 1025, 4095, 4096, 4097]},
     "hs":      {"values": [1, 2, 3, 4, 5, 8, 16, 64]},
     "ds":      {"values": [1, 2, 3, 4]},
-    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant"]}
+    "domain":  {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
   },
   "derive": {
     "ydt":     "'float' if y_float else dtype",
@@ -30,10 +30,15 @@
     "xs_n":    "c * d * h * w",
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[c, 1, 1, 1] if ndim == 4 else [c, 1, 1, 1, 1]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'nonzero' if domain == 'nonzero' else 'zeros' if domain == 'zeros' else 'large' if domain == 'large' else 'subnormal' if domain == 'subnormal' else 'free'",
     "dom_lo":    "-0.01 if domain == 'narrow' else -8.0 if domain == 'wide' else 0.25 if domain == 'positive' else 0.5 if domain == 'constant' else -1.0",
     "dom_hi":    "0.01 if domain == 'narrow' else 8.0 if domain == 'wide' else 4.0 if domain == 'positive' else 0.5 if domain == 'constant' else 1.0",
-    "dom_value": "0.5 if domain == 'constant' else 0.0"
+    "dom_value": "0.5 if domain == 'constant' else 0.0",
+    "dom_scale": "32.0 if domain == 'large' else 1.0",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "xk":        "'special' if domain in ['nan', 'inf'] else dom_kind"
   },
   "constraints": [
     {"rule": "n * c * hw <= 2**30", "reason": "GPU reference cost ceiling for normalization ops (RFC 0023 section 14); also keeps every extent inside the checkedNarrowToInt int range the inference plan requires (BatchnormFwdInferencePlan.cpp:137-158, PlanUtils.hpp:19)"}
@@ -52,8 +57,9 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+        "1": {"kind": "${xk}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
     }
   }

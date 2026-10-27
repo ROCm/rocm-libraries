@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "RMSNormBackward",
-  "description": "RMSNorm backward (dx, dscale and dbias outputs, saved inverse RMS as a graph input) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (RMSnormBwdPlan.cpp:120, IValidator::validateDimensionCount ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale and dbias that the engine and both references accept (pure, mixed io, mixed affine, float x with half or bfloat16 dy) with a float inverse RMS, scale, dscale and dbias covering a trailing suffix of the dims (leading dims 1) and inv_rms keeping the leading dims (suffix dims 1). Axis k is the first normalized axis, as in the RMSNorm space. x and dx always share one dtype, as in every quick row. The inv_rms fill range 0.9 to 1.5 is the quick sweep's tuned range for uid 4. Template: quick RMSNormBackward/Default, the topology with the full tensor set (dbias output).",
+  "description": "RMSNorm backward (dx, dscale and dbias outputs, saved inverse RMS as a graph input) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (RMSnormBwdPlan.cpp:120, IValidator::validateDimensionCount ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale and dbias that the engine and both references accept (pure, mixed io, mixed affine, float x with half or bfloat16 dy) with a float inverse RMS, scale, dscale and dbias covering a trailing suffix of the dims (leading dims 1) and inv_rms keeping the leading dims (suffix dims 1). Axis k is the first normalized axis, as in the RMSNorm space. x and dx always share one dtype, as in every quick row. The inv_rms fill range 0.9 to 1.5 is the quick sweep's tuned range for uid 4. Template: quick RMSNormBackward/Default, the topology with the full tensor set (dbias output). Domain axis: x and dy take the domain fill, with large narrowed to scale 4 because dscale and dbias are sums of dy*x*rstd and dy over the batch groups and overflow half at scale 32; the nan and inf domains put the special fill on inv_rms (uid 4, range 0.9 to 1.5 for the finite elements), which is per-group: only the dx elements of poisoned groups go non-finite and dbias (a sum of dy) stays finite, while x and dy stay free(-1,1).",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/RMSNormBackward/Default/graph.template.json",
   "axes": {
@@ -16,7 +16,7 @@
     "h":        {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
     "w":        {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
     "k":        {"values": [1, 2, 3, 4]},
-    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant"]}
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
   },
   "derive": {
     "d":       "d3 if ndim == 5 else 1",
@@ -50,10 +50,16 @@
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
     "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
-    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
-    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
-    "dom_value": "0.5 if domain == 'constant' else 0"
+    "dm":            "'default' if domain in ['nan', 'inf'] else domain",
+    "dom_kind":      "dm if dm in ['nonzero', 'zeros', 'large', 'subnormal'] else ('fixed' if dm == 'constant' else 'free')",
+    "dom_lo":        "-0.01 if dm == 'narrow' else (-8 if dm == 'wide' else (0.25 if dm == 'positive' else (0.5 if dm == 'constant' else -1)))",
+    "dom_hi":        "0.01 if dm == 'narrow' else (8 if dm == 'wide' else (4 if dm == 'positive' else (0.5 if dm == 'constant' else 1)))",
+    "dom_value":     "0.5 if dm == 'constant' else 0",
+    "dom_scale":     "4 if dm == 'large' else 1",
+    "dom_special":   "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction":  "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the first normalized axis must be one of the non-batch axes: scale dim 0 must be 1 and the normalized suffix must start after it (detail/Utilities.hpp:323 validateScaleNormalizedShape, called from RMSNormBackwardNode.hpp:87)"},
@@ -74,10 +80,11 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
-        "4": {"kind": "free", "lo": 0.8999999761581421, "hi": 1.5},
-        "6": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "4": {"kind": "${poi_kind}", "lo": 0.8999999761581421, "hi": 1.5, "value": 0, "scale": 1, "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "6": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
     }
   }

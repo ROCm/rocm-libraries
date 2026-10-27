@@ -369,6 +369,20 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
+    // A case that asked for the host-only match_nonfinite validator cannot be graded under an
+    // explicit --validator gpu. Said before the engine runs, not after it has spent its time.
+    if(_bundle->metadata.validator == CaseValidator::MATCH_NONFINITE
+       && _deps.policy.validator == ValidatorDevice::GPU)
+    {
+        return VerificationOutcome::failed(
+                   VerificationDepth::NOT_REACHED,
+                   FailureOrigin::HARNESS,
+                   "this case selects the host-only validator match_nonfinite, which cannot run "
+                   "under --validator gpu; run it with --validator auto or --validator cpu ("
+                       + _bundlePath.string() + ")")
+            .atStage(OutcomeStage::SETUP);
+    }
+
     // A graph the engine declined never reads its inputs: every mode below reaches
     // runEngine() -- which reports the decline -- before anything touches
     // _inputs. Filling first made a declined graph pay the full host-side
@@ -807,11 +821,13 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
 
 // ---- engine + reference runs -----------------------------------------------
 
-OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
+OutputTensors
+    IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice,
+                                                                  bool payloadNanSentinel) const
 {
     const auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice);
+        wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice, payloadNanSentinel);
 }
 
 std::unordered_map<int64_t, void*>
@@ -848,7 +864,10 @@ IntegrationBundleVerificationHarness::EngineRunResult
         return run;
     }
 
-    run.outputs = allocateSentinelOutputs(_deps.policy.useDevice());
+    // With the non-finite mask on, NaN matches NaN, so the engine's outputs start as a NaN
+    // with a distinctive payload that the validator fails: an unwritten element cannot pass.
+    run.outputs = allocateSentinelOutputs(
+        _deps.policy.useDevice(), _bundle->metadata.validator == CaseValidator::MATCH_NONFINITE);
     auto variantPack = buildVariantPack(run.outputs, _deps.policy.useDevice());
 
     // The runner reports rather than asserts, so "the engine broke" is a value here
@@ -959,20 +978,23 @@ VerificationOutcome
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
+    const bool matchNonFinite = _bundle->metadata.validator == CaseValidator::MATCH_NONFINITE;
     const auto toleranceFor
         = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
               const float value = tolerance::defaultTolerance(wrapper, dataType);
-              return gradingForTensor(currentTestName(), label, value, value);
+              const auto resolved = gradingForTensor(currentTestName(), label, value, value);
+              // Layered on whatever kind the TOML resolved for this tensor, float outputs only.
+              return matchNonFinite ? withNonFiniteMask(resolved, dataType) : resolved;
           };
 
-    const auto mismatches
-        = bundle::compareOutputs(wrapper,
-                                 _bundle->outputTensorUids,
-                                 engineOutputs,
-                                 expectedFor,
-                                 toleranceFor,
-                                 resolveValidationSite(_deps.policy.validator, site),
-                                 "Bundle: " + _bundlePath.string() + inputFillNote());
+    const auto mismatches = bundle::compareOutputs(
+        wrapper,
+        _bundle->outputTensorUids,
+        engineOutputs,
+        expectedFor,
+        toleranceFor,
+        resolveValidationSite(_deps.policy.validator, site, matchNonFinite),
+        "Bundle: " + _bundlePath.string() + inputFillNote());
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.

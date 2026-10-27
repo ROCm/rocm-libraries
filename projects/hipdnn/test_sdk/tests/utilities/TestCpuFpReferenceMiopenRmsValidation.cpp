@@ -605,3 +605,208 @@ TYPED_TEST(CpuFpReferenceMiopenRmsValidationRagged, FailsForRaggedAgainstDense)
     EXPECT_FALSE(refValidation.allClose(ragged, dense));
     EXPECT_FALSE(refValidation.allClose(dense, ragged));
 }
+
+/* ======== Non-finite mask tests (TYPED_TEST across fp types) ======== */
+
+namespace
+{
+template <typename T>
+CpuFpReferenceMiopenRmsValidation<T>
+    makeMaskedRmsValidation(float tolerance,
+                            std::optional<uint64_t> unwrittenSentinelBits = std::nullopt)
+{
+    return CpuFpReferenceMiopenRmsValidation<T>(T(tolerance),
+                                                NonFiniteMask::matching(unwrittenSentinelBits));
+}
+} // namespace
+
+template <typename T>
+class CpuFpReferenceMiopenRmsValidationNonFiniteMask : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(CpuFpReferenceMiopenRmsValidationNonFiniteMask, RmsFpValidationTypes, );
+
+// Bug caught: a mask that never matches NaN or Inf, or one that changes the default (NaN and
+// Inf must keep failing when the mask is off).
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNonFiniteMask, MatchedNonFinitePositionsPass)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> strictValidation(TypeParam(1.0f));
+    const auto maskedValidation = makeMaskedRmsValidation<TypeParam>(0.01f);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> reference(dims);
+    Tensor<TypeParam> implementation(dims);
+    reference.fillTensorWithValue(1.0f);
+    implementation.fillTensorWithValue(1.0f);
+    for(auto* tensor : {&reference, &implementation})
+    {
+        tensor->setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+        tensor->setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 1);
+        tensor->setHostValue(-std::numeric_limits<TypeParam>::infinity(), 1, 0);
+    }
+
+    EXPECT_FALSE(strictValidation.allClose(reference, implementation));
+    EXPECT_TRUE(maskedValidation.allClose(reference, implementation));
+}
+
+// Bug caught: a non-finite position accepted against anything but its own kind. The tolerance
+// is 1.0 so that only the non-finite rule can produce the failure.
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNonFiniteMask, NonFiniteDisagreementFails)
+{
+    const auto maskedValidation = makeMaskedRmsValidation<TypeParam>(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
+    const TypeParam nanValue = std::numeric_limits<TypeParam>::quiet_NaN();
+    const TypeParam infValue = std::numeric_limits<TypeParam>::infinity();
+    const TypeParam one(1.0f);
+
+    const std::vector<std::pair<TypeParam, TypeParam>> disagreements = {{nanValue, one},
+                                                                        {one, nanValue},
+                                                                        {infValue, one},
+                                                                        {one, -infValue},
+                                                                        {infValue, -infValue},
+                                                                        {nanValue, infValue},
+                                                                        {-infValue, nanValue}};
+    for(const auto& [referenceValue, implementationValue] : disagreements)
+    {
+        Tensor<TypeParam> reference(dims);
+        Tensor<TypeParam> implementation(dims);
+        reference.fillTensorWithValue(1.0f);
+        implementation.fillTensorWithValue(1.0f);
+        reference.setHostValue(referenceValue, 0, 0);
+        implementation.setHostValue(implementationValue, 0, 0);
+
+        EXPECT_FALSE(maskedValidation.allClose(reference, implementation))
+            << "reference " << static_cast<float>(referenceValue) << ", implementation "
+            << static_cast<float>(implementationValue);
+    }
+}
+
+// Bug caught: the RMS normalizer counting or magnitude-scaling matched non-finite positions.
+// Eight elements, six of them matched non-finite, two finite: reference {1, 1}, implementation
+// {1, 0.5}. The RMS is over the finite elements only:
+//   sqrt(0.25) / (sqrt(2) * 1) = 0.3536.
+// Counting all eight elements would give 0.1768 and pass at 0.3; letting an infinity into the
+// magnitude would give 0 and pass at any tolerance. The real error must fail at 0.3 and pass
+// at 0.4.
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNonFiniteMask,
+           FiniteErrorIsMeasuredOverFiniteElementsOnly)
+{
+    const std::vector<int64_t> dims = {2, 4};
+
+    Tensor<TypeParam> reference(dims);
+    Tensor<TypeParam> implementation(dims);
+    reference.fillTensorWithValue(1.0f);
+    implementation.fillTensorWithValue(1.0f);
+    for(auto* tensor : {&reference, &implementation})
+    {
+        tensor->setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+        tensor->setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 1);
+        tensor->setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 2);
+        tensor->setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 3);
+        tensor->setHostValue(std::numeric_limits<TypeParam>::infinity(), 1, 0);
+        tensor->setHostValue(-std::numeric_limits<TypeParam>::infinity(), 1, 1);
+    }
+    implementation.setHostValue(TypeParam(0.5f), 1, 3);
+
+    EXPECT_FALSE(makeMaskedRmsValidation<TypeParam>(0.3f).allClose(reference, implementation));
+    EXPECT_TRUE(makeMaskedRmsValidation<TypeParam>(0.4f).allClose(reference, implementation));
+}
+
+// Bug caught: the mask changing the RMS of an all-finite tensor. It must equal the mask-off
+// value (see MiopenRmsCalculation: 0.0244).
+TEST(TestCpuFpReferenceMiopenRmsValidationNonFiniteMask, FiniteOnlyResultMatchesMaskOff)
+{
+    Tensor<double> reference({4});
+    Tensor<double> implementation({4});
+    for(int64_t i = 0; i < 4; ++i)
+    {
+        reference.setHostValue(static_cast<double>(i + 1), i);
+        implementation.setHostValue(static_cast<double>(i + 1) + 0.1, i);
+    }
+
+    EXPECT_TRUE(makeMaskedRmsValidation<double>(0.1f).allClose(reference, implementation));
+    EXPECT_FALSE(makeMaskedRmsValidation<double>(0.02f).allClose(reference, implementation));
+}
+
+// Bug caught: a vacuous pass. A reference with no finite element has nothing graded.
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNonFiniteMask, ReferenceWithNoFiniteElementFails)
+{
+    const auto maskedValidation = makeMaskedRmsValidation<TypeParam>(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> reference(dims);
+    Tensor<TypeParam> implementation(dims);
+    reference.fillTensorWithValue(std::numeric_limits<float>::quiet_NaN());
+    implementation.fillTensorWithValue(std::numeric_limits<float>::quiet_NaN());
+    EXPECT_FALSE(maskedValidation.allClose(reference, implementation));
+
+    reference.fillTensorWithValue(std::numeric_limits<float>::infinity());
+    implementation.fillTensorWithValue(std::numeric_limits<float>::infinity());
+    EXPECT_FALSE(maskedValidation.allClose(reference, implementation));
+
+    // One finite element, matched, is enough to grade.
+    reference.setHostValue(TypeParam(1.0f), 1, 1);
+    implementation.setHostValue(TypeParam(1.0f), 1, 1);
+    EXPECT_TRUE(maskedValidation.allClose(reference, implementation));
+}
+
+// Bug caught: an unwritten output element (still holding the harness fill) passing as
+// "NaN matches NaN". The sentinel bit pattern fails, an ordinary NaN passes, and with no
+// sentinel configured the validator cannot tell them apart.
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNonFiniteMask, SentinelBitPatternInImplementationFails)
+{
+    const auto sentinelBits = payloadNanSentinelBits<TypeParam>();
+    ASSERT_TRUE(sentinelBits.has_value());
+    const auto detectingValidation = makeMaskedRmsValidation<TypeParam>(1.0f, sentinelBits);
+    const auto blindValidation = makeMaskedRmsValidation<TypeParam>(1.0f);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> reference(dims);
+    Tensor<TypeParam> implementation(dims);
+    reference.fillTensorWithValue(1.0f);
+    implementation.fillTensorWithValue(1.0f);
+    reference.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+
+    implementation.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+    EXPECT_TRUE(detectingValidation.allClose(reference, implementation));
+
+    implementation.setHostValue(payloadNanSentinelValue<TypeParam>(), 0, 0);
+    EXPECT_FALSE(detectingValidation.allClose(reference, implementation));
+    EXPECT_TRUE(blindValidation.allClose(reference, implementation));
+}
+
+// Bug caught: the factory dropping the mask or the sentinel on the way to the validator, and
+// the default factory changing behavior.
+TEST(TestCpuFpReferenceMiopenRmsValidationNonFiniteMask, FactoryBuildsTheMaskedComparison)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto strictValidation = createRmsValidator(DataType::FLOAT, 0.01f);
+    const auto maskedValidation = createRmsMatchingNonFiniteValidator(
+        DataType::FLOAT, 0.01f, payloadNanSentinelBits(DataType::FLOAT));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<float> reference(dims);
+    Tensor<float> implementation(dims);
+    reference.fillTensorWithValue(1.0f);
+    implementation.fillTensorWithValue(1.0f);
+    reference.setHostValue(std::numeric_limits<float>::quiet_NaN(), 0, 0);
+    implementation.setHostValue(std::numeric_limits<float>::quiet_NaN(), 0, 0);
+
+    EXPECT_FALSE(strictValidation->allClose(reference, implementation));
+    EXPECT_TRUE(maskedValidation->allClose(reference, implementation));
+
+    implementation.setHostValue(payloadNanSentinelValue<float>(), 0, 0);
+    EXPECT_FALSE(maskedValidation->allClose(reference, implementation));
+}
+
+// Bug caught: unsupported data types silently accepted when the mask is requested, and a
+// sentinel wider than the element type (which can never match) silently disabling detection.
+TEST(TestCpuFpReferenceMiopenRmsValidationNonFiniteMask, FactoryRejectsUnsupportedRequests)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    EXPECT_THROW(createRmsMatchingNonFiniteValidator(DataType::INT32, 0.01f), std::runtime_error);
+    EXPECT_THROW(createRmsMatchingNonFiniteValidator(
+                     DataType::HALF, 0.01f, payloadNanSentinelBits<double>()),
+                 std::invalid_argument);
+}

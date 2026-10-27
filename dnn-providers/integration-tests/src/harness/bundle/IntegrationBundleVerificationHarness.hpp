@@ -600,7 +600,7 @@ private:
     std::optional<VerificationOutcome> prepareInputs();
     std::optional<VerificationOutcome> fillBundleInputs();
 
-    OutputTensors allocateSentinelOutputs(bool onDevice) const;
+    OutputTensors allocateSentinelOutputs(bool onDevice, bool payloadNanSentinel = false) const;
     std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;

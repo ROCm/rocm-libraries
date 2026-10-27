@@ -572,17 +572,36 @@ def test_gfx950_dense_space_obeys_the_rocke_rules():
 
 
 # --------------------------------------------------------------------------
-# S13 phase 1: the domain axis and the late-axis mechanism
+# S13: the domain axis (phase 1 ranges, phase 2 fill kinds) and the late-axis mechanism
 # --------------------------------------------------------------------------
 
-DOMAINS = ["default", "narrow", "wide", "positive", "constant"]
-# kind, lo, hi, value of the fill recipe a domain renders for a primary data operand
+DOMAINS = [
+    "default", "narrow", "wide", "positive", "constant",
+    "nonzero", "zeros", "large", "subnormal", "nan", "inf",
+]  # fmt: skip
+POISONING_DOMAINS = ("nan", "inf")
+# What a domain renders for a primary data operand:
+# kind, lo, hi, value, scale, special, fraction, case validator
 DOMAIN_TABLE = {
-    "default": ("free", -1, 1, 0),
-    "narrow": ("free", -0.01, 0.01, 0),
-    "wide": ("free", -8, 8, 0),
-    "positive": ("free", 0.25, 4, 0),
-    "constant": ("fixed", 0.5, 0.5, 0.5),
+    "default": ("free", -1, 1, 0, 1, "nan", 0.05, "default"),
+    "narrow": ("free", -0.01, 0.01, 0, 1, "nan", 0.05, "default"),
+    "wide": ("free", -8, 8, 0, 1, "nan", 0.05, "default"),
+    "positive": ("free", 0.25, 4, 0, 1, "nan", 0.05, "default"),
+    "constant": ("fixed", 0.5, 0.5, 0.5, 1, "nan", 0.05, "default"),
+    "nonzero": ("nonzero", -1, 1, 0, 1, "nan", 0.05, "default"),
+    "zeros": ("zeros", -1, 1, 0, 1, "nan", 0.05, "default"),
+    "large": ("large", -1, 1, 0, 32, "nan", 0.05, "default"),
+    "subnormal": ("subnormal", -1, 1, 0, 1, "nan", 0.05, "default"),
+    "nan": ("special", -1, 1, 0, 1, "nan", 0.05, "match_nonfinite"),
+    "inf": ("special", -1, 1, 0, 1, "inf", 0.05, "match_nonfinite"),
+}
+LEAF_KEYS = ("kind", "lo", "hi", "value", "scale", "special", "fraction")
+# the `large` scale of the spaces whose arithmetic would leave the half range at 32
+LARGE_SCALE = {
+    "LayernormBackward/Default": 4,
+    "RMSNormBackward/Default": 4,
+    "SdpaFwd/Default": 8,
+    "SdpaFwd/Gfx950Dense": 8,
 }
 # the tensors (by template name) whose fill the domain axis drives, per space
 PRIMARY_OPERANDS = {
@@ -597,6 +616,21 @@ PRIMARY_OPERANDS = {
     "SdpaFwd/Default": ["Q", "K", "V"],
     "SdpaFwd/Gfx950Dense": ["Q", "K", "V"],
 }
+# The operands that carry the `special` fill in the nan and inf domains, per space. The other
+# primary operands keep the default range there. Each choice keeps the non-finite positions
+# of the output local to the operand (the description of each space says why).
+POISONED_OPERANDS = {
+    "Batchnorm/Default": ["prev_running_mean", "prev_running_variance", "scale"],
+    "BatchnormBackward/Default": ["scale"],
+    "BatchnormInference/Default": ["X"],
+    "Layernorm/Default": ["bias", "scale"],
+    "LayernormBackward/Default": ["rstd"],
+    "RMSNorm/Default": ["bias", "scale"],
+    "RMSNormBackward/Default": ["inv_rms"],
+    "ResampleFwd/Default": ["X"],
+    "SdpaFwd/Default": ["V"],
+    "SdpaFwd/Gfx950Dense": ["V"],
+}
 # sha256 over seeds 0..299 of the pre-existing axes' draws, taken before the domain axis existed
 OLD_SHAPE_DIGESTS = {
     "RMSNorm/Default": "7ff3fe8bdf5afd4845a1bf5e631466fe1cb0bfd55a4056059dae694deed4b8f3",
@@ -605,39 +639,66 @@ OLD_SHAPE_DIGESTS = {
 }
 
 
-def test_every_shipped_space_has_its_primary_operands_listed():
+def test_every_shipped_space_has_its_operands_listed():
     assert sorted(PRIMARY_OPERANDS) == SPACE_IDS
+    assert sorted(POISONED_OPERANDS) == SPACE_IDS
     assert sorted(OLD_SHAPE_DIGESTS) == [
         "RMSNorm/Default", "SdpaFwd/Default", "SdpaFwd/Gfx950Dense",
     ]  # fmt: skip
 
 
 @pytest.mark.parametrize("space_id", SPACE_IDS)
-def test_domain_is_the_last_axis_with_the_five_values(space_id):
-    # bug caught: a domain axis in the middle shifts the draws of the axes after it, and a
-    # misspelled value is never rendered by the derive chain
+def test_domain_is_the_last_axis_with_the_eleven_values_in_order(space_id):
+    # bug caught: a domain axis in the middle shifts the draws of the axes after it, a
+    # reordered or misspelled value is never rendered by the derive chain, and an old value
+    # that moves changes what recorded domain seeds mean
     sp = space_by_id(space_id)
     assert list(sp.axes)[-1] == "domain"
     assert sp.axes["domain"].values == DOMAINS
-    drawn = {sampler.sample(sp, seed).axis_values["domain"] for seed in range(200)}
+    drawn = {sampler.sample(sp, seed).axis_values["domain"] for seed in range(300)}
     assert drawn == set(DOMAINS)
+
+
+def _rendered_by_domain(sp, seed=11):
+    """The case metadata a legal sample renders under every domain value."""
+    sample = sampler.sample(sp, seed)
+    return {
+        domain: sp.render(sp.derive_env(dict(sample.axis_values, domain=domain)))[
+            "metadata"
+        ]
+        for domain in DOMAINS
+    }
 
 
 @pytest.mark.parametrize("space_id", SPACE_IDS)
 def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
-    # bug caught: a domain that reaches the wrong uid, drops a leaf, or overrides the
+    # bug caught: a domain that reaches the wrong uid, drops a leaf, poisons an operand the
+    # description does not name, sets the validator for a finite domain, or overrides the
     # tuned ranges of the saved statistics or of the default domain
     sp = space_by_id(space_id)
     template = json.loads(sp.template_path.read_text())
     uid_of = {t["name"]: str(t["uid"]) for t in template["tensors"]}
     primary = [uid_of[name] for name in PRIMARY_OPERANDS[space_id]]
+    poisoned = [uid_of[name] for name in POISONED_OPERANDS[space_id]]
     quick = json.loads((sp.template_path.parent / "sweep.json").read_text())["cases"]
-    sample = sampler.sample(sp, 11)
-    rendered = {}
-    for domain, (kind, lo, hi, value) in DOMAIN_TABLE.items():
-        case = sp.render(sp.derive_env(dict(sample.axis_values, domain=domain)))
-        assert case["metadata"]["purpose"] == "probe"
-        inputs = rendered[domain] = case["metadata"]["inputs"]
+    metas = _rendered_by_domain(sp)
+    default = metas["default"]["inputs"]
+    for domain, (
+        kind,
+        lo,
+        hi,
+        value,
+        scale,
+        special,
+        fraction,
+        validator,
+    ) in DOMAIN_TABLE.items():
+        meta = metas[domain]
+        inputs = meta["inputs"]
+        assert meta["purpose"] == "probe"
+        assert meta["validator"] == validator
+        if domain == "large":
+            scale = LARGE_SCALE.get(space_id, scale)
         for uid in primary:
             leaf = inputs[uid]
             if domain == "default":
@@ -656,15 +717,89 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
                         for t_lo, t_hi in tuned
                     ), (uid, leaf, tuned)
                     lo, hi = leaf["lo"], leaf["hi"]
-            assert leaf == {"kind": kind, "lo": lo, "hi": hi, "value": value}, (
-                space_id, domain, uid, leaf,
-            )  # fmt: skip
+            if domain in POISONING_DOMAINS and uid not in poisoned:
+                # a primary operand that is not poisoned keeps the default range
+                keep = ("kind", "lo", "hi", "value")
+                assert {k: leaf[k] for k in keep} == {k: default[uid][k] for k in keep}, (
+                    space_id, domain, uid, leaf,
+                )  # fmt: skip
+                continue
+            expected = dict(
+                zip(LEAF_KEYS, (kind, lo, hi, value, scale, special, fraction))
+            )
+            assert {k: leaf[k] for k in LEAF_KEYS} == expected, (
+                space_id,
+                domain,
+                uid,
+                leaf,
+            )
+        for uid in poisoned:
+            if uid in primary:
+                continue
+            leaf = inputs[uid]
+            if domain in POISONING_DOMAINS:
+                assert (leaf["kind"], leaf["special"], leaf["fraction"]) == (
+                    "special", special, fraction,
+                ), (space_id, domain, uid, leaf)  # fmt: skip
+                # the finite share keeps the range the operand has without poison
+                assert (leaf["lo"], leaf["hi"]) == (
+                    default[uid]["lo"],
+                    default[uid]["hi"],
+                )
+            else:
+                keep = ("kind", "lo", "hi")
+                assert {k: leaf[k] for k in keep} == {k: default[uid][k] for k in keep}
+    # every other entry is literal and does not move with the domain
     others = {
-        domain: {u: e for u, e in inputs.items() if u not in primary}
-        for domain, inputs in rendered.items()
+        domain: {
+            u: e
+            for u, e in meta["inputs"].items()
+            if u not in primary and u not in poisoned
+        }
+        for domain, meta in metas.items()
     }
     assert all(o == others["default"] for o in others.values()), others
-    assert all(set(primary) <= set(i) for i in rendered.values())
+    assert all(set(primary + poisoned) <= set(m["inputs"]) for m in metas.values())
+
+
+@pytest.mark.parametrize("space_id", SPACE_IDS)
+def test_rendered_metadata_has_only_what_the_harness_accepts(space_id):
+    # bug caught: a metadata key or fill leaf the strict C++ parsers reject
+    # (BundleMetadata.hpp validator, InputFillRecipes.hpp parseFill) fails every case of
+    # the space at load, and a misspelled leaf value does so for one domain only
+    sp = space_by_id(space_id)
+    kinds = {"free", "fixed", "nonzero", "zeros", "large", "subnormal", "special"}
+    entry_keys = set(LEAF_KEYS) | {"seed"}
+
+    def number(x):
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    for domain, meta in _rendered_by_domain(sp).items():
+        assert set(meta) <= {"purpose", "validator", "inputs"}, (domain, set(meta))
+        assert meta["validator"] in ("default", "match_nonfinite")
+        for uid, leaf in meta["inputs"].items():
+            assert uid.isdigit() and set(leaf) <= entry_keys, (domain, uid, leaf)
+            assert leaf["kind"] in kinds, (domain, uid, leaf)
+            for key in ("lo", "hi", "value", "scale", "fraction"):
+                assert key not in leaf or number(leaf[key]), (domain, uid, key, leaf)
+            if leaf["kind"] in ("free", "nonzero", "special"):
+                assert leaf["lo"] <= leaf["hi"], (domain, uid, leaf)
+            if leaf["kind"] == "large":
+                assert leaf["scale"] > 0, (domain, uid, leaf)
+            if leaf["kind"] == "special":
+                assert leaf["special"] in ("nan", "inf", "-inf"), (domain, uid, leaf)
+                assert 0 <= leaf["fraction"] <= 1, (domain, uid, leaf)
+    allowed = {
+        "format_version",
+        "generator",
+        "notes",
+        "purpose",
+        "seed",
+        "validator",
+        "inputs",
+    }
+    for seed in range(40):
+        assert set(sampler.sample(sp, seed).row["metadata"]) <= allowed
 
 
 @pytest.mark.parametrize("space_id", sorted(OLD_SHAPE_DIGESTS))

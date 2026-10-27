@@ -157,6 +157,29 @@ TEST(TestResolveValidationSite, AutoFollowsTheReferenceAndAnExplicitDeviceOverri
     }
 }
 
+// Bug caught: a host-only validator selected by the case being sent to the device because the
+// reference left its output there (a GPU reference), or an explicit --validator gpu silently
+// overridden instead of reported.
+TEST(TestResolveValidationSite, ACaseThatNeedsTheHostForcesItAndRefusesAnExplicitGpu)
+{
+    using hipdnn_integration_tests::resolveValidationSite;
+    using hipdnn_integration_tests::ValidationSite;
+    using hipdnn_integration_tests::ValidatorDevice;
+
+    for(const auto referenceSite : {ValidationSite::HOST, ValidationSite::DEVICE})
+    {
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::AUTO, referenceSite, true),
+                  ValidationSite::HOST);
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::CPU, referenceSite, true),
+                  ValidationSite::HOST);
+        EXPECT_THROW(resolveValidationSite(ValidatorDevice::GPU, referenceSite, true),
+                     std::invalid_argument);
+        // The default is the old behaviour.
+        EXPECT_EQ(resolveValidationSite(ValidatorDevice::AUTO, referenceSite, false),
+                  referenceSite);
+    }
+}
+
 TEST(TestResolveGoldenDataDir, CliValueWinsOverEnv)
 {
     using hipdnn_integration_tests::resolveGoldenDataDir;

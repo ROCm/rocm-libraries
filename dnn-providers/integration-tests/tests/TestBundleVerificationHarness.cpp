@@ -663,4 +663,234 @@ TEST_F(TestGoldenHarnessFixture, RaggedInBlockMismatchYieldsFail)
     EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
+namespace
+{
+
+HarnessPolicy devicePolicy()
+{
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+    policy.placement = TensorPlacement::DEVICE;
+    return policy;
+}
+
+// Writes the golden value into the whole output the way a working engine would, through the
+// pointer the engine was handed, and records the address of every buffer it saw.
+void engineWritesThroughTheDevicePointer(testing_support::HarnessMocks& mocks,
+                                         std::unordered_map<int64_t, std::uintptr_t>& seen,
+                                         bool writeOutput)
+{
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([&seen, writeOutput](GraphSession&,
+                                            const std::optional<LoadedEngine>&,
+                                            VariantPack& variantPack) {
+            for(const auto& [uid, pointer] : variantPack)
+            {
+                seen[uid] = reinterpret_cast<std::uintptr_t>(pointer);
+            }
+            if(writeOutput)
+            {
+                const std::vector<float> value(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+                EXPECT_EQ(hipMemcpy(variantPack.at(fixtures::K_OUTPUT_UID),
+                                    value.data(),
+                                    value.size() * sizeof(float),
+                                    hipMemcpyHostToDevice),
+                          hipSuccess);
+            }
+            return EngineOpResult::succeeded();
+        });
+}
+
+} // namespace
+
+// Bug caught: a placement that never reaches the engine run (every pointer still 2N-aligned),
+// or one that breaks the run it was meant to leave intact (inputs lost, outputs not copied back).
+TEST_F(TestGoldenHarnessFixture, ExactPlacementReachesTheEngineAndTheRunStillPasses)
+{
+    SKIP_IF_NO_DEVICES();
+    testing_support::HarnessMocks mocks;
+    std::unordered_map<int64_t, std::uintptr_t> seen;
+    engineWritesThroughTheDevicePointer(mocks, seen, /*writeOutput=*/true);
+
+    auto bundle = loadRunnableBundle("exact_placement");
+    bundle->metadata.placement = CasePlacement::EXACT;
+
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(devicePolicy()));
+    harness.setBundle(std::move(bundle), "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_EQ(seen.size(), 6u) << "x, mean, inv_variance, scale, bias and y are all device buffers";
+    for(const auto& [uid, address] : seen)
+    {
+        EXPECT_EQ(address % 16u, 0u) << "uid " << uid;
+        EXPECT_NE(address % 32u, 0u) << "uid " << uid << " is still aligned to 2N";
+    }
+}
+
+// Bug caught: copy-back dressing an unwritten output up as written, so a placed run could not
+// fail an engine that never wrote its output (the very thing the sentinel exists to catch).
+TEST_F(TestGoldenHarnessFixture, ExactPlacementKeepsAnUnwrittenOutputWrong)
+{
+    SKIP_IF_NO_DEVICES();
+    testing_support::HarnessMocks mocks;
+    std::unordered_map<int64_t, std::uintptr_t> seen;
+    engineWritesThroughTheDevicePointer(mocks, seen, /*writeOutput=*/false);
+
+    auto bundle = loadRunnableBundle("unwritten_placement");
+    bundle->metadata.placement = CasePlacement::EXACT;
+
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(devicePolicy()));
+    harness.setBundle(std::move(bundle), "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "an output the engine never wrote must still fail after the copy-back";
+}
+
+// Bug caught: a reference run, or an unplaced case, picking up the placement: the same bundle
+// without `placement` must hand the engine the allocator's own pointers.
+TEST_F(TestGoldenHarnessFixture, DefaultPlacementHandsTheEngineTheAllocatorsPointers)
+{
+    SKIP_IF_NO_DEVICES();
+    testing_support::HarnessMocks mocks;
+    std::unordered_map<int64_t, std::uintptr_t> seen;
+    engineWritesThroughTheDevicePointer(mocks, seen, /*writeOutput=*/true);
+
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(devicePolicy()));
+    harness.setBundle(loadRunnableBundle("default_placement"), "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_EQ(seen.size(), 6u);
+    for(const auto& [uid, address] : seen)
+    {
+        EXPECT_EQ(address % 256u, 0u) << "uid " << uid << " moved without a placement";
+    }
+}
+
+// ---- the non-finite mask ------------------------------------------------------------------
+
+namespace
+{
+
+constexpr float K_QUIET_NAN = std::numeric_limits<float>::quiet_NaN();
+constexpr float K_POSITIVE_INF = std::numeric_limits<float>::infinity();
+
+// The golden y: 3.5 everywhere except a NaN, a +inf and a -inf, which are what a correct
+// engine produces for the poisoned inputs of a `special` domain.
+std::vector<float> goldenWithNonFinite()
+{
+    std::vector<float> golden(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+    golden[3] = K_QUIET_NAN;
+    golden[7] = K_POSITIVE_INF;
+    golden[9] = -K_POSITIVE_INF;
+    return golden;
+}
+
+// The fixture bundle, with `golden` as its y.
+std::shared_ptr<IntegrationTestBundle> loadBundleWithGolden(const std::filesystem::path& parent,
+                                                            const std::string& name,
+                                                            const std::vector<float>& golden)
+{
+    const auto dir = parent / name;
+    fixtures::writeBundleFiles(dir, name, /*includeGoldenOutput=*/true);
+    {
+        std::ofstream out((dir / name).string() + ".tensor" + std::to_string(fixtures::K_OUTPUT_UID)
+                              + ".bin",
+                          std::ios::binary);
+        out.write(reinterpret_cast<const char*>(golden.data()),
+                  static_cast<std::streamsize>(golden.size() * sizeof(float)));
+    }
+    return fixtures::loadWrittenBundle(dir, name);
+}
+
+// An engine that writes `values` into y, except at `skip`, which it never touches.
+void engineWritesExcept(testing_support::HarnessMocks& mocks,
+                        const std::vector<float>& values,
+                        std::optional<std::size_t> skip)
+{
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([values, skip](GraphSession&,
+                                      const std::optional<LoadedEngine>&,
+                                      VariantPack& variantPack) {
+            auto* y = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            for(std::size_t i = 0; i < values.size(); ++i)
+            {
+                if(!skip.has_value() || i != *skip)
+                {
+                    y[i] = values[i];
+                }
+            }
+            return EngineOpResult::succeeded();
+        });
+}
+
+} // namespace
+
+// Bug caught: the mask never reaching the harness comparison (a correct NaN, +inf and -inf
+// still fail), or being on for every case (the same pair passing without it).
+TEST_F(TestGoldenHarnessFixture, MaskedNonFiniteOutputsMatchByPositionAndUnmaskedOnesFail)
+{
+    for(const bool masked : {true, false})
+    {
+        testing_support::HarnessMocks mocks;
+        engineWritesExcept(mocks, goldenWithNonFinite(), std::nullopt);
+
+        auto bundle = loadBundleWithGolden(
+            _tempDir, masked ? "masked_nonfinite" : "unmasked_nonfinite", goldenWithNonFinite());
+        bundle->metadata.validator
+            = masked ? CaseValidator::MATCH_NONFINITE : CaseValidator::DEFAULT;
+
+        ::testing::TestPartResultArray results;
+        runCapturing(mocks, std::move(bundle), &results);
+
+        EXPECT_EQ(testing_support::anyFailed(results), !masked)
+            << (masked ? "masked" : "unmasked") << ": " << testing_support::allMessages(results);
+    }
+}
+
+// Bug caught: an output element the engine never wrote passing because the golden value there is
+// a NaN and the sentinel is a NaN too. The engine's output starts as a payload NaN, and an
+// element still holding it fails even though NaN matches NaN everywhere else.
+TEST_F(TestGoldenHarnessFixture, MaskedRunFailsAnOutputElementTheEngineNeverWrote)
+{
+    testing_support::HarnessMocks mocks;
+    // Everything written except element 3, which is NaN in the golden data.
+    engineWritesExcept(mocks, goldenWithNonFinite(), 3);
+
+    auto bundle = loadBundleWithGolden(_tempDir, "unwritten_nan", goldenWithNonFinite());
+    bundle->metadata.validator = CaseValidator::MATCH_NONFINITE;
+
+    ::testing::TestPartResultArray results;
+    runCapturing(mocks, std::move(bundle), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "the unwritten element still holds the sentinel and must fail";
+}
+
+// Bug caught: the host-only validator running under --validator gpu (which would read device
+// memory through host pointers) or silently overriding the flag; the conflict is reported, and
+// before the engine has spent its time.
+TEST_F(TestGoldenHarnessFixture, MaskedCaseUnderAnExplicitGpuValidatorIsAConfigurationError)
+{
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    auto bundle = loadBundleWithGolden(_tempDir, "masked_gpu_validator", goldenWithNonFinite());
+    bundle->metadata.validator = CaseValidator::MATCH_NONFINITE;
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+    policy.validator = ValidatorDevice::GPU;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(std::move(policy)));
+    harness.setBundle(std::move(bundle), "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("--validator gpu"), std::string::npos)
+        << testing_support::allMessages(results);
+}
 // NOLINTEND(readability-identifier-naming)

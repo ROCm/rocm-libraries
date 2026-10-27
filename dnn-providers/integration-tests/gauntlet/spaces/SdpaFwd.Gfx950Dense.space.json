@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64).",
+  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64). The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 128-wide head stay inside the half range before the softmax scale. The nan and inf domains put the special fill on V alone and leave Q and K at free(-1,1): a non-finite Q or K element spreads over a whole softmax row, while one in V reaches only its own head-dim column of the output; no operand is elementwise-local, so most samples with a long kv sequence turn every output element non-finite and fail the non-finite mask by design.",
   "engine": "hipkernel:Gfx950AttentionDense",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
@@ -15,7 +15,7 @@
     "skv_n":    {"range": [1, 64], "boundaries": [1, 2, 4, 8, 16, 64]},
     "causal":   {"values": [false, true]},
     "scale":    {"values": [5.421010862427522e-20, 0.0625, 0.0883883461356163, 0.125, 0.25, 1.0, 4.0, 16.0]},
-    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant"], "late": true}
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"], "late": true}
   },
   "derive": {
     "heads":     "heads_d64 if d == 64 else heads_d128",
@@ -27,10 +27,15 @@
     "dims_kv":   "[b, hkv, skv, d]",
     "stride_q":  "[sq*hq*d, d, hq*d, 1]",
     "stride_kv": "[skv*hkv*d, d, hkv*d, 1]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain))",
     "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
     "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
-    "dom_value": "0.5 if domain == 'constant' else 0"
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "8 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "dom_qk_kind": "'free' if domain in ['nan', 'inf'] else dom_kind"
   },
   "constraints": [
     {"rule": "hq % hkv == 0", "reason": "GQA: query heads must be a multiple of kv heads"},
@@ -54,10 +59,11 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "0": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
-        "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
-        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+        "0": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "1": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
     }
   }

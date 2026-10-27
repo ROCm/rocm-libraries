@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "LayernormBackward",
-  "description": "Layernorm backward with saved mean and inverse variance as graph inputs (stats:saved) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale, dbias, mean and inverse variance that the engine and both references accept (pure, mixed io, upcast dy), scale, dscale and dbias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. x and dx always share one dtype because LayernormBwd.cpp writes dx as InputType (the x type) whatever the dx tensor says. Template: quick LayernormBackward/Variant2, the topology with the full tensor set (saved mean and rstd inputs); the engine's recomputed-stats path (Default topology, no mean or rstd) is not covered by this space.",
+  "description": "Layernorm backward with saved mean and inverse variance as graph inputs (stats:saved) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale, dbias, mean and inverse variance that the engine and both references accept (pure, mixed io, upcast dy), scale, dscale and dbias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. x and dx always share one dtype because LayernormBwd.cpp writes dx as InputType (the x type) whatever the dx tensor says. Template: quick LayernormBackward/Variant2, the topology with the full tensor set (saved mean and rstd inputs); the engine's recomputed-stats path (Default topology, no mean or rstd) is not covered by this space. Domain axis: x and dy take the domain fill, with large narrowed to scale 4 because dscale and dbias are sums of dy*x and dy over the batch groups and overflow half at scale 32; the nan and inf domains put the special fill on the saved inverse variance (uid 7, range 0..1 for the finite elements), which is per-group: only the dx rows of poisoned groups go non-finite and dbias (a sum of dy) stays finite, while x and dy stay free(-1,1).",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/LayernormBackward/Variant2/graph.template.json",
   "axes": {
@@ -16,7 +16,7 @@
     "h":        {"range": [1, 128], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128]},
     "w":        {"range": [1, 512], "boundaries": [1, 2, 3, 31, 32, 33, 64, 127, 128, 129, 255, 256, 257, 511, 512]},
     "k":        {"values": [1, 2, 3, 4]},
-    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant"]}
+    "domain":   {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
   },
   "derive": {
     "s_dtype": "p_dtype",
@@ -51,10 +51,16 @@
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
     "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
-    "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
-    "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
-    "dom_value": "0.5 if domain == 'constant' else 0"
+    "dm":            "'default' if domain in ['nan', 'inf'] else domain",
+    "dom_kind":      "dm if dm in ['nonzero', 'zeros', 'large', 'subnormal'] else ('fixed' if dm == 'constant' else 'free')",
+    "dom_lo":        "-0.01 if dm == 'narrow' else (-8 if dm == 'wide' else (0.25 if dm == 'positive' else (0.5 if dm == 'constant' else -1)))",
+    "dom_hi":        "0.01 if dm == 'narrow' else (8 if dm == 'wide' else (4 if dm == 'positive' else (0.5 if dm == 'constant' else 1)))",
+    "dom_value":     "0.5 if dm == 'constant' else 0",
+    "dom_scale":     "4 if dm == 'large' else 1",
+    "dom_special":   "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction":  "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the frontend keeps scale batch dim 1 (LayernormBackwardNode.hpp:108 batchDimCount = ndim - normalized_dim_count must leave the one-padded scale dims 1) and the quick sweeps use normalized_dim_count <= ndim - 1; SUPPORT_MATRIX_OVERVIEW.md op-layernormbackward lists norm:all_dims as used by no test graph"},
@@ -78,9 +84,11 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
-        "4": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "4": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "7": {"kind": "${poi_kind}", "lo": 0, "hi": 1, "value": 0, "scale": 1, "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
     }
   }

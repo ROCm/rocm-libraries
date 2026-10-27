@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "BatchnormBackward",
-  "description": "BatchNorm backward (spatial mode, saved mean and inverse variance from the forward pass) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x, dy and dx with float scale, dscale, dbias and statistics (the backward kernels use a single fp_type for x, dy and dx, BatchNormBwdSpatial.cpp:837-839, although the applicability check would accept differing io dtypes, BatchnormApplicabilityChecks.cpp:65-76), N*H*W > 1, hw and n swept around the kernel-variant thresholds (hw 60/200/512/1024/4096, n 32/64/768) and powers of two +-1. Template: quick BatchnormBackward/Variant2 (saved mean and inv-variance, the full backward tensor set; Default recomputes the statistics and sets no mean/inv-variance). The tuned input ranges of the quick sweep are copied: inv_variance 1.9..2.0 stays positive, as an rsqrt output must. The last axis, domain (default/narrow/wide/positive/constant), renders the fills of x (uid 7) and dy (uid 3) in metadata.inputs; default keeps the quick sweep's x -1..1 and dy -0.1..0.1, the other domains use the shared table for both; scale, mean and inv_variance keep their tuned literal ranges.",
+  "description": "BatchNorm backward (spatial mode, saved mean and inverse variance from the forward pass) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC strides, float/half/bfloat16 x, dy and dx with float scale, dscale, dbias and statistics (the backward kernels use a single fp_type for x, dy and dx, BatchNormBwdSpatial.cpp:837-839, although the applicability check would accept differing io dtypes, BatchnormApplicabilityChecks.cpp:65-76), N*H*W > 1, hw and n swept around the kernel-variant thresholds (hw 60/200/512/1024/4096, n 32/64/768) and powers of two +-1. Template: quick BatchnormBackward/Variant2 (saved mean and inv-variance, the full backward tensor set; Default recomputes the statistics and sets no mean/inv-variance). The tuned input ranges of the quick sweep are copied: inv_variance 1.9..2.0 stays positive, as an rsqrt output must. The last axis, domain (default/narrow/wide/positive/constant/nonzero/zeros/large/subnormal/nan/inf), renders the fills of x (uid 7) and dy (uid 3) in metadata.inputs; default keeps the quick sweep's x -1..1 and dy -0.1..0.1, the other finite domains use the shared table for both; large keeps scale 32 (worst-case half dx stays near 1e4, below 65504, because scale*inv_variance <= 0.2); scale, mean and inv_variance keep their tuned literal ranges. For nan and inf, x and dy stay at their default ranges (a non-finite x or dy element spreads through the channel sums to all of dscale, dbias and dx of its channel) and the special fill (5% of elements, at least one) goes on scale (uid 6): it only multiplies dx, so dscale and dbias stay finite and only the poisoned channels of dx are non-finite; c == 1 makes all of dx non-finite, which fails under match_nonfinite by design. The validator is match_nonfinite exactly for nan and inf.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/BatchnormBackward/Variant2/graph.template.json",
   "axes": {
@@ -13,7 +13,7 @@
     "hw":     {"range": [1, 8192], "boundaries": [1, 2, 3, 4, 5, 17, 60, 61, 160, 161, 199, 200, 512, 513, 1024, 1025, 4095, 4096, 4097]},
     "hs":     {"values": [1, 2, 3, 4, 5, 8, 16, 64]},
     "ds":     {"values": [1, 2, 3, 4]},
-    "domain": {"values": ["default", "narrow", "wide", "positive", "constant"]}
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
   },
   "derive": {
     "h":       "hs if hw % hs == 0 else 1",
@@ -30,12 +30,17 @@
     "ss_w":    "1 if layout == 'nchw' else c",
     "stride_s": "[c, 1, ss_w, ss_w] if ndim == 4 else [c, 1, ss_w, ss_w, ss_w]",
     "stride_p": "[c, 1, 1, 1] if ndim == 4 else [c, 1, 1, 1, 1]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_kind":  "'fixed' if domain == 'constant' else 'nonzero' if domain == 'nonzero' else 'zeros' if domain == 'zeros' else 'large' if domain == 'large' else 'subnormal' if domain == 'subnormal' else 'free'",
     "dom_lo":    "-0.01 if domain == 'narrow' else -8.0 if domain == 'wide' else 0.25 if domain == 'positive' else 0.5 if domain == 'constant' else -1.0",
     "dom_hi":    "0.01 if domain == 'narrow' else 8.0 if domain == 'wide' else 4.0 if domain == 'positive' else 0.5 if domain == 'constant' else 1.0",
     "dom_value": "0.5 if domain == 'constant' else 0.0",
-    "dy_lo":     "-0.1 if domain == 'default' else dom_lo",
-    "dy_hi":     "0.1 if domain == 'default' else dom_hi"
+    "dy_lo":     "-0.1 if domain in ['default', 'nan', 'inf'] else dom_lo",
+    "dy_hi":     "0.1 if domain in ['default', 'nan', 'inf'] else dom_hi",
+    "dom_scale": "32.0 if domain == 'large' else 1.0",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
+    "pz_kind":   "'special' if domain in ['nan', 'inf'] else 'free'"
   },
   "constraints": [
     {"rule": "n * hw > 1", "reason": "backward is a training-mode op, so N * spatial must be > 1 (frontend validateBatchNormTrainingSpatialDimensions via BatchnormBackwardNode.hpp:162; engine BatchnormValidator::checkBwdTensorConfigSupported passes isTraining=true to validateSpatialDimensions, BatchnormApplicabilityChecks.cpp:29,414-437)"},
@@ -57,10 +62,11 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "7": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"},
-        "3": {"kind": "${dom_kind}", "lo": "${dy_lo}", "hi": "${dy_hi}", "value": "${dom_value}"},
-        "6": {"kind": "free", "lo": -0.1, "hi": 0.1},
+        "7": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dy_lo}", "hi": "${dy_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "6": {"kind": "${pz_kind}", "lo": -0.1, "hi": 0.1, "special": "${dom_special}", "fraction": "${dom_fraction}"},
         "5": {"kind": "free", "lo": -0.1, "hi": 0.1},
         "4": {"kind": "free", "lo": 1.9, "hi": 2.0}
       }

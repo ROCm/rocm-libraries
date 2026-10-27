@@ -75,23 +75,53 @@ struct ComparisonTolerance
     ValidatorKind kind = ValidatorKind::ALLCLOSE;
     /// Relative-RMS threshold. Read only when `kind == RMS`; atol/rtol are ignored then.
     float rmsThreshold = 0.0f;
+    /// The case asked for `metadata.validator: "match_nonfinite"` and this tensor can carry
+    /// non-finite values: NaN matches NaN and same-signed infinities match, by position, and
+    /// those positions leave the tolerance math (allclose and RMS alike, whichever `kind` was
+    /// resolved). Host only. See withNonFiniteMask().
+    bool matchNonFinite = false;
+    /// With `matchNonFinite`: the storage bits the engine's output was filled with before
+    /// execute, a NaN with a distinctive payload. An engine element still holding it was never
+    /// written and fails. Empty when the data type has no such payload.
+    std::optional<uint64_t> unwrittenSentinelBits;
 
     static ComparisonTolerance allClose(float atolIn, float rtolIn)
     {
-        return ComparisonTolerance{atolIn, rtolIn, ValidatorKind::ALLCLOSE, 0.0f};
+        ComparisonTolerance tolerance;
+        tolerance.atol = atolIn;
+        tolerance.rtol = rtolIn;
+        return tolerance;
     }
 
     static ComparisonTolerance rms(float threshold)
     {
-        return ComparisonTolerance{0.0f, 0.0f, ValidatorKind::RMS, threshold};
+        ComparisonTolerance tolerance;
+        tolerance.kind = ValidatorKind::RMS;
+        tolerance.rmsThreshold = threshold;
+        return tolerance;
     }
 
     static ComparisonTolerance allCloseMatchingInfinities(float atolIn, float rtolIn)
     {
-        return ComparisonTolerance{
-            atolIn, rtolIn, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES, 0.0f};
+        ComparisonTolerance tolerance;
+        tolerance.atol = atolIn;
+        tolerance.rtol = rtolIn;
+        tolerance.kind = ValidatorKind::ALLCLOSE_MATCHING_INFINITIES;
+        return tolerance;
     }
 };
+
+/// Whether an output of `dataType` can be graded with the non-finite mask: the floating
+/// point types the allclose and RMS validators implement (FLOAT, HALF, BFLOAT16, DOUBLE).
+/// Integer and fp8 outputs are graded as before.
+bool canMatchNonFinite(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+
+/// `tolerance` with the non-finite mask layered on, when `dataType` can carry one; unchanged
+/// otherwise. The resolved kind stays in force (a per-tensor RMS override still grades by
+/// RMS), and the unwritten-output sentinel is set to the payload NaN the engine's output
+/// buffers are filled with when the mask is on (see allocateSentinelOutputs()).
+ComparisonTolerance withNonFiniteMask(ComparisonTolerance tolerance,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
 /// Resolves how one output tensor is compared.
 ///

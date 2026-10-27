@@ -66,7 +66,12 @@ OutputTensors allocateSentinelOutputs(
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
     const TensorMap& loadedTensors,
-    bool onDevice);
+    bool onDevice,
+    // The case asked for the non-finite mask: float, half, bfloat16 and double outputs are
+    // filled with a NaN carrying a distinctive payload (NonFiniteMask.hpp), so an element the
+    // engine never wrote still fails when NaN is matched against NaN. Only the engine run's
+    // outputs ask for it; a reference's keep the plain sentinel.
+    bool payloadNanSentinel = false);
 
 /// Tell each tensor which side now holds the fresh data. Without it the comparison
 /// reads the stale copy — silently, and in whichever direction is wrong.

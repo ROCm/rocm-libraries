@@ -11,6 +11,7 @@
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/NonFiniteMask.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 namespace hipdnn_integration_tests::bundle
@@ -101,11 +102,67 @@ std::string tensorLabel(int64_t uid,
     return tensorLabel(uid, name != nullptr ? name->str() : std::string{});
 }
 
+bool canMatchNonFinite(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(dataType)
+    {
+    case DataType::FLOAT:
+    case DataType::HALF:
+    case DataType::BFLOAT16:
+    case DataType::DOUBLE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+ComparisonTolerance withNonFiniteMask(ComparisonTolerance tolerance,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    if(canMatchNonFinite(dataType))
+    {
+        tolerance.matchNonFinite = true;
+        tolerance.unwrittenSentinelBits
+            = hipdnn_test_sdk::utilities::payloadNanSentinelBits(dataType);
+    }
+    return tolerance;
+}
+
 ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                  const std::string& label,
                                  const ComparisonTolerance& tolerance,
                                  ValidationSite site)
 {
+    if(tolerance.matchNonFinite)
+    {
+        // A host-only validator: a DEVICE-site request is refused rather than served by the
+        // host validator reading device memory. resolveValidationSite() sends a case that asked
+        // for the mask to the host, so reaching this means a caller skipped it.
+        if(site == ValidationSite::DEVICE)
+        {
+            return {nullptr, validatorNotApplicableAtSite(label, dataType, "match_nonfinite")};
+        }
+        try
+        {
+            if(tolerance.kind == ValidatorKind::RMS)
+            {
+                return {hipdnn_test_sdk::utilities::createRmsMatchingNonFiniteValidator(
+                            dataType, tolerance.rmsThreshold, tolerance.unwrittenSentinelBits),
+                        {}};
+            }
+            // allclose and allclose_matching_infinities alike: the mask subsumes the
+            // infinity matching, and finite elements keep the resolved atol and rtol.
+            return {hipdnn_test_sdk::utilities::createAllCloseMatchingNonFiniteValidator(
+                        dataType, tolerance.atol, tolerance.rtol, tolerance.unwrittenSentinelBits),
+                    {}};
+        }
+        catch(const std::exception& e)
+        {
+            return {nullptr, validatorNotApplicable(label, dataType, "match_nonfinite", e.what())};
+        }
+    }
+
     switch(tolerance.kind)
     {
     case ValidatorKind::ALLCLOSE:
@@ -200,6 +257,14 @@ std::string formatMismatchReport(int64_t uid,
 
     std::ostringstream report;
     report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
+    if(tolerance.matchNonFinite)
+    {
+        // The drift profile below is the plain one and lists non-finite elements that did
+        // match; say which rule decided, so a reader does not chase a matched NaN.
+        report << "  Graded with validator match_nonfinite: NaN matches NaN and same-signed Inf "
+                  "matches Inf by position,\n  those positions are excluded from the tolerance, "
+                  "and an element still holding the unwritten-output sentinel fails.\n";
+    }
     if(dataType != DataType::UNSET)
     {
         // Zero tolerances under RMS: the per-element budget is not what was checked, and a

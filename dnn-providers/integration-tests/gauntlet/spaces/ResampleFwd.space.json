@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "ResampleFwd",
-  "description": "ResampleFwd (pooling, no index output) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC packed strides, float/half/bfloat16 for x and y alike, maxpool and both avgpool modes, per-dimension window 1..5, stride 1..4 and pre/post padding 0..3 (asymmetric padding and padding of a window or more included, as long as the window fits the padded input). Template: quick ResampleFwd/Variant2, the plain tensor set (x and y, no index tensor, generate_index false, zero_pad); neg_inf_pad needs the index topology of Default and is not drawn here.",
+  "description": "ResampleFwd (pooling, no index output) in the HIP_MLOPS_ENGINE region: rank 4 or 5, NCHW/NCDHW or NHWC/NDHWC packed strides, float/half/bfloat16 for x and y alike, maxpool and both avgpool modes, per-dimension window 1..5, stride 1..4 and pre/post padding 0..3 (asymmetric padding and padding of a window or more included, as long as the window fits the padded input). Template: quick ResampleFwd/Variant2, the plain tensor set (x and y, no index tensor, generate_index false, zero_pad); neg_inf_pad needs the index topology of Default and is not drawn here. The domain axis fills x, and the nan and inf domains poison x itself: a pooled output element reads only its own window, so a non-finite x element stays local to the windows covering it.",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/ResampleFwd/Variant2/graph.template.json",
   "axes": {
@@ -26,7 +26,7 @@
     "post_d": {"values": [0, 1, 2, 3]},
     "post_h": {"values": [0, 1, 2, 3]},
     "post_w": {"values": [0, 1, 2, 3]},
-    "domain": {"values": ["default", "narrow", "wide", "positive", "constant"]}
+    "domain": {"values": ["default", "narrow", "wide", "positive", "constant", "nonzero", "zeros", "large", "subnormal", "nan", "inf"]}
   },
   "derive": {
     "d":       "d3 if ndim == 5 else 1",
@@ -52,10 +52,14 @@
     "pool_stride": "[str_h, str_w] if ndim == 4 else [str_d, str_h, str_w]",
     "pre_pad":  "[pre_h, pre_w] if ndim == 4 else [pre_d, pre_h, pre_w]",
     "post_pad": "[post_h, post_w] if ndim == 4 else [post_d, post_h, post_w]",
-    "dom_kind":  "'fixed' if domain == 'constant' else 'free'",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain))",
     "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
     "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
-    "dom_value": "0.5 if domain == 'constant' else 0"
+    "dom_value": "0.5 if domain == 'constant' else 0",
+    "dom_scale": "32 if domain == 'large' else 1",
+    "dom_special": "'inf' if domain == 'inf' else 'nan'",
+    "dom_fraction": "0.05",
+    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'"
   },
   "constraints": [
     {"rule": "h + pre_h + post_h >= win_h and w + pre_w + post_w >= win_w and (ndim == 4 or d + pre_d + post_d >= win_d)", "reason": "the output extent (x + pre + post - window) / stride + 1 is the one hip-kernel-provider accepts (ResamplePlanUtils.hpp:131-133 validateResampleOutputShape, ResampleApplicabilityChecks.cpp:84-97) and the frontend infers (ResampleFwdNode.hpp:116); it is defined for a window that fits the padded input only, because C++ integer division truncates toward zero and would give 1 for a window that overhangs the padded input"},
@@ -79,8 +83,9 @@
     },
     "metadata": {
       "purpose": "probe",
+      "validator": "${dom_validator}",
       "inputs": {
-        "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}"}
+        "1": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       }
     }
   }
