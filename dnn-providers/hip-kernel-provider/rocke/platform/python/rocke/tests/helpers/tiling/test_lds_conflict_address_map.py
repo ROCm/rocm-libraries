@@ -23,9 +23,9 @@ import pytest
 
 from rocke.core.ir import F16
 from rocke.helpers.tiling import lds_conflict as lc
+from rocke.helpers.tiling.clipping import contiguous_run
 from rocke.helpers.tiling.descriptors import make_tensor_desc, make_window
 from rocke.helpers.tiling.emit import (
-    _contiguous_run,
     _swizzle_lds_positions,
     _swizzle_vw,
     emit_tensor_coordinates,
@@ -51,7 +51,7 @@ def _previous_addresses(tile_desc, strides, origin, n_lanes, lds_swizzle):
     (capped by a swizzle callable at its granularity, alignment 2 for f16) and, per (lane, run),
     ``sum(position * stride)`` over the run start's (swizzled) positions."""
     window = make_window(make_tensor_desc((1, 1), strides, F16), (0, 0))
-    vw = _swizzle_vw(lds_swizzle, _contiguous_run(tile_desc, window, F16, True), 2)
+    vw = _swizzle_vw(lds_swizzle, contiguous_run(tile_desc, window, F16), 2)
     swizzle = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
     rows = []
     for lane in range(n_lanes):

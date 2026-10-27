@@ -6,8 +6,9 @@ The recorder DECORATES the tiling VERBS for the duration of a build so every mem
 movement and register op announces itself as a frozen node -- with **no core edits** and **no
 author burden**. It rebinds the verb NAMES in the build function's module globals (where bare
 `store_fragment(...)` calls actually resolve) plus the emit / package-alias namespaces, and
-`TileMma.__call__` on the class, captures a node BEFORE delegating to the original (so the emitted
-IR is byte-identical), and restores every binding on exit -- even on exception.
+`TileMma.__call__` on the class, captures a node beside each call to the original (the recorder
+emits no IR of its own, so the emitted IR is byte-identical), and restores every binding on exit --
+even on exception.
 
 The `b`-witness completeness gate then counts the memory/mma ops actually emitted into
 `kernel.body.ops` and reconciles them against the recorded nodes' fan-out, raising
@@ -207,6 +208,7 @@ class _Recorder:
 
     def add_memory(
         self,
+        b: Any,
         kind: str,
         ptr: Any,
         window: Any,
@@ -216,16 +218,11 @@ class _Recorder:
         produces: int | None = None,
         consumes: tuple[int, ...] = (),
     ) -> None:
-        from .emit import _is_lds
+        from .clipping import is_lds
 
-        space = "lds" if _is_lds(ptr) else "global"
+        space = "lds" if is_lds(ptr) else "global"
         tensor = window.tensor
-        # Mirror emit's vw EXACTLY: a global store is scalar (store_fragment `vw = ... if lds else 1`,
-        # emit.py:326); everything else takes the contiguous run (+ swizzle cap for LDS).
-        if kind == "store" and space == "global":
-            vw = 1
-        else:
-            vw = _access_vw(tile_desc, tensor, swizzle)
+        vw = _access_vw(b, kind, ptr, window, tile_desc, swizzle)
         node = PipelineTransaction(
             kind=kind,
             seq=self._next(),
@@ -346,11 +343,20 @@ class _Recorder:
             )
 
 
-def _access_vw(tile_desc: Any, tensor: Any, swizzle: Any) -> int:
-    """The vw the emit would choose for this access (reuse the validated bank-conflict helper)."""
+def _access_vw(
+    b: Any, kind: str, ptr: Any, window: Any, tile_desc: Any, swizzle: Any
+) -> int:
+    """The registers one memory instruction of the verb covers, as the verb decided it: an LDS
+    access by the verbs' run rule (the validated bank-conflict helper), a global access by its
+    bound-check plan (``explain_bounds_checks``, the decision the verb took; a store on the
+    one-index form is scalar, see ``global_store_width``)."""
+    from .clipping import explain_bounds_checks, global_store_width, is_lds
     from .lds_conflict import access_width
 
-    return access_width(tile_desc, tensor, swizzle)
+    if is_lds(ptr):
+        return access_width(tile_desc, window.tensor, swizzle)
+    plan = explain_bounds_checks(b, ptr, window, tile_desc)
+    return global_store_width(plan) if kind == "store" else plan.vector_width
 
 
 def _namespaces(build_fn: Callable) -> list[dict]:
@@ -386,6 +392,7 @@ def record_pipeline(build_fn: Callable) -> Iterator[RecordedPipeline]:
                 b, ptr, window, tile_desc, thread, **kw
             )  # delegate first: capture the produced value
             rec.add_memory(
+                b,
                 "load",
                 ptr,
                 window,
@@ -399,7 +406,10 @@ def record_pipeline(build_fn: Callable) -> Iterator[RecordedPipeline]:
 
     def _wrap_store(orig):
         def w(b, ptr, window, fragment, thread, **kw):
+            # Delegate first, so a store the verb refuses is refused in the verb's own words.
+            res = orig(b, ptr, window, fragment, thread, **kw)
             rec.add_memory(
+                b,
                 "store",
                 ptr,
                 window,
@@ -407,7 +417,7 @@ def record_pipeline(build_fn: Callable) -> Iterator[RecordedPipeline]:
                 kw.get("lds_swizzle", False),
                 consumes=(id(fragment.value),),
             )
-            return orig(b, ptr, window, fragment, thread, **kw)
+            return res
 
         return w
 

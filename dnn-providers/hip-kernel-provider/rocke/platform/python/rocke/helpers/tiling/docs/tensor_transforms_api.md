@@ -76,7 +76,7 @@ modules, not re-exported by the door, so no author imports it.
 | `emit_bound_check` | The one predicate: `lo <= value < hi` for one plain value, its per-wave side folded on the scalar unit. | toolbox |
 | `emit_accesses_except_buffer_checked` | `emit_accesses` leaving out of `valid` the sides the buffer hardware checks. | internal (sibling surface, see 6) |
 | IR range walk (`walk.py`: `split_coordinate`, `value_facts`, `leaf_varying_within_workgroup`) | Turn a plain IR value into a split coordinate and derive each part's range and multiple-of fact (reading stated facts through `stated_facts_of`); find a leaf that can differ between the waves of a workgroup. Reads IR, emits nothing. | internal |
-| `Interval`, `Congruence`, `_RuntimeEnd`, `AffineCoord`, `UniformPart`, `AxisBound`, `CheckSide`, `Side`, `VectorRun`, `identity_graph`, the run queries | The machinery (section 12). | internal |
+| `Interval`, `Congruence`, `_RuntimeEnd`, `AffineCoord`, `UniformPart`, `LoopStopWithoutMultipleOf`, `AxisBound`, `CheckSide`, `Side`, `VectorRun`, `identity_graph`, the run queries | The machinery (section 12). | internal |
 
 Package files: `__init__.py` (the door), `graph.py`, `ranges.py` (a leaf module: it also holds
 `value_ranges`, `required_checks`, `graph_injective`), `walk.py`, `address.py`, `emit.py`
@@ -358,7 +358,12 @@ instead of being assumed away, hence its precondition; `block_id << 7` still giv
 **The loop counter, its three cases.** An exact stop gives the tight end of the last trip, so a constant-bound
 loop proves `k + TK <= K` exactly as a runtime one does. A loop that never runs gives `[l, l + 1)`, never an
 empty range (every range operation needs a non-empty one). A stop `L + c` over a runtime length `L` gives the
-counter the end `L` shifted by `c`, so `for k in [0, K - TK + 1) step TK` proves `k + TK <= K` by identity.
+counter the end `L` shifted by `c`, so `for k in [0, K - TK + 1) step TK` proves `k + TK <= K` by identity; that
+end is snapped to the counter's multiple-of fact when `L`'s stated multiple-of fact is a multiple of the step, so
+`[0, K)` step `TK` over a `K` stated `multiple_of=TK` proves the same. When it is not, the end stays at the stop,
+and `split_coordinate` records why on the counter's own uniform part (`LoopStopWithoutMultipleOf`: the length, the
+step, and the range the length being a multiple of the step would give), which `explain_bounds_checks` reads to
+name that fix. A counter folded into a larger wave-uniform value (`k_base + k`) is one part with no record.
 
 **Stated facts and runtime ends.** The walk reads stated facts only through `stated_facts_of`: a kernel
 parameter gets the range and multiple-of fact its declaration states (none, when it states none), and a range
@@ -550,18 +555,21 @@ None of these is on the door; they are listed so the glass box stays open.
   range arithmetic: `plus`, `shifted`, `scaled`, `floor_div`, `floor_mod` (Python floor semantics), `minimum` /
   `maximum` (symmetric in their operands), `overlaps`, `intersect` (a value known to lie in both; on the upper
   side a runtime end is kept over an int so it can still prove a runtime bound; raises when the two cannot
-  both hold), `snapped(congruence)`, `within(lo, hi)`, and `from_pair` / `as_pair`, the only conversions to and
-  from the public pair form.
+  both hold), `snapped(congruence, *, upper_value_residue=None)` (the keyword supposes a runtime upper end's
+  residue instead of reading it from the stated facts: the range a fact not stated yet would give), `within(lo,
+  hi)`, and `from_pair` / `as_pair`, the only conversions to and from the public pair form.
 - `Congruence(modulus, residue)` -- `value == residue (mod modulus)`, a multiple-of fact; `plus`, `shifted`,
   `scaled`, `floor_div`, `floor_mod`, `join` (the residue two values share, for min / max). A constant is an int,
   never a `Congruence`.
 - `_RuntimeEnd(value, plus)` -- an end `value + plus` relative to a runtime integer, compared by identity (the
-  same IR value object and the same `plus`); `shifted(k)` moves it. It holds no facts: `envelope` and
-  `congruence` read `stated_facts_of(value)`. A `Value` given as an `Interval` end becomes `_RuntimeEnd(value)`;
+  same IR value object and the same `plus`); `shifted(k)` moves it; `residue_known_modulo(m)` says whether
+  the stated facts fix `value`'s residue modulo `m` (when `Interval.snapped` may move the end). It holds no
+  facts: `envelope` and `congruence` read `stated_facts_of(value)`. A `Value` given as an `Interval` end becomes `_RuntimeEnd(value)`;
   `as_pair` turns it back (section 7).
 - `AxisBound.of(lo, hi)` -- one tensor axis's valid extent; each end an int or a `Value` (a bound is a length,
   never a shifted end).
-- `AffineCoord(const, uniform, lane, lane_range, lane_congruence)` with `UniformPart(value, range, congruence)`
+- `AffineCoord(const, uniform, lane, lane_range, lane_congruence)` with `UniformPart(value, range, congruence,
+  loop_stop_without_multiple_of=None)`
   -- one coordinate split into a constant, wave-uniform parts and one per-lane part, each with an explicit range
   (`UNBOUNDED` when unknown). Built by the walk (`split_coordinate`), by `of_int`, or by tiling-layer code that
   already holds the parts; `+` emits nothing (two per-lane parts are an error). Its `range` and `congruence` are
@@ -571,8 +579,8 @@ None of these is on the door; they are listed so the glass box stays open.
   sibling entry's `buffer_checked_sides`.
 - `VectorRun(axis, width)` -- the internal form of `vector_axis=` / `vector_width=`.
 - `identity_graph(lengths)` -- the graph of a plain window (inputs and outputs `axis0`, `axis1`, ...): a plain
-  window and a graph window have their checks decided by the same rule. `_value_ranges` / `_required_checks` are
-  the toolbox rules on `Interval`s with explicit `AxisBound`s; `_emit_bound_check` is `emit_bound_check` on an
+  window and a graph window have their checks decided by the same rule. `_value_ranges` / `required_checks_within`
+  are the toolbox rules on `Interval`s with explicit `AxisBound`s; `_emit_bound_check` is `emit_bound_check` on an
   already-split coordinate.
 - Run queries (`runs.py`): `address_contiguous_run`, `validity_uniform_over_run`, `checks_monotone_over_run`
   (section 11).

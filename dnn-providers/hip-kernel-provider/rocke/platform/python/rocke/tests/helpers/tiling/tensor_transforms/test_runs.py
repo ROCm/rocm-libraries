@@ -41,7 +41,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     Interval,
     UniformPart,
     VectorRun,
-    _required_checks,
+    required_checks_within,
 )
 from rocke.helpers.tiling.tensor_transforms.runs import (
     address_contiguous_run,
@@ -189,7 +189,7 @@ def test_uniform_validity_matches_exhaustive_enumeration_at_every_start_residue(
     for residue in range(WIDTH):
         coords = (_start(residue, upper),)
         ranges = (coords[0].range.plus(Interval(0, WIDTH)),)
-        checks = _required_checks(graph, ranges, (AxisBound.of(0, length),))
+        checks = required_checks_within(graph, ranges, (AxisBound.of(0, length),))
         answer = validity_uniform_over_run(graph, checks, run, coords)
         assert answer == _uniform_everywhere(graph, length, residue, upper), residue
         assert checks_monotone_over_run(graph, checks, run, coords)
@@ -203,7 +203,7 @@ def test_a_k_tail_check_is_uniform_when_the_unmerge_length_is_a_multiple_of_the_
     )
     run = VectorRun(0, WIDTH)
     coords = (_start(0, 200),)
-    (check,) = _required_checks(
+    (check,) = required_checks_within(
         graph,
         (coords[0].range.plus(Interval(0, WIDTH)),),
         (AxisBound.of(0, 10), AxisBound.of(0, 16)),

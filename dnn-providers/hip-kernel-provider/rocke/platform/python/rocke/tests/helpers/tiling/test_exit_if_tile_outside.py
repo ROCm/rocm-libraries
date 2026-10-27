@@ -22,9 +22,9 @@ value. These tests pin:
 - on the GPU, that an over-launched grid writes nothing past the tensor and that a workgroup whose
   remapped origin is negative does nothing.
 
-Whether a side is proven is asked of the shared bound-check rule directly (``_required_checks``
-over the identity graph of the tensor's lengths); the verbs use the same rule once they read the
-walk.
+Whether a side is proven is asked of the shared bound-check rule directly
+(``required_checks_within`` over the identity graph of the tensor's lengths); the verbs use the
+same rule once they read the walk.
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     BoundCheck,
     Congruence,
     Interval,
-    _required_checks,
     _RuntimeEnd,
+    required_checks_within,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate, value_facts
 from rocke.tests.engines import lower_with_both_engines
@@ -118,7 +118,7 @@ def _checks(
         for origin, extent in zip(origins, extents)
     )
     bounds = tuple(AxisBound.of(0, length) for length in lengths)
-    return _required_checks(identity_graph(lengths), ranges, bounds)
+    return required_checks_within(identity_graph(lengths), ranges, bounds)
 
 
 def _sides(checks: tuple[BoundCheck, ...]) -> dict[str, tuple[bool, bool]]:

@@ -495,13 +495,14 @@ def access_width(tile_desc, tensor, lds_swizzle):
     the verbs' own contiguous-run rule over the LDS ``tensor`` descriptor, capped by a swizzle's
     granularity exactly as :func:`~rocke.helpers.tiling.emit.load_fragment` and
     :func:`~rocke.helpers.tiling.emit.store_fragment` cap it."""
+    from rocke.helpers.tiling.clipping import contiguous_run, element_bytes
     from rocke.helpers.tiling.descriptors import make_window
-    from rocke.helpers.tiling.emit import _align_of, _contiguous_run, _swizzle_vw
+    from rocke.helpers.tiling.emit import _swizzle_vw
 
     window = make_window(tensor, (0,) * tensor.rank)
-    vw = _contiguous_run(tile_desc, window, tensor.dtype, is_lds=True)
+    vw = contiguous_run(tile_desc, window, tensor.dtype)
     if lds_swizzle:
-        vw = _swizzle_vw(lds_swizzle, vw, _align_of(tensor.dtype))
+        vw = _swizzle_vw(lds_swizzle, vw, element_bytes(tensor.dtype.name))
     return vw
 
 

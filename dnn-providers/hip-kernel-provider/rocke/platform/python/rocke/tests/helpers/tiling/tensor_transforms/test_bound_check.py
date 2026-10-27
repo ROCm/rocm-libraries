@@ -32,7 +32,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     Congruence,
     Interval,
     UniformPart,
-    _required_checks,
+    required_checks_within,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
 from rocke.tests.gpu import current_device_arch
@@ -199,7 +199,7 @@ def test_a_runtime_bounded_origin_keeps_its_upper_check_in_32_bits_and_unbounded
         b = builder()
         m = runtime_length(b, "M")
         coord = _origin_with_lane(b, m, None if wide else m)
-        (check,) = _required_checks(
+        (check,) = required_checks_within(
             identity_graph((None,)), (coord.range,), (AxisBound.of(0, m),)
         )
         assert check.lo is None and check.hi is m
@@ -544,9 +544,9 @@ def _stated(b: IRBuilder, value: Value, lo: int, hi: int):
 
 def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
     """``lo <= s + lane < hi`` with both ends runtime values, through ``emit_bound_check`` and
-    through ``_required_checks`` + ``_emit_bound_check`` with a two-sided ``AxisBound``: exact for
-    every lane, and an empty (``hi == lo``) or inverted (``hi < lo``) window accepts nothing,
-    including a window wider than 2^31."""
+    through ``required_checks_within`` + ``_emit_bound_check`` with a two-sided ``AxisBound``:
+    exact for every lane, and an empty (``hi == lo``) or inverted (``hi < lo``) window accepts
+    nothing, including a window wider than 2^31."""
     current_device_arch()
     import numpy as np
 
@@ -571,7 +571,7 @@ def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
         hi = _stated(b, _uniform(b, "hi"), I32_MIN, 1 << 31)
         x = b.add(s, b.thread_id_x())
         coord = split_coordinate(b, x)
-        (check,) = _required_checks(
+        (check,) = required_checks_within(
             identity_graph((None,)), (coord.range,), (AxisBound.of(lo, hi),)
         )
         return [

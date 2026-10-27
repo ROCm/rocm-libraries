@@ -47,9 +47,9 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     VectorRun,
     _numeric_hi,
     _numeric_lo,
-    _required_checks,
     _RuntimeEnd,
     _value_ranges,
+    required_checks_within,
 )
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
@@ -669,7 +669,7 @@ def test_unknown_input_range_is_an_input_domain_check():
 def test_toolbox_bounds_come_from_the_tensor_lengths():
     graph, tensor = _conv_graph(2, 5, 5, 3, 3, 3, 1, 1)
     ranges = ((0, 64), (0, 32))
-    internal = _required_checks(
+    internal = required_checks_within(
         graph,
         tuple(Interval.from_pair(r) for r in ranges),
         tuple(AxisBound.of(0, length) for length in tensor.lengths),
@@ -679,7 +679,7 @@ def test_toolbox_bounds_come_from_the_tensor_lengths():
 
 def test_runtime_lower_and_upper_bound_give_a_two_sided_check():
     lo, hi = _runtime("Lo", 1000), _runtime("Hi", 4096)
-    checks = _required_checks(
+    checks = required_checks_within(
         identity_graph((None,)), (UNBOUNDED,), (AxisBound.of(lo, hi),)
     )
     assert checks == (
@@ -701,14 +701,14 @@ def test_whole_tile_inside_a_runtime_length_is_proven_by_identity():
     graph = _tile_inside_graph(tile)
     bound = (AxisBound.of(0, seqlen),)
     inside = (Interval(0, seqlen.shifted(-(tile - 1))), Interval(0, tile))
-    assert _required_checks(graph, inside, bound) == ()
+    assert required_checks_within(graph, inside, bound) == ()
     unknown = (UNBOUNDED, Interval(0, tile))
-    assert _required_checks(graph, unknown, bound) == (
+    assert required_checks_within(graph, unknown, bound) == (
         BoundCheck("row", 0, seqlen.value, (CheckReason.TENSOR_BOUND,)),
     )
     same_number = _runtime("seqlen_copy", 4096, multiple_of=tile)
     copied = (AxisBound.of(0, same_number),)
-    assert _required_checks(graph, inside, copied) == (
+    assert required_checks_within(graph, inside, copied) == (
         BoundCheck("row", None, same_number.value, (CheckReason.TENSOR_BOUND,)),
     )
 
@@ -719,7 +719,9 @@ def test_identity_graph_over_a_runtime_length_checks_that_axis_only():
     assert tuple(graph.inputs.items()) == (("axis0", None), ("axis1", 128))
     assert graph.outputs == ("axis0", "axis1")
     bounds = (AxisBound.of(0, seqlen), AxisBound.of(0, 128))
-    checks = _required_checks(graph, (Interval(0, None), Interval(0, 128)), bounds)
+    checks = required_checks_within(
+        graph, (Interval(0, None), Interval(0, 128)), bounds
+    )
     # Per side: the lower side is proven (None), the upper side is reported.
     assert checks == (
         BoundCheck("axis0", None, seqlen.value, (CheckReason.TENSOR_BOUND,)),
@@ -1004,7 +1006,7 @@ def test_empty_bound_raises():
         ValueError,
         "bound of axis 1 is empty: [8, 8) -- an always-empty window cannot be read",
     ):
-        _required_checks(
+        required_checks_within(
             identity_graph((4, 8)),
             (UNBOUNDED, UNBOUNDED),
             (AxisBound.of(0, 4), AxisBound.of(8, 8)),
@@ -1016,7 +1018,7 @@ def test_bounds_count_raises():
         ValueError,
         "bounds has 1 entries but the tensor has rank 2 -- give one AxisBound per tensor axis",
     ):
-        _required_checks(
+        required_checks_within(
             identity_graph((4, 8)), (UNBOUNDED, UNBOUNDED), (AxisBound.of(0, 4),)
         )
 
@@ -1024,7 +1026,9 @@ def test_bounds_count_raises():
 def test_two_failing_ends_are_merged_into_the_one_that_is_always_tighter():
     graph = identity_graph((8,))
     length = _runtime("L", 99, at_least=8)
-    checks = _required_checks(graph, (Interval(0, 20),), (AxisBound.of(0, length),))
+    checks = required_checks_within(
+        graph, (Interval(0, 20),), (AxisBound.of(0, length),)
+    )
     assert checks == (
         BoundCheck(
             "axis0", None, 8, (CheckReason.INPUT_DOMAIN, CheckReason.TENSOR_BOUND)
@@ -1042,7 +1046,7 @@ def test_two_failing_ends_that_cannot_be_ordered_raise():
         "bound the coordinate by one of them (an input over a runtime-length axis is declared "
         "inputs(name=None))",
     ):
-        _required_checks(graph, (Interval(0, 20),), (AxisBound.of(0, length),))
+        required_checks_within(graph, (Interval(0, 20),), (AxisBound.of(0, length),))
 
 
 def test_graph_outputs_must_match_the_tensor_rank():

@@ -21,7 +21,8 @@ from . import block_diagram as _bd
 # Geometry helpers the renderers USE, imported from the analysis package (machinery: pure calc, one
 # home next to coalescing/vectorization). No re-export shim -- callers import the gates from
 # `rocke.helpers.tiling.analysis` directly, so the renderers no longer re-couple to them.
-from ..analysis.geometry import _arch_wave, _elem_bytes, _lane_span, resolve_origin
+from ..analysis.geometry import _arch_wave, _lane_span, resolve_origin
+from ..clipping import element_bytes
 
 
 # --------------------------------------------------------------------------------------------------
@@ -49,7 +50,7 @@ def _lds_geometry(pipeline: Any, space_id: int, *, tile_k: int):
         for kb in range(2)
     }
     tile_m = strides[0] // max(1, len(store_frees))
-    return store, read, strides, n_waves, tile_m, _elem_bytes(store.dtype_name)
+    return store, read, strides, n_waves, tile_m, element_bytes(store.dtype_name)
 
 
 def render_lds_store(
@@ -387,7 +388,7 @@ def _render_linear_flow(pipeline: Any, flow: Flow, out_path: str) -> str:
     stages, prev = [], None
     for t in txns:
         fm = as_forward_map(t.tile_desc.layout)
-        dtype_bits = _elem_bytes(t.dtype_name) * 8
+        dtype_bits = element_bytes(t.dtype_name) * 8
         transform = ""
         if prev is not None:
             kind, why = describe_edge(prev, fm, src_dims=dims, tgt_dims=dims)
@@ -660,7 +661,7 @@ def _prefetch_descs(pipeline, operand, wave_size):
         and _operand_of(t.space_name) == operand
     )
     dtype = store.dtype_name
-    eb = _elem_bytes(dtype)
+    eb = element_bytes(dtype)
     n_waves = _lane_span(store.tile_desc.layout) // wave_size
     tile_free = int(gload.tile_desc.shape[0])  # coop load (free, K): the free extent
     dims = ("N", "K") if operand == "B" else ("M", "K")
@@ -885,7 +886,7 @@ def _lds_load_shade(pipeline, mma_op, operand, op_enc):
     rd_run = max(
         Counter(t for (l, r), t in rd_sh.items() if l == 0).values()
     )  # elems per real load
-    eb = _elem_bytes(rd.dtype_name)
+    eb = element_bytes(rd.dtype_name)
     # cap at b128: a descriptor's contiguous run may exceed one ds_read; the hardware splits it (§9.6 ceiling).
     return vector_transactions(
         as_forward_map(op_enc), af, eb * 8, max_bits=min(128, rd_run * eb * 8)
@@ -912,7 +913,7 @@ def _view_compute_flow(pipeline, *, lds_view, operand, wave, out_path):
         t for t in pipeline.transactions if t.space == "global" and t.kind == "store"
     )
     dtype = reads[0].dtype_name  # A/B input dtype (f16)
-    ab_bits, c_bits = _elem_bytes(dtype) * 8, _elem_bytes(cst.dtype_name) * 8
+    ab_bits, c_bits = element_bytes(dtype) * 8, element_bytes(cst.dtype_name) * 8
 
     # FLOW the shade from the operand's real PRODUCER (a direct LDS read) via the shared axis-agnostic helper --
     # the tee's A/B colours are the true load-transaction groups, matching the LDS diagram.
@@ -1312,7 +1313,7 @@ def _view_compute_physical(pipeline, *, operand, wave, out_path):
     )  # the MMA operand the read feeds
     dtype = read.dtype_name
     dims = ("N", "K") if operand == "B" else ("M", "K")
-    eb = _elem_bytes(dtype)
+    eb = element_bytes(dtype)
     # The OPERAND BRIDGE, if the kernel has one: the recorded transform between THIS read and the matrix
     # instruction. Without it the strip is labelled end-to-end with the POST-bridge (MMA-ready) encoding, so
     # the landing looks MMA-ready and the bridge -- "the price of the wide LDS read" -- disappears. Taken
@@ -1472,8 +1473,8 @@ def _view_epilogue_flow(pipeline, *, out_path):
         t for t in pipeline.transactions if t.space == "global" and t.kind == "store"
     )
     ab_bits, c_bits = (
-        _elem_bytes(reads[0].dtype_name) * 8,
-        _elem_bytes(cst.dtype_name) * 8,
+        element_bytes(reads[0].dtype_name) * 8,
+        element_bytes(cst.dtype_name) * 8,
     )
     tee = MmaTee(
         a_enc=mma_op.a_enc,
@@ -1648,7 +1649,7 @@ def _view_epilogue_flow(pipeline, *, out_path):
                 RegisterFileComponent(
                     fwd_map=rd_fm,
                     dims=("M", "N"),
-                    dtype_bits=_elem_bytes(rmw_rd.dtype_name) * 8,
+                    dtype_bits=element_bytes(rmw_rd.dtype_name) * 8,
                     color_mode="first8",
                     shade_map={k: 0 for k in rd_fm},
                     groups=_c_lane_groups(rd_fm),

@@ -46,7 +46,8 @@ catalog-based groupings; a newcomer meets one map.
 
 - **FRONT DOOR** -- what you reach for by default: `TileMma`, `TilePipeline` (planned), the everyday
   factories (`make_tensor_desc`/`make_window`/`make_tile_desc`/`make_fragment`), the IR verbs
-  (`load_fragment`/`store_fragment`/`fill_fragment`/`transform_fragment`), and `check_gemm_shapes`.
+  (`load_fragment`/`store_fragment`/`fill_fragment`/`transform_fragment`), `check_gemm_shapes`, and
+  `explain_bounds_checks` (which bound checks a global access needs).
 - **TOOLBOX** -- the finer primitives the front door is *built from*, callable directly when you need
   control: `Tiling` (the `TileMma` atom/order knobs), `TileMmaPlan`/`TileMmaDriver`, the `LayoutStyle`
   seam (`canonical`/`interleaved`), `TileDesc.swap_dims`/`.reorder_registers`, `cooperative_load_desc`,
@@ -157,13 +158,16 @@ Clipping is BUILT and bit-exact on the masked path (`tiling_api_surface.md` 5b).
   clipped-but-unmasked read would otherwise index another workgroup's LDS); zeros flow through LDS and
   contribute nothing to the MAC. "Coalescing verdict provisional" is a global-load-only caveat; LDS
   store/read are invariant under predication (`lds_banks.md`).
-- **Trigger:** the wide-load path predicates on **length-vs-tile-alignment**
-  (`lengths[axis] % tile_extent`); a window has no clip of its own. Refuse "odd tensor + vectorized +
-  no predicate." The tile-aligned-length mask-skip also requires a tile-aligned, non-negative ORIGIN.
-- **Wide load is for fully-in-bounds tiles only.** A tile whose free/stride-1 run overhangs the tensor
-  **scalarizes** (an unmasked wide load would read OOB). For the interleaved recipe the free dim IS the
-  stride-1 axis, so an M/N-ragged edge scalarizes. "No OOB global read" is an emit-level guard, not only a
-  golden test.
+- **The tensor's lengths are the only lengths;** a window has no clip of its own.
+- **A check is omitted only when the shared rule proves it** (tensor_transforms `required_checks`, on
+  each origin's range as the IR range walk reads it plus the tile's extent); every other side is
+  checked. Alignment is not a proof: an origin the IR says nothing about stays checked on both sides.
+  A block origin is proven inside its tensor only by `exit_if_tile_outside`.
+- **Width and checks are separate decisions.** The vector width follows the layout and the strides;
+  a checked vector keeps its width and is masked by its validity (first element, or first and last
+  element when it may cross a bound). No access touches an element outside the tensor, and no
+  address an invalid lane computes carries an in-bounds promise. `explain_bounds_checks` reports the
+  decision the verbs apply.
 
 ---
 

@@ -110,9 +110,9 @@ from .ranges import (
     _numeric_hi,
     _numeric_lo,
     _require_i32_end,
-    _required_checks,
     _RuntimeEnd,
     _stated_interval,
+    required_checks_within,
 )
 from .runs import _check_uniform, _contiguity_blocker, _first_non_monotone, _run_steps
 from .walk import split_coordinate
@@ -1739,7 +1739,7 @@ def _plan_validity(
         ranges = [coord.range for coord in coords]
         if run is not None:
             ranges[run.axis] = ranges[run.axis].plus(Interval(0, run.width))
-        checks.append(_required_checks(graph, tuple(ranges), bounds))
+        checks.append(required_checks_within(graph, tuple(ranges), bounds))
     if buffer_checked_sides is not None:
         checks = _without_buffer_checked(checks, buffer_checked_sides)
     if run is None:

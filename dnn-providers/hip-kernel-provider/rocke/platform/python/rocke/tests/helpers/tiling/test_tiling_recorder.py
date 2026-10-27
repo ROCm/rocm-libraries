@@ -12,9 +12,16 @@ from __future__ import annotations
 import pytest
 
 import rocke.helpers.tiling.emit as emit_mod
+from rocke.core.ir import F16, I32, IRBuilder, PtrType
 from rocke.helpers.tiling import (
+    GlobalForm,
+    explain_bounds_checks,
     load_fragment,
-)  # noqa: F401 -- bound so restoration is exercised here
+    make_tensor_desc,
+    make_tile_desc,
+    make_window,
+    store_fragment,
+)
 from rocke.helpers.tiling import tiling_recorder as tr
 from rocke.helpers.tiling.kernels import tiling_gemm_interleaved_demo as demo
 from rocke.helpers.tiling.mma.mma_operation import TileMma
@@ -88,6 +95,59 @@ def test_witness_reconciles_memory_and_flags_direct_mma():
     )
     with pytest.raises(tr.CoverageError, match="mma expected=0 counted=4"):
         tr.witness(pipeline, kernel)
+
+
+# A 16x16 f16 tile over 64 lanes: each lane holds one 4-element run along the contiguous axis.
+_COPY_TILE = make_tile_desc(
+    shape=[16, 16],
+    thread_tile=[1, 4],
+    thread_dist=[16, 4],
+    thread_order=[1, 0],
+    wave_size=64,
+)
+
+
+def _build_ragged_copy():
+    """Copy one 16x16 tile of a runtime-length (M, 64) f16 tensor per workgroup, at block origins
+    nothing bounds, so every global access is checked. Returns the kernel and the store's plan.
+    """
+    b = IRBuilder("recorded_ragged_copy")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    x = b.param("X", PtrType(F16, "global"), align=16)
+    y = b.param("Y", PtrType(F16, "global"), align=16)
+    rows = b.param("M", I32, ge=0, le=1 << 20)
+    origin = (
+        b.mul(b.block_id_y(), b.const_i32(16)),
+        b.mul(b.block_id_x(), b.const_i32(16)),
+    )
+    window = make_window(make_tensor_desc((rows, 64), (64, 1), F16), origin)
+    lane = b.thread_id_x()
+    store_fragment(b, y, window, load_fragment(b, x, window, _COPY_TILE, lane), lane)
+    plan = explain_bounds_checks(b, y, window, _COPY_TILE)
+    b.ret()
+    return b.kernel, plan
+
+
+def test_checked_global_accesses_are_recorded_at_the_width_they_are_emitted():
+    """A checked global store is one wide store per run, not one per register: the recorder takes
+    the width from the access's plan, and the witness then accounts for every emitted op.
+    """
+    (kernel, plan), pipeline = tr.record_build(_build_ragged_copy)
+    assert plan.form is GlobalForm.MASKED and plan.vector_width == 4
+    load, store = pipeline.transactions
+    assert (load.kind, load.space, load.vw, load.op_fanout) == ("load", "global", 4, 1)
+    assert (store.kind, store.space, store.vw, store.op_fanout) == (
+        "store",
+        "global",
+        4,
+        1,
+    )
+    report = tr.witness(pipeline, kernel)
+    assert report.mem_expected == report.mem_counted == 2
+    assert report.histogram["memref.global_store_vN"] == 1
+    # Recording reads each access's plan after the verb; the kernel stays byte-identical.
+    plain, _ = _build_ragged_copy()
+    assert _serialize(kernel.body) == _serialize(plain.body)
 
 
 def test_addressing_roundtrip_passes_on_toy():

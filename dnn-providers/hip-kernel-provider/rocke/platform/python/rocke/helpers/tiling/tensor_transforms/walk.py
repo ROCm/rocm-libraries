@@ -61,6 +61,7 @@ from .ranges import (
     AffineCoord,
     Congruence,
     Interval,
+    LoopStopWithoutMultipleOf,
     UniformPart,
     _RuntimeEnd,
 )
@@ -252,6 +253,7 @@ class _FactWalk:
         self._b = b
         self._root = root
         self._memo: dict[int, Facts] = {}
+        self._loop_stops: dict[int, LoopStopWithoutMultipleOf] = {}
 
     def facts(self, value: Value | int) -> Facts:
         if isinstance(value, int):
@@ -265,6 +267,14 @@ class _FactWalk:
         """The int ``value`` is known to be, or ``None``."""
         r, _ = self.facts(value)
         return r.lo if _is_exact(r) else None
+
+    def loop_stop_without_multiple_of(
+        self, value: Value | int
+    ) -> LoopStopWithoutMultipleOf | None:
+        """Why the loop counter ``value``'s range keeps its runtime stop as its end, recorded when
+        its facts were derived; ``None`` for any other value (call after :meth:`facts`).
+        """
+        return self._loop_stops.get(id(value))
 
     def runtime_end(self, marker: Op) -> _RuntimeEnd:
         """A marker's runtime end ``lt + lt_plus`` over its ``lt`` operand, whose own numbers
@@ -326,7 +336,15 @@ class _FactWalk:
         return self.facts(op.operands[0])
 
     def _loop_counter(self, value: Value) -> Facts:
-        """The induction variable of ``scf.for`` with an exact start and an exact step > 0."""
+        """The induction variable of ``scf.for`` with an exact start and an exact step > 0.
+
+        An exact stop and a runtime length plus constants give ``[start, stop)`` snapped to the
+        counter's multiple-of fact ``(step, start)``: the end of the last trip. So ``[0, K)``
+        step ``TK`` over a ``K`` stated a multiple of ``TK`` ends at ``K - TK + 1``, which proves
+        ``k + TK <= K`` exactly as the stop ``K - (TK - 1)`` does; a ``K`` with no such fact
+        keeps the end ``K``, and the walk records why (:class:`LoopStopWithoutMultipleOf`, read
+        with :meth:`loop_stop_without_multiple_of`). Any other stop gives its own upper end.
+        """
         loop = _loop_of_counter(value)
         if loop is None:
             return _UNKNOWN  # an iter_args value or a loop result
@@ -345,7 +363,15 @@ class _FactWalk:
         if (
             runtime_stop is not None
         ):  # (b) a runtime length plus constants: proven by identity
-            return Interval(lo, runtime_stop), congruence
+            counter = Interval(lo, runtime_stop).snapped(congruence)
+            if not runtime_stop.residue_known_modulo(st):
+                stated = Interval(lo, runtime_stop).snapped(
+                    congruence, upper_value_residue=0
+                )
+                self._loop_stops[id(value)] = LoopStopWithoutMultipleOf(
+                    runtime_stop.value, st, stated
+                )
+            return counter, congruence
         h = self.facts(stop)[0].hi  # (c) any other stop: its own upper end
         if h is None:
             return Interval(lo, None), congruence
@@ -528,7 +554,10 @@ class _Splitter:
                 return self.split(y) + AffineCoord.of_int(kx)
         if self.is_uniform(value):
             r, congruence = self._walk.facts(value)
-            return AffineCoord(0, (UniformPart(value, r, congruence),))
+            part = UniformPart(
+                value, r, congruence, self._walk.loop_stop_without_multiple_of(value)
+            )
+            return AffineCoord(0, (part,))
         if op is not None and op.name == "arith.add" and not op.attrs.get("wrap"):
             left, right = (self.split(v) for v in op.operands)
             if left.lane is None or right.lane is None:
