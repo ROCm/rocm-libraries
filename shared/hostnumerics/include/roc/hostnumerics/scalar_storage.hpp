@@ -184,6 +184,13 @@ Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff
     return decodeScalar<Target>(type, storage, logicalOffset, implicitNativeConversionOptions());
 }
 
+template <typename Source>
+double floatingEncodingSource(Source source, const ScalarConversionOptions& options) {
+    return options.floatingSourcePrecision == FloatingSourcePrecision::Direct
+               ? convertScalar<double>(source, options)
+               : static_cast<double>(convertScalar<float>(source, options));
+}
+
 template <typename Tag, typename Source>
 auto encodeScalarValueKnown(Source source, const ScalarConversionOptions& options) {
     constexpr ScalarType Type = Tag::type;
@@ -191,13 +198,20 @@ auto encodeScalarValueKnown(Source source, const ScalarConversionOptions& option
 
     if constexpr (Type == ScalarType::Boolean)
         return convertScalar<bool>(source, options) ? uint8_t{1} : uint8_t{0};
-    else if constexpr (Type == ScalarType::Float16)
+    else if constexpr (Type == ScalarType::Float16) {
+        if (options.floatingSourcePrecision == FloatingSourcePrecision::Direct ||
+            options.floatingOverflow == FloatingOverflow::SaturateFinite)
+            return encodeFloat16(floatingEncodingSource(source, options), options.floatingOverflow);
         return encodeFloat16(convertScalar<float>(source, options));
-    else if constexpr (Type == ScalarType::BFloat16)
+    } else if constexpr (Type == ScalarType::BFloat16) {
+        if (options.floatingSourcePrecision == FloatingSourcePrecision::Direct ||
+            options.floatingOverflow == FloatingOverflow::SaturateFinite)
+            return encodeBFloat16(floatingEncodingSource(source, options), options.bfloat16Rounding,
+                                  options.floatingOverflow);
         return options.bfloat16Rounding == BFloat16Rounding::Truncate
                    ? encodeBFloat16Truncated(convertScalar<float>(source, options))
                    : encodeBFloat16(convertScalar<float>(source, options));
-    else if constexpr (Type == ScalarType::Int4) {
+    } else if constexpr (Type == ScalarType::Int4) {
         // Complex sources must have a zero imaginary part.
         if constexpr (RuntimeIsComplexV<Source>)
             return encodeScalarValueKnown<Tag>(source.real(), options);
@@ -209,16 +223,26 @@ auto encodeScalarValueKnown(Source source, const ScalarConversionOptions& option
                          Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
                          Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
                          Type == ScalarType::E4M3) {
-        const uint32_t raw = encodeBinaryFloatKnown<Type>(convertScalar<float>(source, options));
+        const uint32_t raw =
+            options.floatingSourcePrecision == FloatingSourcePrecision::Direct ||
+                    options.floatingOverflow == FloatingOverflow::SaturateFinite
+                ? encodeBinaryFloatKnown<Type>(floatingEncodingSource(source, options),
+                                               options.floatingOverflow)
+                : encodeBinaryFloatKnown<Type>(convertScalar<float>(source, options));
         if constexpr (scalarTypeInfo(Type).storageBits == 8)
             return static_cast<uint8_t>(raw);
         else
             return raw;
-    } else if constexpr (Type == ScalarType::E8M0)
+    } else if constexpr (Type == ScalarType::E8M0) {
+        if (options.floatingSourcePrecision == FloatingSourcePrecision::Direct ||
+            options.e8m0Underflow == E8M0Underflow::FlushBelowFloat32Normal)
+            return encodeE8M0(floatingEncodingSource(source, options), options.e8m0Underflow);
         return encodeE8M0(convertScalar<float>(source, options));
-    else if constexpr (Type == ScalarType::E8M0Zero)
+    } else if constexpr (Type == ScalarType::E8M0Zero) {
+        if (options.floatingSourcePrecision == FloatingSourcePrecision::Direct)
+            return encodeE8M0Zero(floatingEncodingSource(source, options));
         return encodeE8M0Zero(convertScalar<float>(source, options));
-    else if constexpr (!std::is_void_v<typename Tag::Storage>)
+    } else if constexpr (!std::is_void_v<typename Tag::Storage>)
         return convertScalar<typename Tag::Storage>(source, options);
     else
         static_assert(AlwaysFalseV<Tag>, "Unhandled ScalarType encoding.");
