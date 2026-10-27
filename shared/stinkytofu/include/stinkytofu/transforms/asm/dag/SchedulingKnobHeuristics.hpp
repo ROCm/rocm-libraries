@@ -11,8 +11,9 @@
 //   1. user-explicit ModuleOptions value
 //   2. SchedulingKnobPolicy::propose() when main-loop wmma and ds_load counts
 //      are both > 0
-//   3. today's static defaults (HW / CDNA5 / Rule3=100) when the main loop is
-//      missing or degenerate (either count == 0)
+//   3. today's static defaults (HW / CDNA5 / Rule3=100 /
+//      ReduceClusterBarrierPerLoop=off) when the main loop is missing or
+//      degenerate (either count == 0)
 //
 // HeuristicSchedulingKnobPolicy is the current owner-tunable formula. A future
 // neural policy can implement the same interface without touching the DAG
@@ -36,6 +37,11 @@ inline constexpr std::string_view kMainLoopGroupName = "loopWithPrefetch";
 
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
+
+/// Static default when the main loop is missing or degenerate. The policy turns
+/// this on when sumWmmaLatencyCycles > 2500 and that sum covers at least 5
+/// cycles per ds_load.
+inline constexpr bool kStaticDefaultReduceClusterBarrierPerLoop = false;
 
 enum class SchedulingKnobSource : uint8_t {
     User,           ///< Explicit ModuleOptions override
@@ -73,11 +79,15 @@ struct ResolvedSchedulingKnobs {
     int clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
+    /// First trigger of each enclosing loop only. False handshakes every trigger.
+    bool reduceClusterBarrierPerLoop = kStaticDefaultReduceClusterBarrierPerLoop;
+    SchedulingKnobSource reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
 };
 
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).
 struct SchedulingKnobOverrides {
     std::optional<int> clusterBarrierRule3SignalLeadCycles;
+    std::optional<bool> reduceClusterBarrierPerLoop;
 };
 
 struct SchedulingKnobPolicy {
@@ -104,6 +114,7 @@ STINKYTOFU_EXPORT SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyA
 
 /// Build overrides from ModuleOptions sentinels:
 ///   ClusterBarrierRule3SignalLeadCycles < 0       → unset
+///   ReduceClusterBarrierPerLoop < 0                  → unset (0 off, >0 on)
 STINKYTOFU_EXPORT SchedulingKnobOverrides
 schedulingKnobOverridesFromModuleOptions(const StinkyAsmModule::ModuleOptions& opts);
 
