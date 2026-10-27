@@ -92,6 +92,27 @@ def test_all_four_reducer_abis(arch, bounded, lse):
     assert spec.kernel_name().endswith("_lse") == lse
 
 
+@pytest.mark.parametrize("page,policy,bounded", [(32, "1x", False), (16, "2x", True)])
+@pytest.mark.parametrize("lse", [False, True])
+def test_tuning_dispatch_signature_matches_segment(page, policy, bounded, lse):
+    from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
+
+    variant = next(
+        v
+        for v in GFX950_TUNING_VARIANTS
+        if v.path == "3d" and v.tile_policy == policy and v.num_segments == 4
+    )
+    req = replace(
+        request("gfx950", page, emit_lse=lse),
+        algorithm="unified_tuning",
+        spec_id=variant.spec_id,
+    )
+    selected = dispatch_attention(req)
+    assert selected.spec.kernel_spec.metadata_containment == bounded
+    segment, _ = selected.spec.build("gfx950")
+    assert [p["name"] for p in selected.signature] == [p.name for p in segment.params]
+
+
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("bad", [None, 0, 1, "false"])
 def test_structural_reducer_rejects_malformed_lse(arch, bad):

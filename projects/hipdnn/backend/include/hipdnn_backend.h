@@ -165,6 +165,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * Executes the given engine_configuration_plan on the variantPack and the finalized executionPlan
  * on the data. The data and the working space are encapsulated in the variantPack.
  *
+ * The plan may run on any handle whose stream is on the device the plan was finalized or
+ * deserialized for; a handle on another device is rejected with HIPDNN_STATUS_BAD_PARAM.
+ *
  * @param  [in]  handle              An instance of hipdnnHandle_t
  * @param  [in]  executionPlan       Descriptor of the finalized executionPlan
  * @param  [in]  variantPack         Descriptor of the finalized variantPack consisting of:
@@ -174,8 +177,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  *                                     large as the size queried
  *
  * @retval  HIPDNN_STATUS_SUCCESS               The executionPlan was executed successfully
- * @retval  HIPDNN_STATUS_BAD_PARAM             An incorrect or inconsistent value is encountered. For example, a required data pointer is invalid.
- * @retval  HIPDNN_STATUS_INTERNAL_ERROR        Some internal errors were encountered.
+ * @retval  HIPDNN_STATUS_BAD_PARAM             An incorrect or inconsistent value is encountered. For example, a required data pointer is invalid, or the handle's stream is on a different device than the executionPlan.
+ * @retval  HIPDNN_STATUS_INTERNAL_ERROR        Some internal errors were encountered, for example the device of the handle's stream could not be queried.
  * @retval  HIPDNN_STATUS_EXECUTION_FAILED      An error was encountered executing the plan with the variantPack.
  *
  */
