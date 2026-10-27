@@ -24,7 +24,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -146,14 +145,11 @@ int extractOptLevel(int argc, char** argv) {
 }
 
 bool isKernelConfigArg(const std::string& arg) {
-    static constexpr const char* kAssignPrefixes[] = {
-        "--TileA0=", "--TileB0=", "--TileM0=",  "--NumGRA=",
-        "--NumGRB=", "--NumGRM=", "--NumWaves="};
-    for (const char* prefix : kAssignPrefixes) {
-        if (arg.starts_with(prefix)) return true;
+    for (const GemmTileField& field : kGemmTileFields) {
+        const std::string flag = std::string("--") + field.name;
+        if (arg == flag || arg.starts_with(flag + "=")) return true;
     }
-    return arg == "--TileA0" || arg == "--TileB0" || arg == "--TileM0" || arg == "--NumGRA" ||
-           arg == "--NumGRB" || arg == "--NumGRM" || arg == "--NumWaves";
+    return false;
 }
 
 // Function to parse command-line arguments for passes.
@@ -206,9 +202,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
             // mistaken for a missing pass (e.g. `--debug-pass FooPass` was
             // emitting `Warning: Unknown pass 'debug-pass'` because the
             // `--` prefix was stripped and `debug-pass` wasn't a known pass).
-            if (arg == "-o" || arg == "--debug-pass" || arg == "--TileA0" || arg == "--TileB0" ||
-                arg == "--TileM0" || arg == "--NumGRA" || arg == "--NumGRB" || arg == "--NumGRM" ||
-                arg == "--NumWaves") {
+            if (arg == "-o" || arg == "--debug-pass") {
                 ++i;  // skip the value argument
                 continue;
             }
@@ -246,59 +240,32 @@ static bool parseGemmTileConfigOptions(int argc, char** argv, stinkytofu::GemmTi
                                        std::string& error) {
     config = {};
     for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto parseAssign = [&](const char* prefix, const char* flag, uint32_t& field) -> bool {
-            if (!a.starts_with(prefix)) return true;
-            return parseGemmTileField(flag, a.substr(std::strlen(prefix)), field, error);
-        };
-        auto parseNext = [&](const char* flag, uint32_t& field) -> bool {
-            if (a != flag) return true;
-            if (i + 1 >= argc) return true;
-            return parseGemmTileField(flag, argv[++i], field, error);
-        };
-
-        if (!parseAssign("--TileA0=", "--TileA0", config.TileA0)) return false;
-        if (a.starts_with("--TileA0=")) continue;
-        if (!parseAssign("--TileB0=", "--TileB0", config.TileB0)) return false;
-        if (a.starts_with("--TileB0=")) continue;
-        if (!parseAssign("--TileM0=", "--TileM0", config.TileM0)) return false;
-        if (a.starts_with("--TileM0=")) continue;
-        if (!parseAssign("--NumGRA=", "--NumGRA", config.NumGRA)) return false;
-        if (a.starts_with("--NumGRA=")) continue;
-        if (!parseAssign("--NumGRB=", "--NumGRB", config.NumGRB)) return false;
-        if (a.starts_with("--NumGRB=")) continue;
-        if (!parseAssign("--NumGRM=", "--NumGRM", config.NumGRM)) return false;
-        if (a.starts_with("--NumGRM=")) continue;
-        if (!parseAssign("--NumWaves=", "--NumWaves", config.NumWaves)) return false;
-        if (a.starts_with("--NumWaves=")) continue;
-
-        if (!parseNext("--TileA0", config.TileA0)) return false;
-        if (a == "--TileA0") continue;
-        if (!parseNext("--TileB0", config.TileB0)) return false;
-        if (a == "--TileB0") continue;
-        if (!parseNext("--TileM0", config.TileM0)) return false;
-        if (a == "--TileM0") continue;
-        if (!parseNext("--NumGRA", config.NumGRA)) return false;
-        if (a == "--NumGRA") continue;
-        if (!parseNext("--NumGRB", config.NumGRB)) return false;
-        if (a == "--NumGRB") continue;
-        if (!parseNext("--NumGRM", config.NumGRM)) return false;
-        if (a == "--NumGRM") continue;
-        if (!parseNext("--NumWaves", config.NumWaves)) return false;
-        if (a == "--NumWaves") continue;
+        const std::string a = argv[i];
+        for (const GemmTileField& field : kGemmTileFields) {
+            const std::string flag = std::string("--") + field.name;
+            uint32_t& value = config.*field.member;
+            if (a.starts_with(flag + "=")) {
+                if (!parseGemmTileField(flag.c_str(), a.substr(flag.size() + 1), value, error))
+                    return false;
+                break;
+            }
+            if (a == flag) {
+                if (i + 1 < argc && !parseGemmTileField(flag.c_str(), argv[++i], value, error))
+                    return false;
+                break;
+            }
+        }
     }
     return true;
 }
 
 static void printKernelConfigHelp(std::ostream& os) {
     os << "  Kernel configuration (GemmTileConfig fields):\n";
-    os << "  --TileA0 <n>        (or --TileA0=<n>)\n";
-    os << "  --TileB0 <n>        (or --TileB0=<n>)\n";
-    os << "  --TileM0 <n>        (or --TileM0=<n>)\n";
-    os << "  --NumGRA <n>        (or --NumGRA=<n>)\n";
-    os << "  --NumGRB <n>        (or --NumGRB=<n>)\n";
-    os << "  --NumGRM <n>        (or --NumGRM=<n>)\n";
-    os << "  --NumWaves <n>      (or --NumWaves=<n>)\n";
+    for (const GemmTileField& field : kGemmTileFields) {
+        std::string usage = std::string("--") + field.name + " <n>";
+        usage.resize(20, ' ');
+        os << "  " << usage << "(or --" << field.name << "=<n>)\n";
+    }
 }
 }  // namespace
 

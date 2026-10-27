@@ -11,7 +11,7 @@ The same package also exposes the logical IR, intrinsics, and `runOptimizationPi
 Use it to test a pass on a kernel, and to edit a kernel by hand.
 
 1. Load physical STIR, or assembler `.s`, from a string or a file.
-2. Run catalog passes, in the order you list them.
+2. Run catalog passes, in the order you list them, and read the remarks and dumps each one left.
 3. Read each instruction. Registers stay physical until you run `LiftAsmRegistersToSSAPass`. After that pass, operands are SSA value ids.
 4. Print the module back to STIR, or emit assembler source and assemble it.
 
@@ -50,6 +50,9 @@ stinkytofu run kernel.stir --arch 12,5,0 \
     --pass RegisterAllocationPass=apply,classes=vs
 
 stinkytofu run kernel.s --pass StinkyRemoveNopPass -o out.s
+
+stinkytofu run kernel.stir --function helper \
+    --pass StinkyRemoveNopPass --print-before asm --print-after asm
 ```
 
 | Option | Meaning |
@@ -58,6 +61,9 @@ stinkytofu run kernel.s --pass StinkyRemoveNopPass -o out.s
 | `--arch 12,5,0` | `major,minor,stepping`. Default is `12,5,0` |
 | `--asm` | Read the input as assembler source. Use it for stdin, or a file without `.s` |
 | `--pass NAME[=args]` | Pass to run. Repeat for more than one, in order |
+| `--function NAME` | Run the passes on that function only. Default is every function |
+| `--print-before stir` or `asm` | Write the function to stderr before each pass |
+| `--print-after stir` or `asm` | Write the function to stderr after each pass |
 | `--emit-asm` | Print assembler source. The default for assembler input |
 | `--ssa` | Print the SSA view. That text cannot be loaded again |
 | `-o PATH` | Write the result to a file |
@@ -67,10 +73,10 @@ Exit status:
 | Code | When |
 | --- | --- |
 | 0 | The run finished |
-| 2 | The file is missing, the text does not load, or the pass name is unknown |
+| 2 | The file is missing, the text does not load, the pass name is unknown, or no function has the `--function` name |
 | 1 | A pass refuses the function, or a pass reports an analysis failure |
 
-Remarks from the passes also go to stderr.
+Remarks from the passes also go to stderr. The `--print-before` and `--print-after` dumps go to stderr too. Stdout is only the module.
 
 Tests for this API are in `python_module/tests/test_stir_api.py`. When pytest is installed, standalone `ctest` runs that file.
 
@@ -80,10 +86,13 @@ Tests for this API are in `python_module/tests/test_stir_api.py`. When pytest is
 import stinkytofu
 
 module = stinkytofu.load_stir(text, arch=(12, 5, 0))
-module.run_passes([
+records = module.run_passes([
     "LiftAsmRegistersToSSAPass",
     "RegisterAllocationPass=apply,classes=vs",
 ])
+for record in records:              # one per pass, per function
+    for remark in record.remarks:
+        print(record.pass_name, remark.kind, remark.remark_name)
 physical = module.serialize()       # load_stir accepts this again
 view = module.serialize(ssa=True)   # diagnostic only
 ```
@@ -92,7 +101,7 @@ view = module.serialize(ssa=True)   # diagnostic only
 
 The text after `=` is split on commas, the same way `stinkytofu-opt --Pass=...` splits it.
 
-`run_passes` uses the same feature defaults as `stinkytofu-opt` in individual-pass mode: GEMM loops are unrolled, and global reads are distributed.
+`run_passes` uses the same feature defaults as `stinkytofu-opt` in individual-pass mode: GEMM loops are unrolled, and global reads are distributed. The `features` and `tile` options below change them for one call.
 
 ### Load
 
@@ -119,14 +128,49 @@ The module owns its functions. A load raises `ValueError` when the arch is unkno
 
 ### Run
 
-`run_passes` runs each name on every function, in order.
+`run_passes(passes, *, function=None, features=None, tile=None, print_before=None, print_after=None)` runs each name on every function, in order. It returns one `PassRecord` per pass on each function: the entry function's records first, in pass order, then each callee's.
+
+| Option | Meaning |
+| --- | --- |
+| `function` | Run on the function with this name only. `""` is an unnamed entry function |
+| `features` | A dict with `unroll_gemm` and `distribute_global_read`, each a bool. A key left out keeps the default above. Of the catalog passes, only `StinkyDAGSchedulerPass` reads them |
+| `tile` | A dict of GEMM tile fields, named as the `stinkytofu-opt` flags are: `TileA0`, `TileB0`, `TileM0`, `NumGRA`, `NumGRB`, `NumGRM`, `NumWaves`. Each is an int from 0 to 4294967295. A field left out stays 0, and `NumWaves` stays 1. The arch is always the module's |
+| `print_before`, `print_after` | `"stir"` or `"asm"`. Keep a dump of the function from before or after each pass, in that form |
+
+| `PassRecord` field | Meaning |
+| --- | --- |
+| `pass_name` | The catalog name you asked for |
+| `function` | The function's name |
+| `changed` | The function prints different physical STIR after the pass. Only that function is compared, not its callees |
+| `remarks` | Every remark the pass emitted on the function, in order. Each has `kind` (`"passed"`, `"missed"`, or `"analysis"`), `remark_name`, and `message` |
+| `before`, `after` | The dump `print_before` or `print_after` asked for, or `None` |
+
+`changed` compares physical STIR, so a pass that only adds SSA values reports `False`. `LiftAsmRegistersToSSAPass` is one. Its `LiftedToSSA` remark says what it lifted.
+
+A missed remark stays in the record when the same pass also reported a success. `TieExecMaskedWritesPass` can return `TiedWrites` and `UnmatchedExecSpan` together.
+
+A dump begins with a `*** Before Pass: NAME ***` or `*** After Pass: NAME ***` line. NAME is the name the pass object reports, which is not always the catalog name: register allocation prints `Register Allocation`. A dump of the entry function is followed by each callee, under a `; --- callee Function: NAME ---` line. `"asm"` prints the function as `emit_asm()` does, without the kernel header.
+
+Remarks still go to stderr as the pass runs.
+
+These raise, and the module is left as it was:
 
 | What happened | Exception |
 | --- | --- |
 | Unknown pass name | `ValueError`. The message lists `pass_names()` |
 | The pass rejects its arguments | `ValueError` |
-| A missed remark, and no success remark | `RuntimeError` with the remark text |
+| No function has the `function` name | `ValueError`. The message lists the names |
+| An unknown `features` or `tile` key, a tile value out of range, or a dump form other than `"stir"` or `"asm"` | `ValueError` |
+| A `features` value that is not a bool, or a `tile` value that is not an int | `TypeError` |
+
+These raise after the pass has run, so that pass and the ones before it may already have changed the module:
+
+| What happened | Exception |
+| --- | --- |
+| A missed remark, and no success remark | `RuntimeError` with one `missed: <pass>: <message>` line per missed remark. `<pass>` is the name the remark carries, such as `RegisterAllocation` |
 | The pass reports an analysis failure | `RuntimeError` |
+
+A call that raises returns no records.
 
 ### Print and emit
 

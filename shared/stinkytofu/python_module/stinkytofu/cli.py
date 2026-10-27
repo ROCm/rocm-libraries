@@ -4,9 +4,11 @@
 
 The command calls the analysis API. It does not run the optimization pipeline.
 A .s file, or stdin with --asm, loads as assembler source and prints assembler
-source; anything else loads as STIR and prints STIR. Exit status: 0 success,
-2 for a missing file, a load error, or an unknown pass, 1 when a pass refuses
-the function or reports an analysis failure.
+source; anything else loads as STIR and prints STIR. --print-before and
+--print-after write each pass's dump to stderr; stdout stays the module. Exit
+status: 0 success, 2 for a missing file, a load error, an unknown pass, or an
+unknown function, 1 when a pass refuses the function or reports an analysis
+failure.
 """
 
 import argparse
@@ -54,8 +56,16 @@ def cmd_run(args):
         module = stinkytofu.load_asm_file(args.input, arch=arch)
     else:
         module = stinkytofu.load_stir_file(args.input, arch=arch)
-    if args.passes:
-        module.run_passes(args.passes)
+    records = module.run_passes(
+        args.passes,
+        function=args.function,
+        print_before=args.print_before,
+        print_after=args.print_after,
+    )
+    for record in records:
+        for dump in (record.before, record.after):
+            if dump is not None:
+                sys.stderr.write(dump)
     if args.emit_asm or (is_asm and not args.ssa):
         out = module.emit_asm()
     else:
@@ -93,6 +103,20 @@ def build_parser():
         default=[],
         metavar="NAME[=args]",
         help="pass to run, repeatable, in order. Text after = is the pass argument list",
+    )
+    run.add_argument(
+        "--function",
+        help="run the passes on this function only; default every function",
+    )
+    run.add_argument(
+        "--print-before",
+        choices=("stir", "asm"),
+        help="write the function to stderr before each pass, as STIR or assembly",
+    )
+    run.add_argument(
+        "--print-after",
+        choices=("stir", "asm"),
+        help="write the function to stderr after each pass, as STIR or assembly",
     )
     output = run.add_mutually_exclusive_group()
     output.add_argument(

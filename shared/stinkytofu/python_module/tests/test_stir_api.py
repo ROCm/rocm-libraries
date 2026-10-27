@@ -319,6 +319,154 @@ def test_assemble_needs_comgr():
         stinkytofu.load_asm("s_nop 0\n").assemble()
 
 
+# Same stream as tests/filecheck/tdm_load_wave_sync_single_wave.stir: one
+# barrier with two waves, none with one.
+TDM_STREAM = """\
+st.func @k() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+}
+"""
+
+
+def test_a_pass_returns_its_remarks():
+    [record] = stinkytofu.load_stir(KERNEL).run_passes(["LiftAsmRegistersToSSAPass"])
+    assert (record.pass_name, record.function) == ("LiftAsmRegistersToSSAPass", "k")
+    [remark] = record.remarks
+    assert (remark.kind, remark.remark_name) == ("passed", "LiftedToSSA")
+    assert remark.message.startswith("@k: lifted")
+    # The lift attaches SSA values. The physical STIR it prints is unchanged.
+    assert not record.changed
+    assert record.before is None and record.after is None
+
+
+def test_a_removal_changes_the_function_without_a_remark():
+    [record] = stinkytofu.load_stir(KERNEL).run_passes(
+        ["RemoveInstructionPass=v_mov_b32"]
+    )
+    assert record.changed
+    assert record.remarks == []
+
+
+def test_a_missed_remark_stays_beside_a_success():
+    text = """\
+st.func @k() {
+^entry:
+  exec_lo0 = "st.s_mov_b32"(vcc_lo0) { issueCycles = 1, latencyCycles = 2 }
+  v11 = "st.v_mov_b32"(0) { issueCycles = 1, latencyCycles = 2 }
+  exec_lo0 = "st.s_mov_b32"(-1) { issueCycles = 1, latencyCycles = 2 }
+  exec_lo0 = "st.s_mov_b32"(vcc_lo0) { issueCycles = 1, latencyCycles = 2 }
+}
+"""
+    [record] = stinkytofu.load_stir(text).run_passes(["TieExecMaskedWritesPass"])
+    assert [(remark.kind, remark.remark_name) for remark in record.remarks] == [
+        ("passed", "TiedWrites"),
+        ("missed", "UnmatchedExecSpan"),
+    ]
+
+
+def test_one_record_per_pass_per_function():
+    records = stinkytofu.load_stir(MODULE).run_passes(
+        ["StinkyRemoveNopPass", "RemoveInstructionPass=v_mov_b32"]
+    )
+    assert [(r.function, r.pass_name, r.changed) for r in records] == [
+        ("main", "StinkyRemoveNopPass", True),
+        ("main", "RemoveInstructionPass", False),
+        ("helper", "StinkyRemoveNopPass", True),
+        ("helper", "RemoveInstructionPass", False),
+    ]
+
+
+def test_function_runs_one_function():
+    module = stinkytofu.load_stir(MODULE)
+    records = module.run_passes(["StinkyRemoveNopPass"], function="helper")
+    assert [(r.function, r.changed) for r in records] == [("helper", True)]
+    main_fn, helper = module.functions()
+    assert [i.opcode for b in main_fn.blocks() for i in b.instructions()] == [
+        "st.s_nop"
+    ]
+    assert [i.opcode for b in helper.blocks() for i in b.instructions()] == []
+
+
+def test_unknown_function_runs_nothing():
+    module = stinkytofu.load_stir(MODULE)
+    before = module.serialize()
+    with pytest.raises(
+        ValueError, match="no function 'nowhere'; functions: 'main', 'helper'"
+    ):
+        module.run_passes(["StinkyRemoveNopPass"], function="nowhere")
+    assert module.serialize() == before
+
+
+def test_rejected_arguments_run_nothing():
+    module = stinkytofu.load_stir(KERNEL)
+    before = module.serialize()
+    with pytest.raises(
+        ValueError, match="RemoveInstructionPass rejected its arguments"
+    ):
+        module.run_passes(["RemoveInstructionPass=v_mov_b32", "RemoveInstructionPass"])
+    assert module.serialize() == before
+
+
+def test_tile_reaches_the_pass():
+    one_wave = stinkytofu.load_stir(TDM_STREAM)
+    [record] = one_wave.run_passes(["TDMLoadWaveSyncPass"])
+    assert not record.changed
+    two_waves = stinkytofu.load_stir(TDM_STREAM)
+    [record] = two_waves.run_passes(["TDMLoadWaveSyncPass"], tile={"NumWaves": 2})
+    assert record.changed
+    assert "st.s_barrier_signal" in two_waves.serialize()
+
+
+def test_features_take_the_two_flags():
+    features = {"unroll_gemm": False, "distribute_global_read": False}
+    records = stinkytofu.load_stir(KERNEL).run_passes(
+        ["StinkyRemoveNopPass"], features=features
+    )
+    assert len(records) == 1
+
+
+@pytest.mark.parametrize(
+    "options, error, message",
+    [
+        ({"print_before": "text"}, ValueError, 'print_before must be "stir" or "asm"'),
+        ({"tile": {"NumWave": 2}}, ValueError, "unknown tile key 'NumWave'"),
+        ({"tile": {"NumWaves": -1}}, ValueError, r"must be in \[0, 4294967295\]"),
+        ({"tile": {"NumWaves": 2**32}}, ValueError, r"must be in \[0, 4294967295\]"),
+        ({"tile": {"NumWaves": "2"}}, TypeError, "must be an int"),
+        ({"features": {"unroll": True}}, ValueError, "unknown features key 'unroll'"),
+        ({"features": {"unroll_gemm": 1}}, TypeError, "must be a bool"),
+    ],
+)
+def test_bad_run_options_run_nothing(options, error, message):
+    module = stinkytofu.load_stir(KERNEL)
+    before = module.serialize()
+    with pytest.raises(error, match=message):
+        module.run_passes(["RemoveInstructionPass=v_mov_b32"], **options)
+    assert module.serialize() == before
+
+
+def test_print_before_and_after():
+    [record] = stinkytofu.load_stir(KERNEL).run_passes(
+        ["RemoveInstructionPass=v_mov_b32"], print_before="stir", print_after="asm"
+    )
+    assert "*** Before Pass: RemoveInstructionPass ***" in record.before
+    assert '"st.v_mov_b32"(v1)' in record.before
+    assert record.after == (
+        "\n*** After Pass: RemoveInstructionPass ***\nv_add_f32 v2, v0, v1\n"
+    )
+
+
+def test_entry_dump_includes_callees():
+    records = stinkytofu.load_stir(MODULE).run_passes(
+        ["StinkyRemoveNopPass"], print_before="asm"
+    )
+    assert [r.before.count("callee Function: helper") for r in records] == [1, 0]
+
+
 def test_cli_passes(capsys):
     assert main(["passes"]) == 0
     assert "LiftAsmRegistersToSSAPass" in capsys.readouterr().out
@@ -383,6 +531,34 @@ st.func @k() {
     )
     assert main(["run", str(path), "--pass", "HazardGapAnalysisPass"]) == 1
     assert "analysis failure" in capsys.readouterr().err
+
+
+def test_cli_prints_dumps_to_stderr(tmp_path, capsys):
+    path = tmp_path / "k.stir"
+    path.write_text(KERNEL)
+    argv = ["run", str(path), "--pass", "RemoveInstructionPass=v_mov_b32"]
+    assert main(argv + ["--print-before", "asm", "--print-after", "stir"]) == 0
+    captured = capsys.readouterr()
+    assert (
+        "*** Before Pass: RemoveInstructionPass ***\nv_mov_b32 v0, v1\n" in captured.err
+    )
+    assert "*** After Pass: RemoveInstructionPass ***" in captured.err
+    assert "***" not in captured.out
+    stinkytofu.load_stir(captured.out)
+
+
+def test_cli_runs_one_function(tmp_path, capsys):
+    path = tmp_path / "m.stir"
+    path.write_text(MODULE)
+    argv = ["run", str(path), "--pass", "StinkyRemoveNopPass", "--function", "helper"]
+    assert main(argv) == 0
+    printed = stinkytofu.load_stir(capsys.readouterr().out)
+    counts = [
+        sum(len(b.instructions()) for b in fn.blocks()) for fn in printed.functions()
+    ]
+    assert counts == [1, 0]
+    assert main(["run", str(path), "--function", "nowhere"]) == 2
+    assert "no function 'nowhere'" in capsys.readouterr().err
 
 
 def _launcher():

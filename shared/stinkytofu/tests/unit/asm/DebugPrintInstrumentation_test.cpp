@@ -112,4 +112,21 @@ TEST_F(DebugPrintInstrumentationTest, WithoutModuleDumpsOnlyEntry) {
         << out;
 }
 
+TEST_F(DebugPrintInstrumentationTest, AsmFormatPrintsEntryAndCalleeAsAssembly) {
+    auto module = makeModuleWithCallee();
+    auto sink = std::make_shared<std::ostringstream>();
+
+    DebugPrintInstrumentation inst(makeConfig(sink), module.get(),
+                                   DebugPrintInstrumentation::Format::Asm);
+    PassContext ctx;
+    inst.beforePass("SomePass", module->getFunction(), ctx);
+
+    const std::string out = sink->str();
+    EXPECT_NE(out.find("*** Before Pass: SomePass ***"), std::string::npos) << out;
+    EXPECT_NE(out.find("\nv_mov_b32 v0"), std::string::npos) << out;
+    EXPECT_NE(out.find("callee Function: callee"), std::string::npos) << out;
+    EXPECT_NE(out.find("\nv_mov_b32 v1"), std::string::npos) << out;
+    EXPECT_EQ(out.find("st.v_mov_b32"), std::string::npos) << "asm dump printed STIR:\n" << out;
+}
+
 }  // namespace

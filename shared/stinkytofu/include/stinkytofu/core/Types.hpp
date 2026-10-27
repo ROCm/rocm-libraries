@@ -66,6 +66,19 @@ struct GemmTileConfig {
     uint32_t NumWaves = 1;             ///< Number of waves; 1 = single wave
 };
 
+/// The GemmTileConfig fields a driver sets by name. Keep in step with the struct.
+struct GemmTileField {
+    const char* name;
+    uint32_t GemmTileConfig::*member;
+};
+
+inline constexpr GemmTileField kGemmTileFields[] = {
+    {"TileA0", &GemmTileConfig::TileA0},     {"TileB0", &GemmTileConfig::TileB0},
+    {"TileM0", &GemmTileConfig::TileM0},     {"NumGRA", &GemmTileConfig::NumGRA},
+    {"NumGRB", &GemmTileConfig::NumGRB},     {"NumGRM", &GemmTileConfig::NumGRM},
+    {"NumWaves", &GemmTileConfig::NumWaves},
+};
+
 /// Pass-specific feature configuration
 /// Categorizes optimization behaviors into semantics, properties, and features
 struct PassFeatureConfig {

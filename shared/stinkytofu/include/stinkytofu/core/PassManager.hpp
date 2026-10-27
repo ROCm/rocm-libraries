@@ -41,6 +41,8 @@
 
 namespace stinkytofu {
 class PassContext;
+// Defined in OptimizationRemark.hpp, which includes this header.
+struct OptimizationRemark;
 // Deliberately forward-declared, not included: HWModel.hpp reaches HazardRules.hpp
 // and from there the asm IR, which does not belong in every PassManager consumer.
 struct HWModel;
@@ -114,9 +116,9 @@ class Pass {
 // It does not own a Function; the Function is passed to PassManager::run(Function&).
 class STINKYTOFU_EXPORT PassContext {
    public:
-    /// prefix is "remark", "missed", or "analysis" — the same word emitRemark prints.
-    using RemarkHandler = std::function<void(const char* prefix, const std::string& passName,
-                                             const std::string& message)>;
+    /// Receives the remark itself, so a consumer can switch on its kind and
+    /// match its remarkName instead of the message text.
+    using RemarkHandler = std::function<void(const OptimizationRemark& remark)>;
 
    private:
     GemmTileConfig gemmConfig;
@@ -124,7 +126,7 @@ class STINKYTOFU_EXPORT PassContext {
     AsmCapsConfig asmCapsConfig;
     bool enableRemarks_ = false;
     bool analysisFailed_ = false;
-    /// Optional sink for the same remark lines emitRemark writes to stderr.
+    /// Optional sink for each remark emitRemark writes to stderr.
     RemarkHandler remarkHandler_;
     uint32_t wavefrontSize = 0;         ///< Computed from gemmConfig.arch
     const HWModel* hwModel_ = nullptr;  ///< Computed from gemmConfig.arch

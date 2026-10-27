@@ -32,6 +32,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -60,7 +61,9 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/support/Diagnostic.hpp"
+#include "stinkytofu/support/OptimizationRemark.hpp"
 #include "stinkytofu/support/PassArguments.hpp"
 
 namespace nb = nanobind;
@@ -86,6 +89,22 @@ struct PyBlock {
 struct PyFunction {
     std::string name;
     nb::list blocks;
+};
+
+struct PyRemark {
+    std::string kind;
+    std::string remarkName;
+    std::string message;
+};
+
+/// What one pass did to one function.
+struct PyPassRecord {
+    std::string passName;
+    std::string function;
+    bool changed = false;
+    nb::list remarks;
+    std::optional<std::string> before;
+    std::optional<std::string> after;
 };
 
 std::string trimCopy(std::string text) {
@@ -390,43 +409,175 @@ std::vector<std::string> modifierTexts(const StinkyInstruction& inst) {
     return out;
 }
 
-void runOnePass(StinkyAsmModule& module, Function& function, const std::string& name,
-                const std::vector<std::string>& args) {
-    PassManager passManager = makeStandalonePassManager(module.getArch());
-    passManager.getPassContext().setRemarksEnabled(true);
+/// The run_passes options, read and checked before any pass runs.
+struct RunOptions {
+    std::optional<bool> unrollGemm;
+    std::optional<bool> distributeGlobalRead;
+    std::vector<std::pair<uint32_t GemmTileConfig::*, uint32_t>> tile;
+    std::optional<DebugPrintInstrumentation::Format> printBefore;
+    std::optional<DebugPrintInstrumentation::Format> printAfter;
+};
 
-    bool missed = false;
-    bool passed = false;
-    std::vector<std::string> missedLines;
+void readFeatures(const nb::dict& features, RunOptions& options) {
+    for (auto [key, value] : features) {
+        const std::string name = nb::str(key).c_str();
+        std::optional<bool>* field = nullptr;
+        if (name == "unroll_gemm") field = &options.unrollGemm;
+        if (name == "distribute_global_read") field = &options.distributeGlobalRead;
+        if (field == nullptr)
+            throw std::invalid_argument("unknown features key '" + name +
+                                        "'; keys: unroll_gemm, distribute_global_read");
+        if (!nb::isinstance<nb::bool_>(value))
+            throw nb::type_error(("features['" + name + "'] must be a bool").c_str());
+        *field = nb::cast<bool>(value);
+    }
+}
+
+void readTile(const nb::dict& tile, RunOptions& options) {
+    for (auto [key, value] : tile) {
+        const std::string name = nb::str(key).c_str();
+        const GemmTileField* field = nullptr;
+        std::string keys;
+        for (const GemmTileField& candidate : kGemmTileFields) {
+            if (name == candidate.name) field = &candidate;
+            if (!keys.empty()) keys += ", ";
+            keys += candidate.name;
+        }
+        if (field == nullptr)
+            throw std::invalid_argument("unknown tile key '" + name + "'; keys: " + keys);
+        if (!nb::isinstance<nb::int_>(value) || nb::isinstance<nb::bool_>(value))
+            throw nb::type_error(("tile['" + name + "'] must be an int").c_str());
+        uint32_t number = 0;
+        if (!nb::try_cast(value, number))
+            throw std::invalid_argument("tile['" + name + "'] must be in [0, 4294967295]");
+        options.tile.emplace_back(field->member, number);
+    }
+}
+
+std::optional<DebugPrintInstrumentation::Format> dumpFormat(
+    const char* option, const std::optional<std::string>& value) {
+    if (!value) return std::nullopt;
+    if (*value == "stir") return DebugPrintInstrumentation::Format::Stir;
+    if (*value == "asm") return DebugPrintInstrumentation::Format::Asm;
+    throw std::invalid_argument(std::string(option) + " must be \"stir\" or \"asm\", not \"" +
+                                *value + "\"");
+}
+
+/// The manager runs one pass, so the stream holds that pass's dump only.
+std::shared_ptr<std::ostringstream> captureDump(PassManager& passManager,
+                                                const StinkyAsmModule& module,
+                                                DebugPrintInstrumentation::Format format,
+                                                bool before) {
+    auto stream = std::make_shared<std::ostringstream>();
+    auto config = std::make_unique<PassManagerDebugConfig>();
+    if (before) {
+        config->setPrintBeforeAll();
+        config->setDumpStreamBefore(stream);
+    } else {
+        config->setPrintAfterAll();
+        config->setDumpStreamAfter(stream);
+    }
+    passManager.addInstrumentation(
+        std::make_shared<DebugPrintInstrumentation>(std::move(config), &module, format));
+    return stream;
+}
+
+/// The factory's feature defaults and tile stay unless the caller named a field.
+void applyOptions(PassManager& passManager, const RunOptions& options) {
+    PassFeatureConfig features = passManager.getPassContext().getPassFeatureConfig();
+    if (options.unrollGemm) features.loopConfig.unrollGemm = *options.unrollGemm;
+    if (options.distributeGlobalRead)
+        features.dagFeatures.distributeGlobalRead = *options.distributeGlobalRead;
+    passManager.setPassFeatureConfig(features);
+
+    GemmTileConfig tile = passManager.getPassContext().getGemmTileConfig();
+    for (const auto& [member, value] : options.tile) tile.*member = value;
+    passManager.setGemmTileConfig(tile);
+}
+
+/// Walk the functions instead of calling getFunction(name): that searches only
+/// callees, and maps "" to the entry whatever the entry is called.
+std::vector<Function*> selectFunctions(StinkyAsmModule& module,
+                                       const std::optional<std::string>& name) {
+    std::vector<Function*> selected;
+    std::string names;
+    for (Function* function : module.getFunctions()) {
+        if (function == nullptr) continue;
+        if (!names.empty()) names += ", ";
+        names += "'" + function->getName() + "'";
+        if (!name || function->getName() == *name) selected.push_back(function);
+    }
+    if (name && selected.empty())
+        throw std::invalid_argument("no function '" + *name + "'; functions: " + names);
+    return selected;
+}
+
+const char* remarkKind(OptimizationRemark::Kind kind) {
+    switch (kind) {
+        case OptimizationRemark::Kind::Passed:
+            return "passed";
+        case OptimizationRemark::Kind::Missed:
+            return "missed";
+        case OptimizationRemark::Kind::Analysis:
+            return "analysis";
+    }
+    return "";
+}
+
+std::string functionText(const Function& function) {
+    std::ostringstream out;
+    function.dump(out);
+    return out.str();
+}
+
+PyPassRecord runOnePass(StinkyAsmModule& module, Function& function, const std::string& name,
+                        const std::vector<std::string>& args, const RunOptions& options) {
+    PassManager passManager = makeStandalonePassManager(module.getArch());
+    applyOptions(passManager, options);
+    PassContext& context = passManager.getPassContext();
+    context.setRemarksEnabled(true);
+    std::vector<OptimizationRemark> remarks;
     // The handler must not throw: it runs inside passes built without exceptions.
-    passManager.getPassContext().setRemarkHandler(
-        [&](const char* prefix, const std::string& passName, const std::string& message) {
-            const std::string line = std::string(prefix) + ": " + passName + ": " + message;
-            if (std::string(prefix) == "remark") passed = true;
-            if (std::string(prefix) == "missed") {
-                missed = true;
-                missedLines.push_back(line);
-            }
-        });
+    context.setRemarkHandler([&](const OptimizationRemark& remark) { remarks.push_back(remark); });
+    std::shared_ptr<std::ostringstream> before;
+    std::shared_ptr<std::ostringstream> after;
+    if (options.printBefore) before = captureDump(passManager, module, *options.printBefore, true);
+    if (options.printAfter) after = captureDump(passManager, module, *options.printAfter, false);
 
     std::unique_ptr<Pass> pass = createCatalogPass(name, args);
     if (!pass) throw std::invalid_argument(name + " rejected its arguments");
     passManager.addPass(std::move(pass));
+    const std::string textBefore = functionText(function);
     passManager.run(function);
 
-    if (missed && !passed) {
-        std::ostringstream out;
-        for (size_t i = 0; i < missedLines.size(); ++i) {
-            if (i > 0) out << '\n';
-            out << missedLines[i];
-        }
-        throw std::runtime_error(out.str());
+    bool passed = false;
+    std::string missed;
+    for (const OptimizationRemark& remark : remarks) {
+        if (remark.kind == OptimizationRemark::Kind::Passed) passed = true;
+        if (remark.kind != OptimizationRemark::Kind::Missed) continue;
+        if (!missed.empty()) missed += '\n';
+        missed += "missed: " + remark.passName + ": " + remark.message;
     }
-    if (passManager.getPassContext().getAnalysisFailed())
+    if (!missed.empty() && !passed) throw std::runtime_error(missed);
+    if (context.getAnalysisFailed())
         throw std::runtime_error(name + " reported an analysis failure");
+
+    PyPassRecord record;
+    record.passName = name;
+    record.function = function.getName();
+    record.changed = functionText(function) != textBefore;
+    for (const OptimizationRemark& remark : remarks)
+        record.remarks.append(PyRemark{remarkKind(remark.kind), remark.remarkName, remark.message});
+    if (before) record.before = before->str();
+    if (after) record.after = after->str();
+    return record;
 }
 
-void runPasses(StinkyAsmModule& module, const std::vector<std::string>& specs) {
+nb::list runPasses(StinkyAsmModule& module, const std::vector<std::string>& specs,
+                   const std::optional<std::string>& functionName,
+                   const std::optional<nb::dict>& features, const std::optional<nb::dict>& tile,
+                   const std::optional<std::string>& printBefore,
+                   const std::optional<std::string>& printAfter) {
     struct Requested {
         std::string name;
         std::vector<std::string> args;
@@ -441,13 +592,23 @@ void runPasses(StinkyAsmModule& module, const std::vector<std::string>& specs) {
         if (findCatalogPass(item.name) == nullptr)
             throw std::invalid_argument("unknown pass '" + item.name +
                                         "'; passes: " + catalogNames());
+        if (createCatalogPass(item.name, item.args) == nullptr)
+            throw std::invalid_argument(item.name + " rejected its arguments");
         requested.push_back(std::move(item));
     }
+    RunOptions options;
+    if (features) readFeatures(*features, options);
+    if (tile) readTile(*tile, options);
+    options.printBefore = dumpFormat("print_before", printBefore);
+    options.printAfter = dumpFormat("print_after", printAfter);
+    const std::vector<Function*> functions = selectFunctions(module, functionName);
 
-    for (Function* function : module.getFunctions()) {
-        if (function == nullptr) continue;
-        for (const Requested& item : requested) runOnePass(module, *function, item.name, item.args);
+    nb::list records;
+    for (Function* function : functions) {
+        for (const Requested& item : requested)
+            records.append(runOnePass(module, *function, item.name, item.args, options));
     }
+    return records;
 }
 
 PyInst snapshotInstruction(const StinkyInstruction& inst) {
@@ -517,6 +678,29 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             "modifiers", [](const PyInst& inst) { return inst.modifiers; },
             "One `mod.X = { ... }` string per modifier, as serialize() prints them");
 
+    nb::class_<PyRemark>(m, "Remark")
+        .def_prop_ro(
+            "kind", [](const PyRemark& remark) { return remark.kind; },
+            "\"passed\", \"missed\", or \"analysis\"")
+        .def_prop_ro("remark_name", [](const PyRemark& remark) { return remark.remarkName; })
+        .def_prop_ro("message", [](const PyRemark& remark) { return remark.message; });
+
+    nb::class_<PyPassRecord>(m, "PassRecord")
+        .def_prop_ro("pass_name", [](const PyPassRecord& record) { return record.passName; })
+        .def_prop_ro("function", [](const PyPassRecord& record) { return record.function; })
+        .def_prop_ro(
+            "changed", [](const PyPassRecord& record) { return record.changed; },
+            "True when the function prints different physical STIR after the pass")
+        .def_prop_ro(
+            "remarks", [](const PyPassRecord& record) { return record.remarks; },
+            "Every remark the pass emitted on this function, in order")
+        .def_prop_ro(
+            "before", [](const PyPassRecord& record) { return record.before; },
+            "The print_before dump, or None")
+        .def_prop_ro(
+            "after", [](const PyPassRecord& record) { return record.after; },
+            "The print_after dump, or None");
+
     cls.def("serialize", &serializeModule, nb::arg("ssa") = false,
             "Print this module. ssa=True is a diagnostic view and does not round-trip");
     cls.def("emit_asm", &emitModuleAsm, nb::kw_only(), nb::arg("comments") = false,
@@ -536,8 +720,12 @@ void bind_stir_api(nb::module_& m, nb::class_<StinkyAsmModule>& cls) {
             return out;
         },
         "Warnings from the load that built this module, one line each");
-    cls.def("run_passes", &runPasses, nb::arg("passes"),
-            "Run named catalog passes, in order, on every function");
+    cls.def("run_passes", &runPasses, nb::arg("passes"), nb::kw_only(),
+            nb::arg("function") = nb::none(), nb::arg("features") = nb::none(),
+            nb::arg("tile") = nb::none(), nb::arg("print_before") = nb::none(),
+            nb::arg("print_after") = nb::none(),
+            "Run named catalog passes, in order, on every function or the one named. Returns one "
+            "PassRecord per pass on each function");
     cls.def("functions", &moduleFunctions, "Functions in this module, entry first");
 
     m.def("load_stir", &loadStir, nb::arg("text"), nb::arg("arch") = std::array<int, 3>{12, 5, 0},

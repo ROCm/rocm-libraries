@@ -27,21 +27,34 @@
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 namespace stinkytofu {
 DebugPrintInstrumentation::DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg,
-                                                     const StinkyAsmModule* module)
-    : dbgCfg(std::move(cfg)), module_(module) {}
+                                                     const StinkyAsmModule* module, Format format)
+    : dbgCfg(std::move(cfg)), module_(module), format_(format) {}
 
 DebugPrintInstrumentation::~DebugPrintInstrumentation() = default;
 
+void DebugPrintInstrumentation::print(const Function& F, std::ostream& out) const {
+    if (format_ == Format::Stir) {
+        F.dump(out);
+        return;
+    }
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.indent = 0;
+    StinkyAsmEmitter emitter(options);
+    emitter.emit(out, F);
+}
+
 void DebugPrintInstrumentation::dumpWithCallees(Function& F, std::ostream& out) const {
-    F.dump(out);
+    print(F, out);
     if (module_ == nullptr || &F != module_->getFunction(/*name=*/"")) return;
     for (const Function* fn : module_->getFunctions()) {
         if (fn == nullptr || !fn->getIsCallable()) continue;
         out << "\n; --- callee Function: " << fn->getName() << " ---\n";
-        fn->dump(out);
+        print(*fn, out);
     }
 }
 
@@ -78,7 +91,7 @@ void DebugPrintInstrumentation::dumpModule(StinkyAsmModule& M, std::ostream& out
     for (const Function* fn : M.getFunctions()) {
         if (fn == nullptr) continue;
         if (fn->getIsCallable()) out << "\n; --- callee Function: " << fn->getName() << " ---\n";
-        fn->dump(out);
+        print(*fn, out);
     }
 }
 

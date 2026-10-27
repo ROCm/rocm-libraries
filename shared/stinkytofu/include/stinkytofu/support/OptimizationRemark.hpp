@@ -60,8 +60,7 @@ inline void emitRemark(const PassContext& passCtx, const OptimizationRemark& rem
             break;
     }
     if (!prefix) return;
-    if (const auto& handler = passCtx.getRemarkHandler())
-        handler(prefix, remark.passName, remark.message);
+    if (const auto& handler = passCtx.getRemarkHandler()) handler(remark);
     std::cerr << prefix << ": " << remark.passName << ": " << remark.message << "\n";
 }
 

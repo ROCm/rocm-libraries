@@ -41,8 +41,13 @@ class StinkyAsmModule;
 /// the entry Function). Without a module it dumps only the Function it is given.
 class STINKYTOFU_EXPORT DebugPrintInstrumentation : public PassInstrumentation {
    public:
+    /// How each Function is printed: STIR, or the assembler source that
+    /// stinkytofu-opt --emit-asm writes.
+    enum class Format { Stir, Asm };
+
     explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg,
-                                       const StinkyAsmModule* module = nullptr);
+                                       const StinkyAsmModule* module = nullptr,
+                                       Format format = Format::Stir);
     ~DebugPrintInstrumentation() override;
 
     void runBegin(Function& F, PassContext& ctx) override;
@@ -55,6 +60,8 @@ class STINKYTOFU_EXPORT DebugPrintInstrumentation : public PassInstrumentation {
                          PassContext& ctx) override;
 
    private:
+    void print(const Function& F, std::ostream& out) const;
+
     /// Dump F to out; if a module is set and F is its entry Function,
     /// also dump each callee Function under a labeled header.
     void dumpWithCallees(Function& F, std::ostream& out) const;
@@ -64,6 +71,7 @@ class STINKYTOFU_EXPORT DebugPrintInstrumentation : public PassInstrumentation {
 
     std::unique_ptr<PassManagerDebugConfig> dbgCfg;
     const StinkyAsmModule* module_ = nullptr;
+    Format format_ = Format::Stir;
 };
 
 }  // namespace stinkytofu
