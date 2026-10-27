@@ -561,9 +561,13 @@ ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
     // the config build used in FillValidKernelsWithTf32Fallback.
     if(use_tf32)
     {
+        // bwd-data/wrw solvers store kernel_id as "<type>+<split_k>", but FillValidKernels returns
+        // the bare type string; strip the suffix before the membership test, as the invoker does.
+        const auto pos          = kernel_id.find_last_of('+');
+        const auto type_string  = (pos == std::string::npos) ? kernel_id : kernel_id.substr(0, pos);
         const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
         use_tf32 =
-            std::find(tf32_kernels.begin(), tf32_kernels.end(), kernel_id) != tf32_kernels.end();
+            std::find(tf32_kernels.begin(), tf32_kernels.end(), type_string) != tf32_kernels.end();
     }
     return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
 }

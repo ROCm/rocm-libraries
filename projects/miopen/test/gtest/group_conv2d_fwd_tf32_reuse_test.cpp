@@ -212,6 +212,15 @@ struct GroupConvTF32Reuse : GroupConvTestFix<NDIM, float, DIR>
         ASSERT_TRUE(solv.IsValidPerformanceConfig(ctx, problem_tf32, restored))
             << "restored perf-db config rejected by IsValidPerformanceConfig";
 
+        // 2D bwd-data and all bwd-weights solvers store kernel_id as "<type>+<split_k>"; make sure
+        // such a case is exercised, since GetSolutionTf32Aware must strip that suffix before the
+        // TF32 membership test (a bare FillValidKernels entry never carries it).
+        constexpr bool suffixed_id =
+            DIR == Direction::BackwardWeights || (DIR == Direction::BackwardData && NDIM == 2u);
+        if constexpr(suffixed_id)
+            EXPECT_NE(restored.kernel_id.find('+'), std::string::npos)
+                << "expected a split_k suffix on the kernel_id: " << restored.kernel_id;
+
         tensor<float> out_tf32 = result_src;
         run(problem_tf32, restored, out_tf32);
         tensor<float> out_fp32 = result_src;
