@@ -459,8 +459,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         {
                             auto b_window = b_lds_gemm_windows[s];
                             move_tile_window(b_window,
-                                             is_b_load_tr_v ? multi_index<2>{i.value * kSubTileK, 0}
-                                                            : multi_index<2>{0, i.value * kSubTileK});
+                                             is_b_load_tr_v
+                                                 ? multi_index<2>{i.value * kSubTileK, 0}
+                                                 : multi_index<2>{0, i.value * kSubTileK});
                             if constexpr(is_b_load_tr_v)
                             {
                                 b_block_tile = load_tile_transpose(b_window);
@@ -484,12 +485,13 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 {
                                     arrive();
                                 }
-                                BlockGemmRows<r.value, 0, 1>(c_block_tile, a_row_tile, b_block_tile);
+                                BlockGemmRows<r.value, 0, 1>(
+                                    c_block_tile, a_row_tile, b_block_tile);
                             });
                         }
                         else
                         {
-                            constexpr auto mode = sub_tile_num == 1 ? WindowSlideMode::Stay
+                            constexpr auto mode = sub_tile_num == 1  ? WindowSlideMode::Stay
                                                   : is_last_sub_tile ? WindowSlideMode::Reset
                                                                      : WindowSlideMode::Move;
                             block_gemm.template LocalPrefetch<mode>(a_block_tile,
