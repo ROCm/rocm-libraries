@@ -47,7 +47,8 @@ typedef struct rocke_winograd_fwd_spec
     int vec; /* 8 */
     int block_size; /* 256 */
     bool prescale; /* false */
-    int tiles_per_thread; /* 1 */
+    int tiles_per_thread; /* 1: K2 tiles per thread along W; long register-path
+                           * runs of tiles >= 4 spill (see WinogradFwdSpec) */
     const char* prescale_mode; /* "fused" */
     int input_block_tiles[2]; /* (0, 0) */
     int wg_tile_rows; /* 1 */

@@ -1077,7 +1077,13 @@ I/O). Three implementations:
   - K1 filter transform `w KYXC -> U [bin][K][C/g]`;
   - K2 input transform `x NHWC -> V [tile][bin][C]` (register path, or an
     LDS region of `bh x bw` tiles per workgroup); dilation runs as
-    `dH * dW` independent sub-grids;
+    `dH * dW` independent sub-grids. On the register path a run of
+    `tiles_per_thread` tiles keeps its whole input patch in VGPRs, so
+    explicit specs with long runs of large tiles spill to scratch on gfx1250
+    (F4: from 2 tiles at `vec` 8, from 4 at `vec` 4; F(6x4), F(4x6), F6:
+    from 2 or 3). They stay legal (slower, not wrong); the dispatcher's
+    knobs (`tuned_transform_options`) use one tile per thread on the
+    register path and longer runs only on the LDS path, which does not spill;
   - K3 batched GEMM over the `bins * groups` independent GEMMs
     (`WinogradGemmWmmaSpec`: TDM operand ring in LDS, WMMA 16x16x32, TDM or
     direct epilogue, optional split-K with `build_winograd_gemm_reduce`);

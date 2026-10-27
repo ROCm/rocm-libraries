@@ -55,7 +55,7 @@
 #   39  merged K2+K1 F2 LDS region [gfx1250]
 #   40  F4 bf16 fused prescale over 128 lanes (LDS group max) K2 [gfx1250]
 #   41  merged K2+K1 with a 64-thread K2 block (K1 split) [gfx1250]
-#   42  F4 K2 3 tiles per thread (partial runs) [gfx1250]
+#   42  F4 K2 3 tiles per thread (partial runs), vec 4 [gfx1250]
 #   43  F6 K2 [gfx1250]
 #   44  F6 K4 [gfx1250]
 #   45  gfx950: F4 K2 [gfx950]
@@ -122,7 +122,7 @@ CONFIGS = [
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2,K1', 'gfx1250', {'m': 2, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 4, 'pmode': 'fused', 'bh': 4, 'bw': 8, 'wgr': 1, 'nt': 1, 'lanes': 16, 'frows': 1, 'fvec': 0}),  # 39: merged K2+K1 F2 LDS region
     ((1, 8, 8, 512, 64, 3, 3, 1, 1, 1), 'K2', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'bf16', 'op': 'fp16', 'vec': 4, 'block': 256, 'ps': 1, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 40: F4 bf16 fused prescale over 128 lanes (LDS group max) K2
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2,K1', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 64, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 41: merged K2+K1 with a 64-thread K2 block (K1 split)
-    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 3, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 42: F4 K2 3 tiles per thread (partial runs)
+    ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2', 'gfx1250', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 4, 'block': 256, 'ps': 0, 'tpt': 3, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 42: F4 K2 3 tiles per thread (partial runs), vec 4
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2', 'gfx1250', {'m': 6, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 43: F6 K2
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K4', 'gfx1250', {'m': 6, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 44: F6 K4
     ((2, 20, 24, 64, 96, 3, 3, 1, 1, 1), 'K2', 'gfx950', {'m': 4, 'm_w': 0, 'io': 'fp16', 'op': 'fp16', 'vec': 8, 'block': 256, 'ps': 0, 'tpt': 1, 'pmode': 'fused', 'bh': 0, 'bw': 0, 'wgr': 1, 'nt': 1, 'lanes': 32, 'frows': 1, 'fvec': 0}),  # 45: gfx950: F4 K2

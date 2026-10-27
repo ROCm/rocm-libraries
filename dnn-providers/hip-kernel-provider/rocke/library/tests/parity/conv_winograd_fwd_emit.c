@@ -119,8 +119,8 @@ static const cfg_t CONFIGS[] = {
      256, 1, 1, "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 40: F4 bf16 fused prescale over 128 lanes (LDS group max) K2 */
     {2,  20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,       "fp16",   "fp16", 8,
      64, 0,  1,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2,K1", "gfx1250"}, /* 41: merged K2+K1 with a 64-thread K2 block (K1 split) */
-    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 8,
-     256, 0,  3,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 42: F4 K2 3 tiles per thread (partial runs) */
+    {2,   20, 24, 64,      96, 3, 3, 1, 1,  1, 4, 0,    "fp16",   "fp16", 4,
+     256, 0,  3,  "fused", 0,  0, 1, 1, 32, 1, 0, "K2", "gfx1250"}, /* 42: F4 K2 3 tiles per thread (partial runs), vec 4 */
     {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 0, "fp16", "fp16",
      8, 256, 0,  1,  "fused", 0, 0, 1, 1, 32, 1, 0, "K2",   "gfx1250"}, /* 43: F6 K2 */
     {2, 20,  24, 64, 96,      3, 3, 1, 1, 1,  6, 0, "fp16", "fp16",

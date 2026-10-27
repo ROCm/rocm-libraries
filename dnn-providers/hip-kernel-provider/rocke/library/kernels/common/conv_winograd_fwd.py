@@ -286,7 +286,17 @@ class WinogradFwdSpec:
         prescale:      Per-tile power-of-two prescale (see module doc).
         tiles_per_thread: K2 tiles per thread along W (a "run"); adjacent
                        tiles share two input columns, which are loaded and
-                       column-transformed once.
+                       column-transformed once. On the register path the
+                       run's patch (``nh x (nw + (tiles_per_thread - 1) *
+                       mw)`` x ``vec`` fp32 values) lives in VGPRs, so
+                       long runs of large tiles spill: on gfx1250 (ROCm
+                       clang, -O3) F4 spills from 2 tiles at ``vec`` 8 and
+                       from 4 at ``vec`` 4, F(6x4) / F(4x6) / F6 from 2 or
+                       3. Not rejected (a spill costs speed, not
+                       correctness, and the threshold is the compiler's);
+                       :func:`tuned_transform_options` (the dispatcher's
+                       knobs) uses 1 on the register path and 4 only on
+                       the LDS path, which does not spill.
         input_block_tiles: ``(rows, cols)`` of tiles per K2 workgroup, whose
                        input region (shared patch borders included once) is
                        staged through LDS; ``(0, 0)`` = no LDS, every thread
