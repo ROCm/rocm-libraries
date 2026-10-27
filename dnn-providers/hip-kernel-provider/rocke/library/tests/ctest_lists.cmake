@@ -12,6 +12,15 @@
 #
 # A test that is in library/tests but in no list here does not run in CI.
 
+# Collect the whole oracle-free suite so new test files need no CMake edits.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_oracle_free_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 300)\n")
+
 # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
 # The test environment installs the platform wheel. PYTHONPATH puts the staged
 # library tree first so kernels.*, builders.*, dispatch.*, and benchmarks.* do
