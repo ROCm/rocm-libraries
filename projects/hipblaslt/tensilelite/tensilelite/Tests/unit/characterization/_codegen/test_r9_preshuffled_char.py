@@ -523,16 +523,16 @@ def test_r9_depth_u_ceiling_follows_the_dtl_immediate():
     row of a swizzle block, so the byte step is ``rows * DepthU * bpe`` and has to
     fit the 12-bit DTL field.
     """
-    from tensilelite.Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleMaxDepthU
+    from tensilelite.Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleTensorMaxDepthU
 
     # fp4, fp8, bf16 over a 16-row MFMA block, then a 32-row block.
-    assert swizzleMaxDepthU(16, 0.5) == 512
-    assert swizzleMaxDepthU(16, 1) == 256
-    assert swizzleMaxDepthU(16, 2) == 128
-    assert swizzleMaxDepthU(32, 0.5) == 256
+    assert swizzleTensorMaxDepthU(16, 0.5) == 512
+    assert swizzleTensorMaxDepthU(16, 1) == 256
+    assert swizzleTensorMaxDepthU(16, 2) == 128
+    assert swizzleTensorMaxDepthU(32, 0.5) == 256
 
     for rows, bpe in ((16, 0.5), (16, 1), (16, 2), (32, 0.5)):
-        maxDepthU = swizzleMaxDepthU(rows, bpe)
+        maxDepthU = swizzleTensorMaxDepthU(rows, bpe)
         assert rows * maxDepthU * bpe <= SWIZZLE_DTL_OFFSET12_MAX + 1
         assert rows * (maxDepthU + 1) * bpe > SWIZZLE_DTL_OFFSET12_MAX + 1
 

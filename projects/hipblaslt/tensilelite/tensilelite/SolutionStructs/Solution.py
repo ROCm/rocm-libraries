@@ -86,7 +86,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -5013,7 +5013,7 @@ class Solution(collections.abc.Mapping):
             continue
           if subtileSwizzled:
             rowsPerBlock = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
-            maxDepthU = swizzleMaxDepthU(rowsPerBlock, state["ProblemType"][f"DataType{tc}"].numBytes())
+            maxDepthU = swizzleTensorMaxDepthU(rowsPerBlock, state["ProblemType"][f"DataType{tc}"].numBytes())
             if state["DepthU"] > maxDepthU:
               reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {maxDepthU}")
               continue

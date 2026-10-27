@@ -18,7 +18,7 @@
 
 import contextlib
 from ...ExecutionPolicy import isPersistentDataParallel
-from ...Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleMaxDepthU
+from ...Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, swizzleTensorMaxDepthU
 import math
 from functools import singledispatch
 
@@ -580,7 +580,7 @@ def _preShuffledKStepBytes(tileInfo, offsetK):
   """
   rowsPerBlock = int(tileInfo.mmaTileShape[0])
   depthU = int(tileInfo.depthUBytes / tileInfo.bpe)
-  maxDepthU = swizzleMaxDepthU(rowsPerBlock, tileInfo.bpe)
+  maxDepthU = swizzleTensorMaxDepthU(rowsPerBlock, tileInfo.bpe)
   if depthU > maxDepthU:
     raise RuntimeError(
         "SwizzleTensor%s with DepthU %u is not supported: the pre-shuffled global "

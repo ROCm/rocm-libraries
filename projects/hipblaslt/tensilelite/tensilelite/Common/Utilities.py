@@ -589,8 +589,11 @@ SWIZZLE_LOAD_BYTES = 16
 SWIZZLE_DTL_OFFSET12_MAX = 4095
 
 
-def swizzleMaxDepthU(rowsPerBlock: int, bpe: float) -> int:
-    """Largest DepthU the pre-swizzled global read can encode.
+def swizzleTensorMaxDepthU(rowsPerBlock: int, bpe: float) -> int:
+    """Largest DepthU the read of a swizzled A or B can encode.
+
+    SwizzleTensor, not the MX scale swizzle: the scale blocks have their own
+    layout and their own read, and this ceiling says nothing about them.
 
     A K step consumes a K-extent on every row of a swizzle block, so the byte
     step is rowsPerBlock times the unit-stride count, and that product rides in
