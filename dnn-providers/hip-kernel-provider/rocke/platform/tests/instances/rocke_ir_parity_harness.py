@@ -3436,6 +3436,33 @@ def cases():
             num_segments=4,
         ),
     )
+    # Split-KV reduce weighted-sum layouts: lane groups per head size (d64: 4,
+    # d128: 2, d256: 1, d192: 1 with idle lanes), the unrolled segment loop
+    # (seg128) and segment counts the groups do not divide (seg9; at d64 the
+    # last group has no segment at all).
+    for _arch in ("gfx942", "gfx950"):
+        for _hd, _seg in (
+            (64, 128),
+            (64, 9),
+            (128, 128),
+            (128, 9),
+            (192, 9),
+            (256, 128),
+        ):
+            add(
+                "attention",
+                f"attention/{_arch}/reduce_bf16_d{_hd}_seg{_seg}",
+                _arch,
+                build_attention_reduce_own_module(
+                    f"irhash_attn_{_arch[3:]}_reduce_bf16_d{_hd}_seg{_seg}",
+                    _arch,
+                    head_size=_hd,
+                    num_query_heads=8,
+                    num_kv_heads=2,
+                    dtype="bf16",
+                    num_segments=_seg,
+                ),
+            )
 
     # Dense flash-attn prefill (gfx950-only builder). Registered as a table rather
     # than 18 add() blocks because every case is the same base spec with one or two
