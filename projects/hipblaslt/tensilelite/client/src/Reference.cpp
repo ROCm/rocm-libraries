@@ -923,46 +923,37 @@ namespace TensileLite
                 validationStride
                     = NextPrime(biasTensor.totalAllocatedElements() / elementsToValidate);
 
+            if((tensor.dimensions() != 2 && tensor.dimensions() != 3) || reducIdx > 1)
+                return "Unsupported bias reduction dimensions";
+            const size_t batches = tensor.dimensions() == 3 ? tensor.sizes()[2] : 1;
+            const size_t length = tensor.sizes()[1 - reducIdx];
+            if(biasTensor.dimensions() != 3 || biasTensor.sizes()[0] != length
+               || biasTensor.sizes()[1] != 1 || biasTensor.sizes()[2] != batches)
+                return "Bias reduction output shape does not match its source";
+            if(batches > 1 && biasTensor.strides()[2] < length)
+                return "Batched bias gradients require non-overlapping output vectors";
+
             Input const* srcTyped = (Input const*)src;
-            // For 2D bias reduction, d batch = 1
-            if((tensor.dimensions() == 3 && tensor.sizes()[2] == 1) || tensor.dimensions() == 2)
-            {
-                omp_set_num_threads(MAX_OMP_THREADS);
+            omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel for
-                for(size_t bNum = 0; bNum < biasTensor.totalLogicalElements();
-                    bNum += validationStride)
-                {
-                    std::vector<int64_t> coord(tensor.dimensions());
-                    size_t               sumLength = 0;
-                    size_t               idx       = 0;
-                    if(reducIdx == 1)
-                    {
-                        sumLength = tensor.sizes()[1];
-                        coord[0]  = bNum;
-                        idx       = 1;
-                    }
-                    else
-                    {
-                        sumLength = tensor.sizes()[0];
-                        coord[1]  = bNum;
-                        idx       = 0;
-                    }
-                    Accumulator sum = static_cast<Accumulator>(0);
-                    for(size_t i = 0; i < sumLength; i++)
-                    {
-                        coord[idx] = i;
-                        auto index = tensor.index(coord);
-                        sum += static_cast<Accumulator>(srcTyped[index]);
-                    }
-                    auto biasPtr = (void*)inputs.bias;
-                    SetValue<Accumulator>(biasTensor.dataType(), sum, biasPtr, bNum);
-                }
-            }
-            else
+            for(size_t bNum = 0; bNum < biasTensor.totalLogicalElements();
+                bNum += validationStride)
             {
-                std::string msg = "Unsupported reduction dimension "
-                                  + std::to_string(tensor.dimensions()) + ".";
-                return msg;
+                std::vector<size_t> biasCoord(biasTensor.dimensions());
+                CoordNumbered(bNum, biasCoord.begin(), biasCoord.end(),
+                              biasTensor.sizes().begin(), biasTensor.sizes().end());
+                std::vector<size_t> coord(tensor.dimensions());
+                coord[1 - reducIdx] = biasCoord[0];
+                if(tensor.dimensions() == 3)
+                    coord[2] = biasCoord[2];
+                Accumulator sum = static_cast<Accumulator>(0);
+                for(size_t i = 0; i < tensor.sizes()[reducIdx]; i++)
+                {
+                    coord[reducIdx] = i;
+                    sum += static_cast<Accumulator>(srcTyped[tensor.index(coord)]);
+                }
+                SetValue<Accumulator>(biasTensor.dataType(), sum, const_cast<void*>(inputs.bias),
+                                      biasTensor.index(biasCoord));
             }
             return "";
         }
@@ -1880,9 +1871,12 @@ namespace TensileLite
                 boundSize[i] = problem.boundSize(i);
 
             auto boundCount = CoordCount(boundSize.begin() + 1, boundSize.end());
+            const bool computeProduct = std::all_of(boundSize.begin(), boundSize.end(),
+                                                   [](size_t size) { return size != 0; })
+                && std::get<typename Inputs::AlphaType>(inputs.alpha)
+                       != static_cast<typename Inputs::AlphaType>(0);
 
-            if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-               != static_cast<typename Inputs::AlphaType>(0))
+            if(computeProduct)
             {
                 if(inputs.a == nullptr || inputs.b == nullptr)
                 {
@@ -1961,9 +1955,8 @@ namespace TensileLite
 
                 Accumulator value(0);
 
-                // Check short-circuit for alpha = 0
-                if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-                   != static_cast<typename Inputs::AlphaType>(0))
+                // Empty summation dimensions have no valid input coordinates.
+                if(computeProduct)
                 {
                     for(size_t boundNum = 0; boundNum < boundCount; boundNum++)
                     {
@@ -2253,7 +2246,7 @@ namespace TensileLite
                     if(!msg.empty())
                     {
                         free(ws);
-                        std::runtime_error(msg.c_str());
+                        throw std::runtime_error(msg.c_str());
                     }
                 }
                 else if(problem.biasSrc() == ContractionProblemGemm::A)
@@ -2263,7 +2256,7 @@ namespace TensileLite
                         biasTensor, a, inputs.a, inputs, elementsToValidate, reducIdx);
                     if(!msg.empty())
                     {
-                        std::runtime_error(msg.c_str());
+                        throw std::runtime_error(msg.c_str());
                     }
                 }
                 else if(problem.biasSrc() == ContractionProblemGemm::B)
@@ -2273,7 +2266,7 @@ namespace TensileLite
                         biasTensor, b, inputs.b, inputs, elementsToValidate, reducIdx);
                     if(!msg.empty())
                     {
-                        std::runtime_error(msg.c_str());
+                        throw std::runtime_error(msg.c_str());
                     }
                 }
                 else
