@@ -321,16 +321,19 @@ class ErrorExtractor:
 
                     # Search for failure patterns
                     error_lines = []
+                    covered_until = 0
                     for i, line in enumerate(last_lines):
                         if re.search(
                             r"(error|failed|fatal|exception|assertion)",
                             line,
                             re.IGNORECASE,
                         ):
-                            # Include context: 2 lines before and 3 lines after
-                            start = max(0, i - 2)
+                            # Include context: 2 lines before and 3 lines after,
+                            # without repeating lines of the previous window
+                            start = max(covered_until, i - 2)
                             end = min(len(last_lines), i + 4)
                             error_lines.extend(last_lines[start:end])
+                            covered_until = max(covered_until, end)
                             if len(error_lines) >= self.MAX_CONTEXT_LINES:
                                 break
 
@@ -531,6 +534,12 @@ THEROCK_JOB_PREFIXES = ("Linux::", "Windows::")
 # Expected-failure test jobs; their failures are not actionable.
 XFAIL_JOB_MARKER = "(xfail)"
 GITHUB_ERROR_MARKER = "##[error]"
+# Timestamp GitHub prefixes to every job log line.
+LOG_TIMESTAMP_PATTERN = re.compile(
+    r"^\ufeff?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?", re.MULTILINE
+)
+# Runner step header: the step's command, shell and env, up to "##[endgroup]".
+STEP_HEADER_GROUP = "##[group]Run "
 JOBS_PER_PAGE = 100
 # gh >= 2.97.0 refuses to print API responses containing terminal escape
 # sequences (GHSA-3m3g-3wcr-px46) unless this flag is passed, and job logs
@@ -576,6 +585,28 @@ def truncate_at_first_error(log: str) -> str:
 def strip_terminal_escapes(log: str) -> str:
     """Remove ANSI escape sequences so they never reach a Teams message."""
     return TERMINAL_ESCAPE_PATTERN.sub("", log)
+
+
+def clean_job_log(log: str) -> str:
+    """Make a GitHub Actions job log readable in a Teams message.
+
+    Drops the per-line timestamps and the runner's step headers
+    ("##[group]Run <command>" through "##[endgroup]"), keeps the content of
+    other groups without their markers, and shows "##[error]" as "Error: ",
+    like the GitHub UI does.
+    """
+    cleaned = []
+    in_step_header = False
+    for line in LOG_TIMESTAMP_PATTERN.sub("", log).splitlines(keepends=True):
+        if line.startswith("##[group]"):
+            in_step_header = line.startswith(STEP_HEADER_GROUP)
+        elif line.startswith("##[endgroup]"):
+            in_step_header = False
+        elif not in_step_header:
+            if line.startswith(GITHUB_ERROR_MARKER):
+                line = "Error: " + line[len(GITHUB_ERROR_MARKER) :]
+            cleaned.append(line)
+    return "".join(cleaned)
 
 
 def gh_api(endpoint: str, *flags: str) -> str:
@@ -734,7 +765,9 @@ def notify_failed_jobs_from_run(
             )
             log_path = Path(log_dir) / f"{job['id']}.log"
             log_path.write_text(
-                truncate_at_first_error(fetch_job_log(repository, job["id"])),
+                clean_job_log(
+                    truncate_at_first_error(fetch_job_log(repository, job["id"]))
+                ),
                 encoding="utf-8",
             )
             logger.info(f"Reporting {failure_stage} failure of job '{job['name']}'")

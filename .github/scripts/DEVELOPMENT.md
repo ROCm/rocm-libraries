@@ -273,7 +273,9 @@ In `therock-multi-arch-ci.yml`, build and test jobs run inside TheRock's
 reusable workflows, so the `notify_teams_on_failure` job calls this script once
 with `--failed-jobs-from-run`. The script lists the failed `Linux::`/`Windows::`
 jobs of the run attempt (skipping `(xfail)` jobs), downloads each job log with
-`gh api`, routes test jobs by job name and build jobs by `--component-name`,
+`gh api`, cuts it at the first `##[error]` line, strips timestamps, ANSI
+escapes and the runner's `##[group]Run …` step headers, routes test jobs by job
+name and build jobs by `--component-name`,
 sends one notification per job, and exits 1 if any notification failed. The
 job is `continue-on-error`, so a notifier failure never blocks a PR. It runs
 only for `pull_request` events: the Teams flow looks up every message by its

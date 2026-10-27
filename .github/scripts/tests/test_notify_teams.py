@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -124,6 +125,57 @@ class TruncateAtFirstErrorTest(unittest.TestCase):
         self.assertEqual(notify_teams.truncate_at_first_error(log), log)
 
 
+# Shape of a real GitHub Actions job log: timestamped lines, a runner step
+# header group echoing the step's script and env, and a script-made group.
+TIMESTAMPED_JOB_LOG = (
+    "\ufeff2026-10-27T04:20:34.0000001Z Complete job name: Test miopen\n"
+    "2026-10-27T04:20:34.4300000Z ##[group]Run printf '%s\\n' \"${MESSAGE}\"\n"
+    "2026-10-27T04:20:34.4310000Z printf '%s\\n' \"${MESSAGE}\"\n"
+    "2026-10-27T04:20:34.4321032Z shell: /usr/bin/bash -e {0}\n"
+    "2026-10-27T04:20:34.4322444Z env:\n"
+    "2026-10-27T04:20:34.4323585Z   MESSAGE: [  FAILED  ] Suite.Case\n"
+    "2026-10-27T04:20:34.4326203Z ##[endgroup]\n"
+    "2026-10-27T04:20:34.4400000Z ##[group]ctest output\n"
+    "2026-10-27T04:20:34.4500000Z [  FAILED  ] Suite.Case\n"
+    "2026-10-27T04:20:34.4600000Z ##[endgroup]\n"
+    "2026-10-27T04:20:34.4700000Z 50% tests passed, 1 tests failed out of 2\n"
+    "2026-10-27T04:20:34.4800000Z \n"
+    "2026-10-27T04:20:34.4900000Z ##[error]Process completed with exit code 1.\n"
+)
+
+CLEAN_JOB_LOG = (
+    "Complete job name: Test miopen\n"
+    "[  FAILED  ] Suite.Case\n"
+    "50% tests passed, 1 tests failed out of 2\n"
+    "\n"
+    "Error: Process completed with exit code 1.\n"
+)
+
+
+class CleanJobLogTest(unittest.TestCase):
+    def test_drops_timestamps_step_headers_and_group_markers(self):
+        self.assertEqual(notify_teams.clean_job_log(TIMESTAMPED_JOB_LOG), CLEAN_JOB_LOG)
+
+
+class ErrorExtractorTest(unittest.TestCase):
+    def test_overlapping_context_windows_do_not_repeat_lines(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            log_path = Path(log_dir) / "job.log"
+            log_path.write_text(
+                "setup\nRunning tests\n[  FAILED  ] Suite.Case\n"
+                "1 tests failed out of 2\nError: exit code 1\n",
+                encoding="utf-8",
+            )
+
+            context, _ = notify_teams.ErrorExtractor(str(log_path), "test").extract()
+
+        self.assertEqual(
+            context,
+            "setup\nRunning tests\n[  FAILED  ] Suite.Case\n"
+            "1 tests failed out of 2\nError: exit code 1\n",
+        )
+
+
 class NotifyFailedJobsFromRunTest(unittest.TestCase):
     def run_notifier(self, fake_github, send_results=None, pr_title="Fix bug"):
         sent = []
@@ -202,6 +254,18 @@ class NotifyFailedJobsFromRunTest(unittest.TestCase):
                 context = sent[0]["error_context"]
                 self.assertIn("[  FAILED  ] Suite.Case", context)
                 self.assertNotIn("\x1b", context)
+
+    def test_error_context_is_clean_job_output(self):
+        fake_github = FakeGitHub(
+            job_pages=[[job(3, LINUX_TEST_HIPDNN)]],
+            logs={
+                3: TIMESTAMPED_JOB_LOG + "2026-10-27T04:20:35.0Z Post job cleanup.\n"
+            },
+        )
+
+        _, sent = self.run_notifier(fake_github)
+
+        self.assertEqual(sent[0]["error_context"], CLEAN_JOB_LOG)
 
     def test_pr_title_tag_overrides_job_component(self):
         fake_github = FakeGitHub(
