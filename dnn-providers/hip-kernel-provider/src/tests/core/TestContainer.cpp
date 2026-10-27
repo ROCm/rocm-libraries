@@ -206,18 +206,15 @@ TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngi
     expectEveryIngestorEngine(whileAlive, "the while-alive");
 }
 
-// The slot tests below refill the slots first: whichever test constructs the process's
-// first Container takes what discovery built, and shuffling moves that test around.
-
-TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
+TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
 
-    // The schema id is what a manager exposes of the set it was built from, so a slot
-    // serving another set's manager shows up only between sets whose schemas differ.
+    // The schema id is what a state exposes of the set it was built from, so a slot
+    // serving another set's state shows up only between sets whose schemas differ.
     std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
     for(const auto& set : sets)
     {
@@ -226,44 +223,47 @@ TEST(TestContainer, EachDiscoveredSetsStateManagerIsHandedOutOnceAndToItsOwnSet)
     ASSERT_GE(schemaIds.size(), 2U)
         << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
 
-    rediscoverStateManagersForTesting();
-
     for(const auto& set : sets)
     {
-        const auto stateManager = takeDiscoveredStateManager(set.engine.id);
-        ASSERT_NE(stateManager.get(), nullptr)
-            << "no state manager handed off for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(stateManager->metadataSchema().id, set.schema.id)
-            << "the id of '" << set.engine.name << "' took the state manager of another set";
-        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
-            << "'" << set.engine.name << "' handed out a second state manager";
+        const auto state = discoveredSharedState(set.engine.id);
+        ASSERT_NE(state.get(), nullptr)
+            << "no shared state for descriptor set '" << set.engine.name << "'";
+        EXPECT_EQ(state->schema().id, set.schema.id)
+            << "the id of '" << set.engine.name << "' serves the state of another set";
+        // Shared, not rebuilt or handed out once: a second lookup is the same object.
+        EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
+            << "'" << set.engine.name << "' built a second state";
     }
+
+    EXPECT_EQ(discoveredSharedState(hipdnn_plugin_sdk::ingestor::DescriptorId{}).get(), nullptr)
+        << "an id no discovered set has must have no state";
 }
 
-TEST(TestContainer, ConcurrentTakesOfOneDiscoveredStateManagerHandItOutOnce)
+TEST(TestContainer, ConcurrentLookupsOfOneDiscoveredSharedStateAllSeeTheSameState)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
     const auto& engineId = sets.front().engine.id;
-    rediscoverStateManagersForTesting();
+    const auto expected = discoveredSharedState(engineId);
+    ASSERT_NE(expected.get(), nullptr);
 
     constexpr size_t THREAD_COUNT = 8;
     std::atomic<bool> start{false};
-    std::atomic<size_t> handedOut{0};
+    std::atomic<size_t> matching{0};
     std::vector<std::thread> threads;
     threads.reserve(THREAD_COUNT);
     for(size_t threadIndex = 0; threadIndex < THREAD_COUNT; ++threadIndex)
     {
-        threads.emplace_back([&start, &handedOut, &engineId] {
+        threads.emplace_back([&start, &matching, &engineId, &expected] {
             while(!start.load())
             {
                 std::this_thread::yield();
             }
-            if(takeDiscoveredStateManager(engineId) != nullptr)
+            if(discoveredSharedState(engineId) == expected)
             {
-                ++handedOut;
+                ++matching;
             }
         });
     }
@@ -273,27 +273,77 @@ TEST(TestContainer, ConcurrentTakesOfOneDiscoveredStateManagerHandItOutOnce)
         thread.join();
     }
 
-    EXPECT_EQ(handedOut.load(), 1U);
+    EXPECT_EQ(matching.load(), THREAD_COUNT);
 }
 
-TEST(TestContainer, TheFirstContainerAfterRediscoveryTakesEveryDiscoveredStateManager)
+TEST(TestContainer, EveryContainerSharesTheDiscoveredStateAndReleasesItOnDestruction)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
-    rediscoverStateManagersForTesting();
 
-    {
-        const Container container;
-    }
-
-    // A slot still full means that Container built the set's state manager a second time.
+    // use_count, read through a held copy, counts the engines serving each state: one
+    // more per live Container proves each Container shares it rather than building its
+    // own, and the count falling back proves a destroyed Container lets go.
+    std::vector<
+        std::shared_ptr<const hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>>>
+        states;
+    std::vector<long> baseline;
     for(const auto& set : sets)
     {
-        EXPECT_EQ(takeDiscoveredStateManager(set.engine.id).get(), nullptr)
-            << "the Container did not take the state manager discovered for '" << set.engine.name
+        states.push_back(discoveredSharedState(set.engine.id));
+        ASSERT_NE(states.back().get(), nullptr);
+        baseline.push_back(states.back().use_count());
+    }
+
+    {
+        const Container first;
+        const Container second;
+        for(size_t index = 0; index < sets.size(); ++index)
+        {
+            EXPECT_EQ(states[index].use_count(), baseline[index] + 2)
+                << "two Containers do not both serve the shared state of '"
+                << sets[index].engine.name << "'";
+        }
+    }
+
+    for(size_t index = 0; index < sets.size(); ++index)
+    {
+        EXPECT_EQ(states[index].use_count(), baseline[index])
+            << "a destroyed Container still holds the shared state of '" << sets[index].engine.name
             << "'";
+    }
+}
+
+TEST(TestContainer, RediscoveryReplacesTheSharedStateWithoutInvalidatingALiveContainer)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    const auto& sets = discoverDescriptorSets();
+    ASSERT_FALSE(sets.empty());
+    const auto& engineId = sets.front().engine.id;
+    const auto engineIdValue = hipdnn_data_sdk::utilities::engineNameToId(sets.front().engine.name);
+
+    const auto before = discoveredSharedState(engineId);
+    ASSERT_NE(before.get(), nullptr);
+
+    Container alive;
+    ASSERT_NO_THROW(rediscoverSharedStatesForTesting());
+
+    const auto after = discoveredSharedState(engineId);
+    ASSERT_NE(after.get(), nullptr);
+    EXPECT_NE(after.get(), before.get()) << "the reset hook did not rebuild the shared state";
+    EXPECT_EQ(after->schema().id, before->schema().id);
+
+    // The live Container's engine still holds what it was built over; the next Container
+    // serves the rebuilt state.
+    const auto engineIds = alive.getEngineManager().getAllEngineIds();
+    EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineIdValue), engineIds.end());
+    const long afterBaseline = after.use_count();
+    {
+        const Container next;
+        EXPECT_EQ(after.use_count(), afterBaseline + 1);
     }
 }
 

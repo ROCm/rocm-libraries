@@ -65,6 +65,18 @@ void registerGfx1151WmmaAttentionDecodeSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionDecodeModuleCache();
 
+/// @see packs/Gfx950ConvFwdNative.cpp
+void registerGfx950ConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvFwdModuleCache();
+
+/// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
+void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvFwdAotModuleCache();
+
+/// @see packs/Gfx950ConvDgradNative.cpp (hipkernel:Gfx950ConvDgradAot)
+void registerGfx950ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvDgradAotModuleCache();
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.

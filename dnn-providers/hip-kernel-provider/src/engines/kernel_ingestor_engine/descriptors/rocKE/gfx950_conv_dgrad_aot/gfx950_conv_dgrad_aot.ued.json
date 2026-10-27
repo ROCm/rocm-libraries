@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "id": "982553f9-07a6-4a9b-9387-c016c1a8febf",
+  "name": "hipkernel:Gfx950ConvDgradAot",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx950_conv_dgrad_aot.graph_match"
+  },
+  "metadata": "11e87973-b7f3-42eb-a69b-c51c3b49a835",
+  "sort_kernel_catalog": {
+    "default": [
+      "8c8c5135-8f2c-4b49-9e32-51b333565e3c",
+      "d1de3948-a405-4292-8e39-0bd4be5f09f4"
+    ]
+  },
+  "knobs": [
+    "kernel_family",
+    "direct_variant",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "epilogue",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "lds_k_outer",
+    "block_w",
+    "block_waves",
+    "block_h",
+    "block_q",
+    "block_groups",
+    "fold_k32",
+    "waves_k",
+    "waves_q",
+    "persistent_grid",
+    "runtime_k_loop"
+  ]
+}

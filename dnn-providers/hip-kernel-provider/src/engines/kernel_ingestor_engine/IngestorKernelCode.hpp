@@ -84,6 +84,9 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
+compilation::KpackModuleCache& gfx950ConvFwdKpackModuleCache();
+compilation::KpackModuleCache& gfx950ConvFwdAotKpackModuleCache();
+compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache();
 
 /// What a kpack kernel needs to be loaded again for another device, or read again for a
 /// save: the archive it was resolved to, the entry inside it, and the declared digest the
