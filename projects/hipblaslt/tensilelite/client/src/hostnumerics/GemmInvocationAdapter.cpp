@@ -596,10 +596,22 @@ namespace TensileLite::Client::hostnumerics
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape element count exceeds size_t.");
             const Shape outputShape(problem.d().sizes());
+            if(!roc::hostnumerics::detail::ShapeAccess::isValidIndexOrder(outputShape.rank(),
+                                                                          globalOrder))
+                return failure(TranslationFailureCode::InvalidDescriptor,
+                               "Tensor index order must contain each dimension once.");
             try
             {
-                outputShape.forEachCoordinate(std::set<size_t>{}, globalOrder, [](size_t, auto) {});
-                selectAllOutputs = requiresCompleteD || outputShape.selectsAll(indices);
+                size_t selectedCount;
+                if constexpr(std::is_same_v<Indices, roc::hostnumerics::IndexRange>)
+                    selectedCount = indices.count(*logicalCount);
+                else
+                {
+                    if(!indices.empty() && *indices.rbegin() >= *logicalCount)
+                        throw std::runtime_error("Explicit index exceeds logical element count.");
+                    selectedCount = indices.size();
+                }
+                selectAllOutputs = requiresCompleteD || selectedCount == *logicalCount;
             }
             catch(const std::runtime_error& error)
             {

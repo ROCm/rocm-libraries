@@ -14,7 +14,9 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <set>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -145,6 +147,36 @@ TEST(ReferenceInvocationAdapter, InvalidAmaxStorageIsAnInvalidDescriptor)
     EXPECT_NE(failure.reason.find("storage is too small"), std::string::npos);
     EXPECT_EQ(d, -99);
     EXPECT_EQ(amax, -99);
+}
+
+TEST(ReferenceInvocationAdapter, RejectsOutOfBoundsSetBeforeChoosingCompleteOutput)
+{
+    for(bool outputAmax : {false, true})
+    {
+        SCOPED_TRACE(outputAmax);
+        auto problem = makePackedProblem(
+            rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 1, 1, 1);
+        problem.setOutputAmaxD(outputAmax);
+        if(outputAmax)
+            problem.setAmaxD(rocisa::DataType::Float, true);
+        float             a = 2, b = 3, c = 0, d = -99, amax = -99;
+        ContractionInputs inputs(&a, &b, &c, &d, 1.0f, 0.0f);
+        inputs.amaxD = &amax;
+        const std::set<size_t> indices{1};
+        const auto             translation = hostnumerics::translateGemmInvocation(
+            problem, inputs, indices, roc::hostnumerics::LastDimensionFastest{});
+        ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
+        EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
+                  hostnumerics::TranslationFailureCode::InvalidDescriptor);
+        EXPECT_THROW(executeReferenceGemm(problem,
+                                          inputs,
+                                          indices,
+                                          roc::hostnumerics::LastDimensionFastest{},
+                                          requireBlockedExecution),
+                     std::runtime_error);
+        EXPECT_EQ(d, -99);
+        EXPECT_EQ(amax, -99);
+    }
 }
 
 TEST(ReferenceInvocationAdapter, InvalidScalarVariantIsAnInvalidDescriptor)
@@ -641,8 +673,7 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
     const auto selection = roc::hostnumerics::primeIndexRange(problem.d().totalLogicalElements(),
                                                               problem.d().totalAllocatedElements(),
                                                               elementsToValidate);
-    const std::vector<size_t> selected
-        = roc::hostnumerics::Shape(problem.d().sizes()).selectedIndices(selection);
+    const std::vector<size_t> selected = selection.indices(problem.d().totalLogicalElements());
     ASSERT_EQ(selected.size(), elementsToValidate);
 
     std::vector<bool> expectedWritten(M * N, false);

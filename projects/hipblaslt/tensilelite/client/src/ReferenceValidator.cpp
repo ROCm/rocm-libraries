@@ -553,7 +553,8 @@ namespace TensileLite
                                 options.maxReportedMismatches);
             }
             if(boundsCheck == BoundsCheckMode::NaN
-               && (resultTensor.shape().selectsAll(outputSelection) || m_freivalds))
+               && (outputSelection.count(resultTensor.elementCount()) == resultTensor.elementCount()
+                   || m_freivalds))
             {
                 sentinel.append(roc::hostnumerics::checkUnusedTensorStorage(
                                     resultTensor,
