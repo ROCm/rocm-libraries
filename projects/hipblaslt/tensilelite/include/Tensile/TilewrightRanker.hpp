@@ -1246,21 +1246,25 @@ namespace TensileLite
                     std::cerr << "[TILEWRIGHT_DIAG TENSILELITE] ranking failed (" << e.what()
                               << "); ranking with origami instead" << std::endl;
             }
-            if(positions.empty() && diagnostics())
+            if(diagnostics())
             {
-                if(auto note = unsupportedContextNote(context, tilewrightHardware))
+                auto const note = positions.empty()
+                                      ? unsupportedContextNote(context, tilewrightHardware)
+                                      : nearestContextNote(context, tilewrightHardware);
+                if(note)
                     std::cerr << *note << std::endl;
             }
             return positions;
         }
 
-        // The TILEWRIGHT_DIAG line for a context the model does not support,
-        // the first time the ranker meets that context; nullopt otherwise.
+        // The TILEWRIGHT_DIAG line for a context the model scores nothing in
+        // (a schedule it does not list), the first time the ranker meets that
+        // context; nullopt otherwise.
         std::optional<std::string>
             unsupportedContextNote(tilewright::ExecutionContext const& context,
                                    tilewright::Hardware const&         hardware) const
         {
-            if(tilewright::supports(m_candidates.model(), context, hardware))
+            if(tilewright::scoring_context(m_candidates.model(), context, hardware))
                 return std::nullopt;
             std::lock_guard<std::mutex> lock(m_reportedMutex);
             if(!m_reported.emplace(context.cu_budget, static_cast<int>(context.schedule)).second)
@@ -1272,6 +1276,33 @@ namespace TensileLite
                    + " n_cu=" + std::to_string(hardware.N_CU)
                    + (floor != 0 ? " min_effective_cus=" + std::to_string(floor) : std::string())
                    + ": the model does not support this context; ranking with origami";
+        }
+
+        // The TILEWRIGHT_DIAG line for a context outside the model's range
+        // only by its CU budget, which it ranks at the nearest budget in it
+        // (tilewright::scoring_context), the first time the ranker meets that
+        // context; nullopt otherwise.
+        std::optional<std::string> nearestContextNote(tilewright::ExecutionContext const& context,
+                                                      tilewright::Hardware const& hardware) const
+        {
+            auto const& model = m_candidates.model();
+            if(tilewright::supports(model, context, hardware))
+                return std::nullopt;
+            auto const at = tilewright::scoring_context(model, context, hardware);
+            if(!at)
+                return std::nullopt;
+            std::lock_guard<std::mutex> lock(m_reportedMutex);
+            if(!m_reported.emplace(context.cu_budget, static_cast<int>(context.schedule)).second)
+                return std::nullopt;
+            size_t const floor = tilewright::describe(model).min_effective_cus;
+            return "[TILEWRIGHT_DIAG TENSILELITE] arch=" + m_arch
+                   + " cu_budget=" + std::to_string(context.cu_budget)
+                   + " schedule=" + std::to_string(static_cast<int>(context.schedule))
+                   + " n_cu=" + std::to_string(hardware.N_CU)
+                   + (floor != 0 ? " min_effective_cus=" + std::to_string(floor) : std::string())
+                   + ": outside the model's CU range; ranked as cu_budget="
+                   + std::to_string(at->cu_budget)
+                   + ", the kernels launch with cu_budget=" + std::to_string(context.cu_budget);
         }
 
         // The architecture of the library's kernels.

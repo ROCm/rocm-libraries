@@ -1383,7 +1383,7 @@ TEST(PredictionLibraryTest, TilewrightNamesTheCompilerTargetOfTheLibrary)
     }
 }
 
-TEST(PredictionLibraryTest, TilewrightNotesEachContextTheModelDoesNotSupportOnce)
+TEST(PredictionLibraryTest, TilewrightNotesEachContextOutsideTheModelOnce)
 {
     SolutionMap<ContractionSolution> solutions;
     addContestedKernels(solutions);
@@ -1397,15 +1397,32 @@ TEST(PredictionLibraryTest, TilewrightNotesEachContextTheModelDoesNotSupportOnce
     auto const&                ranker = *lib.tilewright_ranker;
     EXPECT_FALSE(ranker.unsupportedContextNote({}, hardware));
     EXPECT_FALSE(ranker.unsupportedContextNote({.cu_budget = 256}, hardware));
+    EXPECT_FALSE(ranker.nearestContextNote({}, hardware));
+    EXPECT_FALSE(ranker.nearestContextNote({.cu_budget = 256}, hardware));
 
-    auto const note = ranker.unsupportedContextNote({.cu_budget = 224}, hardware);
+    // A budget outside the model's range is ranked at the nearest one in it
+    // (every CU, for a v2 model), never by origami.
+    EXPECT_FALSE(ranker.unsupportedContextNote({.cu_budget = 224}, hardware));
+    auto const nearest = ranker.nearestContextNote({.cu_budget = 224}, hardware);
+    ASSERT_TRUE(nearest);
+    EXPECT_EQ(*nearest,
+              "[TILEWRIGHT_DIAG TENSILELITE] arch=gfx950 cu_budget=224 schedule=0 n_cu=256: "
+              "outside the model's CU range; ranked as cu_budget=0, the kernels "
+              "launch with cu_budget=224");
+    EXPECT_FALSE(ranker.nearestContextNote({.cu_budget = 224}, hardware));
+
+    // A schedule the model does not list is ranked by origami.
+    tilewright::ExecutionContext const dynamic{.cu_budget = 224,
+                                               .schedule  = tilewright::Schedule::Dynamic};
+    EXPECT_FALSE(ranker.nearestContextNote(dynamic, hardware));
+    auto const note = ranker.unsupportedContextNote(dynamic, hardware);
     ASSERT_TRUE(note);
     EXPECT_EQ(*note,
-              "[TILEWRIGHT_DIAG TENSILELITE] arch=gfx950 cu_budget=224 schedule=0 n_cu=256: the "
+              "[TILEWRIGHT_DIAG TENSILELITE] arch=gfx950 cu_budget=224 schedule=1 n_cu=256: the "
               "model does not support this context; ranking with origami");
-    EXPECT_FALSE(ranker.unsupportedContextNote({.cu_budget = 224}, hardware));
+    EXPECT_FALSE(ranker.unsupportedContextNote(dynamic, hardware));
     EXPECT_TRUE(ranker.unsupportedContextNote(
-        {.cu_budget = 224, .schedule = tilewright::Schedule::Dynamic}, hardware));
+        {.cu_budget = 0, .schedule = tilewright::Schedule::Auto}, hardware));
 }
 
 TEST(PredictionLibraryTest, TilewrightRanksTheTopKernelsOrEveryScoredKernel)
@@ -2326,7 +2343,7 @@ TEST(PredictionLibraryTest, TilewrightLoadsTheModelOfTheDevicesPciChipId)
     EXPECT_NE(warning.find("ranking with origami"), std::string::npos) << warning;
 }
 
-TEST(PredictionLibraryTest, TilewrightNotesTheCuFloorOfAContextItRefuses)
+TEST(PredictionLibraryTest, TilewrightNotesTheCuFloorOfADeviceSmallerThanIt)
 {
     ScratchDir const            dir("tensilelite_tilewright_cu_floor");
     std::filesystem::path const path = dir.path() / "floor.tilewright.bin";
@@ -2338,10 +2355,14 @@ TEST(PredictionLibraryTest, TilewrightNotesTheCuFloorOfAContextItRefuses)
 
     TilewrightRanker const             ranker(model, {}, nullptr, "gfx1250");
     tilewright::ExecutionContext const whole{};
-    EXPECT_FALSE(ranker.unsupportedContextNote(whole, {64, 163840, 4000000}).has_value());
-    auto const note = ranker.unsupportedContextNote(whole, {32, 163840, 4000000});
+    // A device with fewer CUs than the floor is ranked as a whole, never by
+    // origami.
+    EXPECT_FALSE(ranker.unsupportedContextNote(whole, {32, 163840, 4000000}).has_value());
+    EXPECT_FALSE(ranker.nearestContextNote(whole, {64, 163840, 4000000}).has_value());
+    auto const note = ranker.nearestContextNote(whole, {32, 163840, 4000000});
     ASSERT_TRUE(note.has_value());
     EXPECT_NE(note->find("n_cu=32 min_effective_cus=64"), std::string::npos) << *note;
+    EXPECT_NE(note->find("ranked as cu_budget=0"), std::string::npos) << *note;
 }
 #endif
 
