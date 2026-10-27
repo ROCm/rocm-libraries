@@ -35,12 +35,34 @@ dispatcher family `dispatch/families/tensor_gett.py` (`plan_tensor_gett`: the GE
 the GEMM dispatcher's own bodies -- the both-MN-contiguous CRR pick reading the
 operands in place, or the RCR pick on K-contiguous copies made by the
 [`tensor/pack.py`](../../python/rocke/instances/common/tensor/pack.py) kernel -- by a
-cost model). gfx950; Python engine only.
+cost model). Autotune mode: `plan_tensor_gett_candidates` lists the candidate routes
+(the selector's best both-MN-contiguous and RCR bodies plus one-step body mutations) and
+`tune_tensor_gett` measures them with the search engine; measured winners ship in the
+tuned route table `tensor_gett_tuned.json`, which `plan_tensor_gett` consults first.
+gfx950; Python engine only.
 
 Fused operand prologues for the universal GEMM (f32 operands with bf16 split
 emulation, unary opA / opB, interleaved complex-f32 B):
 [`gemm_prologue.py`](../../python/rocke/instances/common/gemm_prologue.py)
 (`Prologue`, `attach_prologue`); Python engine only.
+Emulated-f32 GEMM routes on gfx950 built on the prologue:
+[`dispatch/gemm/cf32.py`](../../python/rocke/dispatch/gemm/cf32.py)
+(`plan_cf32_gemm`: interleaved complex f32 as one fused kernel; `plan_f32_gemm`:
+real f32 by bf16 split). Ragged M / N take the padded bounds; operands past the
+2 GiB DMA range or D past 2**31 elements take the `wide_addr` trait (64-bit
+tile origins). Below half a wave of 256 x 256 tiles a fitted cost model
+(`CF32_SMALL_COST`) picks the small stream-K / data-parallel body or the
+256 x 256 stream-K body by K; `alpha` / bilinear also run in the small bodies'
+scatter epilogue (complex partner column by one DPP lane swap), and a kernel N
+that is not a multiple of 8 takes a scatter-epilogue body at any size. Python
+engine only.
+
+Multi-axis tiled N-D permute (2-, 4- and 8-byte elements, 16-byte accesses on
+both sides, in-register transpose + swizzled LDS stage):
+[`permute_tiled.py`](../../python/rocke/instances/common/permute_tiled.py)
+(`PermuteTiledSpec`, `build_permute_tiled`; host planner `plan_permute_tiled`
+with a tuned table). The tensor GETT family can use it for its operand packs
+(`TENSOR_GETT_PACK_KERNEL`). Python engine only.
 
 Atom set: `16x16x16`, `16x16x32`, `32x32x8`, `32x32x16` f16.
 

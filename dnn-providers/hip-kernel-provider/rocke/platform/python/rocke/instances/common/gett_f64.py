@@ -364,6 +364,74 @@ class GettF64Spec:
       ``n`` partials in order and applies the epilogue. Deterministic; an output
       goes through about ``K/n + n`` roundings instead of ``K``. For problems
       with few output tiles per CU and a long K.
+    * ``acc_agpr``: keep the MFMA accumulators in AGPRs (Python engine only).
+      Reserves exactly the accumulator registers as AGPRs
+      (``amdgpu-agpr-alloc``), forces the AGPR form of the MFMA, and seeds
+      every accumulator from an opaque AGPR zero so the loop-carried
+      accumulators stay whole vectors. Lets a wave hold up to 256
+      accumulator registers (a 128x64 wave tile) beside its fragments and
+      prefetch registers without spilling.
+    * ``split_serial``: with ``split_k``, reduce the partial sums inside the
+      same launch instead of a second (reduce) kernel (Python engine only).
+      The kernel then takes ``C``, ``D``, alpha and beta as without split_k,
+      plus ``W`` (f64 partial slots, :func:`gett_f64_workspace_bytes`) and
+      ``Cnt`` (i32 counters, :func:`gett_f64_counter_count`, zeroed once when
+      allocated). Every wave stores its partial accumulators into its slot
+      (lane-coalesced 16-byte stores), releases them (agent-scope fence) and
+      bumps its counter; the wave that arrives last acquires, sums the
+      ``split_k`` partials in the fixed order z = 0 .. split_k - 1 (the bits
+      do not depend on the arrival order and equal the reduce kernel's),
+      resets the counter to 0 and runs the epilogue. 1: agent-scope release
+      / acquire fences around the counter (each writes back / invalidates the
+      L2); 2 (gfx942 / gfx950): write-through partial stores and loads
+      (``sc1``, they bypass the per-XCD L2; completed by ``s_waitcnt
+      vmcnt(0)``) and no L2 fences.
+    * ``frag_pipe``: software-pipeline the LDS fragments (Python engine
+      only). The fragments of k-step ``ks + 1`` are read into a second set of
+      registers before the MFMAs of k-step ``ks`` issue, and the LDS store of
+      the next K tile plus its barrier move in front of the last k-step, whose
+      MFMAs then overlap the reads of the next tile's first k-step: no MFMA
+      waits on an LDS read inside the loop. Needs two LDS stages, prefetch
+      depth 1 and no ``k_block``; ``unroll2`` is supported (compile-time
+      stages).
+    * ``k_inner``: real data only (Python engine only). 1 (default) issues a
+      K tile's MFMAs k-step by k-step (every accumulator once per k-step).
+      ``n > 1`` reads the fragments of ``n`` k-steps first and then issues
+      the ``n`` MFMAs of each accumulator back to back (the K order of every
+      output is unchanged, so the bits are too): a chain of MFMAs on one
+      accumulator keeps the matrix pipe fed better than a round robin over
+      many accumulators. ``n`` divides ``tile_k / 4``; with ``frag_pipe`` the
+      groups of ``n`` k-steps are what the pipeline prefetches.
+    * ``mfma_fence``: a scheduling barrier after every MFMA of the K loop, so
+      the backend keeps the emitted MFMA order (Python engine only).
+    * ``ilv``: (Python engine only) 0 (default) off. ``n > 0``
+      emits the K loop as one instruction-level schedule per K tile: the
+      tile's MFMAs in order with, between them, the fragment reads of the
+      next k-step group (spread over the current group), the LDS stores of
+      the next K tile (it rides in registers, ``prefetch_depth`` 2) each
+      followed by the global load of the tile after it into the freed
+      registers (spread evenly up to ``ilv_wgap`` MFMAs before the barrier),
+      and the barrier ``n`` MFMAs before the end of the tile; the reads of
+      the next tile's first k-step group follow the barrier, between the last
+      ``n`` MFMAs. A scheduling barrier after every MFMA keeps the order, so
+      no MFMA waits for an LDS read or a global load and no burst of loads or
+      stores drains the matrix pipe (a hand-scheduled loop). Needs two LDS
+      stages, prefetch depth 2, no ``k_block`` / ``k_stagger``; complex
+      data schedule each fused 4M atom (its four MFMAs) as one slot; with
+      ``unroll2`` (compile-time sizes) two K tiles per iteration read
+      compile-time LDS stages.
+    * ``ilv_wgap``: MFMAs between the last LDS store of a tile and its
+      barrier (``ilv``).
+    * ``kmajor_lds``: real data only (Python engine only). An operand the
+      loader reads along K (K-contiguous in memory) gets a K-major LDS tile,
+      ``[stage * side + mn][k]`` with ``kmajor_pad`` elements of padding per
+      row, instead of the ``[k][mn]`` tile: every 16-byte load is one 16-byte
+      LDS store (no scatter into two K rows), and with the padded pitch the
+      fragment reads of a half-wave (16 rows, one K) and of its partner
+      half-wave (the next K) land on disjoint banks. The swizzle does not
+      apply to such an operand. The K order of every output is unchanged.
+    * ``kmajor_pad``: elements of padding per K-major LDS row (even, so rows
+      stay 16-byte aligned).
     """
 
     problem: GettF64Problem
@@ -390,6 +458,15 @@ class GettF64Spec:
     k_block: int = 0
     runtime_sizes: bool = False
     split_k: int = 1
+    acc_agpr: bool = False
+    split_serial: int = 0
+    frag_pipe: bool = False
+    k_inner: int = 1
+    mfma_fence: bool = False
+    ilv: int = 0
+    ilv_wgap: int = 4
+    kmajor_lds: bool = False
+    kmajor_pad: int = 2
 
     @property
     def threads(self) -> int:
@@ -465,6 +542,15 @@ class GettF64Spec:
                 "nopf": not self.prefetch,
                 "nofence": not self.sched_fence,
                 "u2": self.unroll2,
+                "agpr": self.acc_agpr,
+                f"sks{self.split_serial}": bool(self.split_serial),
+                "fp": self.frag_pipe,
+                f"ki{self.k_inner}": self.k_inner != 1,
+                "mf": self.mfma_fence,
+                f"il{self.ilv}": self.ilv > 0,
+                f"iw{self.ilv_wgap}": self.ilv > 0 and self.ilv_wgap != 4,
+                "km": self.kmajor_lds,
+                f"kp{self.kmajor_pad}": self.kmajor_lds and self.kmajor_pad != 2,
                 "cja": p.conj_a,
                 "cjb": p.conj_b,
             },
@@ -750,6 +836,22 @@ def _load_plan(
     return None
 
 
+def _kmajor(spec: GettF64Spec, side_digits: Digits, k_digits: Digits, side: int) -> bool:
+    """``kmajor_lds`` applies to this operand (its loader reads along K)."""
+    if not spec.kmajor_lds:
+        return False
+    pl = _load_plan(spec, side_digits, k_digits, side)
+    return pl is not None and pl.along_k
+
+
+def _lds_shape(spec: GettF64Spec, side_digits: Digits, k_digits: Digits, side: int):
+    """``[rows, cols]`` of an operand's LDS tile (f64 elements)."""
+    words = 2 if spec.problem.complex_ else 1
+    if _kmajor(spec, side_digits, k_digits, side):
+        return [spec.lds_stages * side, spec.tile_k + spec.kmajor_pad]
+    return [spec.lds_stages * spec.tile_k, side * words + spec.resolved_pad()]
+
+
 def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
     p = spec.problem
     ok, why = p.check()
@@ -780,6 +882,47 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
         return False, "k_block must be >= 0"
     if spec.split_k < 1 or spec.split_k > MAX_GRID_Y:
         return False, f"split_k must be in [1, {MAX_GRID_Y}]"
+    if spec.kmajor_lds and (
+        p.complex_ or spec.kmajor_pad < 0 or (spec.tile_k + spec.kmajor_pad) % 2
+    ):
+        return False, "kmajor_lds needs real data and an even tile_k + kmajor_pad"
+    if spec.ilv < 0 or spec.ilv_wgap < 0:
+        return False, "ilv and ilv_wgap must be >= 0"
+    if spec.ilv and (
+        spec.lds_stages != 2
+        or spec.prefetch_depth != 2
+        or not spec.prefetch
+        or spec.k_block
+        or spec.k_stagger
+        or spec.frag_pipe
+        or (p.complex_ and spec.k_inner != 1)
+    ):
+        return (
+            False,
+            "ilv needs two LDS stages, prefetch depth 2, no k_block / k_stagger / "
+            "frag_pipe (complex: k_inner 1)",
+        )
+    if spec.k_inner < 1 or (spec.tile_k // 4) % spec.k_inner:
+        return False, "k_inner must divide the k-steps of a K tile (tile_k / 4)"
+    if spec.k_inner > 1 and p.complex_:
+        return False, "k_inner needs real data"
+    if spec.frag_pipe and (
+        spec.lds_stages != 2
+        or spec.prefetch_depth != 1
+        or not spec.prefetch
+        or spec.k_block
+        or spec.k_stagger
+    ):
+        return (
+            False,
+            "frag_pipe needs two LDS stages, prefetch depth 1, no k_block / k_stagger",
+        )
+    if spec.split_serial not in (0, 1, 2):
+        return False, "split_serial must be 0, 1 or 2"
+    if spec.split_serial and (spec.split_k < 2 or spec.runtime_sizes):
+        return False, "split_serial needs split_k > 1 and compile-time sizes"
+    if spec.split_serial == 2 and arch not in ("gfx942", "gfx950"):
+        return False, "split_serial 2 (write-through partials) needs gfx942 / gfx950"
     if spec.split_k > 1 and (spec.unroll2 or spec.k_stagger):
         return False, "split_k does not combine with unroll2 or k_stagger"
     if (
@@ -807,9 +950,13 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
     if spec.k_stagger < 0:
         return False, "k_stagger must be >= 0"
     if spec.unroll2 and (
-        spec.lds_stages != 2 or spec.prefetch_depth != 1 or not spec.prefetch
+        spec.lds_stages != 2
+        or spec.prefetch_depth != (2 if spec.ilv else 1)
+        or not spec.prefetch
     ):
-        return False, "unroll2 needs two LDS stages and prefetch depth 1"
+        return False, "unroll2 needs two LDS stages and prefetch depth 1 (ilv: 2)"
+    if spec.unroll2 and spec.ilv and spec.runtime_sizes:
+        return False, "ilv with unroll2 needs compile-time sizes"
     acc_words = (
         (spec.wave_m // atom.m)
         * (spec.wave_n // atom.n)
@@ -819,6 +966,21 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
     )
     if acc_words * 2 > 384:
         return False, f"accumulator needs {acc_words * 2} registers per lane (max 384)"
+    if spec.acc_agpr and acc_words * 2 > 256:
+        return (
+            False,
+            f"acc_agpr: accumulator needs {acc_words * 2} AGPRs per lane (max 256)",
+        )
+    # A CTA of more than four waves puts several waves on one SIMD: each gets
+    # a share of the 512 registers, and the AGPR reservation must leave room
+    # for the fragments and addresses (at least 64 VGPRs).
+    per_simd = -(-(spec.warps_m * spec.warps_n) // 4)
+    if spec.acc_agpr and acc_words * 2 > 512 // per_simd - 64:
+        return (
+            False,
+            f"acc_agpr: {acc_words * 2} AGPRs leave too few VGPRs with "
+            f"{per_simd} waves per SIMD",
+        )
     for which in ("A", "B", "C", "D"):
         span = p.addr_span_bytes(which, spec.tile_k)
         if span > _MAX_SPAN:
@@ -834,6 +996,16 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
         * ((spec.tile_m + spec.tile_n) * words + 2 * spec.resolved_pad())
         * 8
     )
+    if spec.kmajor_lds:
+        lds = sum(
+            _lds_shape(spec, side_d, k_d, side)[0]
+            * _lds_shape(spec, side_d, k_d, side)[1]
+            * 8
+            for side_d, k_d, side in (
+                (p.a_m, p.a_k, spec.tile_m),
+                (p.b_n, p.b_k, spec.tile_n),
+            )
+        )
     cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     if lds > cap:
         return False, f"LDS {lds} bytes exceeds {cap} on {arch}"
@@ -973,6 +1145,7 @@ class _Operand:
         tmpl_side = p.a_m if name == "A" else p.b_n
         tmpl_k = p.a_k if name == "A" else p.b_k
         self.plan = _load_plan(spec, tmpl_side, tmpl_k, side_tile)
+        self.kmajor = _kmajor(spec, tmpl_side, tmpl_k, side_tile)
         if self.rt:
             # One digit per space: the K tile always splits; the per-buffer
             # span and the bytes per K tile come from the size arguments.
@@ -1046,7 +1219,12 @@ class _Operand:
         the out-of-range offset), also when ``k_stagger`` would wrap it onto a
         real tile.
         """
-        b, spec, pl = self.b, self.spec, self.plan
+        st = self.load_begin(kt)
+        return [self.load_piece(st, i) for i in range(len(self.coords))]
+
+    def load_begin(self, kt: Value):
+        """The per-K-tile part of :meth:`load` (state for :meth:`load_piece`)."""
+        b, spec = self.b, self.spec
         live = None
         if self.kmap is not None:
             live = b.cmp_lt(kt, _ci(b, self.nk))
@@ -1062,8 +1240,14 @@ class _Operand:
                 koff = _mixed64(b, kt, self.split[1], self.es)
             tile_ptr = b.global_ptr_add(self.base_ptr, koff)
             rsrc = b.buffer_rsrc(tile_ptr, _ci(b, self.span))
-        vals = []
-        for s_loc, k_loc, base, s_ok in self.coords:
+        return (k0, rsrc, live)
+
+    def load_piece(self, st, i: int) -> Value:
+        """The global load of pass ``i`` of the K tile :meth:`load_begin` set up."""
+        b, pl = self.b, self.plan
+        k0, rsrc, live = st
+        if True:
+            s_loc, k_loc, base, s_ok = self.coords[i]
             kg = b.add(k0, k_loc)
             # The vector covers vec consecutive K rows when along K; every K
             # tail is a whole vector because K-contiguous runs are even.
@@ -1080,15 +1264,45 @@ class _Operand:
             voff = b.select(ok, voff, b.const_i32(_MASK_OFFSET))
             words = pl.vec * (2 if self.cx else 1)
             raw = b.buffer_load_vN(rsrc, voff, b.const_i32(0), I32, 2 * words)
-            vals.append(b.vec_bitcast(raw, VectorType(F64, words)))
-        return vals
+            return b.vec_bitcast(raw, VectorType(F64, words))
 
     def store_lds(self, vals, stage: Value):
         """Write one K tile (from :meth:`load`) into LDS stage ``stage``."""
-        b, spec, pl = self.b, self.spec, self.plan
-        row0 = b.mul(stage, b.const_i32(spec.tile_k))
+        row0 = self.b.mul(stage, self.b.const_i32(self.spec.tile_k))
+        for i, v in enumerate(vals):
+            self.store_piece(v, i, row0)
+
+    def stage_rows(self, row0: Value) -> Value:
+        """K-major tile: the first LDS row of the stage whose [k][mn] row
+        offset is ``row0`` (``stage * tile_k``)."""
+        b, spec = self.b, self.spec
+        if self.side_tile % spec.tile_k == 0:
+            return b.mul(row0, b.const_i32(self.side_tile // spec.tile_k))
+        return b.div(b.mul(row0, b.const_i32(self.side_tile)), b.const_i32(spec.tile_k))
+
+    def frag(self, row0: Value, row: Value, col: Value):
+        """The fragment of LDS K row ``row`` (stage rows from ``row0``) at
+        column ``col``."""
+        if self.kmajor:
+            b = self.b
+            return _frag(b, self.lds, b.add(self.stage_rows(row0), col), b.sub(row, row0), False)
+        return _frag(self.b, self.lds, row, col, self.cx)
+
+    def store_piece(self, v, i: int, row0: Value):
+        """The LDS store of pass ``i`` (value ``v``) into the stage at ``row0``."""
+        b, pl = self.b, self.plan
         wpe = 2 if self.cx else 1
-        for (s_loc, k_loc, _, _), cols, v in zip(self.coords, self.store_cols, vals):
+        s_loc, k_loc, _, _ = self.coords[i]
+        cols = self.store_cols[i]
+        if self.kmajor:
+            # [stage * side + mn][k]: the vector's K values are adjacent
+            r = b.add(self.stage_rows(row0), s_loc)
+            if pl.vec == 1:
+                b.smem_store_vN(self.lds, [r, k_loc], b.vec_extract(v, 0), 1)
+            else:
+                b.smem_store_vN(self.lds, [r, k_loc], v, pl.vec)
+            return
+        if True:
             if pl.along_k:
                 # vec K rows of one column (one element each).
                 for j in range(pl.vec):
@@ -1204,11 +1418,14 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     # carries noalias. 8-byte alignment: an f64 subtensor view need not be
     # 16-byte aligned (the buffer loads only need 4).
     split = spec.split_k > 1
+    # split_serial: the partials are reduced in this launch (C / D / alpha /
+    # beta as without split_k, plus W and Cnt)
+    partial_only = split and not spec.split_serial
     A = b.param("A", gptr, noalias=True, readonly=True, align=8)
     Bp = b.param("B", gptr, noalias=True, readonly=True, align=8)
-    C = D = W = None
+    C = D = W = Cnt = None
     alpha, beta = [], []
-    if split:
+    if partial_only:
         # Partial sums only: the reduce kernel reads C and applies alpha / beta.
         W = b.param("W", gptr, noalias=True, align=8)
     else:
@@ -1221,6 +1438,9 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
             beta = [b.param("beta_re" if cx else "beta", F64)]
             if cx:
                 beta.append(b.param("beta_im", F64))
+        if split:
+            W = b.param("W", gptr, noalias=True, align=8)
+            Cnt = b.param("Cnt", PtrType(I32, "global"), align=4)
     rt_args = None
     if spec.runtime_sizes:
         rt_args = {
@@ -1263,10 +1483,12 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
         return b.const_i32(p.addr_span_bytes(which, spec.tile_k))
 
     rd = rc = rw = kz = None
-    if split:
+    if partial_only:
         kz = b.block_id_z()
         rw = _workspace_rsrc(b, spec, geo, W, kz, lb, es)
     else:
+        if split:
+            kz = b.block_id_z()
         dptr = at_batch(D, p.d_l, "d_sl")
         rd = b.buffer_rsrc(dptr, out_span(geo.d_m, geo.d_n, "D"))
         if C is not None:
@@ -1274,12 +1496,20 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
             rc = b.buffer_rsrc(cptr, out_span(geo.c_m, geo.c_n, "C"))
 
     ns = spec.lds_stages
-    a_lds = b.smem_alloc(
-        F64, [ns * spec.tile_k, spec.tile_m * wpe + pad], name_hint="a_lds"
-    )
-    b_lds = b.smem_alloc(
-        F64, [ns * spec.tile_k, spec.tile_n * wpe + pad], name_hint="b_lds"
-    )
+    if spec.kmajor_lds:
+        a_lds = b.smem_alloc(
+            F64, _lds_shape(spec, p.a_m, p.a_k, spec.tile_m), name_hint="a_lds"
+        )
+        b_lds = b.smem_alloc(
+            F64, _lds_shape(spec, p.b_n, p.b_k, spec.tile_n), name_hint="b_lds"
+        )
+    else:
+        a_lds = b.smem_alloc(
+            F64, [ns * spec.tile_k, spec.tile_m * wpe + pad], name_hint="a_lds"
+        )
+        b_lds = b.smem_alloc(
+            F64, [ns * spec.tile_k, spec.tile_n * wpe + pad], name_hint="b_lds"
+        )
     aptr = at_batch(A, p.a_l, "a_sl")
     opa = _Operand(
         b, spec, "A", aptr, geo.a_m, geo.a_k, spec.tile_m, m0, geo.M, a_lds, geo
@@ -1299,8 +1529,15 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     b_col0 = b.add(b.mul(wn, b.const_i32(spec.wave_n)), b_mn)
     swz_on = spec.uses_swizzle()
 
-    def frag_cols(col0, n_atoms, side, k_row):
+    def frag_cols(col0, n_atoms, side, k_row, kmaj=False):
         """cols[ks][i]: column of atom i at k-step ks."""
+        if kmaj:
+            # K-major tile: the column is the M / N index, no swizzle
+            cols = [
+                b.add(col0, b.const_i32(i * atom.m)) if i else col0
+                for i in range(n_atoms)
+            ]
+            return _Frag(k_row, [cols] * (spec.tile_k // atom.k))
         mask = spec.swizzle_mask(side)
         odd = None
         if swz_on and not spec.lds_swizzle_mode:
@@ -1321,8 +1558,8 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
             out.append(cols)
         return _Frag(k_row, out)
 
-    fa = frag_cols(a_col0, am_n, spec.tile_m, a_k)
-    fb = frag_cols(b_col0, an_n, spec.tile_n, b_k)
+    fa = frag_cols(a_col0, am_n, spec.tile_m, a_k, opa.kmajor)
+    fb = frag_cols(b_col0, an_n, spec.tile_n, b_k, opb.kmajor)
 
     if geo.rt:
         nk = b.div(b.add(geo.K, b.const_i32(spec.tile_k - 1)), b.const_i32(spec.tile_k))
@@ -1343,6 +1580,15 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
             op.nk = nk
     n_acc = am_n * an_n * (spec.complex_accs if cx else 1)
     zero = b.vec_pack([b.const_f64(0.0)] * atom.c_frag_len, F64)
+    if spec.acc_agpr:
+        # AGPR-resident accumulators: reserve exactly their registers (the
+        # attr's minimum also selects the AGPR form of every MFMA) and seed
+        # them from an opaque AGPR zero, so the loop-carried accumulator phis
+        # stay whole vectors instead of per-element copies.
+        n_regs = n_acc * atom.c_frag_len * 2 * (2 if spec.k_block else 1)
+        b.kernel.attrs["agpr_alloc"] = (n_regs, n_regs)
+        b.kernel.attrs["mfma_agpr_form"] = True
+        zero = b.inline_asm("", "=a,0", [zero], zero.type, sideeffect=False)
 
     # split_k: this CTA's K tiles are [lo, hi) with lo = z*nk/S, hi = (z+1)*nk/S.
     k_lo, count = None, nk
@@ -1372,12 +1618,23 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     )
     ctx.na = len(nx[0]) if nx is not None else 0
     ctx.k_lo = k_lo
-    if spec.unroll2:
+    if spec.ilv:
+        accs = _k_loop_ilv(ctx, nx)
+    elif spec.frag_pipe:
+        accs = _k_loop_pipe(ctx)
+    elif spec.unroll2:
         accs = _k_loop_unroll2(ctx)
     else:
         accs = _k_loop(ctx, nx)
-    if split:
+    if partial_only:
         _epilogue_partial(b, spec, atom, accs, lane, wm, wn, m0, n0, rw, geo)
+    elif split:
+        tile = b.add(b.mul(tm, b.const_i32(-(-p.N // spec.tile_n))), tn)
+        red = _SerialReduce(b, spec, atom, accs, W, Cnt, kz, lb, tile, wave, lane)
+        with red as summed:
+            _epilogue(
+                b, spec, atom, summed, lane, wm, wn, m0, n0, rd, rc, alpha, beta, geo
+            )
     else:
         _epilogue(b, spec, atom, accs, lane, wm, wn, m0, n0, rd, rc, alpha, beta, geo)
     b.ret()
@@ -1398,17 +1655,60 @@ class _LoopCtx:
         self.k_lo = None  # split_k: the first K tile of this CTA
         self.cx = spec.problem.complex_
 
+    def read_group(self, row0, g):
+        """Fragments of k-step group ``g`` (``k_inner`` k-steps): per k-step,
+        the A fragments of the wave's atom rows and the B fragments of its
+        atom columns."""
+        b, spec, atom = self.b, self.spec, self.atom
+        out = []
+        for ks in range(g * spec.k_inner, (g + 1) * spec.k_inner):
+            ka = self.fa.k_row
+            row_a = b.add(row0, b.add(ka, b.const_i32(ks * atom.k)) if ks else ka)
+            fa = [self.opa.frag(row0, row_a, col) for col in self.fa.cols[ks]]
+            kb = self.fb.k_row
+            row_b = b.add(row0, b.add(kb, b.const_i32(ks * atom.k)) if ks else kb)
+            fb = [self.opb.frag(row0, row_b, col) for col in self.fb.cols[ks]]
+            out.append((fa, fb))
+        return out
+
+    def mma_group(self, accs, frags):
+        """The MFMAs of one k-step group (from :meth:`read_group`)."""
+        b, spec, atom = self.b, self.spec, self.atom
+        if len(frags) == 1 and not spec.mfma_fence:
+            fa, fb = frags[0]
+            return _mma_step(b, atom, fa, fb, accs, spec.problem, spec.complex_accs)
+        if spec.problem.complex_:
+            for fa, fb in frags:
+                accs = _mma_step(b, atom, fa, fb, accs, spec.problem, spec.complex_accs)
+                if spec.mfma_fence:
+                    b.sched_barrier(0)
+            return accs
+        accs = list(accs)
+        am_n, an_n = len(frags[0][0]), len(frags[0][1])
+        for am in range(am_n):
+            for an in range(an_n):
+                i = am * an_n + an
+                for fa, fb in frags:
+                    accs[i] = b.mma(atom, fa[am], fb[an], accs[i])
+                    if spec.mfma_fence:
+                        b.sched_barrier(0)
+        return accs
+
     def mfma_block(self, accs, row0):
         """The MFMAs of one K tile read from the LDS rows at ``row0``."""
         b, spec, atom = self.b, self.spec, self.atom
         accs = list(accs)
+        if spec.k_inner > 1 or spec.mfma_fence:
+            for g in range(spec.tile_k // atom.k // spec.k_inner):
+                accs = self.mma_group(accs, self.read_group(row0, g))
+            return accs
         for ks in range(spec.tile_k // atom.k):
             ka = self.fa.k_row
             row_a = b.add(row0, b.add(ka, b.const_i32(ks * atom.k)) if ks else ka)
-            fa = [_frag(b, self.a_lds, row_a, col, self.cx) for col in self.fa.cols[ks]]
+            fa = [self.opa.frag(row0, row_a, col) for col in self.fa.cols[ks]]
             kb = self.fb.k_row
             row_b = b.add(row0, b.add(kb, b.const_i32(ks * atom.k)) if ks else kb)
-            fb = [_frag(b, self.b_lds, row_b, col, self.cx) for col in self.fb.cols[ks]]
+            fb = [self.opb.frag(row0, row_b, col) for col in self.fb.cols[ks]]
             accs = _mma_step(b, atom, fa, fb, accs, spec.problem, spec.complex_accs)
         return accs
 
@@ -1579,6 +1879,400 @@ def _k_loop_unroll2(ctx: _LoopCtx) -> List[Value]:
         accs = half(accs, b.add(kt, b.const_i32(1)), 1, False)
     else:
         accs = half(accs, b.const_i32(nk - 1), 0, False)
+    return accs
+
+
+def _k_loop_pipe(ctx: _LoopCtx) -> List[Value]:
+    """``frag_pipe``: the K loop with register double-buffered fragments.
+
+    Per K tile ``t`` (LDS stage ``s``, next stage ``s'``): the global loads of
+    tile ``t + 1``; then for every k-step but the last, the fragment reads of
+    the next k-step followed by the MFMAs of this one; then the LDS store of
+    tile ``t + 1`` into ``s'`` and the barrier; then the reads of k-step 0 of
+    tile ``t + 1`` (from ``s'``) and the MFMAs of the last k-step of ``t``.
+    The fragments of the next k-step ride into the loop iteration as carried
+    values. Every k-step group is fenced (``sched_barrier``) so the backend
+    keeps the reads ahead of the MFMAs that do not need them.
+
+    Stage safety: every read of ``s'`` (tile ``t - 1``) was issued before the
+    barrier of tile ``t - 1``, so the store of tile ``t + 1`` into ``s'`` after
+    that barrier overwrites nothing still to be read; the reads of ``s'``
+    after the barrier of tile ``t`` see that store.
+    """
+    b, spec, atom = ctx.b, ctx.spec, ctx.atom
+    opa, opb = ctx.opa, ctx.opb
+    cx = ctx.cx
+    ki = spec.k_inner
+    nks = spec.tile_k // atom.k // ki  # k-step groups per K tile
+
+    def read(row0, g):
+        return ctx.read_group(row0, g)
+
+    def flat(f):
+        out = []
+        for fa, fb in f:
+            for x in list(fa) + list(fb):
+                out += list(x) if cx else [x]
+        return out
+
+    na = len(ctx.fa.cols[0])
+    nb = len(ctx.fb.cols[0])
+    wf = 2 if cx else 1
+
+    def unflat(vals):
+        per = (na + nb) * wf
+        out = []
+        for j in range(ki):
+            v = vals[j * per : (j + 1) * per]
+            fa = v[: na * wf]
+            fb = v[na * wf :]
+            if cx:
+                fa = [(fa[2 * i], fa[2 * i + 1]) for i in range(na)]
+                fb = [(fb[2 * i], fb[2 * i + 1]) for i in range(nb)]
+            out.append((fa, fb))
+        return out
+
+    def mma(accs, f):
+        return ctx.mma_group(accs, f)
+
+    def row_of(stg):
+        if isinstance(stg, int):
+            return b.const_i32(stg * spec.tile_k)
+        return b.mul(stg, b.const_i32(spec.tile_k))
+
+    def tile(accs, cur, kt, stg, nstg, has_next):
+        """One K tile from stage ``stg``; returns (accs, fragments of the next
+        tile's k-step 0, or None for the last tile)."""
+        row0 = row_of(stg)
+        if has_next:
+            ktg = kt if ctx.k_lo is None else b.add(kt, ctx.k_lo)
+            nxt = b.add(ktg, b.const_i32(1))
+            pre_a = opa.load(nxt)
+            pre_b = opb.load(nxt)
+        b.sched_barrier(0)
+        for ks in range(nks - 1):
+            f_next = read(row0, ks + 1)
+            b.sched_barrier(0)
+            accs = mma(accs, cur)
+            cur = f_next
+            b.sched_barrier(0)
+        nf = None
+        if has_next:
+            other = b.const_i32(nstg) if isinstance(nstg, int) else nstg
+            opa.store_lds(pre_a, other)
+            opb.store_lds(pre_b, other)
+            b.sync()
+            nf = read(row_of(nstg), 0)
+            b.sched_barrier(0)
+        accs = mma(accs, cur)
+        b.sched_barrier(0)
+        return accs, nf
+
+    nk = ctx.nk
+    last = nk - 1 if isinstance(nk, int) else b.sub(nk, b.const_i32(1))
+    f0 = read(b.const_i32(0), 0)
+    accs0 = [ctx.zero] * ctx.n_acc
+    if spec.unroll2:
+        # two tiles per iteration with compile-time stages 0 / 1
+        if isinstance(nk, int):
+            looped = nk // 2 if nk % 2 else nk // 2 - 1
+            tail_pair = nk % 2 == 0
+        else:
+            pairs = b.div(b.add(nk, b.const_i32(1)), b.const_i32(2))
+            looped = b.sub(pairs, b.const_i32(1))
+            tail_pair = True
+        iter_args = [(f"acc{i}", v) for i, v in enumerate(accs0)]
+        iter_args += [(f"fr{i}", v) for i, v in enumerate(flat(f0))]
+        loop = b.scf_for_iter(
+            b.const_i32(0), _ci(b, looped), b.const_i32(1), iter_args, iv_name="kp2"
+        )
+        with loop as (kt2, carried):
+            carried = list(carried)
+            accs = carried[: ctx.n_acc]
+            cur = unflat(carried[ctx.n_acc :])
+            kt = b.mul(kt2, b.const_i32(2))
+            accs, cur = tile(accs, cur, kt, 0, 1, True)
+            accs, cur = tile(accs, cur, b.add(kt, b.const_i32(1)), 1, 0, True)
+            b.scf_yield(*accs, *flat(cur))
+        res = list(loop.results)
+        accs = res[: ctx.n_acc]
+        cur = unflat(res[ctx.n_acc :])
+        if tail_pair:
+            kt = b.mul(_ci(b, looped), b.const_i32(2))
+            accs, cur = tile(accs, cur, kt, 0, 1, True)
+            accs, _ = tile(accs, cur, b.add(kt, b.const_i32(1)), 1, 0, False)
+        else:
+            accs, _ = tile(accs, cur, b.const_i32(nk - 1), 0, 1, False)
+        return accs
+    iter_args = [(f"acc{i}", v) for i, v in enumerate(accs0)]
+    iter_args += [(f"fr{i}", v) for i, v in enumerate(flat(f0))]
+    loop = b.scf_for_iter(
+        b.const_i32(0), _ci(b, last), b.const_i32(1), iter_args, iv_name="kp"
+    )
+    with loop as (kt, carried):
+        carried = list(carried)
+        accs = carried[: ctx.n_acc]
+        cur = unflat(carried[ctx.n_acc :])
+        stg = b.land(kt, b.const_i32(1))
+        nstg = b.xor(stg, b.const_i32(1))
+        accs, cur = tile(accs, cur, kt, stg, nstg, True)
+        b.scf_yield(*accs, *flat(cur))
+    res = list(loop.results)
+    accs = res[: ctx.n_acc]
+    cur = unflat(res[ctx.n_acc :])
+    kt = _ci(b, last)
+    stg = b.land(kt, b.const_i32(1))
+    accs, _ = tile(accs, cur, kt, stg, None, False)
+    return accs
+
+
+def _spread(n: int, lo: int, hi: int) -> List[int]:
+    """``n`` slot indices spread evenly over ``[lo, hi)`` (clamped to ``lo``
+    when the range is empty)."""
+    if n <= 0:
+        return []
+    width = max(hi - lo, 0)
+    return [lo + (j * width) // n for j in range(n)]
+
+
+def _k_loop_ilv(ctx: _LoopCtx, nx) -> List[Value]:
+    """``ilv``: the K loop as one instruction-level schedule per K tile.
+
+    Tile ``t`` (stage ``s``, next stage ``s'``; tile ``t + 1`` in registers):
+    the MFMAs of every k-step group in order; the fragment reads of group
+    ``g + 1`` spread over the MFMAs of group ``g``; the LDS stores of tile
+    ``t + 1`` into ``s'`` spread over the MFMAs up to ``ilv_wgap`` before the
+    barrier, each followed by the global load of the same pass of tile
+    ``t + 2``; the barrier ``ilv`` MFMAs before the end; then the reads of
+    tile ``t + 1``'s first group (from ``s'``) spread over the last MFMAs. A
+    scheduling barrier after every MFMA pins the order.
+
+    Stage safety as in :func:`_k_loop_pipe`: every read of ``s'`` (tile
+    ``t - 1``) completed before the barrier of tile ``t - 1``.
+    """
+    b, spec, atom = ctx.b, ctx.spec, ctx.atom
+    opa, opb = ctx.opa, ctx.opb
+    ki = spec.k_inner
+    ng = spec.tile_k // atom.k // ki
+    am_n = len(ctx.fa.cols[0])
+    an_n = len(ctx.fb.cols[0])
+    n_a, n_b = len(opa.coords), len(opb.coords)
+    per_group = am_n * an_n * ki
+    total = ng * per_group
+    tail = min(spec.ilv, per_group)
+    bpos = total - tail
+
+    def reads_of(row0, g):
+        """Thunks of the fragment reads of group ``g`` -> (kind, kl, idx)."""
+        out = []
+        for kl in range(ki):
+            ks = g * ki + kl
+            ka = ctx.fa.k_row
+            kb = ctx.fb.k_row
+            for i, col in enumerate(ctx.fa.cols[ks]):
+                out.append(("a", kl, i, ka, ks, col))
+            for i, col in enumerate(ctx.fb.cols[ks]):
+                out.append(("b", kl, i, kb, ks, col))
+        return out
+
+    def do_read(row0, r):
+        kind, kl, i, kr, ks, col = r
+        row = b.add(row0, b.add(kr, b.const_i32(ks * atom.k)) if ks else kr)
+        op = ctx.opa if kind == "a" else ctx.opb
+        return op.frag(row0, row, col)
+
+    def empty_frags():
+        return [([None] * am_n, [None] * an_n) for _ in range(ki)]
+
+    def put(fr, r, v):
+        kind, kl, i = r[0], r[1], r[2]
+        fr[kl][0 if kind == "a" else 1][i] = v
+
+    cx = ctx.cx
+    wf = 2 if cx else 1
+
+    def flat(fr):
+        out = []
+        for fa, fb in fr:
+            for x in list(fa) + list(fb):
+                out += list(x) if cx else [x]
+        return out
+
+    def unflat(vals):
+        out = []
+        per = (am_n + an_n) * wf
+        for kl in range(ki):
+            v = vals[kl * per : (kl + 1) * per]
+            if cx:
+                v = [(v[2 * j], v[2 * j + 1]) for j in range(am_n + an_n)]
+            out.append((list(v[:am_n]), list(v[am_n:])))
+        return out
+
+    p = spec.problem
+    sa = -1 if p.conj_a else 1
+    sb = -1 if p.conj_b else 1
+
+    def atom_mma(accs, fa, fb, am, an, negs):
+        """The MFMAs of atom (am, an) (real: one; complex: the fused 4M
+        products, as :func:`_mma_step`)."""
+        i = am * an_n + an
+        if not cx:
+            accs[i] = b.mma(atom, fa[am], fb[an], accs[i])
+            return
+        ar, ai = fa[am]
+        br, bi = fb[an]
+        if spec.complex_accs == 4:
+            j = 4 * i
+            accs[j] = b.mma(atom, ar, br, accs[j])
+            accs[j + 1] = b.mma(atom, ai, bi, accs[j + 1])
+            accs[j + 2] = b.mma(atom, ar, bi, accs[j + 2])
+            accs[j + 3] = b.mma(atom, ai, br, accs[j + 3])
+            return
+
+        def neg_a():
+            if ("a", am) not in negs:
+                negs[("a", am)] = b.fneg(ai)
+            return negs[("a", am)]
+
+        def neg_b():
+            if ("b", an) not in negs:
+                negs[("b", an)] = b.fneg(bi)
+            return negs[("b", an)]
+
+        j = 2 * i
+        acc_r, acc_i = accs[j], accs[j + 1]
+        acc_r = b.mma(atom, ar, br, acc_r)
+        acc_r = b.mma(atom, neg_a() if sa * sb == 1 else ai, bi, acc_r)
+        acc_i = b.mma(atom, ar, neg_b() if sb == -1 else bi, acc_i)
+        acc_i = b.mma(atom, neg_a() if sa == -1 else ai, br, acc_i)
+        accs[j], accs[j + 1] = acc_r, acc_i
+
+    def row_of(stg):
+        if isinstance(stg, int):
+            return b.const_i32(stg * spec.tile_k)
+        return b.mul(stg, b.const_i32(spec.tile_k))
+
+    def tile(accs, cur, regs, kt, stg, nstg, has_next):
+        """One K tile; returns (accs, next tile's group-0 fragments, regs of
+        tile t + 2) (the last two None for the last tile)."""
+        accs = list(accs)
+        row0 = row_of(stg)
+        events = {}  # MFMA index -> list of thunks emitted before it
+
+        def at(idx, fn):
+            events.setdefault(idx, []).append(fn)
+
+        frags = [cur] + [empty_frags() for _ in range(ng - 1)]
+        for g in range(ng - 1):
+            rl = reads_of(row0, g + 1)
+            for pos, r in zip(_spread(len(rl), g * per_group, (g + 1) * per_group), rl):
+                at(pos, lambda r=r, g=g: put(frags[g + 1], r, do_read(row0, r)))
+        nxt_frags = None
+        new_regs = None
+        if has_next:
+            nrow0 = row_of(nstg)
+            ra, rb = regs
+            new_a, new_b = [None] * n_a, [None] * n_b
+            ktg = kt if ctx.k_lo is None else b.add(kt, ctx.k_lo)
+            st = {}
+
+            def store_load(which, i):
+                op = opa if which == "a" else opb
+                src = ra if which == "a" else rb
+                dst = new_a if which == "a" else new_b
+                op.store_piece(src[i], i, nrow0)
+                if which not in st:
+                    st[which] = op.load_begin(b.add(ktg, b.const_i32(2)))
+                dst[i] = op.load_piece(st[which], i)
+
+            pieces = [("a", i) for i in range(n_a)] + [("b", i) for i in range(n_b)]
+            hi = max(bpos - spec.ilv_wgap, 1)
+            for pos, pc in zip(_spread(len(pieces), 0, hi), pieces):
+                at(pos, lambda pc=pc: store_load(*pc))
+            at(bpos, lambda: b.sync_lds_only())
+            nxt_frags = empty_frags()
+            rl = reads_of(nrow0, 0)
+            for pos, r in zip(_spread(len(rl), bpos, total), rl):
+                at(pos, lambda r=r: put(nxt_frags, r, do_read(nrow0, r)))
+            new_regs = (new_a, new_b)
+        idx = 0
+        for g in range(ng):
+            negs = [{} for _ in range(ki)]
+            for am in range(am_n):
+                for an in range(an_n):
+                    for kl in range(ki):
+                        for fn in events.get(idx, ()):
+                            fn()
+                        fa, fb = frags[g][kl]
+                        atom_mma(accs, fa, fb, am, an, negs[kl])
+                        b.sched_barrier(0)
+                        idx += 1
+        for fn in events.get(idx, ()):  # anything placed past the last MFMA
+            fn()
+        return accs, nxt_frags, new_regs
+
+    nk = ctx.nk
+    last = nk - 1 if isinstance(nk, int) else b.sub(nk, b.const_i32(1))
+    cur = empty_frags()
+    for r in reads_of(b.const_i32(0), 0):
+        put(cur, r, do_read(b.const_i32(0), r))
+    ra, rb = nx
+    iter_args = [(f"acc{i}", v) for i, v in enumerate([ctx.zero] * ctx.n_acc)]
+    iter_args += [(f"fr{i}", v) for i, v in enumerate(flat(cur))]
+    iter_args += [(f"ra{i}", v) for i, v in enumerate(ra)]
+    iter_args += [(f"rb{i}", v) for i, v in enumerate(rb)]
+    nf = len(flat(cur))
+    if spec.unroll2 and isinstance(nk, int):
+        # two tiles per iteration with compile-time stages 0 / 1; the tiles
+        # 0 .. nk - 2 have a successor, tile nk - 1 is the last
+        pairs = (nk - 1) // 2
+        loop = b.scf_for_iter(
+            b.const_i32(0), b.const_i32(pairs), b.const_i32(1), iter_args, iv_name="kil2"
+        )
+        with loop as (kt2, carried):
+            carried = list(carried)
+            accs = carried[: ctx.n_acc]
+            o = ctx.n_acc
+            cur = unflat(carried[o : o + nf])
+            o += nf
+            regs = (carried[o : o + n_a], carried[o + n_a : o + n_a + n_b])
+            kt = b.mul(kt2, b.const_i32(2))
+            accs, cur, regs = tile(accs, cur, regs, kt, 0, 1, True)
+            accs, cur, regs = tile(
+                accs, cur, regs, b.add(kt, b.const_i32(1)), 1, 0, True
+            )
+            b.scf_yield(*accs, *flat(cur), *regs[0], *regs[1])
+        res = list(loop.results)
+        accs = res[: ctx.n_acc]
+        o = ctx.n_acc
+        cur = unflat(res[o : o + nf])
+        o += nf
+        regs = (res[o : o + n_a], res[o + n_a : o + n_a + n_b])
+        if (nk - 1) % 2:
+            accs, cur, regs = tile(accs, cur, regs, b.const_i32(nk - 2), 0, 1, True)
+        stg = (nk - 1) % 2
+        accs, _, _ = tile(accs, cur, None, b.const_i32(nk - 1), stg, None, False)
+        return accs
+    loop = b.scf_for_iter(
+        b.const_i32(0), _ci(b, last), b.const_i32(1), iter_args, iv_name="kil"
+    )
+    with loop as (kt, carried):
+        carried = list(carried)
+        accs = carried[: ctx.n_acc]
+        o = ctx.n_acc
+        cur = unflat(carried[o : o + nf])
+        o += nf
+        regs = (carried[o : o + n_a], carried[o + n_a : o + n_a + n_b])
+        stg = b.land(kt, b.const_i32(1))
+        nstg = b.xor(stg, b.const_i32(1))
+        accs, cur, regs = tile(accs, cur, regs, kt, stg, nstg, True)
+        b.scf_yield(*accs, *flat(cur), *regs[0], *regs[1])
+    res = list(loop.results)
+    accs = res[: ctx.n_acc]
+    cur = unflat(res[ctx.n_acc : ctx.n_acc + nf])
+    kt = _ci(b, last)
+    stg = b.land(kt, b.const_i32(1))
+    accs, _, _ = tile(accs, cur, None, kt, stg, None, False)
     return accs
 
 
@@ -1876,6 +2570,172 @@ def _epilogue_partial(b, spec, atom, accs, lane, wm, wn, m0, n0, rw, geo):
                 b.buffer_store_vN_f32(rw, off, b.const_i32(0), vec, 2 * words)
 
 
+def _serial_slot_bytes(spec: GettF64Spec) -> int:
+    """Bytes of one wave's partial-sum slot (``split_serial``): the wave's
+    accumulator registers, f64 16x16 atoms (4 values per lane)."""
+    p = spec.problem
+    n_acc = (
+        (spec.wave_m // 16)
+        * (spec.wave_n // 16)
+        * (spec.complex_accs if p.complex_ else 1)
+    )
+    return n_acc * 4 * 64 * 8
+
+
+def _tiles(spec: GettF64Spec) -> int:
+    p = spec.problem
+    return -(-p.M // spec.tile_m) * -(-p.N // spec.tile_n)
+
+
+class _SerialReduce:
+    """``split_serial``: store this wave's partial accumulators, count the
+    arrivals of its (batch, tile, wave) and, in the wave that arrives last,
+    yield the sums of the ``split_k`` partials taken in the order z = 0 ..
+    split_k - 1 (the body of the ``with`` runs only in that wave)."""
+
+    def __init__(self, b, spec, atom, accs, W, Cnt, kz, lb, tile, wave, lane):
+        self.b, self.spec, self.atom = b, spec, atom
+        self.accs, self.W, self.Cnt = list(accs), W, Cnt
+        self.kz, self.lb, self.tile, self.wave, self.lane = kz, lb, tile, wave, lane
+        self._if = None
+
+    def _rsrc(self, z):
+        b, spec = self.b, self.spec
+        p = spec.problem
+        waves = spec.warps_m * spec.warps_n
+        sb = _serial_slot_bytes(spec)
+        zl = b.add(b.mul(z, b.const_i32(p.L)), self.lb)
+        sl = b.add(
+            b.mul(
+                b.add(b.mul(zl, b.const_i32(_tiles(spec))), self.tile),
+                b.const_i32(waves),
+            ),
+            self.wave,
+        )
+        off = b.mul(b.zext(sl, I64), b.const_i64(sb))
+        return b.buffer_rsrc(b.global_ptr_add(self.W, off), b.const_i32(sb))
+
+    def _addr(self, z, i, h):
+        """64-bit address of half ``h`` of accumulator ``i`` of this lane in
+        the slot of split ``z`` (write-through mode)."""
+        b, spec = self.b, self.spec
+        p = spec.problem
+        waves = spec.warps_m * spec.warps_n
+        zl = b.add(b.mul(z, b.const_i32(p.L)), self.lb)
+        sl = b.add(
+            b.mul(
+                b.add(b.mul(zl, b.const_i32(_tiles(spec))), self.tile),
+                b.const_i32(waves),
+            ),
+            self.wave,
+        )
+        off = b.add(
+            b.mul(b.zext(sl, I64), b.const_i64(_serial_slot_bytes(spec))),
+            b.const_i64((i * 2 + h) * 64 * 16),
+        )
+        lane_b = b.zext(b.mul(self.lane, b.const_i32(16)), I64)
+        return b.add(b.global_ptr_to_i64(self.W), b.add(off, lane_b))
+
+    def __enter__(self):
+        b, spec, atom = self.b, self.spec, self.atom
+        if atom.c_frag_len != 4:  # pragma: no cover - the f64 16x16x4 atom
+            raise ValueError("split_serial expects 4 accumulator values per lane")
+        voff = b.mul(self.lane, b.const_i32(16))
+
+        def soff(i, h):
+            return b.const_i32((i * 2 + h) * 64 * 16)
+
+        wt = spec.split_serial == 2
+        halves = [
+            (i, h, b.vec_bitcast(
+                b.vec_pack([b.vec_extract(acc, 2 * h + j) for j in range(2)], F64),
+                VectorType(F32, 4),
+            ))
+            for i, acc in enumerate(self.accs)
+            for h in range(2)
+        ]
+        if wt:
+            # write-through: sc1 stores in asm groups that end with
+            # vmcnt(0), so the partial is in memory before the counter bump
+            for g0 in range(0, len(halves), 8):
+                grp = halves[g0 : g0 + 8]
+                tmpl, ops = [], []
+                for j, (i, h, v4) in enumerate(grp):
+                    tmpl.append(f"global_store_dwordx4 ${2 * j}, ${2 * j + 1}, off sc1")
+                    ops += [self._addr(self.kz, i, h), v4]
+                tmpl.append("s_waitcnt vmcnt(0)")
+                b.inline_asm("\n".join(tmpl), ",".join(["v"] * len(ops)), ops)
+        else:
+            rs = self._rsrc(self.kz)
+            for i, h, v4 in halves:
+                b.buffer_store_vN_f32(rs, voff, soff(i, h), v4, 4)
+            b.fence(scope="agent", ordering="release")
+        waves = spec.warps_m * spec.warps_n
+        idx = b.add(
+            b.mul(
+                b.add(b.mul(self.lb, b.const_i32(_tiles(spec))), self.tile),
+                b.const_i32(waves),
+            ),
+            self.wave,
+        )
+        one = b.select(
+            b.cmp_eq(self.lane, b.const_i32(0)), b.const_i32(1), b.const_i32(0)
+        )
+        old = b.global_atomic_add(
+            self.Cnt, idx, one, ordering="monotonic" if wt else "acq_rel"
+        )
+        ticket = b.readfirstlane(old)
+        self._if = b.scf_if(b.cmp_eq(ticket, b.const_i32(spec.split_k - 1)))
+        self._if.__enter__()
+        sums = [None] * len(self.accs)
+        if wt:
+            # write-through loads, up to 16 in flight per asm group, summed
+            # in z order
+            lq = [(z, i, h) for z in range(spec.split_k) for i in range(len(self.accs))
+                  for h in range(2)]
+            got = {}
+            for g0 in range(0, len(lq), 16):
+                grp = lq[g0 : g0 + 16]
+                n = len(grp)
+                tmpl = [f"global_load_dwordx4 ${j}, ${n + j}, off sc1" for j in range(n)]
+                tmpl.append("s_waitcnt vmcnt(0)")
+                res = b.inline_asm_multi(
+                    "\n".join(tmpl),
+                    ",".join(["=&v"] * n + ["v"] * n),
+                    [self._addr(b.const_i32(z), i, h) for z, i, h in grp],
+                    result_types=[VectorType(F32, 4)] * n,
+                )
+                for (z, i, h), r in zip(grp, res):
+                    got[(z, i, h)] = b.vec_bitcast(r, VectorType(F64, 2))
+                for z, i in sorted({(z, i) for z, i, _ in grp}):
+                    if (z, i, 0) in got and (z, i, 1) in got:
+                        lo, hi = got.pop((z, i, 0)), got.pop((z, i, 1))
+                        v = b.vec_pack(
+                            [b.vec_extract(lo, 0), b.vec_extract(lo, 1),
+                             b.vec_extract(hi, 0), b.vec_extract(hi, 1)],
+                            F64,
+                        )
+                        sums[i] = v if sums[i] is None else b.fadd(sums[i], v)
+            b.global_store(self.Cnt, idx, b.const_i32(0), align=4)
+            return sums
+        b.fence(scope="agent", ordering="acquire")
+        for z in range(spec.split_k):
+            rz = self._rsrc(b.const_i32(z))
+            for i in range(len(self.accs)):
+                parts = []
+                for h in range(2):
+                    raw = b.buffer_load_vN(rz, voff, soff(i, h), I32, 4)
+                    two = b.vec_bitcast(raw, VectorType(F64, 2))
+                    parts += [b.vec_extract(two, j) for j in range(2)]
+                v = b.vec_pack(parts, F64)
+                sums[i] = v if sums[i] is None else b.fadd(sums[i], v)
+        b.global_store(self.Cnt, idx, b.const_i32(0), align=4)
+        return sums
+
+    def __exit__(self, *exc):
+        return self._if.__exit__(*exc)
+
+
 #: Threads per block of :func:`build_gett_f64_reduce` (one output each).
 REDUCE_THREADS = 256
 
@@ -1893,7 +2753,35 @@ def gett_f64_workspace_bytes(
             )
         problem = spec.problem
     p = problem
+    if spec.split_serial:
+        return (
+            spec.split_k
+            * p.L
+            * -(-p.M // spec.tile_m)
+            * -(-p.N // spec.tile_n)
+            * spec.warps_m
+            * spec.warps_n
+            * _serial_slot_bytes(spec)
+        )
     return spec.split_k * p.L * p.M * p.N * p.elem_bytes
+
+
+def gett_f64_counter_count(
+    spec: GettF64Spec, problem: Optional[GettF64Problem] = None
+) -> int:
+    """i32 counters of a ``split_serial`` launch (0 otherwise): one per batch,
+    output tile and wave. Zero them once when they are allocated; every launch
+    leaves them at zero."""
+    if not spec.split_serial:
+        return 0
+    p = problem or spec.problem
+    return (
+        p.L
+        * -(-p.M // spec.tile_m)
+        * -(-p.N // spec.tile_n)
+        * spec.warps_m
+        * spec.warps_n
+    )
 
 
 def gett_f64_reduce_name(spec: GettF64Spec) -> str:
@@ -2566,6 +3454,308 @@ def tuned_spec(
     return finish(_long_k(spec, problem, arch, cus, knobs))
 
 
+_PIPE = dict(
+    lds_stages=2,
+    unroll2=True,
+    prefetch_depth=2,
+    sched_fence=False,
+    kmajor_lds=True,
+    acc_agpr=True,
+)
+
+#: Pipelined configurations (Python engine only: ``ilv``, ``kmajor_lds`` and
+#: ``acc_agpr`` have no C++ builder mirror yet) per (arch, real / complex,
+#: pipe class), selected by :func:`pipe_spec` through
+#: :func:`gett_f64_pipe_class` for the ``gett_f64_pipe`` dispatch candidate.
+#: Found with the search engine (the tuned problems' winners, then
+#: cross-evaluated on held-out problems); see dsl_docs/instances/gett_f64.md.
+PIPE_CONFIGS = {
+    # large grids with long contiguous runs: 256x128 CTA tiles, 4x2 waves
+    # (64x64 per wave, 2 waves per SIMD from one CTA), AGPR accumulators
+    ("gfx950", "real", "long"): dict(
+        tile_m=256,
+        tile_n=128,
+        tile_k=16,
+        warps_m=4,
+        warps_n=2,
+        group_m=16,
+        waves_per_eu=1,
+        ilv=8,
+        **_SWZ0,
+        **_PIPE,
+    ),
+    # medium grids and short contiguous runs (interleaved contraction
+    # layouts): 128x64 tiles, 4x1 waves, three CTAs per CU
+    ("gfx950", "real", "short"): dict(
+        tile_m=128,
+        tile_n=64,
+        tile_k=16,
+        warps_m=4,
+        warps_n=1,
+        group_m=2,
+        xcds=8,
+        waves_per_eu=3,
+        ilv=4,
+        lds_stages=2,
+        unroll2=True,
+        prefetch_depth=2,
+        sched_fence=True,
+        **_SWZ0,
+    ),
+    # large grids with a short K (< PIPE_LONG_MIN_K): 128x128x16 tiles, 2x4
+    # waves, padded LDS rows
+    ("gfx950", "real", "wide"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=16,
+        warps_m=2,
+        warps_n=4,
+        group_m=32,
+        waves_per_eu=1,
+        ilv=16,
+        lds_pad=None,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+        **_PIPE,
+    ),
+    # small grids, at most one 64x64 tile per CU: 64x64x16 tiles, 2x2 waves
+    ("gfx950", "real", "tiny"): dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=16,
+        warps_m=2,
+        warps_n=2,
+        group_m=8,
+        xcds=8,
+        waves_per_eu=2,
+        ilv=4,
+        lds_stages=2,
+        unroll2=True,
+        prefetch_depth=2,
+        sched_fence=False,
+        acc_agpr=True,
+        **_SWZ0,
+    ),
+    # small grids with more 64x64 tiles: 32x32x32 tiles, 2x2 waves, four CTAs
+    # per CU
+    ("gfx950", "real", "small"): dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=32,
+        warps_m=2,
+        warps_n=2,
+        group_m=8,
+        xcds=8,
+        waves_per_eu=4,
+        ilv=1,
+        lds_stages=2,
+        unroll2=True,
+        prefetch_depth=2,
+        sched_fence=False,
+        acc_agpr=True,
+        **_SWZ2,
+    ),
+    # complex: 128x128x8 tiles, 4x2 waves (32x64 per wave, two per SIMD),
+    # AGPR accumulators, the fused 4M atoms as ilv slots
+    ("gfx950", "complex", "long"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=8,
+        warps_m=4,
+        warps_n=2,
+        group_m=16,
+        waves_per_eu=1,
+        ilv=8,
+        lds_stages=2,
+        unroll2=True,
+        prefetch_depth=2,
+        sched_fence=False,
+        acc_agpr=True,
+        **_SWZ0,
+    ),
+    # gfx90a, at least 8 128x128 tiles per CU and K > 512: 256x128x8 tiles,
+    # 2x2 waves (128x64 per wave in AGPRs), one wave per SIMD
+    ("gfx90a", "real", "long"): dict(
+        tile_m=256,
+        tile_n=128,
+        tile_k=8,
+        warps_m=2,
+        warps_n=2,
+        group_m=4,
+        waves_per_eu=1,
+        ilv=16,
+        **_SWZ0,
+        **_PIPE,
+    ),
+    # gfx90a complex, at least 8 128x128 tiles per CU: 128x128x8 tiles, 4x2
+    # waves, AGPR accumulators
+    ("gfx90a", "complex", "long"): dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=8,
+        warps_m=4,
+        warps_n=2,
+        group_m=8,
+        waves_per_eu=1,
+        ilv=8,
+        lds_stages=2,
+        unroll2=True,
+        prefetch_depth=2,
+        sched_fence=False,
+        acc_agpr=True,
+        **_SWZ0,
+    ),
+    # gfx90a, fewer tiles: 128x64x16 tiles, 4x2 waves, padded LDS rows
+    ("gfx90a", "real", "short"): dict(
+        tile_m=128,
+        tile_n=64,
+        tile_k=16,
+        warps_m=4,
+        warps_n=2,
+        group_m=1,
+        waves_per_eu=1,
+        ilv=8,
+        lds_pad=4,
+        lds_swizzle=False,
+        lds_swizzle_mode=0,
+        lds_stages=2,
+        unroll2=True,
+        prefetch_depth=2,
+        sched_fence=False,
+        acc_agpr=True,
+    ),
+}
+
+#: gfx90a: 128x128 tiles per CU from which the long configuration applies,
+#: and the K it needs (shorter K keeps the tuned configurations).
+PIPE_GFX90A_LONG_TILES_PER_CU = 8
+PIPE_GFX90A_LONG_MIN_K = 768
+
+#: Contiguous run (elements) from which an operand counts as long for
+#: :func:`gett_f64_pipe_class`, and the shortest run the short class takes.
+PIPE_LONG_RUN = 64
+PIPE_MIN_RUN = 16
+#: gfx950 long class: the shortest K, and the smallest busy share of the last
+#: wave of 256x128 CTAs (one CTA per CU: a ragged last wave idles CUs).
+PIPE_LONG_MIN_K = 1024
+PIPE_LONG_MIN_WAVE_EFF = 0.95
+#: Complex: the pipelined configuration from one 128x128 tile per CU and this K.
+PIPE_COMPLEX_MIN_K = 768
+#: gfx950 short class from a large problem: fewer 128x128 tiles per CU than
+#: this (bigger interleaved grids keep the tuned configuration).
+PIPE_SHORT_MAX_TILES_PER_CU = 16
+
+
+def _run(digits: Digits) -> int:
+    e, s = digits[0]
+    return e if s == 1 else 0
+
+
+def gett_f64_pipe_class(
+    problem: GettF64Problem, arch: str, num_cus: Optional[int] = None
+) -> Optional[str]:
+    """The :data:`PIPE_CONFIGS` class of ``problem`` on ``arch`` (None: the
+    pipelined candidate does not apply and dispatch keeps the tuned one).
+
+    Complex data: ``long`` from one 128x128 tile per CU (gfx90a:
+    :data:`PIPE_GFX90A_LONG_TILES_PER_CU`) and a K of at least
+    :data:`PIPE_COMPLEX_MIN_K`. Real data, gfx950 (:func:`gett_f64_shape_class`
+    classes): ``wide`` is a ``large`` problem with a K under
+    :data:`PIPE_LONG_MIN_K`; ``long`` a ``large`` problem whose last wave of
+    256x128 CTAs is at least :data:`PIPE_LONG_MIN_WAVE_EFF` busy, whose D
+    contiguous run is at least half of :data:`PIPE_LONG_RUN`, and whose A and
+    B contiguous runs (along M / N or K) are at least :data:`PIPE_LONG_RUN`
+    elements, or at least :data:`PIPE_MIN_RUN` with at least
+    :data:`PIPE_SHORT_MAX_TILES_PER_CU` 128x128 tiles per CU; ``short`` a
+    ``medium`` problem, or a ``large`` one under that tile count whose shorter
+    A / B run lies in [:data:`PIPE_MIN_RUN`, :data:`PIPE_LONG_RUN`); ``tiny``
+    a ``small`` problem with at most one 64x64 tile per CU, ``small`` the
+    other ``small`` problems. The other problems keep the tuned
+    configurations. gfx90a:
+    ``long`` from :data:`PIPE_GFX90A_LONG_TILES_PER_CU` 128x128 tiles per CU
+    with a K of at least :data:`PIPE_GFX90A_LONG_MIN_K`, ``short`` below that
+    tile count; a short K with many tiles keeps the tuned configurations.
+    """
+    p = problem
+    if p.complex_:
+        cus = resolve_num_cus(arch, num_cus)
+        tiles = -(-p.M // 128) * -(-p.N // 128) * p.L
+        per_cu = PIPE_GFX90A_LONG_TILES_PER_CU if arch == "gfx90a" else 1
+        if tiles >= per_cu * cus and p.K >= PIPE_COMPLEX_MIN_K:
+            return "long" if (arch, "complex", "long") in PIPE_CONFIGS else None
+        return None
+    if arch == "gfx90a":
+        cus = resolve_num_cus(arch, num_cus)
+        tiles = -(-p.M // 128) * -(-p.N // 128) * p.L
+        if tiles >= PIPE_GFX90A_LONG_TILES_PER_CU * cus:
+            name = "long" if p.K >= PIPE_GFX90A_LONG_MIN_K else None
+        else:
+            name = "short"
+        return name if name and (arch, "real", name) in PIPE_CONFIGS else None
+    cls = gett_f64_shape_class(p, arch, num_cus)
+    cus = resolve_num_cus(arch, num_cus)
+    run_ab = min(max(_run(p.a_m), _run(p.a_k)), max(_run(p.b_n), _run(p.b_k)))
+    run_d = max(_run(p.d_m), _run(p.d_n))
+    ctas = -(-p.M // 256) * -(-p.N // 128) * p.L
+    wave_eff = ctas / (-(-ctas // cus) * cus)
+    tiles = -(-p.M // 128) * -(-p.N // 128) * p.L
+    if cls == "small":
+        tiles64 = -(-p.M // 64) * -(-p.N // 64) * p.L
+        name = "tiny" if tiles64 <= cus else "small"
+    elif cls == "large" and p.K < PIPE_LONG_MIN_K:
+        name = "wide"
+    elif cls == "medium":
+        name = "short"
+    elif (
+        cls == "large"
+        and 2 * run_d >= PIPE_LONG_RUN
+        and p.K >= PIPE_LONG_MIN_K
+        and wave_eff >= PIPE_LONG_MIN_WAVE_EFF
+        and (
+            run_ab >= PIPE_LONG_RUN
+            or (
+                run_ab >= PIPE_MIN_RUN
+                and tiles >= PIPE_SHORT_MAX_TILES_PER_CU * cus
+            )
+        )
+    ):
+        name = "long"
+    elif (
+        cls == "large"
+        and PIPE_MIN_RUN <= run_ab < PIPE_LONG_RUN
+        and tiles < PIPE_SHORT_MAX_TILES_PER_CU * cus
+    ):
+        name = "short"
+    else:
+        return None
+    return name if (arch, "real", name) in PIPE_CONFIGS else None
+
+
+def pipe_spec(
+    problem: GettF64Problem,
+    arch: str,
+    *,
+    bilinear: bool = True,
+    num_cus: Optional[int] = None,
+    **knobs,
+) -> Optional[GettF64Spec]:
+    """The pipelined configuration of ``problem`` (:data:`PIPE_CONFIGS`,
+    :func:`gett_f64_pipe_class`) on ``arch``, overridden by ``knobs``; None
+    when no class applies, the configuration is not valid for the problem, or
+    the tuned path sums K in blocks or splits a K of :data:`K_BLOCK_MIN_K` or
+    more (few CTAs and a long K: the tuned configuration keeps the shorter
+    rounding chains)."""
+    cls = gett_f64_pipe_class(problem, arch, num_cus)
+    if cls is None or knobs.get("runtime_sizes"):
+        return None
+    base = tuned_spec(problem, arch, bilinear=bilinear, num_cus=num_cus)
+    if base.k_block or (base.split_k > 1 and problem.K >= K_BLOCK_MIN_K):
+        return None
+    cfg = PIPE_CONFIGS[(arch, "complex" if problem.complex_ else "real", cls)]
+    spec = arch_spec(problem, arch, bilinear=bilinear, **{**cfg, **knobs})
+    return spec if is_valid_spec(spec, arch=arch)[0] else None
+
+
 def gett_f64_grid(
     spec: GettF64Spec, problem: Optional[GettF64Problem] = None
 ) -> Tuple[int, int, int]:
@@ -2588,7 +3778,7 @@ def gett_f64_signature(spec: GettF64Spec):
     """Kernel arguments of :func:`build_gett_f64` (``split_k``: ``A, B, W``
     and the size arguments)."""
     sb = SignatureBuilder().ptr("A", "f64").ptr("B", "f64")
-    if spec.split_k > 1:
+    if spec.split_k > 1 and not spec.split_serial:
         sb = sb.ptr("W", "f64")
         if spec.runtime_sizes:
             for name, dtype in _runtime_arg_names(spec):
@@ -2605,6 +3795,8 @@ def gett_f64_signature(spec: GettF64Spec):
         sb = sb.scalar("alpha", "f64")
         if spec.bilinear:
             sb = sb.scalar("beta", "f64")
+    if spec.split_serial:
+        sb = sb.ptr("W", "f64").ptr("Cnt", "i32")
     if spec.runtime_sizes:
         for name, dtype in _runtime_arg_names(spec):
             sb = sb.scalar(name, dtype)
@@ -2621,6 +3813,15 @@ __all__ = [
     "SPLIT_MIN_K",
     "MAX_GRID_Y",
     "RUNTIME_SIZE_ARGS",
+    "PIPE_COMPLEX_MIN_K",
+    "PIPE_CONFIGS",
+    "PIPE_GFX90A_LONG_MIN_K",
+    "PIPE_GFX90A_LONG_TILES_PER_CU",
+    "PIPE_LONG_MIN_K",
+    "PIPE_LONG_MIN_WAVE_EFF",
+    "PIPE_SHORT_MAX_TILES_PER_CU",
+    "PIPE_LONG_RUN",
+    "PIPE_MIN_RUN",
     "TUNED_CONFIGS",
     "GettF64Problem",
     "GettF64Spec",
@@ -2631,18 +3832,21 @@ __all__ = [
     "f64_atom",
     "f64_gett_archs",
     "gemm_problem",
+    "gett_f64_counter_count",
     "gett_f64_grid",
     "gett_f64_reduce_grid",
     "gett_f64_reduce_name",
     "gett_f64_reduce_signature",
     "gett_f64_workspace_bytes",
     "gett_f64_runtime_args",
+    "gett_f64_pipe_class",
     "gett_f64_shape_class",
     "gett_f64_signature",
     "is_valid_spec",
     "k_split",
     "mixed_offset",
     "pick_tile_k",
+    "pipe_spec",
     "resolve_num_cus",
     "runtime_compatible",
     "runtime_template",

@@ -32,6 +32,7 @@
 
 #include <hiptensor/hiptensor_types.h>
 
+#include "../backend/launch_config.hpp"
 #include "data_types.hpp"
 #include "plancache_autotune.hpp"
 
@@ -84,7 +85,7 @@ namespace hiptensor
                                      std::vector<hiptensorOperator_t> const& operators,
                                      std::vector<hiptensorOperator_t> const& queryOperators,
                                      std::size_t                             flopsPerElement,
-                                     hipStream_t                             stream);
+                                     backend::LaunchConfig const&            cfg);
 
     // hiptensorElementwiseBinaryExecute on explicit operands: D = opAC(alpha * opA(A),
     // gamma * opC(C)), with the data types and scalar type of the plan's operation.
@@ -104,7 +105,7 @@ namespace hiptensor
                                                void const*                      gamma,
                                                void const*                      C,
                                                void*                            D,
-                                               hipStream_t                      stream,
+                                               backend::LaunchConfig const&     cfg,
                                                char const*                      apiFuncName);
 } // namespace hiptensor
 

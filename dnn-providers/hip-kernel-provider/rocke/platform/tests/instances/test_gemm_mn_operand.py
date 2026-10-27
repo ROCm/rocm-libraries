@@ -139,6 +139,7 @@ from rocke.instances.common.gemm_mn_operand import (
 from rocke.instances.common.gemm_universal import (
     build_universal_gemm,
     is_valid_spec,
+    launch_shape_error,
 )  # noqa: E402
 
 _TRANS = {lay: (lay[0] == "C", lay[1] == "C") for lay in GEMM_LAYOUTS}
@@ -195,19 +196,40 @@ def test_layout_trans_flags_must_match():
 
 
 def test_mn_leading_dimension_not_multiple_of_8_uses_generic_loader():
-    # M-contiguous A with M % 8 != 0: no 16-byte DTL rows -> the padded
-    # VGPR-staged body with the widest MN load that divides M (the
-    # native gemm_skinny takes such shapes first; off here)
+    # M-contiguous A with M % 8 != 0 and the DTL any-ld forms off
+    # (NATIVE_LAYOUT_DTL_LD_ANY): the padded VGPR-staged body with the widest MN
+    # load that divides M (the native gemm_skinny can take such shapes first;
+    # off here)
     from unittest import mock
 
+    from rocke.dispatch.gemm import common as _cm
     from rocke.dispatch.gemm import skinny as _sk
 
-    with mock.patch.object(_sk, "SKINNY_NATIVE", False):
+    with mock.patch.object(_sk, "SKINNY_NATIVE", False), mock.patch.object(
+        _cm, "NATIVE_LAYOUT_DTL_LD_ANY", False
+    ):
         r = dispatch_gemm_fp16(_req(4100, 4096, 4096, "CCR"))
         assert r.spec.data.layout == "CCR" and not r.spec.trait.direct_to_lds
         assert r.spec.trait.mn_vec == 4 and r.spec.trait.pad_m
         r = dispatch_gemm_bf16(_req(4097, 4096, 4096, "CCR", "bf16"))
         assert r.spec.trait.mn_vec == 1
+
+
+def test_mn_leading_dimension_not_multiple_of_8_dtl_ld_any():
+    # the same shapes on the DTL ring (TraitSpec.mn_ld_any, 2-byte-aligned
+    # DMA rows, the last tile shifted to end at the extent)
+    from unittest import mock
+
+    from rocke.dispatch.gemm import skinny as _sk
+
+    with mock.patch.object(_sk, "SKINNY_NATIVE", False):
+        for M, dt in ((4100, "fp16"), (4097, "bf16")):
+            f = dispatch_gemm_fp16 if dt == "fp16" else dispatch_gemm_bf16
+            r = f(_req(M, 4096, 4096, "CCR", dt))
+            tr = r.spec.trait
+            assert r.spec.data.layout == "CCR" and tr.direct_to_lds and tr.mn_ld_any
+            assert tr.dtl_tight_rsrc and tr.pad_m
+            assert launch_shape_error(r.spec, M, 4096, 4096) is None
 
 
 @pytest.mark.parametrize("lay", ["RRR", "CRR", "CCR"])

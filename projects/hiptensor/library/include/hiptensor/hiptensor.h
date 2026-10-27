@@ -95,17 +95,32 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorHandleReadPlanCacheFromFile(
     hiptensorHandle_t handle, const char fileName[], uint32_t* numCachelinesRead);
 
-//! @brief Writes the kernel cache of a hipTensor handle to a file.
-//! @param[in] handle The hipTensor handle whose kernel cache will be written.
+//! @brief Writes the JIT-compiled kernels of the handle's device class to a file.
+//! @details The kernel cache is process-wide; the handle selects the device class (architecture,
+//! target features, compute unit count) whose kernels are written. The file is replaced. A library
+//! built without a JIT keeps no kernel cache and returns `HIPTENSOR_STATUS_SUCCESS` without touching
+//! the file. Not reentrant with a read of the same file.
+//! @param[in] handle The hipTensor handle whose device class is written.
 //! @param[in] fileName The name of the file to write the cache to.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @retval HIPTENSOR_STATUS_SUCCESS on success, also when there is no kernel to write.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is `NULL`.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `fileName` is `NULL`.
+//! @retval HIPTENSOR_STATUS_IO_ERROR if the file cannot be written.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorWriteKernelCacheToFile(const hiptensorHandle_t handle,
                                                                    const char fileName[]);
 
-//! @brief Reads a kernel cache from a file into a hipTensor handle.
-//! @param[in] handle The hipTensor handle to populate with the kernel cache.
+//! @brief Adds the JIT-compiled kernels of a file to the kernel cache.
+//! @details Kernels already in the cache are kept. The entries are used only by plans created with
+//! `HIPTENSOR_JIT_MODE_DEFAULT`; damaged entries are skipped. A library built without a JIT keeps no
+//! kernel cache and returns `HIPTENSOR_STATUS_SUCCESS` without touching the file.
+//! @param[in] handle The hipTensor handle whose device class the file must have been written for.
 //! @param[in] fileName The name of the file to read the cache from.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` on success, or an error code otherwise.
+//! @retval HIPTENSOR_STATUS_SUCCESS on success, also for an empty file.
+//! @retval HIPTENSOR_STATUS_NOT_INITIALIZED if `handle` is `NULL`.
+//! @retval HIPTENSOR_STATUS_INVALID_VALUE if `fileName` is `NULL`, or the file was written in a newer
+//! format, for another device class or for another kernel ABI.
+//! @retval HIPTENSOR_STATUS_IO_ERROR if the file is missing or unreadable, is not a kernel cache
+//! file, has a damaged header, or is not owned by the user (or root) or is writable by others.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorReadKernelCacheFromFile(hiptensorHandle_t handle,
                                                                     const char        fileName[]);
 
@@ -267,7 +282,9 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] plan The existing plan (created via `hiptensorCreatePlan` or `hiptensorCreatePlanAutotuned`).
 //! @param[in] attr The attribute to retrieve. `HIPTENSOR_PLAN_REQUIRED_WORKSPACE` (a `uint64_t`) is the
 //! workspace in bytes the plan's kernel needs, which is at most the `workspaceSizeLimit` the plan was
-//! created with; elementwise operations and reductions need none. It is the workspace of the kernel
+//! created with; elementwise operations need none, and reductions need none with the Composable
+//! Kernel backend (the rocKE backend may use workspace to split long reductions, and uses none for a
+//! plan created with a `workspaceSizeLimit` of 0). It is the workspace of the kernel
 //! selected when the plan was created. With `HIPTENSOR_CACHE_MODE_PEDANTIC`, a plan-cache entry or
 //! `HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL` can make an execution run another candidate kernel, whose
 //! workspace this value does not bound; such an execution returns
@@ -288,8 +305,9 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHand
 //! (`HIPTENSOR_WORKSPACE_DEFAULT` or `HIPTENSOR_WORKSPACE_MAX`), so that a plan created with it as
 //! `workspaceSizeLimit` can select any of them, or the smallest (`HIPTENSOR_WORKSPACE_MIN`). A
 //! trinary contraction also needs room for its intermediate tensor \f$A B\f$. Elementwise operations
-//! and reductions need no workspace. After `hiptensorCreatePlan`, `HIPTENSOR_PLAN_REQUIRED_WORKSPACE`
-//! gives the workspace of the selected kernel.
+//! need no workspace; reductions need none with the Composable Kernel backend, and the rocKE backend
+//! may use workspace to split long reductions. After `hiptensorCreatePlan`,
+//! `HIPTENSOR_PLAN_REQUIRED_WORKSPACE` gives the workspace of the selected kernel.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] desc Opaque structure encoding the operation details.
 //! @param[in] planPref Opaque structure limiting the viable candidate space. May be `NULL`.

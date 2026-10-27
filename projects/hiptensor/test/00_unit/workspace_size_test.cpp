@@ -305,8 +305,13 @@ TEST(WorkspaceSizeTest, TrinaryContractionReportsItsIntermediateAndKernelWorkspa
     }
 }
 
+// The Composable Kernel backend's elementwise and reduction kernels need no workspace. The rocKE
+// backend may use workspace to split long reductions, so the plans here are created with the
+// Composable Kernel backend whatever HIPTENSOR_BACKEND selects.
 TEST(WorkspaceSizeTest, ElementwiseAndReductionPlansNeedNoWorkspace)
 {
+    hiptensor_test::ScopedBackend ck("ck");
+
     ApiObjects    api;
     auto          desc2   = api.tensor({8, 4}, {}, HIPTENSOR_R_32F);
     auto          desc1   = api.tensor({8}, {}, HIPTENSOR_R_32F);
@@ -358,4 +363,75 @@ TEST(WorkspaceSizeTest, ElementwiseAndReductionPlansNeedNoWorkspace)
     EXPECT_EQ(hiptensorEstimateWorkspaceSize(
                   api.handle, permute, nullptr, HIPTENSOR_WORKSPACE_DEFAULT, nullptr),
               HIPTENSOR_STATUS_INVALID_VALUE);
+}
+
+// With any backend, a reduction planned with a workspace limit of 0 needs no workspace and runs
+// without one. The reduced mode is long enough that the rocKE backend would split it if the limit
+// allowed.
+TEST(WorkspaceSizeTest, ReductionPlannedWithoutWorkspaceNeedsNone)
+{
+    ApiObjects    api;
+    int64_t const M        = 64;
+    int64_t const N        = 16384;
+    auto          descA    = api.tensor({M, N}, {}, HIPTENSOR_R_32F);
+    auto          descD    = api.tensor({M}, {}, HIPTENSOR_R_32F);
+    int32_t const modesA[] = {'m', 'n'};
+    int32_t const modesD[] = {'m'};
+
+    hiptensorOperationDescriptor_t reduce = nullptr;
+    ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                       &reduce,
+                                       descA,
+                                       modesA,
+                                       HIPTENSOR_OP_IDENTITY,
+                                       descD,
+                                       modesD,
+                                       HIPTENSOR_OP_IDENTITY,
+                                       descD,
+                                       modesD,
+                                       HIPTENSOR_OP_ADD,
+                                       HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    api.keep(reduce);
+
+    hiptensorPlan_t plan = nullptr;
+    ASSERT_EQ(api.plan(reduce, plan, 0), HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(requiredWorkspace(api, plan), 0u);
+
+    // Small integers: every partial sum is exact in float, whatever the summation order.
+    std::vector<float> a(M * N);
+    for(int64_t n = 0; n < N; n++)
+    {
+        for(int64_t m = 0; m < M; m++)
+        {
+            a[m + M * n] = static_cast<float>((m + 3 * n) % 7 - 3);
+        }
+    }
+    DeviceBuffer<float> deviceA(a);
+    DeviceBuffer<float> deviceD(std::vector<float>(M, 0.0f));
+    float const         alpha = 1.0f;
+    float const         beta  = 0.0f;
+    ASSERT_EQ(hiptensorReduce(api.handle,
+                              plan,
+                              &alpha,
+                              deviceA.ptr,
+                              &beta,
+                              deviceD.ptr,
+                              deviceD.ptr,
+                              nullptr,
+                              0,
+                              nullptr),
+              HIPTENSOR_STATUS_SUCCESS);
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+    auto const d = deviceD.read();
+    for(int64_t m = 0; m < M; m++)
+    {
+        double sum = 0;
+        for(int64_t n = 0; n < N; n++)
+        {
+            sum += a[m + M * n];
+        }
+        EXPECT_EQ(d[m], sum) << m;
+    }
 }

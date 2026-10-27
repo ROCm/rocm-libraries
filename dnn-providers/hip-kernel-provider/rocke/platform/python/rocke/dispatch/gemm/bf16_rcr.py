@@ -57,6 +57,10 @@ from .skinny import (
     RING_ANY_PRIORITY,
     make_selected_skinny_candidate,
     make_skinny_candidate,
+    R3_RING_SPLIT_ARCHES,
+    R3_RING_SPLIT_PRIORITY,
+    r3_ring_split_admit,
+    r3_ring_split_spec,
     ring_small_any_admit,
     ring_small_any_spec,
 )
@@ -91,6 +95,8 @@ from .common import (
     rcr_request_errors,
     G1_PAD_FALLBACK_ARCHES,
     g1_adapt_spec,
+    r3_kproxy_dispatch,
+    r3_qgeo_spec,
     g1_gemm_signature,
     g1_sweep_filter,
     g1_decode_tile_trait,
@@ -220,6 +226,12 @@ def _spec_cdna_ring_small_any(req: GemmRequest, name: str) -> UniversalGemmSpec:
     # the small ring with pads / few-tile split-K for shapes
     # its own admission does not take (``skinny.ring_small_any_spec``)
     return ring_small_any_spec(req, _spec_cdna_dtl_ring_small(req, name))
+
+
+def _spec_cdna_ring_split(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    # the small ring split over K for few / mid-tile long-K
+    # shapes (``skinny.r3_ring_split_spec``)
+    return r3_ring_split_spec(req, _spec_cdna_dtl_ring_small(req, name))
 
 
 def _spec_cdna_dtl_ring_pad(req: GemmRequest, name: str) -> UniversalGemmSpec:
@@ -490,6 +502,18 @@ GEMM_BF16_REGISTRY.extend(
             family=_FAMILY,
             abi_version=GEMM_BF16_RCR_ABI_VERSION,
             dtype="bf16",
+        ),
+        # few / mid-tile long-K split-K ring (gfx950), ahead
+        # of gemm_skinny and the rings in its region (skinny.R3_RING_SPLIT)
+        _make_candidate(
+            name="universal_gemm_bf16_cdna_ring_split",
+            spec_id="cdna_ring_split",
+            priority=R3_RING_SPLIT_PRIORITY,
+            spec_fn=_spec_cdna_ring_split,
+            arches=R3_RING_SPLIT_ARCHES,
+            admit=native_any_admit(r3_ring_split_admit),
+            split_k=False,
+            layouts=GEMM_LAYOUTS,
         ),
         _make_candidate(
             name="universal_gemm_bf16_cdna_ring_small_any",
@@ -775,10 +799,15 @@ def dispatch_gemm_bf16(
     req: GemmRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
     """Select a registered BF16 RCR UniversalGemm candidate for ``req``."""
-    candidate = GEMM_BF16_REGISTRY.select(req, ranker=ranker)
-    spec = candidate.select_spec(req)
-    why: Tuple[str, ...] = ()
-    if ranker is None:
+    # K % 64 != 0 runs the K-rounded pick with the K tail
+    kp = r3_kproxy_dispatch(req, dispatch_gemm_bf16) if ranker is None else None
+    if kp is not None:
+        candidate, spec, why = kp
+    else:
+        candidate = GEMM_BF16_REGISTRY.select(req, ranker=ranker)
+        spec = candidate.select_spec(req)
+        why: Tuple[str, ...] = ()
+    if ranker is None and kp is None:
         # the learned selector (``selector.py``; ROCKE_GEMM_SELECTOR=0 = rules only)
         candidate, spec, why = _selector.dispatch_override(
             req,
@@ -788,6 +817,14 @@ def dispatch_gemm_bf16(
             selected_name=_SELECTED_NAME,
             selected_skinny_name=_SELECTED_SKINNY_NAME,
         )
+    if ranker is None:
+        # the 256x192 / 192x256 ring for poorly filled small-ring waves
+        q = r3_qgeo_spec(req, spec)
+        if q is not None:
+            spec = q
+            why = tuple(why) + (
+                f"r3 qgeo: {q.tile.tile_m}x{q.tile.tile_n} ring (fewer, fuller waves)",
+            )
     kid = _kernel_id(req, candidate, spec)
     return DispatchResult(
         request=req,

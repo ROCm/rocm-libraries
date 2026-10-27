@@ -329,7 +329,7 @@ def test_split_launches_cover_the_output_exactly_once():
     assert np.max(np.abs(got - ref)) < 1e-12 * max(1.0, float(np.max(np.abs(ref))))
 
 
-# ------------------------------------------------- special values (G1)
+# ------------------------------------------------------ special values
 
 
 def _gemm_nn(M, N, K, cx=False, **kw):
@@ -366,7 +366,7 @@ def _nonfinite(x):
 @pytest.mark.parametrize("cx", [False, True])
 def test_special_values(cx):
     """NaN / Inf propagation and the BLAS beta / alpha rules, bitwise on the
-    whole output (the in-repo form of the G1 gates)."""
+    whole output."""
     arch = _arch()
     M, N, K = 96, 80, 64
     p = _gemm_nn(M, N, K, cx)
@@ -458,7 +458,7 @@ def test_real_complex_scalars_keep_an_infinite_part_apart():
 
 @pytest.mark.parametrize("which", ["a", "b"])
 def test_conjugation_equals_conjugated_data(which):
-    """CONJ in the kernel is bitwise the kernel on host-conjugated data (MR8)."""
+    """CONJ in the kernel is bitwise the kernel on host-conjugated data."""
     arch = _arch()
     M, N, K = 96, 64, 40
     kw = dict(a_strides=(K, 1), b_strides=(1, N), d_strides=(N, 1), complex_=True)
@@ -719,3 +719,141 @@ def test_split_k_special_values():
     C[:] = 2.0
     out = H.run(spec, arch, A, B, C, D.copy(), 0.0, 0.5)
     np.testing.assert_array_equal(H.gather(p, "D", out), 1.0)
+
+
+# ------------------------------------------- pipelined K loops / AGPR accumulators
+
+# (Python engine levers of gett_f64: they keep the K order of every output, so
+# the bits equal the default kernel's)
+_PIPE_KNOBS = [
+    dict(acc_agpr=True),
+    dict(frag_pipe=True, tile_k=16),
+    dict(frag_pipe=True, unroll2=True, tile_k=8),
+    dict(frag_pipe=True, acc_agpr=True, unroll2=True, tile_k=16),
+    dict(kmajor_lds=True, tile_k=16),
+    dict(kmajor_lds=True, kmajor_pad=4, unroll2=True, tile_k=8),
+    dict(ilv=4, prefetch_depth=2, tile_k=16),
+    dict(ilv=8, prefetch_depth=2, unroll2=True, tile_k=8, kmajor_lds=True, acc_agpr=True),
+    dict(ilv=64, ilv_wgap=0, prefetch_depth=2, unroll2=True, tile_k=16),
+    dict(ilv=4, prefetch_depth=2, unroll2=True, tile_k=12, warps_m=4, warps_n=1),
+    dict(k_inner=2, mfma_fence=True, tile_k=16),
+    dict(k_inner=4, frag_pipe=True, tile_k=16),
+]
+
+# (M, N, K, A strides, B strides, D strides): both operands K-contiguous with a
+# K tail, both M/N-contiguous, mixed with an even K-tile count
+_PIPE_PROBLEMS = [
+    (200, 136, 104, (104, 1), (104, 1), (1, 200)),
+    (192, 160, 72, (1, 192), (1, 160), (160, 1)),
+    (136, 200, 96, (1, 136), (96, 1), (1, 136)),
+]
+
+
+@pytest.mark.parametrize("kw", _PIPE_KNOBS, ids=lambda kw: knobs_id(kw))
+def test_pipeline_knobs_bitwise(kw):
+    """Every lever passes the f64 bound and gives the default kernel's bits
+    (same tiles: only the schedule / register file / LDS layout change)."""
+    arch = _arch()
+    for i, (M, N, K, sa, sb, sd) in enumerate(_PIPE_PROBLEMS):
+        p = gemm_problem(M, N, K, a_strides=sa, b_strides=sb, d_strides=sd)
+        tiles = dict(tile_m=64, tile_n=64)
+        if "warps_m" in kw:
+            tiles = dict(tile_m=128, tile_n=64)
+        spec = arch_spec(p, arch, **tiles, **kw)
+        base = arch_spec(
+            p,
+            arch,
+            **tiles,
+            tile_k=spec.tile_k,
+            warps_m=spec.warps_m,
+            warps_n=spec.warps_n,
+        )
+        _run_check(spec, arch, seed=40 + i)
+        rng = np.random.default_rng(50 + i)
+        A, B, C, D = H.random_buffers(p, rng)
+        got = H.run(spec, arch, A, B, C, D.copy(), 1.25, -0.5)
+        ref = H.run(base, arch, A, B, C, D.copy(), 1.25, -0.5)
+        np.testing.assert_array_equal(got.view(np.int64), ref.view(np.int64))
+
+
+def knobs_id(kw):
+    return ",".join(f"{k}={v}" for k, v in kw.items())
+
+
+@pytest.mark.parametrize("cx", [False, True])
+@pytest.mark.parametrize("conj", [(False, False), (True, False), (False, True), (True, True)])
+def test_pipeline_knobs_complex(cx, conj):
+    """frag_pipe, acc_agpr and ilv also carry the complex fragments (re, im):
+    f64 bound, and the default kernel's bits."""
+    arch = _arch()
+    if not cx and conj != (False, False):
+        pytest.skip("conjugation is complex only")
+    p = gemm_problem(
+        96, 64, 40, a_strides=(40, 1), b_strides=(1, 64), d_strides=(1, 96),
+        complex_=cx, conj_a=conj[0], conj_b=conj[1],
+    )
+    for kw in (
+        dict(frag_pipe=True),
+        dict(frag_pipe=True, acc_agpr=True, unroll2=True),
+        dict(ilv=8, prefetch_depth=2, unroll2=True, acc_agpr=True),
+        dict(ilv=4, prefetch_depth=2, complex_accs=4),
+    ):
+        spec = arch_spec(p, arch, tile_m=64, tile_n=64, tile_k=8, **kw)
+        _run_check(spec, arch, seed=61)
+        base = arch_spec(
+            p, arch, tile_m=64, tile_n=64, tile_k=8, complex_accs=spec.complex_accs
+        )
+        rng = np.random.default_rng(62)
+        A, B, C, D = H.random_buffers(p, rng)
+        al, be = (complex(1.25, -0.375), complex(-0.5, 0.625)) if cx else (1.25, -0.5)
+        got = H.run(spec, arch, A, B, C, D.copy(), al, be)
+        ref = H.run(base, arch, A, B, C, D.copy(), al, be)
+        np.testing.assert_array_equal(got.view(np.int64), ref.view(np.int64))
+
+
+@pytest.mark.parametrize("cx", [False, True])
+@pytest.mark.parametrize("mode", [1, 2])
+@pytest.mark.parametrize("split", [2, 5])
+def test_split_serial(mode, split, cx):
+    """split_serial reduces the partials in the launch: f64 bound, bitwise
+    equal to the two-kernel split_k (same z order; real data), repeatable,
+    and every launch leaves the counters at zero."""
+    arch = _arch()
+    if mode == 2 and arch not in ("gfx942", "gfx950"):
+        pytest.skip("write-through partials need gfx942 / gfx950")
+    M, N, K, L = 96, 80, 1032, 2
+    p = gemm_problem(
+        M, N, K, a_strides=(K, 1), b_strides=(1, N), d_strides=(N, 1),
+        c_strides=(1, M), batch=L, batch_strides=(M * K, N * K, M * N),
+        c_batch_stride=M * N, complex_=cx,
+    )
+    spec = arch_spec(
+        p, arch, tile_m=64, tile_n=64, tile_k=8, split_k=split, split_serial=mode
+    )
+    rng = np.random.default_rng(105)
+    A, B, C, D = H.random_buffers(p, rng)
+    alpha, beta = (complex(1.25, -0.375), complex(-0.5, 0.625)) if cx else (1.25, -0.5)
+    out = H.run(spec, arch, A, B, C, D.copy(), alpha, beta, problem=p, launches=3)
+    worst, bad = H.check(p, A, B, C, out, D, alpha, beta, _samples(p, rng))
+    assert bad is None and worst <= 1.0
+    if not cx:
+        two = arch_spec(p, arch, tile_m=64, tile_n=64, tile_k=8, split_k=split)
+        ref = H.run(two, arch, A, B, C, D.copy(), alpha, beta, problem=p)
+        np.testing.assert_array_equal(out.view(np.int64), ref.view(np.int64))
+
+
+def test_pipe_configurations():
+    """Every pipelined dispatch configuration of the arch (PIPE_CONFIGS) on a
+    problem with tails in M, N and K, both load directions."""
+    from rocke.instances.common.gett_f64 import PIPE_CONFIGS
+
+    arch = _arch()
+    for (a, kind, cls), cfg in PIPE_CONFIGS.items():
+        if a != arch:
+            continue
+        for sa, sb in (((136, 1), (1, 520)), ((1, 600), (136, 1))):
+            p = gemm_problem(
+                600, 520, 136, a_strides=sa, b_strides=sb, d_strides=(1, 600),
+                complex_=kind == "complex",
+            )
+            _run_check(arch_spec(p, arch, **cfg), arch, seed=71)

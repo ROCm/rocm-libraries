@@ -194,9 +194,17 @@ class TestBothEngines(unittest.TestCase):
                     SkinnyGemmSpec(layout=lay, mnalign=mna, mn_pad=16, warp_k=2)
                 )
         specs.append(SkinnyGemmSpec(layout="CCR", kalign=1, red_sync="agent"))
+        # unaligned 16-byte MN loads + the shifted last tile
+        for lay in _NATIVE:
+            for mna in (1, 2):
+                specs.append(
+                    SkinnyGemmSpec(layout=lay, mnalign=mna, mn_uload=True, warp_k=2)
+                )
         with mock.patch.dict(os.environ, {"ROCKE_BACKEND": "both"}):
             for spec in specs:
                 for arch in ("gfx950", "gfx942"):
+                    if arch != "gfx950" and spec.mn_uload:
+                        continue  # (admitted on gfx950 only)
                     s = (
                         spec
                         if arch == "gfx950" or spec.layout == "RCR"

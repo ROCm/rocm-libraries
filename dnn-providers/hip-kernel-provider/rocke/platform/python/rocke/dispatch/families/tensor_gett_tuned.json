@@ -1,0 +1,1090 @@
+{
+ "entries": {
+  "gfx950": {
+   "0f9482785a920350e45f": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_wgm=4,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True,mn_chunk=128",
+    "problem": {
+     "bilinear": true,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 6,
+      "K1": 6,
+      "K2": 4,
+      "K3": 4,
+      "M0": 12,
+      "M1": 8,
+      "M2": 8,
+      "M3": 6,
+      "N0": 10,
+      "N1": 8,
+      "N2": 6,
+      "N3": 8
+     },
+     "modes_a": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "23f2bbb805ad34ff92ea": {
+    "body": "t128x128x64_w2x4x1_a16x16x32|chiplet_chunk_size=32,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True,mn_chunk=128,waves_per_eu=1",
+    "problem": {
+     "bilinear": false,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 24,
+      "K1": 24,
+      "M0": 48,
+      "M1": 32,
+      "N0": 40,
+      "N1": 36
+     },
+     "modes_a": [
+      "K1",
+      "K0",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K1",
+      "K0",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N1",
+      "N0",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "3d6bbc99c041dd301738": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_wgm=4,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True,mn_chunk=128",
+    "problem": {
+     "bilinear": false,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 6,
+      "K1": 6,
+      "K2": 4,
+      "K3": 4,
+      "M0": 12,
+      "M1": 8,
+      "M2": 8,
+      "M3": 6,
+      "N0": 10,
+      "N1": 8,
+      "N2": 6,
+      "N3": 8
+     },
+     "modes_a": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "4907717213385e0ec490": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=32,chiplet_swizzle=True,chiplet_wgm=16,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,lds_swizzle=True,mfma_interleave=True,mn_chunk=128",
+    "problem": {
+     "bilinear": true,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 3,
+      "K4": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 6,
+      "M3": 4,
+      "M4": 4,
+      "N0": 8,
+      "N1": 6,
+      "N2": 4,
+      "N3": 6,
+      "N4": 4
+     },
+     "modes_a": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "52afee352c8cc1485d4f": {
+    "body": "t128x128x32_w2x4x1_a16x16x32|chiplet_chunk_size=32,chiplet_swizzle=True,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_merge=True,interwave_setprio=True,mfma_interleave=True",
+    "problem": {
+     "bilinear": true,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 12,
+      "K1": 8,
+      "K2": 6,
+      "M0": 24,
+      "M1": 16,
+      "M2": 8,
+      "N0": 20,
+      "N1": 12,
+      "N2": 8
+     },
+     "modes_a": [
+      "K2",
+      "K1",
+      "K0",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K2",
+      "K1",
+      "K0",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N2",
+      "N1",
+      "N0",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "5ef8541a5e73dbe91da4": {
+    "body": "t128x128x32_w2x4x1_a16x16x32|chiplet_chunk_size=4,chiplet_swizzle=True,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True",
+    "problem": {
+     "bilinear": false,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 12,
+      "K1": 8,
+      "K2": 6,
+      "M0": 24,
+      "M1": 16,
+      "M2": 8,
+      "N0": 20,
+      "N1": 12,
+      "N2": 8
+     },
+     "modes_a": [
+      "K2",
+      "K1",
+      "K0",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K2",
+      "K1",
+      "K0",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N2",
+      "N1",
+      "N0",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "6a5951db87850882819f": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=32,chiplet_swizzle=True,chiplet_wgm=16,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True,mn_chunk=64",
+    "problem": {
+     "bilinear": false,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 3,
+      "K4": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 6,
+      "M3": 4,
+      "M4": 4,
+      "N0": 8,
+      "N1": 6,
+      "N2": 4,
+      "N3": 6,
+      "N4": 4
+     },
+     "modes_a": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "6ca39588a7df7b98780c": {
+    "body": "t128x192x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=32,chiplet_swizzle=True,chiplet_wgm=16,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True",
+    "problem": {
+     "bilinear": false,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 2,
+      "K4": 2,
+      "K5": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 4,
+      "M3": 4,
+      "M4": 3,
+      "M5": 2,
+      "N0": 6,
+      "N1": 6,
+      "N2": 4,
+      "N3": 4,
+      "N4": 4,
+      "N5": 2
+     },
+     "modes_a": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "826372e76a2ca4dc4d44": {
+    "body": "t128x128x64_w2x4x1_a16x16x32|chiplet_chunk_size=32,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True",
+    "problem": {
+     "bilinear": true,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 24,
+      "K1": 24,
+      "M0": 48,
+      "M1": 32,
+      "N0": 40,
+      "N1": 36
+     },
+     "modes_a": [
+      "K1",
+      "K0",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K1",
+      "K0",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N1",
+      "N0",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "a3f922690fb55c4f4d8d": {
+    "body": "t256x256x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=4,chiplet_swizzle=True,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True",
+    "problem": {
+     "bilinear": true,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 16,
+      "K1": 12,
+      "K2": 8,
+      "M0": 32,
+      "M1": 20,
+      "M2": 12,
+      "N0": 24,
+      "N1": 20,
+      "N2": 14
+     },
+     "modes_a": [
+      "K2",
+      "K1",
+      "K0",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K2",
+      "K1",
+      "K0",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N2",
+      "N1",
+      "N0",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "acde940489d8c678e4cf": {
+    "body": "t128x128x32_w2x4x1_a16x16x32|chiplet_chunk_size=32,chiplet_swizzle=True,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True,waves_per_eu=1",
+    "problem": {
+     "bilinear": true,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 12,
+      "K1": 8,
+      "K2": 6,
+      "M0": 24,
+      "M1": 16,
+      "M2": 8,
+      "N0": 20,
+      "N1": 12,
+      "N2": 8
+     },
+     "modes_a": [
+      "K2",
+      "K1",
+      "K0",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K2",
+      "K1",
+      "K0",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N2",
+      "N1",
+      "N0",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "bc2dca5ed43e3e3fabd2": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=32,chiplet_swizzle=True,chiplet_wgm=4,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,lds_swizzle=True,mfma_interleave=True,mn_chunk=128",
+    "problem": {
+     "bilinear": false,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 3,
+      "K4": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 6,
+      "M3": 4,
+      "M4": 4,
+      "N0": 8,
+      "N1": 6,
+      "N2": 4,
+      "N3": 6,
+      "N4": 4
+     },
+     "modes_a": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "c040717c86e077567e5d": {
+    "body": "t128x192x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_wgm=16,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True",
+    "problem": {
+     "bilinear": true,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 2,
+      "K4": 2,
+      "K5": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 4,
+      "M3": 4,
+      "M4": 3,
+      "M5": 2,
+      "N0": 6,
+      "N1": 6,
+      "N2": 4,
+      "N3": 4,
+      "N4": 4,
+      "N5": 2
+     },
+     "modes_a": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "c3afaac231cdfe126504": {
+    "body": "t128x128x32_w2x4x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=32,chiplet_swizzle=True,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True,waves_per_eu=1",
+    "problem": {
+     "bilinear": false,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 12,
+      "K1": 8,
+      "K2": 6,
+      "M0": 24,
+      "M1": 16,
+      "M2": 8,
+      "N0": 20,
+      "N1": 12,
+      "N2": 8
+     },
+     "modes_a": [
+      "K2",
+      "K1",
+      "K0",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K2",
+      "K1",
+      "K0",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N2",
+      "N1",
+      "N0",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "ce0756fc3571cca809a1": {
+    "body": "t128x128x64_w2x4x1_a16x16x32|chiplet_chunk_size=32,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,mfma_interleave=True",
+    "problem": {
+     "bilinear": false,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 24,
+      "K1": 24,
+      "M0": 48,
+      "M1": 32,
+      "N0": 40,
+      "N1": 36
+     },
+     "modes_a": [
+      "K1",
+      "K0",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K1",
+      "K0",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N1",
+      "N0",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "d010a031b720ee7d5362": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_wgm=4,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True,mn_chunk=128",
+    "problem": {
+     "bilinear": true,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 6,
+      "K1": 6,
+      "K2": 4,
+      "K3": 4,
+      "M0": 12,
+      "M1": 8,
+      "M2": 8,
+      "M3": 6,
+      "N0": 10,
+      "N1": 8,
+      "N2": 6,
+      "N3": 8
+     },
+     "modes_a": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "de86aebf39d3e2ff25d0": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_wgm=4,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True,mn_chunk=128",
+    "problem": {
+     "bilinear": false,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 6,
+      "K1": 6,
+      "K2": 4,
+      "K3": 4,
+      "M0": 12,
+      "M1": 8,
+      "M2": 8,
+      "M3": 6,
+      "N0": 10,
+      "N1": 8,
+      "N2": 6,
+      "N3": 8
+     },
+     "modes_a": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "e22621813ed5a21095d8": {
+    "body": "t128x128x64_w2x4x1_a16x16x32|chiplet_chunk_size=32,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,interwave_setprio=True,mfma_interleave=True",
+    "problem": {
+     "bilinear": true,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 24,
+      "K1": 24,
+      "M0": 48,
+      "M1": 32,
+      "N0": 40,
+      "N1": 36
+     },
+     "modes_a": [
+      "K1",
+      "K0",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K1",
+      "K0",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N1",
+      "N0",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "eb9949e94e6710bf165a": {
+    "body": "t256x128x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_chunk_size=32,chiplet_swizzle=True,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,lds_swizzle=True,mfma_interleave=True,waves_per_eu=2",
+    "problem": {
+     "bilinear": true,
+     "dtype": "fp16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 3,
+      "K4": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 6,
+      "M3": 4,
+      "M4": 4,
+      "N0": 8,
+      "N1": 6,
+      "N2": 4,
+      "N3": 6,
+      "N4": 4
+     },
+     "modes_a": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "f476c18bd8d31703491c": {
+    "body": "t128x192x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_swizzle=True,chiplet_wgm=16,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_merge=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True",
+    "problem": {
+     "bilinear": false,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 2,
+      "K4": 2,
+      "K5": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 4,
+      "M3": 4,
+      "M4": 3,
+      "M5": 2,
+      "N0": 6,
+      "N1": 6,
+      "N2": 4,
+      "N3": 4,
+      "N4": 4,
+      "N5": 2
+     },
+     "modes_a": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   },
+   "fb8844773bff9c3e7321": {
+    "body": "t128x192x32_w2x2x1_a16x16x32|acc_agpr=True,chiplet_wgm=16,direct_to_lds=True,dtl_cache_b=0,dtl_frag_prefetch=True,dtl_hoist=True,dtl_prefetch=True,dtl_stages=3,epilogue=default,ilv_barrier_after=2,ilv_merge=True,lds_swizzle=True,lds_swizzle_r=1,mfma_interleave=True",
+    "problem": {
+     "bilinear": true,
+     "dtype": "bf16",
+     "extents": {
+      "K0": 4,
+      "K1": 4,
+      "K2": 3,
+      "K3": 2,
+      "K4": 2,
+      "K5": 2,
+      "M0": 8,
+      "M1": 6,
+      "M2": 4,
+      "M3": 4,
+      "M4": 3,
+      "M5": 2,
+      "N0": 6,
+      "N1": 6,
+      "N2": 4,
+      "N3": 4,
+      "N4": 4,
+      "N5": 2
+     },
+     "modes_a": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ],
+     "modes_b": [
+      "K5",
+      "K4",
+      "K3",
+      "K2",
+      "K1",
+      "K0",
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0"
+     ],
+     "modes_d": [
+      "N5",
+      "N4",
+      "N3",
+      "N2",
+      "N1",
+      "N0",
+      "M5",
+      "M4",
+      "M3",
+      "M2",
+      "M1",
+      "M0"
+     ]
+    },
+    "route": "mn"
+   }
+  }
+ },
+ "schema": 1
+}

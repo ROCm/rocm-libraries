@@ -32,13 +32,17 @@
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
+#include "api_test_helpers.hpp"
+
 // A HIP allocation failure inside the library used to end the process (exit() in the library's
 // error check) or escape the C API as an exception. It must instead be returned as
 // HIPTENSOR_STATUS_ALLOC_FAILED, after which the library keeps working.
 //
 // A complex contraction splits its operands into real and imaginary buffers that the library
 // allocates on every execution. Filling the device memory between two executions of the same
-// plan makes the first of those allocations fail.
+// plan makes the first of those allocations fail. That is the Composable Kernel backend's
+// execution path (the rocKE backend allocates nothing at execution), so the plan is created with
+// that backend whatever HIPTENSOR_BACKEND selects.
 
 namespace
 {
@@ -114,6 +118,8 @@ namespace
 
 TEST(AllocFailureTest, ComplexContractionReturnsAllocFailedWhenDeviceMemoryIsExhausted)
 {
+    hiptensor_test::ScopedBackend ck("ck");
+
     int             deviceId = 0;
     hipDeviceProp_t props{};
     ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);

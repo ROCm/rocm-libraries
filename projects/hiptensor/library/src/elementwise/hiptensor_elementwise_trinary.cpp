@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "backend/registry.hpp"
+#include "backends/ck/ck_backend.hpp"
 #include "data_types.hpp"
 #include "elementwise_execute.hpp"
 #include "elementwise_solution.hpp"
@@ -45,6 +47,47 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
                                                      hipStream_t             stream)
 try
 {
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::elementwiseTrinary(
+            handle, plan, alpha, A, beta, B, gamma, C, D, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.beta  = beta;
+    scalars.gamma = gamma;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.B   = B;
+    buffers.C   = C;
+    buffers.out = D;
+
+    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorElementwiseTrinaryExecute");
+}
+
+hiptensorStatus_t hiptensor::ckbackend::elementwiseTrinary(hiptensorHandle_t            handle,
+                                                           hiptensorPlan_t              plan,
+                                                           void const*                  alpha,
+                                                           void const*                  A,
+                                                           void const*                  beta,
+                                                           void const*                  B,
+                                                           void const*                  gamma,
+                                                           void const*                  C,
+                                                           void*                        D,
+                                                           backend::LaunchConfig const& cfg)
+{
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -164,9 +207,5 @@ try
                                      operators,
                                      operators,
                                      8,
-                                     stream);
-}
-catch(...)
-{
-    return hiptensor::exceptionToStatus("hiptensorElementwiseTrinaryExecute");
+                                     cfg);
 }

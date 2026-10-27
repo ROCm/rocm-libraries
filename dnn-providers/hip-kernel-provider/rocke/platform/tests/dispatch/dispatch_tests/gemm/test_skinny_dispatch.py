@@ -176,6 +176,15 @@ if __name__ == "__main__":
 
 
 class TestRingSmallAny(unittest.TestCase):
+    def setUp(self):
+        # the split-K ring (priority 2) takes some of these
+        # shapes ahead of ring_small_any; these tests pin ring_small_any
+        self._r3 = mock.patch.object(SK, "R3_RING_SPLIT", False)
+        self._r3.start()
+
+    def tearDown(self):
+        self._r3.stop()
+
     def test_takes_sub_half_wave_shapes_over_the_generic_bodies(self):
         for dt in ("fp16", "bf16"):
             for M, N, K in (

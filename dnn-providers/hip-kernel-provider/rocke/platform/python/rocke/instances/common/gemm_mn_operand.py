@@ -485,9 +485,23 @@ def mn_layout_error(spec, arch: str) -> Optional[str]:
     except ValueError as e:
         return str(e)
     if not (a_mn or b_mn):
+        if getattr(spec.trait, "mn_ld_any", False):
+            return "mn_ld_any needs an MN-contiguous operand (layout RRR / CRR / CCR)"
         return None
     t, tr = spec.tile, spec.trait
     why = f"layout {spec.data.layout}"
+    if getattr(tr, "mn_ld_any", False):
+        # the shifted last tile (TraitSpec.mn_ld_any) recomputes rows of
+        # the tile before it: every output path must store, never accumulate
+        if not uses_mn_dtl(spec):
+            return f"{why}: mn_ld_any is a DTL-ring lever (dtl_stages >= 2)"
+        if int(tr.split_k) > 1 or int(getattr(tr, "split_k_serial", 0)) or tr.streamk:
+            return (
+                f"{why}: mn_ld_any shifts the last tile onto rows of the one before "
+                "it (split-K / stream-K would add those partials twice)"
+            )
+        if spec.batched:
+            return f"{why}: mn_ld_any is built for the non-batched body"
     if not uses_mn_dtl(spec):
         return _mn_generic_error(spec, arch, a_mn, b_mn, why)
     if arch not in MN_OPERAND_ARCHS:
@@ -557,7 +571,21 @@ def mn_launch_error(spec, M: int, N: int, K: int) -> Optional[str]:
         return str(e)
     dtl = uses_mn_dtl(spec)
     v = 8 if dtl else int(spec.trait.mn_vec)
-    for is_mn, nm, ld in ((a_mn, "A", int(M)), (b_mn, "B", int(N))):
+    any_ld = dtl and bool(getattr(spec.trait, "mn_ld_any", False))
+    for is_mn, nm, ld, tile in (
+        (a_mn, "A", int(M), int(spec.tile.tile_m)),
+        (b_mn, "B", int(N), int(spec.tile.tile_n)),
+    ):
+        if is_mn and any_ld:
+            # TraitSpec.mn_ld_any: 2-byte-aligned DMA rows, the last
+            # tile shifted back to end at the extent (origin ld - tile >= 0)
+            if ld < tile:
+                return (
+                    f"layout {spec.data.layout}: mn_ld_any shifts the last tile to "
+                    f"end at the extent; the MN-contiguous {nm}'s leading dimension "
+                    f"{ld} is below the tile ({tile})"
+                )
+            continue
         if is_mn and ld % v:
             return (
                 f"layout {spec.data.layout}: the MN-contiguous {nm}'s leading "

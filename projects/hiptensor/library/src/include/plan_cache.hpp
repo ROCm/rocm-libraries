@@ -234,6 +234,19 @@ namespace hiptensor
         }
     };
 
+    //! A backend whose solutions a plan cache holds, with the version of its kernel arguments.
+    //! Plan cache files record the backends of the cache that wrote them.
+    struct PlanCacheBackend
+    {
+        std::string name;
+        uint32_t    kernelAbi;
+
+        bool operator==(PlanCacheBackend const& other) const
+        {
+            return name == other.name && kernelAbi == other.kernelAbi;
+        }
+    };
+
     class PlanCache
     {
     public:
@@ -243,16 +256,19 @@ namespace hiptensor
         using UseStamp = uint64_t;
 
         //archName and cuCount identify the device: they are part of every key and of the
-        //plan cache file, which is only read back on the same kind of device
-        PlanCache(std::string archName, uint32_t cuCount);
+        //plan cache file, which is only read back on the same kind of device. The file also
+        //records the backends, and is only read back by a library with the same backends.
+        PlanCache(std::string                   archName,
+                  uint32_t                      cuCount,
+                  std::vector<PlanCacheBackend> backends = {});
         ~PlanCache() = default;
 
-        //Get hash ID from peration descriptor pointer
-        //Calculate hash key by: hash({device, Tag, DatatypeA..E, DatatypeCompute, mOperationType, mContractionOpId, operators, ranks, lengths, strides, modes})
-        HashId getHashID(hiptensorOperationDescriptor_t desc);
+        //Get hash ID from operation descriptor pointer, for the solutions of a backend
+        //Calculate hash key by: hash({device, backend, Tag, DatatypeA..E, DatatypeCompute, mOperationType, mContractionOpId, operators, ranks, lengths, strides, modes})
+        HashId getHashID(hiptensorOperationDescriptor_t desc, std::string const& backend);
 
-        //Query solution Uid through operation descriptor pointer
-        Uid querySolutionUid(hiptensorOperationDescriptor_t desc);
+        //Query solution Uid of a backend through operation descriptor pointer
+        Uid querySolutionUid(hiptensorOperationDescriptor_t desc, std::string const& backend);
 
         //Query solution Uid through hash key, 0 if there is none
         Uid querySolutionUidByHash(HashId hashId);
@@ -266,7 +282,8 @@ namespace hiptensor
 
         //Function for deserialization from disk. Replaces the cache lines, keeps the capacity.
         //On success numCachelinesRead is the number of lines read. A file written by another
-        //hipTensor version or for another device returns HIPTENSOR_STATUS_INVALID_VALUE, and a
+        //hipTensor version, for another device or by a library with other backends returns
+        //HIPTENSOR_STATUS_INVALID_VALUE, and a
         //file with more lines than the capacity returns HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE
         //with numCachelinesRead set to the number of lines it needs. Unreadable or damaged files
         //return HIPTENSOR_STATUS_IO_ERROR. On error the cache is unchanged.
@@ -286,6 +303,9 @@ namespace hiptensor
         std::string mArchName;
         uint32_t    mCuCount;
         HashId      mDeviceHash;
+
+        //Backends the cached solutions belong to
+        std::vector<PlanCacheBackend> mBackends;
 
         //Max size of the hash table
         uint32_t mMaxCachelines;

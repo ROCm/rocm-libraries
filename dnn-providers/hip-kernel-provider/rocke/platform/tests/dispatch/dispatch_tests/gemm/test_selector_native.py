@@ -233,13 +233,38 @@ class TestNativeCandidates(_Clean):
         self.assertEqual(cs, [])
 
     def test_generated_need_multiples_of_8(self):
+        # (SELECTOR_LD_ANY admits DTL-ring mn_ld_any forms; off here)
+        for lay in _LAYOUTS:
+            req = _req(130, 4000, 20000, lay)
+            cand = GEMM_FP16_REGISTRY.select(req)
+            with mock.patch.object(S, "SELECTOR_LD_ANY", False):
+                cs = S.native_candidates(
+                    req, GEMM_FP16_REGISTRY, rule_pick=(cand, cand.select_spec(req))
+                )
+            self.assertTrue(cs)
+            self.assertFalse([c for c in cs if c.origin.startswith("neighbour")], lay)
+
+    def test_generated_ld_any_forms(self):
+        # generated forms on a misaligned M / N are DTL-ring mn_ld_any forms
+        # with exact bounds only; a misaligned K keeps every generated spec out
         for lay in _LAYOUTS:
             req = _req(130, 4000, 20000, lay)
             cand = GEMM_FP16_REGISTRY.select(req)
             cs = S.native_candidates(
                 req, GEMM_FP16_REGISTRY, rule_pick=(cand, cand.select_spec(req))
             )
-            self.assertTrue(cs)
+            for c in cs:
+                if c.origin.startswith("neighbour"):
+                    tr = c.spec.trait
+                    self.assertTrue(
+                        tr.mn_ld_any and tr.direct_to_lds and tr.dtl_tight_rsrc,
+                        (lay, c.origin),
+                    )
+            req = _req(130, 4000, 20004, lay)
+            cand = GEMM_FP16_REGISTRY.select(req)
+            cs = S.native_candidates(
+                req, GEMM_FP16_REGISTRY, rule_pick=(cand, cand.select_spec(req))
+            )
             self.assertFalse([c for c in cs if c.origin.startswith("neighbour")], lay)
 
     def test_mn_levers_not_on_vgpr_bases(self):

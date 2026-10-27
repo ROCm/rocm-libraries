@@ -70,6 +70,13 @@ def _gemm_selector_layer(request, monkeypatch):
     if os.environ.get("ROCKE_GEMM_SELECTOR_TESTS") == "1":
         yield
         return
+    # the learned gemm_skinny configuration choice
+    # (dispatch.gemm.skinny_select) is pinned off the same way unless a module
+    # sets GEMM_SKINNY_SELECT_TESTS = True (the rule layer's table plans)
+    if getattr(request.module, "GEMM_SKINNY_SELECT_TESTS", False) is True:
+        monkeypatch.delenv("ROCKE_GEMM_SKINNY_SELECT", raising=False)
+    else:
+        monkeypatch.setenv("ROCKE_GEMM_SKINNY_SELECT", "0")
     mode = getattr(request.module, "GEMM_SELECTOR_TESTS", False)
     if mode is True:
         monkeypatch.delenv("ROCKE_GEMM_SELECTOR", raising=False)

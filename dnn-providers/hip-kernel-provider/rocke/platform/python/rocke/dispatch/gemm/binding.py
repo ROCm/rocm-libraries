@@ -118,6 +118,10 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
             w_dev = rt.alloc(4 * ws[0])
             n_dev = rt.alloc(4 * max(1, ws[1]))
             rt.memset(n_dev, 0, 4 * max(1, ws[1]))
+            if serial == 3:
+                # mode 3 atomic-adds into W (zeroed once here;
+                # the kernel leaves it zeroed)
+                rt.memset(w_dev, 0, 4 * ws[0])
             return (
                 struct.pack("<QQQQQiii", a_dev, b_dev, c_dev, w_dev, n_dev, M, N, K),
                 (a_dev, b_dev, c_dev, w_dev, n_dev),

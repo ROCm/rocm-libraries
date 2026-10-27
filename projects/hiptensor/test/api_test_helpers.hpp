@@ -37,10 +37,75 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace hiptensor_test
 {
+    // Sets (or, for nullptr, removes) an environment variable for the life of the object.
+    class ScopedEnvironmentVariable
+    {
+    public:
+        ScopedEnvironmentVariable(char const* name, char const* value)
+            : mName(name)
+        {
+            if(char const* previous = std::getenv(name))
+            {
+                mPrevious    = previous;
+                mHadPrevious = true;
+            }
+            set(value);
+        }
+
+        ~ScopedEnvironmentVariable()
+        {
+            set(mHadPrevious ? mPrevious.c_str() : nullptr);
+        }
+
+        ScopedEnvironmentVariable(ScopedEnvironmentVariable const&)            = delete;
+        ScopedEnvironmentVariable& operator=(ScopedEnvironmentVariable const&) = delete;
+
+    private:
+        void set(char const* value)
+        {
+#ifdef _WIN32
+            _putenv_s(mName.c_str(), value != nullptr ? value : "");
+#else
+            if(value != nullptr)
+            {
+                setenv(mName.c_str(), value, 1);
+            }
+            else
+            {
+                unsetenv(mName.c_str());
+            }
+#endif
+        }
+
+        std::string mName;
+        std::string mPrevious;
+        bool        mHadPrevious = false;
+    };
+
+    // Makes the plans created while it lives use one backend ("ck" or "rocke"), whatever
+    // HIPTENSOR_BACKEND and HIPTENSOR_BACKEND_AB select for the rest of the process. For tests of
+    // one backend's own behaviour (the Composable Kernel backend's tensor size limits, for
+    // example), which the other backend does not share.
+    class ScopedBackend
+    {
+    public:
+        explicit ScopedBackend(char const* name)
+            : mBackend("HIPTENSOR_BACKEND", name)
+            , mAb("HIPTENSOR_BACKEND_AB", nullptr)
+        {
+        }
+
+    private:
+        ScopedEnvironmentVariable mBackend;
+        ScopedEnvironmentVariable mAb;
+    };
+
     template <typename T>
     struct DeviceBuffer
     {

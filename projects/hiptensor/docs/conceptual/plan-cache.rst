@@ -57,11 +57,11 @@ Save and load from disk
 
 When paired with cache serialization APIs like `hiptensorHandleWritePlanCacheToFile() <../api-reference/api-reference.html#hiptensorhandlewriteplancachetofile>`_ and `hiptensorHandleReadPlanCacheFromFile() <../api-reference/api-reference.html#hiptensorhandlereadplancachefromfile>`_, plan cache lines can be saved to disk and reloaded later to avoid the repeated benchmarking in future application runs.
 
-A plan cache file records the hipTensor version (major, minor, and patch) and the architecture and compute unit count of the device it was written on. It can only be read back by the same hipTensor version on a device with the same architecture and compute unit count. Reading a file never changes the size of the plan cache, so resize the plan cache before reading a file that holds more lines. ``hiptensorHandleReadPlanCacheFromFile`` returns:
+A plan cache file records the hipTensor version (major, minor, and patch), the architecture and compute unit count of the device it was written on, and the backends of the library with the version of their kernel arguments. It can only be read back by the same hipTensor version, built with the same backends, on a device with the same architecture and compute unit count. Plan cache entries are kept per backend. Reading a file never changes the size of the plan cache, so resize the plan cache before reading a file that holds more lines. ``hiptensorHandleReadPlanCacheFromFile`` returns:
 
 - ``HIPTENSOR_STATUS_SUCCESS`` when the lines were read. ``numCachelinesRead`` holds the number of lines read.
 - ``HIPTENSOR_STATUS_IO_ERROR`` when the file can't be read or is damaged.
-- ``HIPTENSOR_STATUS_INVALID_VALUE`` when the file was written by another hipTensor version, including every file written by hipTensor versions that didn't record a version, or on another device.
+- ``HIPTENSOR_STATUS_INVALID_VALUE`` when the file was written by another hipTensor version, including every file written by hipTensor versions that didn't record a version, by a library with other backends, or on another device.
 - ``HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE`` when the file holds more lines than the plan cache. ``numCachelinesRead`` holds the number of lines the file needs.
 
 In every case other than ``HIPTENSOR_STATUS_SUCCESS`` the plan cache is left unchanged, so the application can tune again and write a new file.

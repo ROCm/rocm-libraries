@@ -69,7 +69,7 @@ class TestSplitKSerial(unittest.TestCase):
         self.assertIn("_sks1", _spec(split_k=4, split_k_serial=1).kernel_name())
         refused = {
             "no split": dict(split_k_serial=2),
-            "mode": dict(split_k=4, split_k_serial=3),
+            "mode": dict(split_k=4, split_k_serial=4),  # (3: atomic + ticket mode)
             "no vgpr_prefetch": dict(
                 split_k=4,
                 split_k_serial=2,
@@ -108,7 +108,14 @@ class TestSplitKSerial(unittest.TestCase):
         self.assertIsNone(launch_shape_error(ser, 256, 256, 8192))
 
     def test_sync_modes_in_ir(self):
-        ir1 = _ir(_spec(split_k=4, split_k_serial=1))
+        # mode 1 is refused by is_valid_spec (measured wrong results); its emission is
+        # kept behind SPLIT_K_SERIAL_FENCED_VALID
+        from unittest import mock
+
+        from rocke.instances.common import gemm_universal as _gu
+
+        with mock.patch.object(_gu, "SPLIT_K_SERIAL_FENCED_VALID", True):
+            ir1 = _ir(_spec(split_k=4, split_k_serial=1))
         ir2 = _ir(_spec(split_k=4, split_k_serial=2))
         # mode 1: agent-scope release before the ticket, acquire after it
         self.assertIn('fence syncscope("agent") release', ir1)

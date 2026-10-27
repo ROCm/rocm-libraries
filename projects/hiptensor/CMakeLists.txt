@@ -89,6 +89,8 @@ if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
     option(BUILD_OFFLOAD_COMPRESS "Build hiptensor with offload compression" ON)
     option(HIPTENSOR_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
     option(HIPTENSOR_INLINE_UNARY_OPS "Inline all unary ops for best runtime performance (slower compilation)" OFF)
+    option(HIPTENSOR_ENABLE_ROCKE_BACKEND "Build the rocKE backend, which plans select with HIPTENSOR_BACKEND=rocke" OFF)
+    option(HIPTENSOR_ENABLE_ROCKE_JIT "Build the rocKE backend's JIT and kernel cache (needs HIPTENSOR_ENABLE_ROCKE_BACKEND; links COMGR)" ON)
     if(WIN32)
         option(CREATE_TEST_APP_LOCAL_DEPLOY "Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)" OFF)
     endif()
@@ -185,6 +187,22 @@ else()
   add_compile_definitions(HIPTENSOR_INLINE_UNARY_OPS=0)
 endif()
 message(STATUS "HIPTENSOR_INLINE_UNARY_OPS=${HIPTENSOR_INLINE_UNARY_OPS}")
+message(STATUS "HIPTENSOR_ENABLE_ROCKE_BACKEND=${HIPTENSOR_ENABLE_ROCKE_BACKEND}")
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    # Where the build-time pack builder imports rocKE from (a rocKE source tree).
+    set(HIPTENSOR_ROCKE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../dnn-providers/hip-kernel-provider/rocke"
+        CACHE PATH "rocKE source tree the rocKE kernel packs are built from")
+    set(HIPTENSOR_ROCKE_PACK_DIR "" CACHE PATH
+        "Directory of prebuilt rocKE packs (<target>/rocke.htpk); when set, no pack is built")
+    set(HIPTENSOR_ROCKE_PACK_TARGETS "" CACHE STRING
+        "GPU targets to build rocKE packs for (default: the targets of GPU_TARGETS rocKE supports)")
+    set(HIPTENSOR_ROCKE_PACK_JOBS "" CACHE STRING "Parallel compile jobs of the rocKE pack build")
+    set(HIPTENSOR_ROCKE_SELECT_MODEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/library/src/backends/rocke/select"
+        CACHE PATH "Kernel selection models written into the rocKE packs (<target>/<cell>.model)")
+    include(cmake/Functions/hiptensorRockePack.cmake)
+    message(STATUS "HIPTENSOR_ROCKE_SOURCE_DIR=${HIPTENSOR_ROCKE_SOURCE_DIR}")
+    message(STATUS "HIPTENSOR_ENABLE_ROCKE_JIT=${HIPTENSOR_ENABLE_ROCKE_JIT}")
+endif()
 
 # Setup HIP
 find_package(hip REQUIRED)

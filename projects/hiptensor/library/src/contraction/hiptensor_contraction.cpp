@@ -41,6 +41,8 @@
 #include "logger.hpp"
 #include "util.hpp"
 
+#include "backend/registry.hpp"
+#include "backends/ck/ck_backend.hpp"
 #include "hiptensor_options.hpp"
 #include "plancache_autotune.hpp"
 
@@ -638,19 +640,20 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
-hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
-                                    const hiptensorPlan_t   plan,
-                                    const void*             alpha,
-                                    const void*             A,
-                                    const void*             B,
-                                    const void*             beta,
-                                    const void*             C,
-                                    void*                   D,
-                                    void*                   workspace,
-                                    uint64_t                workspaceSize,
-                                    hipStream_t             stream)
-try
+hiptensorStatus_t hiptensor::ckbackend::contract(hiptensorHandle_t            handle,
+                                                 hiptensorPlan_t              plan,
+                                                 void const*                  alpha,
+                                                 void const*                  A,
+                                                 void const*                  B,
+                                                 void const*                  beta,
+                                                 void const*                  C,
+                                                 void*                        D,
+                                                 void*                        workspace,
+                                                 uint64_t                     workspaceSize,
+                                                 backend::LaunchConfig const& cfg)
 {
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -749,9 +752,6 @@ try
     // Perform contraction with timing if LOG_LEVEL_PERF_TRACE
     if(logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
     {
-        using hiptensor::HiptensorOptions;
-        auto& options = HiptensorOptions::instance();
-
         std::tie(errorCode, time)
             = (*cSolution)(alpha,
                            A,
@@ -774,13 +774,7 @@ try
                            {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
                            workspace,
                            workspaceSize,
-                           StreamConfig{
-                               stream, // stream id
-                               true, // time_kernel
-                               0, // log_level
-                               options->coldRuns(), // cold_niters
-                               options->hotRuns(), // nrepeat
-                           });
+                           toStreamConfig(timedLaunch(cfg)));
 
         if(errorCode == HIPTENSOR_STATUS_SUCCESS)
         {
@@ -833,7 +827,7 @@ try
                            {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB, plan->mOpDesc->mOpC},
                            workspace,
                            workspaceSize,
-                           StreamConfig{stream, false});
+                           toStreamConfig(cfg));
     }
 
     if(errorCode == HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
@@ -859,6 +853,43 @@ try
         hiptensor::AutotuneOps::Autotune_Contraction, time, handle, plan);
 
     return errorCode;
+}
+
+hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
+                                    const hiptensorPlan_t   plan,
+                                    const void*             alpha,
+                                    const void*             A,
+                                    const void*             B,
+                                    const void*             beta,
+                                    const void*             C,
+                                    void*                   D,
+                                    void*                   workspace,
+                                    uint64_t                workspaceSize,
+                                    hipStream_t             stream)
+try
+{
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::contract(
+            handle, plan, alpha, A, B, beta, C, D, workspace, workspaceSize, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.beta  = beta;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.B   = B;
+    buffers.C   = C;
+    buffers.out = D;
+
+    return hiptensor::backend::executePlan(
+        handle, plan, scalars, buffers, workspace, workspaceSize, cfg);
 }
 catch(...)
 {
@@ -1035,7 +1066,8 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     //If there is a solution in Plan Cache, set that solution and skip solution finding
     if(handle->getPlanCache() && pref->mCacheMode == HIPTENSOR_CACHE_MODE_PEDANTIC)
     {
-        auto Uid = handle->getPlanCache()->querySolutionUid(desc);
+        auto Uid
+            = handle->getPlanCache()->querySolutionUid(desc, hiptensor::backend::kCkBackendName);
         if(Uid > 0ull)
         {
             winner = findSolutionByUid(candidates, Uid);
@@ -1826,7 +1858,8 @@ hiptensorStatus_t contractionTrinaryInitPlan(
 
     if(handle->getPlanCache() && pref->mCacheMode == HIPTENSOR_CACHE_MODE_PEDANTIC)
     {
-        auto Uid = handle->getPlanCache()->querySolutionUid(desc);
+        auto Uid
+            = handle->getPlanCache()->querySolutionUid(desc, hiptensor::backend::kCkBackendName);
         if(Uid > 0ull)
         {
             winner = findSolutionByUid(candidates, Uid);
@@ -1985,20 +2018,21 @@ hiptensorStatus_t contractionTrinaryInitPlan(
 //
 // Workspace layout:
 //   [ intermediate tensor T (256-byte aligned) | sub-workspace for kernels ]
-hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
-                                           const hiptensorPlan_t   plan,
-                                           const void*             alpha,
-                                           const void*             A,
-                                           const void*             B,
-                                           const void*             C,
-                                           const void*             beta,
-                                           const void*             D,
-                                           void*                   E,
-                                           void*                   workspace,
-                                           uint64_t                workspaceSize,
-                                           hipStream_t             stream)
-try
+hiptensorStatus_t hiptensor::ckbackend::contractTrinary(hiptensorHandle_t            handle,
+                                                        hiptensorPlan_t              plan,
+                                                        void const*                  alpha,
+                                                        void const*                  A,
+                                                        void const*                  B,
+                                                        void const*                  C,
+                                                        void const*                  beta,
+                                                        void const*                  D,
+                                                        void*                        E,
+                                                        void*                        workspace,
+                                                        uint64_t                     workspaceSize,
+                                                        backend::LaunchConfig const& cfg)
 {
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -2137,14 +2171,9 @@ try
     void*    kernelWs      = static_cast<char*>(workspace) + tBytesAligned;
     uint64_t kernelWsSize  = workspaceSize - tBytesAligned;
 
-    using hiptensor::HiptensorOptions;
-    auto& options = HiptensorOptions::instance();
-
     const bool perfTrace =
         (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE) != 0;
-    StreamConfig streamCfg = perfTrace
-        ? StreamConfig{stream, true, 0, options->coldRuns(), options->hotRuns()}
-        : StreamConfig{stream, false};
+    StreamConfig streamCfg = toStreamConfig(perfTrace ? timedLaunch(cfg) : cfg);
 
     // --- Step 1: T = A * B (alpha=1, no bias) ---
     // In the bilinear case step 1 runs the step 2 kernel, which reads its bias, here T itself,
@@ -2274,6 +2303,45 @@ try
         hiptensor::AutotuneOps::Autotune_ContractionTrinary, totalTime, handle, plan);
 
     return errorCode;
+}
+
+hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
+                                           const hiptensorPlan_t   plan,
+                                           const void*             alpha,
+                                           const void*             A,
+                                           const void*             B,
+                                           const void*             C,
+                                           const void*             beta,
+                                           const void*             D,
+                                           void*                   E,
+                                           void*                   workspace,
+                                           uint64_t                workspaceSize,
+                                           hipStream_t             stream)
+try
+{
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::contractTrinary(
+            handle, plan, alpha, A, B, C, beta, D, E, workspace, workspaceSize, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.beta  = beta;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.B   = B;
+    buffers.C   = C;
+    buffers.D   = D;
+    buffers.out = E;
+
+    return hiptensor::backend::executePlan(
+        handle, plan, scalars, buffers, workspace, workspaceSize, cfg);
 }
 catch(...)
 {

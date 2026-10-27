@@ -31,6 +31,9 @@
 //  - for f64 elementwise operations with an input laid out differently from the output, a
 //    tensor of 2^29 bytes or more;
 //  - the intermediate A * B tensor of a trinary contraction.
+// These are the limits of the Composable Kernel backend, so every plan here is created with that
+// backend whatever HIPTENSOR_BACKEND selects (the rocKE backend addresses such tensors with
+// 64-bit offsets; rocke_backend_test checks its results on them).
 // Each limit is checked just below and at the threshold. Only descriptors are created: nothing
 // of the refused sizes is allocated. Where planning a size just below the limit would run the
 // kernels on gigabytes of scratch data (contractions), the check itself is asserted instead.
@@ -41,6 +44,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "api_test_helpers.hpp"
 #include "ck_tensor_limits.hpp"
 #include "data_types.hpp"
 
@@ -273,7 +277,8 @@ protected:
         return status == HIPTENSOR_STATUS_SUCCESS;
     }
 
-    HandleGuard mHandle;
+    hiptensor_test::ScopedBackend mBackend{"ck"};
+    HandleGuard                   mHandle;
 };
 
 // ---- The addressed range of one tensor ----

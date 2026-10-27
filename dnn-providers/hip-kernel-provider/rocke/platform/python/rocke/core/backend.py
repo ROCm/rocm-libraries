@@ -550,6 +550,11 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("vgpr_prefetch_depth", 1),
     ("vp_unroll", 0),
     ("vp_late_reads", 0),
+    # gfx942: early single-buffer LDS release and main-loop placement
+    ("vp_release_atoms", 1),
+    ("vp_tail_pack", 0),
+    ("vp_pair_reads", 0),
+    ("vp_mfma_first", 0),
     # native NN / TN / TT (MN-contiguous operands), the
     # scheduler-strategy knob and the guarded padded rows of the VGPR loader
     ("mn_pad", 32),
@@ -565,6 +570,10 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("vp_mn_worder", 0),
     ("vp_mn_pipe", 0),
     ("vp_mn_wrap", 0),
+    # 64-bit tile origins (operands / C past the i32 offsets)
+    ("wide_addr", False),
+    # DTL-ring MN operands on any leading dimension
+    ("mn_ld_any", False),
 )
 
 

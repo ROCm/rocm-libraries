@@ -63,6 +63,37 @@ G5P_VP_UNROLL_MAX_ACC = 128
 # predicted-time factor of an unrolled plan (the learned model is fitted on
 # one-tile-per-iteration bodies)
 G5P_VP_UNROLL_SCALE = 0.97
+# the dispatcher takes the best-ranked of the first
+# ``G5P_LAUNCHABLE_TOP`` plans that the launch contract accepts (1 = the top
+# plan only: a refused top plan refuses the g5 candidate, e.g. a
+# padded tile with operand bytes >= 2^31 at 128 x 32768 x 32768)
+G5P_LAUNCHABLE_TOP = 8
+# main-loop traits applied to the chosen single-LDS-buffer
+# (mode 4) RCR plan (``common._g5p_mainloop``; only when the result is valid
+# and launchable), within the scope of :func:`mainloop_applies`. Empty = off.
+# The hipBLASLt-style loop (read every fragment of a K tile during its first
+# atom, release the LDS buffer, stream load / write pairs through the other
+# atoms, pack the next tile's reads behind the second barrier, keep the tile's
+# first MFMA ahead of its slot): measured faster on gfx942 for the 4-wave AGPR
+# bodies (256x256 / 256x224 / 224x288 w2x2), neutral on the 8-wave
+# VGPR-accumulator picks.
+G5P_MAINLOOP: Dict[str, int] = {
+    "vp_pair_reads": 1,
+    "vp_release_atoms": 3,
+    "vp_tail_pack": 3,
+    "vp_mfma_first": 1,
+}
+# scope of G5P_MAINLOOP: minimum K tiles of the plan's K loop (per split-K
+# slice), accumulators per lane in [MIN_ACC, MAX_ACC] (0 = no bound), waves
+# per workgroup (empty = any) and minimum K atoms per K tile
+G5P_MAINLOOP_MIN_KTILES = 0
+G5P_MAINLOOP_MIN_ACC = 129
+G5P_MAINLOOP_MAX_ACC = 0
+G5P_MAINLOOP_WAVES: Tuple[int, ...] = (4,)
+G5P_MAINLOOP_MIN_KATOMS = 4
+# predicted-time factor of a plan the main-loop traits apply to (the learned
+# model is fitted on bodies without these traits); 1.0 = rank as before
+G5P_MAINLOOP_SCALE = 0.95
 # feature value for "not applicable" (the tree walker has no NaN branch)
 G5P_NA = -1.0
 
@@ -143,6 +174,39 @@ def analytic_us(
         fx, pb = G5P_SPLIT_COST.get(serial, G5P_SPLIT_COST[0])
         t += fx + pb * M * N * 4 * split
     return t
+
+
+def mainloop_applies(tile, trait, M: int, N: int, K: int) -> bool:
+    """Whether ``G5P_MAINLOOP`` applies to a plan (tile, trait) at M x N x K."""
+    if int(trait.vgpr_prefetch) != 4:
+        return False
+    split = max(1, int(trait.split_k))
+    ktiles = -(-K // (split * tile.tile_k))
+    if ktiles < G5P_MAINLOOP_MIN_KTILES:
+        return False
+    if tile.tile_k // max(1, tile.warp_tile_k) < G5P_MAINLOOP_MIN_KATOMS:
+        return False
+    waves = tile.warp_m * tile.warp_n
+    if G5P_MAINLOOP_WAVES and waves not in tuple(G5P_MAINLOOP_WAVES):
+        return False
+    acc = tile.tile_m * tile.tile_n // (64 * waves)
+    if G5P_MAINLOOP_MIN_ACC and acc < G5P_MAINLOOP_MIN_ACC:
+        return False
+    return not G5P_MAINLOOP_MAX_ACC or acc <= G5P_MAINLOOP_MAX_ACC
+
+
+def plan_mainloop(plan: "G5Plan", M: int, N: int, K: int) -> bool:
+    """Whether the dispatcher would run ``plan`` with ``G5P_MAINLOOP`` (the
+    ranking scale ``G5P_MAINLOOP_SCALE`` applies to it)."""
+    if plan.geo == "skinny" or not G5P_MAINLOOP:
+        return False
+    tm, tn, tk, wm, wn, mode, _swr = parse_geo(plan.geo)
+    if mode != 4:
+        return False
+    from types import SimpleNamespace as _NS
+
+    tile = _NS(tile_m=tm, tile_n=tn, tile_k=tk, warp_m=wm, warp_n=wn, warp_tile_k=16)
+    return mainloop_applies(tile, _NS(vgpr_prefetch=4, split_k=plan.split), M, N, K)
 
 
 def plan_unroll(plan: G5Plan) -> bool:
@@ -232,7 +296,13 @@ def candidate_plans(M: int, N: int, K: int, arch: str) -> List[Tuple[float, G5Pl
 
 
 def rank_plans(
-    M: int, N: int, K: int, dtype: str, arch: str, extra: Sequence[G5Plan] = ()
+    M: int,
+    N: int,
+    K: int,
+    dtype: str,
+    arch: str,
+    extra: Sequence[G5Plan] = (),
+    mainloop: bool = True,
 ) -> List[Tuple[float, G5Plan]]:
     """The preselected plans (+ ``extra``) by predicted time (microseconds),
     cheapest first: the learned model when it is on and shipped, else the
@@ -251,7 +321,16 @@ def rank_plans(
     ys = model.predict(xs)
     out = sorted(
         (
-            (math.exp(y) * (G5P_VP_UNROLL_SCALE if plan_unroll(p) else 1.0), p)
+            (
+                math.exp(y)
+                * (G5P_VP_UNROLL_SCALE if plan_unroll(p) else 1.0)
+                * (
+                    G5P_MAINLOOP_SCALE
+                    if mainloop and plan_mainloop(p, M, N, K)
+                    else 1.0
+                ),
+                p,
+            )
             for y, p in zip(ys, plans)
         ),
         key=lambda x: (x[0], x[1].geo, x[1].split, x[1].serial),

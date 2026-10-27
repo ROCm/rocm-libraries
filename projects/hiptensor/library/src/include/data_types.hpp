@@ -41,6 +41,7 @@
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
 
+#include "../backend/backend.hpp"
 #include "hip_device.hpp"
 #include "plan_cache.hpp"
 
@@ -128,6 +129,10 @@ struct hiptensorPlan
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescE;
     std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
     std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
+
+    // The backend that serves the plan and its prepared program, set at plan creation.
+    // Declared last so it is released before the descriptors it was prepared from.
+    std::unique_ptr<hiptensor::backend::PlanBackendState> mBackend;
 };
 
 struct hiptensorPlanPreference

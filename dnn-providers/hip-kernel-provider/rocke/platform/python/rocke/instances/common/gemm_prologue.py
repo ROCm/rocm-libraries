@@ -110,6 +110,18 @@ class Prologue:
     cplx_b: bool = False
     conj_a: bool = False
     conj_b: bool = False
+    # output scaling of an ``out_f32`` kernel (row-interleave vector epilogue):
+    # "" (D = acc), "alpha" (D = alpha acc) or "bilinear" (D = alpha acc + beta Cin,
+    # Cin with D's layout). Kernel params alpha_re / alpha_im / beta_re / beta_im (f32)
+    # and Cin (f32, read-only); with ``cplx_b`` the scalars are complex and every
+    # (even, odd) column pair of D / Cin is one complex value, else only the real parts
+    # are used.
+    epi: str = ""
+    # ``agpr_out`` (out_f32, acc_agpr bodies): the f32 stores read the accumulators
+    # straight from the AGPRs (``"=a,0"`` hand-out). Default off: they leave the
+    # AGPRs through the compiler's own copy, whose MFMA hazard wait the compiler
+    # inserts (the direct form gave wrong stream-K tiles on the device).
+    agpr_out: bool = False
 
     def check(self) -> None:
         if self.src not in ("same", "f32"):
@@ -137,6 +149,10 @@ class Prologue:
             self.src != "f32" or self.stage != "lds" or self.split_at != "use"
         ):
             raise ValueError("cplx_b needs src='f32', stage='lds', split_at='use'")
+        if self.epi not in ("", "alpha", "bilinear"):
+            raise ValueError(f"prologue epi {self.epi!r}")
+        if self.epi and not self.out_f32:
+            raise ValueError("prologue epi (alpha / bilinear) needs out_f32")
 
     @property
     def kmul(self) -> int:
@@ -181,6 +197,10 @@ class Prologue:
             s += "_pv"
         if self.cplx_b:
             s += "_cx" + ("a" if self.conj_a else "") + ("b" if self.conj_b else "")
+        if self.epi:
+            s += "_e" + ("a" if self.epi == "alpha" else "ab")
+        if self.agpr_out:
+            s += "_ao"
         return s
 
 

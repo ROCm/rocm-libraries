@@ -63,6 +63,8 @@ GEMM_RAGGED_MNK = (15360, 13440, 1536)
 # gemm_skinny configuration outside the registered plans (another split-K /
 # warp_k), i.e. the opt-in ``*_cdna_selected_skinny`` candidates
 GEMM_FEWTILE_LONGK_MNK = (448, 128, 14912)
+# a mid-tile long-K shape the gfx950 split-K ring exists for
+GEMM_SPLIT_RING_MNK = (2304, 256, 28416)
 NORM_WIDE_SHAPE = dict(rows=4096, cols=8192)
 
 
@@ -74,6 +76,7 @@ def _gemm_reqs(arch, spec_id, dtype):
         GEMM_SMALL_SQUARE_MNK,
         GEMM_RAGGED_MNK,
         GEMM_FEWTILE_LONGK_MNK,
+        GEMM_SPLIT_RING_MNK,
     ):
         yield GemmRequest(M=m, N=n, K=k, arch=arch, dtype=dtype, spec_id=spec_id)
 

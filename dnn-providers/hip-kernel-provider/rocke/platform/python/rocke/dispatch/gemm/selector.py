@@ -145,6 +145,9 @@ _DTL_ONLY_LEVERS = ("dtl_stages",)
 # generated variants. Only models whose feature version knows the family
 # (SKINNY_FEATURE_VERSIONS) rank them.
 SELECTOR_SKINNY = True
+# a rule pick of the split-K ring candidate (spec_id
+# cdna_ring_split) keeps the rule pick (no shipped model has its levers)
+SELECTOR_KEEP_R3_RING_SPLIT = True
 # split-K degrees offered for every registered skinny configuration (each must
 # leave every K slice non-empty; see skinny_variant_error)
 SELECTOR_SKINNY_SPLITS: Tuple[int, ...] = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -1082,6 +1085,30 @@ def _fix_pads(spec: Any, M: int, N: int, K: int) -> Any:
     )
 
 
+# generated specs on M / N that are not multiples of 8 (K % 8 ==
+# 0) when they are DTL-ring native forms with TraitSpec.mn_ld_any (2-byte-aligned
+# DMA rows of the MN-contiguous operands, the last tile shifted to end at the
+# extent) and the exact DTL resource (the rows of a ragged K-contiguous operand
+# read zeros past it, as on the registered DTL forms); the ragged-tiling rules
+# below still apply. False: M, N, K multiples of 8 as before.
+SELECTOR_LD_ANY = True
+
+
+def _ld_any_generated_ok(req: Any, spec: Any) -> bool:
+    from . import common as _C
+
+    if not SELECTOR_LD_ANY or not _C.NATIVE_LAYOUT_DTL_LD_ANY:
+        return False
+    if str(req.arch) not in _C.NATIVE_LAYOUT_DTL_LD_ANY_ARCHS:
+        return False
+    tr = spec.trait
+    if not bool(getattr(tr, "mn_ld_any", False)):
+        return False
+    # (mn_ld_any: a non-RCR DTL-ring form; the other ragged dimension's rows are
+    # bounded by the exact DTL resource, as on the registered DTL forms)
+    return bool(tr.direct_to_lds and tr.dtl_tight_rsrc)
+
+
 def generated_spec_error(req: Any, spec: Any, parent: Any | None) -> Optional[str]:
     """Why a GENERATED spec (neighbour / library) is not offered, or None.
 
@@ -1104,7 +1131,7 @@ def generated_spec_error(req: Any, spec: Any, parent: Any | None) -> Optional[st
         return None
     M, N, K = int(req.M), int(req.N), int(req.K)
     t, tr = spec.tile, spec.trait
-    if M % 8 or N % 8 or K % 8:
+    if K % 8 or ((M % 8 or N % 8) and not _ld_any_generated_ok(req, spec)):
         return "generated specs need M, N, K multiples of 8"
     ptile = parent.tile if parent is not None else None
     ptr = parent.trait if parent is not None else None
@@ -1683,7 +1710,14 @@ def _cache_key(req: Any, registry: Any) -> Tuple[Any, ...]:
         native_selector_enabled(str(getattr(req, "arch", ""))),
         SELECTOR_SKINNY,
         SELECTOR_PORTFOLIO_GUARD,
+        _ring_split_state(),
     )
+
+
+def _ring_split_state() -> bool:
+    from .skinny import r3_ring_split_state
+
+    return r3_ring_split_state()
 
 
 def selector_on_for(req: Any) -> bool:
@@ -1722,6 +1756,12 @@ def decide(req: Any, registry: Any) -> Optional[SelectorDecision]:
         # UniversalGemm specs only: a rule pick of a family the model does not
         # know keeps the rule pick
         if rule is None:
+            known = False
+        elif SELECTOR_KEEP_R3_RING_SPLIT and str(
+            getattr(rule[0], "spec_id", "")
+        ) == "cdna_ring_split":
+            # the split-K ring's levers (in-launch reduction,
+            # aligned slices) are outside every shipped model's features
             known = False
         elif kind == "native":
             known = _universal(rule[1])

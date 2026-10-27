@@ -43,13 +43,19 @@ namespace hiptensor
         //   char[4] magic "HTPC", u32 format version,
         //   u32 hipTensor major, minor and patch version,
         //   u32 length and the bytes of the device architecture name, u32 compute unit count,
+        //   u32 backend count, then per backend the u32 length and the bytes of its name and
+        //   its u32 kernel argument version,
         //   u64 line count, then per line the u64 hash key and the u64 solution uid, least
         //   recently used first,
         //   u64 FNV-1a checksum of all the bytes before it.
-        // Hash keys and solution uids only hold for the hipTensor version and the device that
-        // wrote them, so a file of another version or device is refused.
+        // Hash keys, which include the backend, and solution uids only hold for the hipTensor
+        // version, the device and the backends that wrote them, so a file of another version,
+        // device or backend set is refused. Version 1 files have no backends.
         constexpr char     planCacheMagic[4]      = {'H', 'T', 'P', 'C'};
-        constexpr uint32_t planCacheFormatVersion = 1u;
+        constexpr uint32_t planCacheFormatVersion = 2u;
+
+        // A larger backend count is taken as a damaged file.
+        constexpr uint32_t maxBackendCount        = 64u;
         constexpr uint32_t libraryMajorVersion    = HIPTENSOR_MAJOR_VERSION;
         constexpr uint32_t libraryMinorVersion    = HIPTENSOR_MINOR_VERSION;
         constexpr uint32_t libraryPatchVersion    = HIPTENSOR_PATCH_VERSION;
@@ -181,16 +187,20 @@ namespace hiptensor
 
     /////// Class PlanCache ////////////////////////
 
-    PlanCache::PlanCache(std::string archName, uint32_t cuCount)
+    PlanCache::PlanCache(std::string                   archName,
+                         uint32_t                      cuCount,
+                         std::vector<PlanCacheBackend> backends)
         : mArchName(std::move(archName))
         , mCuCount(cuCount)
         , mDeviceHash(Hash{}(Hash{}(mArchName), cuCount))
+        , mBackends(std::move(backends))
         , mMaxCachelines(128)
         , mNextUseStamp(0)
     {
     }
 
-    PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc)
+    PlanCache::HashId PlanCache::getHashID(hiptensorOperationDescriptor_t desc,
+                                           std::string const&             backend)
     {
         auto tag             = desc->mTag;
         auto ADataType       = desc->mDescA ? desc->mDescA->mType : hiptensor::NONE_TYPE;
@@ -248,33 +258,36 @@ namespace hiptensor
         arrLSM.insert(arrLSM.end(), desc->mModeD.begin(), desc->mModeD.end());
         arrLSM.insert(arrLSM.end(), desc->mModeE.begin(), desc->mModeE.end());
 
-        //generate hash ID by {Device, Tag, DatatypeA..E, DatatypeCompute, mOperationType, mContractionOpId, operators, ranks, lengths, strides, modes}
+        //generate hash ID by {Device, Backend, Tag, DatatypeA..E, DatatypeCompute, mOperationType, mContractionOpId, operators, ranks, lengths, strides, modes}
         // A const copy: a non-const std::size_t lvalue would pick Hash's private seed overload
-        std::size_t const deviceHash = mDeviceHash;
-        PlanCache::HashId hashID     = Hash{}(deviceHash,
-                                              tag,
-                                              ADataType,
-                                              BDataType,
-                                              CDataType,
-                                              DDataType,
-                                              EDataType,
-                                              computeType,
-                                              operationType,
-                                              contractionOpId,
-                                              desc->mOpA,
-                                              desc->mOpB,
-                                              desc->mOpC,
-                                              desc->mOpD,
-                                              desc->mOpAC,
-                                              desc->mOpABC,
-                                              arrLSM);
+        std::size_t const deviceHash  = mDeviceHash;
+        std::size_t const backendHash = Hash{}(backend);
+        PlanCache::HashId hashID      = Hash{}(deviceHash,
+                                          backendHash,
+                                          tag,
+                                          ADataType,
+                                          BDataType,
+                                          CDataType,
+                                          DDataType,
+                                          EDataType,
+                                          computeType,
+                                          operationType,
+                                          contractionOpId,
+                                          desc->mOpA,
+                                          desc->mOpB,
+                                          desc->mOpC,
+                                          desc->mOpD,
+                                          desc->mOpAC,
+                                          desc->mOpABC,
+                                          arrLSM);
 
         return hashID;
     }
 
-    PlanCache::Uid PlanCache::querySolutionUid(hiptensorOperationDescriptor_t desc)
+    PlanCache::Uid PlanCache::querySolutionUid(hiptensorOperationDescriptor_t desc,
+                                               std::string const&             backend)
     {
-        return querySolutionUidByHash(getHashID(desc));
+        return querySolutionUidByHash(getHashID(desc, backend));
     }
 
     PlanCache::Uid PlanCache::querySolutionUidByHash(HashId hashId)
@@ -372,6 +385,12 @@ namespace hiptensor
             writer.u32(libraryPatchVersion);
             writer.str(mArchName);
             writer.u32(mCuCount);
+            writer.u32(static_cast<uint32_t>(mBackends.size()));
+            for(auto const& backend : mBackends)
+            {
+                writer.str(backend.name);
+                writer.u32(backend.kernelAbi);
+            }
             writer.u64(lines.size());
             for(auto const& line : lines)
             {
@@ -447,6 +466,32 @@ namespace hiptensor
             return HIPTENSOR_STATUS_IO_ERROR;
         }
         if(archName != mArchName || cuCount != mCuCount)
+        {
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+
+        uint32_t backendCount = 0;
+        if(!reader.u32(backendCount) || backendCount > maxBackendCount)
+        {
+            return HIPTENSOR_STATUS_IO_ERROR;
+        }
+        std::vector<PlanCacheBackend> backends;
+        for(uint32_t i = 0; i < backendCount; i++)
+        {
+            uint32_t nameLength = 0;
+            if(!reader.u32(nameLength) || nameLength > maxArchNameLength)
+            {
+                return HIPTENSOR_STATUS_IO_ERROR;
+            }
+            PlanCacheBackend backend{std::string(nameLength, '\0'), 0u};
+            if(!reader.bytes(backend.name.data(), backend.name.size())
+               || !reader.u32(backend.kernelAbi))
+            {
+                return HIPTENSOR_STATUS_IO_ERROR;
+            }
+            backends.push_back(std::move(backend));
+        }
+        if(backends != mBackends)
         {
             return HIPTENSOR_STATUS_INVALID_VALUE;
         }

@@ -41,6 +41,8 @@
 #include "reduction_solution_instances.hpp"
 #include "reduction_solution_registry.hpp"
 
+#include "backend/registry.hpp"
+#include "backends/ck/ck_backend.hpp"
 #include "hiptensor_options.hpp"
 #include "plancache_autotune.hpp"
 
@@ -251,6 +253,46 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
                                   hipStream_t             stream)
 try
 {
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::reduce(
+            handle, plan, alpha, A, beta, C, D, workspace, workspaceSize, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.beta  = beta;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.C   = C;
+    buffers.out = D;
+
+    return hiptensor::backend::executePlan(
+        handle, plan, scalars, buffers, workspace, workspaceSize, cfg);
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorReduce");
+}
+
+hiptensorStatus_t hiptensor::ckbackend::reduce(hiptensorHandle_t            handle,
+                                               hiptensorPlan_t              plan,
+                                               void const*                  alpha,
+                                               void const*                  A,
+                                               void const*                  beta,
+                                               void const*                  C,
+                                               void*                        D,
+                                               void*                        workspace,
+                                               uint64_t                     workspaceSize,
+                                               backend::LaunchConfig const& cfg)
+{
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -454,20 +496,11 @@ try
 
     for(auto pSolution : solutions)
     {
-        using hiptensor::HiptensorOptions;
-        auto& options = HiptensorOptions::instance();
-
         // Perform reduction with timing if LOG_LEVEL_PERF_TRACE
-        auto streamConfig =
-            (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE) ?
-            StreamConfig{
-                stream, // stream id
-                true, // time_kernel
-                0, // log_level
-                options->coldRuns(), // cold_niters
-                options->hotRuns(), // nrepeat
-            }:
-        StreamConfig{stream, false};
+        auto streamConfig = hiptensor::ckbackend::toStreamConfig(
+            (logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
+                ? hiptensor::ckbackend::timedLaunch(cfg)
+                : cfg);
         auto [isSupported, time] = (*pSolution)(descA->mLengths,
                                                 descA->mStrides,
                                                 modeA,
@@ -530,8 +563,4 @@ try
              hiptensorGetErrorString(errorCode));
     logger->logError("hiptensorReduce", msg);
     return errorCode;
-}
-catch(...)
-{
-    return hiptensor::exceptionToStatus("hiptensorReduce");
 }

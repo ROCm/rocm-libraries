@@ -198,15 +198,19 @@ def run(
     engine="python",
     problem: Optional[GettF64Problem] = None,
     compiled=None,
+    launches: int = 1,
 ):
     """Compile (unless ``compiled`` is given) and launch one GETT kernel on flat
     host buffers; returns D. A ``runtime_sizes`` kernel needs ``problem``.
     ``split_k``: the partial-sum kernel into a workspace, then the reduce
-    kernel (``compiled`` then holds both)."""
+    kernel (``compiled`` then holds both); with ``split_serial`` one kernel
+    with the workspace and the arrival counters (zeroed once), launched
+    ``launches`` times (every launch must leave the counters at zero)."""
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.packing import pack_args
 
-    split = spec.split_k > 1
+    serial = getattr(spec, "split_serial", 0)
+    split = spec.split_k > 1 and not serial
     if compiled is None:
         compiled = compile_kernel(spec, arch, engine=engine)
         if split:
@@ -235,17 +239,34 @@ def run(
         vals.update(_scalars(spec, alpha, beta))
         if spec.runtime_sizes:
             vals.update(gett_f64_runtime_args(spec, problem))
-        if split:
+        if split or serial:
             nbytes = gett_f64_workspace_bytes(spec, problem)
             wptr = rt.alloc(max(nbytes, 16))
             vals["W"] = wptr
+        if serial:
+            from rocke.instances.common.gett_f64 import gett_f64_counter_count
+
+            zeros = np.zeros(max(gett_f64_counter_count(spec, problem), 4), np.int32)
+            cptr = rt.alloc(zeros.nbytes)
+            ptrs.insert(0, (cptr, zeros))  # freed with the buffers; D stays last
+            rt.memcpy_h2d(
+                cptr, (ctypes.c_ubyte * zeros.nbytes).from_buffer(zeros), zeros.nbytes
+            )
+            vals["Cnt"] = cptr
         args = pack_args(gett_f64_signature(spec), vals)
-        rt.launch_blocking(
-            module.get_function(name),
-            gett_f64_grid(spec, problem),
-            (spec.threads, 1, 1),
-            args,
-        )
+        for _ in range(launches if serial else 1):
+            rt.launch_blocking(
+                module.get_function(name),
+                gett_f64_grid(spec, problem),
+                (spec.threads, 1, 1),
+                args,
+            )
+        if serial:
+            back = np.empty_like(zeros)
+            rt.memcpy_d2h(
+                (ctypes.c_ubyte * back.nbytes).from_buffer(back), cptr, back.nbytes
+            )
+            assert not back.any(), "split_serial left a counter non-zero"
         if split:
             rt.launch_blocking(
                 rmodule.get_function(rname),

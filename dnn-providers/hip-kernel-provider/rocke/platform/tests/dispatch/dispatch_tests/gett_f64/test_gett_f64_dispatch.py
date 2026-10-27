@@ -18,6 +18,7 @@ from rocke.instances.common.gett_f64 import (
     gett_f64_grid,
     gett_f64_shape_class,
     is_valid_spec,
+    pipe_spec,
     tuned_spec,
 )
 from rocke.instances.common.gett_f64_plan import packed_strides, plan_contraction
@@ -40,6 +41,11 @@ def test_the_tuned_candidate_comes_first(arch):
     for n, cx in ((8192, False), (1024, False), (4096, True), (1024, True)):
         req = _req(n, arch, cx=cx)
         r = dispatch_gett_f64(req)
+        piped = pipe_spec(req.problem, arch, num_cus=req.cus())
+        if piped is not None:  # the pipelined candidate goes first where it applies
+            assert r.candidate.name == "gett_f64_pipe"
+            assert r.spec == piped
+            continue
         assert r.candidate.name == "gett_f64_tuned"
         assert r.spec == tuned_spec(req.problem, arch, num_cus=req.cus())
         assert r.block == (r.spec.threads, 1, 1)

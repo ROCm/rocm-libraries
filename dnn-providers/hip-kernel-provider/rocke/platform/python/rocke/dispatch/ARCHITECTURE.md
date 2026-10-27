@@ -1886,6 +1886,25 @@ sweep data, through a model rather than a table
   the native model's time predictions and a transpose cost model; the plan
   names existing kernels and the workspace bytes (`ROCKE_GEMM_PLAN_PREPASS`
   auto / off / always).
+- **K-proxy and wave-quantization rules (gfx950 RCR, post-selection).**
+  `common.r3_kproxy_dispatch` (`R3_KPROXY`): a request with K % 64 != 0
+  (K % 8 == 0) is dispatched as K rounded up to a multiple of 64 and the pick
+  runs at the real K with the DTL K tail (`g1_adapt_spec`); a pick that is not
+  a direct-to-LDS body taking the tail, or that fails `is_valid_spec` / the
+  launch contract at the real K, keeps the normal dispatch. Without it such
+  shapes fall to the tile_k 32 ring geometries. `common.r3_qgeo_spec`
+  (`R3_QGEO`): a dispatched 128x128x64 2x4-wave ring is replaced by the
+  256x192 / 192x256 4-wave interleave ring when that ring's quantised work
+  (waves of tiles x tile area, one workgroup per CU against the small ring's
+  two) is at most the small ring's; `R3_QGEO_KTAIL_ONLY` limits it to the
+  K-tail form. The explanation records both rules.
+- **Stream-K levers.** `gemm_universal.STREAMK_KLOOP_UNROLL` admits
+  kloop_unroll 2 / 4 on stream-K bodies (the staged K loop takes a runtime
+  tile count per item); `STREAMK_RESIDENCY_WPE` counts a `waves_per_eu` hint
+  as the register budget of the stream-K co-residency bound. A launcher must
+  still check the pool against the loaded kernel's occupancy
+  (`streamk_launch_error`). Stream-K is not dispatched by these rules: it
+  pays off only for a nearly empty last wave of output tiles.
 
 ---
 

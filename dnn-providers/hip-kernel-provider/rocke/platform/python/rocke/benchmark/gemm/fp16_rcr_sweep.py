@@ -175,6 +175,23 @@ def _request_for_shape(config: GemmSweepConfig, shape: GemmSweepShape) -> GemmRe
     )
 
 
+def _manifest_unsupported(result) -> Optional[str]:
+    """Why a dispatched selection cannot be run through the v1 GEMM manifest, or None.
+
+    The manifest describes a kernel by its tile (block_m / block_n), block size
+    and the plain ``A, B, C, M, N, K`` arguments: gemm_skinny bodies (split-K
+    workspace / counter / scalar arguments) and split-K universal bodies (f32
+    ``Cf32`` workspace, or the in-launch reduction's ``W`` / ``Cnt``) need the
+    dispatcher binding (``result.bind()``) instead.
+    """
+    if not hasattr(result.spec, "tile"):
+        return f"{type(result.spec).__name__}: no tile; run through result.bind()"
+    names = tuple(s["name"] for s in result.signature)
+    if names != ("A", "B", "C", "M", "N", "K"):
+        return f"arguments {names}: not the v1 GEMM manifest signature"
+    return None
+
+
 def expand_sweep(config: GemmSweepConfig) -> GemmSweepPlan:
     """Expand a config into supported dispatcher variants and filtered records."""
     shapes = config.shapes or default_gemm_shapes()
@@ -205,6 +222,10 @@ def expand_sweep(config: GemmSweepConfig) -> GemmSweepPlan:
             if result.kernel_id.cache_key in seen:
                 continue
             seen.add(result.kernel_id.cache_key)
+            why = _manifest_unsupported(result)
+            if why is not None:
+                filtered.append(GemmFilteredVariant(shape, candidate.name, why))
+                continue
             variants.append(
                 GemmSweepVariant(
                     shape=shape,

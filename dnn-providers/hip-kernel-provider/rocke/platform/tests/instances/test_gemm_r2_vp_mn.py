@@ -336,6 +336,16 @@ class TestDispatch(unittest.TestCase):
 
         self.C = C
         self.saved = (C.R2_VP_MN, C.R2_VP_MN_WRAP)
+        # these tests pin the native machinery without the native-form model;
+        # the model (g5_native, tested in test_gemm_r3_g5_native.py) takes
+        # precedence when it is on
+        from unittest import mock as _mock
+
+        from rocke.dispatch.gemm import g5_native as _gn
+
+        _p = _mock.patch.object(_gn, "G5N_ON", False)
+        _p.start()
+        self.addCleanup(_p.stop)
 
     def tearDown(self):
         self.C.R2_VP_MN, self.C.R2_VP_MN_WRAP = self.saved
@@ -523,6 +533,16 @@ class TestPlan(unittest.TestCase):
 
         self.P = P
         self.saved = (P.R2_PLAN, P.R2_PLAN_MARGIN)
+        # these tests pin the native machinery without the native-form model;
+        # the model (g5_native, tested in test_gemm_r3_g5_native.py) takes
+        # precedence when it is on
+        from unittest import mock as _mock
+
+        from rocke.dispatch.gemm import g5_native as _gn
+
+        _p = _mock.patch.object(_gn, "G5N_ON", False)
+        _p.start()
+        self.addCleanup(_p.stop)
         # gemm_skinny's native forms (skinny.SKINNY_NATIVE) take
         # several of these shapes ahead of the slow fallback; the chooser's
         # logic is tested on the register-staged / fallback picks

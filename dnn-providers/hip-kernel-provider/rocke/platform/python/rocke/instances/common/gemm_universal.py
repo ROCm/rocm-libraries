@@ -938,8 +938,9 @@ class TraitSpec:
     # K tail. Without it pad_k + split_k needs ``K % split_k == 0`` and
     # ``(K / split_k) % tile_k == 0`` (a ragged slice reads into the next one).
     split_k_aligned: bool = False
-    # ``split_k_serial`` (split_k > 1, vgpr_prefetch body, default epilogue):
-    # reduce the split-K partials inside the same launch
+    # ``split_k_serial`` (split_k > 1, vgpr_prefetch body or a non-persistent
+    # direct_to_lds ring without ping-pong, default epilogue): reduce the
+    # split-K partials inside the same launch
     # instead of atomic-adding into a zeroed f32 workspace that a second pass
     # casts. The kernel takes ``C`` (the output dtype) plus ``W`` (f32 partial
     # slots) and ``Cnt`` (i32 counters, one per output tile and wave). Every
@@ -953,6 +954,10 @@ class TraitSpec:
     #      writes back / invalidates the XCD's L2);
     #   2: write-through partials instead (``sc1`` stores / loads that bypass
     #      the per-XCD L2, completed by ``s_waitcnt vmcnt(0)``; no L2 fences);
+    #   3: f32 atomic adds into ``W`` [M, N] (zeroed once at
+    #      allocation), the same per-wave ticket; the last wave reads its cells
+    #      back (sc1), stores C and re-zeroes them (no zeroing / cast pass; the
+    #      f32 add order varies between runs, as with the atomic split);
     # 0 (default): off.
     split_k_serial: int = 0
     # ``dtl_k_tail`` (direct_to_lds, dtl_stages >= 2): a ring body runs
@@ -1008,6 +1013,40 @@ class TraitSpec:
     # the first atoms, so they reuse the registers the writes freed; 0
     # (default) = the free slots of atoms 0 .. KA - 2.
     vp_late_reads: int = 0
+    # ``vp_release_atoms`` R (vgpr_prefetch 4): the single LDS
+    # buffer is released (first barrier) before K atom KA - R instead of before
+    # the last atom: the fragments of atoms KA - R + 1 .. KA - 1 are read one
+    # atom early (during atom KA - R - 1; R - 1 more atoms of fragment
+    # registers), and the LDS writes of tile i + 1, the second barrier and the
+    # next tile's first-atom reads spread over the last R atoms instead of one
+    # (on gfx942 the MFMA pipe idles at the tile boundary, where one atom of
+    # MFMAs must cover the LDS refill). 1 (default) = the last atom.
+    vp_release_atoms: int = 1
+    # ``vp_tail_pack`` (vgpr_prefetch 4): placement of the
+    # single-buffer refill in its window. 0 (default): the LDS writes one per
+    # MFMA slot, the second barrier right behind them, the next tile's
+    # first-atom fragment reads spread to the end of the tile. 1: those reads
+    # two per slot right behind the second barrier (their latency is covered
+    # by the rest of the tile instead of exposed at the tile boundary). 2: also
+    # the writes two per slot, then a gap of MPA / 8 slots before the second
+    # barrier (the writes complete before its lgkmcnt(0)). 3: as 1, one read
+    # per slot.
+    vp_tail_pack: int = 0
+    # ``vp_pair_reads`` (vgpr_prefetch 4, depth 1, RCR): the
+    # global reads of tile i + 2 leave the free slots of the first atoms and
+    # pair with the LDS writes of tile i + 1 in the release window: each loaded
+    # vector's ds_writes, then the buffer_load that refills the same registers
+    # (load / ds_write pairs streamed through the MFMA stream): one staging register set instead of two, no loop-carried
+    # prefetch copies. 1 = one instruction per MFMA slot; 2 = a vector's writes
+    # and load in one slot. 0 (default) = off.
+    vp_pair_reads: int = 0
+    # ``vp_mfma_first`` (vgpr_prefetch 3 / 4): a scheduling
+    # barrier between an MFMA and the instructions of its interleave slot, so
+    # the slot's LDS reads / writes cannot be hoisted above the MFMA (a hoisted
+    # first read of a K tile made the tile's first MFMA wait for it:
+    # s_waitcnt lgkmcnt(0) right behind a fresh ds_read). 1 = the first MFMA of
+    # each K tile, 2 = every MFMA. 0 (default) = off.
+    vp_mfma_first: int = 0
     # ``mn_pad`` / ``mn_chunk`` (native NN / TN / TT: only read
     # when ``DataSpec.layout`` makes an operand MN-contiguous, see
     # :mod:`gemm_mn_operand`): the bytes of pad after every 1 KiB LDS block of
@@ -1021,6 +1060,20 @@ class TraitSpec:
     # loader that writes the operand transposed into the K-contiguous LDS tile.
     # The operand's leading dimension (M for A, N for B) must be a multiple.
     mn_vec: int = 8
+    # ``mn_ld_any`` (DTL-ring MN-contiguous operands): admit
+    # an MN leading dimension (M for an M-contiguous A, N for an N-contiguous
+    # B) that is not a multiple of 8. The 16-byte DMA of a 2-byte-aligned row
+    # returns the right data (gfx950, hardware-probed at every 2-byte offset of
+    # voffset, soffset and resource base), but the buffer range check works per
+    # dword of each load: with an exact-bounds resource, a load whose last
+    # in-range element is the low half of one of its dwords returns 0 for it
+    # (the operand's last element when the last row starts 2 bytes off a
+    # dword). So the last output tile along that dimension is shifted back to
+    # end at the extent (origin ``ld - tile``; it recomputes rows of the tile
+    # before it, the same values): no load of the operand reaches past its last
+    # element and none is cut by the range check. Needs ``ld >= tile`` (launch
+    # rule) and the exact-bounds resource (ragged). Default off: unchanged IR.
+    mn_ld_any: bool = False
     # ``vp_mn_kv`` (native NN / TN / TT in the
     # ``vgpr_prefetch`` body; gfx942 has no ds_read_b64_tr_b16): every thread
     # loads micro-blocks of ``vp_mn_kv`` K rows x ``mn_vec`` consecutive M / N
@@ -1069,6 +1122,14 @@ class TraitSpec:
     # built from two ds_read_b64_tr_b16 (the default scheduler there runs out
     # of VGPRs and shuffles accumulators through VGPRs / scratch).
     sched_strategy: str = ""
+    # ``wide_addr`` (direct-to-LDS, dtl_hoist + dtl_soff0 or dtl_tight_rsrc,
+    # row-interleave vector epilogue, non-persistent, RCR): 64-bit tile
+    # origins. Each operand's DTL resource base is a 64-bit pointer at the
+    # output tile's row origin (row * K * 2 bytes computed in i64) and the
+    # epilogue stores relative to a 64-bit C base at the tile's first row, so
+    # A, B and C may exceed the i32 element offsets and the 2 GiB buffer
+    # range of the default addressing (only a tile's own span must fit).
+    wide_addr: bool = False
 
 
 @dataclass(frozen=True)
@@ -1224,6 +1285,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 f"hsk{tr.hb_skew}": tr.hb_skew > 0,
                 f"htl{tr.hb_tile_lgkm0}": tr.hb_tile_lgkm0 > 0,
                 "dbf": tr.dtl_base_fold,
+                "w64": tr.wide_addr,
                 f"hsd{tr.hb_skew_dtl}": tr.hb_skew_dtl > 0,
                 "dsa": tr.das_anchor,
                 "dsl": tr.das_late,
@@ -1235,6 +1297,10 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 f"vpd{tr.vgpr_prefetch_depth}": tr.vgpr_prefetch_depth != 1,
                 f"vpu{tr.vp_unroll}": tr.vp_unroll > 0,
                 f"vpl{tr.vp_late_reads}": tr.vp_late_reads > 0,
+                f"vpr{tr.vp_release_atoms}": tr.vp_release_atoms != 1,
+                f"vtp{tr.vp_tail_pack}": tr.vp_tail_pack > 0,
+                f"vpp{tr.vp_pair_reads}": tr.vp_pair_reads > 0,
+                f"vmf{tr.vp_mfma_first}": tr.vp_mfma_first > 0,
                 f"su{tr.stagger_u}s{tr.stagger_u_stride}m{tr.stagger_u_map}": tr.stagger_u
                 > 0,
                 "msp": tr.mfma_serpentine,
@@ -1258,6 +1324,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 f"mnp{tr.mn_pad}": self.data.layout != "RCR" and tr.mn_pad != 32,
                 f"mnc{tr.mn_chunk}": self.data.layout != "RCR" and tr.mn_chunk > 0,
                 f"mnv{tr.mn_vec}": self.data.layout != "RCR" and tr.mn_vec != 8,
+                "mnla": tr.mn_ld_any,
                 f"vmk{tr.vp_mn_kv}": tr.vp_mn_kv > 0,
                 f"vmo{tr.vp_mn_order}": tr.vp_mn_order > 0,
                 f"vmw{tr.vp_mn_worder}": tr.vp_mn_worder > 0,
@@ -1287,12 +1354,42 @@ _ILV_ARCHS = ("gfx942", "gfx950")
 _SWR_DH_ARCHS = ("gfx942", "gfx950")
 
 
+def _pro_epi_params(b: IRBuilder, pro) -> Dict[str, Value]:
+    """The kernel params of a prologue ``epi`` (declared once per kernel)."""
+    got = getattr(b, "_rocke_pro_epi_params", None)
+    if got is not None:
+        return got
+    got = {"alpha_re": b.param("alpha_re", F32)}
+    if pro.cplx_b:
+        got["alpha_im"] = b.param("alpha_im", F32)
+    if pro.epi == "bilinear":
+        got["beta_re"] = b.param("beta_re", F32)
+        if pro.cplx_b:
+            got["beta_im"] = b.param("beta_im", F32)
+        got["Cin"] = b.param(
+            "Cin", PtrType(F32, "global"), noalias=True, readonly=True, align=16
+        )
+    b._rocke_pro_epi_params = got
+    return got
+
+
+def _hb_k_atoms(spec: "UniversalGemmSpec") -> int:
+    """K atoms of one K tile as the MFMA stream issues them: an operand
+    prologue with an f32 pair view (``spec._prologue``, ``kmul`` 2) packs two
+    16-bit K atoms into one f32 atom (one slot = the recipe's MFMA group)."""
+    ka = spec.tile.k_atoms_per_tile_k
+    pro = getattr(spec, "_prologue", None)
+    if pro is not None and pro.kmul > 1:
+        ka //= pro.kmul
+    return max(1, ka)
+
+
 def hb_last_read_slot(spec: "UniversalGemmSpec") -> int:
     """``hb_sched``: the MFMA index (within a K tile) of the last intra-tile
     fragment read (-1 when the tile has a single K atom)."""
     t = spec.tile
     n = t.mfmas_per_warp_m * t.mfmas_per_warp_n
-    ka = t.k_atoms_per_tile_k
+    ka = _hb_k_atoms(spec)
     if ka < 2:
         return -1
     nrd = t.mfmas_per_warp_m + t.mfmas_per_warp_n
@@ -1303,7 +1400,8 @@ def hb_slots(spec: "UniversalGemmSpec") -> Tuple[int, int]:
     """``hb_sched``: (release, acquire) MFMA slot of a K tile (auto-resolved)."""
     t = spec.tile
     n = t.mfmas_per_warp_m * t.mfmas_per_warp_n
-    ntot = t.k_atoms_per_tile_k * n
+    ka = _hb_k_atoms(spec)
+    ntot = ka * n
     tr = spec.trait
     rel = (
         tr.hb_rel_slot
@@ -1313,7 +1411,7 @@ def hb_slots(spec: "UniversalGemmSpec") -> Tuple[int, int]:
     acq = (
         tr.hb_acq_slot
         if tr.hb_acq_slot >= 0
-        else min(ntot - 1, (t.k_atoms_per_tile_k - 1) * n + 3)
+        else min(ntot - 1, (ka - 1) * n + 3)
     )
     return rel, acq
 
@@ -1551,7 +1649,7 @@ def launch_shape_error(
     if _pro_err is not None:
         return _pro_err
     _ra, _rb = _operand_rows(spec, int(M), int(N))
-    if tr.dtl_tight_rsrc and max(_ra, _rb) * int(K) * 2 >= 2**31:
+    if tr.dtl_tight_rsrc and not tr.wide_addr and max(_ra, _rb) * int(K) * 2 >= 2**31:
         return (
             f"dtl_tight_rsrc: operand bytes max(M, N) * K * 2 = "
             f"{max(_ra, _rb) * int(K) * 2} do not fit the i32 buffer range"
@@ -1561,7 +1659,9 @@ def launch_shape_error(
             f"rve_pad: N={N} is not a multiple of 8 (each lane stores 8 "
             "consecutive 16-bit columns with one 16-byte store)"
         )
-    if tr.rve_pad == 2 and int(M) * int(N) * 2 >= 2**32:
+    _pro_o = getattr(spec, "_prologue", None)
+    _f32_out = _pro_o is not None and bool(_pro_o.out_f32)
+    if tr.rve_pad == 2 and not _f32_out and int(M) * int(N) * 2 >= 2**32:
         return (
             f"rve_pad 2: C bytes M * N * 2 = {int(M) * int(N) * 2} do not fit "
             "the u32 buffer range"
@@ -1611,6 +1711,20 @@ def launch_shape_error(
                     else ""
                 )
                 + ")"
+            )
+    if tr.split_k > 1 and tr.split_k_aligned and tr.direct_to_lds:
+        # the ring's aligned slices are whole tiles (no K mask)
+        # and none may be empty
+        if int(K) % t.tile_k:
+            return (
+                f"K={K} is not a multiple of tile_k={t.tile_k} (split_k_aligned on "
+                "the direct_to_lds ring has no K tail)"
+            )
+        _ks_t = -(-(int(K) // t.tile_k) // tr.split_k)
+        if (tr.split_k - 1) * _ks_t >= int(K) // t.tile_k:
+            return (
+                f"split_k={tr.split_k}: K={K} gives empty aligned slices "
+                f"({_ks_t} tiles of {t.tile_k} per slice)"
             )
     if spec.data.layout != "RCR":
         err = _mno.mn_launch_error(spec, int(M), int(N), int(K))
@@ -1707,6 +1821,25 @@ def _g1_launch_error(
     if tr.split_k > _GRID_YZ_MAX:
         return f"split_k {tr.split_k} exceeds the grid.z limit {_GRID_YZ_MAX}"
     _ra, _rb = _operand_rows(spec, M, N)
+    if tr.wide_addr:
+        # 64-bit tile origins: only a tile's own span needs the i32 offsets
+        # and the DTL buffer range (a complex-B tile spans tile_n / 2 rows)
+        _span_b = t.tile_n // 2 if _rb != N else t.tile_n
+        for nm, nbytes in (
+            ("A", t.tile_m * K * 2),
+            ("B", _span_b * K * 2),
+        ):
+            if nbytes > DTL_BUFFER_NUM_RECORDS:
+                return (
+                    f"wide_addr: an operand {nm} tile spans {nbytes} bytes, past "
+                    f"the DTL buffer range {DTL_BUFFER_NUM_RECORDS:#x}"
+                )
+        if t.tile_m * N > (1 << 31):
+            return (
+                f"wide_addr: a C tile spans {t.tile_m * N} elements; the "
+                "tile-relative i32 store offsets cover at most 2**31"
+            )
+        return None
     for nm, elems in (("A", _ra * K), ("B", _rb * K), ("C", M * N)):
         if elems > (1 << 31):
             return (
@@ -1781,6 +1914,21 @@ def streamk_workspace_bytes(spec: "UniversalGemmSpec") -> Tuple[int, int]:
     return (flags, pool * t.tile_m * t.tile_n * 4)
 
 
+# ``split_k_serial`` is also valid on the non-persistent direct_to_lds ring (no
+# ping-pong / asm loop): the in-launch ordered reduction replaces the zeroed f32
+# workspace + cast passes of the atomic split-K. False = the vgpr_prefetch body
+# only.
+SPLIT_K_SERIAL_DTL = True
+# split_k_serial 1 (release / acquire fences around the
+# counter) measured wrong results on gfx942 and gfx950 (full-output checks):
+# is_valid_spec refuses it while this is False (the emission is kept).
+SPLIT_K_SERIAL_FENCED_VALID = False
+# ``split_k_aligned`` (whole-tile K slices, the last one shorter) is also valid
+# on that ring when K % tile_k == 0 (no pad_k / K tail); no slice may be empty
+# (launch_shape_error). False = global-load body only.
+SPLIT_K_ALIGNED_DTL = True
+
+
 def split_k_serial_workspace(
     spec: "UniversalGemmSpec", M: int, N: int
 ) -> Tuple[int, int]:
@@ -1793,6 +1941,10 @@ def split_k_serial_workspace(
     t = spec.tile
     tiles = -(-int(M) // t.tile_m) * -(-int(N) // t.tile_n)
     waves = t.warp_m * t.warp_n * t.warp_k
+    if int(spec.trait.split_k_serial) == 3:
+        # mode 3: the atomic f32 workspace [M, N] (zero it once at allocation,
+        # like Cnt: the kernel leaves both zeroed)
+        return (int(M) * int(N), tiles * waves)
     return (int(spec.trait.split_k) * tiles * t.tile_m * t.tile_n, tiles * waves)
 
 
@@ -1800,6 +1952,19 @@ def split_k_serial_workspace(
 # maximum -- the register-limited occupancy a kernel is guaranteed before its
 # register count is known.
 STREAMK_WORST_CASE_WAVES_PER_CU = 4
+# A ``waves_per_eu`` hint is a
+# register budget the backend must meet (``amdgpu-waves-per-eu`` min bounds the
+# VGPR + AGPR allocation; it spills rather than exceed it), so a stream-K pool
+# may count ``waves_per_eu`` waves per SIMD instead of the 1-wave worst case:
+# the 8-wave small DTL ring then keeps its two workgroups per CU under
+# stream-K. False: the worst case only.
+STREAMK_RESIDENCY_WPE = True
+# ``kloop_unroll`` 2 / 4 on a stream-K body. The staged K loop
+# already takes a runtime tile count per stream-K item (main trips of U tiles +
+# a 0 .. U-1 tile tail that bounds its DMA issues by the item's K end), so the
+# unrolled loop is the same code path the persistent / plain bodies use. False:
+# stream-K bodies run kloop_unroll 1 only.
+STREAMK_KLOOP_UNROLL = True
 
 
 def streamk_resident_ctas(
@@ -1818,7 +1983,11 @@ def streamk_resident_ctas(
     waves = t.warp_m * t.warp_n * t.warp_k
     cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     per_lds = cap // max(1, int(lds_bytes))
-    per_reg = max(1, STREAMK_WORST_CASE_WAVES_PER_CU // max(1, waves))
+    wpe = STREAMK_WORST_CASE_WAVES_PER_CU // 4
+    if STREAMK_RESIDENCY_WPE and spec.trait.waves_per_eu is not None:
+        w_ = spec.trait.waves_per_eu
+        wpe = max(wpe, int(w_[0] if isinstance(w_, tuple) else w_))
+    per_reg = max(1, (4 * wpe) // max(1, waves))
     per_cu = min(per_lds, per_reg)
     return arch_num_cus(arch) * per_cu, per_cu
 
@@ -2430,6 +2599,35 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         return False, (
             "vp_late_reads must be 0 / 1 and requires vgpr_prefetch 4 with depth 1"
         )
+    if tr.vp_release_atoms != 1 and (
+        int(tr.vgpr_prefetch) != 4
+        or tr.vp_late_reads
+        or not 1 <= int(tr.vp_release_atoms) < t.k_atoms_per_tile_k
+    ):
+        return False, (
+            "vp_release_atoms must be 1 .. K atoms per tile - 1 and requires "
+            "vgpr_prefetch 4 without vp_late_reads"
+        )
+    if tr.vp_tail_pack and (
+        tr.vp_tail_pack not in (1, 2, 3) or int(tr.vgpr_prefetch) != 4
+    ):
+        return False, "vp_tail_pack must be 0 .. 3 and requires vgpr_prefetch 4"
+    if tr.vp_mfma_first and (
+        tr.vp_mfma_first not in (1, 2) or int(tr.vgpr_prefetch) not in (3, 4)
+    ):
+        return False, "vp_mfma_first must be 0 / 1 / 2 and requires vgpr_prefetch 3 / 4"
+    if tr.vp_pair_reads and (
+        tr.vp_pair_reads not in (1, 2)
+        or int(tr.vgpr_prefetch) != 4
+        or int(tr.vgpr_prefetch_depth) != 1
+        or tr.vp_late_reads
+        or tr.vp_tail_pack == 2
+        or str(spec.data.layout).upper() != "RCR"
+    ):
+        return False, (
+            "vp_pair_reads must be 0 / 1 / 2 and requires vgpr_prefetch 4 with depth 1, "
+            "the RCR layout, no vp_late_reads and vp_tail_pack 0 / 1 / 3"
+        )
     if (
         tr.vp_mn_kv
         or tr.vp_mn_order
@@ -2447,6 +2645,16 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         if tr.vgpr_prefetch_depth not in (1, 2, 3):
             return False, (
                 f"vgpr_prefetch_depth must be 1..3 (got {tr.vgpr_prefetch_depth})"
+            )
+        if tr.vgpr_prefetch_depth > 1 and tr.acc_agpr:
+            # gfx942 guard-page checks: depth 2 / 3 with AGPR accumulators
+            # spills heavily and some of those kernels compute wrong results
+            # (e.g. 224x256 w2x2 depth 2 + vp_unroll f16, 192x320 / 256x224
+            # w2x2 depth 3 with pads: rows of one wave's fragments read from
+            # the wrong K); never faster than depth 1
+            return False, (
+                "vgpr_prefetch_depth > 1 with AGPR accumulators (acc_agpr): "
+                "spill-heavy, wrong results measured"
             )
         if tr.lds_swizzle and family == "mma":
             _vop = _resolve_mma_op(spec, arch)
@@ -2660,6 +2868,31 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             "dtl_base_fold requires dtl_soff0 + dtl_hoist, no dtl_tight_rsrc and "
             "a non-persistent grid"
         )
+    if tr.wide_addr and not (
+        tr.direct_to_lds
+        and tr.dtl_hoist
+        and (tr.dtl_soff0 or tr.dtl_tight_rsrc)
+        and tr.rilv_vec_epilogue
+        and not tr.dtl_base_fold
+        and not tr.persistent_ctas
+        and not tr.streamk
+        and tr.split_k <= 1
+        and not tr.split_k_serial
+        and not tr.pingpong
+        and not tr.asm_loop
+        and not tr.dtl_k_tail
+        and str(spec.data.layout).upper() == "RCR"
+        and not spec.batched
+        and getattr(spec, "_gett", None) is None
+        and getattr(spec, "_mono", None) is None
+    ):
+        return False, (
+            "wide_addr requires the direct-to-LDS ring with dtl_hoist and "
+            "dtl_soff0 or dtl_tight_rsrc, the row-interleave vector epilogue, a "
+            "non-persistent grid without split-K / stream-K / pingpong / asm_loop "
+            "/ dtl_k_tail / dtl_base_fold / batching, the RCR layout and no "
+            "tensor GETT / rich-epilogue hook"
+        )
     if (tr.stagger_u or tr.stagger_u_stride != 1 or tr.stagger_u_map) and not (
         tr.stagger_u in (2, 4, 8, 16, 32, 64)
         and 1 <= tr.stagger_u_stride <= 64
@@ -2711,7 +2944,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         and tr.direct_to_lds
         and tr.dtl_stages >= 2
         and not tr.pingpong
-        and not tr.streamk
+        and (STREAMK_KLOOP_UNROLL or not tr.streamk)
     ):
         return False, (
             "kloop_unroll requires 2 or 4 with direct_to_lds, dtl_stages >= 2, "
@@ -2748,8 +2981,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 "hb_sched is its own MFMA-slot schedule: it excludes ilv_merge, "
                 "ilv_barrier_after, ilv_dtl_every and iglp_opt"
             )
-        _ntot = t.k_atoms_per_tile_k * t.mfmas_per_warp_m * t.mfmas_per_warp_n
-        if tr.hb_split_rel and (tr.hb_rel_slot >= 0 or t.k_atoms_per_tile_k < 2):
+        _ntot = _hb_k_atoms(spec) * t.mfmas_per_warp_m * t.mfmas_per_warp_n
+        if tr.hb_split_rel and (tr.hb_rel_slot >= 0 or _hb_k_atoms(spec) < 2):
             return False, (
                 "hb_split_rel places both releases itself (hb_rel_slot must stay "
                 "-1) and needs >= 2 K atoms per tile"
@@ -3233,18 +3466,50 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         )
     if tr.pad_k_fast and (not tr.pad_k or tr.direct_to_lds):
         return False, "pad_k_fast requires pad_k on the global-load body"
+    # SPLIT_K_ALIGNED_DTL: whole-tile slices on the
+    # non-persistent direct_to_lds ring (no pad_k / K tail: K % tile_k == 0;
+    # the ring's tile count is per slice and the DMA past a slice end loads
+    # zeros), so any split degree serves K instead of the divisors of K / tile_k
+    _ska_ring = (
+        SPLIT_K_ALIGNED_DTL
+        and tr.direct_to_lds
+        and not tr.pad_k
+        and not tr.dtl_k_tail
+        and not int(tr.pingpong)
+        and not tr.asm_loop
+        and not tr.persistent_ctas
+    )
     if tr.split_k_aligned and (
-        sk < 2 or not tr.pad_k or tr.direct_to_lds or tr.streamk or tr.preshuffle_b
+        sk < 2
+        or not ((tr.pad_k and not tr.direct_to_lds) or _ska_ring)
+        or tr.streamk
+        or tr.preshuffle_b
     ):
         return False, (
             "split_k_aligned requires split_k > 1 and pad_k on the global-load "
-            "body (no direct_to_lds / streamk / preshuffle_b)"
+            "body, or a direct_to_lds ring without pad_k / dtl_k_tail / ping-pong "
+            "/ asm loop / persistent CTAs (no streamk / preshuffle_b)"
         )
-    if tr.split_k_serial not in (0, 1, 2):
-        return False, f"split_k_serial must be 0, 1 or 2 (got {tr.split_k_serial})"
+    if tr.split_k_serial not in (0, 1, 2, 3):
+        return False, f"split_k_serial must be 0, 1, 2 or 3 (got {tr.split_k_serial})"
+    # the non-persistent direct_to_lds ring (no ping-pong, no
+    # asm loop) shares the epilogue the reduction runs in (SPLIT_K_SERIAL_DTL)
+    _sks_ring = (
+        SPLIT_K_SERIAL_DTL
+        and tr.direct_to_lds
+        and not int(tr.pingpong)
+        and not tr.asm_loop
+    )
+    if tr.split_k_serial == 1 and not SPLIT_K_SERIAL_FENCED_VALID:
+        # full-output f64 checks: the fence-ordered reduction (1) returned
+        # wrong elements on the gfx950 direct_to_lds ring and on the gfx942
+        # vgpr_prefetch body (incl. a second run of a passing launch); the
+        # write-through form (2) passed every check (the dispatcher never
+        # picks 1: g5_plan.G5P_SERIAL_MODES)
+        return False, "split_k_serial 1 (fenced partials) returned wrong results: use 2"
     if tr.split_k_serial and (
         sk < 2
-        or not tr.vgpr_prefetch
+        or not (tr.vgpr_prefetch or _sks_ring)
         or tr.epilogue != "default"
         or tr.streamk
         or tr.persistent_ctas
@@ -3252,8 +3517,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         or t.warp_k != 1
     ):
         return False, (
-            "split_k_serial requires split_k > 1 on the vgpr_prefetch body with "
-            "the default epilogue (no streamk / persistent_ctas / batched; warp_k 1)"
+            "split_k_serial requires split_k > 1 on the vgpr_prefetch body or a "
+            "direct_to_lds ring without ping-pong / asm loop, with the default "
+            "epilogue (no streamk / persistent_ctas / batched; warp_k 1)"
         )
     if tr.dtl_k_tail not in (0, 1, 2):
         return False, f"dtl_k_tail must be 0, 1 or 2 (got {tr.dtl_k_tail})"
@@ -3567,6 +3833,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             raise ValueError("prologue out_f32 needs the default epilogue")
         if spec.trait.split_k > 1:
             raise ValueError("prologue: split_k unsupported")
+        if _pro.epi and spec.trait.mfma_swap_ab:
+            # the swapped-accumulator store does not apply alpha / beta
+            raise ValueError("prologue epi: mfma_swap_ab unsupported")
         if spec.trait.sia_sched or spec.trait.asm_loop:
             # these K-tile emitters were never verified with a prologue
             raise ValueError("prologue: sia_sched / asm_loop bodies unsupported")
@@ -3913,6 +4182,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # P57: pin the non-swizzled batched-GEMM offsets in SGPR too.
         block_m_off = b.to_sgpr_u32(b.mul(b.block_id_y(), c_block_m))
         block_n_off = b.to_sgpr_u32(b.mul(b.block_id_x(), c_block_n))
+
+    # ``mn_ld_any``: the last tile along an MN-contiguous
+    # operand's dimension ends at the extent (origin ``ld - tile``; the launch
+    # rules keep ld >= tile), so no DMA row of that operand runs past its end
+    def _mn_ld_clamp(off: Value, ld: Value, tile: int) -> Value:
+        return b.to_sgpr_u32(b.smin(off, b.sub(ld, b.const_i32(tile))))
+
+    _mnla_a = bool(spec.trait.mn_ld_any) and _mn_lay_a is not None
+    _mnla_b = bool(spec.trait.mn_ld_any) and _mn_lay_b is not None
+    if _mnla_a:
+        block_m_off = _mn_ld_clamp(block_m_off, M, block_m)
+    if _mnla_b:
+        block_n_off = _mn_ld_clamp(block_n_off, N, block_n)
 
     # stagger_u: this workgroup's K start offset (elements)
     _su_off = None
@@ -5472,6 +5754,128 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             with edge:
                 _emit_epilogue_default(b, spec, op, vals, *args, **kw)
 
+    def _ep_split_k_ticket(vals: Sequence[Value]) -> None:
+        """``split_k_serial`` 3: the atomic split-K scatter
+        into the f32 workspace ``W`` [M, N] (zeroed once at allocation), then
+        the per-(tile, wave) ticket of the serial modes. The wave that draws
+        ticket split_k - 1 reads its cells of ``W`` back with write-through
+        (sc1) loads, stores them to ``C`` through the default epilogue, writes
+        zeros back to its in-bounds cells of ``W`` and resets its counter: no
+        zeroing pass and no cast pass, any split degree, the slices reduce in
+        parallel (atomics: the f32 add order varies between runs)."""
+        from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding, mfma_atom
+        from ...helpers.distribution import make_static_tile_distribution
+        from ...core.ir import I64
+
+        tl_ = spec.tile
+        n_waves = tl_.warp_m * tl_.warp_n * tl_.warp_k
+        c_nw = b.const_i32(n_waves)
+        npn = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+        tile_ = b.to_sgpr_u32(
+            b.add(
+                b.mul(b.div(block_m_off, c_block_m), npn),
+                b.div(block_n_off, c_block_n),
+            )
+        )
+        cnt_idx = b.add(b.mul(tile_, c_nw), b.to_sgpr_u32(warp_id))
+        _emit_epilogue_split_k(
+            b,
+            spec,
+            vals,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off,
+            block_n_off,
+            M,
+            N,
+            sks_w,
+            c_per_lane,
+        )
+        # the wave's adds are performed before its ticket
+        b.inline_asm("s_waitcnt vmcnt(0)", "", [])
+        one = b.select(b.cmp_eq(lane, c0), b.const_i32(1), c0)
+        old = b.global_atomic_add(sks_cnt, cnt_idx, one, ordering="monotonic")
+        ticket = b.readfirstlane(old)
+        with b.scf_if(b.cmp_eq(ticket, b.const_i32(_split_k - 1))):
+            # the cells of this wave (the atomic scatter's coordinates)
+            mfmas_m, mfmas_n = tl_.mfmas_per_warp_m, tl_.mfmas_per_warp_n
+            wm_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * tl_.warp_tile_m))
+            wn_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * tl_.warp_tile_n))
+            bwm = b.add(block_m_off, wm_off)
+            bwn = b.add(block_n_off, wn_off)
+            atom = mfma_atom(
+                spec.data.dtype_a, tl_.warp_tile_m, tl_.warp_tile_n, tl_.warp_tile_k
+            )
+            _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
+            c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+            c_nlane = b.const_i32(kc_nlane)
+            p_lane = [b.div(lane, c_nlane), b.mod(lane, c_nlane)]
+            rows_: List[Value] = []
+            col_: Optional[Value] = None
+            for i in range(c_per_lane):
+                ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+                x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+                rows_.append(x_row)
+                col_ = x_col
+            m_last = b.sub(M, b.const_i32(1))
+            n_last = b.sub(N, b.const_i32(1))
+            w64 = b.global_ptr_to_i64(sks_w)
+            cells = []  # (acc index, slot, c_m, c_n, clamped element offset)
+            flat = 0
+            for mi in range(mfmas_m):
+                base_m = b.add(bwm, b.const_i32(mi * tl_.warp_tile_m))
+                for ni in range(mfmas_n):
+                    c_n = b.add(bwn, b.add(b.const_i32(ni * tl_.warp_tile_n), col_))
+                    cn_c = b.smin(c_n, n_last)
+                    for i in range(c_per_lane):
+                        c_m = b.add(base_m, rows_[i])
+                        off = b.add(b.mul(b.smin(c_m, m_last), N), cn_c)
+                        cells.append((flat, i, c_m, c_n, off))
+                    flat += 1
+            got = {}
+            for g0 in range(0, len(cells), 16):
+                grp = cells[g0 : g0 + 16]
+                n_ = len(grp)
+                tmpl = [f"global_load_dword ${j}, ${n_ + j}, off sc1" for j in range(n_)]
+                tmpl.append("s_waitcnt vmcnt(0)")
+                addrs = [
+                    b.add(w64, b.mul(b.zext(off, I64), b.const_i64(4)))
+                    for (_f, _i, _m, _n, off) in grp
+                ]
+                res_ = b.inline_asm_multi(
+                    "\n".join(tmpl),
+                    ",".join(["=&v"] * n_ + ["v"] * n_),
+                    addrs,
+                    result_types=[F32] * n_,
+                )
+                for (f_, i_, _m, _n, _o), r_ in zip(grp, res_):
+                    got[(f_, i_)] = r_
+            out = []
+            for f_ in range(len(vals)):
+                v_ = b.vec_pack([got[(f_, i)] for i in range(c_per_lane)], F32)
+                out.append(
+                    b.inline_asm("", "=a,0", [v_], v_.type, sideeffect=True)
+                    if spec.trait.acc_agpr
+                    else v_
+                )
+            # zero this wave's in-bounds cells for the next launch
+            z_ = b.const_f32(0.0)
+            pad_m, pad_n = bool(spec.trait.pad_m), bool(spec.trait.pad_n)
+            for _f, _i, c_m, c_n, off in cells:
+                chk = []
+                if pad_m:
+                    chk.append(b.cmp_lt(c_m, M))
+                if pad_n:
+                    chk.append(b.cmp_lt(c_n, N))
+                if chk:
+                    with b.scf_if(chk[0] if len(chk) == 1 else b.land(chk[0], chk[1])):
+                        b.global_store(sks_w, off, z_, align=4)
+                else:
+                    b.global_store(sks_w, off, z_, align=4)
+            b.global_store(sks_cnt, cnt_idx, c0, align=4)
+            _ep_default(out, block_m_off, block_n_off)
+
     def _ep_split_k_serial(vals: Sequence[Value]) -> None:
         """``split_k_serial``: per-wave in-launch split-K reduction. Wave w of
         the workgroup of K slice z stores its f32 partial into slot
@@ -5484,6 +5888,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         default epilogue. Every wave of a slice computes the same sub-tile of
         the output tile, so wave w's partials meet only wave w's reduction:
         no workgroup barrier, no LDS."""
+        if int(spec.trait.split_k_serial) == 3:
+            _ep_split_k_ticket(vals)
+            return
         tl_ = spec.tile
         n_waves = tl_.warp_m * tl_.warp_n * tl_.warp_k
         c_nw = b.const_i32(n_waves)
@@ -6009,21 +6416,61 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             nxt_f = {}
             reads_per_atom = mfmas_m + mfmas_n
             free = []
-            for kk in range(KA - 1):
-                ra, rb = [None] * mfmas_m, [None] * mfmas_n
-                nxt_f[kk + 1] = (ra, rb)
-                rth = frag_thunks(kk + 1, par, ra, rb)
+            # vp_release_atoms R (single LDS buffer, not the last tile): the
+            # fragments of atoms KA - R .. KA - 1 are all read during atom
+            # KA - R - 1, so the buffer is released before atom KA - R
+            _R = int(spec.trait.vp_release_atoms) if _vp_single else 1
+            if nxt is None:
+                _R = 1
+            if _R > 1:
+                RA = KA - _R - 1
+                early = []
+                for kk in range(KA - 1):
+                    ra, rb = [None] * mfmas_m, [None] * mfmas_n
+                    nxt_f[kk + 1] = (ra, rb)
+                    rth = frag_thunks(kk + 1, par, ra, rb)
+                    if kk < RA:
+                        rs = [
+                            kk * MPA + (j * (MPA // 2)) // reads_per_atom
+                            for j in range(len(rth))
+                        ]
+                        for s_, th in zip(rs, rth):
+                            put(s_, th, plan)
+                        free += [
+                            kk * MPA + j
+                            for j in range(MPA)
+                            if kk * MPA + j not in set(rs)
+                        ]
+                    else:
+                        early += rth
+                # every hosted read in the first 3/4 of atom RA (in order)
                 rs = [
-                    kk * MPA + (j * (MPA // 2)) // reads_per_atom
-                    for j in range(len(rth))
+                    RA * MPA + (j * max(1, (3 * MPA) // 4)) // len(early)
+                    for j in range(len(early))
                 ]
-                for s_, th in zip(rs, rth):
+                for s_, th in zip(rs, early):
                     put(s_, th, plan)
                 free += [
-                    kk * MPA + j for j in range(MPA) if kk * MPA + j not in set(rs)
+                    RA * MPA + j for j in range(MPA) if RA * MPA + j not in set(rs)
                 ]
+            else:
+                for kk in range(KA - 1):
+                    ra, rb = [None] * mfmas_m, [None] * mfmas_n
+                    nxt_f[kk + 1] = (ra, rb)
+                    rth = frag_thunks(kk + 1, par, ra, rb)
+                    rs = [
+                        kk * MPA + (j * (MPA // 2)) // reads_per_atom
+                        for j in range(len(rth))
+                    ]
+                    for s_, th in zip(rs, rth):
+                        put(s_, th, plan)
+                    free += [
+                        kk * MPA + j for j in range(MPA) if kk * MPA + j not in set(rs)
+                    ]
             regs_out: List[Value] = []
             last0 = (KA - 1) * MPA
+            # first slot of the release window (the last atom when R = 1)
+            lastR = (KA - _R) * MPA
             if nxt is not None and not _vp_single:
                 npar, regs, k_pf = nxt
                 spread(
@@ -6040,18 +6487,52 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 # the next tile's first-atom fragment reads
                 npar, regs, k_pf = nxt
                 _late = bool(int(spec.trait.vp_late_reads))
-                if not _late:
+                _pair = bool(int(spec.trait.vp_pair_reads))
+                if not _late and not _pair:
                     spread(_vp_read_thunks(k_pf, regs_out), free, plan)
                 wth = _vp_write_thunks(regs, 0)
                 nw = len(wth)
-                wslots = max(1, min(nw, MPA // 2))
-                spread(wth, list(range(last0, last0 + wslots)), plan)
+                wslots = max(1, min(nw, MPA // 2 if _R == 1 else _R * MPA - MPA // 2))
+                _tp = int(spec.trait.vp_tail_pack)
+                if _pair:
+                    # each loaded vector's ds_writes, then the load of tile i + 2
+                    # into the registers they freed, spread over the window but
+                    # the last half atom (second barrier + next-tile reads)
+                    rth_ = _vp_read_thunks(k_pf, regs_out)
+                    per = nw // max(1, len(rth_))
+                    if per * len(rth_) != nw:  # pragma: no cover - RCR is uniform
+                        raise AssertionError("vp_pair_reads: uneven write groups")
+                    wslots = max(1, _R * MPA - MPA // 2)
+                    if int(spec.trait.vp_pair_reads) == 2:
+                        # one slot per vector: its writes and its load together
+                        groups = [
+                            lambda g=tuple(wth[j * per : (j + 1) * per]) + (rth_[j],): [
+                                t() for t in g
+                            ]
+                            for j in range(len(rth_))
+                        ]
+                    else:
+                        # one instruction per MFMA slot (an MFMA shadows one
+                        # LDS / VMEM issue), in order: writes of vector j, its load
+                        groups = []
+                        for j in range(len(rth_)):
+                            groups += list(wth[j * per : (j + 1) * per]) + [rth_[j]]
+                    spread(groups, list(range(lastR, lastR + wslots)), plan)
+                elif _tp == 2:
+                    # writes packed (two or more per slot, never past the default
+                    # window), then a gap before the second barrier
+                    _d = max(2, -(-nw // wslots))
+                    for j, th in enumerate(wth):
+                        put(lastR + j // _d, th, plan)
+                    wslots = max(1, min(wslots, -(-nw // _d) + max(1, MPA // 8)))
+                else:
+                    spread(wth, list(range(lastR, lastR + wslots)), plan)
 
                 def _bar2():
                     b.s_waitcnt(lgkmcnt=0)
                     b.s_barrier_bare()
 
-                b2 = min(last0 + wslots, last_slot)
+                b2 = min(lastR + wslots, last_slot)
                 put(b2, _bar2, plan)
                 lth = frag_thunks(0, 0, na_, nb_)
                 # after the second barrier: in its slot (appended behind it) and
@@ -6063,11 +6544,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     # for every read in flight -- s_waitcnt vmcnt(0) -- ends
                     # each tile otherwise); one tile of latency cover
                     lth = lth + _vp_read_thunks(k_pf, regs_out)
-                spread(lth, list(range(b2, max(b2 + 1, last0 + MPA - 1))), plan)
+                if _tp:
+                    # two (vp_tail_pack 3: one) per slot right behind the second
+                    # barrier
+                    _td = 1 if _tp == 3 else 2
+                    for j, th in enumerate(lth):
+                        put(b2 + j // _td, th, plan)
+                else:
+                    spread(lth, list(range(b2, max(b2 + 1, last0 + MPA - 1))), plan)
             atoms = {0: (fa, fb)}
             atoms.update(nxt_f)
             for kk in range(KA):
-                if kk == KA - 1 and nxt is not None:
+                if kk == KA - _R and nxt is not None:
                     b.s_waitcnt(lgkmcnt=0)
                     b.s_barrier_bare()
                     b.sched_barrier(0)
@@ -6077,6 +6565,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         s_ = kk * MPA + mi * mfmas_n + ni
                         flat = mi * mfmas_n + ni
                         new_accs[flat] = _mma_ab(aa[mi], bb[ni], new_accs[flat])
+                        _vmf = int(spec.trait.vp_mfma_first)
+                        if _vmf == 2 or (_vmf == 1 and s_ == 0):
+                            b.sched_barrier(0)
                         for th in plan.pop(s_, []):
                             th()
                         b.sched_barrier(0)
@@ -6617,13 +7108,43 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             a_tile0 = b_tile0 = None
         # dtl_base_fold: per-operand base pointer at the output tile's origin
         _fold = {}
+        _wide = bool(spec.trait.wide_addr)
         if spec.trait.dtl_base_fold and not pers:
             _fold["A"] = b.global_ptr_add(A, b.to_sgpr_u32(b.mul(a_tile0, c2s)))
             _fold["B"] = b.global_ptr_add(Bp, b.to_sgpr_u32(b.mul(b_tile0, c2s)))
         c_big = b.const_i32(DTL_BUFFER_NUM_RECORDS)
         c_zero_rec = b.const_i32(0)
         tight = bool(spec.trait.dtl_tight_rsrc)
-        if tight:
+        if _wide:
+            # wide_addr: 64-bit per-operand base at the output tile's origin
+            # (row origin * K * 2 bytes in i64), so an operand may exceed the
+            # i32 element / buffer range; a K tile's resource is base + k * 2.
+            # dtl_tight_rsrc: the range is the operand bytes left from the
+            # tile origin, clamped to the buffer range (a tile reads at most
+            # tile rows * K * 2 bytes past its origin, far below the clamp).
+            _row_b = b.zext(b.to_sgpr_u32(b.mul(K, c2s)), _I64s)
+            _w_org = {
+                "A": b.mul(b.zext(block_m_off, _I64s), _row_b),
+                "B": b.mul(b.zext(_brow(block_n_off), _I64s), _row_b),
+            }
+            _fold["A"] = b.global_ptr_add(A, _w_org["A"])
+            _fold["B"] = b.global_ptr_add(Bp, _w_org["B"])
+            if tight:
+                _c_big64 = b.const_i64(DTL_BUFFER_NUM_RECORDS)
+
+                def _w_left(rows: Value, org64: Value) -> Value:
+                    left = b.sub(b.mul(b.zext(rows, _I64s), _row_b), org64)
+                    return b.to_sgpr_u32(
+                        b.trunc(
+                            b.select(b.cmp_lt(left, _c_big64), left, _c_big64), I32
+                        )
+                    )
+
+                a_bytes = _w_left(M, _w_org["A"])
+                b_bytes = _w_left(_brow(N), _w_org["B"])
+            else:
+                a_bytes = b_bytes = None
+        elif tight:
             # operand bytes (launch_shape_error keeps them below 2^31)
             a_bytes = b.to_sgpr_u32(b.mul(b.mul(M, K), c2s))
             b_bytes = b.to_sgpr_u32(b.mul(b.mul(_brow(N), K), c2s))
@@ -6649,6 +7170,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         def _tight_rs(ptr: Value, tile0: Value, k_ld: Value, ok: Value, nbytes: Value):
             """``dtl_tight_rsrc``: (resource, soffset 0) whose base is this tile's
             origin and whose range ends at the operand's last byte."""
+            if _wide:
+                # wide_addr: the tile origin is in the 64-bit base, ``nbytes``
+                # the bytes left from it
+                _wk = "A" if ptr is A else "B"
+                org = b.to_sgpr_u32(b.mul(_korg(_wk, k_ld), c2s))
+                left = b.smax(b.sub(nbytes, org), c_zero_rec)
+                rs = b.buffer_rsrc(
+                    b.global_ptr_add(_fold[_wk], org),
+                    b.select(ok, left, c_zero_rec),
+                    word3=_w3,
+                )
+                return rs, c_zero_rec
             org = b.to_sgpr_u32(b.mul(_org("A" if ptr is A else "B", tile0, k_ld), c2s))
             left = b.smax(b.sub(nbytes, org), c_zero_rec)
             rs = b.buffer_rsrc(
@@ -9046,10 +9579,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     for q in range(nq)
                 ]
 
+            def _sk_acc_out(v: Value) -> Value:
+                # an operand prologue body's accumulators leave the AGPRs into
+                # VGPRs (``"=v,0"``: the compiler's own v_accvgpr_read, with its
+                # MFMA hazard wait) before the partial store; the ``"=a,0"``
+                # hand-out let a buffer store read an AGPR the last MFMAs were
+                # still writing (device-verified wrong stream-K tiles)
+                if _pro is not None and spec.trait.acc_agpr and not _pro.agpr_out:
+                    return b.inline_asm("", "=v,0", [v], v.type, sideeffect=True)
+                return _acc_agpr_out(b, spec, v)
+
             def _store_partial(w: Value, vals: Sequence[Value], tl_=None) -> None:
                 rs = _part_rsrc(w)
                 for ai, v in enumerate(vals):
-                    for q, v4 in enumerate(_quads(_acc_agpr_out(b, spec, v))):
+                    for q, v4 in enumerate(_quads(_sk_acc_out(v))):
                         b.buffer_store_vN_f32(rs, voff_p, _soff(ai, q), v4, 4)
                 if xcd_local:
                     # owner on this XCD (same L2): the partial stores only have
@@ -9118,7 +9661,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         hi_p,
                         c1,
                         [
-                            (f"skf_{accs[i][0]}", _acc_agpr_out(b, spec, vals[i]))
+                            (f"skf_{accs[i][0]}", _sk_acc_out(vals[i]))
                             for i in idx
                         ],
                         iv_name=f"skp{g0}",
@@ -9239,6 +9782,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 row, col = b.div(tid_flat, n_pid_n), b.mod(tid_flat, n_pid_n)
             bm = b.to_sgpr_u32(b.mul(row, c_block_m))
             bn = b.to_sgpr_u32(b.mul(col, c_block_n))
+            if _mnla_a:
+                bm = _mn_ld_clamp(bm, M, block_m)
+            if _mnla_b:
+                bn = _mn_ld_clamp(bn, N, block_n)
             if _gett_addr:
                 t0 = (_gett.tile_voffs(b, "A", bm), _gett.tile_voffs(b, "B", bn))
             else:
@@ -9392,6 +9939,19 @@ def _acc_agpr_out(b: IRBuilder, spec: UniversalGemmSpec, acc: Value) -> Value:
         # the asm's own input copy: no AGPR -> AGPR move (+ its hazard nops)
         return b.inline_asm("", "=v,0", [acc], acc.type, sideeffect=True)
     return b.inline_asm("", "=a,0", [acc], acc.type, sideeffect=True)
+
+
+def _acc_f32_out(b: IRBuilder, spec: UniversalGemmSpec, acc: Value) -> Value:
+    """An f32-output (prologue ``out_f32``) accumulator handed to the stores.
+    With ``acc_agpr`` it leaves the AGPRs through the compiler's own copy
+    (``"=v,0"``, whose MFMA hazard wait the compiler inserts): with the
+    ``"=a,0"`` hand-out the f32 stores read the AGPRs directly and could read
+    registers the last MFMAs were still writing (device-verified wrong tiles on
+    the stream-K body). Other bodies keep :func:`_acc_agpr_out`."""
+    _p = getattr(spec, "_prologue", None)
+    if spec.trait.acc_agpr and _p is not None and not _p.agpr_out:
+        return b.inline_asm("", "=v,0", [acc], acc.type, sideeffect=True)
+    return _acc_agpr_out(b, spec, acc)
 
 
 def _emit_mfma_acc_scatter(
@@ -9661,9 +10221,82 @@ def _emit_epilogue_default(
         # columns per (mi, v) -> one 16-byte store each
         if fused_epilogue is not None and storage_dtype == F32:
             raise ValueError("prologue out_f32 does not support a fused epilogue")
+        _wide_c = bool(spec.trait.wide_addr)
+        if _wide_c:
+            # wide_addr: C base = C + block_m_off * N * elem bytes (i64); the
+            # store offsets are relative to the tile's first row
+            if (
+                spec.batched
+                or getattr(spec, "_mono", None) is not None
+                or getattr(spec, "_gett", None) is not None
+            ):
+                raise ValueError(
+                    "wide_addr: no batched C / rich-epilogue or tensor GETT hook"
+                )
+            from ...core.ir import I64 as _I64w
+
+            C = b.global_ptr_add(
+                C,
+                b.mul(
+                    b.mul(b.zext(block_m_off, _I64w), b.zext(N, _I64w)),
+                    b.const_i64(type_bits(storage_dtype) // 8),
+                ),
+            )
+
+        def _crow(c_m: Value) -> Value:
+            return b.sub(c_m, block_m_off) if _wide_c else c_m
+
+        # prologue ``epi`` (out_f32): D = alpha acc (+ beta Cin)
+        _epi = _pro_ep.epi if (_pro_ep is not None and storage_dtype == F32) else ""
+        _epi_cplx = bool(_epi and _pro_ep.cplx_b)
+        if _epi:
+            _ep = _pro_epi_params(b, _pro_ep)
+            _Cin = _ep.get("Cin")
+            if _Cin is not None and _wide_c:
+                from ...core.ir import I64 as _I64w
+
+                _Cin = b.global_ptr_add(
+                    _Cin,
+                    b.mul(
+                        b.mul(b.zext(block_m_off, _I64w), b.zext(N, _I64w)),
+                        b.const_i64(4),
+                    ),
+                )
+
+        def _epi_apply(v4: Value, o4: Value) -> Value:
+            """``epi`` on 4 consecutive f32 of D at element offset ``o4``."""
+            xs = [b.vec_extract(v4, i) for i in range(4)]
+            cs = None
+            if _epi == "bilinear":
+                c4 = b.global_load_vN(_Cin, o4, F32, 4, align=16)
+                cs = [b.vec_extract(c4, i) for i in range(4)]
+            ar, br = _ep["alpha_re"], _ep.get("beta_re")
+            out = []
+            if _epi_cplx:
+                ai, bi = _ep["alpha_im"], _ep.get("beta_im")
+                for j in (0, 2):
+                    xr, xi = xs[j], xs[j + 1]
+                    yr = b.fma(xr, ar, b.fneg(b.fmul(xi, ai)))
+                    yi = b.fma(xi, ar, b.fmul(xr, ai))
+                    if cs is not None:
+                        cr, ci = cs[j], cs[j + 1]
+                        yr = b.fma(cr, br, b.fma(b.fneg(ci), bi, yr))
+                        yi = b.fma(ci, br, b.fma(cr, bi, yi))
+                    out += [yr, yi]
+            else:
+                for j in range(4):
+                    y = b.fmul(xs[j], ar)
+                    if cs is not None:
+                        y = b.fma(cs[j], br, y)
+                    out.append(y)
+            return b.vec_pack(out, F32)
         _rv_pad_m = bool(spec.trait.rve_pad == 1 and spec.trait.pad_m)
         _rv_pad_n = bool(spec.trait.rve_pad == 1 and spec.trait.pad_n)
         _rv_buf = spec.trait.rve_pad == 2 and (spec.trait.pad_m or spec.trait.pad_n)
+        if _rv_buf and _wide_c and storage_dtype != F32:
+            raise ValueError(
+                "wide_addr: rve_pad 2 (one buffer resource over C) has a u32 range"
+            )
         if _rv_buf:
             # branch-free bounds: one buffer resource over C (M * N * 2 bytes);
             # an out-of-range store gets voffset = num_records and is dropped
@@ -9757,7 +10390,7 @@ def _emit_epilogue_default(
         for mi in range(mfmas_m):
             hs = [
                 (
-                    _acc_agpr_out(b, spec, accs[mi * mfmas_n + ni])
+                    _acc_f32_out(b, spec, accs[mi * mfmas_n + ni])
                     if storage_dtype == F32
                     else b.vec_cast_f32_to(
                         _acc_agpr_out(b, spec, accs[mi * mfmas_n + ni]), storage_dtype
@@ -9775,9 +10408,24 @@ def _emit_epilogue_default(
                         # prologue out_f32: 8 consecutive f32 = two 16-byte stores
                         from ...core.ir import TemporalHint as _TH
 
-                        c_off = b.add(b.mul(c_m, N), b.add(_col0, b.const_i32(n0)))
+                        c_off = b.add(
+                            b.mul(_crow(c_m), N), b.add(_col0, b.const_i32(n0))
+                        )
                         if batch_off_c is not None:
                             c_off = b.add(batch_off_c, c_off)
+                        # bounds (pad_m / pad_n): N % 8 == 0 (launch
+                        # contract), so the 8 columns are all inside or all
+                        # outside C; the lane-wide column guard (rve_pad 1)
+                        # already covers the columns
+                        _f_ok = None
+                        if pad_m:
+                            _f_ok = b.cmp_lt(c_m, M)
+                        if pad_n and _rv_colguard is None:
+                            _f_okn = b.cmp_lt(b.add(_col0, b.const_i32(n0)), N)
+                            _f_ok = _f_okn if _f_ok is None else b.land(_f_ok, _f_okn)
+                        _f_if = b.scf_if(_f_ok) if _f_ok is not None else None
+                        if _f_if is not None:
+                            _f_if.__enter__()
                         for h4 in (0, 4):
                             v4 = b.vec_pack(
                                 [
@@ -9787,19 +10435,23 @@ def _emit_epilogue_default(
                                 F32,
                             )
                             o4 = c_off if h4 == 0 else b.add(c_off, b.const_i32(4))
+                            if _epi:
+                                v4 = _epi_apply(v4, o4)
                             if spec.trait.rve_store_nt:
                                 b.global_store_vN(
                                     C, o4, v4, 4, align=16, temporal_hint=_TH.STREAMING
                                 )
                             else:
                                 b.global_store_vN(C, o4, v4, 4, align=16)
+                        if _f_if is not None:
+                            _f_if.__exit__(None, None, None)
                         continue
                     vec = b.vec_pack(
                         [b.vec_extract(hs[ni], v) for ni in range(n0, n0 + 8)],
                         storage_dtype,
                     )
                     c_n = b.add(_col0, b.const_i32(n0))
-                    c_off = b.add(b.mul(c_m, N), c_n)
+                    c_off = b.add(b.mul(_crow(c_m), N), c_n)
                     if batch_off_c is not None:
                         c_off = b.add(batch_off_c, c_off)
                     if fused_epilogue is not None:
@@ -9818,14 +10470,96 @@ def _emit_epilogue_default(
             _rv_colguard.__exit__(None, None, None)
         return
 
+    # prologue ``epi`` (out_f32) on the scatter epilogue: D = alpha acc
+    # (+ beta Cin), one element per lane and slot. Complex values are the
+    # (even, odd) column pairs; the 16x16 / 32x32 MFMA output puts column
+    # ``lane % 16`` (``lane % 32``) on the lane, so the partner of a column is
+    # lane ``lane ^ 1`` (same rows): one DPP swap per operand.
+    _sc_epi = _pro_ep.epi if (_pro_ep is not None and storage_dtype == F32) else ""
+    if _pro_ep is not None and _pro_ep.epi and not _sc_epi:
+        raise ValueError("prologue epi (alpha / bilinear) needs out_f32")
+    if _sc_epi:
+        if fused_epilogue is not None:
+            raise ValueError("prologue epi does not support a fused epilogue")
+        _sc_ep = _pro_epi_params(b, _pro_ep)
+        _sc_cplx = bool(_pro_ep.cplx_b)
+        if _sc_cplx:
+            # -1 on the real (even) column, +1 on the imaginary (odd) one
+            _sc_sgn = b.select(
+                b.cmp_eq(b.mod(lane, b.const_i32(2)), b.const_i32(0)),
+                b.const_f32(-1.0),
+                b.const_f32(1.0),
+            )
+
+    def _sc_cin(c_m: Value, c_n: Value, c_off: Value) -> Value:
+        off = c_off
+        if pad_m or pad_n:
+            # rows / columns past D read element 0 (the store is dropped)
+            ok = []
+            if pad_m:
+                ok.append(b.cmp_lt(c_m, M))
+            if pad_n:
+                ok.append(b.cmp_lt(c_n, N))
+            inb = ok[0] if len(ok) == 1 else b.land(ok[0], ok[1])
+            off = b.select(inb, c_off, b.const_i32(0))
+        return b.global_load(_sc_ep["Cin"], off, F32, align=4)
+
+    def _sc_apply(
+        h: Value, c_m: Value, c_n: Value, c_off: Value, cin: Optional[Value] = None
+    ) -> Value:
+        y = b.fmul(h, _sc_ep["alpha_re"])
+        if _sc_cplx:
+            p = b.warp_shuffle_xor_dpp(h, 1)
+            y = b.fma(b.fmul(p, _sc_sgn), _sc_ep["alpha_im"], y)
+        if _sc_epi == "bilinear":
+            c = cin if cin is not None else _sc_cin(c_m, c_n, c_off)
+            if _sc_cplx:
+                pc = b.warp_shuffle_xor_dpp(c, 1)
+                y = b.fma(b.fmul(pc, _sc_sgn), _sc_ep["beta_im"], y)
+            y = b.fma(c, _sc_ep["beta_re"], y)
+        return y
+
     def _store_cell(c_m: Value, c_n: Value, acc_h: Value, i: int) -> None:
         c_off = b.add(b.mul(c_m, N), c_n)
         if batch_off_c is not None:
             c_off = b.add(batch_off_c, c_off)
         h = b.vec_extract(acc_h, i)
+        if _sc_epi:
+            h = _sc_apply(h, c_m, c_n, c_off)
         if fused_epilogue is not None:
             h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
         _store_masked(c_m, c_n, c_off, h)
+
+    if _sc_epi == "bilinear":
+        # two passes per group of up to 64 cells: the group's Cin loads first
+        # (straight-line code, clamped offsets), then the epi and the
+        # (guarded) stores -- one pass would put each load behind the
+        # previous cell's store guard and serialise the loads' latency
+        _cells: List[Tuple[Value, Value, Value, Value]] = []
+
+        def _load_cell(c_m: Value, c_n: Value, acc_h: Value, i: int) -> None:
+            c_off = b.add(b.mul(c_m, N), c_n)
+            if batch_off_c is not None:
+                c_off = b.add(batch_off_c, c_off)
+            _cells.append((c_m, c_n, c_off, b.vec_extract(acc_h, i)))
+
+        _emit_mfma_acc_scatter(
+            b,
+            spec,
+            lane,
+            accs,
+            block_warp_m_off,
+            block_warp_n_off,
+            c_per_lane,
+            storage_dtype,
+            _load_cell,
+        )
+        for g0 in range(0, len(_cells), 64):
+            grp = _cells[g0 : g0 + 64]
+            cins = [_sc_cin(c_m, c_n, c_off) for c_m, c_n, c_off, _ in grp]
+            for (c_m, c_n, c_off, h), c in zip(grp, cins):
+                _store_masked(c_m, c_n, c_off, _sc_apply(h, c_m, c_n, c_off, cin=c))
+        return
 
     _emit_mfma_acc_scatter(
         b,

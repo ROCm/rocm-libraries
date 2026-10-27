@@ -114,3 +114,42 @@ class TestPlan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTailSplitRows(unittest.TestCase):
+    """``tail_split_rows``: the partial-wave tail of a body's tile grid."""
+
+    def _spec(self, tm, tn):
+        from dataclasses import replace
+
+        s = dispatch_gemm_bf16(_req(8192, 8192, 1024, "RCR", "bf16")).spec
+        return replace(s, tile=replace(s.tile, tile_m=tm, tile_n=tn))
+
+    def test_ragged_last_wave(self):
+        # 30 x 27 tiles of 256 x 256 on 256 workgroups: 3 full waves hold 28
+        # whole tile rows (756 tiles), the last 2 rows are the tail
+        rows = P.tail_split_rows(_req(7680, 6720, 1536, "RCR", "bf16"), self._spec(256, 256))
+        self.assertEqual(rows, 512)
+
+    def test_head_fits_the_full_waves(self):
+        for M, N, tm, tn in ((7680, 6720, 256, 256), (15360, 13440, 256, 256), (4608, 3840, 128, 192)):
+            sp = self._spec(tm, tn)
+            rows = P.tail_split_rows(_req(M, N, 1024, "RCR", "bf16"), sp)
+            with self.subTest(M=M, N=N):
+                self.assertGreater(rows, 0)
+                self.assertEqual((M - rows) % tm, 0)
+                tiles_n = -(-N // tn)
+                head = (M - rows) // tm * tiles_n
+                waves = (-(-M // tm) * tiles_n) // 256
+                self.assertLessEqual(head, waves * 256)
+                # one more tile row would not fit the full waves
+                self.assertGreater(head + tiles_n, waves * 256)
+
+    def test_no_tail(self):
+        # whole waves (16 x 16 tiles on 256 workgroups) and less than one wave
+        self.assertEqual(P.tail_split_rows(_req(4096, 4096, 1024, "RCR"), self._spec(256, 256)), 0)
+        self.assertEqual(P.tail_split_rows(_req(1024, 1024, 1024, "RCR"), self._spec(256, 256)), 0)
+        self.assertEqual(
+            P.tail_split_rows(_req(4096, 4096, 1024, "RCR"), self._spec(256, 256), cus=300), 0
+        )
+

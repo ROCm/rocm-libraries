@@ -196,6 +196,43 @@ exactly, and negating A (and C) negates D exactly.
 | `sched_fence` | on | scheduling barriers around the MFMA block |
 | `bilinear` | on | read C (`beta * C`) |
 
+Python-engine levers (default off; the C++ builder mirror does not have them
+yet, so `TUNED_CONFIGS` and the byte-identity family do not use them; the
+kernels they produce still lower through either engine):
+
+| knob | default | meaning |
+|---|---|---|
+| `acc_agpr` | off | accumulators in AGPRs (`amdgpu-agpr-alloc` + the AGPR MFMA form + an opaque AGPR zero seed): up to 256 accumulator registers beside the fragments without spills |
+| `kmajor_lds` / `kmajor_pad` | off / 2 | real: an operand read along K gets a K-major LDS tile (`[stage * side + mn][k]`, padded rows): one 16-byte LDS store per 16-byte load and conflict-free fragment reads |
+| `ilv` / `ilv_wgap` | 0 / 4 | real: the instruction-level interleaved K loop (below); `ilv` = MFMAs after the barrier |
+| `frag_pipe` | off | the fragments of the next k-step read into a second register set before the MFMAs of this one; the LDS store and barrier of the next tile before the last k-step |
+| `k_inner` / `mfma_fence` | 1 / off | real: MFMAs of `k_inner` k-steps back to back per accumulator; a scheduling barrier after every MFMA |
+| `split_serial` | 0 | with `split_k`: reduce the partials inside the launch (1: agent-scope fences; 2, gfx942 / gfx950: write-through partial stores and loads) instead of the reduce kernel |
+
+**The interleaved K loop (`ilv`).** Each K tile is emitted as one fixed
+instruction schedule: the tile's MFMAs in order, and between them the
+fragment reads of the next k-step group (spread over the current group), the
+LDS stores of the next K tile (it rides in registers: `prefetch_depth` 2),
+each followed by the global load of the same pass of the tile after it into
+the freed registers (spread up to `ilv_wgap` MFMAs before the barrier), an
+LDS-only barrier (`s_waitcnt lgkmcnt(0)` + `s_barrier`: the global loads stay
+in flight) `ilv` MFMAs before the end of the tile, and after it the reads of
+the next tile's first group. A scheduling barrier after every MFMA keeps the
+order. With `unroll2` two K tiles per iteration read compile-time LDS stages
+(no per-tile address arithmetic). Every read of a stage completes before the
+barrier that lets the next tile overwrite it. None of these levers changes
+the K order of an output (`split_serial` sums the partials in the order of
+the reduce kernel), so the bits equal the default kernel's.
+
+Why: an ablation of the K loop (global loads, LDS stores, barriers and
+fragment reads removed one by one at build time) shows that the MFMA loop
+alone runs at the matrix ceiling with any number of accumulators per wave,
+global loads are hidden, and the cost is in the LDS stores: issued as a
+burst before the barrier they drain the matrix pipe, and the K-contiguous
+operand's two-row scatter adds bank conflicts. Spreading every store between
+MFMAs, a K-major tile for K-contiguous operands and AGPR accumulators (so a
+CTA can hold a 256x128 tile at one or two waves per SIMD) remove that cost.
+
 `arch_spec(problem, arch, **knobs)` gives the reference defaults (two K
 stages of 16 rows on gfx950, 8 on the 64 KiB-LDS targets, so two CTAs fit per
 CU). `tuned_spec(problem, arch, num_cus=...)` gives the tuned configuration of
@@ -234,10 +271,37 @@ drops `unroll2` and `k_stagger`); when the K range of one CTA is still `K_BLOCK_
 it also sets `k_block` to `K_BLOCK_ELEMS / tile_k` tiles. Knobs passed to
 `tuned_spec` override both.
 
+## Pipelined configurations
+
+`PIPE_CONFIGS` maps (arch, real, pipe class) to a knob set using the levers
+above; `gett_f64_pipe_class(problem, arch, num_cus)` picks the class and
+`pipe_spec` the spec (None where no class applies):
+
+| arch | class | rule | configuration |
+|---|---|---|---|
+| gfx950 | `long` | a `large` problem whose A and B contiguous runs are at least `PIPE_LONG_RUN` elements (or `PIPE_MIN_RUN` with at least `PIPE_SHORT_MAX_TILES_PER_CU` 128x128 tiles per CU), whose D run is at least half of `PIPE_LONG_RUN`, with K >= `PIPE_LONG_MIN_K` and a last wave of 256x128 CTAs at least `PIPE_LONG_MIN_WAVE_EFF` busy (one CTA per CU: a ragged last wave idles CUs) | 256x128x16 tiles, 4x2 waves (two per SIMD from one CTA), AGPR accumulators, K-major LDS, `ilv` |
+| gfx950 | `short` | a `medium` problem, or a `large` one under `PIPE_SHORT_MAX_TILES_PER_CU` 128x128 tiles per CU whose shorter A / B run is in [`PIPE_MIN_RUN`, `PIPE_LONG_RUN`) (interleaved contraction layouts) | 128x64x16 tiles, 4x1 waves, three CTAs per CU, `ilv` |
+| gfx950 | `wide` | a `large` problem with K < `PIPE_LONG_MIN_K` | 128x128x16 tiles, 2x4 waves, padded LDS rows, AGPR accumulators, K-major LDS, `ilv` |
+| gfx950 | `tiny` | a `small` problem with at most one 64x64 tile per CU | 64x64x16 tiles, 2x2 waves, `ilv` |
+| gfx950 | `small` | the other `small` problems | 32x32x32 tiles, 2x2 waves, four CTAs per CU, `ilv` |
+| gfx950 | complex `long` | at least one 128x128 tile per CU and K >= `PIPE_COMPLEX_MIN_K` | 128x128x8 tiles, 4x2 waves, AGPR accumulators, `ilv` (each fused 4M atom is one slot) |
+| gfx90a | `long` | at least `PIPE_GFX90A_LONG_TILES_PER_CU` 128x128 tiles per CU and K >= `PIPE_GFX90A_LONG_MIN_K` | 256x128x8 tiles, 2x2 waves, AGPR accumulators, K-major LDS, `ilv` |
+| gfx90a | complex `long` | at least `PIPE_GFX90A_LONG_TILES_PER_CU` 128x128 tiles per CU and K >= `PIPE_COMPLEX_MIN_K` | 128x128x8 tiles, 4x2 waves, AGPR accumulators, `ilv` |
+| gfx90a | `short` | fewer tiles | 128x64x16 tiles, 4x2 waves, padded LDS, `ilv` |
+
+Complex data below those sizes or K, gfx950 problems with very short runs
+or only a short D run, gfx90a problems with many tiles and a short K, requests with
+`runtime_sizes`, problems whose tuned spec sums K in blocks or splits a K of
+`K_BLOCK_MIN_K` or more (the shorter rounding chains), and gfx942 (not tuned
+yet) keep the tuned configurations. The configurations came from the search
+engine (the tuned problems' winners, then cross-evaluated on held-out
+problems).
+
 ## Dispatch
 
-`rocke.dispatch.families.gett_f64` registers `gett_f64_tuned` (first choice:
-`tuned_spec`), then the reference geometries `gett_f64_t128` and `gett_f64_t64`
+`rocke.dispatch.families.gett_f64` registers `gett_f64_pipe` (first choice
+where `pipe_spec` applies), `gett_f64_tuned` (`tuned_spec`), then the
+reference geometries `gett_f64_t128` and `gett_f64_t64`
 (the 64x64 geometry when the 128-tile grid would leave CUs idle), on every
 target in `F64_GETT_ARCHS`. A request carries the problem, the arch, the CU
 count (`num_cus`, or queried from a device of that arch) and optionally
@@ -277,6 +341,11 @@ contraction planner and the tuned selection stay in the Python dispatch layer.
   first), the shape classes and their CU count, validity of every tuned
   configuration, the long-K rule (`split_k`, `k_block`), sweep space,
   runtime-size requests, builds.
+* `tests/instances/test_gett_f64_levers.py`: validity of the Python-engine
+  levers and their combinations, kernel names, the `split_serial` signature,
+  workspace and counters and its fences / write-through accesses, the AGPR
+  reservation, the K-major LDS tile sizes, the `ilv` barriers, builds on
+  every target, and the pipelined classes and dispatch candidate.
 * `tests/numeric/test_gett_f64_numeric.py` (every target with the atom):
   every layout, tails, tiles and knobs, scale and `beta == 0` with NaN C, C with
   its own strides and batch, exact integer results, complex with every
@@ -286,7 +355,10 @@ contraction planner and the tuned selection stay in the Python dispatch layer.
   kernel), against exact (two-product + `fsum`) references; and bitwise on whole
   outputs: NaN / Inf propagation, `beta == 0` / `-0` with NaN C, NaN alpha /
   beta, `alpha == 0` with NaN / Inf in A and B, real complex scalars with an
-  infinite component, and CONJ against host-conjugated data.
+  infinite component, and CONJ against host-conjugated data; every
+  Python-engine lever bitwise against the default kernel on three layouts,
+  `split_serial` (both modes, bitwise against the reduce kernel, counters back
+  at zero after repeated launches) and every `PIPE_CONFIGS` entry.
 * `tests/instances/parity/gett_f64_emit.{py,c}`: the byte-identity family (the
   C++ mirror `cpp/instances/common/gett_f64.cpp`, API
   `rocke/instance_gett_f64.h`): every load direction and knob, blocked K,

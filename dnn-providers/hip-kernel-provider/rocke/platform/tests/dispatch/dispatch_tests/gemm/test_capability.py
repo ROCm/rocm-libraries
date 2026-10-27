@@ -32,6 +32,8 @@ _SHAPES = tuple((m, n, k) for m in _DIMS for n in _DIMS for k in _DIMS)
 # large ragged shape: the padded 256x256 ring takes ragged M / N only where its
 # tiles fill the device.
 _SHAPES += ((8192, 8192, 8192), (8192, 8000, 8192))
+# the split-K ring is admitted for 12..200 tiles with long K only
+_SHAPES += ((1024, 768, 10752),)
 
 
 def _requests(arch: str, dtype: str):

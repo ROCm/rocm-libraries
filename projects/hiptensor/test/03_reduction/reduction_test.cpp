@@ -607,6 +607,18 @@ namespace hiptensor
                     auto reducedSize = resource->getCurrentInputElementCount()
                                        / resource->getCurrentOutputElementCount();
                     double tolerance = reducedSize * getEpsilon(computeDataType);
+                    // A reduction that keeps every mode is checked against the elementwise CPU
+                    // reference, which applies alpha and beta as float; the library applies
+                    // them in double.
+                    if(modeD.size() == modeA.size())
+                    {
+                        auto floatRounding = [](double scalar) {
+                            return scalar == 0.0 ? 0.0
+                                                 : std::fabs(scalar - static_cast<float>(scalar))
+                                                       / std::fabs(scalar);
+                        };
+                        tolerance += 2 * (floatRounding(alpha) + floatRounding(beta));
+                    }
                     std::tie(mValidationResult, mMaxRelativeError)
                         = compareEqualLaunchKernel<float64_t>(
                             (float64_t*)resource->deviceD().get(),

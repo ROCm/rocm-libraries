@@ -6,8 +6,15 @@
 A request carries one :class:`rocke.instances.common.gett_f64.GettF64Problem`
 (one launch of :func:`rocke.instances.common.gett_f64_plan.plan_contraction`, or
 a strided GEMM from :func:`rocke.instances.common.gett_f64.gemm_problem`) and the
-target. Three candidates are registered on gfx90a / gfx942 / gfx950:
+target. Four candidates are registered on gfx90a / gfx942 / gfx950:
 
+* ``gett_f64_pipe`` (first choice where it applies) -- the pipelined
+  configuration of the request's pipe class
+  (:func:`~rocke.instances.common.gett_f64.pipe_spec`: an instruction-level
+  interleaved K loop, K-major LDS tiles for K-contiguous operands and AGPR
+  accumulators; ``PIPE_CONFIGS``). These levers are built by the Python
+  engine only; requests with ``runtime_sizes``, complex data, small grids and
+  problems the tuned path splits along K skip it;
 * ``gett_f64_tuned`` (first choice) -- the tuned configuration of the
   request's shape class (:func:`~rocke.instances.common.gett_f64.tuned_spec`:
   grid size per CU, K length, and on gfx90a the operands read along K),
@@ -39,6 +46,7 @@ from typing import Optional, Sequence, Tuple
 
 from ...instances.common.gett_f64 import (
     F64_GETT_ARCHS,
+    PIPE_CONFIGS,
     TUNED_CONFIGS,
     GettF64Problem,
     GettF64Spec,
@@ -47,6 +55,7 @@ from ...instances.common.gett_f64 import (
     gett_f64_grid,
     gett_f64_signature,
     is_valid_spec,
+    pipe_spec,
     resolve_num_cus,
     runtime_compatible,
     runtime_template,
@@ -134,6 +143,22 @@ def _spec_tuned(req: GettF64Request) -> GettF64Spec:
     )
 
 
+def _spec_pipe(req: GettF64Request) -> GettF64Spec:
+    spec = pipe_spec(req.problem, req.arch, bilinear=req.bilinear, num_cus=req.cus())
+    if spec is None:
+        raise ValueError("no pipelined configuration applies")
+    return spec
+
+
+def _fits_pipe(req: GettF64Request) -> Tuple[bool, str]:
+    if req.runtime_sizes:
+        return False, "runtime_sizes: the pipelined loop needs compile-time sizes"
+    spec = pipe_spec(req.problem, req.arch, bilinear=req.bilinear, num_cus=req.cus())
+    if spec is None:
+        return False, "no pipelined configuration applies to this problem"
+    return True, "ok"
+
+
 def _spec_t128(req: GettF64Request) -> GettF64Spec:
     return _rt(req, arch_spec(req.problem, req.arch, bilinear=req.bilinear))
 
@@ -186,7 +211,9 @@ def _neighbourhood(spec: GettF64Spec, arch: str = "") -> Tuple[GettF64Spec, ...]
     return tuple(out)
 
 
-def _make_candidate(*, name, spec_id, priority, spec_fn, fits) -> KernelCandidate:
+def _make_candidate(
+    *, name, spec_id, priority, spec_fn, fits, arches=F64_GETT_ARCHS
+) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
@@ -228,7 +255,7 @@ def _make_candidate(*, name, spec_id, priority, spec_fn, fits) -> KernelCandidat
         spec_id=spec_id,
         abi_version=GETT_F64_ABI_VERSION,
         priority=priority,
-        capability=Capability(arches=F64_GETT_ARCHS, dtypes=("f64", "c128")),
+        capability=Capability(arches=tuple(arches), dtypes=("f64", "c128")),
         _supports=support,
         select_spec=select,
         signature=gett_f64_signature,
@@ -260,6 +287,17 @@ GETT_F64_REGISTRY = CandidateRegistry(
 )
 GETT_F64_REGISTRY.extend(
     (
+        _make_candidate(
+            name="gett_f64_pipe",
+            spec_id="pipe",
+            priority=4,
+            spec_fn=_spec_pipe,
+            fits=_fits_pipe,
+            # the targets with pipelined configurations
+            arches=tuple(
+                a for a in F64_GETT_ARCHS if any(k[0] == a for k in PIPE_CONFIGS)
+            ),
+        ),
         _make_candidate(
             name="gett_f64_tuned",
             spec_id="tuned",

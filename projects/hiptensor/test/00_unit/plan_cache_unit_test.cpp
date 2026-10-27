@@ -27,11 +27,11 @@
 // Plan cache:
 //  - the number of cache lines stays within the capacity, and the least recently used line is
 //    the one evicted;
-//  - the key tells apart problems that differ in device, output tensor E, operators or tensor
-//    ranks;
+//  - the key tells apart problems that differ in device, backend, output tensor E, operators or
+//    tensor ranks;
 //  - the cache file round-trips, and the cache stays usable after it was written;
-//  - files of earlier versions, of another version or device, damaged files and files with
-//    more lines than the cache holds are refused, leaving the cache unchanged;
+//  - files of earlier versions, of another version, device or backend set, damaged files and
+//    files with more lines than the cache holds are refused, leaving the cache unchanged;
 //  - through the API: contractions keep running after the plan cache was written, and a plan
 //    created from a cache line read back from the file computes the right result.
 // The contraction results are compared with a plain loop with 64-bit offsets, not with the CPU
@@ -60,6 +60,9 @@ namespace
     // Any device identity will do: the cache only compares them.
     constexpr char const* archName = "gfx942:sramecc+:xnack-";
     constexpr uint32_t    cuCount  = 100;
+
+    // The backend whose solutions the key tests store.
+    std::string const ckBackend = "ck";
 
     // Offsets in the file: magic, format version, hipTensor major version.
     constexpr std::size_t formatVersionOffset = 4;
@@ -263,53 +266,68 @@ TEST(PlanCacheKeyTest, DeviceIsPartOfTheKey)
     PlanCache   otherArch("gfx950:sramecc+:xnack-", cuCount);
     PlanCache   otherCuCount(archName, cuCount + 1);
 
-    auto key = cache.getHashID(&desc.op);
-    EXPECT_EQ(sameDevice.getHashID(&desc.op), key);
-    EXPECT_NE(otherArch.getHashID(&desc.op), key);
-    EXPECT_NE(otherCuCount.getHashID(&desc.op), key);
+    auto key = cache.getHashID(&desc.op, ckBackend);
+    EXPECT_EQ(sameDevice.getHashID(&desc.op, ckBackend), key);
+    EXPECT_NE(otherArch.getHashID(&desc.op, ckBackend), key);
+    EXPECT_NE(otherCuCount.getHashID(&desc.op, ckBackend), key);
 }
 
 TEST(PlanCacheKeyTest, OutputTensorEIsPartOfTheKey)
 {
     PlanCache   cache(archName, cuCount);
     TrinaryDesc desc;
-    auto        key = cache.getHashID(&desc.op);
+    auto        key = cache.getHashID(&desc.op, ckBackend);
 
     TrinaryDesc otherStrides;
     otherStrides.e = tensor({4, 7}, {7, 1});
-    EXPECT_NE(cache.getHashID(&otherStrides.op), key);
+    EXPECT_NE(cache.getHashID(&otherStrides.op, ckBackend), key);
 
     TrinaryDesc otherModes;
     otherModes.e         = tensor({7, 4}, {1, 7});
     otherModes.op.mModeE = {'n', 'm'};
-    EXPECT_NE(cache.getHashID(&otherModes.op), key);
+    EXPECT_NE(cache.getHashID(&otherModes.op, ckBackend), key);
 
     TrinaryDesc otherType;
     otherType.e.mType = HIPTENSOR_R_16F;
-    EXPECT_NE(cache.getHashID(&otherType.op), key);
+    EXPECT_NE(cache.getHashID(&otherType.op, ckBackend), key);
 }
 
 TEST(PlanCacheKeyTest, OperatorsArePartOfTheKey)
 {
     PlanCache   cache(archName, cuCount);
     TrinaryDesc desc;
-    auto        key = cache.getHashID(&desc.op);
+    auto        key = cache.getHashID(&desc.op, ckBackend);
 
     TrinaryDesc opA;
     opA.op.mOpA = HIPTENSOR_OP_SQRT;
-    EXPECT_NE(cache.getHashID(&opA.op), key);
+    EXPECT_NE(cache.getHashID(&opA.op, ckBackend), key);
 
     TrinaryDesc opD;
     opD.op.mOpD = HIPTENSOR_OP_SQRT;
-    EXPECT_NE(cache.getHashID(&opD.op), key);
+    EXPECT_NE(cache.getHashID(&opD.op, ckBackend), key);
 
     TrinaryDesc opAC;
     opAC.op.mOpAC = HIPTENSOR_OP_ADD;
-    EXPECT_NE(cache.getHashID(&opAC.op), key);
+    EXPECT_NE(cache.getHashID(&opAC.op, ckBackend), key);
 
     TrinaryDesc opABC;
     opABC.op.mOpABC = HIPTENSOR_OP_MUL;
-    EXPECT_NE(cache.getHashID(&opABC.op), key);
+    EXPECT_NE(cache.getHashID(&opABC.op, ckBackend), key);
+}
+
+TEST(PlanCacheKeyTest, BackendIsPartOfTheKey)
+{
+    TrinaryDesc desc;
+    PlanCache   cache(archName, cuCount);
+
+    auto key = cache.getHashID(&desc.op, ckBackend);
+    EXPECT_EQ(cache.getHashID(&desc.op, ckBackend), key);
+    EXPECT_NE(cache.getHashID(&desc.op, "rocke"), key);
+
+    // A solution cached for one backend is not found for another.
+    cache.addCacheLine(key, 101);
+    EXPECT_EQ(cache.querySolutionUid(&desc.op, ckBackend), 101u);
+    EXPECT_EQ(cache.querySolutionUid(&desc.op, "rocke"), 0u);
 }
 
 // A[a,b] with B[c] and A[a] with B[b,c] concatenate to the same lengths, strides and modes.
@@ -335,7 +353,7 @@ TEST(PlanCacheKeyTest, RanksArePartOfTheKey)
     second.mDescB         = &b2;
     second.mModeB         = {'b', 'c'};
 
-    EXPECT_NE(cache.getHashID(&first), cache.getHashID(&second));
+    EXPECT_NE(cache.getHashID(&first, ckBackend), cache.getHashID(&second, ckBackend));
 }
 
 // ---- File ----
@@ -460,6 +478,37 @@ TEST(PlanCacheFileTest, FileOfAnotherDeviceIsRefused)
     auto fileName = writeThreeLineFile("other_device");
     expectRefused(fileName, HIPTENSOR_STATUS_INVALID_VALUE, "gfx950:sramecc+:xnack-", cuCount);
     expectRefused(fileName, HIPTENSOR_STATUS_INVALID_VALUE, archName, cuCount + 1);
+    std::remove(fileName.c_str());
+}
+
+TEST(PlanCacheFileTest, FileOfAnotherBackendSetIsRefused)
+{
+    std::vector<hiptensor::PlanCacheBackend> const backends = {{"ck", 1u}, {"rocke", 1u}};
+
+    PlanCache writer(archName, cuCount, backends);
+    fillThreeLines(writer);
+    auto fileName = tempFile("backend_set");
+    ASSERT_EQ(writer.writeFile(fileName.c_str()), HIPTENSOR_STATUS_SUCCESS);
+
+    std::vector<std::vector<hiptensor::PlanCacheBackend>> const others
+        = {{}, {{"ck", 1u}}, {{"ck", 2u}, {"rocke", 1u}}, {{"rocke", 1u}, {"ck", 1u}}};
+    for(auto const& other : others)
+    {
+        PlanCache reader(archName, cuCount, other);
+        reader.addCacheLine(7, 107);
+        uint32_t numCachelinesRead = 12345;
+        EXPECT_EQ(reader.readFile(fileName.c_str(), &numCachelinesRead),
+                  HIPTENSOR_STATUS_INVALID_VALUE);
+        EXPECT_EQ(numCachelinesRead, 12345u);
+        EXPECT_EQ(reader.querySolutionUidByHash(7), 107u);
+    }
+
+    PlanCache reader(archName, cuCount, backends);
+    uint32_t  numCachelinesRead = 0;
+    EXPECT_EQ(reader.readFile(fileName.c_str(), &numCachelinesRead), HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(numCachelinesRead, 3u);
+    EXPECT_EQ(reader.querySolutionUidByHash(2), 102u);
+
     std::remove(fileName.c_str());
 }
 

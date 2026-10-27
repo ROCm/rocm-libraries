@@ -144,6 +144,16 @@ class SkinnyGemmSpec:
     # "tr" (ds_read_b64_tr_b16, gfx950) or "u16" (eight 16-bit reads per
     # fragment, any target)
     mn_lds: str = "tr"
+    # ``mn_uload`` (mnalign 1 / 2): an MN-contiguous operand's
+    # 8-element pieces are single 16-byte buffer loads at their 2- / 4-byte
+    # aligned offsets (the hardware's unaligned access; gfx950 / gfx942 probed)
+    # instead of four dword loads + a ushort realigned with v_alignbyte. The
+    # buffer range check drops a whole dword of a load that straddles the
+    # range end, so the last tile along that operand's dimension is shifted
+    # back to end at the extent (origin ``ld - tile``; it recomputes rows of
+    # the tile before it, the same values; split-K partials stay per tile):
+    # no load reaches past the operand's last element. Launch: ld >= tile.
+    mn_uload: bool = False
     name: str = "rocke_gemm_skinny"
     # ``split``: the launch's split-K degree (grid z, the ``SPLIT`` argument).
     # Launch-only: it does not change the IR or the kernel name; a dispatcher
@@ -189,6 +199,7 @@ class SkinnyGemmSpec:
             f"mna{self.mnalign}" if self.mnalign != 8 else "",
             f"mnp{self.mn_pad}" if self.mn_pad else "",
             "mnu16" if self.mn_lds == "u16" else "",
+            "mnul" if self.mn_uload else "",
             flags={"ntws": self.nt_ws},
         )
 
@@ -253,6 +264,11 @@ def is_valid_spec(spec: SkinnyGemmSpec, arch: str = "gfx950") -> Tuple[bool, str
             return False, "kalign is unused with both operands MN-contiguous (keep 8)"
         if spec.mn_lds == "tr" and arch != "gfx950":
             return False, f"mn_lds='tr' needs ds_read_b64_tr_b16 (gfx950), not {arch}"
+    if spec.mn_uload and (not (a_mn or b_mn) or spec.mnalign == 8):
+        return False, "mn_uload needs an MN-contiguous operand with mnalign 1 or 2"
+    if spec.mn_uload and arch != "gfx950":
+        # (unaligned 16-byte buffer loads hardware-probed on gfx950)
+        return False, f"mn_uload is admitted on gfx950 only, not {arch}"
     if spec.block_size > 1024:
         return False, f"block_size {spec.block_size} > 1024"
     # registers: accumulators + prefetch stages of fragments (VGPR budget 512
@@ -347,6 +363,12 @@ def skinny_launch_error(
     if K % spec.kalign and not (a_mn and b_mn):
         return f"K={K} is not a multiple of kalign={spec.kalign} (use kalign 1)"
     for is_mn, ld, nm in ((a_mn, M, "M"), (b_mn, N, "N")):
+        if is_mn and spec.mn_uload and ld < (spec.tile_m if nm == "M" else spec.tile_n):
+            return (
+                f"{nm}={ld}: mn_uload shifts the last tile to end at the extent; "
+                f"the leading dimension is below the tile "
+                f"({spec.tile_m if nm == 'M' else spec.tile_n})"
+            )
         if is_mn and ld % spec.mnalign:
             return (
                 f"{nm}={ld} (MN-contiguous leading dimension) is not a multiple "
@@ -462,6 +484,14 @@ def build_gemm_skinny(spec: SkinnyGemmSpec, arch: str = "gfx950") -> KernelDef:
     bz = b.block_id_z()
     n_tile0 = b.to_sgpr_u32(b.mul(bx, b.const_i32(TN)))
     m_tile0 = b.to_sgpr_u32(b.mul(by, b.const_i32(TM)))
+    if spec.mn_uload:
+        # the last tile along an MN-contiguous operand's dimension ends at
+        # the extent (the launch rules keep ld >= tile)
+        _a_mn, _b_mn = spec.mn_operands
+        if _a_mn:
+            m_tile0 = b.to_sgpr_u32(b.smin(m_tile0, b.sub(M, b.const_i32(TM))))
+        if _b_mn:
+            n_tile0 = b.to_sgpr_u32(b.smin(n_tile0, b.sub(N, b.const_i32(TN))))
 
     lrow = b.mod(lane, b.const_i32(16))  # row within an atom (operand load)
     lgrp = b.div(lane, b.const_i32(16))  # K lane group 0..3
@@ -567,7 +597,10 @@ def build_gemm_skinny(spec: SkinnyGemmSpec, arch: str = "gfx950") -> KernelDef:
         """8 consecutive elements of one row at byte offset vo + so (K of a
         K-contiguous operand at ``kalign``, or M / N of an MN-contiguous one
         at ``align`` = ``mnalign``)."""
-        if (spec.kalign if align is None else align) >= 2:
+        if (spec.kalign if align is None else align) >= 2 or (
+            align is not None and spec.mn_uload
+        ):
+            # (mn_uload: one unaligned 16-byte load at any 2-byte offset)
             return b.buffer_load_vN(rs, vo, so, elem, 8)
         # kalign 1 (any K): the row may start at a 2-byte boundary. Load the
         # four dwords at the dword-aligned offset plus the 2 bytes after them
@@ -606,7 +639,7 @@ def build_gemm_skinny(spec: SkinnyGemmSpec, arch: str = "gfx950") -> KernelDef:
             # past K / the slice and M / N past the operand's end read 0)
             nel = b.sub(b.mul(rows_c, L), b.select(capped, c0, mn_tile0))
             nbytes = b.mul(b.smax(nel, c0), c2)
-            if spec.mnalign == 1:
+            if spec.mnalign == 1 and not spec.mn_uload:
                 # odd leading dimension: whole dwords only (see _rsrc)
                 nbytes = b.land(b.add(nbytes, c3), cm4)
             base = b.global_ptr_add(

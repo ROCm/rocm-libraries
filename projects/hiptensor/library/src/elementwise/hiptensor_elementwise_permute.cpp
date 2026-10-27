@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "backend/registry.hpp"
+#include "backends/ck/ck_backend.hpp"
 #include "data_types.hpp"
 #include "elementwise_execute.hpp"
 #include "elementwise_solution.hpp"
@@ -44,6 +46,38 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
                                    const hipStream_t       stream)
 try
 {
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::permute(handle, plan, alpha, A, B, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.out = B;
+
+    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorPermute");
+}
+
+hiptensorStatus_t hiptensor::ckbackend::permute(hiptensorHandle_t            handle,
+                                                hiptensorPlan_t              plan,
+                                                void const*                  alpha,
+                                                void const*                  A,
+                                                void*                        B,
+                                                backend::LaunchConfig const& cfg)
+{
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -134,9 +168,5 @@ try
                                      operators,
                                      {operators[0], opDes->mOpB},
                                      2,
-                                     stream);
-}
-catch(...)
-{
-    return hiptensor::exceptionToStatus("hiptensorPermute");
+                                     cfg);
 }

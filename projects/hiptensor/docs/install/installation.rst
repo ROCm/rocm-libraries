@@ -197,6 +197,29 @@ Here are the available options to build the hipTensor library, with or without c
     *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
         -   Inline all contraction unary ops for best runtime performance (slower compilation)
         -   ``OFF``
+    *   -   ``HIPTENSOR_ENABLE_ROCKE_BACKEND``
+        -   Build the rocKE backend, which plans select with ``HIPTENSOR_BACKEND=rocke``
+        -   ``OFF``
+    *   -   ``HIPTENSOR_ENABLE_ROCKE_JIT``
+        -   Build the rocKE backend's JIT and kernel cache (with ``HIPTENSOR_ENABLE_ROCKE_BACKEND``): compiles rocKE's
+            recipe engine from ``HIPTENSOR_ROCKE_SOURCE_DIR`` into the library and links the COMGR library
+        -   ``ON``
+    *   -   ``HIPTENSOR_ROCKE_SOURCE_DIR``
+        -   rocKE source tree the rocKE kernel packs are built from (build time only; needs a Python 3 interpreter)
+        -   ``../../dnn-providers/hip-kernel-provider/rocke``
+    *   -   ``HIPTENSOR_ROCKE_PACK_DIR``
+        -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``); when set, no pack is built and no Python runs
+        -   Empty
+    *   -   ``HIPTENSOR_ROCKE_PACK_TARGETS``
+        -   GPU targets to build rocKE kernel packs for
+        -   The targets of ``GPU_TARGETS`` among gfx90a, gfx942, gfx950
+    *   -   ``HIPTENSOR_ROCKE_PACK_JOBS``
+        -   Parallel compile jobs of the rocKE kernel pack build
+        -   Number of CPUs
+    *   -   ``HIPTENSOR_ROCKE_SELECT_MODEL_DIR``
+        -   Kernel selection models written into the rocKE kernel packs (``<target>/<class>.model``); a target
+            without models selects kernels by rocKE's rules
+        -   ``library/src/backends/rocke/select``
     *   -   ``CREATE_TEST_APP_LOCAL_DEPLOY``
         -   Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)
         -   ``OFF``

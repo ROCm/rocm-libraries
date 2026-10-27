@@ -29,6 +29,7 @@
 
 #include <hiptensor/hiptensor.h>
 
+#include "backends/ck/ck_backend.hpp"
 #include "elementwise_execute.hpp"
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
@@ -248,7 +249,7 @@ namespace hiptensor
                                      std::vector<hiptensorOperator_t> const& operators,
                                      std::vector<hiptensorOperator_t> const& queryOperators,
                                      std::size_t                             flopsPerElement,
-                                     hipStream_t                             stream)
+                                     backend::LaunchConfig const&            cfg)
     {
         auto& logger      = Logger::instance();
         auto& autotuneMgr = PlancacheAutotuneMgr::instance();
@@ -315,15 +316,7 @@ namespace hiptensor
                 float time = 0.0f;
                 if(logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
                 {
-                    auto& options = HiptensorOptions::instance();
-
-                    time = (*pSolution)(StreamConfig{
-                        stream, // stream id
-                        true, // time_kernel
-                        0, // log_level
-                        options->coldRuns(), // cold_niters
-                        options->hotRuns(), // nrepeat
-                    });
+                    time = (*pSolution)(ckbackend::toStreamConfig(ckbackend::timedLaunch(cfg)));
                     if(time < 0)
                     {
                         return HIPTENSOR_STATUS_CK_ERROR;
@@ -352,7 +345,7 @@ namespace hiptensor
                 }
                 else
                 {
-                    time = (*pSolution)(StreamConfig{stream, false});
+                    time = (*pSolution)(ckbackend::toStreamConfig(cfg));
                     if(time < 0)
                     {
                         return HIPTENSOR_STATUS_CK_ERROR;

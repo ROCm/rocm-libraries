@@ -38,6 +38,14 @@ model:
 
 The ring-body candidate serves what none of these admits.
 
+Autotune mode: :func:`plan_tensor_gett_candidates` lists the candidate routes
+of a problem (the cost-model route, the MN-layout GETT on the selector's best
+both-MN-contiguous bodies, one-step body mutations, the K-contiguous route on
+its best RCR bodies) and :func:`tune_tensor_gett` measures them with the
+search engine. Measured winners ship in the tuned route table
+(:data:`TENSOR_GETT_TUNED`, sidecar ``tensor_gett_tuned.json``), which
+:func:`plan_tensor_gett` consults before the cost model.
+
 The candidate's ``sweep_space`` is its knob neighbourhood (K tile, stage
 count, persistent grid, paired 16-byte epilogue stores), for the tuning
 engine to search. Python engine only (no C++ builder).
@@ -146,8 +154,11 @@ TENSOR_GETT_MN_EPI_V16 = True
 #: doc rows; 0 issues each load where it is consumed).
 TENSOR_GETT_MN_C_PREFETCH = 2
 #: K-contiguous candidate, bilinear: C loads issued this many rows ahead in
-#: the vector epilogue hook.
-TENSOR_GETT_KC_C_PREFETCH = 0
+#: the vector epilogue hook (8: the C load latency overlaps the alpha / beta
+#: math of the previous rows; measured faster than 0, 2 and 4 on the
+#: bilinear canonical rows this route serves; 0 issues each load where it is
+#: consumed).
+TENSOR_GETT_KC_C_PREFETCH = 8
 #: K-contiguous candidate on a vector-epilogue body: D's contiguous run on
 #: the column side must be at least this long, unless K is at least
 #: :data:`TENSOR_GETT_KC_SHORT_RUN_MIN_K`. A wave's store instruction covers
@@ -230,13 +241,16 @@ def _mn_persistent(req: TensorGettRequest, tile, trait):
     return replace(trait, persistent_ctas=cus)
 
 
-def _spec_mn(req: TensorGettRequest):
+def _spec_mn(req: TensorGettRequest, bodies=None):
     """The first valid MN-layout GETT spec over :func:`_mn_bodies` (with the
-    16-byte epilogue when it applies), or None."""
+    16-byte epilogue when it applies), or None. ``bodies``: explicit
+    ``(tile, trait)`` pairs to try instead (used as given, no persistent
+    rewrite; the candidate routes of :func:`plan_tensor_gett_candidates`)."""
     p = req.problem
     valid = []
-    for tile, trait in _mn_bodies(req):
-        trait = _mn_persistent(req, tile, trait)
+    for tile, trait in _mn_bodies(req) if bodies is None else bodies:
+        if bodies is None:
+            trait = _mn_persistent(req, tile, trait)
         kn = replace(
             p.knobs,
             bilinear=p.bilinear,
@@ -458,6 +472,7 @@ TENSOR_PACK_COST = {
     "pairs": (2.0, 4.2e6),
     "tiled": (5.0, 5.5e6),
     "elements": (3.0, 1.3e6),
+    "permute_tiled": (2.5, 5.8e6),
 }
 #: ratio of the GETT kernel time to the GEMM model's prediction of its body (the
 #: model predicts the plain GEMM): the MN-layout GETT (operand addressing +
@@ -477,8 +492,61 @@ def _route_policy() -> str:
 
 
 def _pack_cost_us(spec) -> float:
+    from ...instances.common.permute_tiled import PermuteTiledSpec
+
+    if isinstance(spec, PermuteTiledSpec):
+        c0, bw = TENSOR_PACK_COST["permute_tiled"]
+        n = 1
+        for e in spec.x_shape:
+            n *= int(e)
+        return c0 + 2.0 * spec.elem_bytes * n / bw
     c0, bw = TENSOR_PACK_COST[spec.resolved_form()]
     return c0 + 4.0 * spec.numel() / bw
+
+
+#: Pack kernel of the pack steps: "tensor_pack" (the GETT family's own pack)
+#: or "permute_tiled" (the multi-axis tiled permute: 16-byte accesses on both
+#: sides with an in-register / LDS transpose; used for contiguous sources,
+#: strided sources keep tensor_pack)
+TENSOR_GETT_PACK_KERNEL = "tensor_pack"
+
+
+def _pack_step(name: str, ps, arch: str) -> "TensorPackStep":
+    """The pack step copying operand ``name`` per ``ps`` (a TensorPackSpec)
+    with the :data:`TENSOR_GETT_PACK_KERNEL` kernel."""
+    from ...instances.common.tensor.pack import tensor_pack_block, tensor_pack_grid
+
+    if TENSOR_GETT_PACK_KERNEL == "permute_tiled" and ps.strides_src is None:
+        from ...instances.common.permute_tiled import (
+            permute_tiled_grid,
+            plan_permute_tiled,
+        )
+
+        ext = dict(ps.extents)
+        shape = [int(ext[m]) for m in ps.modes_src]
+        perm = [list(ps.modes_src).index(m) for m in ps.modes_dst]
+        dt = "f16" if ps.dtype in ("f16", "fp16") else ps.dtype
+        try:
+            pt = plan_permute_tiled(shape, perm, dt, arch)
+        except ValueError:
+            pt = None
+        if pt is not None:
+            return TensorPackStep(
+                name, pt, permute_tiled_grid(pt), (pt.block_size, 1, 1), 2 * ps.numel()
+            )
+    return TensorPackStep(
+        name, ps, tensor_pack_grid(ps), tensor_pack_block(ps), 2 * ps.numel()
+    )
+
+
+def build_pack_step(step: "TensorPackStep", arch: str):
+    """The kernel of a pack step (params ``X`` = source, ``Y`` = workspace)."""
+    from ...instances.common.permute_tiled import PermuteTiledSpec, build_permute_tiled
+    from ...instances.common.tensor.pack import build_tensor_pack
+
+    if isinstance(step.spec, PermuteTiledSpec):
+        return build_permute_tiled(step.spec, arch=arch)
+    return build_tensor_pack(step.spec, arch=arch)
 
 
 def _gemm_req(req, M, N, K, layout):
@@ -511,10 +579,11 @@ def _predicted(greq, spec):
         return None
 
 
-def _spec_kc(req: TensorGettRequest):
+def _spec_kc(req: TensorGettRequest, body=None):
     """The K-contiguous GETT spec on the GEMM dispatcher's RCR pick, or None.
     The pick's epilogue decides which GEMM operand owns D's fastest mode (the
-    row-interleave vector epilogue stores 8 columns per lane)."""
+    row-interleave vector epilogue stores 8 columns per lane). ``body``: an
+    explicit RCR GEMM spec to use instead of the dispatcher pick."""
     from ...instances.common.gemm_universal import UniversalGemmSpec
 
     p = req.problem
@@ -524,13 +593,16 @@ def _spec_kc(req: TensorGettRequest):
             plan = _kc_plan(p, role)
         except ValueError:
             continue
-        try:
-            r = disp(_gemm_req(req, plan.M, plan.N, plan.K, "RCR"))
-        except (ValueError, KeyError):
+        if body is not None:
+            r_spec = body
+        else:
+            try:
+                r_spec = disp(_gemm_req(req, plan.M, plan.N, plan.K, "RCR")).spec
+            except (ValueError, KeyError):
+                continue
+        if not isinstance(r_spec, UniversalGemmSpec):
             continue
-        if not isinstance(r.spec, UniversalGemmSpec):
-            continue
-        tr = r.spec.trait
+        tr = r_spec.trait
         if bool(tr.rilv_vec_epilogue) != (role == "B"):
             continue
         if (
@@ -549,7 +621,7 @@ def _spec_kc(req: TensorGettRequest):
             chiplet_chunk_size=64,
             mn_tile=None,
             mn_trait=None,
-            kc_tile=r.spec.tile,
+            kc_tile=r_spec.tile,
             kc_trait=tr,
             knobs=replace(
                 p.knobs,
@@ -657,11 +729,15 @@ def _pack_order(modes, k_modes, ext):
 
 
 def plan_tensor_gett(req: TensorGettRequest) -> TensorGettPlan:
-    """The product route for ``req`` (see the module doc)."""
-    p = req.problem
-    mn = TENSOR_GETT_REGISTRY.get("tensor_gett_mn")
-    mn_plan = _plan_mn(req)
+    """The product route for ``req`` (see the module doc). A problem with an
+    entry in the tuned route table (:data:`TENSOR_GETT_TUNED`, measured by
+    :func:`tune_tensor_gett`) takes that route under the ``auto`` policy."""
     policy = _route_policy()
+    if policy == "auto" and TENSOR_GETT_USE_TUNED:
+        tuned = _tuned_plan(req)
+        if tuned is not None:
+            return tuned
+    mn_plan = _plan_mn(req)
     if policy == "mn":
         return mn_plan
     kc_plan = _plan_kc(req)
@@ -703,17 +779,14 @@ def _plan_cost(req: TensorGettRequest, plan: "TensorGettPlan"):
     return t + sum(_pack_cost_us(s.spec) for s in plan.packs)
 
 
-def _plan_kc(req: TensorGettRequest):
-    """The K-contiguous route (both operands packed [rows, K]), or None."""
+def _plan_kc(req: TensorGettRequest, body=None):
+    """The K-contiguous route (both operands packed [rows, K]), or None
+    (``body``: an explicit RCR GEMM spec, see :func:`_spec_kc`)."""
     from ...instances.common.tensor import kc_operand_modes, launch_operands
-    from ...instances.common.tensor.pack import (
-        TensorPackSpec,
-        tensor_pack_block,
-        tensor_pack_grid,
-    )
+    from ...instances.common.tensor.pack import TensorPackSpec
     from ...instances.common.tensor.pack import is_valid_spec as _pack_valid
 
-    sp = _spec_kc(req)
+    sp = _spec_kc(req, body)
     if sp is None:
         return None
     p = req.problem
@@ -732,11 +805,7 @@ def _plan_kc(req: TensorGettRequest):
         )
         if not _pack_valid(ps, arch=req.arch)[0]:
             return None
-        packs.append(
-            TensorPackStep(
-                nm, ps, tensor_pack_grid(ps), tensor_pack_block(ps), 2 * ps.numel()
-            )
-        )
+        packs.append(_pack_step(nm, ps, req.arch))
     cand = TENSOR_GETT_REGISTRY.get("tensor_gett_kc")
     kid = _kernel_id(req, cand, sp)
     r = DispatchResult(
@@ -757,19 +826,41 @@ def _plan_kc(req: TensorGettRequest):
     )
 
 
-def _plan_mn(req: TensorGettRequest) -> "TensorGettPlan":
-    """The MN-layout routes: single launch, else the pack hybrid, else the
-    ring body."""
-    from ...instances.common.tensor.pack import (
-        TensorPackSpec,
-        tensor_pack_block,
-        tensor_pack_grid,
+def _mn_result(req: TensorGettRequest, bodies) -> Optional[DispatchResult]:
+    """A ``tensor_gett_mn`` dispatch result on the explicit ``bodies`` (None:
+    no valid body)."""
+    if _request_errors(req):
+        return None
+    sp = _spec_mn(req, bodies)
+    if sp is None or not is_valid_spec(sp, arch=req.arch)[0]:
+        return None
+    cand = TENSOR_GETT_REGISTRY.get("tensor_gett_mn")
+    return DispatchResult(
+        request=req,
+        candidate=cand,
+        spec=sp,
+        kernel_id=_kernel_id(req, cand, sp),
+        grid=cand.grid(sp, req),
+        block=cand.block(sp),
+        signature=tuple(cand.signature(sp)),
+        explanation=(f"selected {cand.name} on an explicit body",),
     )
+
+
+def _plan_mn(req: TensorGettRequest, bodies=None) -> "TensorGettPlan":
+    """The MN-layout routes: single launch, else the pack hybrid, else the
+    ring body. ``bodies``: explicit MN bodies (see :func:`_spec_mn`); then the
+    ring-body fallback is not taken (None when no body serves)."""
+    from ...instances.common.tensor.pack import TensorPackSpec
     from ...instances.common.tensor.pack import is_valid_spec as _pack_valid
 
     p = req.problem
     mn = TENSOR_GETT_REGISTRY.get("tensor_gett_mn")
-    if mn.admits(req)[0] or not TENSOR_GETT_PACK_HYBRID:
+    if bodies is not None:
+        r = _mn_result(req, bodies)
+        if r is not None:
+            return TensorGettPlan((), r, 0, (f"single launch: {r.candidate.name}",))
+    elif mn.admits(req)[0] or not TENSOR_GETT_PACK_HYBRID:
         r = dispatch_tensor_gett(req)
         return TensorGettPlan((), r, 0, (f"single launch: {r.candidate.name}",))
     try:
@@ -802,19 +893,19 @@ def _plan_mn(req: TensorGettRequest) -> "TensorGettPlan":
                 why.append(f"operand {nm}: no pack ({w})")
                 packs = None
                 break
-            packs.append(
-                TensorPackStep(
-                    nm, ps, tensor_pack_grid(ps), tensor_pack_block(ps), 2 * ps.numel()
-                )
-            )
+            packs.append(_pack_step(nm, ps, req.arch))
             if nm == "A":
                 newp = replace(newp, modes_a=order, strides_a=None)
             else:
                 newp = replace(newp, modes_b=order, strides_b=None)
     if packs:
         preq = replace(req, problem=newp)
-        if mn.admits(preq)[0]:
+        r = None
+        if bodies is not None:
+            r = _mn_result(preq, bodies)
+        elif mn.admits(preq)[0]:
             r = dispatch_tensor_gett(preq)
+        if r is not None:
             return TensorGettPlan(
                 tuple(packs),
                 r,
@@ -826,10 +917,402 @@ def _plan_mn(req: TensorGettRequest) -> "TensorGettPlan":
                 ),
             )
         why.append("the packed problem has no MN-layout body")
+    if bodies is not None:
+        return None
     r = dispatch_tensor_gett(req)
     return TensorGettPlan(
         (), r, 0, tuple(why) + (f"single launch: {r.candidate.name}",)
     )
+
+
+# ---------------------------------------------------------------------------
+# candidate routes, autotune mode and the tuned route table
+# ---------------------------------------------------------------------------
+
+#: candidate routes of :func:`plan_tensor_gett_candidates`: the MN-layout GETT
+#: on the best ``TENSOR_GETT_TUNE_MN_TOP`` both-MN-contiguous GEMM bodies of the
+#: native selector's ranking, and the K-contiguous route on the best
+#: ``TENSOR_GETT_TUNE_KC_TOP`` RCR bodies of the RCR selector's ranking (one
+#: body per geometry, see :func:`_diverse_bodies`)
+TENSOR_GETT_TUNE_MN_TOP = 6
+TENSOR_GETT_TUNE_KC_TOP = 6
+#: one-step body mutations :func:`plan_tensor_gett_candidates` adds around its
+#: first ``neighbours`` MN-layout bodies (the autotune search space beyond the
+#: selector's ranking): grid raster, ring depth, scheduling priority and
+#: interleave barrier, occupancy hint, persistent grid, the MN-operand LDS
+#: block layout, the LDS swizzle, AGPR accumulators, fragment prefetch
+TENSOR_GETT_TUNE_LEVERS = (
+    ("chiplet_swizzle", (False,)),
+    ("chiplet_wgm", (4, 8, 16)),
+    ("dtl_stages", (2, 3, 4)),
+    ("interwave_setprio", (True, False)),
+    ("ilv_barrier_after", (0, 2)),
+    ("waves_per_eu", (1, 2)),
+    ("persistent_ctas", (0, 256)),
+    ("chiplet_chunk_size", (4, 8, 32)),
+    ("mn_chunk", (64, 128, 256)),
+    ("mn_pad", (0, 32, 64)),
+    ("lds_swizzle", (True, False)),
+    ("acc_agpr", (True, False)),
+    ("dtl_frag_prefetch", (True, False)),
+)
+#: consult :data:`TENSOR_GETT_TUNED` in :func:`plan_tensor_gett` (False: the
+#: cost-model routes only)
+TENSOR_GETT_USE_TUNED = True
+#: Tuned routes: ``{arch: {tensor_gett_route_key(req): (route, gemm config)}}``
+#: with route ``"mn"`` (MN-layout GETT, pack hybrid when an operand run needs
+#: it) or ``"kc"`` (K-contiguous packed operands) and the GEMM body as a
+#: selector config string (``selector.config_string``). Entries come from
+#: :func:`tune_tensor_gett` runs (each winner passed the full numeric check
+#: and was confirmed in an interleaved final pass). The shipped entries live in
+#: the ``tensor_gett_tuned.json`` sidecar next to this module (each with the
+#: problem it was tuned on, see :func:`tuned_entry_problem`).
+TENSOR_GETT_TUNED_FILE = "tensor_gett_tuned.json"
+
+
+def _load_shipped_tuned() -> dict:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).with_name(TENSOR_GETT_TUNED_FILE)
+    if not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        arch: {k: (e["route"], e["body"]) for k, e in table.items()}
+        for arch, table in raw.get("entries", {}).items()
+    }
+
+
+_SHIPPED_TUNED: dict = _load_shipped_tuned()
+TENSOR_GETT_TUNED: dict = {a: dict(t) for a, t in _SHIPPED_TUNED.items()}
+
+
+def tuned_entry_problem(arch: str, key: str) -> Optional[dict]:
+    """The problem (``modes_a`` / ``modes_b`` / ``modes_d`` / ``extents`` /
+    ``dtype`` / ``bilinear``) a shipped tuned entry was measured on, or None."""
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).with_name(TENSOR_GETT_TUNED_FILE)
+    if not path.exists():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    e = raw.get("entries", {}).get(arch, {}).get(key)
+    return None if e is None else e.get("problem")
+
+
+@dataclass(frozen=True)
+class TensorGettRoute:
+    """One candidate route: ``route`` ("mn" / "kc"), the GEMM ``body`` spec
+    it runs on, where it came from (``origin``) and its launches (``plan``)."""
+
+    origin: str
+    route: str
+    body: object
+    plan: "TensorGettPlan"
+
+
+@dataclass
+class TensorGettTuneResult:
+    route: TensorGettRoute
+    evaluations: int
+    routes: tuple
+    search: object = None
+
+    def table_entry(self, req: "TensorGettRequest") -> tuple:
+        """``(key, (route, config))`` for :data:`TENSOR_GETT_TUNED`."""
+        from ..gemm.selector import config_string
+
+        return tensor_gett_route_key(req), (
+            self.route.route,
+            config_string(self.route.body),
+        )
+
+
+def _canonical_modes(p) -> dict:
+    """The problem's modes renamed by first appearance (D, then A, then B):
+    two problems that differ only in mode names get the same key."""
+    names: dict = {}
+    for m in tuple(p.modes_d) + tuple(p.modes_a) + tuple(p.modes_b):
+        names.setdefault(m, f"x{len(names)}")
+    return names
+
+
+def tensor_gett_route_key(req: "TensorGettRequest") -> str:
+    """The tuned-table key of ``req``: dtype, bilinear and the problem's
+    modes / extents / strides with mode names canonicalised."""
+    p = req.problem
+    nm = _canonical_modes(p)
+    ext = dict(p.extents)
+
+    def strides(st):
+        if st is None:
+            return None
+        return sorted((nm[k], int(v)) for k, v in dict(st).items())
+
+    body = {
+        "dtype": req.dtype,
+        "bilinear": bool(p.bilinear),
+        "a": [nm[m] for m in p.modes_a],
+        "b": [nm[m] for m in p.modes_b],
+        "d": [nm[m] for m in p.modes_d],
+        "ext": sorted((nm[m], int(e)) for m, e in ext.items() if m in nm),
+        "sa": strides(p.strides_a),
+        "sb": strides(p.strides_b),
+        "sd": strides(p.strides_d),
+    }
+    return stable_json_hash(body, n=20)
+
+
+def _diverse_bodies(ranked, k: int) -> list:
+    """The best spec of each distinct body geometry (tile, waves, atom,
+    persistent grid, ring depth, row interleave), best first, at most ``k``."""
+    out, seen = [], set()
+    if k <= 0:
+        return out
+    for _sc, c in ranked:
+        t, tr = c.spec.tile, c.spec.trait
+        key = (
+            t.tile_m,
+            t.tile_n,
+            t.tile_k,
+            t.warp_m,
+            t.warp_n,
+            t.warp_tile_m,
+            t.warp_tile_n,
+            t.warp_tile_k,
+            tr.persistent_ctas > 0,
+            tr.dtl_stages,
+            bool(tr.lds_row_interleave),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c.spec)
+        if len(out) >= k:
+            break
+    return out
+
+
+def _route_body(sp):
+    """The GEMM body of a GETT spec with its tile / trait as the route stores
+    them (``mn_*`` / ``kc_*``, before the GETT normalisation of
+    :meth:`TensorGettSpec.body`), so a tuned-table entry rebuilds the same
+    spec."""
+    b = sp.body()
+    if sp.kc_body:
+        return replace(b, tile=sp.kc_tile, trait=sp.kc_trait)
+    return replace(b, tile=sp.mn_tile, trait=sp.mn_trait)
+
+
+def _ranked_bodies(req: "TensorGettRequest", M: int, N: int, K: int, layout: str):
+    from ..gemm import selector as _S
+    from ..gemm.autotune import _registry
+
+    greq = _S._auto(_gemm_req(req, M, N, K, layout))
+    registry = _registry(greq)
+    try:
+        cand = registry.select(greq)
+        rule = (cand, cand.select_spec(greq))
+    except Exception:  # noqa: BLE001 - no rule pick: rank without it
+        rule = None
+    try:
+        return _S.rank(greq, registry, rule_pick=rule)
+    except Exception:  # noqa: BLE001 - no model for this arch / layout
+        return []
+
+
+def plan_tensor_gett_candidates(
+    req: "TensorGettRequest",
+    *,
+    mn_top: Optional[int] = None,
+    kc_top: Optional[int] = None,
+    neighbours: int = 0,
+) -> list:
+    """The candidate routes of ``req`` for autotuning, the cost-model product
+    route first: the MN-layout GETT on each of the selector's best
+    both-MN-contiguous bodies (with the pack hybrid where an operand run
+    needs it), one-step mutations (:data:`TENSOR_GETT_TUNE_LEVERS`) of the
+    first ``neighbours`` of those bodies, and the K-contiguous route on each
+    of the selector's best RCR bodies. Every route's GETT spec passed
+    :func:`is_valid_spec`; duplicates count once."""
+    mn_top = TENSOR_GETT_TUNE_MN_TOP if mn_top is None else mn_top
+    kc_top = TENSOR_GETT_TUNE_KC_TOP if kc_top is None else kc_top
+    out: list = []
+    seen: set = set()
+
+    def add(origin, route, body, plan):
+        if plan is None:
+            return
+        key = (route, stable_json_hash(asdict(plan.gett.spec), n=16))
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(TensorGettRoute(origin, route, body, plan))
+
+    global TENSOR_GETT_USE_TUNED
+    saved = TENSOR_GETT_USE_TUNED
+    TENSOR_GETT_USE_TUNED = False
+    try:
+        dflt = plan_tensor_gett(req)
+    finally:
+        TENSOR_GETT_USE_TUNED = saved
+    sp = dflt.gett.spec
+    if sp.mn_body or sp.kc_body:
+        add("default", "kc" if sp.kc_body else "mn", _route_body(sp), dflt)
+    try:
+        base = replace(req.problem, tile_k=32, mn_tile=None, mn_trait=None).plan()
+    except ValueError:
+        base = None
+    mn_bodies = [_route_body(sp)] if sp.mn_body else []
+    if base is not None and mn_top > 0:
+        ranked = _ranked_bodies(req, base.M, base.N, base.K, "CRR")
+        for i, body in enumerate(_diverse_bodies(ranked, mn_top)):
+            mn_bodies.append(body)
+            add(f"mn:{i}", "mn", body, _plan_mn(req, [(body.tile, body.trait)]))
+    for r in tensor_gett_neighbour_routes(req, mn_bodies[: max(0, int(neighbours))]):
+        add(r.origin, r.route, r.body, r.plan)
+    if kc_top > 0:
+        kp = None
+        for role in ("B", "A"):
+            try:
+                kp = _kc_plan(req.problem, role)
+                break
+            except ValueError:
+                kp = None
+        if kp is not None:
+            ranked = _ranked_bodies(req, kp.M, kp.N, kp.K, "RCR")
+            for i, body in enumerate(_diverse_bodies(ranked, kc_top)):
+                add(f"kc:{i}", "kc", body, _plan_kc(req, body))
+    return out
+
+
+def tensor_gett_neighbour_routes(req: "TensorGettRequest", bodies) -> list:
+    """MN-layout routes on the one-step mutations
+    (:data:`TENSOR_GETT_TUNE_LEVERS`) of each MN body in ``bodies`` (origin
+    ``nb<i>:<lever>=<value>``); invalid mutations are dropped."""
+    from ...helpers.split_k import arch_num_cus
+
+    out = []
+    for j, body in enumerate(bodies):
+        for lever, values in TENSOR_GETT_TUNE_LEVERS:
+            for v in values:
+                if lever == "persistent_ctas" and v:
+                    v = arch_num_cus(req.arch)
+                if getattr(body.trait, lever) == v:
+                    continue
+                tr = replace(body.trait, **{lever: v})
+                if lever == "chiplet_wgm":
+                    tr = replace(tr, chiplet_swizzle=True)
+                nb = replace(body, trait=tr)
+                pl = _plan_mn(req, [(nb.tile, nb.trait)])
+                if pl is not None:
+                    out.append(TensorGettRoute(f"nb{j}:{lever}={v}", "mn", nb, pl))
+    return out
+
+
+def _route_flat(r: TensorGettRoute) -> dict:
+    from ..gemm.selector import flatten_spec as _flat
+
+    d = {"route": r.route, "packs": len(r.plan.packs)}
+    d.update(_flat(r.body))
+    return d
+
+
+def tune_tensor_gett(
+    req: "TensorGettRequest",
+    *,
+    measure,
+    check,
+    mode: str = "search",
+    budget: int = 12,
+    strategy: str = "portfolio",
+    seed: int = 0,
+    mn_top: Optional[int] = None,
+    kc_top: Optional[int] = None,
+    routes=None,
+    **tune_kwargs,
+) -> TensorGettTuneResult:
+    """Autotune mode of the product route: measure the candidate routes of
+    :func:`plan_tensor_gett_candidates` (or the given ``routes``) with the
+    search engine (:func:`rocke.dispatch.tuning.search.api.search_configs`)
+    and return the fastest one that passed ``check``.
+
+    ``measure(plan, fidelity)`` times one :class:`TensorGettPlan` (packs +
+    GETT launch); ``check(plan)`` runs the full-output numeric check (a
+    route that fails it can never win). ``mode="lite"`` times every
+    candidate once plus an interleaved confirmation of the finalists;
+    ``mode="search"`` spends ``budget`` evaluations (the cost-model route is
+    the warm start)."""
+    from ..tuning.search import Budget, WarmStart
+    from ..tuning.search.api import search_configs
+
+    if routes is None:
+        routes = plan_tensor_gett_candidates(req, mn_top=mn_top, kc_top=kc_top)
+    routes = list(routes)
+    if not routes:
+        raise ValueError(f"no GETT route for {req}")
+    rows = [_route_flat(r) for r in routes]
+    by_id = {id(r.plan): i for i, r in enumerate(routes)}
+    confirm = int(tune_kwargs.pop("confirm", min(3, len(routes))))
+    lite = mode == "lite"
+    n = len(routes) + confirm if lite else max(1, int(budget))
+    warm = () if lite else [WarmStart(rows[0], "default")]
+    winner, result = search_configs(
+        [r.plan for r in routes],
+        measure=measure,
+        check=check,
+        flatten=lambda pl: rows[by_id[id(pl)]],
+        strategy="exhaustive" if lite else strategy,
+        budget=Budget(evaluations=n),
+        seed=seed,
+        warm=warm,
+        confirm=confirm,
+        **tune_kwargs,
+    )
+    if winner is None:
+        raise ValueError("autotune found no route that passed the numeric check")
+    return TensorGettTuneResult(
+        route=routes[winner],
+        evaluations=len(getattr(result, "history", []) or []) or n,
+        routes=tuple(routes),
+        search=result,
+    )
+
+
+def _tuned_plan(req: "TensorGettRequest") -> Optional["TensorGettPlan"]:
+    """The plan of ``req``'s tuned-table entry, or None (no entry, or the
+    entry no longer builds a valid route)."""
+    table = TENSOR_GETT_TUNED.get(req.arch)
+    if not table:
+        return None
+    ent = table.get(tensor_gett_route_key(req))
+    if ent is None:
+        return None
+    route, cfg = ent
+    from ...instances.common.gemm_universal import TileSpec, TraitSpec
+    from ..gemm.selector import parse_config
+
+    try:
+        tl, tr = parse_config(cfg)
+        tile, trait = TileSpec(**tl), TraitSpec(**tr)
+    except (ValueError, TypeError):
+        return None
+    if route == "mn":
+        pl = _plan_mn(req, [(tile, trait)])
+    elif route == "kc":
+        try:
+            kp = _kc_plan(req.problem, "B")
+            pick = _gemm_dispatch(req)(_gemm_req(req, kp.M, kp.N, kp.K, "RCR")).spec
+        except (ValueError, KeyError):
+            return None
+        pl = _plan_kc(req, replace(pick, tile=tile, trait=trait))
+    else:
+        return None
+    if pl is None:
+        return None
+    return replace(pl, explanation=pl.explanation + ("tuned route table",))
 
 
 def gett_operand_sources(plan: TensorGettPlan) -> tuple:
@@ -844,9 +1327,19 @@ def gett_operand_sources(plan: TensorGettPlan) -> tuple:
 
 __all__ = [
     "TENSOR_GETT_PACK_HYBRID",
+    "TENSOR_GETT_PACK_KERNEL",
+    "build_pack_step",
     "TENSOR_GETT_PACK_ORDER",
     "TensorGettPlan",
+    "TensorGettRoute",
+    "TensorGettTuneResult",
     "TensorPackStep",
+    "TENSOR_GETT_TUNED",
+    "plan_tensor_gett_candidates",
+    "tensor_gett_neighbour_routes",
+    "tensor_gett_route_key",
+    "tuned_entry_problem",
+    "tune_tensor_gett",
     "gett_operand_sources",
     "plan_tensor_gett",
     "TENSOR_GETT_REGISTRY",

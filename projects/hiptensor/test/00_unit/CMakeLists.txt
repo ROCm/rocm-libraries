@@ -66,6 +66,35 @@ add_hiptensor_unit_test(plan_cache_unit_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_unit_test.cpp
     )
+add_hiptensor_unit_test(backend_seam_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend_seam_test.cpp
+    )
+# The rocKE backend's kernels through the public API (HIPTENSOR_BACKEND=rocke, no fallback).
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    add_hiptensor_unit_test(rocke_backend_test
+        ${HIPTENSOR_COMMON_TEST_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocke_backend_test.cpp
+        )
+    # Every contraction on the f64 route (operands converted to f64, one rounding of the result).
+    add_test(NAME rocke_backend_test_f64_route
+             COMMAND rocke_backend_test --gtest_filter=*RockeContraction*)
+    set_tests_properties(rocke_backend_test_f64_route PROPERTIES
+        ENVIRONMENT "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64"
+        WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    if(HIPTENSOR_ENABLE_ROCKE_JIT)
+        # The JIT and kernel cache, and every rocke_backend_test case with every elementwise
+        # launch specialized (HIPTENSOR_ROCKE_JIT=all: also the launches without a vector form).
+        add_hiptensor_unit_test(rocke_jit_test
+            ${HIPTENSOR_COMMON_TEST_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rocke_jit_test.cpp
+            )
+        add_test(NAME rocke_backend_test_jit COMMAND rocke_backend_test)
+        set_tests_properties(rocke_backend_test_jit PROPERTIES
+            ENVIRONMENT "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all"
+            WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    endif()
+endif()
 add_hiptensor_unit_test(contraction_selection_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/contraction_selection_test.cpp

@@ -113,15 +113,51 @@ SKINNY_NATIVE_MARGIN = 100
 # SKINNY_NATIVE_A64_MAX_TILES when both are and min(M, N) <
 # SKINNY_NATIVE_A64_MAX_SMALL); "table": the native table's predictions
 # (r >= rx x SKINNY_NATIVE_MARGIN)
-SKINNY_NATIVE_RULE = {"gfx950": "tiles", "gfx942": "table"}
+# "tiles2" (gfx950): thresholds fitted against the native-form selector's
+# non-skinny picks (which are faster than the rule picks the "tiles"
+# thresholds were measured against): an odd MN leading
+# dimension, or fewer than SKINNY_NATIVE_T2_SMALL 128x128 tiles, or fewer than
+# SKINNY_NATIVE_T2_LONGK_TILES tiles with K >= SKINNY_NATIVE_T2_LONGK_MIN.
+# Chosen from paired gfx950 non-NT timings (gemm_skinny vs the SKINNY_NATIVE-off
+# pick, same process, cross-validated). "tiles" stays a knob value.
+SKINNY_NATIVE_RULE = {"gfx950": "tiles2", "gfx942": "table"}
 SKINNY_NATIVE_ALIGN = 64
-# thresholds fitted against the native-form selector's non-skinny picks (paired
-# gemm_skinny vs SKINNY_NATIVE-off timings on gfx950 non-NT shapes, same
-# process, cross-validated): admit on an odd leading dimension or fewer than 16
-# 128x128 tiles
-SKINNY_NATIVE_A8_MAX_TILES = 16
-SKINNY_NATIVE_A64_MAX_TILES = 16
-SKINNY_NATIVE_A64_MAX_SMALL = 1 << 30
+SKINNY_NATIVE_A8_MAX_TILES = 128
+SKINNY_NATIVE_A64_MAX_TILES = 64
+SKINNY_NATIVE_A64_MAX_SMALL = 256
+SKINNY_NATIVE_T2_SMALL = 8
+# with the learned gemm_skinny configuration (skinny_select) gemm_skinny
+# serves 32-47 tiles with K >= 2048 better than the non-skinny native picks
+# (paired gfx950 NN / TN / TT timings, thresholds 48 / 64 / 96 next to the pick
+# in one process, cross-validated: larger thresholds lose).
+SKINNY_NATIVE_T2_LONGK_TILES = 48
+SKINNY_NATIVE_T2_LONGK_MIN = 2048
+# with the DTL-ring native forms for an MN leading dimension
+# that is not a multiple of 8 (common.NATIVE_LAYOUT_DTL_LD_ANY, TraitSpec
+# mn_ld_any), "tiles2" admits gemm_skinny on such a leading dimension only below
+# SKINNY_NATIVE_T2_ODD_MAX_TILES 128x128 tiles or with K below
+# SKINNY_NATIVE_T2_ODD_MIN_K (no DTL ring form there: the non-skinny pick is the
+# VGPR-staged loader). Chosen from paired gfx950 odd-ld non-NT timings
+# (gemm_skinny vs the non-skinny pick in one process): thresholds from 16 to 48
+# tiles are all close to the per-shape best and well ahead of always- or
+# never-skinny; below K 96 the non-skinny pick is the VGPR-staged loader,
+# which gemm_skinny beats. 0 / None: always gemm_skinny on such a dimension.
+SKINNY_NATIVE_T2_ODD_MAX_TILES = 32
+SKINNY_NATIVE_T2_ODD_MIN_K = 96
+# with the learned gemm_skinny configuration (skinny_select) an odd
+# MN leading dimension with K >= SKINNY_NATIVE_T2_ODD_LONGK_MIN goes to gemm_skinny
+# below SKINNY_NATIVE_T2_ODD_LONGK_TILES tiles. Chosen from paired gfx950
+# non-NT timings (gemm_skinny vs the pick in one process): gemm_skinny is faster
+# there at long K and slower below K 4096. 0 = off.
+SKINNY_NATIVE_T2_ODD_LONGK_TILES = 64
+SKINNY_NATIVE_T2_ODD_LONGK_MIN = 4096
+# an MN-contiguous leading dimension that is not a multiple of 8
+# reads its 8-element pieces with single unaligned 16-byte loads
+# (SkinnyGemmSpec.mn_uload; the last tile shifted to end at the extent) where
+# every such leading dimension is >= its tile: faster than the mnalign 1 / 2
+# kernel of the same configuration (gfx950 odd-ld shapes, same process).
+SKINNY_MN_ULOAD = True
+SKINNY_MN_ULOAD_ARCHS = ("gfx950",)
 # fallback configuration constants
 SKINNY_WAVES_TARGET = 2048
 SKINNY_MIN_STEPS_PER_WAVE = 8
@@ -234,7 +270,7 @@ def skinny_native(spec: SkinnyGemmSpec, req: GemmRequest) -> SkinnyGemmSpec:
         if all(x % 8 == 0 for x in lds)
         else (2 if all(x % 2 == 0 for x in lds) else 1)
     )
-    return replace(
+    out = replace(
         spec,
         layout=lay,
         mnalign=mna,
@@ -244,6 +280,18 @@ def skinny_native(spec: SkinnyGemmSpec, req: GemmRequest) -> SkinnyGemmSpec:
         kmap="mfma",
         b_load="buffer" if b_mn else spec.b_load,
     )
+    if (
+        mna < 8
+        and SKINNY_MN_ULOAD
+        and req.arch in SKINNY_MN_ULOAD_ARCHS
+        and all(
+            int(ld) >= t
+            for ld, t, m in ((req.M, out.tile_m, a_mn), (req.N, out.tile_n, b_mn))
+            if m
+        )
+    ):
+        out = replace(out, mn_uload=True)
+    return out
 
 
 def _ld_odd(req: GemmRequest) -> bool:
@@ -326,7 +374,27 @@ def skinny_plan(req: GemmRequest) -> SkinnyGemmSpec:
             kc=16,
             prefetch=prefetch,
         )
+    if _plan_ok(spec, req.arch, M, N, K):
+        # the learned per-shape configuration choice
+        # (skinny_select; the table plan unless every guard bag predicts a
+        # menu configuration faster by SKINNY_SELECT_MARGIN)
+        from .skinny_select import select as _select
+
+        spec = _select(req, spec)[0]
     return spec
+
+
+def skinny_table_plan_of(req: GemmRequest) -> SkinnyGemmSpec:
+    """The table / fallback plan of ``req`` without the learned choice (the
+    plan :func:`skinny_plan` starts from; harnesses compare the two)."""
+    from . import skinny_select as _ss
+
+    saved = _ss.SKINNY_SELECT
+    try:
+        _ss.SKINNY_SELECT = False
+        return skinny_plan(req)
+    finally:
+        _ss.SKINNY_SELECT = saved
 
 
 def _native_fit(
@@ -411,11 +479,25 @@ def skinny_admit_region(req: GemmRequest) -> Tuple[bool, str]:
     return True, "ok"
 
 
-# gfx942 NN / TN / TT: the native gemm_skinny ahead of the g5 register-staged
+# gfx942 NN / TN / TT: the native gemm_skinny ahead of the register-staged
 # native forms (common.R2_VP_MN, priority 2) below max_tiles 128x128 output
-# tiles, chosen from paired gfx942 non-NT timings (gemm_skinny vs the dispatcher
-# pick, same process, cross-validated). Per arch; empty = g5 first.
-SKINNY_OVER_VGPR_NATIVE = {"gfx942": {"max_tiles": 32}}
+# tiles or with min(M, N) below max_small, or below longk_tiles with
+# K >= longk_min (off: the register-staged serial split-K forms are faster
+# there). With K >= native_min_k (and min(M, N) >= max_small) the
+# register-staged native forms of the native-form model (g5_native) take the
+# shapes below max_tiles too. Chosen from paired gfx942 non-NT timings
+# (gemm_skinny vs the dispatcher's non-skinny pick, same process,
+# cross-validated). Per arch; empty = register-staged forms first. A 48-tile
+# bound without native_min_k stays a knob value.
+SKINNY_OVER_VGPR_NATIVE = {
+    "gfx942": {
+        "max_tiles": 32,
+        "longk_tiles": 0,
+        "longk_min": 1 << 62,
+        "max_small": 64,
+        "native_min_k": 16384,
+    }
+}
 
 
 def skinny_native_over_vgpr(req: GemmRequest) -> bool:
@@ -427,8 +509,13 @@ def skinny_native_over_vgpr(req: GemmRequest) -> bool:
     if str(getattr(req, "layout", "RCR")).upper() == "RCR":
         return False
     M, N, K = int(req.M), int(req.N), int(req.K)
-    if -(-M // 128) * -(-N // 128) >= int(rule["max_tiles"]):
+    tiles = -(-M // 128) * -(-N // 128)
+    longk = tiles < int(rule.get("longk_tiles", 0)) and K >= int(rule.get("longk_min", 1 << 62))
+    small = min(M, N) < int(rule.get("max_small", 0))
+    if tiles >= int(rule["max_tiles"]) and not longk and not small:
         return False
+    if not small and not longk and K >= int(rule.get("native_min_k", 1 << 62)):
+        return False  # long K below max_tiles goes to the register-staged native forms
     spec = skinny_plan(req)
     return _plan_ok(spec, req.arch, M, N, K)
 
@@ -446,6 +533,8 @@ def _native_admit(req: GemmRequest, reg: dict, s: int) -> Tuple[bool, str]:
         return True, "ok (few tiles: ahead of the g5 native forms, SKINNY_OVER_VGPR_NATIVE)"
     if SKINNY_NATIVE_RULE.get(req.arch, "table") == "tiles":
         return _native_tiles_admit(req, s)
+    if SKINNY_NATIVE_RULE.get(req.arch, "table") == "tiles2":
+        return _native_tiles2_admit(req)
     e = skinny_native_entry(req.arch, req.M, req.N, req.K, req.layout, _ld_odd(req))
     if e is None:
         return False, f"min(M, N)={s} is outside the native gemm_skinny table"
@@ -456,6 +545,56 @@ def _native_admit(req: GemmRequest, reg: dict, s: int) -> Tuple[bool, str]:
             f"{SKINNY_NATIVE_MARGIN / 100:.2f} x the non-gemm_skinny pick's {rx / 100:.2f}"
         )
     return True, "ok"
+
+
+def _native_tiles2_admit(req: GemmRequest) -> Tuple[bool, str]:
+    """The "tiles2" native rule (``SKINNY_NATIVE_RULE``)."""
+    tiles = -(-int(req.M) // 128) * -(-int(req.N) // 128)
+    if _ld_odd(req):
+        if not _odd_dtl_native(req):
+            return True, "ok (MN-contiguous leading dimension not a multiple of 8)"
+        if tiles < int(SKINNY_NATIVE_T2_ODD_MAX_TILES):
+            return True, (
+                "ok (MN-contiguous leading dimension not a multiple of 8, "
+                f"{tiles} < {SKINNY_NATIVE_T2_ODD_MAX_TILES} 128x128 tiles)"
+            )
+        if int(req.K) < int(SKINNY_NATIVE_T2_ODD_MIN_K):
+            return True, (
+                "ok (MN-contiguous leading dimension not a multiple of 8, "
+                f"K={req.K} < {SKINNY_NATIVE_T2_ODD_MIN_K}: no DTL ring form)"
+            )
+        if tiles < int(SKINNY_NATIVE_T2_ODD_LONGK_TILES) and int(req.K) >= int(
+            SKINNY_NATIVE_T2_ODD_LONGK_MIN
+        ):
+            return True, (
+                "ok (MN-contiguous leading dimension not a multiple of 8, "
+                f"{tiles} < {SKINNY_NATIVE_T2_ODD_LONGK_TILES} tiles with K={req.K} >= "
+                f"{SKINNY_NATIVE_T2_ODD_LONGK_MIN}: merge r3)"
+            )
+        return False, (
+            f"{tiles} 128x128 tiles: the DTL-ring native forms read the "
+            "MN-contiguous operand in place (mn_ld_any, SKINNY_NATIVE_T2_ODD_*)"
+        )
+    if tiles < SKINNY_NATIVE_T2_SMALL:
+        return True, "ok"
+    if tiles < SKINNY_NATIVE_T2_LONGK_TILES and int(req.K) >= SKINNY_NATIVE_T2_LONGK_MIN:
+        return True, "ok (few tiles, long K)"
+    return False, (
+        f"{tiles} 128x128 tiles (K={req.K}): the native non-skinny bodies serve it "
+        "(SKINNY_NATIVE_RULE tiles2)"
+    )
+
+
+def _odd_dtl_native(req: GemmRequest) -> bool:
+    """The DTL-ring native forms serve an MN leading dimension that is
+    not a multiple of 8 on this target (and the tiles2 odd thresholds are on)."""
+    from . import common as _C
+
+    return bool(
+        SKINNY_NATIVE_T2_ODD_MAX_TILES
+        and _C.NATIVE_LAYOUT_DTL_LD_ANY
+        and str(req.arch) in _C.NATIVE_LAYOUT_DTL_LD_ANY_ARCHS
+    )
 
 
 def _native_tiles_admit(req: GemmRequest, s: int) -> Tuple[bool, str]:
@@ -824,6 +963,133 @@ def _ring_k_floor(req: GemmRequest, spec: Any) -> Optional[str]:
             "shape (the default candidate serves it)"
         )
     return None
+
+
+# ---------------------------------------------------------------------------
+# few / mid-tile long-K split-K ring (gfx950). The 128x128x64
+# DTL ring split over K with the in-launch ordered reduction (split_k_serial 2:
+# no zeroed workspace, no cast pass) for low degrees and the atomic f32 split
+# for high ones, any degree through whole-tile aligned slices. Fitted on
+# measured gfx950 timings of every degree x reduction: the degree aims at
+# R3_RING_SPLIT_SERIAL_CTAS workgroups with the serial reduction up to
+# R3_RING_SPLIT_SERIAL_MAX slices, else at R3_RING_SPLIT_ATOMIC_CTAS with the
+# atomic one (at most R3_RING_SPLIT_ATOMIC_MAX), every slice at least
+# R3_RING_SPLIT_MIN_SLICE deep (close to the per-shape best degree,
+# cross-validated). Admitted for R3_RING_SPLIT_MIN_TILES ..
+# R3_RING_SPLIT_MAX_TILES 128x128 tiles with K >= R3_RING_SPLIT_MIN_K,
+# min(M, N) >= R3_RING_SPLIT_MIN_SMALL, MN-contiguous leading dimensions that
+# are multiples of 8 and a degree >= 2, ahead of gemm_skinny / the rings
+# (priority R3_RING_SPLIT_PRIORITY). The region was fitted on paired gfx950
+# timings (the split ring vs the dispatcher's pick with the learned gemm_skinny
+# configuration, cross-validated); below 12 tiles the learned gemm_skinny
+# configuration is as fast.
+# ---------------------------------------------------------------------------
+R3_RING_SPLIT = True
+R3_RING_SPLIT_ARCHES: Tuple[str, ...] = ("gfx950",)
+R3_RING_SPLIT_PRIORITY = 2
+R3_RING_SPLIT_SERIAL_CTAS = 192
+R3_RING_SPLIT_SERIAL_MAX = 6
+R3_RING_SPLIT_SERIAL_MODE = 2
+R3_RING_SPLIT_ATOMIC_CTAS = 128
+R3_RING_SPLIT_ATOMIC_MAX = 24
+R3_RING_SPLIT_MIN_SLICE = 512
+R3_RING_SPLIT_MIN_K = 6144
+R3_RING_SPLIT_MIN_TILES = 12
+R3_RING_SPLIT_MAX_TILES = 200
+R3_RING_SPLIT_MIN_SMALL = 64
+# >0 while common.r3_kproxy_dispatch re-dispatches a K-rounded
+# request without the split ring (a split-K ring cannot run the K tail)
+_R3_RING_SPLIT_BYPASS = [0]
+
+
+def r3_ring_split_state() -> bool:
+    """Whether the split-K ring candidate can admit right now (the knob and no
+    K-proxy bypass); part of the selector's decision-cache key."""
+    return bool(R3_RING_SPLIT) and not _R3_RING_SPLIT_BYPASS[0]
+
+
+def r3_ring_split_degree(
+    M: int, N: int, K: int, tile_m: int, tile_n: int
+) -> Tuple[int, int]:
+    """``(split_k, split_k_serial)`` of the ring split rule (1, 0: none)."""
+    tiles = -(-int(M) // tile_m) * -(-int(N) // tile_n)
+    cap = max(1, int(K) // max(1, int(R3_RING_SPLIT_MIN_SLICE)))
+    s = int(round(R3_RING_SPLIT_SERIAL_CTAS / max(1, tiles)))
+    if s < 2:
+        return 1, 0
+    if s <= R3_RING_SPLIT_SERIAL_MAX:
+        s = min(s, cap)
+        return (s, int(R3_RING_SPLIT_SERIAL_MODE)) if s >= 2 else (1, 0)
+    s = max(
+        2,
+        min(
+            int(R3_RING_SPLIT_ATOMIC_MAX),
+            cap,
+            int(round(R3_RING_SPLIT_ATOMIC_CTAS / max(1, tiles))),
+        ),
+    )
+    return (s, 0) if s <= cap else (1, 0)
+
+
+def r3_ring_split_spec(req: GemmRequest, spec: Any) -> Any:
+    """The small ring's spec for ``req`` with its pads and the ring split (whole
+    K tiles per slice; aligned slices when the degree does not divide them)."""
+    t = spec.tile
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    tr = replace(
+        spec.trait,
+        pad_m=spec.trait.pad_m or M % t.tile_m != 0,
+        pad_n=spec.trait.pad_n or N % t.tile_n != 0,
+    )
+    s, ser = r3_ring_split_degree(M, N, K, t.tile_m, t.tile_n)
+    if s > 1 and K % t.tile_k == 0:
+        tr = replace(
+            tr,
+            split_k=s,
+            split_k_serial=ser,
+            split_k_aligned=(K // t.tile_k) % s != 0,
+            pad_fast_tile=False,
+        )
+    elif tr.pad_fast_tile and not (tr.pad_m or tr.pad_n):
+        tr = replace(tr, pad_fast_tile=False)
+    return replace(spec, trait=tr)
+
+
+def r3_ring_split_admit(req: GemmRequest, spec: Any) -> Tuple[bool, str]:
+    from ...instances.common.gemm_universal import is_valid_spec as uv_valid
+    from ...instances.common.gemm_universal import launch_shape_error
+
+    if not R3_RING_SPLIT:
+        return False, "R3_RING_SPLIT is off"
+    if _R3_RING_SPLIT_BYPASS[0]:
+        return False, "K-proxy re-dispatch without the split ring"
+    if req.arch not in R3_RING_SPLIT_ARCHES:
+        return False, f"no r3 ring split rule for {req.arch}"
+    t = spec.tile
+    M, N, K = int(req.M), int(req.N), int(req.K)
+    tiles = -(-M // 128) * -(-N // 128)
+    if not R3_RING_SPLIT_MIN_TILES <= tiles <= R3_RING_SPLIT_MAX_TILES:
+        return False, (
+            f"{tiles} 128x128 tiles outside [{R3_RING_SPLIT_MIN_TILES}, "
+            f"{R3_RING_SPLIT_MAX_TILES}]"
+        )
+    if K < R3_RING_SPLIT_MIN_K:
+        return False, f"K={K} < {R3_RING_SPLIT_MIN_K}"
+    if min(M, N) < R3_RING_SPLIT_MIN_SMALL:
+        return False, f"min(M, N)={min(M, N)} < {R3_RING_SPLIT_MIN_SMALL}"
+    if _ld_odd(req):
+        return False, "an MN-contiguous leading dimension is not a multiple of 8"
+    if K % t.tile_k:
+        return False, f"K={K} is not a multiple of tile_k={t.tile_k} (no K tail with split-K)"
+    if int(spec.trait.split_k) < 2:
+        return False, "the split rule keeps one slice (the unsplit bodies serve it)"
+    ok, why = uv_valid(spec, arch=req.arch)
+    if not ok:
+        return False, why
+    err = launch_shape_error(spec, M, N, K)
+    if err is not None:
+        return False, err
+    return True, "ok"
 
 
 def ring_small_any_admit(req: GemmRequest, spec: Any) -> Tuple[bool, str]:

@@ -44,6 +44,147 @@ The hipTensor solution layer is divided into functional components, such as cont
 Each component contains a registry of backend instances as potential solution candidates for given input parameters.
 These instances are selected based on API-provided hints and populated with the appropriate arguments for invocation by the API.
 
+Backends
+^^^^^^^^
+
+The solution layer reaches kernels only through a backend interface (``library/src/backend``). When a plan is
+created, hipTensor describes the operation to the backends as a problem with 64-bit extents and strides, selects
+the backend that serves it, and lets that backend prepare the plan. Executing the plan launches the prepared
+kernels of that backend on the caller's stream. Plan-cache entries and plan-cache files are keyed by backend.
+
+The Composable Kernel backend (``library/src/backends/ck``) is always built and serves every plan by default.
+The rocKE backend (``library/src/backends/rocke``) is built with ``-DHIPTENSOR_ENABLE_ROCKE_BACKEND=ON``.
+These environment variables, read at every plan creation and workspace estimate, select the backend:
+
+.. list-table::
+
+    *   -   **Variable**
+        -   **Description**
+    *   -   ``HIPTENSOR_BACKEND``
+        -   ``auto`` (default), ``ck``, or ``rocke``: the backend that serves plans. ``auto`` selects the Composable
+            Kernel backend. Other values make ``hiptensorCreatePlan`` and ``hiptensorEstimateWorkspaceSize`` return
+            ``HIPTENSOR_STATUS_INVALID_VALUE``.
+    *   -   ``HIPTENSOR_BACKEND_FALLBACK``
+        -   ``1`` (default) or ``0``. When the selected backend declines a problem, or isn't built, the Composable
+            Kernel backend serves it. With ``0``, ``hiptensorCreatePlan`` returns ``HIPTENSOR_STATUS_NOT_SUPPORTED``
+            instead.
+    *   -   ``HIPTENSOR_BACKEND_AB``
+        -   ``<primary>,<shadow>``, for example ``rocke,ck``, for debugging. Plans prepare both backends. Every
+            execution runs the shadow backend into a buffer of its own, then the primary backend into the caller's
+            output, and logs the difference between the two results at the ``HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE``
+            level. It overrides ``HIPTENSOR_BACKEND``, allocates device memory, and synchronizes the stream.
+    *   -   ``HIPTENSOR_ROCKE_PACK_PATH``
+        -   ``:``-separated directories with rocKE kernel packs (``<dir>/<target>/rocke.htpk``). When set, they are the
+            only places the rocKE backend looks; otherwise it looks next to the library
+            (``../share/hiptensor/rocke``), in the install prefix and in the build tree. Without a pack for the device,
+            the rocKE backend declines every problem.
+    *   -   ``HIPTENSOR_ROCKE_CONTRACTION_ROUTE``
+        -   ``f64``, for debugging and testing: the rocKE backend runs every contraction in f64 (complex f64), with the
+            operands converted to f64 and the result rounded once to the output type.
+    *   -   ``HIPTENSOR_ROCKE_DISABLE_TUNED``
+        -   Any value, for debugging and testing: the rocKE backend does not use the launches it has for the
+            contractions of its tuned route table, and plans them like any other contraction.
+    *   -   ``HIPTENSOR_ROCKE_SELECT``
+        -   ``static``, for debugging and testing: the rocKE backend selects kernels by rocKE's rules instead of
+            the selection model of its kernel pack.
+    *   -   ``HIPTENSOR_ROCKE_AUTOTUNE_TOPK``
+        -   The number of candidates ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times on the rocKE backend (default 4), or
+            ``all``.
+    *   -   ``HIPTENSOR_ROCKE_AUTOTUNE_REPS``
+        -   The timed repetitions per candidate of ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` on the rocKE backend
+            (default 5).
+    *   -   ``HIPTENSOR_ROCKE_SELECT_DUMP``
+        -   A file to which ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` on the rocKE backend appends, for every timed
+            candidate, one line of JSON with its features, the selector's view of it and its median time. It
+            is the training data of the selection models. ``HIPTENSOR_ROCKE_SELECT_DUMP_TAG`` adds a tag to the
+            lines.
+    *   -   ``HIPTENSOR_ROCKE_JIT``
+        -   ``all`` or ``0``, for plans created with ``HIPTENSOR_JIT_MODE_DEFAULT`` on the rocKE backend: ``all``
+            also specializes the elementwise launches that have no vector form; ``0`` turns the JIT off.
+    *   -   ``HIPTENSOR_JIT_MAX_MS``
+        -   The compile time, in milliseconds, one ``hiptensorCreatePlan`` may spend on JIT compiles. Past it, the
+            remaining launches of the plan keep their kernel-pack kernels (kernels already in the kernel cache are
+            still used). Unset or ``0``: no limit.
+    *   -   ``HIPTENSOR_KERNEL_CACHE_DIR``
+        -   A directory (of the user, not writable by others unless sticky) where plans created with
+            ``HIPTENSOR_JIT_MODE_DEFAULT`` look for a kernel before they compile it and store every kernel they
+            compile, one kernel cache file per kernel. Processes that share the directory compile a kernel once.
+            Unset (default): no directory.
+    *   -   ``HIPTENSOR_KERNEL_CACHE_ACCEPT_STALE``
+        -   ``1``: kernel cache entries read from a file that another compiler version compiled are used. By
+            default they are kept and written back, but not used.
+    *   -   ``HIPTENSOR_ROCKE_JIT_NO_COMPILE``
+        -   Any value but ``0``, for testing: the JIT never compiles; only kernel cache entries are used.
+
+The selected backend and kernel of every plan are logged at the ``HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE`` level.
+
+The rocKE backend selects kernels when the plan is created. It lists the candidates of the problem, the
+programs that its kernel pack can run the problem with within the plan's workspace limit (for a contraction, the
+universal GEMM bodies of the data type's route and the f64 strided GEMM classes; for a reduction, the row and
+column kernels with several splits of the reduced modes), checking every capability on the host without
+launching anything. It then orders them:
+
+1. A contraction of rocKE's tuned route table takes the launches of that table.
+2. Otherwise, the selection model of the kernel pack for the problem's class (gradient-boosted trees over
+   integer features of the problem and the candidate, trained on measured timings of every candidate) ranks
+   the candidates. Selection takes no timing, no allocation and no device call, and is the same on every host
+   for the same problem, device and pack.
+3. Without a model for the class, rocKE's rules order the candidates.
+
+The plan preference changes this:
+
+* ``HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK`` = *k* selects the *k*-th candidate of that order (0 is the
+  default). A rank past the candidates the plan admits returns ``HIPTENSOR_STATUS_NOT_SUPPORTED``.
+* ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times the first candidates of the order on the device at plan creation
+  (on buffers it allocates and initializes, which it frees before ``hiptensorCreatePlan`` returns) and keeps
+  the fastest one. With ``HIPTENSOR_CACHE_MODE_PEDANTIC`` (the default) the winner is stored in the handle's plan
+  cache, and later plans of the same problem on that handle, or on a handle that read the plan cache file,
+  take it from there without timing, as long as their workspace limit admits it.
+
+``hiptensorEstimateWorkspaceSize`` reports, for ``HIPTENSOR_WORKSPACE_DEFAULT``, the workspace of the candidate
+a plan selects (of the candidates ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times, of every candidate for a
+``KERNEL_RANK`` preference, and at least that of the plan cache's kernel); for ``HIPTENSOR_WORKSPACE_MIN``, the
+least workspace some candidate runs with; for ``HIPTENSOR_WORKSPACE_MAX``, the workspace every candidate runs with.
+The plan's ``HIPTENSOR_PLAN_REQUIRED_WORKSPACE`` is the workspace of the selected candidate.
+
+The rocKE backend serves contractions (f16, bf16, and f32 with an f32, f16 or bf16 compute type; f64; complex f32;
+complex f64), permutations, elementwise binary and trinary operations, and reductions on the GPU targets it has a
+kernel pack for (gfx90a and gfx942: every contraction on the f64 route; gfx950: the routes of each data type, and
+the f64 route when those decline). Its kernels take their sizes and strides at run time. Tensors with more than eight modes
+after merging contiguous modes, unary operators other than identity, square root, ReLU, conjugate, reciprocal, sigmoid,
+tanh, exp, log, abs and negation, trinary contractions, and problems past the kernels' 32-bit offsets are declined, and
+the fallback backend serves them. Contractions need workspace for packed copies of A and B and an f32 (f64) result.
+
+JIT and kernel cache
+^^^^^^^^^^^^^^^^^^^^
+
+A build with ``-DHIPTENSOR_ENABLE_ROCKE_JIT=ON`` (the default when the rocKE backend is built) links the COMGR
+library and rocKE's recipe engine. Plans created on the rocKE backend with ``HIPTENSOR_JIT_MODE_DEFAULT`` then
+replace the elementwise launches of the plan (permutations, elementwise binary and trinary operations, and the
+operand packing and epilogue launches of contractions) by kernels compiled for the problem at plan creation: every
+size, stride and operator a constant, and, when the output and an input are contiguous in the output's fastest
+mode, 16-byte vector loads and stores along that mode. A launch whose layout has no vector form keeps its
+kernel-pack kernel (``HIPTENSOR_ROCKE_JIT=all`` specializes it too). The kernels come from recipes that the build
+records from rocKE's kernel builder (``share/hiptensor/rocke/rocke.recipes``); the library replays them in C++ and
+compiles the result with COMGR, without Python. A specialized launch keeps its kernel-pack launch, which execution
+takes when a buffer is not aligned to the vector width or the plan runs on another device than the one it was
+created on.
+
+Plans created with ``HIPTENSOR_JIT_MODE_NONE`` (the default) never compile and never use JIT kernels; every
+problem the rocKE backend serves runs without JIT. Plan creation with ``HIPTENSOR_JIT_MODE_DEFAULT`` can take as
+long as the compiles of its new kernels and can't be captured in a HIP graph; execution can.
+
+Compiled kernels go to a process-wide kernel cache. An entry is identified by the SHA-256 of its LLVM IR, the
+target, the compile options and the compiler version, and is found again by its recipe and values, so a second
+plan of the same problem, from any handle, compiles nothing. ``hiptensorWriteKernelCacheToFile`` writes the entries
+of the handle's device class (architecture, target features, compute unit count) to a file, replacing it;
+``hiptensorReadKernelCacheFromFile`` adds the entries of a file to the cache. Reading returns
+``HIPTENSOR_STATUS_INVALID_VALUE`` for a file of a newer format, another device class or another kernel ABI,
+``HIPTENSOR_STATUS_IO_ERROR`` for a file that is missing, damaged in its header, not a kernel cache file, not owned
+by the user (or root), or writable by others, and ``HIPTENSOR_STATUS_SUCCESS`` for an empty file. Damaged entries
+are skipped. Entries are used only by plans created with ``HIPTENSOR_JIT_MODE_DEFAULT``. A build without the JIT
+keeps no kernel cache: both calls then succeed without touching the file.
+
 hipTensor tests and samples are consumers of the hipTensor library and demonstrate the usages of the API in different contexts, such as tensor contractions, permutations and reductions.
 
 --------------------------------
@@ -133,6 +274,9 @@ The ``library`` directory contains the following include and source files:
 - ``library/include/hiptensor/``: C++ include files for the hipTensor API. These files also contain Doxygen comments that document the API.
 - ``library/include/hiptensor/internal``: Include files for utility code and tensor utility generation.
 - ``library/src/``: Source files for logging, device management, and performance functions.
+- ``library/src/backend/``: The backend interface: the problem description, backend selection, and plan execution.
+- ``library/src/backends/ck/``: The Composable Kernel backend.
+- ``library/src/backends/rocke/``: The rocKE backend.
 - ``library/src/contraction/``: Source files for core initialization and management of contraction module.
 - ``library/src/contraction/device``: Source files for composable kernel backend bilinear and scale instances.
 - ``library/src/elementwise/``: Source files for core initialization and management of permutation module.

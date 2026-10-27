@@ -168,17 +168,12 @@ class TestNativeTable(unittest.TestCase):
             )
 
     def test_tiles_rule(self):
-        self.assertEqual(SK.SKINNY_NATIVE_RULE["gfx950"], "tiles")
-        # the rule's mechanism at fixed thresholds (the shipped thresholds:
+        # the "tiles" rule (gfx950 ships "tiles2":
         # test_gemm_merge_r2.TestSkinnyNativeThresholds)
-        p = mock.patch.multiple(
-            SK,
-            SKINNY_NATIVE_A8_MAX_TILES=128,
-            SKINNY_NATIVE_A64_MAX_TILES=64,
-            SKINNY_NATIVE_A64_MAX_SMALL=256,
-        )
+        p = mock.patch.dict(SK.SKINNY_NATIVE_RULE, {"gfx950": "tiles"})
         p.start()
         self.addCleanup(p.stop)
+        self.assertEqual(SK.SKINNY_NATIVE_RULE["gfx950"], "tiles")
         cases = (
             # odd MN leading dimension: always (no DTL ring reads it in place)
             ("RRR", 333, 8001, 4096, True),

@@ -60,6 +60,13 @@ TRANSPOSE_COST: Dict[str, Tuple[float, float]] = {
 }
 TRANSPOSE_TILE = 64
 _HIP_GRID_YZ_MAX = 65535
+# native-selector chooser: a native gemm_skinny pick on an MN leading
+# dimension that is not a multiple of 8 (no vector MN loads; transpose2d cannot
+# serve the extent) with at least this many 128x128 output tiles takes the
+# pre-pass through the caller's copy (TransposeStep.spec None) and the RCR pick.
+# Chosen from paired gfx950 odd-ld non-NT timings (same process), where the
+# pre-pass was faster on most large-tile-count shapes. Per arch; 0 / absent = off.
+GEMM_PLAN_ODD_SKINNY_PREPASS_TILES: Dict[str, int] = {"gfx950": 256}
 
 # --- the g5 cost-model chooser (gfx942) -------------------------------------
 # the chooser on these targets (elsewhere: the native selector chooser)
@@ -110,6 +117,12 @@ R2_PLAN_FAST_RCR_OVER_SLOW_NATIVE = True
 # running the other native layout ("prepass_a": A transposed -> NN form,
 # "prepass_b": B transposed -> TT form); False: full pre-pass or native only
 R2_PLAN_PARTIAL = True
+# g5 bodies (native forms, the pre-pass's RCR body, the TN
+# partial forms) estimated by the native-form model (g5_native.predict_spec)
+# when it is active for the request -- one model for both sides of the choice;
+# the pre-pass is then taken when it is predicted R3_PLAN_MARGIN x faster
+R3_PLAN_G5N = True
+R3_PLAN_MARGIN = 1.2
 
 
 @dataclass(frozen=True)
@@ -226,6 +239,30 @@ def predicted_us(req: Any, spec: Any) -> Optional[float]:
     return math.exp(s + _sel._ln(_sel.roofline_cycles(str(req.arch), M, N, K)))
 
 
+def tail_split_rows(req: Any, spec: Any, cus: Optional[int] = None) -> int:
+    """Rows of the partial-wave tail of ``spec`` on ``req`` (0: none): the
+    head keeps the whole tile rows that fit in the full waves of the grid
+    (``cus`` workgroups per wave, default the arch's CU count), the tail is
+    the rest of M. A plan can run the tail as its own launch (the
+    dispatcher's pick for the tail's ``rows x N x K``, whose smaller tiles
+    spread the remainder over the device) instead of a mostly idle last wave."""
+    from ...helpers.split_k import arch_num_cus
+
+    t = spec.tile
+    M, N = int(req.M), int(req.N)
+    P = int(cus or arch_num_cus(str(req.arch)))
+    tn = -(-N // t.tile_n)
+    R = -(-M // t.tile_m)
+    total = R * tn
+    W = total // P
+    if W < 1 or total % P == 0:
+        return 0
+    Rh = (W * P) // tn
+    if Rh <= 0 or Rh >= R:
+        return 0
+    return M - Rh * t.tile_m
+
+
 def plan_gemm(req: Any, dispatch: Callable[[Any], Any]) -> GemmPlan:
     """The plan for ``req``; ``dispatch`` is the family's dispatch function
     (``dispatch_gemm_fp16`` / ``dispatch_gemm_bf16``)."""
@@ -240,6 +277,20 @@ def plan_gemm(req: Any, dispatch: Callable[[Any], Any]) -> GemmPlan:
         return gemm_plan(req, dispatch)
     native = dispatch(req)
     steps = transpose_steps(req)
+    if steps is None and _odd_skinny_prepass(req, native):
+        rreq = _rcr_request(req)
+        cps = _copy_steps(req)
+        return GemmPlan(
+            "prepass",
+            dispatch(rreq),
+            cps,
+            {},
+            (
+                "native gemm_skinny on an odd MN leading dimension with many tiles: "
+                "pre-pass through the caller's copy (GEMM_PLAN_ODD_SKINNY_PREPASS_TILES)",
+            ),
+            rreq,
+        )
     if steps is None:
         return GemmPlan(
             "native",
@@ -281,6 +332,30 @@ def plan_gemm(req: Any, dispatch: Callable[[Any], Any]) -> GemmPlan:
         pred,
         (f"native predicted {t_nat:.1f} us vs pre-pass {t_pp:.1f} us",),
         req,
+    )
+
+
+def _odd_skinny_prepass(req: Any, native: Any) -> bool:
+    lim = int(GEMM_PLAN_ODD_SKINNY_PREPASS_TILES.get(str(req.arch), 0) or 0)
+    if not lim or type(native.spec).__name__ != "SkinnyGemmSpec":
+        return False
+    from ...instances.common.gemm_mn_operand import mn_layout_letters
+
+    a_mn, b_mn = mn_layout_letters(str(req.layout))
+    M, N = int(req.M), int(req.N)
+    odd = any(x % 8 for x, m in ((M, a_mn), (N, b_mn)) if m)
+    return odd and -(-M // 128) * -(-N // 128) >= lim
+
+
+def _copy_steps(req: Any) -> Tuple[TransposeStep, ...]:
+    """Pre-pass steps through the caller's copy (no transpose2d spec)."""
+    from ...instances.common.gemm_mn_operand import mn_layout_letters
+
+    a_mn, b_mn = mn_layout_letters(str(req.layout))
+    return tuple(
+        TransposeStep(name, int(req.K), cols, None)
+        for name, is_mn, cols in (("A", a_mn, int(req.M)), ("B", b_mn, int(req.N)))
+        if is_mn
     )
 
 
@@ -430,7 +505,10 @@ def _g5p_cal(req: Any) -> Optional[float]:
         if key not in menu:
             continue
         fitted = _geo_est(req, geo, s)
-        pr = _gp.rank_plans(M, N, K, str(req.dtype), req.arch, [_gp.G5Plan(key, s)])
+        # the fitted estimate is of the body without the main-loop traits: unscaled
+        pr = _gp.rank_plans(
+            M, N, K, str(req.dtype), req.arch, [_gp.G5Plan(key, s)], mainloop=False
+        )
         pred = next((float(t) for t, p in pr if p.geo == key and p.split == s), None)
         if fitted is None or not pred:
             continue
@@ -448,7 +526,13 @@ def _g5p_plan_pred(rreq: Any, spec: Any) -> Optional[float]:
     want = (t.tile_m, t.tile_n, t.tile_k, t.warp_m, t.warp_n, int(tr.vgpr_prefetch),
             int(tr.lds_swizzle_r), int(tr.split_k), int(getattr(tr, "split_k_serial", 0)))  # fmt: skip
     M, N, K = int(rreq.M), int(rreq.N), int(rreq.K)
-    for tm, p in _g5p_ranked(rreq):
+    # a body that runs the main-loop traits (RCR only) is ranked with
+    # their scale; a native form without them is not
+    ml = (
+        int(getattr(tr, "vp_pair_reads", 0)) > 0
+        or int(getattr(tr, "vp_mfma_first", 0)) > 0
+    )
+    for tm, p in _g5p_ranked(rreq, mainloop=ml):
         if p.geo == "skinny":
             continue
         pt, ptr = plan_tile_trait(p, M, N, K)
@@ -511,6 +595,23 @@ def _slow_native(req: Any, cname: str) -> bool:
     )
 
 
+def _g5n_plan_on(req: Any) -> bool:
+    """Whether the native-form model estimates the chooser's g5 plans for req."""
+    from . import g5_native as _gn
+
+    return bool(R3_PLAN_G5N) and _gn.active(req)
+
+
+def _g5n_est(req: Any, res) -> Optional[float]:
+    """The native-form model's time of a dispatched g5 body (None: not a g5
+    body / no model)."""
+    from . import g5_native as _gn
+
+    if not _is_vgpr(res):
+        return None
+    return _gn.predict_spec(req, res.spec)
+
+
 def _rcr_est(rreq: Any, rcr) -> Optional[float]:
     """Modelled time of the dispatched RCR pick ``rcr`` of ``rreq``."""
     est_r = _g5p_est(rreq, rcr)
@@ -561,6 +662,13 @@ def gemm_plan(req: Any, dispatch: Optional[Callable[[Any], Any]] = None) -> Gemm
             tp_us += r2_transpose_cost_us(K, cols, fast=sp is not None)
     est_r = _rcr_est(rreq, rcr)
     est_n = _g5_est(req, nat)
+    g5n = _g5n_plan_on(req)
+    margin = R2_PLAN_MARGIN
+    use_m = False
+    if g5n:
+        mn, mr = _g5n_est(req, nat), _g5n_est(rreq, rcr)
+        if mn is not None and mr is not None:
+            est_n, est_r, margin, use_m = mn, mr, R3_PLAN_MARGIN, True
     cname = getattr(nat.candidate, "name", "")
     rname = getattr(rcr.candidate, "name", "")
     slow_n = _slow_native(req, cname)
@@ -594,7 +702,9 @@ def gemm_plan(req: Any, dispatch: Optional[Callable[[Any], Any]] = None) -> Gemm
                 pres = dsp(preq)
             except ValueError:
                 continue
-            est_q = _g5_est(preq, pres)
+            est_q = _g5n_est(preq, pres) if use_m else None
+            if est_q is None:
+                est_q = _g5_est(preq, pres)
             if est_q is None:
                 continue
             tq = [t for t in tps if t.operand == nm]
@@ -605,7 +715,7 @@ def gemm_plan(req: Any, dispatch: Optional[Callable[[Any], Any]] = None) -> Gemm
             if est_q < best[4]:
                 best = ("prepass_" + nm.lower(), preq, pres, tuple(tq), est_q)
     kind, preq, pres, ptps, est_p = best
-    if est_p * R2_PLAN_MARGIN < est_n:
+    if est_p * margin < est_n:
         return _plan(
             kind, preq, pres, ptps, est_p, est_n,
             f"{kind} {est_p:.1f} us < native {est_n:.1f} us",

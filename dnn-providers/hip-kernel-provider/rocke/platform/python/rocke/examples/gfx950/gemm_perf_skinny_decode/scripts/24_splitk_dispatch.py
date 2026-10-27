@@ -4,7 +4,7 @@
 """End-to-end split-K via the GEMM dispatcher for decode shapes.
 
 The split-K body in ``instances/common/gemm_universal.py`` is the proven win on
-skinny / tall-N decode GEMMs (~1.6x rocBLAS at M=2, N=4096, K=4096 bf16). This
+skinny / tall-N decode GEMMs (e.g. M=2, N=4096, K=4096 bf16). This
 script wires that body into the *dispatcher* so the decode matmuls -- qkv_proj /
 o_proj / gate_up / down -- pick it up automatically:
 
@@ -64,6 +64,20 @@ def dispatch_one(name: str, M: int, N: int, K: int):
     return req, result, spec
 
 
+def _split_of(spec) -> int:
+    """Split-K degree of a UniversalGemm spec (trait.split_k) or a gemm_skinny spec (split)."""
+    trait = getattr(spec, "trait", None)
+    return int(trait.split_k if trait is not None else spec.split)
+
+
+def _tile_of(spec) -> str:
+    """Workgroup tile: UniversalGemm tile_m x tile_n x tile_k; gemm_skinny tile_m x tile_n x step_k."""
+    t = getattr(spec, "tile", None)
+    if t is not None:
+        return f"{t.tile_m}x{t.tile_n}x{t.tile_k}"
+    return f"{spec.tile_m}x{spec.tile_n}x{spec.step_k}"
+
+
 def report_dispatch():
     # The square-shape-stays-1 invariant only holds under the auto heuristic; a
     # forced env degree (ROCKE_GEMM_SPLIT_K=<n>) intentionally overrides it.
@@ -75,9 +89,8 @@ def report_dispatch():
     square_ok = True
     for name, M, N, K in SHAPES:
         req, result, spec = dispatch_one(name, M, N, K)
-        t = spec.tile
-        sk = spec.trait.split_k
-        tile = f"{t.tile_m}x{t.tile_n}x{t.tile_k}"
+        sk = _split_of(spec)
+        tile = _tile_of(spec)
         print(
             f"{name:>12} {M:>5} {N:>6} {K:>6} {tile:>12} {sk:>7} {str(result.grid):>16}"
         )
@@ -111,11 +124,25 @@ def run_numeric():
 
     for name, M, N, K in SHAPES:
         req, result, spec = dispatch_one(name, M, N, K)
-        sk = spec.trait.split_k
+        sk = _split_of(spec)
         kernel = build_kernel_bf16(result)
         art = compile_kernel(kernel, isa=f"amdgcn-amd-amdhsa--{ARCH}")
         mod = rt.load_module(art.hsaco)
         fn = mod.get_function(art.kernel_name)
+
+        if getattr(spec, "trait", None) is None:
+            # gemm_skinny: workspace / counter / SPLIT / KPS arguments; the
+            # dispatcher binding owns the argument recipe and the reference
+            binding = result.bind(verify=True)
+            args, ptrs = binding.make_args(rt)
+            rt.launch(fn, binding.grid, binding.block, args, stream=0)
+            rt.stream_sync(0)
+            _max_abs, bad, total = binding.check(rt, ptrs)
+            status = "PASS" if bad == 0 else "FAIL"
+            print(
+                f"[numeric] {name:>12} gemm_skinny split={sk} bad={bad}/{total} -> {status}"
+            )
+            continue
 
         A = torch.randn(M, K, dtype=torch.bfloat16, device=dev)
         W = torch.randn(N, K, dtype=torch.bfloat16, device=dev)

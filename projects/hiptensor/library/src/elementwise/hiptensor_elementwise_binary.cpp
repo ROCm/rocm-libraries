@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "backend/registry.hpp"
+#include "backends/ck/ck_backend.hpp"
 #include "data_types.hpp"
 #include "elementwise_execute.hpp"
 #include "elementwise_solution.hpp"
@@ -42,6 +44,40 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
                                                     void*                   D,
                                                     hipStream_t             stream)
 try
+{
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::elementwiseBinary(handle, plan, alpha, A, gamma, C, D, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.gamma = gamma;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.C   = C;
+    buffers.out = D;
+
+    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+}
+catch(...)
+{
+    return hiptensor::exceptionToStatus("hiptensorElementwiseBinaryExecute");
+}
+
+hiptensorStatus_t hiptensor::ckbackend::elementwiseBinary(hiptensorHandle_t            handle,
+                                                          hiptensorPlan_t              plan,
+                                                          void const*                  alpha,
+                                                          void const*                  A,
+                                                          void const*                  gamma,
+                                                          void const*                  C,
+                                                          void*                        D,
+                                                          backend::LaunchConfig const& cfg)
 {
     using hiptensor::Logger;
     auto& logger = Logger::instance();
@@ -71,12 +107,8 @@ try
                                                gamma,
                                                C,
                                                D,
-                                               stream,
+                                               cfg,
                                                "hiptensorElementwiseBinaryExecute");
-}
-catch(...)
-{
-    return hiptensor::exceptionToStatus("hiptensorElementwiseBinaryExecute");
 }
 
 namespace hiptensor
@@ -97,9 +129,11 @@ namespace hiptensor
                                                void const*                      gamma,
                                                void const*                      C,
                                                void*                            D,
-                                               hipStream_t                      stream,
+                                               backend::LaunchConfig const&     cfg,
                                                char const*                      apiFuncName)
     {
+        hipStream_t const stream = cfg.stream;
+
         auto& logger = Logger::instance();
 
         auto& autotuneMgr = PlancacheAutotuneMgr::instance();
@@ -191,6 +225,6 @@ namespace hiptensor
                               operators,
                               operators,
                               5,
-                              stream);
+                              cfg);
     }
 } // namespace hiptensor
