@@ -16,6 +16,7 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
+from kernels.common._attention_dense_paged import paged_cache_bytes
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
@@ -251,13 +252,7 @@ class AttentionDenseSpec:
                 )
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
-            cache_bytes = (
-                self.num_kv_blocks
-                * self.block_size
-                * self.num_kv_heads
-                * self.head_size
-                * 2
-            )
+            cache_bytes = paged_cache_bytes(self)
             if cache_bytes > 2**31 - 1:
                 raise ValueError(
                     f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB)"
@@ -271,15 +266,17 @@ class AttentionDenseSpec:
                     "paged + persistent not yet implemented "
                     "(persistent builder is contiguous-only)"
                 )
-            if self.head_size != 128:
-                raise ValueError("paged not yet implemented for head_size != 128")
             if self.dtype not in ("fp16", "bf16"):
                 raise ValueError(f"paged not yet implemented for dtype={self.dtype}")
-            if self.sliding_window <= 0:
+            if self.seqlen_kv % self.block_n:
+                # The padded keys of a partial KV tile would read stale page rows
+                # (or block 0) instead of the zeros the contiguous bound gives.
                 raise ValueError(
-                    "paged not yet implemented for plain-causal "
-                    "(sliding_window>0 only)"
+                    f"paged needs whole KV tiles: seqlen_kv ({self.seqlen_kv}) must be "
+                    f"a multiple of block_n ({self.block_n})"
                 )
+            if not self.causal:
+                raise ValueError("paged attention is causal-only")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:
@@ -299,15 +296,14 @@ class AttentionDenseSpec:
 
     @property
     def _aligned_causal(self) -> bool:
-        """Causal attention on the plain dense layout: where the auto block
-        orders were measured."""
+        """Causal attention on the plain dense or paged layout: where the auto
+        block orders were measured."""
         moving_diagonal = self.causal_bottom_right and self.seqlen_q != self.seqlen_kv
         return (
             balance_causal(self)
             and not moving_diagonal
             and not self.ragged
             and not self.varlen
-            and not self.paged
         )
 
     @property
@@ -354,7 +350,8 @@ class AttentionDenseSpec:
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         hq = self.num_query_heads
         if (
-            hq == self.num_kv_heads
+            not self.paged  # not measured with paged K/V
+            and hq == self.num_kv_heads
             and hq % self.chiplet_num_xcds == 0
             and nqb >= 16
             and self.batch * hq * nqb >= 8192

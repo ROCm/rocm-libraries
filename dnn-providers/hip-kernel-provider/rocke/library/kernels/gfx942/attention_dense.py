@@ -1759,7 +1759,7 @@ def _build_attention_dense_single_buffer(
         if spec.paged:
             # The block table places the sequence's keys; no batch term.
             k_base = b.mul(hkv, b.const_i32(D))
-            pg_seq_base, pg_n_pages = paged_seq_setup(
+            _pg_seq_base, _pg_n_pages = paged_seq_setup(
                 b, bt, kv_lens, bt_stride, spec.block_size
             )
         else:
@@ -1784,16 +1784,18 @@ def _build_attention_dense_single_buffer(
             q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
         def _async_load(rsrc, lds_base, tile_key0, group_pad=False):
+            if spec.paged:
+                # A wave's rows of the tile sit in one page (spec paged
+                # validation): one block-table lookup per wave.
+                _wphys_base = paged_wave_row_base(
+                    b,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
+                    spec.block_size,
+                )
             if ROWS_PER_INSTR == 1:
-                if spec.paged:
-                    pg_row_base = paged_wave_row_base(
-                        b,
-                        block_tables,
-                        pg_seq_base,
-                        pg_n_pages,
-                        b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
-                        spec.block_size,
-                    )
                 for r in range(ROWS_PER_WAVE):
                     row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
                     row_lds_off = b.zext(b.mul(row, b.const_i32(K_LDROW_BYTES)), I64)
@@ -1801,7 +1803,7 @@ def _build_attention_dense_single_buffer(
                     gkey = b.add(tile_key0, row)
                     gcol = b.mul(lane, b.const_i32(2))
                     if spec.paged:
-                        kv_row = paged_kv_row(b, pg_row_base, gkey, spec.block_size)
+                        kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     else:
                         kv_row = gkey
                     voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
@@ -1839,6 +1841,8 @@ def _build_attention_dense_single_buffer(
                         )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
+                    if spec.paged:
+                        gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1

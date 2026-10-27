@@ -37,6 +37,11 @@ class I32DeviceTensor:
         return strides if dim is None else strides[dim]
 
     def __getitem__(self, index):
+        if isinstance(index, tuple):  # [rows, cols] of a 2-D table
+            rows, cols = index
+            return I32DeviceTensor(
+                [row[cols] for row in self._values[rows]], device=self.device
+            )
         item = self._values[index]
         return (
             I32DeviceTensor(item, device=self.device)

@@ -53,8 +53,20 @@ def _pinned(req, spec_id):
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
-def test_paged_request_builds_a_paged_spec(arch, spec_id):
-    spec = dispatch_attention(_pinned(_request(arch), spec_id)).spec.kernel_spec
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        dict(),
+        dict(sliding_window=0),
+        dict(hdim_q=64, hdim_v=64),
+        dict(seqlen_q=512),
+        dict(seqlen_q=4096, sliding_window=0),
+    ],
+    ids=["swa", "plain_causal", "d64", "sq_lt_skv", "sq_gt_skv"],
+)
+def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
+    req = _request(arch, **overrides)
+    spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
     assert spec.paged and spec.block_size == _BS
     assert spec.num_kv_blocks == _SQ // _BS  # the smallest cache, until binding
     assert not spec.persistent
@@ -71,12 +83,27 @@ def test_persistent_variants_decline_paged(spec_id):
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 @pytest.mark.parametrize(
     "overrides",
-    [dict(batch=2), dict(sliding_window=0), dict(hdim_q=64, hdim_v=64)],
-    ids=["multi_seq", "plain_causal", "d64"],
+    [
+        dict(batch=2),
+        dict(mask_type=0, sliding_window=0),
+        dict(seqlen_q=1000, seqlen_k=1000),
+    ],
+    ids=["multi_seq", "non_causal", "partial_kv_tile"],
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides):
     with pytest.raises(ValueError):
         dispatch_attention(_pinned(_request(arch, **overrides), spec_id))
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_paged_ragged_query_tail_follows_the_contiguous_kernel(arch, spec_id):
+    req = _request(arch, seqlen_q=1088, seqlen_k=1088, sliding_window=0)
+    if arch == "gfx942":  # no ragged body on gfx942
+        with pytest.raises(ValueError, match="ragged"):
+            dispatch_attention(_pinned(req, spec_id))
+    else:
+        spec = dispatch_attention(_pinned(req, spec_id)).spec.kernel_spec
+        assert spec.paged and spec.ragged
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
