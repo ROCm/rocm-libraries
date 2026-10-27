@@ -506,11 +506,15 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
         constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
 
-        constexpr index_t ALoadVGPRNum = sizeof(ADataType) / APackedSize * MPerBlock * KPerBlock /
+        // Multiply by the tile dimension before dividing by PackedSize. FP4 is
+        // 1 byte / 2 elements, so sizeof/PackedSize truncates to 0 and the
+        // estimate ignores every A/B register. Wider types divide evenly and
+        // keep the previous value.
+        constexpr index_t ALoadVGPRNum = sizeof(ADataType) * MPerBlock / APackedSize * KPerBlock /
                                          MWarps / warpSize / BytesPerVGPR * DoubleBufferNumerator /
                                          DoubleBufferDenominator;
 
-        constexpr index_t BLoadVGPRNum = sizeof(BDataType) / BPackedSize * NPerBlock * KPerBlock /
+        constexpr index_t BLoadVGPRNum = sizeof(BDataType) * NPerBlock / BPackedSize * KPerBlock /
                                          NWarps / warpSize / BytesPerVGPR * DoubleBufferNumerator /
                                          DoubleBufferDenominator;
 
@@ -532,7 +536,24 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         constexpr auto acc_vgpr_num   = estimated_vgpr.at(number<0>{});
         constexpr auto input_vgpr_num = estimated_vgpr.at(number<1>{});
 
-        constexpr index_t vgpr_capacity = get_max_vgpr_count();
+        // gfx1250's 1024 VGPRs/wave is the limit when one wave owns a SIMD.
+        // A CU has 4 SIMDs, so a workgroup's waves share that file: an 8-wave
+        // block (256 threads, wave32) can keep 512 VGPRs/wave. Comparing the
+        // estimate with 1024 kept TileK 256/512 at one subtile. AICK-2813.
+        constexpr index_t vgpr_capacity = [] {
+            constexpr index_t arch_vgpr_capacity = get_max_vgpr_count();
+            if constexpr(std::is_same_v<decltype(get_device_arch()), gfx125_t>)
+            {
+                constexpr index_t kSimdsPerCu    = 4;
+                constexpr index_t num_waves      = Problem::kBlockSize / get_warp_size();
+                constexpr index_t waves_per_simd = (num_waves + kSimdsPerCu - 1) / kSimdsPerCu;
+                return arch_vgpr_capacity / waves_per_simd;
+            }
+            else
+            {
+                return arch_vgpr_capacity;
+            }
+        }();
         // sub tile number; have 1, 2, 4 choices
         constexpr index_t sub_tile_num = ((input_vgpr_num + acc_vgpr_num) <= vgpr_capacity) ? 1
                                          : ((input_vgpr_num / 2 + acc_vgpr_num) <= vgpr_capacity)
