@@ -1025,7 +1025,7 @@ namespace
 
     TEST_F(L2DeviceSptrsvMisc, scalar_type_differs_from_compute_type)
     {
-        // The matrix and the vectors are f64, the scalar is f32.
+        // The matrix and the vectors are f64; the first two solves use an f32 scalar.
         const int32_t             n  = 3;
         const host_csr<double>    a  = make_triangular_pattern<double>(n, 1, true, false, true);
         const std::vector<double> x0 = values<double>(n, 100);
@@ -1051,7 +1051,7 @@ namespace
         };
 
         const float           alpha_host = 2.0f;
-        device_vector<float>  alpha_device_f32(std::vector<float>(1, 2.0f));
+        device_vector<float>  alpha_device_f32(std::vector<float>(1, 5.0f));
         device_vector<double> alpha_device(std::vector<double>(1, 3.0));
         ASSERT_TRUE(alpha_device_f32.ptr && alpha_device.ptr);
 
@@ -1072,7 +1072,7 @@ namespace
         o.alpha = alpha_device_f32.ptr;
         reset_y();
         if(run_sptrsv(handle, A.d, x.d, y.d, o))
-            expect_near(host_triangular_solve(a, lo, nu, op_t, 2.0, x0),
+            expect_near(host_triangular_solve(a, lo, nu, op_t, 5.0, x0),
                         to_host(dy),
                         "sptrsv device f32 alpha");
         o.scalar = f64;
