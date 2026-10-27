@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <type_traits>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
@@ -481,11 +482,17 @@ namespace TensileLite
                 return error;
             }
 
+            // Keep ownership until insertion succeeds, so an allocation failure
+            // cannot leave a loaded module outside the adapter's maps.
+            std::unique_ptr<std::remove_pointer_t<hipModule_t>, decltype(m_moduleApi.unload)>
+                ownedModule(module, m_moduleApi.unload);
+
             if(m_debug)
                 std::cout << "loaded local code object " << path << std::endl;
 
             std::lock_guard<std::mutex> guard(m_access);
             m_localModules.emplace(path, module);
+            ownedModule.release();
             m_loadedModuleNames.push_back(concatenate("Local file ", path));
             return hipSuccess;
         }
