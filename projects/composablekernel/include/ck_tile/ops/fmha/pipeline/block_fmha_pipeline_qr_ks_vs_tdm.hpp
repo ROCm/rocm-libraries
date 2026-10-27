@@ -2119,6 +2119,25 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
+            // Last reads of this tile's descales; col_scale and the K-descaled max are done
+            // with them by here. The V scales go to VGPRs, then the fence keeps every read
+            // above the next tile's loads. Fencing here rather than after the O rescale keeps
+            // the row sum, P cast, rescale and gemm1 in one scheduling region.
+            [[maybe_unused]] array<int32_t, k1_loops> v_scale_packed;
+            if constexpr(kBlockScale)
+            {
+                static_for<0, k1_loops, 1>{}([&](auto i_k1) {
+                    v_scale_packed(i_k1) = pack_v_scale<decltype(i_k1)::value>(kv_descale);
+                });
+                __builtin_amdgcn_sched_barrier(0);
+                next_kv_descale = load_tile_descale(i_total_loops + 1);
+            }
+
+            // Cast P before its row sum: the sum's tree then overwrites fp32 P registers the
+            // cast has consumed, instead of holding its partials beside all of P.
+            int32_t p_scale = 0;
+            auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+
             // The current PV consumes P and corrected O, not the denominator.
             // Keep whole-P production unchanged and defer only l's reduction
             // in the guarded path. The original left-fold and row sync remain.
@@ -2136,9 +2155,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }();
             auto l_correction = m;
-
-            int32_t p_scale = 0;
-            auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -2177,18 +2193,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                     o_acc(i_j_idx) *= tmp;
                 });
             });
-
-            // Last reads of this tile's descales: the V scales go to VGPRs here, then the
-            // fence keeps every read above the next tile's loads.
-            [[maybe_unused]] array<int32_t, k1_loops> v_scale_packed;
-            if constexpr(kBlockScale)
-            {
-                static_for<0, k1_loops, 1>{}([&](auto i_k1) {
-                    v_scale_packed(i_k1) = pack_v_scale<decltype(i_k1)::value>(kv_descale);
-                });
-                __builtin_amdgcn_sched_barrier(0);
-                next_kv_descale = load_tile_descale(i_total_loops + 1);
-            }
 
             if constexpr(!kMergedWarBarriers)
             {
