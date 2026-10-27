@@ -3700,6 +3700,11 @@ def cases():
         ("persist_causal_sq512", _persist942),
         ("persist_hqswz_sq512", {**_persist942, "persist_decode": "hq_minor_swz"}),
         ("persist_hkvmaj_sq512", {**_persist942, "persist_decode": "hkv_major"}),
+        # Diagonal split with the register-staged next-tile K/V prefetch.
+        (
+            "persist_dsplit_kvpf_sq512",
+            {**_persist942, "causal_diag_split": True, "kv_prefetch": True},
+        ),
         # Bottom-right causal: runtime diagonal offset on both grids, and the
         # diagonal split with the KV-segment split.
         ("bottom_right_sq512", {"seqlen_kv": 1024, "causal_bottom_right": True}),
