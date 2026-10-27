@@ -18,7 +18,7 @@
 /**
  * @file TestUnifiedAttentionGeometry.cpp
  * @brief The arch-neutral unified-attention geometry: what another architecture's pack
- *        (gfx942, AICK-2544) inherits by supplying its own UnifiedAttentionArchTraits.
+ *        (e.g. a future gfx942 pack) inherits by supplying its own UnifiedAttentionArchTraits.
  *
  * The gfx950 values are pinned in TestGfx950AttentionUnified2DGeometry /
  * TestGfx950AttentionUnified3DGeometry; this suite pins what the traits change -- the wave
