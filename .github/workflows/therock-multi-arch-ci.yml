@@ -297,13 +297,16 @@ jobs:
     # notify_teams.py reports each failed Linux::/Windows:: job of this run
     # from here, routing to the MIOpen / hipDNN channels by PR title tag
     # ([miopen], [hipdnn], [miopenprovider]) or component name.
-    # Webhook secrets are unavailable to fork PRs.
+    # Webhook secrets are unavailable to fork PRs. The Teams flow looks up
+    # each message by PR number, so runs without a PR (push, dispatch) are
+    # not reported.
     needs: [configure, linux_build_and_test, windows_build_and_test]
     # A notification problem must never fail the PR.
     continue-on-error: true
     if: >-
       ${{
         always() &&
+        github.event_name == 'pull_request' &&
         !github.event.pull_request.head.repo.fork &&
         (
           needs.linux_build_and_test.result == 'failure' ||

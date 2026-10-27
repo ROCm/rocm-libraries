@@ -275,7 +275,9 @@ with `--failed-jobs-from-run`. The script lists the failed `Linux::`/`Windows::`
 jobs of the run attempt (skipping `(xfail)` jobs), downloads each job log with
 `gh api`, routes test jobs by job name and build jobs by `--component-name`,
 sends one notification per job, and exits 1 if any notification failed. The
-job is `continue-on-error`, so a notifier failure never blocks a PR.
+job is `continue-on-error`, so a notifier failure never blocks a PR. It runs
+only for `pull_request` events: the Teams flow looks up every message by its
+`**PR #<n>:**` line and rejects messages without one.
 
 To debug this mode locally against a real run, point it at that run and use
 `--dry-run` (requires an authenticated `gh` or `GH_TOKEN`):
