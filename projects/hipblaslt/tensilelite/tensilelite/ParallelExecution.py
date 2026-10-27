@@ -23,14 +23,14 @@
 ################################################################################
 
 """
-Parallel GPU execution utilities for Tensile client.
+Parallel GPU execution utilities for the TensileLite client.
 
 This module provides functions to distribute benchmark workloads across
 multiple GPUs for faster execution.
 
 Default Execution (Single GPU)
 ==============================
-Without parallel execution, the Tensile client processes all benchmark problems
+Without parallel execution, the TensileLite client processes all benchmark problems
 sequentially on a single GPU (device 0). For a config file with N problems,
 each problem is executed one after another:
 

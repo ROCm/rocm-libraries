@@ -90,9 +90,12 @@ void resetFlydslSdpaCdnaDecodeModuleCache();
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
-/// @see packs/Gfx1151WmmaAttentionNative.cpp
+/// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();
+void registerGfx1151WmmaAttentionDecodeSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx1151WmmaAttentionDecodeModuleCache();
 
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases

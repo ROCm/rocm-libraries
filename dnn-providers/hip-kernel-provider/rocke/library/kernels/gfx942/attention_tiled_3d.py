@@ -127,12 +127,10 @@ class UnifiedAttention3DTiledSpec:
     # instructions -> less VMEM issue pressure on the memory-bound decode segment.
     # fp16/bf16 only (the fp8 path already loads wide). Signature-tracked.
     use_wide_kv_load: bool = False
-    # 64-bit paged-KV addressing for caches > 2 GiB. Accepted for signature
-    # parity with the shared dispatch spec builder and the gfx950 spec; the
-    # gfx942 narrow segment loaders do not key on it yet (the gfx942 >2 GiB
-    # decode path is a separate follow-on), so a True value here would be a
-    # no-op on gfx942 -- guard it so the dispatcher cannot silently build an
-    # uncorrected gfx942 kernel for an oversized cache.
+    # 64-bit paged-KV addressing. Accepted for signature parity with the gfx950
+    # spec, but this kernel has no i64 path: the builders set it only for a
+    # cache past what the K/V loader reads (``i32_kv_cache_bytes``), and it is
+    # refused below so an oversized cache cannot build a kernel that misreads it.
     use_i64_kv_addr: bool = False
     # Direct non-paged [B,H,S,D] addressing; D remains contiguous.
     kv_layout: str = "paged"
@@ -318,6 +316,30 @@ def supports_tiled_3d(
     if 16 % num_queries_per_kv != 0:
         return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
     return True, "supported"
+
+
+# The wide K/V loader moves 8 halves per lane over the 64-lane wave; a tile it
+# cannot split evenly falls back to the async copies.
+_WIDE_KV_ELEMS = 8
+
+
+def wide_kv_load_fits(tile_size: int, head_size: int) -> bool:
+    """True when ``use_wide_kv_load`` takes effect for this tile."""
+    return (tile_size * head_size) % (64 * _WIDE_KV_ELEMS) == 0
+
+
+def i32_kv_cache_bytes(
+    *, kv_fp8: bool, use_wide_kv_load: bool, tile_size: int, head_size: int
+) -> int:
+    """Largest paged K/V cache, in bytes, the selected K/V loader reads.
+
+    This kernel has no i64 KV path. The fp8 dequant and wide loaders are flat
+    global loads indexed by an i32 byte offset, correct below 2^31 bytes. The
+    async copies read through a buffer resource bounded at 0x7FFF0000 bytes.
+    """
+    if kv_fp8 or (use_wide_kv_load and wide_kv_load_fits(tile_size, head_size)):
+        return 0x8000_0000
+    return 0x7FFF_0000
 
 
 def build_unified_attention_3d_tiled(
@@ -801,8 +823,8 @@ def build_unified_attention_3d_tiled(
     # 1 DWORD to 4 DWORDs, cutting load-instruction count 4x. The dim axis is
     # contiguous in the paged cache (stride = KV_BYTES) so 8 consecutive halves
     # are a legal coalesced b128 load.
-    WIDE_ELEMS = 8
-    WIDE_OK = (T * HD) % (THREADS * WIDE_ELEMS) == 0
+    WIDE_ELEMS = _WIDE_KV_ELEMS
+    WIDE_OK = wide_kv_load_fits(T, HD)
     wide_chunks_per_thread = (T * HD) // (THREADS * WIDE_ELEMS) if WIDE_OK else 0
 
     def _kv_col(row: Value, col: Value) -> Value:
@@ -1141,22 +1163,29 @@ def build_unified_attention_3d_tiled(
                 masked[(n, reg)] = b.select(m_ok, s_scaled, neg_inf)
 
         # Row max and sum: this lane's 4 * QK_N_TILES tokens, then the row's
-        # other 3 lanes.
+        # other 3 lanes. m_new is the running max (m_val included), so
+        # alpha = exp2(m_val - m_safe) is at most 1, as exp2_fast requires; a
+        # tile-local max would overflow alpha once a tile scores ~128 log2 units
+        # below an earlier one. Until the row has an unmasked key (or, in
+        # segment 0, a sink), m_new is -inf and the exponents subtract m_safe = 0
+        # instead, so P and alpha are 0, not NaN. A row with neither in the
+        # segment stores m = -inf, which the reduce kernel weights by 0.
         local_max = neg_inf
         for v in masked.values():
             local_max = b.fmax(local_max, v)
-        full_max_raw = _row_reduce(local_max, b.fmax)
-        ok = b.fcmp("ogt", full_max_raw, neg_inf)
-        m_new = b.select(ok, full_max_raw, zero_f)
+        tile_max = _row_reduce(local_max, b.fmax)
+        m_new = b.fmax(m_val, tile_max)
+        ok = b.fcmp("ogt", m_new, neg_inf)
+        m_safe = b.select(ok, m_new, zero_f)
         p_regs = {}
         sum_p = zero_f
         for key, v in masked.items():
-            p = b.exp2_fast(b.fsub(v, m_new))
+            p = b.exp2_fast(b.fsub(v, m_safe))
             p_regs[key] = p
             sum_p = b.fadd(sum_p, p)
         l_local = _row_reduce(sum_p, b.fadd)
 
-        alpha = b.exp2_fast(b.fsub(m_val, m_new))
+        alpha = b.exp2_fast(b.fsub(m_val, m_safe))
         new_l_val = b.fadd(b.fmul(l_val, alpha), l_local)
         if KV_FP8:
             # FP8 sync loader has no in-flight async work.
