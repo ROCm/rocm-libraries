@@ -973,7 +973,7 @@ void test_equality_pair_scan(const thrust::host_vector<Pair<X, Y>>& hvalue,
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
-#elif THRUST_HAS_CUDA_COMPILER()
+#elif THRUST_CUDA_COMPILATION()
 #  define THRUST_DEVICE_BACKEND                 cuda
 #  define THRUST_DEVICE_BACKEND_DETAIL          cuda_cub
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) cuda##name
