@@ -159,7 +159,6 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
         if (complexAccumulator)
             return {.reason = "Complex reference GEMM does not support block scaling."};
     }
-    const size_t outputCount = problem.d.shape().elementCount();
     if (!hasProvablyDistinctElementOffsets(problem.d.layout()))
         return {.reason = "Reference GEMM requires distinct logical destination elements."};
 
