@@ -93,8 +93,9 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
     16-bit atomic touches 16 distinct dwords, each from 2 lanes. Combining
     the two lanes of a pair into one packed atomic would halve the 16-bit
     atomic count.
-  - §6.5 (registers): the split-K epilogue adds no spills or scratch. VGPRs
-    are unchanged on most geometries; 64x64x64 with 2x2 warps adds 8.
+  - §6.5 (registers): the split-K epilogue's register cost is not pinned by
+    a test. When changing it, read the VGPR, spill and scratch counts from the
+    compiler's resource usage for the target geometry (`probe_occupancy.py`).
   - §7.3 (split-K accumulator strategy): each K-slice accumulates in f32
     registers and reduces into dW with atomics; there is no workspace.
   - §9.4 (output validation): the GPU tests check every group's channel rows,
@@ -104,8 +105,9 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
     (`wg_M`, `wg_N`). Group tiling folds the group into `block_id_z`
     alongside the K-slice. Output store mapping is the WMMA C layout above.
   - §14.1 and §16.1: the 16-bit degree against the atomic's rounding, a
-    validator rule scoped to the wrong epilogue, and a 16-bit atomic whose
-    throughput collapses with the degree (fp16 here).
+    validator rule scoped to the wrong epilogue, and sweeping every 16-bit
+    degree against the best `split_k=1` kernel before setting a cap (fp16
+    here).
 
 ### Initial implementation
 

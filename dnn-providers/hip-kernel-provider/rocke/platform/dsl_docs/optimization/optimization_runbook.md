@@ -2545,12 +2545,14 @@ An optimization is done when:
   from accepting more rounding error. Only a wider dW dtype raises the
   bound itself.
 - Sweep every 16-bit split-K degree per dtype, and compare it with the best
-  `split_k=1` kernel, before you set a cap. Two packed atomics with the same
-  instruction pattern can scale very differently. On gfx1250, bf16 kept
-  gaining up to the accuracy cap, while fp16 lost to the unsplit kernel at
-  every degree on a mid-size dW. When no cap avoids such a loss, turn the
-  automatic split off for that dtype and leave the explicit degree as an
-  opt-in.
+  `split_k=1` kernel, before you set a cap. Do not assume two packed atomics
+  with the same instruction pattern behave alike. In a gfx1250 wgrad sweep
+  (`benchmark_implicit_gemm_conv.py --direction wgrad --verify`, once per
+  `--split-k` degree), bf16 timings kept improving up to the accuracy cap,
+  while no fp16 degree beat the unsplit kernel on a mid-size dW. That is a
+  timing observation only; the cause was not classified with hardware
+  counters. When no cap avoids such a loss, turn the automatic split off for
+  that dtype and leave the explicit degree as an opt-in.
 
 ### 16.2 Anti-patterns (what to avoid)
 
