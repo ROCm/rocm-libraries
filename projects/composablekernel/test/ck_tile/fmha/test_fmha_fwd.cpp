@@ -411,6 +411,856 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
     }
 }
 
+// Batch-mode XCD remap of the block index (gfx1250): 3 batches, seqlen_q 300, so
+// 3 (bm0=128) or 5 (bm0=64) m-tiles per (batch, head) on grids that are not a
+// multiple of the XCD count, where the remap is not the identity. Each case names
+// the GetTileIndex branch it reaches. Square causal bhsd grids take the
+// batch-local causal order instead, hence seqlen_k 400 for the bhsd causal case.
+// Masked bshd grids remap only with at least 8 (batch, head) rows per m-tile: 3 x
+// 16 heads covers both m-tile counts, 3 x 5 neither.
+class BatchXCDRemap
+    : public TestWithParam<
+          std::tuple<bool, int, int, std::vector<int>, std::vector<int>, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchXCDRemap,
+    // bhsd/bshd, nhead, seqlen_k, q_eff_lens, kv_eff_lens, mask
+    Values(
+        // bhsd remap
+        std::tuple{true, 5, 300, std::vector<int>{}, std::vector<int>{}, "0"},
+        std::tuple{true, 5, 400, std::vector<int>{}, std::vector<int>{}, "2"},
+        // bshd remap
+        std::tuple{false, 5, 300, std::vector<int>{}, std::vector<int>{}, "0"},
+        std::tuple{false, 16, 300, std::vector<int>{}, std::vector<int>{}, "2"},
+        // bshd masked, too few heads per m-tile: round-robin
+        std::tuple{false, 5, 300, std::vector<int>{}, std::vector<int>{}, "2"},
+        // per-batch lengths: round-robin, early exit past each batch's seqlen_q
+        std::tuple{true, 5, 300, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "0"},
+        std::tuple{
+            false, 16, 300, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "2"}));
+
+TEST_P(BatchXCDRemap, DataTypeConfig)
+{
+    auto [perm, nhead, seqlen_k, q_eff_lens, kv_eff_lens, mask_str] = GetParam();
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                               3, // batch
+                                               nhead,
+                                               -1, // nhead_k
+                                               {adjust_seqlen(300)},
+                                               {adjust_seqlen(seqlen_k)},
+                                               adjust_hdim(128),
+                                               adjust_hdim(128),
+                                               0,    // seqlen_knew
+                                               {-1}, // seqlen_qpads
+                                               {-1}, // seqlen_kpads
+                                               q_eff_lens,
+                                               kv_eff_lens,
+                                               0,    // rotary_dim
+                                               perm, // i_perm
+                                               perm, // o_perm
+                                               0,    // scale_s
+                                               0,    // logits_soft_cap
+                                               def_is_v_rowmajor,
+                                               def_lse,
+                                               0,     // page_block_size
+                                               false, // use_cache_batch_idx
+                                               "n",   // bias_str
+                                               0.0f,  // p_drop
+                                               0,     // drop_seed
+                                               0,     // drop_offset
+                                               false, // drop_prefs
+                                               mask_str,
+                                               qscale_str,
+                                               true, // is_rotary_interleaved
+                                               1,    // num_splits
+                                               COMMON_ARGS);
+    CHECK_RESULT(result);
+}
+
+// d128 runs qr_tdm_pingpong below 640 rows with at least 2 (batch, head) pairs per
+// multiprocessor (GFX125_QR_TDM_PINGPONG_RANGE in fmha_fwd.py), so each case sizes its
+// grid to reach it on this device: the batch in batch mode; in group mode, where this
+// runner passes the packed total length as max_seqlen_q (kept below 640), the head
+// count for a given number of sequences (12 by default). The unpadded instance serves
+// any seqlen_k except with an elementwise bias; causal masks take its causal kernel
+// ("_mc_", without LSE, bias or sink). ALiBi without a mask makes every K tile raise the
+// row maxima of the steep heads past the rebase threshold, so those cases take the
+// finite-to-finite rescale of o_acc and l on every trip, with and without LSE.
+std::pair<int, int> PingPongGrid(mode_enum mode, int nhead, int group_batch = 12)
+{
+    int device = 0;
+    hipDeviceProp_t props{};
+    EXPECT_EQ(hipGetDevice(&device), hipSuccess);
+    EXPECT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+    const int pairs = 2 * props.multiProcessorCount;
+    if(mode == mode_enum::batch)
+        return {ck_tile::integer_divide_ceil(pairs, nhead), nhead};
+    return {group_batch, ck_tile::integer_divide_ceil(pairs, group_batch)};
+}
+
+// max_seqlen_q <= 16 takes qr_tdm_pingpong's 16-row tile, which spends its warps on N
+// instead of M and so sends S through LDS on its way from gemm_0 to gemm_1. A
+// distribution mismatch there permutes P's columns within a row: the row sums, and so
+// the LSE, stay right while O is wrong, so O is what these cases check. seqlen_k covers
+// a tile multiple and a padded tail; the masks cover the causal and windowed paths. The
+// grid is sized as for QrTdmPingPong; group mode packs 2 sequences of 8 rows.
+class QrTdmShortQuery : public TestWithParam<std::tuple<mode_enum, int, int, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmShortQuery,
+                         // mode, seqlen_q, seqlen_k, mask
+                         Values(std::tuple{mode_enum::batch, 1, 509, "0"},
+                                std::tuple{mode_enum::batch, 8, 64, "0"},
+                                std::tuple{mode_enum::batch, 16, 509, "1"},
+                                std::tuple{mode_enum::batch, 8, 509, "2"},
+                                std::tuple{mode_enum::batch, 16, 64, "t:50,64"},
+                                std::tuple{mode_enum::group, 8, 509, "2"}));
+
+TEST_P(QrTdmShortQuery, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        auto [mode, seqlen_q, seqlen_k, mask_str] = GetParam();
+        const auto [batch, nhead]                 = PingPongGrid(mode, 4, 2);
+
+        std::string selected_kernel;
+        // MHA: pack-GQA would fold the heads into seqlen_q and move the tile choice.
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   -1,
+                                                   {seqlen_q},
+                                                   {seqlen_k},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_b16x64"), std::string::npos) << selected_kernel;
+    }
+}
+
+class QrTdmPingPong
+    : public TestWithParam<
+          std::tuple<mode_enum, int, int, int, const char*, const char*, bool, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QrTdmPingPong,
+    // mode, nhead (group mode: from the grid), seqlen_q, seqlen_k, mask, bias, lse, name part
+    Values(std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_"},
+           std::tuple{mode_enum::batch, 4, 64, 100, "0", "n", true, "_npad_"},
+           std::tuple{mode_enum::batch, 4, 64, 100, "0", "e", true, "_pssk_"},
+           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_npad_"},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_"},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", false, "_alibi_"},
+           std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_"},
+           std::tuple{mode_enum::batch, 8, 100, 100, "2", "n", false, "_mc_"},
+           std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, ""}));
+
+TEST_P(QrTdmPingPong, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        auto [mode, nhead_hint, seqlen_q, seqlen_k, mask_str, bias_str, lse, tag] = GetParam();
+        const auto [batch, nhead] = PingPongGrid(mode, nhead_hint);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   -1,
+                                                   {seqlen_q},
+                                                   {seqlen_k},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   lse,
+                                                   0,
+                                                   false,
+                                                   bias_str,
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(tag), std::string::npos) << selected_kernel;
+    }
+}
+
+// qr_tdm_pingpong with a sink, and below d128: the dpad/dvpad instances, whose O goes
+// through the LDS-shuffle epilogue with a padded N. Same grids as QrTdmPingPong.
+class QrTdmPingPongEdges
+    : public TestWithParam<std::tuple<int, int, const char*, const char*, int, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmPingPongEdges,
+                         // hdim_q, hdim_v, mask, bias, init_sink, name part
+                         Values(std::tuple{128, 128, "0", "n", 1, "_sink"},
+                                std::tuple{128, 128, "t:50,64", "n", 1, "_sink"},
+                                std::tuple{120, 120, "2", "n", 0, "_pddv_"},
+                                std::tuple{128, 120, "0", "e", 0, "_psskddv_"}));
+
+TEST_P(QrTdmPingPongEdges, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        auto [hdim_q, hdim_v, mask_str, bias_str, init_sink, tag] = GetParam();
+        const auto [batch, nhead] = PingPongGrid(mode_enum::batch, 4);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(
+            mode_enum::batch,
+            batch,
+            nhead,
+            -1,
+            {100},
+            {300},
+            hdim_q,
+            hdim_v,
+            0,
+            {-1},
+            {-1},
+            {},
+            {},
+            0,
+            false,
+            false,
+            0,
+            0,
+            true,
+            true, // lse
+            0,
+            false,
+            bias_str,
+            0.0f,
+            0,
+            0,
+            false,
+            mask_str,
+            qscale_str,
+            true,
+            1,
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1, // do_validation
+            init_sink,
+            1, // pack_gqa
+            stream_config,
+            std::nullopt,
+            &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(tag), std::string::npos) << selected_kernel;
+    }
+}
+
+// A named API and pipeline (the example's -api/-pipeline) run that pipeline whatever the
+// heuristics that choose between pipelines say -- qr_tdm_pingpong on a small grid,
+// qr_tdm_sched or qr_tdm on a big one -- with the pipeline's own tile choice (16 rows up
+// to s_q 16), and no other API or pipeline when it has no kernel for the args. "small" is
+// 2 x 4 heads; otherwise the grid is sized as for QrTdmPingPong. One K/V head; splitkv runs
+// 2 splits. tile: a part of the kernel name, "" for no kernel at all.
+// api, pipeline, mode, small grid, seqlen_q, seqlen_k, page_block_size, tile
+using ForcedPipelineCase =
+    std::tuple<const char*, const char*, mode_enum, bool, int, int, int, const char*>;
+
+class ForcedPipeline : public TestWithParam<ForcedPipelineCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    ForcedPipeline,
+    Values(
+        ForcedPipelineCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, true, 532, 532, 0, "_b64x"},
+        ForcedPipelineCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, true, 8, 532, 0, "_b16x"},
+        ForcedPipelineCase{"fwd", "qr_tdm_sched", mode_enum::batch, false, 100, 300, 0, "_b128x"},
+        ForcedPipelineCase{"fwd", "qr_tdm", mode_enum::batch, false, 532, 532, 0, "_b128x"},
+        ForcedPipelineCase{"auto", "qr_tdm", mode_enum::group, true, 100, 300, 0, "_qr_tdm_v"},
+        ForcedPipelineCase{"fwd", "no_such_pipeline", mode_enum::batch, true, 100, 300, 0, ""}));
+
+TEST_P(ForcedPipeline, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the qr_tdm pipelines are only supported on gfx1250";
+
+        const auto [api, pipeline, mode, small, seqlen_q, seqlen_k, page_block_size, tile] =
+            GetParam();
+        const auto [batch, nhead] = small ? std::pair{2, 4} : PingPongGrid(mode, 4);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   1,
+                                                   std::vector<int>(batch, seqlen_q),
+                                                   std::vector<int>(batch, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false, // lse: pagedkv has none
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "0",
+                                                   qscale_str,
+                                                   true,
+                                                   std::string(api) == "splitkv" ? 2 : 1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "auto",
+                                                   "block_table",
+                                                   api,
+                                                   pipeline);
+        if(tile != nullptr && *tile == '\0')
+        {
+            EXPECT_EQ(result, fwd_result::no_instance);
+            return;
+        }
+        ASSERT_EQ(result, fwd_result::success);
+        if(tile != nullptr)
+        {
+            EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+                << selected_kernel;
+            EXPECT_NE(selected_kernel.find(tile), std::string::npos) << selected_kernel;
+        }
+    }
+}
+
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+// splitkv: qr, and on gfx1250 qr_tdm and qr_tdm_pingpong (its 16-row tile for decode: one
+// query row, the 4 heads of the K/V head merged into the rows), dense and paged.
+INSTANTIATE_TEST_SUITE_P(
+    SplitKV,
+    ForcedPipeline,
+    Values(ForcedPipelineCase{"splitkv", "qr", mode_enum::batch, true, 100, 300, 0, "_b64x"},
+           ForcedPipelineCase{"splitkv", "qr_tdm", mode_enum::batch, true, 100, 300, 0, "_b64x"},
+           ForcedPipelineCase{"splitkv", "qr_tdm", mode_enum::group, true, 100, 531, 128, "_b64x"},
+           ForcedPipelineCase{
+               "splitkv", "qr_tdm_pingpong", mode_enum::batch, true, 1, 1000, 128, "_b16x"},
+           ForcedPipelineCase{
+               "splitkv", "qr_tdm_pingpong", mode_enum::batch, false, 1, 531, 0, "_b16x"}));
+#endif
+
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+// pagedkv_prefill: qr_pagedkv (pages of 128), and on gfx1250 the TDM pipelines with any page
+// size: each warp's K/V rows from one page where the page size is a multiple of them, TDM
+// gathers otherwise ("_gather").
+INSTANTIATE_TEST_SUITE_P(
+    PagedKV,
+    ForcedPipeline,
+    Values(
+        ForcedPipelineCase{"pagedkv", "qr_pagedkv", mode_enum::batch, true, 100, 300, 128, "_b64x"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_pingpong", mode_enum::batch, true, 100, 300, 16, "_b64x"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_pingpong", mode_enum::group, true, 8, 532, 1, "_gather"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_sched", mode_enum::batch, false, 300, 531, 16, "_gather"},
+        ForcedPipelineCase{
+            "pagedkv", "qr_tdm_sched", mode_enum::group, true, 300, 531, 64, "_b128x"},
+        ForcedPipelineCase{"pagedkv", "qr_tdm", mode_enum::group, true, 100, 500, 7, "_gather"},
+        ForcedPipelineCase{"pagedkv", "qr_tdm", mode_enum::batch, true, 100, 500, 48, "_b128x"}));
+#endif
+
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+// Gappy paged K/V (fmha_fwd_pagedkv_args::is_gappy, group mode): each sequence starts some
+// rows into its first page, which only the TDM gathers take. pipeline, page_block_size
+class PagedKVGappy : public TestWithParam<std::tuple<const char*, int>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         PagedKVGappy,
+                         Values(std::tuple{"qr_tdm", 16},
+                                std::tuple{"qr_tdm", 7},
+                                std::tuple{"qr_tdm_sched", 64},
+                                std::tuple{"qr_tdm_pingpong", 1}));
+
+TEST_P(PagedKVGappy, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pagedkv_prefill pipelines are only supported on gfx1250";
+
+        const auto [pipeline, page_block_size] = GetParam();
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   3,
+                                                   4,
+                                                   2,
+                                                   {300, 100, 37},
+                                                   {531, 200, 97},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "b",
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "auto",
+                                                   "block_table",
+                                                   "pagedkv",
+                                                   pipeline,
+                                                   0,
+                                                   true);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_gather"), std::string::npos) << selected_kernel;
+    }
+}
+#endif
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+INSTANTIATE_TEST_SUITE_P(
+    BatchPrefill,
+    ForcedPipeline,
+    Values(
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm_pingpong", mode_enum::group, true, 100, 500, 16, "_b64x"},
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm_pingpong", mode_enum::group, true, 8, 532, 1, "_b16x"},
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm_sched", mode_enum::group, false, 100, 500, 16, "_b128x"},
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm", mode_enum::group, false, 100, 500, 1024, "_qr_tdm_v"}));
+#endif
+
+// min_seqlen_q (aiter's mha_varlen_fwd): the "_skip" kernels leave the group-mode sequences
+// of at most min_seqlen_q query rows unwritten; the others must match the reference.
+TEST(TestCkTileFmhaFwd, SkipMinSeqlenQ)
+{
+    std::string selected_kernel;
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                               4,
+                                               2,
+                                               -1,
+                                               {8, 100, 16, 200},
+                                               {64, 300, 64, 200},
+                                               128,
+                                               128,
+                                               0,
+                                               {-1},
+                                               {-1},
+                                               {},
+                                               {},
+                                               0,
+                                               false,
+                                               false,
+                                               0,
+                                               0,
+                                               true,
+                                               true,
+                                               0,
+                                               false,
+                                               "n",
+                                               0.0f,
+                                               0,
+                                               0,
+                                               false,
+                                               "0",
+                                               qscale_str,
+                                               true,
+                                               1,
+                                               COMMON_ARGS,
+                                               std::nullopt,
+                                               &selected_kernel,
+                                               "auto",
+                                               "block_table",
+                                               "fwd",
+                                               "",
+                                               16);
+    CHECK_RESULT(result);
+    EXPECT_NE(selected_kernel.find("_skip_"), std::string::npos) << selected_kernel;
+}
+
+// A logits soft cap on the gfx1250 TDM pipelines (qr_tdm, qr_tdm_pingpong; not qr_tdm_sched) of
+// each API. A cap of 0.5 bends every score, so the reference catches a missing transform.
+// api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask
+using TdmSoftCapCase = std::tuple<const char*, const char*, mode_enum, int, int, int, const char*>;
+
+class TdmLogitsSoftCap : public TestWithParam<TdmSoftCapCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b"},
+           TdmSoftCapCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, 8, 532, 0, "0"},
+           TdmSoftCapCase{"fwd", "qr_tdm_pingpong", mode_enum::group, 100, 500, 0, "t:64,32"}));
+
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+INSTANTIATE_TEST_SUITE_P(
+    SplitKV,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"splitkv", "qr_tdm", mode_enum::batch, 300, 2049, 0, "b"},
+           TdmSoftCapCase{"splitkv", "qr_tdm_pingpong", mode_enum::batch, 1, 2000, 128, "0"}));
+#endif
+
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+INSTANTIATE_TEST_SUITE_P(
+    PagedKV,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"pagedkv", "qr_tdm", mode_enum::batch, 100, 500, 7, "0"},
+           TdmSoftCapCase{"pagedkv", "qr_tdm_pingpong", mode_enum::group, 300, 500, 64, "b"}));
+#endif
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+INSTANTIATE_TEST_SUITE_P(
+    BatchPrefill,
+    TdmLogitsSoftCap,
+    Values(TdmSoftCapCase{"batch_prefill", "qr_tdm", mode_enum::group, 100, 500, 16, "0"},
+           TdmSoftCapCase{"batch_prefill", "qr_tdm_pingpong", mode_enum::group, 100, 500, 1, "b"}));
+#endif
+
+TEST_P(TdmLogitsSoftCap, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
+
+        const auto [api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask_str] =
+            GetParam();
+        const bool splitkv = std::string(api) == "splitkv";
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   3,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(3, seqlen_q),
+                                                   std::vector<int>(3, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0.5f, // logits_soft_cap
+                                                   true,
+                                                   splitkv, // lse
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   splitkv ? 3 : 1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "auto",
+                                                   "block_table",
+                                                   api,
+                                                   pipeline);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_logits_"), std::string::npos) << selected_kernel;
+    }
+}
+
+// Dropout on the TDM pipelines (fwd and batch_prefill), also with a logits soft cap and a
+// sink. Validation also compares the stored random values. The 1024-row causal case takes
+// qr_tdm's staged M128 traversal; unpadded qr_tdm_pingpong also takes unaligned sequences.
+// qr_tdm_sched and qr_tdm_pingpong take dropout on masked attention only.
+// api, pipeline, mode, seqlen_q, seqlen_k, page_block_size, mask, logits_soft_cap, init_sink
+using TdmDropoutCase =
+    std::tuple<const char*, const char*, mode_enum, int, int, int, const char*, float, int>;
+
+class TdmDropout : public TestWithParam<TdmDropoutCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    TdmDropout,
+    Values(TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "0", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 1024, 1024, 0, "t", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::group, 100, 500, 0, "t:64,32", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm", mode_enum::batch, 300, 531, 0, "b", 0.5f, 1},
+           TdmDropoutCase{"fwd", "qr_tdm_sched", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm_sched", mode_enum::group, 300, 500, 0, "t", 0.5f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, 300, 531, 0, "b", 0.0f, 0},
+           TdmDropoutCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, 8, 532, 0, "b", 0.5f, 1}));
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+INSTANTIATE_TEST_SUITE_P(
+    BatchPrefill,
+    TdmDropout,
+    Values(TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 100, 500, 16, "0", 0.0f, 0},
+           TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 1, "b", 0.0f, 0},
+           TdmDropoutCase{"batch_prefill", "qr_tdm", mode_enum::group, 300, 500, 16, "t", 0.5f, 1},
+           TdmDropoutCase{
+               "batch_prefill", "qr_tdm_sched", mode_enum::group, 300, 500, 16, "b", 0.0f, 0},
+           TdmDropoutCase{
+               "batch_prefill", "qr_tdm_pingpong", mode_enum::group, 100, 500, 16, "b", 0.0f, 0}));
+#endif
+
+TEST_P(TdmDropout, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
+
+        const auto [api,
+                    pipeline,
+                    mode,
+                    seqlen_q,
+                    seqlen_k,
+                    page_block_size,
+                    mask_str,
+                    logits_soft_cap,
+                    init_sink] = GetParam();
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(
+            mode,
+            3,
+            4,
+            2,
+            std::vector<int>(3, seqlen_q),
+            std::vector<int>(3, seqlen_k),
+            128,
+            128,
+            0,
+            {-1},
+            {-1},
+            {},
+            {},
+            0,
+            false,
+            false,
+            0,
+            logits_soft_cap,
+            true,
+            true, // lse
+            page_block_size,
+            false,
+            "n",
+            0.2f, // p_drop
+            7,
+            123,
+            false,
+            mask_str,
+            qscale_str,
+            true,
+            1,
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1,
+            init_sink,
+            1,
+            stream_config,
+            std::nullopt,
+            &selected_kernel,
+            "auto",
+            "block_table",
+            api,
+            pipeline);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_dropout_"), std::string::npos) << selected_kernel;
+    }
+}
+
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+// fwd_splitkv on the TDM pipelines with a sink logit (counted once over the splits) and sink
+// tokens (on the split holding the window's first tile).
+// pipeline, seqlen_q, seqlen_k, page_block_size, mask, init_sink
+using TdmSplitKVSinkCase = std::tuple<const char*, int, int, int, const char*, int>;
+
+class TdmSplitKVSink : public TestWithParam<TdmSplitKVSinkCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         TdmSplitKVSink,
+                         Values(TdmSplitKVSinkCase{"qr_tdm", 300, 2049, 0, "b", 1},
+                                TdmSplitKVSinkCase{"qr_tdm", 300, 2049, 0, "b:300,0,70", 1},
+                                TdmSplitKVSinkCase{"qr_tdm_sched", 300, 2049, 0, "b:256,0,4", 0},
+                                TdmSplitKVSinkCase{"qr_tdm_pingpong", 1, 3000, 128, "0", 1},
+                                TdmSplitKVSinkCase{
+                                    "qr_tdm_pingpong", 40, 2049, 0, "b:256,0,4", 1}));
+
+TEST_P(TdmSplitKVSink, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the TDM pipelines are only supported on gfx1250";
+
+        const auto [pipeline, seqlen_q, seqlen_k, page_block_size, mask_str, init_sink] =
+            GetParam();
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(
+            mode_enum::batch,
+            4,
+            16,
+            seqlen_q == 1 ? 4 : 8,
+            std::vector<int>(4, seqlen_q),
+            std::vector<int>(4, seqlen_k),
+            128,
+            128,
+            0,
+            {-1},
+            {-1},
+            {},
+            {},
+            0,
+            false,
+            false,
+            0,
+            0.0f,
+            true,
+            true, // lse
+            page_block_size,
+            false,
+            "n",
+            0.0f,
+            0,
+            0,
+            false,
+            mask_str,
+            qscale_str,
+            true,
+            3, // num_splits
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1,
+            init_sink,
+            1,
+            stream_config,
+            std::nullopt,
+            &selected_kernel,
+            "auto",
+            "block_table",
+            "splitkv",
+            pipeline);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+            << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_sink"), std::string::npos) << selected_kernel;
+    }
+}
+#endif
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
@@ -490,9 +1340,9 @@ TEST_P(QrTdmNewHeadDim, DataTypeConfig)
         // GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q in fmha_fwd.py). The tile is
         // embedded in the kernel name as "_b<bm0>x<bn0>x...". Only assert in batch
         // mode: there a.max_seqlen_q == seqlen_q, so the input directly drives tile
-        // selection. In group mode a.max_seqlen_q is the packed total q length across
-        // the batch (sum of per-sequence lengths), not the per-sequence seqlen, so a
-        // single input seqlen does not pin dispatch to one side of the crossover.
+        // selection. In group mode the per-sequence lengths are drawn around the input
+        // seqlen, so their maximum (a.max_seqlen_q) does not pin dispatch to one side of
+        // the crossover.
         if(mode == mode_enum::batch)
         {
             if(seqlen_q >= 128)
@@ -638,6 +1488,423 @@ TEST_P(QrTdmLargeHeadDim, DataTypeConfig)
         GTEST_SKIP() << "qr_tdm large head dims (256/512) are fp16/bf16 only";
     }
 }
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+// batch_prefill: group mode with a paged KV cache, in aiter's KV layouts and page tables
+// (indptr: kv_indptr/kv_page_indices/kv_last_page_lens, block_table: 2D). On gfx125
+// the pipeline in the kernel name is checked as well, so a silent fallback from TDM to the
+// async pipeline is caught; other archs only have the async pipeline (pages of 1, 16, 1024).
+// hdim_q, hdim_v, seqlen_q, seqlen_k, mask, page_block_size, kv_layout, kv_lookup, i_perm,
+// gfx125 pipeline
+using BatchPrefillCase =
+    std::tuple<int, int, int, int, const char*, int, const char*, const char*, bool, const char*>;
+
+class BatchPrefill : public TestWithParam<BatchPrefillCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchPrefill,
+    Values(
+        BatchPrefillCase{128, 128, 300, 1000, "0", 1024, "auto", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{
+            128, 128, 513, 2100, "b", 1024, "auto", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{
+            64, 64, 200, 1500, "b:128,0", 1024, "auto", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 8, 900, "b", 1024, "auto", "indptr", false, "_qr_tdm_vr"},
+        BatchPrefillCase{96, 96, 200, 700, "0", 1024, "auto", "indptr", true, "_qr_tdm_vr"},
+        BatchPrefillCase{
+            256, 256, 130, 1100, "b", 1024, "auto", "block_table", false, "_qr_tdm_vr"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "auto", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{64, 64, 300, 1000, "0", 16, "auto", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "auto", "indptr", false, "_qr_tdm_vr"},
+        BatchPrefillCase{64, 64, 300, 1000, "b", 1, "auto", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{
+            128, 128, 300, 1000, "b", 16, "vec", "block_table", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 64, "vec", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 1000, "t:64,32", 16, "vec", "indptr", false, "_qr_tdm_vr"},
+        // vectorized pages of a few vectors: one TDM box per vector of rows
+        BatchPrefillCase{128, 128, 77, 2049, "b", 8, "vec", "block_table", true, "_qr_tdm_vr"},
+        BatchPrefillCase{64, 64, 300, 1000, "0", 24, "vec", "indptr", false, "_qr_tdm_sched_"},
+        // page sizes taken at run time on gfx125: page views, and TDM gathers (page 7)
+        BatchPrefillCase{
+            128, 128, 300, 1000, "b", 32, "nhd", "block_table", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{
+            64, 64, 300, 1000, "t:64,32", 48, "nhd", "indptr", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 2049, "0", 7, "hnd", "indptr", true, "_qr_tdm_vr"},
+        BatchPrefillCase{
+            128, 128, 300, 1000, "b", 7, "nhd", "block_table", true, "_qr_tdm_sched_"}));
+
+TEST_P(BatchPrefill, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        const auto [hdim_q,
+                    hdim_v,
+                    seqlen_q,
+                    seqlen_k,
+                    mask_str,
+                    page_block_size,
+                    kv_layout,
+                    kv_lookup,
+                    i_perm,
+                    gfx125_pipeline] = GetParam();
+        if(!ck_tile::is_gfx125_supported() &&
+           !(page_block_size == 1 || page_block_size == 16 || page_block_size == 1024))
+            GTEST_SKIP() << "other page sizes run on the gfx125 TDM pipelines only";
+
+        // fixed per-sequence lengths, so max_seqlen_q selects the pipeline deterministically
+        constexpr int batch = 3;
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(batch, seqlen_q),
+                                                   std::vector<int>(batch, seqlen_k),
+                                                   hdim_q,
+                                                   hdim_v,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   i_perm,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   kv_lookup);
+        CHECK_RESULT(result);
+        const char* pipeline = ck_tile::is_gfx125_supported() ? gfx125_pipeline : "_qr_async_";
+        EXPECT_NE(selected_kernel.find(pipeline), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "batch_prefill tests run fp16 and bf16";
+    }
+}
+
+// aiter initializes the traits as flat aggregates, without the fields CK added last
+// (csrc/include/mha_fwd.h): new fields go at the end.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+TEST(TestCkTileFmhaFwd, TraitsFlatAggregateInit)
+{
+    const fmha_fwd_traits fwd{128,
+                              128,
+                              "bf16",
+                              true,
+                              true,
+                              false,
+                              mask_enum::no_mask,
+                              bias_enum::no_bias,
+                              false,
+                              false,
+                              quant_scale_enum::no_scale,
+                              false,
+                              true};
+    EXPECT_TRUE(fwd.has_sink);
+    EXPECT_TRUE(fwd.pipeline.empty());
+
+    const fmha_batch_prefill_traits bp{
+        128,
+        128,
+        "bf16",
+        true,
+        true,
+        false,
+        mask_enum::no_mask,
+        bias_enum::no_bias,
+        false,
+        false,
+        quant_scale_enum::no_scale,
+        false,
+        true,
+        ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT,
+        ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D,
+        16};
+    EXPECT_TRUE(bp.has_sink);
+    EXPECT_EQ(bp.kv_lookup_table,
+              ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D);
+    EXPECT_EQ(bp.page_size, 16);
+    EXPECT_TRUE(bp.pipeline.empty());
+}
+#pragma clang diagnostic pop
+
+// batch_prefill on K/V with strides that are not their packed sizes (-kv_pad, as aiter
+// allows): rows of hdim + 8 elements, pages 8 elements longer, so a page stride is not a
+// multiple of the row stride; the gfx125 TDM gathers (pages smaller than a warp's 32 K/V
+// rows) then count rows in units of their common divisor. pagedkv_prefill reads the same
+// layouts on its gfx125 TDM gathers ("_gather").
+// api, page_block_size, kv_layout, mask, gfx125 kernel name part
+using BatchPrefillPaddedKVCase =
+    std::tuple<const char*, int, const char*, const char*, const char*>;
+
+class BatchPrefillPaddedKV : public TestWithParam<BatchPrefillPaddedKVCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchPrefillPaddedKV,
+    Values(BatchPrefillPaddedKVCase{"batch_prefill", 1024, "nhd", "b", "_ps1024_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 32, "nhd", "t:64,32", "_psrt_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 16, "hnd", "0", "_psrtg_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 7, "nhd", "b", "_psrtg_"},
+           BatchPrefillPaddedKVCase{"batch_prefill", 1, "hnd", "t:64,32", "_psrtg_"},
+           BatchPrefillPaddedKVCase{"pagedkv", 7, "nhd", "b", "_gather"},
+           BatchPrefillPaddedKVCase{"pagedkv", 16, "hnd", "0", "_gather"}));
+
+TEST_P(BatchPrefillPaddedKV, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        const auto [api, page_block_size, kv_layout, mask_str, gfx125_name] = GetParam();
+        const bool batch_prefill = std::string(api) == "batch_prefill";
+        if(!ck_tile::is_gfx125_supported() &&
+           !(batch_prefill &&
+             (page_block_size == 1 || page_block_size == 16 || page_block_size == 1024)))
+            GTEST_SKIP() << "other page sizes run on the gfx125 TDM pipelines only";
+
+        constexpr int batch = 3;
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(batch, 300),
+                                                   std::vector<int>(batch, 1000),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   "block_table",
+                                                   api,
+                                                   "",
+                                                   0,
+                                                   false,
+                                                   8);
+        CHECK_RESULT(result);
+        if(ck_tile::is_gfx125_supported())
+        {
+            EXPECT_NE(selected_kernel.find("_qr_tdm_sched_"), std::string::npos) << selected_kernel;
+            EXPECT_NE(selected_kernel.find(gfx125_name), std::string::npos) << selected_kernel;
+        }
+        else
+            EXPECT_NE(selected_kernel.find("_qr_async_"), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "batch_prefill tests run fp16 and bf16";
+    }
+}
+
+// fp8bf16 batch_prefill on gfx125 qr_tdm with page sizes taken at run time: per-tensor
+// scales with page views and TDM gathers, per-page K/V scales with pages of whole K/V tiles
+// (128 rows; smaller pages have no instance).
+// qscale, page_block_size, kv_layout, mask, page size in the kernel name ("": no instance)
+using BatchPrefillFp8Case = std::tuple<const char*, int, const char*, const char*, const char*>;
+
+class BatchPrefillFp8 : public TestWithParam<BatchPrefillFp8Case>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         BatchPrefillFp8,
+                         Values(BatchPrefillFp8Case{"pt", 32, "nhd", "b", "_psrt_"},
+                                BatchPrefillFp8Case{"pt", 7, "hnd", "0", "_psrtg_"},
+                                BatchPrefillFp8Case{"kvbs", 256, "nhd", "b", "_psrt_"},
+                                BatchPrefillFp8Case{"kvbs", 64, "nhd", "0", ""}));
+
+TEST_P(BatchPrefillFp8, DataTypeConfig)
+{
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "run-time page sizes run on the gfx125 TDM pipelines only";
+        const auto [qscale, page_block_size, kv_layout, mask_str, page_name] = GetParam();
+
+        constexpr int batch = 3;
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(batch, 200),
+                                                   std::vector<int>(batch, 900),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   std::string(kv_layout) == "hnd",
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   "block_table",
+                                                   "batch_prefill");
+        if(std::string(page_name).empty())
+        {
+            EXPECT_EQ(result, fwd_result::no_instance) << selected_kernel;
+            return;
+        }
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_vr"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(page_name), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "fp8bf16 only";
+    }
+}
+
+// batch_prefill on qr_tdm_pingpong: its grids (at least 2 (batch, head) pairs per CU, below
+// 640 rows) take the 64-row tile, up to 16 rows the 16-row one. Pages of 1024, 16 (a warp's
+// 16 K/V rows) and 1 (TDM gather), with GQA, and vectorized K/V.
+// seqlen_q, seqlen_k, mask, page_block_size, kv_lookup, i_perm, tile, kv_layout
+using BatchPrefillPingPongCase =
+    std::tuple<int, int, const char*, int, const char*, bool, const char*, const char*>;
+
+class BatchPrefillPingPong : public TestWithParam<BatchPrefillPingPongCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchPrefillPingPong,
+    Values(BatchPrefillPingPongCase{100, 500, "0", 1024, "indptr", false, "_b64x", "auto"},
+           BatchPrefillPingPongCase{100, 500, "b", 16, "block_table", true, "_b64x", "auto"},
+           BatchPrefillPingPongCase{100, 500, "t:64,32", 1, "indptr", false, "_b64x", "auto"},
+           BatchPrefillPingPongCase{8, 532, "0", 16, "block_table", true, "_b16x", "auto"},
+           BatchPrefillPingPongCase{8, 532, "b", 1, "indptr", false, "_b16x", "auto"},
+           BatchPrefillPingPongCase{100, 500, "b", 16, "indptr", false, "_b64x", "vec"},
+           BatchPrefillPingPongCase{100, 500, "0", 8, "block_table", true, "_b64x", "vec"},
+           BatchPrefillPingPongCase{8, 532, "b", 64, "block_table", true, "_b16x", "vec"}));
+
+TEST_P(BatchPrefillPingPong, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        const auto [seqlen_q,
+                    seqlen_k,
+                    mask_str,
+                    page_block_size,
+                    kv_lookup,
+                    i_perm,
+                    tile,
+                    kv_layout]    = GetParam();
+        const auto [batch, nhead] = PingPongGrid(mode_enum::batch, 4);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   nhead,
+                                                   2,
+                                                   std::vector<int>(batch, seqlen_q),
+                                                   std::vector<int>(batch, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   i_perm,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   i_perm, // lse (with the block_table cases)
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   kv_lookup);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(tile), std::string::npos) << selected_kernel;
+    }
+}
+#endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 
 class General
     : public TestWithParam<std::tuple<std::tuple<int, int>,

@@ -5,7 +5,7 @@ import copy
 import fnmatch
 import itertools
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -25,7 +25,9 @@ from codegen.cpp_symbol_map import (
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
 from codegen.ops.fmha_fwd import (
+    CppConstraint,
     DTYPE_BITS,
+    GFX125_QR_TDM_PINGPONG_RANGE,
     K0_MAX_SUBMAX_MAP,
     FMHA_FWD_KERNEL_HEADER,
     FMHA_FWD_API_PER_ARCH,
@@ -35,8 +37,58 @@ from codegen.ops.fmha_fwd import (
 
 
 FMHA_FWD_PAGEDKV_PIPELINE_MAP = {
-    "qr_pagedkv": "ck_tile::BlockFmhaFwdPagedKVPipelineQRKSVS"
+    "qr_pagedkv": "ck_tile::BlockFmhaFwdPagedKVPipelineQRKSVS",
+    "qr_tdm": "ck_tile::BlockFmhaPipelineQRKSVSTdm",
+    "qr_tdm_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSched",
+    "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineQRKSVSTdmPingPong",
 }
+
+# The TDM pipelines of fmha_fwd (gfx125). qr_tdm runs with double K/V LDS buffers and
+# progressive K LDS loading, as in fmha_fwd.
+TDM_PIPELINES = ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong")
+TDM_PROBLEM_EXTRA_MAP = {
+    "qr_tdm": ", true, true",
+    "qr_tdm_sched": "",
+    "qr_tdm_pingpong": "",
+}
+
+FMHA_FWD_TDM_TRAIT_AND_PROBLEM = """using fmha_trait_{F_idx} = ck_tile::TileFmhaTraits<{F_spad},
+                                                    {F_skpad},
+                                                    {F_dpad},
+                                                    {F_dvpad},
+                                                    {F_logits},
+                                                    {F_bias},
+                                                    false,
+                                                    {F_lse},
+                                                    false,
+                                                    ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+                                                    {F_occupancy},
+                                                    {F_skip},
+                                                    {F_sink}>;
+
+using fmha_variant_{F_idx} = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
+
+using fmha_mask_{F_idx} = {F_mask};
+
+using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaFwdPagedKVTdmPipelineProblem<
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::QDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::KDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::VDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::SaccDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::SMPLComputeDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::BiasDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::RandValOutputDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::LSEDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::PDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::OaccDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::ODataType,
+    fmha_shape_{F_idx},
+    {F_mode},
+    fmha_variant_{F_idx},
+    fmha_mask_{F_idx},
+    fmha_trait_{F_idx},
+    {F_kv_gather}{F_problem_extra}>;
+"""
 
 FMHA_FWD_KERNEL_BODY = """
 #include <iostream>
@@ -54,7 +106,36 @@ using fmha_shape_{F_idx} = ck_tile::TileFmhaShape<fmha_block_tile_{F_idx},
                                       ck_tile::sequence<{F_wm1}, {F_wn1}, {F_wk1}>,
                                       {F_vlayout}>;
 
-using fmha_trait_{F_idx} = ck_tile::TileFmhaFwdPagedKVTraits<{F_spad},
+{F_trait_and_problem}
+using fmha_pipeline_{F_idx} = {F_pipeline}<
+    fmha_pipeline_problem_{F_idx}>;
+
+{F_epilogue}
+
+using fmha_kernel_{F_idx} =
+    ck_tile::FmhaFwdPagedKVKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
+
+using trait_{F_idx} = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
+                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip}, {F_sink}, {F_occupancy}{F_kv_gather_trait}>;
+
+template<>
+float fmha_fwd_pagedkv_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_pagedkv_args a)
+{{
+    using k_ = fmha_kernel_{F_idx};
+    if(a.selected_kernel_name != nullptr)
+        *a.selected_kernel_name = k_::GetName();
+    if(s.log_level_ > 0)
+        std::cout << ", " << k_::GetName() << std::flush;
+    auto [kargs, grids] = fmha_fwd_pagedkv_create_kargs_and_grids<k_>(a);
+    const dim3 blocks                      = k_::BlockSize();
+    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));
+}}
+
+#endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
+"""
+
+FMHA_FWD_LEGACY_TRAIT_AND_PROBLEM = """using fmha_trait_{F_idx} = ck_tile::TileFmhaFwdPagedKVTraits<{F_spad},
                                                              {F_skpad},
                                                              {F_dpad},
                                                              {F_dvpad},
@@ -88,40 +169,21 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaFwdPagedKVPipelineProble
     fmha_variant_{F_idx},
     fmha_mask_{F_idx},
     fmha_trait_{F_idx}>;
-
-using fmha_pipeline_{F_idx} = {F_pipeline}<
-    fmha_pipeline_problem_{F_idx}>;
-
-using fmha_epilogue_{F_idx} =
-    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<{F_dtype}>::OaccDataType,
-                                           typename FmhaFwdTypeConfig<{F_dtype}>::ODataType,
-                                           {F_spad}, {F_dvpad}>>;
-
-using fmha_kernel_{F_idx} =
-    ck_tile::FmhaFwdPagedKVKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
-
-using trait_{F_idx} = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip}, {F_sink}, {F_occupancy}>;
-
-template<>
-float fmha_fwd_pagedkv_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_pagedkv_args a)
-{{
-    using k_ = fmha_kernel_{F_idx};
-    if(s.log_level_ > 0)
-        std::cout << ", " << k_::GetName() << std::flush;
-    auto [kargs, grids] = fmha_fwd_pagedkv_create_kargs_and_grids<k_>(a);
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));
-}}
-
-#endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 """
 
 FMHA_FWD_API_FILENAME = "fmha_fwd_pagedkv_api.cpp"
 FMHA_FWD_API = """
 float fmha_fwd_pagedkv(fmha_fwd_pagedkv_traits& t, fmha_fwd_pagedkv_args& a, const ck_tile::stream_config& s) {{
     float r = -1;
+
+    // used by the gfx125 rules that choose between the TDM pipelines
+    [[maybe_unused]] const unsigned num_cus = [] {{
+        int device = 0;
+        hipDeviceProp_t props{{}};
+        if(hipGetDevice(&device) != hipSuccess || hipGetDeviceProperties(&props, device) != hipSuccess)
+            return 0u;
+        return static_cast<unsigned>(props.multiProcessorCount);
+    }}();
 
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
 
@@ -130,9 +192,9 @@ float fmha_fwd_pagedkv(fmha_fwd_pagedkv_traits& t, fmha_fwd_pagedkv_args& a, con
 }}
 """
 
-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.use_pagedkv == {F_pagedkv}) && (t.do_fp8_static_quant == {F_squant}) && (t.skip_min_seqlen_q == {F_skip}) && (t.has_sink == {F_sink}) &&
-        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck})) {{
-    using trait_ = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip},{F_sink}, {F_occupancy}>;
+FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.pipeline.empty() || t.pipeline == "{F_pipeline_tag}") && (t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.use_pagedkv == {F_pagedkv}) && (t.do_fp8_static_quant == {F_squant}) && (t.skip_min_seqlen_q == {F_skip}) && (t.has_sink == {F_sink}) &&
+        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}){F_page_check}{F_constraint}) {{
+    using trait_ = fmha_fwd_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_pagedkv}, {F_squant}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_skip},{F_sink}, {F_occupancy}{F_kv_gather_trait}>;
     return fmha_fwd_pagedkv_<trait_, {F_arch.tag}>(s, a);
 }}
 """
@@ -168,6 +230,12 @@ class FmhaFwdApiTrait:
     # Metadata-only hint (occupancy of the pagedkv kernel), see
     # fmha_fwd_traits_::kOccupancy for rationale.
     occupancy: int = -1
+    # TDM pipelines: K/V rows read with TDM gathers ("t") or through a view of each
+    # warp's page ("f"), and the tile's dispatch constraint
+    kv_gather: str = "f"
+    constraint: CppConstraint = None
+    # rows of a K/V tile each warp reads (TDM page view)
+    kv_warp_rows: int = 0
 
     @property
     def name(self) -> str:
@@ -175,7 +243,26 @@ class FmhaFwdApiTrait:
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.pagedkv}-{self.squant}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.skip}-{self.sink}"
             + ("" if self.occupancy == -1 else f"-o{self.occupancy}")
+            + ("-gather" if self.kv_gather == "t" else "")
         )
+
+    @property
+    def page_check(self) -> str:
+        if self.pagedkv != "t":
+            return ""
+        if self.pipeline_tag == "qr_pagedkv":
+            return " && (a.page_block_size % 128 == 0)"
+        if self.kv_gather == "t":
+            # any page and row strides (gather row indices count their common divisor)
+            return ""
+        # each warp's K/V rows must lie in one page
+        return f" && (a.page_block_size % {self.kv_warp_rows} == 0) && !(t.is_group_mode && a.is_gappy)"
+
+    @property
+    def constraint_check(self) -> str:
+        if self.constraint is None:
+            return ""
+        return f" && ({self.constraint})"
 
     @property
     def scheck(self) -> str:
@@ -186,6 +273,9 @@ class FmhaFwdApiTrait:
                 return "true"  # always support
             else:
                 return "true"
+        elif self.pipeline_tag in TDM_PIPELINES:
+            assert self.spad == "t"
+            return "true"
         elif self.pipeline_tag in ["qr_pagedkv", "qs"]:
             if self.spad == "t":
                 return f"true /*a.seqlen_q % {self.bm0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -203,6 +293,9 @@ class FmhaFwdApiTrait:
                 return f"a.seqlen_k == 0 || a.seqlen_k % {self.bn0} != 0"
             else:
                 return f"a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0"
+        elif self.pipeline_tag in TDM_PIPELINES:
+            assert self.skpad == "t"
+            return "true"
         elif self.pipeline_tag in ["qr_pagedkv", "qs"]:
             if self.skpad == "t":
                 return f"true /*a.seqlen_k_ptr != nullptr || a.seqlen_k % {self.bn0} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -213,6 +306,11 @@ class FmhaFwdApiTrait:
 
     @property
     def dcheck(self) -> str:
+        if self.pipeline_tag in TDM_PIPELINES:
+            vec = int((32 * 4) / DTYPE_BITS[self.dtype])
+            if self.dpad == "t":
+                return f"a.hdim_q % {vec} == 0"
+            return f"a.hdim_q == {self.bk0max}"
         if self.pipeline_tag == "qr_async":
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dpad == "t":
@@ -230,6 +328,11 @@ class FmhaFwdApiTrait:
 
     @property
     def dvcheck(self) -> str:
+        if self.pipeline_tag in TDM_PIPELINES:
+            vec = int((32 * 4) / DTYPE_BITS[self.dtype])
+            if self.dvpad == "t":
+                return f"a.hdim_v % {vec} == 0"
+            return f"a.hdim_v == {self.bn1}"
         if self.pipeline_tag == "qr_async":
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dvpad == "t":
@@ -263,6 +366,8 @@ class FmhaFwdPipeline:
     F_mask: str  # value from MASK_MAP
     F_skip: str  # true/false
     F_sink: str  # true/false
+    F_kv_gather: str = "f"  # TDM pipelines: K/V rows read with TDM gathers
+    F_constraint: CppConstraint = None
 
     @property
     def name(self) -> str:
@@ -331,6 +436,8 @@ class FmhaFwdPipeline:
             n += "_sink"
         else:
             n += "_nsink"
+        if self.F_kv_gather == "t":
+            n += "_gather"
 
         return n
 
@@ -366,6 +473,7 @@ class FmhaFwdApiPool:
                             F_mode=MODE_MAP[trait.mode],
                             F_vlayout=LAYOUT_MAP[trait.vlayout],
                             F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
+                            F_pipeline_tag=trait.pipeline_tag,
                             F_logits=BOOL_MAP[trait.logits],
                             F_mask=get_mask_map(self.mask_impl)[trait.mask],
                             F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
@@ -380,6 +488,11 @@ class FmhaFwdApiPool:
                             F_skcheck=trait.skcheck,
                             F_dcheck=trait.dcheck,
                             F_dvcheck=trait.dvcheck,
+                            F_page_check=trait.page_check,
+                            F_constraint=trait.constraint_check,
+                            F_kv_gather_trait=", true"
+                            if trait.kv_gather == "t"
+                            else "",
                             F_spad=BOOL_MAP[trait.spad],
                             F_skpad=BOOL_MAP[trait.skpad],
                             F_dpad=BOOL_MAP[trait.dpad],
@@ -435,6 +548,7 @@ class FmhaFwdTileSize:
     F_wn1: int  # gemm1 warp size along n
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
+    F_constraint: CppConstraint = None
 
     @property
     def name(self) -> str:
@@ -499,6 +613,53 @@ class FmhaFwdKernel:
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
             F_pipeline=FMHA_FWD_PAGEDKV_PIPELINE_MAP[self.F_pipeline.tag],
+            F_trait_and_problem=self._trait_and_problem(),
+            F_epilogue=self._epilogue_decl(),
+            F_kv_gather_trait=", true" if self.F_pipeline.F_kv_gather == "t" else "",
+        )
+
+    def _trait_and_problem(self) -> str:
+        tdm = self.F_pipeline.tag in TDM_PIPELINES
+        template = (
+            FMHA_FWD_TDM_TRAIT_AND_PROBLEM if tdm else FMHA_FWD_LEGACY_TRAIT_AND_PROBLEM
+        )
+        return template.format(
+            F_idx=self.F_idx,
+            F_spad=BOOL_MAP[self.F_pipeline.F_spad],
+            F_skpad=BOOL_MAP[self.F_pipeline.F_skpad],
+            F_dpad=BOOL_MAP[self.F_pipeline.F_dpad],
+            F_dvpad=BOOL_MAP[self.F_pipeline.F_dvpad],
+            F_logits=BOOL_MAP[self.F_pipeline.F_logits],
+            F_bias=BIAS_MAP[self.F_pipeline.F_bias],
+            F_lse=BOOL_MAP[self.F_pipeline.F_lse],
+            F_pagedkv=BOOL_MAP[self.F_pipeline.F_pagedkv],
+            F_squant=BOOL_MAP[self.F_pipeline.F_squant],
+            F_occupancy=self.F_tile.F_occupancy,
+            F_skip=BOOL_MAP[self.F_pipeline.F_skip],
+            F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
+            F_mode=MODE_MAP[self.F_mode],
+            F_kv_gather=BOOL_MAP[self.F_pipeline.F_kv_gather],
+            F_problem_extra=TDM_PROBLEM_EXTRA_MAP.get(self.F_pipeline.tag, ""),
+        )
+
+    def _epilogue_decl(self) -> str:
+        spad = BOOL_MAP[self.F_pipeline.F_spad]
+        dvpad = BOOL_MAP[self.F_pipeline.F_dvpad]
+        acc = f"typename FmhaFwdTypeConfig<{FWD_DTYPE_MAP[self.F_dtype]}>::OaccDataType"
+        out = f"typename FmhaFwdTypeConfig<{FWD_DTYPE_MAP[self.F_dtype]}>::ODataType"
+        if self.F_pipeline.tag == "qr_tdm_pingpong":
+            # As in fmha_fwd: O is stored through the pipeline's LDS (coalesced rows).
+            return (
+                f"using fmha_epilogue_{self.F_idx} = ck_tile::LdsShuffle2DEpilogue<\n"
+                f"    ck_tile::LdsShuffle2DEpilogueProblem<{acc}, {out}, fmha_shape_{self.F_idx}::NumWarps,\n"
+                f"        {self.F_tile.F_bm0}, {self.F_tile.F_bn1}, {spad}, {dvpad}>>;"
+            )
+        return (
+            f"using fmha_epilogue_{self.F_idx} =\n"
+            f"    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<{acc},\n"
+            f"                                           {out},\n"
+            f"                                           {spad}, {dvpad}>>;"
         )
 
     @property
@@ -542,10 +703,25 @@ class FmhaFwdKernel:
             skip=self.F_pipeline.F_skip,
             sink=self.F_pipeline.F_sink,
             occupancy=int(self.F_tile.F_occupancy),
+            kv_gather=self.F_pipeline.F_kv_gather,
+            constraint=_combine(self.F_tile.F_constraint, self.F_pipeline.F_constraint),
+            kv_warp_rows=self.F_tile.F_bn0 // (self.F_tile.F_rm0 * self.F_tile.F_rn0),
         )
 
 
+def _combine(a: Optional[CppConstraint], b: Optional[CppConstraint]):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a & b
+
+
 class KernelComponentFactoryBase:
+    @staticmethod
+    def is_tile_supported(tile, pipeline) -> bool:
+        return True
+
     @staticmethod
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdPipeline]:
         # this function will populate a list possible pipelines
@@ -645,20 +821,121 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
         else:
             return None
 
+
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
 
-    @staticmethod
-    def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+    # fp16/bf16 run the TDM pipelines of fmha_fwd on its tiles: qr_tdm_pingpong on its
+    # grids, then qr_tdm_sched for max_seqlen_q >= 128, then qr_tdm (as in fmha_fwd and
+    # batch_prefill), then qr_pagedkv. Each TDM tile comes as a page view instance (each
+    # warp's K/V rows from one page) and a TDM gather instance (any page size).
+    #                            bm0, bn0, bk0, bn1, bk1, bk0max
+    _QR_TDM_TILES = {
+        32  : FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+        64  : FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+        96  : FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+        128 : FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+        160 : FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+        192 : FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+        256 : FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+    }  # fmt: skip
+
+    # fmha_fwd's qr_tdm_sched tiles; occupancy must match the sched policy tuning.
+    _QR_TDM_SCHED_TILES = {
+        64  : FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  3),
+        128 : FmhaFwdTileSize(128, 128,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1),
+        192 : FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  2),
+    }  # fmt: skip
+
+    # fmha_fwd's qr_tdm_pingpong tiles and grid rule (GFX125_QR_TDM_PINGPONG_RANGE).
+    _QR_TDM_PINGPONG_TILES = {
+        128 : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q <= 16", GFX125_QR_TDM_PINGPONG_RANGE)),
+               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(select_expr=GFX125_QR_TDM_PINGPONG_RANGE))],
+    }  # fmt: skip
+
+    _QR_PAGEDKV_TILES = {
+        #                      bm0, bn0, bk0, bn1, bk1,
+        128: FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
+    }  # fmt: skip
+
+    @classmethod
+    def is_tile_supported(cls, tile, pipeline) -> bool:
+        # Pair by identity: the tiles of different pipelines may share a geometry.
+        if any(tile is t for t in cls._QR_TDM_SCHED_TILES.values()):
+            return pipeline.tag == "qr_tdm_sched"
+        if any(
+            tile is t for tiles in cls._QR_TDM_PINGPONG_TILES.values() for t in tiles
+        ):
+            return pipeline.tag == "qr_tdm_pingpong"
+        if any(tile is t for t in cls._QR_TDM_TILES.values()):
+            return pipeline.tag == "qr_tdm"
+        return pipeline.tag == "qr_pagedkv"
+
+    @classmethod
+    def get_pipelines(cls, dtype, hdim, mask_impl) -> List[FmhaFwdPipeline]:
+        pipelines = []
+        if dtype in ["fp16", "bf16"]:
+            # page view before gather, so a page size the page view takes runs it
+            for kv_gather in ["f", "t"]:
+                if hdim in cls._QR_TDM_PINGPONG_TILES:
+                    for head_pad, mask, bias, lse, sink in itertools.product(
+                        ["f", "t"],
+                        get_mask_map(mask_impl).keys(),
+                        BIAS_MAP.keys(),
+                        ["t", "f"],
+                        ["t", "f"],
+                    ):
+                        if sink == "t" and mask in ("no", "s_no"):
+                            continue
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", head_pad, head_pad, "f", bias, lse, "t", "f", mask, "f", sink, kv_gather))  # fmt: skip
+                if hdim in cls._QR_TDM_SCHED_TILES:
+                    head_pad = "f" if hdim == 64 else "t"
+                    sched_seqlen_q = "a.max_seqlen_q >= 128"
+                    if hdim in cls._QR_TDM_PINGPONG_TILES:
+                        sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
+                    for mask, lse in itertools.product(
+                        get_mask_map(mask_impl).keys(), ["t", "f"]
+                    ):
+                        pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "t", "f", mask, "f", "f", kv_gather, CppConstraint(select_expr=sched_seqlen_q)))  # fmt: skip
+                if hdim in cls._QR_TDM_TILES:
+                    for mask, bias, lse, sink in itertools.product(
+                        get_mask_map(mask_impl).keys(),
+                        BIAS_MAP.keys(),
+                        ["t", "f"],
+                        ["t", "f"],
+                    ):
+                        if sink == "t" and mask in ("no", "s_no"):
+                            continue
+                        pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", bias, lse, "t", "f", mask, "f", sink, kv_gather))  # fmt: skip
+        # logits soft cap on the TDM pipelines, without a bias
+        pipelines += [
+            replace(p, F_logits="t")
+            for p in pipelines
+            if p.tag in ("qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong")
+            and p.F_bias == "no"
+        ]
+        return pipelines + KernelComponentFactoryBase.get_pipelines(
+            dtype, hdim, mask_impl
+        )
+
+    @classmethod
+    def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
             return {
-                #                      bm0, bn0, bk0, bn1, bk1,
-              # "32":  FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 32,  -1),
-              # "64":  FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 32,  -1),
-                "128": FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-              # "192": FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 32,  -1),
-              # "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 32,  -1),
-            }  # fmt: skip
+                str(hdim): cls._QR_TDM_PINGPONG_TILES.get(hdim, [])
+                + (
+                    [cls._QR_TDM_SCHED_TILES[hdim]]
+                    if hdim in cls._QR_TDM_SCHED_TILES
+                    else []
+                )
+                + [tdm_tile]
+                + (
+                    [cls._QR_PAGEDKV_TILES[hdim]]
+                    if hdim in cls._QR_PAGEDKV_TILES
+                    else []
+                )
+                for hdim, tdm_tile in cls._QR_TDM_TILES.items()
+            }
         elif dtype in ["fp8", "bf8"]:
             return {
                 #                      bm0, bn0, bk0, bn1, bk1,
@@ -668,6 +945,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             }  # fmt: skip
         else:
             return None
+
 
 def get_factory(target: str):
     # Place more specific architectures first
@@ -697,9 +975,13 @@ def get_fwd_blobs(
         if d is None:
             continue
         for hdim_str, mode in itertools.product(d.keys(), MODE_MAP.keys()):
-            tile = d[hdim_str]
+            tiles = d[hdim_str] if isinstance(d[hdim_str], list) else [d[hdim_str]]
             hdim = int(hdim_str)
-            for pipeline in factory.get_pipelines(dtype, hdim, mask_impl):
+            for tile, pipeline in itertools.product(
+                tiles, factory.get_pipelines(dtype, hdim, mask_impl)
+            ):
+                if not factory.is_tile_supported(tile, pipeline):
+                    continue
                 # if pipeline.F_pagedkv == "f":
                 #     continue
                 if mode == "group":
@@ -726,8 +1008,11 @@ def get_fwd_blobs(
                     F_pipeline=pipeline,
                     mask_impl=mask_impl,
                 )
+                # "+" separates alternative patterns
                 if kernel_filter != "":
-                    if not fnmatch.fnmatch(k.name, kernel_filter):
+                    if not any(
+                        fnmatch.fnmatch(k.name, f) for f in kernel_filter.split("+")
+                    ):
                         continue
                 if optdim_list != [-1]:
                     if hdim not in optdim_list:

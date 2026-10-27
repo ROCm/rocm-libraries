@@ -452,7 +452,7 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
         using KDataType = remove_cvref_t<typename Problem::KDataType>;
         if constexpr(AsyncCopy)
         {
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__)
             constexpr index_t MaxLoadSizeInBytes = 4 * 4; // dwordx4
 #else
             constexpr index_t MaxLoadSizeInBytes = 4; // dword

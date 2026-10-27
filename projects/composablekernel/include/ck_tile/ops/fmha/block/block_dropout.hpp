@@ -247,6 +247,142 @@ struct BlockDropout
         return make_static_tile_distribution(randval_block_part_dstr_encode);
     }
 
+    // LDS of RunWholeTile: the random values of a whole kM x kN block tile, laid out as
+    // MakeRandValLdsBlockDescriptor's step.
+    template <typename BlockGemm>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeRandValLdsTileDescriptor()
+    {
+        constexpr auto config =
+            BlockGemm::Policy::template GetWarpGemmMWarpNWarp<typename BlockGemm::Problem>();
+        using WG                       = remove_cvref_t<decltype(config.template at<0>())>;
+        constexpr bool IsWG32          = WG::kM == 32;
+        constexpr index_t MWarp        = config.template at<1>();
+        using BlockGemmShape           = remove_cvref_t<typename BlockGemm::BlockGemmShape>;
+        constexpr index_t kMPerBlock   = BlockGemmShape::kM;
+        constexpr index_t kNPerBlock   = BlockGemmShape::kN;
+        constexpr index_t MIterPerWarp = (!IsWG32 && kMPerBlock > MWarp * WG::kM) ? 2 : 1;
+        constexpr index_t kMPerStep    = MIterPerWarp * MWarp * WG::kM;
+        constexpr index_t kN1          = 8;
+        constexpr index_t kN0          = kNPerBlock / kN1;
+
+        constexpr auto desc_0 = make_naive_tensor_descriptor(
+            ck_tile::make_tuple(number<kN0>{}, number<kMPerStep>{}, number<kN1>{}),
+            ck_tile::make_tuple(number<(kMPerStep + 1) * kN1>{}, number<kN1>{}, number<1>{}),
+            number<kN1>{},
+            number<1>{});
+
+        return transform_tensor_descriptor(
+            desc_0,
+            ck_tile::make_tuple(
+                make_pass_through_transform(number<kMPerStep>{}),
+                make_merge_transform(ck_tile::make_tuple(number<kN0>{}, number<kN1>{}))),
+            ck_tile::make_tuple(sequence<1>{}, sequence<0, 2>{}),
+            ck_tile::make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    // Run with one LDS round trip per block tile instead of one per kM x kNPerStep step:
+    // every step's random values go to LDS, then one barrier, and the whole tile is read
+    // back in P's own distribution (which need not be BlockGemm's C distribution); one more
+    // barrier before the next tile writes. Same random values as Run; wave32 16x16 warp
+    // gemms with the whole kM in one step.
+    template <typename BlockGemm,
+              typename PComputeDataType,
+              typename RandValOutputDataType,
+              typename PComputeTensor,
+              typename RandValDramWindow>
+    CK_TILE_DEVICE void RunWholeTile(void* randval_ptr,
+                                     const index_t start_n0_idx,
+                                     PComputeTensor& p_compute,
+                                     RandValDramWindow& randval_dram_window) const
+    {
+        constexpr auto config =
+            BlockGemm::Policy::template GetWarpGemmMWarpNWarp<typename BlockGemm::Problem>();
+        using WG                       = remove_cvref_t<decltype(config.template at<0>())>;
+        constexpr index_t MWarp        = config.template at<1>();
+        constexpr index_t NWarp        = config.template at<2>();
+        using BlockGemmShape           = remove_cvref_t<typename BlockGemm::BlockGemmShape>;
+        constexpr index_t kMPerBlock   = BlockGemmShape::kM;
+        constexpr index_t kNPerBlock   = BlockGemmShape::kN;
+        constexpr index_t MIterPerWarp = kMPerBlock > MWarp * WG::kM ? 2 : 1;
+        constexpr index_t kMPerStep    = MIterPerWarp * MWarp * WG::kM;
+        constexpr index_t kNPerStep    = NWarp * WG::kN;
+        static_assert(WG::kM == 16 && WG::kN == 16 && get_warp_size() == 32 &&
+                          kMPerStep == kMPerBlock,
+                      "RunWholeTile takes wave32 16x16 warp gemms and one step along M");
+
+        auto randval_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<uint8_t*>(randval_ptr), MakeRandValLdsTileDescriptor<BlockGemm>());
+
+        const index_t start_m0_idx = randval_dram_window.get_window_origin().at(number<0>{});
+        const index_t iMWarp       = get_warp_id() / NWarp;
+        const index_t iNWarp       = get_warp_id() % NWarp;
+
+        // As Run's wave32 16x16 generation
+        static_for<0, kNPerBlock / kNPerStep, 1>{}([&](auto i_n0) {
+            auto randval_dist_generated =
+                make_static_distributed_tensor<uint8_t>(MakeRandValTileDistribution<BlockGemm>());
+            uint8_t random_uint8_t[randval_dist_generated.kThreadElementSpaceSize];
+            const index_t wg_m0 = (start_m0_idx / WG::kM) + iMWarp * MIterPerWarp;
+            const index_t wg_n0 = (start_n0_idx / WG::kN) + (i_n0 * NWarp + iNWarp);
+            const unsigned long long ph_subsequence =
+                bit_cast<unsigned long long>(make_uint2(wg_m0 / 2, wg_n0 / 2));
+            const index_t subtile_m0 = wg_m0 % 2;
+            const index_t ph_offset =
+                (get_lane_id() & 15) + (((get_lane_id() >> 4) & 1) << 5) + ((wg_n0 % 2) << 4);
+            const ck_tile::philox ph(ph_seed, ph_head_offset + ph_offset);
+            if constexpr(MIterPerWarp == 1)
+            {
+                static_assert(randval_dist_generated.kThreadElementSpaceSize == 8);
+                ph.get_random_8x8(
+                    random_uint8_t, ph_subsequence, subtile_m0 * 2 + 0, subtile_m0 * 2 + 1);
+            }
+            else
+            {
+                static_assert(randval_dist_generated.kThreadElementSpaceSize == 16);
+                ph.get_random_16x8(random_uint8_t, ph_subsequence);
+            }
+
+            constexpr auto spans = decltype(randval_dist_generated)::get_distributed_spans();
+            int i_random_idx     = 0;
+            sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                    randval_dist_generated(ck_tile::make_tuple(idx0, idx1)) =
+                        random_uint8_t[i_random_idx++];
+                });
+            });
+            auto step_window =
+                make_tile_window(randval_lds,
+                                 make_tuple(number<kMPerStep>{}, number<kNPerStep>{}),
+                                 {0, i_n0 * kNPerStep});
+            store_tile(step_window, randval_dist_generated);
+        });
+        block_sync_lds();
+
+        const auto randval =
+            load_tile(make_tile_window(randval_lds,
+                                       make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                       {0, 0},
+                                       p_compute.get_tile_distribution()));
+        if(is_store_randval)
+        {
+            auto randval_tile_window =
+                make_tile_window(randval_dram_window.get_bottom_tensor_view(),
+                                 make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}),
+                                 randval_dram_window.get_window_origin());
+            store_tile(randval_tile_window, cast_tile<RandValOutputDataType>(randval));
+        }
+        constexpr auto p_spans = PComputeTensor::get_distributed_spans();
+        sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
+            sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
+                constexpr auto i_j_idx = ck_tile::make_tuple(idx0, idx1);
+                p_compute(i_j_idx)     = randval[i_j_idx] <= p_undrop_in_uint8_t
+                                             ? p_compute[i_j_idx] * rp_undrop
+                                             : PComputeDataType(0);
+            });
+        });
+        block_sync_lds();
+    }
+
     template <typename BlockGemm,
               typename PComputeDataType,
               typename RandValOutputDataType,
@@ -689,6 +825,19 @@ struct BlockDropoutBwd<true, IsWG32_, IsStoreRandval_>
     const unsigned long long ph_head_offset;
     const float rp_undrop;
     const uint8_t p_undrop_in_uint8_t;
+};
+
+// Dropout of P for the gfx1250 TDM pipelines: the BlockDropout of the block, and its randval
+// window (kM0 x kN0 at the block's first query row; each K tile's step is cut from it).
+struct BlockFmhaTdmNoDropout
+{
+};
+
+template <typename Dropout, typename RandValWindow>
+struct BlockFmhaTdmDropout
+{
+    Dropout dropout;
+    RandValWindow randval_window;
 };
 
 } // namespace ck_tile

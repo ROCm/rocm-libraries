@@ -107,6 +107,41 @@ auto create_args(int argc, char* argv[])
                 "1",
                 "# of splits for key/value. 0 to determine actual number by heuristic")
         .insert("page_block_size", "0", "paged-kvcache block size. 0 means not use paged-kvcahe")
+        .insert("kv_layout",
+                "auto",
+                "paged KV cache layout (P pages, S = page_block_size, H = nhead_k, D = hdim, "
+                "x = 16 bytes of elements): nhd: K/V [P, S, H, D]; hnd: K/V [P, H, S, D]; "
+                "vec: K [P, H, D/x, S, x], V [P, H, S/x, D, x] (batch_prefill); "
+                "auto: nhd with -iperm=0, hnd with -iperm=1")
+        .insert("kv_lookup",
+                "block_table",
+                "paged KV page table: block_table: int32 [batch, max_pages_per_seq]; indptr: "
+                "int32 kv_indptr [batch + 1], kv_page_indices, kv_last_page_lens [batch] "
+                "(batch_prefill)")
+        .insert("api",
+                "auto",
+                "attention API to run: auto (batch_prefill, pagedkv, splitkv, then fwd, as the "
+                "args allow), fwd, splitkv, pagedkv or batch_prefill; no fallback when named")
+        .insert("pipeline",
+                "",
+                "within the API (-api picks the entry point), run only this pipeline, by the "
+                "tag in the kernel name (e.g. qr, qr_async, qr_tdm, qr_tdm_sched, "
+                "qr_tdm_pingpong), skipping the dispatch heuristics that choose between "
+                "pipelines; the same tag can exist in several APIs. Not needed for an API with "
+                "one pipeline. Empty: let the dispatch choose")
+        .insert("min_seqlen_q",
+                "0",
+                "group mode, fwd/pagedkv: skip the sequences of at most this many query rows "
+                "(their O and LSE are left unwritten); 0: off")
+        .insert("kv_pad",
+                "0",
+                "-api=batch_prefill/pagedkv, nhd/hnd: K/V rows of hdim + kv_pad elements and pages "
+                "kv_pad "
+                "elements longer (strides that are not the packed sizes); 0: packed")
+        .insert("kv_gappy",
+                "0",
+                "-api=pagedkv, group mode: each sequence starts some rows into its first page "
+                "(fmha_fwd_pagedkv_args::is_gappy)")
         .insert("cache_batch_idx", "0", "whether to use index map to the kvcache")
         .insert("warmup", "5", "number of iterations before benchmark the kernel")
         .insert("repeat", "20", "number of iterations to benchmark the kernel")
@@ -216,7 +251,15 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         init_sink_value,
                                         pack_gqa,
                                         stream_config,
-                                        json);
+                                        json,
+                                        nullptr,
+                                        arg_parser.get_str("kv_layout"),
+                                        arg_parser.get_str("kv_lookup"),
+                                        arg_parser.get_str("api"),
+                                        arg_parser.get_str("pipeline"),
+                                        arg_parser.get_int("min_seqlen_q"),
+                                        arg_parser.get_bool("kv_gappy"),
+                                        arg_parser.get_int("kv_pad"));
 }
 
 int main(int argc, char* argv[])

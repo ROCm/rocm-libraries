@@ -6,6 +6,8 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
+#include "ck_tile/ops/fmha/block/block_fmha_kv_rows.hpp"
 #include "ck_tile/ops/fmha/block/cast_tile_mx.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
@@ -86,10 +88,12 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
     static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
-    static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
+    // Paged K/V (batch_prefill) with one K and one V descale per page.
+    static constexpr bool kKVBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE;
+    static constexpr bool kQuantized    = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                                       kBlockScale;
-    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale;
+                                       kBlockScale || kKVBlockScale;
+    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale && !kKVBlockScale;
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
@@ -265,6 +269,35 @@ struct BlockFmhaPipelineQRKSVSTdm
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
 
+    // KV_BLOCKSCALE descales of the page holding a K/V tile. The V descale is any float, but
+    // the scaled MMA only takes its power of two; the fp32 o_acc rescale applies the mantissa
+    // in [1, 2). (Folding it into P before P is quantized biases O by ~1%.) A zero descale
+    // keeps mantissa 1 and scale 2^-127.
+    struct PageDescale
+    {
+        float k;
+        float v_mantissa;
+        int32_t v_exponent; // E8M0 in all four bytes
+    };
+
+    template <typename KVRows>
+    CK_TILE_DEVICE static PageDescale LoadPageDescale(const KVRows& kv_rows,
+                                                      const float* k_descale_ptr,
+                                                      const float* v_descale_ptr,
+                                                      index_t page_descale_stride,
+                                                      index_t kv_tile_start)
+    {
+        static_assert(KVRows::kIsPaged && KVRows::kPageSize_ % kN0 == 0,
+                      "qr_tdm pipeline: KV_BLOCKSCALE needs every K/V tile within one page");
+        const index_t i = kv_rows.physical_page(kv_tile_start) * page_descale_stride;
+        const float k   = cast_pointer_to_constant_address_space(k_descale_ptr)[i];
+        const uint32_t v_bits =
+            bit_cast<uint32_t>(cast_pointer_to_constant_address_space(v_descale_ptr)[i]);
+        const float v_mantissa    = bit_cast<float>((v_bits & 0x007fffffu) | 0x3f800000u);
+        const uint32_t v_exponent = ((v_bits >> 23) & 0xffu) * 0x01010101u;
+        return {k, v_mantissa, pin_to_vgpr(static_cast<int32_t>(v_exponent))};
+    }
+
     template <typename Gemm1>
     CK_TILE_DEVICE static auto make_gemm1_scale([[maybe_unused]] int32_t scale)
     {
@@ -283,19 +316,16 @@ struct BlockFmhaPipelineQRKSVSTdm
                   "qr_tdm pipeline: FAST_EXP2=0 has no code path here - log2(e) is never folded "
                   "into scale_s, so the kernel would return 2^logit instead of e^logit");
 
-    static_assert(!kHasLogitsSoftCap,
-                  "qr_tdm pipeline does not implement logits soft cap - LogitsTransform is never "
-                  "applied, so scores would reach softmax uncapped and unscaled");
-
-    // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
-    // Dropout requires kernel dispatch interface expansion (dropout object +
-    // randval window) and is deferred to a follow-up task.
-    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
+    // A logits soft cap comes without a bias, and through the position-encoding argument: a
+    // LogitsSoftCapTransform, applied to the scores after gemm0 (STAGE 2).
+    static_assert(!kHasLogitsSoftCap || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
+                  "qr_tdm pipeline: a logits soft cap comes without a bias");
 
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
+                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE ||
+                      QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
     static_assert(!kBlockScale || kHwGemm1Scale,
@@ -416,6 +446,103 @@ struct BlockFmhaPipelineQRKSVSTdm
         __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
     }
 
+    // K/V TDM tile loads. Gather-mode paged K/V issue kTdmInsts TDM gathers per wave instead.
+    template <bool kIsK, typename LdsWindow, typename DramWindow, typename KVRows>
+    CK_TILE_DEVICE static void LoadKVTile(const TDMConfig& config,
+                                          LdsWindow& lds_window,
+                                          const DramWindow& dram_window,
+                                          const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsVectorized)
+            kv_rows.template load_vectorized<kIsK>(config, lds_window, dram_window);
+        else if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
+        else
+        {
+            ignore = kv_rows;
+            load_tile_tdm(config, lds_window, dram_window);
+        }
+    }
+
+    template <bool kIsK,
+              bool AllowDenseFullBox = false,
+              typename LdsWindow,
+              typename DramWindow,
+              typename KVRows>
+    CK_TILE_DEVICE static void LoadKVTileFullOrPadded(const TDMConfig& config,
+                                                      LdsWindow& lds_window,
+                                                      const DramWindow& dram_window,
+                                                      const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsVectorized)
+            kv_rows.template load_vectorized<kIsK>(config, lds_window, dram_window);
+        else if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
+        else
+        {
+            ignore = kv_rows;
+            LoadTdmFullTileOrPadded<AllowDenseFullBox>(config, lds_window, dram_window);
+        }
+    }
+
+    // V tile reads. V is row-major in LDS and read with transposed loads, except from a
+    // vectorized KV cache, which leaves V as [kN0/v][kN1][v] (see
+    // BlockFmhaPagedKVRows::load_vectorized): plain loads then read, in (hdim_v, seq)
+    // coordinates, the layout the transposed loads produce. The read windows are built
+    // and moved in place: helper functions around them changed the dense kernels' code.
+    template <typename KVRows>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadDescriptor()
+    {
+        if constexpr(KVRows::kIsVectorized)
+            return Policy::template MakeVLdsVectorizedDescriptor<Problem>();
+        else
+            return Policy::template MakeVLdsBlockDescriptor<Problem>();
+    }
+
+    template <typename KVRows, typename Window>
+    CK_TILE_DEVICE static auto LoadVTile(const Window& window)
+    {
+        if constexpr(KVRows::kIsVectorized)
+            return load_tile(window);
+        else
+            return load_tile_transpose(window);
+    }
+
+    template <typename KVRows>
+    using VLdsReadLengths = std::conditional_t<KVRows::kIsVectorized,
+                                               tuple<number<kN1>, number<kK1>>,
+                                               tuple<number<kK1>, number<kN1>>>;
+
+    using VRegTileDistribution =
+        remove_cvref_t<decltype(Policy::template MakeVRegTileDistribution<Problem>())>;
+
+    template <typename KVRows>
+    using VLdsReadDistribution = std::conditional_t<
+        KVRows::kIsVectorized,
+        remove_cvref_t<decltype(make_static_tile_distribution(
+            typename OutputTileDistributionTraits<typename VRegTileDistribution::DstrEncode,
+                                                  VDataType>::TransposedDstrEncode{}))>,
+        VRegTileDistribution>;
+
+    // Advance a K/V DRAM window by `delta` sequence rows. Paged K/V re-map the new
+    // sequence position through the page table instead of moving linearly.
+    template <bool kIsK, typename KVRows, typename DramWindow>
+    CK_TILE_DEVICE static void
+    MoveKVRows(DramWindow& window, index_t& row, index_t delta, const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsPaged)
+        {
+            row += delta;
+            kv_rows.template move_to<kIsK>(window, row);
+        }
+        else
+        {
+            ignore = row;
+            ignore = kv_rows;
+            move_tile_window(window, {delta, 0});
+        }
+    }
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
@@ -527,7 +654,9 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename KVRows      = BlockFmhaDenseKVRows,
+              typename DropoutArgs = BlockFmhaTdmNoDropout>
     CK_TILE_HOST_DEVICE auto run_single_v_double_k_lds_buffer(
         const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
@@ -542,7 +671,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        float v_descale) const
+        float v_descale,
+        const KVRows& kv_rows           = {},
+        const DropoutArgs& dropout_args = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -600,6 +731,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto l_quant = MLBlockTileType{};
         if constexpr(kQuantized)
             clear_tile(l_quant);
+        // KV_BLOCKSCALE: o_acc is kept in units of the V mantissa of the last tile.
+        [[maybe_unused]] float o_acc_v_mantissa = 1.f;
 
         clear_tile(o_acc);
         // kDeferSink folds to false at compile time for every non-deferred instance; the
@@ -753,10 +886,13 @@ struct BlockFmhaPipelineQRKSVSTdm
         // K is staged a whole (kN0 x kSubQKHeaddim) tile at a time, into two
         // ping-pong buffers: the tile consumed this iteration and the next
         // iteration's tile, prefetched one iteration ahead.
+        index_t k_row = kv_load_start; // K/V sequence position of the DRAM windows
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem, true>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<true>(k_dram_window, kv_load_start);
 
         // K LDS writer (TDM) and reader share plain row-major desc; see Q
         // comment above for the no-swizzle rationale.
@@ -792,10 +928,13 @@ struct BlockFmhaPipelineQRKSVSTdm
         // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
         // with V's DRAM dist switched to trivial tile-major and the V LDS read
         // view kept plain row-major (matches the write view).
+        index_t v_row = kv_load_start;
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<false>(v_dram_window, kv_load_start);
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(smem_ptrv),
@@ -808,18 +947,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         // operand expected pattern. Verified end-to-end on ABC + multi-stride
         // GQA + d-sweep (d <= 128).
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<VDataType*>(smem_ptrv),
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
+            reinterpret_cast<VDataType*>(smem_ptrv), MakeVLdsReadDescriptor<KVRows>());
         auto v_lds_write_window =
             make_tile_window(v_lds_write_view,
                              Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(),
                              {0, 0});
 
-        auto v_lds_read_window =
-            make_tile_window(v_lds_read_view,
-                             make_tuple(number<kK1>{}, number<kN1>{}),
-                             {0, 0},
-                             Policy::template MakeVRegTileDistribution<Problem>());
+        auto v_lds_read_window = make_tile_window(
+            v_lds_read_view, VLdsReadLengths<KVRows>{}, {0, 0}, VLdsReadDistribution<KVRows>{});
 
         s_wait_tensorcnt_barrier<0>();
         auto q_tile = load_tile(q_lds_read_window);
@@ -834,6 +969,11 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
+        // TDM instructions per K/V tile load and wave: the tensorcnt waits below count these.
+        constexpr index_t kKTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(k_dram_window)>>;
+        constexpr index_t kVTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(v_dram_window)>>;
 
         // K ping-pong: each buffer holds a whole (kN0 x kSubQKHeaddim) K tile.
         // Iteration i consumes buffer (i % 2) while the next tile streams into
@@ -862,8 +1002,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         // *next* tile. k_lds_write_window is still bound to buffer 0, so
         // iteration 0 consumes buffer 0 and therefore runs at parity 0.
         block_sync_lds();
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-        move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
+        LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
+        MoveKVRows<true>(k_dram_window, k_row, num_total_loop > 1 ? kN0 : 0, kv_rows);
 
         // One KV-tile iteration. i_parity is the compile-time LDS buffer
         // parity: the iteration consumes buffer i_parity and prefetches the
@@ -881,7 +1021,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     ? kv_load_start + i_total_loops * kN0
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
-            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
+            [[maybe_unused]] const index_t kv_last   = mask.GetXTotal() - 1;
+            [[maybe_unused]] const auto page_descale = [&] {
+                if constexpr(kKVBlockScale)
+                    return LoadPageDescale(
+                        kv_rows, k_descale_ptr, v_descale_ptr, block_scale_size_kv, kv_tile_start);
+                else
+                    return 0;
+            }();
 
             // This barrier covers both reuses below: V is single-buffered (the
             // previous iteration's gemm1 must be done reading it) and buffer
@@ -889,13 +1036,15 @@ struct BlockFmhaPipelineQRKSVSTdm
             block_sync_lds();
 
             // Issue order is [K(cur) (issued one iteration ago), V, K(next)] and
-            // TDM retires in order, hence the waits below:
-            //   wait<2> -> K(cur) landed, V and K(next) still in flight
-            //   wait<1> -> V landed, K(next) still in flight
-            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
+            // TDM retires in order, hence the waits below (each load is kKTdmInsts /
+            // kVTdmInsts TDM instructions):
+            //   wait<kK + kV> -> K(cur) landed, V and K(next) still in flight
+            //   wait<kK>      -> V landed, K(next) still in flight
+            LoadKVTile<false>(
+                tdm_config_v, v_lds_write_window, v_dram_window, kv_rows); // prefetch load v tile
 
             // move V tile windows
-            move_tile_window(v_dram_window, {kN0, 0});
+            MoveKVRows<false>(v_dram_window, v_row, kN0, kv_rows);
 
             // The K load below prefetches the NEXT iteration's tile, so the
             // sink->normal jump has to be applied one iteration earlier than it
@@ -913,17 +1062,19 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<true>(
+                        k_dram_window, k_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                 }
             }
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kNextBuf>{}));
-            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+            LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
+            MoveKVRows<true>(
+                k_dram_window, k_row, i_total_loops + 2 < num_total_loop ? kN0 : 0, kv_rows);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
 
-            s_wait_tensorcnt_barrier<2>();
+            s_wait_tensorcnt_barrier<kKTdmInsts + kVTdmInsts>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kCurBuf>{}));
             if constexpr(Problem::kProgressiveDsLoadK)
             {
@@ -1006,6 +1157,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                     });
                 });
             }
+            else if constexpr(kKVBlockScale)
+            {
+                tile_elementwise_inout([&](auto& x) { x *= page_descale.k; }, s_acc);
+            }
 
             // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -1039,6 +1194,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                         position_encoding.update(s_acc(i_j_idx), row, col);
                     });
                 });
+            }
+            else if constexpr(kHasLogitsSoftCap)
+            {
+                tile_elementwise_inout([&](auto& x) { x = position_encoding(x); }, s_acc);
             }
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
@@ -1084,7 +1243,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<false>(
+                        v_dram_window, v_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                     move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
@@ -1169,6 +1329,28 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
+            if constexpr(kHasDropout)
+            {
+                // As qr: drop P after its row sum went into l; the random values of this
+                // K tile's columns are those of the kN0 x kM0 step at kv_tile_start.
+                auto randval_block_window = dropout_args.randval_window;
+                auto randval_window =
+                    dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
+                        randval_block_window, kv_tile_start);
+                // Run's LDS round trip per 16 columns measured a few percent ahead of
+                // RunWholeTile here (qr_tdm_sched and qr_tdm_pingpong take RunWholeTile).
+                dropout_args.dropout
+                    .template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
+                        static_cast<char*>(smem_arena) + Layout::kRandValOffset,
+                        kv_tile_start,
+                        p_compute,
+                        randval_window);
+            }
+            else
+            {
+                ignore = dropout_args;
+            }
+
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
 
@@ -1183,6 +1365,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
 
             // l{j}, Oacc{j}
+            [[maybe_unused]] float o_acc_v_rescale = 1.f;
+            if constexpr(kKVBlockScale)
+            {
+                o_acc_v_rescale  = o_acc_v_mantissa / page_descale.v_mantissa;
+                o_acc_v_mantissa = page_descale.v_mantissa;
+            }
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -1208,19 +1396,20 @@ struct BlockFmhaPipelineQRKSVSTdm
                 l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 if constexpr(kQuantized)
                     l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
+                const auto o_scale = kKVBlockScale ? tmp * o_acc_v_rescale : tmp;
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
-                    o_acc(i_j_idx) *= tmp;
+                    o_acc(i_j_idx) *= o_scale;
                 });
             });
 
             // V is on the tensorcnt counter (load_tile_tdm). Wait for V's TDM
             // write to commit before ds_load_tr reads it; the next iteration's
             // K prefetch is still outstanding, hence <1> rather than <0>.
-            s_wait_tensorcnt_barrier<1>();
+            s_wait_tensorcnt_barrier<kKTdmInsts>();
 
-            auto v_tile = load_tile_transpose(v_lds_read_window);
+            auto v_tile = LoadVTile<KVRows>(v_lds_read_window);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -1229,6 +1418,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     return make_gemm1_scale<decltype(gemm_1)>(pack_v_scale(
                         v_descale_ptr, kv_tile_start + i_k1 * kK1, kv_last, block_scale_size_kv));
+                }
+                else if constexpr(kKVBlockScale)
+                {
+                    ignore = i_k1;
+                    return make_gemm1_scale<decltype(gemm_1)>(page_descale.v_exponent);
                 }
                 else
                 {
@@ -1249,11 +1443,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                            v_scale(i_k1));
 
                     // loop over along the [V]alue Sequence length
-                    move_tile_window(v_lds_read_window, {kK1, 0});
-                    v_tile = load_tile_transpose(v_lds_read_window);
+                    move_tile_window(
+                        v_lds_read_window,
+                        {KVRows::kIsVectorized ? 0 : kK1, KVRows::kIsVectorized ? kK1 : 0});
+                    v_tile = LoadVTile<KVRows>(v_lds_read_window);
                 });
                 // move back to the origin
-                move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+                move_tile_window(v_lds_read_window,
+                                 {KVRows::kIsVectorized ? 0 : -kK1 * (k1_loops - 1),
+                                  KVRows::kIsVectorized ? -kK1 * (k1_loops - 1) : 0});
             }
 
             gemm_1(o_acc,
@@ -1334,6 +1532,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 tmp *= v_descale;
             }
+            else if constexpr(kKVBlockScale)
+            {
+                tmp *= o_acc_v_mantissa;
+            }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
                 o_acc(i_j_idx) *= tmp;
@@ -1349,7 +1551,9 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename KVRows      = BlockFmhaDenseKVRows,
+              typename DropoutArgs = BlockFmhaTdmNoDropout>
     CK_TILE_HOST_DEVICE auto run_double_kv_lds_buffer(
         const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
@@ -1364,7 +1568,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        float v_descale) const
+        float v_descale,
+        const KVRows& kv_rows           = {},
+        const DropoutArgs& dropout_args = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -1422,6 +1628,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto l_quant = MLBlockTileType{};
         if constexpr(kQuantized)
             clear_tile(l_quant);
+        // KV_BLOCKSCALE: o_acc is kept in units of the V mantissa of the last tile.
+        [[maybe_unused]] float o_acc_v_mantissa = 1.f;
 
         clear_tile(o_acc);
         // kDeferSink folds to false at compile time for every non-deferred instance; the
@@ -1569,10 +1777,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
 
+        index_t k_row = kv_load_start; // K/V sequence position of the DRAM windows
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem, true>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<true>(k_dram_window, kv_load_start);
 
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
@@ -1607,27 +1818,27 @@ struct BlockFmhaPipelineQRKSVSTdm
                              Policy::template MakeSRegTileDistribution<Problem>());
 
         // V tile in LDS (sink-aware start)
+        index_t v_row = kv_load_start;
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<false>(v_dram_window, kv_load_start);
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             smem_ptrv0, Policy::template MakeVLdsBlockDescriptor<Problem>());
 
-        auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            smem_ptrv0, Policy::template MakeVLdsBlockDescriptor<Problem>());
+        auto v_lds_read_view =
+            make_tensor_view<address_space_enum::lds>(smem_ptrv0, MakeVLdsReadDescriptor<KVRows>());
 
         auto v_lds_write_window =
             make_tile_window(v_lds_write_view,
                              Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(),
                              {0, 0});
 
-        auto v_lds_read_window =
-            make_tile_window(v_lds_read_view,
-                             make_tuple(number<kK1>{}, number<kN1>{}),
-                             {0, 0},
-                             Policy::template MakeVRegTileDistribution<Problem>());
+        auto v_lds_read_window = make_tile_window(
+            v_lds_read_view, VLdsReadLengths<KVRows>{}, {0, 0}, VLdsReadDistribution<KVRows>{});
 
         const index_t num_total_loop =
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
@@ -1639,11 +1850,17 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
+        // TDM instructions per K/V tile load and wave: the tensorcnt waits below count these.
+        constexpr index_t kKTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(k_dram_window)>>;
+        constexpr index_t kVTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(v_dram_window)>>;
         block_sync_lds<0>();
-        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
-        LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
+        LoadKVTileFullOrPadded<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
+        LoadKVTileFullOrPadded<false, true>(
+            tdm_config_v, v_lds_write_window, v_dram_window, kv_rows);
 
-        move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
+        MoveKVRows<true>(k_dram_window, k_row, num_total_loop > 1 ? kN0 : 0, kv_rows);
         // The prologue issues two K prefetches: the first into ptrk0, which
         // k_lds_read_window is bound to and which mainloop() therefore consumes at
         // i_total_loops == 0, and the second into ptrk1, consumed at
@@ -1658,24 +1875,25 @@ struct BlockFmhaPipelineQRKSVSTdm
         {
             if(num_sink_loop == 1 && num_total_loop > 1)
             {
-                move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                MoveKVRows<true>(
+                    k_dram_window, k_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
             }
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadKVTileFullOrPadded<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
 
-        // drain-to-2: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
+        // drain-to-2 loads: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
         // K->ptrk1). Wait for the oldest (K->ptrk0) to land so the load_tile
         // below can read ptrk0, while ptrk1 and V stay in flight. This count is
         // structurally coupled to the prologue's prefetch sequence: it equals
         // (TDM loads issued in prologue) - (loads that must complete before the
         // first LDS read). If the prologue prefetch count changes, update this
         // value or risk a silent data hazard / unnecessary stall.
-        s_wait_tensorcnt_barrier<2>();
+        s_wait_tensorcnt_barrier<kKTdmInsts + kVTdmInsts>();
         auto k_tile = load_tile(k_lds_read_window);
 
         __builtin_amdgcn_sched_barrier(0);
@@ -1694,7 +1912,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     ? kv_load_start + i_total_loops * kN0
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
-            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
+            [[maybe_unused]] const index_t kv_last   = mask.GetXTotal() - 1;
+            [[maybe_unused]] const auto page_descale = [&] {
+                if constexpr(kKVBlockScale)
+                    return LoadPageDescale(
+                        kv_rows, k_descale_ptr, v_descale_ptr, block_scale_size_kv, kv_tile_start);
+                else
+                    return 0;
+            }();
 
             // move V tile windows
             block_sync_lds<k_lds_insts>();
@@ -1706,14 +1931,17 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                 {
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<false>(
+                        v_dram_window, v_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                 }
             }
             // Preserve the TDM counter schedule in the tail, but re-read the last
             // valid tile instead of forming an unused out-of-allocation address.
-            move_tile_window(v_dram_window, {i_total_loops + 1 < num_total_loop ? kN0 : 0, 0});
+            MoveKVRows<false>(
+                v_dram_window, v_row, i_total_loops + 1 < num_total_loop ? kN0 : 0, kv_rows);
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
+            LoadKVTileFullOrPadded<false, true>(
+                tdm_config_v, v_lds_write_window, v_dram_window, kv_rows);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -1896,6 +2124,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                     });
                 });
             }
+            else if constexpr(kKVBlockScale)
+            {
+                tile_elementwise_inout([&](auto& x) { x *= page_descale.k; }, s_acc);
+            }
 
             // STAGE 2: scale_s, add bias (prefill path, mirrors baseline)
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -1929,10 +2161,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     });
                 });
             }
+            else if constexpr(kHasLogitsSoftCap)
+            {
+                tile_elementwise_inout([&](auto& x) { x = position_encoding(x); }, s_acc);
+            }
 
-            s_wait_tensorcnt_barrier<1>();
+            s_wait_tensorcnt_barrier<kVTdmInsts>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
-            auto v_tile = load_tile_transpose(v_lds_read_window);
+            auto v_tile = LoadVTile<KVRows>(v_lds_read_window);
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
 
@@ -2086,7 +2322,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             // The current PV consumes P and corrected O, not the denominator.
             // Keep whole-P production unchanged and defer only l's reduction
             // in the guarded path. The original left-fold and row sync remain.
-            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking;
+            // Dropout changes P after its row sum, so it keeps the sum up front.
+            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking && !kHasDropout;
             auto rowsum_p                    = [&]() {
                 if constexpr(kDeferDenominator)
                 {
@@ -2102,6 +2339,28 @@ struct BlockFmhaPipelineQRKSVSTdm
             }();
             auto l_correction = m;
 
+            if constexpr(kHasDropout)
+            {
+                // As qr: drop P after its row sum went into l; the random values of this
+                // K tile's columns are those of the kN0 x kM0 step at kv_tile_start.
+                auto randval_block_window = dropout_args.randval_window;
+                auto randval_window =
+                    dropout_args.dropout.template MakeRandvalDramWindow<decltype(gemm_0)>(
+                        randval_block_window, kv_tile_start);
+                // Run's LDS round trip per 16 columns measured a few percent ahead of
+                // RunWholeTile here (qr_tdm_sched and qr_tdm_pingpong take RunWholeTile).
+                dropout_args.dropout
+                    .template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
+                        static_cast<char*>(smem_arena) + Layout::kRandValOffset,
+                        kv_tile_start,
+                        p_compute,
+                        randval_window);
+            }
+            else
+            {
+                ignore = dropout_args;
+            }
+
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
 
@@ -2116,6 +2375,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
 
             // l{j}, Oacc{j}
+            [[maybe_unused]] float o_acc_v_rescale = 1.f;
+            if constexpr(kKVBlockScale)
+            {
+                o_acc_v_rescale  = o_acc_v_mantissa / page_descale.v_mantissa;
+                o_acc_v_mantissa = page_descale.v_mantissa;
+            }
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -2148,10 +2413,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
                 if constexpr(kQuantized)
                     l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
+                const auto o_scale = kKVBlockScale ? tmp * o_acc_v_rescale : tmp;
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
-                    o_acc(i_j_idx) *= tmp;
+                    o_acc(i_j_idx) *= o_scale;
                 });
             });
 
@@ -2167,12 +2433,14 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<true>(
+                        k_dram_window, k_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                 }
             }
-            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+            MoveKVRows<true>(
+                k_dram_window, k_row, i_total_loops + 2 < num_total_loop ? kN0 : 0, kv_rows);
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-            LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+            LoadKVTileFullOrPadded<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -2181,6 +2449,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     return make_gemm1_scale<decltype(gemm_1)>(pack_v_scale(
                         v_descale_ptr, kv_tile_start + i_k1 * kK1, kv_last, block_scale_size_kv));
+                }
+                else if constexpr(kKVBlockScale)
+                {
+                    ignore = i_k1;
+                    return make_gemm1_scale<decltype(gemm_1)>(page_descale.v_exponent);
                 }
                 else
                 {
@@ -2193,8 +2466,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     // loop over along the [V]alue Sequence length
-                    move_tile_window(v_lds_read_window, {kK1, 0});
-                    auto v_tile_switch = load_tile_transpose(v_lds_read_window);
+                    move_tile_window(
+                        v_lds_read_window,
+                        {KVRows::kIsVectorized ? 0 : kK1, KVRows::kIsVectorized ? kK1 : 0});
+                    auto v_tile_switch = LoadVTile<KVRows>(v_lds_read_window);
 
                     gemm_1(o_acc,
                            get_slice_tile(p_tile,
@@ -2207,7 +2482,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                     v_tile = v_tile_switch;
                 });
                 // move back to the origin
-                move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
+                move_tile_window(v_lds_read_window,
+                                 {KVRows::kIsVectorized ? 0 : -kK1 * (k1_loops - 1),
+                                  KVRows::kIsVectorized ? -kK1 * (k1_loops - 1) : 0});
             }
 
             gemm_1(o_acc,
@@ -2231,7 +2508,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                        rowsum_p);
             }
 
-            s_wait_tensorcnt_barrier<1>();
+            s_wait_tensorcnt_barrier<kKTdmInsts>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
@@ -2319,6 +2596,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 tmp *= v_descale;
             }
+            else if constexpr(kKVBlockScale)
+            {
+                tmp *= o_acc_v_mantissa;
+            }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
                 o_acc(i_j_idx) *= tmp;
@@ -2326,6 +2607,73 @@ struct BlockFmhaPipelineQRKSVSTdm
         });
 
         return o_acc;
+    }
+
+    // Paged K/V (batch_prefill): k/v_dram_block_window_tmp span the whole KV cache pool
+    // and kv_rows maps sequence positions onto it.
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename KVRows>
+    CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+                                        const KDramBlockWindowTmp& k_dram_block_window_tmp,
+                                        const VDramBlockWindowTmp& v_dram_block_window_tmp,
+                                        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+                                        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+                                        FmhaMask mask,
+                                        PositionEncoding position_encoding,
+                                        float scale_s,
+                                        void* smem_ptr,
+                                        float sink_v,
+                                        const KVRows& kv_rows,
+                                        const float* k_descale_ptr  = nullptr,
+                                        const float* v_descale_ptr  = nullptr,
+                                        index_t page_descale_stride = 1,
+                                        float v_descale             = 1.0f) const
+    {
+        // KV_BLOCKSCALE: k/v_descale_ptr point at this head's descale of page 0 and
+        // page_descale_stride is the distance between pages. PERTENSOR passes v_descale.
+        static_assert(KVRows::kIsPaged);
+        static_assert(!(kQuantized && !kVScaleOnOacc && !kKVBlockScale),
+                      "qr_tdm pipeline: paged K/V takes per-tensor or per-page descales");
+        static_assert(KVRows::kIsGather ||
+                          KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
+                      "the K/V rows of one warp must not straddle two pages");
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
+            return run_double_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_ptr,
+                                            sink_v,
+                                            k_descale_ptr,
+                                            v_descale_ptr,
+                                            page_descale_stride,
+                                            v_descale,
+                                            kv_rows);
+        else
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_ptr,
+                                                    sink_v,
+                                                    k_descale_ptr,
+                                                    v_descale_ptr,
+                                                    page_descale_stride,
+                                                    v_descale,
+                                                    kv_rows);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -2481,6 +2829,71 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                     nullptr,
                                                     1,
                                                     1.0f);
+    }
+
+    // Dropout: the BlockDropout of the block and its randval window (kM0 x kN0 at
+    // the block's first query row); paged K/V (batch_prefill) pass their kv_rows.
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename RandValDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename Dropout,
+              typename KVRows = BlockFmhaDenseKVRows>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+               const RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
+               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+               FmhaMask mask,
+               PositionEncoding position_encoding,
+               float scale_s,
+               float sink_v,
+               void* smem_arena,
+               const Dropout& dropout,
+               const KVRows& kv_rows = {}) const
+    {
+        static_assert(kHasDropout && !kQuantized);
+        const auto dropout_args = BlockFmhaTdmDropout<Dropout, RandValDramBlockWindowTmp>{
+            dropout, randval_dram_block_window_tmp};
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
+            return run_double_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_arena,
+                                            sink_v,
+                                            nullptr,
+                                            nullptr,
+                                            1,
+                                            1.0f,
+                                            kv_rows,
+                                            dropout_args);
+        else
+            return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_arena,
+                                                    sink_v,
+                                                    nullptr,
+                                                    nullptr,
+                                                    1,
+                                                    1.0f,
+                                                    kv_rows,
+                                                    dropout_args);
     }
 
     template <typename QDramBlockWindowTmp,

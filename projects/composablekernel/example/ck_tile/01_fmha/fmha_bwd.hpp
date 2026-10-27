@@ -588,6 +588,11 @@ struct fmha_bwd_traits
     bool is_store_randval;
     bool is_deterministic;
     // TODO: padding check is inside this api
+    // Run only the dq/dk/dv pipeline with this tag (e.g. "tdm_kr_ktr", "trload_qr_qtr_dor";
+    // see FmhaBwdApiTrait.pipeline_tag in codegen/ops/fmha_bwd.py), whatever the dispatch
+    // heuristics that choose between pipelines say; the constraints a kernel needs to be
+    // correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
 };
 
 template <typename T0 /*dot_do_o_trait*/,
@@ -642,6 +647,8 @@ struct fmha_bwd_launcher
     ~fmha_bwd_launcher() = default;
 
     ck_tile::index_t selected_max_seqlen_q() const { return selected_max_seqlen_q_; }
+    // Name of the selected dq/dk/dv kernel; empty when none applies.
+    const std::string& selected_kernel_name() const { return selected_kernel_name_; }
 
     // Stream-async workspace preparation. Zeroes the dq_acc region (if the kernel
     // accumulates) and launches a single-thread device kernel that writes the
@@ -709,6 +716,7 @@ struct fmha_bwd_launcher
     ck_tile::index_t selected_max_seqlen_q_ = 0;
     size_t host_ws_size_                    = 0;
     bool needs_zero_dq_acc_                 = false;
+    std::string selected_kernel_name_;
 
     // Function pointer (points to code segment, survives launcher destruction)
     PrepareWorkspaceDeviceFunc prepare_ws_dev_func_ = nullptr;
@@ -731,6 +739,7 @@ struct fmha_bwd_launcher
     {
         traits_                = t;
         selected_max_seqlen_q_ = fmha_bwd_dq_dk_dv_maxq_<T1, Arch>();
+        selected_kernel_name_  = fmha_bwd_dq_dk_dv_get_name_<T1, Arch>();
         run                    = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
             return fmha_bwd_<T0, T1, T2, Arch>(s, a);
         };

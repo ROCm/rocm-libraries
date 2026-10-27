@@ -62,11 +62,25 @@ struct FmhaTdmAffineVRead
                                     const TileWindow& window,
                                     const FmhaTdmPreparedKRead::Address& base)
     {
-        static_assert(ValidateOriginZeroDelta<IAccess, TileWindow, VPhysicalStride>());
-        auto address         = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
-        address.byte_address = base.byte_address +
-                               ByteDelta<IAccess, VPhysicalStride, TileWindow::NumAccessPerCoord>();
-        FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
+        // A window whose distribution is the destination's (a vectorized KV cache's V, read
+        // with plain loads) is not row-major: each access computes its own address.
+        if constexpr(std::is_same_v<
+                         remove_cvref_t<typename DistributedTensor::StaticTileDistribution>,
+                         remove_cvref_t<typename TileWindow::Base::TileDstr>>)
+        {
+            ignore = base;
+            FmhaTdmPreparedVRead::Load<IAccess>(
+                dst, window, FmhaTdmPreparedKRead::Prepare<IAccess>(window));
+        }
+        else
+        {
+            static_assert(ValidateOriginZeroDelta<IAccess, TileWindow, VPhysicalStride>());
+            auto address = FmhaTdmPreparedKRead::Prepare<IAccess>(window);
+            address.byte_address =
+                base.byte_address +
+                ByteDelta<IAccess, VPhysicalStride, TileWindow::NumAccessPerCoord>();
+            FmhaTdmPreparedVRead::Load<IAccess>(dst, window, address);
+        }
     }
 };
 
