@@ -64,6 +64,7 @@ EXPECTED_FEATURES = {
         "softcap",
         "alibi",
         "qq_bias",
+        "lse",
     },
     "attention_strided_decode": {
         "strided_kv",
