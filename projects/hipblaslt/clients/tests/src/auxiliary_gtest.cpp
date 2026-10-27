@@ -109,6 +109,8 @@ namespace
                 testing_aux_matmul_pref_init(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_null_matmul"))
                 testing_aux_matmul_alg_null_matmul(arg);
+            else if(!strcmp(arg.function, "aux_matmul_swish"))
+                testing_aux_matmul_swish(arg);
             else if(!strcmp(arg.function, "aux_matmul_bad_ws_size"))
                 testing_aux_matmul_bad_ws_size(arg);
 #ifdef CODE_COVERAGE
@@ -182,6 +184,7 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
                    || !strcmp(arg.function, "aux_matmul_sm_count_target")
+                   || !strcmp(arg.function, "aux_matmul_swish")
                    || !strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext")
                    || !strcmp(arg.function, "aux_matmul_uniform_summation_order_ext")
                    || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")

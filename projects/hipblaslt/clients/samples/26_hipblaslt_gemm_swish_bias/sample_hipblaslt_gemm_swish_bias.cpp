@@ -44,31 +44,34 @@ void simpleGemmSwishBias(hipblasLtHandle_t  handle,
                          void*              d_d,
                          void*              d_workspace,
                          int64_t            max_workspace_size,
-                         hipStream_t        stream);
+                         hipStream_t        stream,
+                         bool               useAux);
 
 int main()
 {
     Runner<hipblasLtHalf, hipblasLtHalf, hipblasLtHalf, float, float> runner(
         1024, 512, 1024, 1, 1.f, 1.f, 32 * 1024 * 1024);
 
-    runner.run([&runner] {
-        simpleGemmSwishBias(runner.handle,
-                            HIPBLAS_OP_N,
-                            HIPBLAS_OP_N,
-                            runner.m,
-                            runner.n,
-                            runner.k,
-                            runner.batch_count,
-                            runner.alpha,
-                            runner.beta,
-                            runner.d_a,
-                            runner.d_b,
-                            runner.d_c,
-                            runner.d_d,
-                            runner.d_workspace,
-                            runner.max_workspace_size,
-                            runner.stream);
-    });
+    for(bool useAux : {false, true})
+        runner.run([&runner, useAux] {
+            simpleGemmSwishBias(runner.handle,
+                                HIPBLAS_OP_N,
+                                HIPBLAS_OP_N,
+                                runner.m,
+                                runner.n,
+                                runner.k,
+                                runner.batch_count,
+                                runner.alpha,
+                                runner.beta,
+                                runner.d_a,
+                                runner.d_b,
+                                runner.d_c,
+                                runner.d_d,
+                                runner.d_workspace,
+                                runner.max_workspace_size,
+                                runner.stream,
+                                useAux);
+        });
 
     return 0;
 }
@@ -88,7 +91,8 @@ void simpleGemmSwishBias(hipblasLtHandle_t  handle,
                          void*              d_d,
                          void*              d_workspace,
                          int64_t            max_workspace_size,
-                         hipStream_t        stream)
+                         hipStream_t        stream,
+                         bool               useAux)
 {
     hipblasLtMatrixLayout_t matA, matB, matC, matD;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matA, HIP_R_16F, m, k, m));
@@ -127,9 +131,30 @@ void simpleGemmSwishBias(hipblasLtHandle_t  handle,
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
         matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &trans_b, sizeof(int32_t)));
 
-    hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT;
+    hipblasLtEpilogue_t epilogue
+        = useAux ? HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT : HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
         matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
+
+    // AUX saves the biased input to Swish; D receives Swish(x, 1).
+    void* d_aux_buffer = nullptr;
+    if(useAux)
+    {
+        CHECK_HIP_ERROR(hipMalloc(&d_aux_buffer, m * n * batch_count * sizeof(hipblasLtHalf)));
+        CHECK_HIPBLASLT_ERROR(
+            hipblasLtMatmulDescSetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER,
+                                            &d_aux_buffer,
+                                            sizeof(d_aux_buffer)));
+        const int64_t aux_ld = m, aux_batch_stride = m * n;
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &aux_ld, sizeof(aux_ld)));
+        CHECK_HIPBLASLT_ERROR(
+            hipblasLtMatmulDescSetAttribute(matmul,
+                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE,
+                                            &aux_batch_stride,
+                                            sizeof(aux_batch_stride)));
+    }
 
     // Set Desc Bias Data Type
     int32_t bias_data_type = HIP_R_16F;
@@ -206,5 +231,6 @@ void simpleGemmSwishBias(hipblasLtHandle_t  handle,
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
     CHECK_HIP_ERROR(hipFree(d_bias));
+    CHECK_HIP_ERROR(hipFree(d_aux_buffer));
     return;
 }

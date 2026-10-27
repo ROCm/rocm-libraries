@@ -2784,6 +2784,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 case HIPBLASLT_EPILOGUE_GELU_BIAS:
                     epilogue[i] = HIPBLASLT_EPILOGUE_GELU_AUX_BIAS;
                     break;
+                case HIPBLASLT_EPILOGUE_SWISH_EXT:
+                    epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_AUX_EXT;
+                    break;
+                case HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+                    epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT;
+                    break;
                 case HIPBLASLT_EPILOGUE_CLAMP_EXT:
                     epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT;
                     break;
