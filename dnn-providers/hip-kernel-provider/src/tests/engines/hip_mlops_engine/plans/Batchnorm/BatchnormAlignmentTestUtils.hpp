@@ -144,19 +144,20 @@ void expectDeclinedBelowElementAlignment(const flatbuffers::FlatBufferBuilder& v
 class RecordingKernel : public compilation::IRunnableKernel
 {
 public:
-    void setBlockSize(unsigned int, unsigned int, unsigned int) override {}
-    void setGridSize(unsigned int, unsigned int, unsigned int) override {}
-    void setSharedMemBytes(unsigned int) override {}
+    void setBlockSize(unsigned int /*x*/, unsigned int /*y*/, unsigned int /*z*/) override {}
+    void setGridSize(unsigned int /*x*/, unsigned int /*y*/, unsigned int /*z*/) override {}
+    void setSharedMemBytes(unsigned int /*bytes*/) override {}
 
 protected:
-    void launchImpl(hipStream_t, void**) const override {}
+    void launchImpl(hipStream_t /*stream*/, void** /*args*/) const override {}
 };
 
 /// A compiled program that hands back as many kernels as the plan asks for.
 class RecordingProgram : public compilation::ICompiledProgram
 {
 public:
-    std::unique_ptr<compilation::IRunnableKernel> getKernel(const std::string&) const override
+    std::unique_ptr<compilation::IRunnableKernel>
+        getKernel(const std::string& /*name*/) const override
     {
         return std::make_unique<RecordingKernel>();
     }
@@ -167,7 +168,8 @@ class RecordingCompiler : public compilation::IKernelCompiler
 {
 public:
     std::unique_ptr<compilation::ICompiledProgram>
-        compile(const std::string&, const std::vector<std::string>& options) const override
+        compile(const std::string& /*source*/,
+                const std::vector<std::string>& options) const override
     {
         _options = options;
         ++_compileCount;
