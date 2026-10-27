@@ -9,9 +9,9 @@ The schedule families are separate K-tile bodies:
   mirrored in C++),
 * early stage free ``ilv_early_free`` / ``ilv_ef_spread`` / ``ilv_split_wait``
   (Python only),
-* slot schedule ``hb_sched`` (+ slot knobs) with ``lds_row_interleave`` /
-  ``rilv_vec_epilogue`` / ``rve_store_nt`` (Python only; covered in depth by
-  test_gemm_hb_sched.py),
+* slot schedule ``hb_sched`` (+ slot knobs; Python only; covered in depth by
+  test_gemm_hb_sched.py) with ``lds_row_interleave`` / ``rilv_vec_epilogue`` /
+  ``rve_store_nt`` (mirrored in C++),
 * wave-specialized ``pingpong`` (+ ``pp_*``; Python only).
 
 These tests pin the composition rules: every lever is default-off (the default
@@ -248,11 +248,17 @@ class TestEngineGuard(unittest.TestCase):
             (_EF, _T22),
             (replace(_A16, ilv_split_wait=8, ilv_barrier_after=1), _T22),
             (_HB, _T22),
-            (replace(_ER3, **_RILV), _T22),
+            (replace(_ER3, **dict(_RILV, hb_sched=True)), _T22),
             (_PP7, _T24),
         ):
             with self.assertRaises(NotImplementedError):
                 _be.universal_gemm_spec_to_dict(_spec(tr, tile))
+
+    def test_row_interleave_levers_cross_to_the_engine(self):
+        # the row-interleave layout (with the early-release levers) is mirrored in C++
+        d = _be.universal_gemm_spec_to_dict(_spec(replace(_ER3, **_RILV), _T22))
+        self.assertIs(d["lds_row_interleave"], True)
+        self.assertEqual(d["rilv_pad"], 16)
 
     def test_every_python_only_lever_is_listed(self):
         listed = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}

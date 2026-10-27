@@ -44,7 +44,9 @@ gfx950; Python engine only.
 Fused operand prologues for the universal GEMM (f32 operands with bf16 split
 emulation, unary opA / opB, interleaved complex-f32 B):
 [`gemm_prologue.py`](../../python/rocke/instances/common/gemm_prologue.py)
-(`Prologue`, `attach_prologue`); Python engine only.
+(`Prologue`, `attach_prologue`); mirrored by the C++ engine
+(`cpp/instances/common/gemm_prologue.cpp`) except unary opA / opB, `stage="vgpr"` and
+`epi` (Python engine only).
 Emulated-f32 GEMM routes on gfx950 built on the prologue:
 [`dispatch/gemm/cf32.py`](../../python/rocke/dispatch/gemm/cf32.py)
 (`plan_cf32_gemm`: interleaved complex f32 as one fused kernel; `plan_f32_gemm`:

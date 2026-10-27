@@ -547,8 +547,10 @@ class TraitSpec:
     # B fragment reads. The B loads -- issued last -- gain Q MFMAs of lead time
     # (two partial-vmcnt barriers per tile). 0 (default): off.
     ilv_split_wait: int = 0
-    # ---- row-interleave LDS layout and slot-schedule levers (Python-engine
-    # only, default-off; the defaults keep every kernel byte-identical) ----
+    # ---- row-interleave LDS layout and slot-schedule levers (default-off;
+    # the defaults keep every kernel byte-identical). ``lds_row_interleave``
+    # and ``rilv_pad`` are mirrored by the C++ engine, the ``hb_*`` levers are
+    # Python-engine only ----
     # ``lds_row_interleave`` (dtl_stages >= 2, gfx950 16-byte DTL, 16-bit data,
     # tile_k 64 = one 128-byte LDS row, 16x16x32 atom, mfmas_m / mfmas_n
     # multiples of 8, no ``lds_swizzle``): the LDS tile layout hipBLASLt uses
@@ -611,8 +613,9 @@ class TraitSpec:
     # ``hb_rel_gap`` (hb_sched): MFMAs between the last fragment read and the
     # (auto-placed) release.
     hb_rel_gap: int = 4
-    # ---- SIA-style schedule and vector-epilogue levers (Python-engine only,
-    # default-off) ----
+    # ---- SIA-style schedule and vector-epilogue levers (default-off; the
+    # ``sia_*`` levers are Python-engine only, ``rilv_vec_epilogue`` and
+    # ``rve_store_nt`` are mirrored by the C++ engine) ----
     # ``sia_sched`` (dtl_frag_prefetch + mfma_interleave + lds_row_interleave,
     # 2 K atoms per tile): a Tensile-SIA3-style K-tile schedule family. One MFMA
     # stream per K tile, every other instruction pinned after an MFMA slot
@@ -682,7 +685,8 @@ class TraitSpec:
     # ``rve_store_nt`` (rilv_vec_epilogue): write C with the streaming
     # (non-temporal) hint (the NT store bits).
     rve_store_nt: bool = False
-    # ---- DTL issue-economy levers (Python-engine only, default-off) ----
+    # ---- DTL issue-economy levers (default-off; Python-engine only except
+    # ``dtl_soff0``, which the C++ engine mirrors) ----
     # ``dtl_rsrc_word3`` (direct_to_lds, dtl_stages >= 2): DWORD3 (flags) of
     # the DTL buffer resources; 0 (default) = the target default (CDNA
     # 0x00027000: DATA_FORMAT 32, NUM_FORMAT FLOAT). hipBLASLt / CK use
@@ -3821,8 +3825,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     if op is None:  # pragma: no cover - is_valid_spec already rejects this
         raise ValueError(f"no MMA atom for spec on {arch}")
 
-    # fused operand prologue (Python-only side channel ``spec._prologue``, see
-    # gemm_prologue)
+    # fused operand prologue (side channel ``spec._prologue``, see
+    # gemm_prologue; mirrored by cpp/instances/common/gemm_prologue.cpp)
     from .gemm_prologue import PrologueEmitter as _ProEm, get_prologue as _get_pro
 
     _pro = _get_pro(spec)

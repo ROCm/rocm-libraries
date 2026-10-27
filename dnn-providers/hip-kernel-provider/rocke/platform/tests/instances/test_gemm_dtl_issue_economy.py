@@ -13,8 +13,10 @@
   free MFMA slots / first DTL a few slots after the release barrier.
 
 Every lever is default-off (the default trait keeps the historical
-emission), has a unique kernel-name flag, is rejected outside its scope, and
-is refused by the C-engine converters (Python-engine only).
+emission), has a unique kernel-name flag and is rejected outside its scope.
+``rilv_pad`` and ``dtl_soff0`` are mirrored by the C++ engine (the
+``gemm_cf32`` parity family); the others are refused by the C-engine
+converters (Python-engine only).
 """
 
 from __future__ import annotations
@@ -171,15 +173,33 @@ class EmissionTest(unittest.TestCase):
             self.assertIn("define", _ir(tr))
 
 
+# mirrored by the C++ engine (cpp/instances/common/gemm_build_staged.cpp)
+_MIRRORED = ("rilv_pad", "dtl_soff0")
+
+
 class EngineGuardTest(unittest.TestCase):
     def test_python_only(self):
         keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
         for k in _NEW:
+            if k in _MIRRORED:
+                continue
             self.assertIn(k, keys)
         for k, (_off, on) in _NEW.items():
+            if k in _MIRRORED:
+                continue
             tr = replace(_HB, **{k: on})
             with self.assertRaises(NotImplementedError):
                 _be._refuse_python_only_levers(tr)
+
+    def test_mirrored_levers_reach_the_engine(self):
+        keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
+        ring = replace(_RM, rilv_pad=32, dtl_soff0=True)
+        for k in _MIRRORED:
+            self.assertNotIn(k, keys)
+        _be._refuse_python_only_levers(ring)
+        sd = _be.universal_gemm_spec_to_dict(_spec(ring))
+        self.assertEqual(sd["rilv_pad"], 32)
+        self.assertIs(sd["dtl_soff0"], True)
 
 
 if __name__ == "__main__":

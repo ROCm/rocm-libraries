@@ -40,6 +40,7 @@
 
 extern "C" {
 #include "rocke/arena.h"
+#include "rocke/compile_options.h"
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
@@ -53,6 +54,7 @@ extern "C" {
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
+#include "rocke/instance_gemm_prologue.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/instance_gfx950_block_scaled_gemm.h"
 #include "rocke/instance_grouped_gemm.h"
@@ -153,6 +155,8 @@ struct SpecHolder
 {
     rocke_gemm_universal_spec_t spec;
     std::vector<std::string> storage; /* keeps pointed-to strings alive */
+    /* the fused operand prologue spec._prologue points at (stable address) */
+    std::shared_ptr<rocke_gemm_prologue_t> prologue;
 
     const char* keep(const std::string& s)
     {
@@ -313,7 +317,13 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "ilv_acquire_at",
                               "acc_out_vgpr",
                               "ilv_read_span",
-                              "ilv_dtl_span"};
+                              "ilv_dtl_span",
+                              "lds_row_interleave",
+                              "rilv_pad",
+                              "rilv_vec_epilogue",
+                              "rve_store_nt",
+                              "dtl_soff0",
+                              "wide_addr"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -401,6 +411,14 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
         spec->trait.acc_out_vgpr = dict_bool(tr, "acc_out_vgpr", spec->trait.acc_out_vgpr);
         spec->trait.ilv_read_span = dict_int(tr, "ilv_read_span", spec->trait.ilv_read_span);
         spec->trait.ilv_dtl_span = dict_int(tr, "ilv_dtl_span", spec->trait.ilv_dtl_span);
+        spec->trait.lds_row_interleave
+            = dict_bool(tr, "lds_row_interleave", spec->trait.lds_row_interleave);
+        spec->trait.rilv_pad = dict_int(tr, "rilv_pad", spec->trait.rilv_pad);
+        spec->trait.rilv_vec_epilogue
+            = dict_bool(tr, "rilv_vec_epilogue", spec->trait.rilv_vec_epilogue);
+        spec->trait.rve_store_nt = dict_bool(tr, "rve_store_nt", spec->trait.rve_store_nt);
+        spec->trait.dtl_soff0 = dict_bool(tr, "dtl_soff0", spec->trait.dtl_soff0);
+        spec->trait.wide_addr = dict_bool(tr, "wide_addr", spec->trait.wide_addr);
     }
 
     /* ---- data ---- */
@@ -436,7 +454,7 @@ SpecHolder build_spec(const py::dict& root)
 {
     SpecHolder h;
     h.spec = rocke_gemm_universal_spec_default();
-    h.storage.reserve(16);
+    h.storage.reserve(32);
 
     /* Merge nested sub-dicts down into a flat view for convenience. */
     auto sub = [&](const char* key) -> py::dict {
@@ -545,7 +563,13 @@ SpecHolder build_spec(const py::dict& root)
                               "ilv_acquire_at",
                               "acc_out_vgpr",
                               "ilv_read_span",
-                              "ilv_dtl_span"};
+                              "ilv_dtl_span",
+                              "lds_row_interleave",
+                              "rilv_pad",
+                              "rilv_vec_epilogue",
+                              "rve_store_nt",
+                              "dtl_soff0",
+                              "wide_addr"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -636,6 +660,14 @@ SpecHolder build_spec(const py::dict& root)
         h.spec.trait.acc_out_vgpr = dict_bool(tr, "acc_out_vgpr", h.spec.trait.acc_out_vgpr);
         h.spec.trait.ilv_read_span = dict_int(tr, "ilv_read_span", h.spec.trait.ilv_read_span);
         h.spec.trait.ilv_dtl_span = dict_int(tr, "ilv_dtl_span", h.spec.trait.ilv_dtl_span);
+        h.spec.trait.lds_row_interleave
+            = dict_bool(tr, "lds_row_interleave", h.spec.trait.lds_row_interleave);
+        h.spec.trait.rilv_pad = dict_int(tr, "rilv_pad", h.spec.trait.rilv_pad);
+        h.spec.trait.rilv_vec_epilogue
+            = dict_bool(tr, "rilv_vec_epilogue", h.spec.trait.rilv_vec_epilogue);
+        h.spec.trait.rve_store_nt = dict_bool(tr, "rve_store_nt", h.spec.trait.rve_store_nt);
+        h.spec.trait.dtl_soff0 = dict_bool(tr, "dtl_soff0", h.spec.trait.dtl_soff0);
+        h.spec.trait.wide_addr = dict_bool(tr, "wide_addr", h.spec.trait.wide_addr);
     }
 
     /* ---- data ---- */
@@ -665,6 +697,46 @@ SpecHolder build_spec(const py::dict& root)
     h.spec.wave_size = dict_int(root, "wave_size", h.spec.wave_size);
     h.spec.block_size = dict_int(root, "block_size", h.spec.block_size);
     h.spec.batched = dict_bool(root, "batched", h.spec.batched);
+
+    /* ---- fused operand prologue (Python spec._prologue) ---- */
+    if(root.contains("prologue") && py::isinstance<py::dict>(root["prologue"]))
+    {
+        py::dict pd = root["prologue"].cast<py::dict>();
+        h.prologue = std::make_shared<rocke_gemm_prologue_t>(rocke_gemm_prologue_default());
+        rocke_gemm_prologue_t* p = h.prologue.get();
+        std::string s;
+        /* every string field in its own storage slot: h.storage is reserved
+         * for 32 strings, so keep() never reallocates (name + 3 trait + 5 data +
+         * at most 9 prologue strings) */
+        if(dict_str(pd, "src", s))
+            p->src = h.keep(s);
+        if(dict_str(pd, "recipe", s))
+            p->recipe = h.keep(s);
+        if(dict_str(pd, "unary_a", s))
+            p->unary_a = h.keep(s);
+        if(dict_str(pd, "unary_b", s))
+            p->unary_b = h.keep(s);
+        if(dict_str(pd, "unary_impl", s))
+            p->unary_impl = h.keep(s);
+        if(dict_str(pd, "order", s))
+            p->order = h.keep(s);
+        if(dict_str(pd, "split_at", s))
+            p->split_at = h.keep(s);
+        if(dict_str(pd, "stage", s))
+            p->stage = h.keep(s);
+        if(dict_str(pd, "epi", s))
+            p->epi = h.keep(s);
+        p->out_f32 = dict_bool(pd, "out_f32", p->out_f32);
+        p->cap = dict_bool(pd, "cap", p->cap);
+        p->pin_v = dict_bool(pd, "pin_v", p->pin_v);
+        p->fast_exp = dict_bool(pd, "fast_exp", p->fast_exp);
+        p->psub = dict_bool(pd, "psub", p->psub);
+        p->cplx_b = dict_bool(pd, "cplx_b", p->cplx_b);
+        p->conj_a = dict_bool(pd, "conj_a", p->conj_a);
+        p->conj_b = dict_bool(pd, "conj_b", p->conj_b);
+        p->agpr_out = dict_bool(pd, "agpr_out", p->agpr_out);
+        h.spec._prologue = p;
+    }
 
     rocke_gemm_universal_spec_finalize(&h.spec);
     return h;
@@ -4410,6 +4482,32 @@ std::string lower_serialized_ir(const std::string& ir_text,
  * defaults (prologue included, launch bounds from the kernel). Lets a test
  * compare the C++ HIP lowering of a Python-built kernel, and its refusals,
  * with rocke.core.lower_hip.lower_kernel_to_hip. */
+/* comgr_options_for_ir(ir_text, flavor): the COMGR codegen options of a
+ * serialized kernel (rocke_comgr_options_for_kernel), the C++ twin of
+ * helpers/compile.py _comgr_options_for_kernel(kernel, flavor). */
+std::vector<std::string> comgr_options_for_ir(const std::string& ir_text, const std::string& flavor)
+{
+    const rocke_llvm_flavor_t fl = rocke_llvm_flavor_from_name(flavor.c_str());
+    if(!rocke_llvm_flavor_is_known(fl))
+    {
+        throw std::runtime_error(std::string("rocke_engine.comgr_options_for_ir: unknown LLVM "
+                                             "flavor '")
+                                 + flavor + "' (expected one of " + rocke_engine_flavor_list()
+                                 + ")");
+    }
+    rocke_ir_builder_t b = {};
+    std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
+        &b, rocke_ir_builder_free);
+    const rocke_kernel_def_t* kernel = parse_serialized_ir(ir_text, "comgr_options_for_ir", &b);
+    const char* opts[64];
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    const int n = rocke_comgr_options_for_kernel(kernel, fl, opts, 64, err, sizeof err);
+    if(n < 0)
+        throw std::runtime_error(std::string("rocke_engine.comgr_options_for_ir: ") + err);
+    return std::vector<std::string>(opts, opts + n);
+}
+
 std::string lower_serialized_ir_hip(const std::string& ir_text, const std::string& arch)
 {
     /* The target is required, as for lower_serialized_ir. */
@@ -4523,6 +4621,13 @@ PYBIND11_MODULE(rocke_engine, m)
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "
           "the Python lowerer for the same serialized IR. flavor='' resolves "
           "the LLVM flavor automatically; a name from llvm_flavors() pins it.");
+
+    m.def("comgr_options_for_ir",
+          &comgr_options_for_ir,
+          py::arg("ir_text"),
+          py::arg("flavor"),
+          "The COMGR codegen options of a serialized ck.dsl.ir/v1 kernel at an LLVM "
+          "flavor (the C++ twin of helpers.compile._comgr_options_for_kernel).");
 
     m.def("lower_serialized_ir_hip",
           &lower_serialized_ir_hip,

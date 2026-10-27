@@ -203,6 +203,29 @@ typedef struct rocke_gemm_trait_spec
      * MFMAs (0 = off) */
     int ilv_read_span;
     int ilv_dtl_span;
+    /* ---- row-interleave LDS layout, its vector epilogue and the 64-bit
+     * tile-origin levers (Python TraitSpec fields of the same names; every
+     * default keeps the emission unchanged). ---- */
+    /* (gfx950 ring, dtl_stages >= 2, 16-bit A/B, tile_k 64, 16x16x32 atom):
+     * one DTL instruction per wave fills one LDS row of 8 tile rows x tile_k
+     * elements + rilv_pad bytes; no XOR swizzle. */
+    bool lds_row_interleave;
+    /* (lds_row_interleave) pad bytes after each LDS row: 16 / 32 / 48 / 64.
+     * 0 means the Python default (16), so a zero-initialised trait is valid. */
+    int rilv_pad;
+    /* (lds_row_interleave, default epilogue, no pad_m / pad_n): linear DTL rows
+     * and the C mapping carries the interleave -- one 16-byte store per 8
+     * consecutive columns. */
+    bool rilv_vec_epilogue;
+    /* (rilv_vec_epilogue) write C with the streaming (nontemporal) hint. */
+    bool rve_store_nt;
+    /* (dtl_hoist, no dtl_tight_rsrc) the per-tile global origin in the buffer
+     * resource base, inline soffset 0. */
+    bool dtl_soff0;
+    /* (dtl_hoist + dtl_soff0 or dtl_tight_rsrc, rilv_vec_epilogue,
+     * non-persistent, RCR, not batched) 64-bit tile origins: operands past the
+     * i32 element offsets / buffer range and C past 2^31 elements. */
+    bool wide_addr;
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */
@@ -234,6 +257,10 @@ typedef struct rocke_gemm_universal_spec
      * rocke_gemm_universal_spec_set_fused_epilogue. */
     void* _fused_epilogue;
     bool _fused_epilogue_is_mde;
+    /* object.__setattr__(spec, "_prologue", pro) side channel (Python
+     * gemm_prologue.attach_prologue): the fused operand prologue, or NULL (the
+     * default: every kernel unchanged). See rocke/instance_gemm_prologue.h. */
+    const struct rocke_gemm_prologue* _prologue;
 } rocke_gemm_universal_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -246,6 +273,15 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec);
 
 /* Python acc_agpr_regs(spec): per-lane accumulator registers of one wave. */
 int rocke_gemm_acc_agpr_regs(const rocke_gemm_universal_spec_t* spec);
+
+/* Python DTL_BUFFER_NUM_RECORDS: the bytes one DTL buffer resource addresses. */
+#define ROCKE_GEMM_UNIVERSAL_DTL_BUFFER_NUM_RECORDS 0x7FFF0000
+
+/* Python streamk_workspace_bytes(spec): (flags_bytes, partials_bytes) of a
+ * streamk body ((0, 0) without streamk). False (both 0) when warp_k != 1. */
+bool rocke_gemm_universal_streamk_workspace_bytes(const rocke_gemm_universal_spec_t* spec,
+                                                  long long* flags_bytes,
+                                                  long long* partials_bytes);
 
 /* UniversalGemmSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */

@@ -453,8 +453,8 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* col_v = rocke_b_mod(b, chunk_idx, ctx->dtl_c_chunks_per_row);
             rocke_value_t* col = rocke_b_mul(b, col_v, ctx->dtl_c_halves_per_chunk);
             /* Same operand-order pinning as the A path above. */
-            rocke_value_t* b_row_term
-                = rocke_b_mul(b, rocke_b_add(b, ctx->block_n_off, row), ctx->K);
+            rocke_value_t* b_row_term = rocke_b_mul(
+                b, rocke_gemm_brow(ctx, rocke_b_add(b, ctx->block_n_off, row)), ctx->K);
             rocke_value_t* b_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
             rocke_value_t* off_elems
                 = rocke_b_add(b, ctx->batch_off_b, rocke_b_add(b, b_row_term, b_k_term));

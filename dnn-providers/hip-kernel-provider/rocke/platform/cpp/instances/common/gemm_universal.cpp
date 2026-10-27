@@ -949,6 +949,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.spec = spec;
     ctx.arch = arch;
     ctx.target = rocke_archtarget_from_gfx(arch);
+    /* the prologue emitter is owned by this build */
+    struct pe_owner
+    {
+        rocke_gemm_build_ctx_t* c;
+        ~pe_owner()
+        {
+            if(c->pe != NULL)
+                rocke_gemm_pro_emitter_free(c->pe);
+            c->pe = NULL;
+        }
+    } pe_guard{&ctx};
 
     ctx.op = rocke_gemm_resolve_mma_op(spec, arch, ctx.target);
     if(ctx.op == NULL)
@@ -957,6 +968,33 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         return NULL;
     }
     ctx.is_wmma = (ctx.op->family != NULL && strcmp(ctx.op->family, "wmma") == 0);
+
+    /* fused operand prologue (side channel spec->_prologue, see gemm_prologue):
+     * attach_prologue's check(), then the Python builder's guards */
+    ctx.pro = spec->_prologue;
+    if(ctx.pro != NULL)
+    {
+        if(!rocke_gemm_prologue_check(ctx.pro, reason, sizeof(reason)))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+            return NULL;
+        }
+        if(ctx.is_wmma)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue: MFMA bodies only");
+            return NULL;
+        }
+        if(ctx.pro->out_f32 && strcmp(spec->trait.epilogue, "default") != 0)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue out_f32 needs the default epilogue");
+            return NULL;
+        }
+        if(spec->trait.split_k > 1)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue: split_k unsupported");
+            return NULL;
+        }
+    }
 
     /* Python build_universal_gemm opens with `b = IRBuilder(spec.kernel_name())`,
      * so the emitted kernel symbol is ALWAYS spec.kernel_name() -- derived from
@@ -971,6 +1009,16 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "build_universal_gemm: kernel_name() overflow");
             return NULL;
+        }
+        if(ctx.pro != NULL)
+        {
+            /* Python: IRBuilder(spec.kernel_name() + _pro.suffix()) */
+            size_t used = strlen(uni_name);
+            if(rocke_gemm_prologue_suffix(ctx.pro, uni_name + used, sizeof(uni_name) - used) != 0)
+            {
+                rocke_i_set_err(b, ROCKE_ERR_VALUE, "build_universal_gemm: kernel_name() overflow");
+                return NULL;
+            }
         }
         b->kernel->name = rocke_arena_strdup(&b->arena, uni_name);
         if(b->kernel->name == NULL)
@@ -1043,7 +1091,13 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             opts.writeonly_set = true;
             opts.align = 16;
             opts.align_set = true;
-            ctx.C = rocke_b_param(b, "C", ptr_storage, &opts);
+            /* prologue out_f32: the f32 accumulators are the output */
+            ctx.C = rocke_b_param(b,
+                                  "C",
+                                  (ctx.pro != NULL && ctx.pro->out_f32)
+                                      ? rocke_ptr_type(b, rocke_f32(), "global")
+                                      : ptr_storage,
+                                  &opts);
         }
 
         ctx.M = rocke_b_param(b, "M", rocke_i32(), NULL);
@@ -1245,6 +1299,7 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.stages = (ctx.prefetch && spec->trait.direct_to_lds) ? spec->trait.dtl_stages : 0;
     ctx.swap_ab = spec->trait.mfma_swap_ab;
     ctx.staged_persistent_done = false;
+    ctx.rilv = spec->trait.lds_row_interleave;
     if(ctx.stages >= 2)
     {
         static const char* const a_names[4] = {"A_smem_s0", "A_smem_s1", "A_smem_s2", "A_smem_s3"};
@@ -1252,6 +1307,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         int a_shape[2] = {ctx.block_m, ctx.block_k};
         int b_shape[2] = {ctx.block_n, ctx.block_k};
         int j;
+        if(ctx.rilv)
+        {
+            /* lds_row_interleave: rows of 8 x block_k elements + rilv_pad bytes of
+             * pad (one DTL instruction per wave fills exactly one such row) */
+            int rpad = spec->trait.rilv_pad ? spec->trait.rilv_pad : 16;
+            ctx.rilv_cols = 8 * ctx.block_k + rpad / (rocke_i_type_bits(ctx.storage_dtype) / 8);
+            a_shape[0] = ctx.block_m / 8;
+            a_shape[1] = ctx.rilv_cols;
+            b_shape[0] = ctx.block_n / 8;
+            b_shape[1] = ctx.rilv_cols;
+        }
         if(ctx.stages > 4)
         {
             return NULL;
@@ -1276,6 +1342,64 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     ctx.mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
     ctx.k_atoms = rocke_gemm_tile_k_atoms_per_tile_k(t);
+    ctx.kmul = 1;
+    ctx.pe = NULL;
+    if(ctx.pro != NULL)
+    {
+        int a_pl = 0, b_pl = 0, c_pl = 0;
+        ctx.kmul = rocke_gemm_prologue_kmul(ctx.pro);
+        if(ctx.k_atoms % ctx.kmul)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "prologue src=f32: tile_k (%d halves) must hold whole f32 atoms",
+                            ctx.block_k);
+            return NULL;
+        }
+        ctx.k_atoms /= ctx.kmul;
+        rocke_gemm_atom_frag_lengths(ctx.op, &a_pl, &b_pl, &c_pl);
+        if(a_pl != b_pl)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue: a_per_lane != b_per_lane");
+            return NULL;
+        }
+        ctx.pe = rocke_gemm_pro_emitter_new(b, ctx.pro, ctx.storage_dtype, a_pl);
+    }
+    /* complex B (real embedding, see Prologue.cplx_b): tile row r of B' is
+     * complex row r >> 1 */
+    ctx.cplx = ctx.pe != NULL && ctx.pro->cplx_b;
+    if(ctx.cplx)
+    {
+        if(!spec->trait.direct_to_lds)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "cplx_b needs the direct-to-LDS ring");
+            return NULL;
+        }
+        if(ctx.rilv && !spec->trait.rilv_vec_epilogue)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "cplx_b + lds_row_interleave needs rilv_vec_epilogue (linear rows)");
+            return NULL;
+        }
+        if(ctx.rilv && (ctx.mfmas_n % 2))
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "cplx_b + lds_row_interleave needs an even mfmas_per_warp_n");
+            return NULL;
+        }
+        if(ctx.rilv)
+        {
+            rocke_gemm_pro_set_cplx_ni(ctx.pe);
+        }
+        else
+        {
+            rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+            rocke_value_t* la = rocke_b_land(b, ctx.lane, c1);
+            rocke_value_t* cz = rocke_b_const_i32(b, 0);
+            rocke_gemm_pro_set_cplx_lane(ctx.pe, rocke_b_cmp_ne(b, la, cz));
+        }
+    }
 
     /* ---- accumulators -- */
     ctx.acc_init = rocke_gemm_emit_zero_acc_op(b, ctx.op);

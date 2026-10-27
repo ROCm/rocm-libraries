@@ -551,8 +551,10 @@ with `dtl_soff0`, `dtl_addr_spread`, `hb_dtl_delay`, `kloop_unroll`, `hb_skew`,
   and after timing) when the shape population changes.
 - **Scope.** gfx950, packed RCR, f16 / bf16, alpha = 1 / beta = 0, non-batched when
   persistent. `is_valid_spec` rejects `rilv_vec_epilogue`, `persistent_ctas` and
-  `mfma_swap_ab` with a fused epilogue (`helpers.fuse`). The levers are Python-only
-  (see `architecture/engines_and_switching.md`, "Python-only universal-GEMM levers").
+  `mfma_swap_ab` with a fused epilogue (`helpers.fuse`). The layout, vector epilogue
+  and `dtl_soff0` are mirrored in C++; the slot schedules and the other levers are
+  Python-only (see `architecture/engines_and_switching.md`, "Python-only universal-GEMM
+  levers").
 
 ## 9. Performance Metrics
 

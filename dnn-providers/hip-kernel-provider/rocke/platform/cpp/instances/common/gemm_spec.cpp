@@ -114,6 +114,34 @@ int rocke_gemm_acc_agpr_regs(const rocke_gemm_universal_spec_t* spec)
     return rocke_gemm_tile_mfmas_per_warp_m(t) * rocke_gemm_tile_mfmas_per_warp_n(t) * c_per;
 }
 
+bool rocke_gemm_universal_streamk_workspace_bytes(const rocke_gemm_universal_spec_t* spec,
+                                                  long long* flags_bytes,
+                                                  long long* partials_bytes)
+{
+    long long fb = 0, pb = 0;
+    bool ok = true;
+    if(spec != NULL && spec->trait.streamk)
+    {
+        const rocke_gemm_tile_spec_t* t = &spec->tile;
+        if(t->warp_k != 1)
+        {
+            ok = false;
+        }
+        else
+        {
+            long long pool = spec->trait.persistent_ctas;
+            long long waves = (long long)t->warp_m * t->warp_n * t->warp_k;
+            fb = (4 * pool * waves + 255) / 256 * 256;
+            pb = pool * t->tile_m * t->tile_n * 4;
+        }
+    }
+    if(flags_bytes != NULL)
+        *flags_bytes = fb;
+    if(partials_bytes != NULL)
+        *partials_bytes = pb;
+    return ok;
+}
+
 int rocke_gemm_tile_mfmas_per_warp_m(const rocke_gemm_tile_spec_t* t)
 {
     int denom;
@@ -240,6 +268,13 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.acc_out_vgpr = false;
     s.trait.ilv_read_span = 0;
     s.trait.ilv_dtl_span = 0;
+    s.trait.lds_row_interleave = false; /* row interleave / 64-bit origins: off */
+    s.trait.rilv_pad = 16; /* Python default (0 reads as 16 too) */
+    s.trait.rilv_vec_epilogue = false;
+    s.trait.rve_store_nt = false;
+    s.trait.dtl_soff0 = false;
+    s.trait.wide_addr = false;
+    s._prologue = NULL; /* no fused operand prologue */
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -308,9 +343,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_aq[32];
     char part_rs[32];
     char part_ds[32];
+    char part_rp[32];
     const char* parts[5];
-    const char* flag_names[39];
-    int flag_on[39];
+    const char* flag_names[45];
+    int flag_on[45];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -400,6 +436,16 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_names[37] = part_rs;
     snprintf(part_ds, sizeof(part_ds), "ds%d", tr->ilv_dtl_span);
     flag_names[38] = part_ds;
+    /* row interleave / vector epilogue / DTL origin levers (Python: "rilv",
+     * f"rp{rilv_pad}", "rve", "rvnt", "so0", "w64"; the Python-engine-only flags
+     * between them are never on here) */
+    flag_names[39] = "rilv";
+    snprintf(part_rp, sizeof(part_rp), "rp%d", tr->rilv_pad ? tr->rilv_pad : 16);
+    flag_names[40] = part_rp;
+    flag_names[41] = "rve";
+    flag_names[42] = "rvnt";
+    flag_names[43] = "so0";
+    flag_names[44] = "w64";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -441,9 +487,15 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[36] = tr->acc_out_vgpr ? 1 : 0;
     flag_on[37] = (tr->ilv_read_span > 0) ? 1 : 0;
     flag_on[38] = (tr->ilv_dtl_span > 0) ? 1 : 0;
+    flag_on[39] = tr->lds_row_interleave ? 1 : 0;
+    flag_on[40] = (tr->lds_row_interleave && tr->rilv_pad != 0 && tr->rilv_pad != 16) ? 1 : 0;
+    flag_on[41] = tr->rilv_vec_epilogue ? 1 : 0;
+    flag_on[42] = tr->rve_store_nt ? 1 : 0;
+    flag_on[43] = tr->dtl_soff0 ? 1 : 0;
+    flag_on[44] = tr->wide_addr ? 1 : 0;
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 39, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 45, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -1130,6 +1182,71 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("acc_out_vgpr requires acc_agpr");
         }
+        /* row interleave, its vector epilogue and the DTL origin levers (same
+         * reasons as the Python predicate, in its order) */
+        if(tr->lds_row_interleave)
+        {
+            int mm = rocke_gemm_tile_mfmas_per_warp_m(&spec->tile);
+            int mn = rocke_gemm_tile_mfmas_per_warp_n(&spec->tile);
+            if(strcmp(arch, "gfx950") != 0 || tr->dtl_stages < 2 || tr->lds_swizzle)
+            {
+                CK_GEMM_REJECT("lds_row_interleave requires gfx950 (16-byte DTL), dtl_stages >= 2 "
+                               "and lds_swizzle off (the interleave replaces the XOR swizzle)");
+            }
+            if(!(strcmp(spec->data.dtype_a, "fp16") == 0 || strcmp(spec->data.dtype_a, "bf16") == 0)
+               || strcmp(spec->data.dtype_b, spec->data.dtype_a) != 0 || t->tile_k != 64
+               || t->warp_tile_m != 16 || t->warp_tile_n != 16 || t->warp_tile_k != 32 || mm % 8
+               || mn % 8 || spec->wave_size != 64)
+            {
+                CK_GEMM_REJECT("lds_row_interleave requires 16-bit A/B, tile_k 64 (128-byte LDS "
+                               "rows), the 16x16x32 atom, wave64 and mfmas_m / mfmas_n multiples "
+                               "of 8 (got %s/%s, tile_k %d, atom %dx%dx%d, mfmas %dx%d)",
+                               spec->data.dtype_a,
+                               spec->data.dtype_b,
+                               t->tile_k,
+                               t->warp_tile_m,
+                               t->warp_tile_n,
+                               t->warp_tile_k,
+                               mm,
+                               mn);
+            }
+        }
+        if(tr->rilv_vec_epilogue
+           && !(tr->lds_row_interleave && strcmp(tr->epilogue, "default") == 0 && !tr->mfma_swap_ab
+                && !(tr->pad_m || tr->pad_n) && tr->split_k == 1))
+        {
+            CK_GEMM_REJECT("rilv_vec_epilogue requires lds_row_interleave, the default epilogue, "
+                           "no mfma_swap_ab, split_k == 1 and no pad_m / pad_n unless rve_pad");
+        }
+        if(tr->rve_store_nt && !tr->rilv_vec_epilogue)
+        {
+            CK_GEMM_REJECT("rve_store_nt requires rilv_vec_epilogue");
+        }
+        if(tr->wide_addr
+           && !(tr->direct_to_lds && tr->dtl_hoist && (tr->dtl_soff0 || tr->dtl_tight_rsrc)
+                && tr->rilv_vec_epilogue && !tr->persistent_ctas && !tr->streamk && tr->split_k <= 1
+                && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched))
+        {
+            CK_GEMM_REJECT("wide_addr requires the direct-to-LDS ring with dtl_hoist and "
+                           "dtl_soff0 or dtl_tight_rsrc, the row-interleave vector epilogue, a "
+                           "non-persistent grid without split-K / stream-K / pingpong / asm_loop "
+                           "/ dtl_k_tail / dtl_base_fold / batching, the RCR layout and no "
+                           "tensor GETT / rich-epilogue hook");
+        }
+        if(tr->dtl_soff0
+           && !(tr->direct_to_lds && tr->dtl_stages >= 2 && tr->dtl_hoist && !tr->dtl_tight_rsrc))
+        {
+            CK_GEMM_REJECT("dtl_soff0 requires direct_to_lds, dtl_stages >= 2 and dtl_hoist, "
+                           "without dtl_tight_rsrc / pingpong");
+        }
+        if(tr->rilv_pad != 0 && tr->rilv_pad != 16
+           && !(tr->lds_row_interleave
+                && (tr->rilv_pad == 32 || tr->rilv_pad == 48 || tr->rilv_pad == 64)))
+        {
+            CK_GEMM_REJECT("rilv_pad requires lds_row_interleave and one of 16, 32, 48, 64 bytes "
+                           "(got %d)",
+                           tr->rilv_pad);
+        }
         if(tr->acc_agpr_pin && !tr->acc_agpr)
         {
             CK_GEMM_REJECT("acc_agpr_pin requires acc_agpr");
@@ -1258,6 +1375,14 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     else
     {
         bytes_lds = (ab_bytes > c_bytes) ? ab_bytes : c_bytes;
+    }
+    if(spec->trait.lds_row_interleave)
+    {
+        /* rilv_pad bytes of padding per 8 LDS rows, per operand and stage */
+        int rpad = spec->trait.rilv_pad ? spec->trait.rilv_pad : 16;
+        ab_bytes += ((t->tile_m + t->tile_n) / 8) * rpad * spec->trait.dtl_stages;
+        bytes_lds = spec->trait.cshuffle_no_alias ? ab_bytes + c_bytes
+                                                  : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
     }
     if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
     {

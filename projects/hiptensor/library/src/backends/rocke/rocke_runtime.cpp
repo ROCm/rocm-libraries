@@ -907,10 +907,11 @@ namespace hiptensor
                     {
                         continue;
                     }
-                    auto* base   = static_cast<uint8_t*>(workspace) + m.offset;
-                    auto  status = m.height == 1 ? hipMemsetAsync(base, 0, m.width, stream)
-                                                 : hipMemset2DAsync(
-                                                    base, m.pitch, 0, m.width, m.height, stream);
+                    auto* base = static_cast<uint8_t*>(workspace) + m.offset;
+                    auto  status
+                        = m.height == 1
+                              ? hipMemsetAsync(base, 0, m.width, stream)
+                              : hipMemset2DAsync(base, m.pitch, 0, m.width, m.height, stream);
                     if(status != hipSuccess)
                     {
                         return HIPTENSOR_STATUS_HIP_ERROR;

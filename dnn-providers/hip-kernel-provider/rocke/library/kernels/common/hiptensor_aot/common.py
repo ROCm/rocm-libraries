@@ -206,10 +206,27 @@ class Emit:
                 return v
             if dt == "f32":
                 return b.cvt_f64_to_f32(v)
-            return b.cast_f32_to(self.f64_to_f32_odd(v), ty)
+            return self.narrow(self.f64_to_f32_odd(v), ty)
         if dt == "f64":
             return b.cvt_f32_to_f64(v)
-        return v if dt == "f32" else b.cast_f32_to(v, ty)
+        return v if dt == "f32" else self.narrow(v, ty)
+
+    def narrow(self, v: Value, ty) -> Value:
+        """f32 ``v`` rounded to nearest even to f16 / bf16, a zero keeping its sign.
+
+        The AMDGPU backend folds an f32 multiply whose only use is the f16 conversion into one
+        mixed-precision FMA with a +0 addend (``v_fma_mixlo_f16 a, b, 0``), which turns a -0
+        product into +0. A zero therefore takes the conversion of a zero built from ``v``'s
+        sign bit (no multiply behind it), every other value the plain conversion."""
+        b = self.b
+        if ty is not F16:
+            return b.cast_f32_to(v, ty)
+        signed_zero = b.bitcast(b.land(b.bitcast(v, I32), self.c32(-(1 << 31))), F32)
+        is_zero = b.fcmp("oeq", v, self.cf_f32(0.0))
+        return b.cast_f32_to(b.select(is_zero, signed_zero, v), ty)
+
+    def cf_f32(self, v: float) -> Value:
+        return self.b.const_f32(v)
 
     def f64_to_f32_odd(self, v: Value) -> Value:
         """``v`` rounded to f32 with round-to-odd: the f32 value toward zero, its last bit set
@@ -221,7 +238,7 @@ class Emit:
         b = self.b
         r = b.cvt_f64_to_f32(v)  # nearest even
         back = b.cvt_f32_to_f64(r)
-        inexact = b.fcmp("une", back, v)
+        inexact = b.fcmp("one", back, v)  # false for NaN, which stays NaN
         away = b.fcmp("ogt", b.fabs(back), b.fabs(v))
         bits = b.bitcast(r, I32)
         # one step toward zero when the nearest even rounding went away from zero (the bits

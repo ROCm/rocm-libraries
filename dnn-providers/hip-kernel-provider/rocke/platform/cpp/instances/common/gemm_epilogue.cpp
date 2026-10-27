@@ -291,7 +291,9 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                 rocke_value_t* acc_h;
                 rocke_value_t* c_n;
                 flat += 1;
-                acc_h = rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
+                acc_h = rocke_type_eq(storage_dtype, rocke_f32())
+                            ? acc
+                            : rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
                 if(n_base_first)
                 {
                     c_n = rocke_b_add(
@@ -333,6 +335,7 @@ typedef struct gemm_default_store_user
     bool fused_is_mde; /* fused_epilogue is a _MultiDEpilogue base */
     bool pad_m;
     bool pad_n;
+    int st_align; /* storage element bytes (Python _st_align) */
 } gemm_default_store_user_t;
 
 /* _store_masked(c_m, c_n, c_off, h). */
@@ -345,7 +348,7 @@ static void gemm_default_store_masked(gemm_default_store_user_t* u,
     rocke_ir_builder_t* b = u->b;
     if(!(u->pad_m || u->pad_n))
     {
-        rocke_b_global_store(b, u->C, c_off, h, 2);
+        rocke_b_global_store(b, u->C, c_off, h, u->st_align);
         return;
     }
     {
@@ -360,7 +363,7 @@ static void gemm_default_store_masked(gemm_default_store_user_t* u,
         {
             rocke_if_t iff = rocke_b_scf_if(b, in_bounds);
             rocke_b_region_enter(b, iff.then_region);
-            rocke_b_global_store(b, u->C, c_off, h, 2);
+            rocke_b_global_store(b, u->C, c_off, h, u->st_align);
             rocke_b_region_leave(b);
         }
     }
@@ -497,6 +500,131 @@ void rocke_gemm_emit_store_swapped_acc(rocke_ir_builder_t* b,
     }
 }
 
+/* rilv_vec_epilogue (Python _emit_epilogue_default, the row-interleave branch):
+ * atom (mi, ni), lane (q = lane / 16, c = lane % 16), slot v holds
+ * C[wm + (4q + v) * mfmas_m + mi, wn + c * mfmas_n + ni]: 8 consecutive columns
+ * per (mi, v) -> one 16-byte store each (f32 output: two). The Python-engine-
+ * only forms (rve_pad, the prologue epi, the rich-epilogue / tensor GETT hooks)
+ * are refused before emission. */
+static void gemm_emit_rilv_vec_epilogue(rocke_ir_builder_t* b,
+                                        const rocke_gemm_universal_spec_t* spec,
+                                        rocke_value_t* const* accs,
+                                        rocke_value_t* lane,
+                                        rocke_value_t* block_m_off,
+                                        rocke_value_t* block_warp_m_off,
+                                        rocke_value_t* block_warp_n_off,
+                                        rocke_value_t* N,
+                                        rocke_value_t* C,
+                                        int c_per_lane,
+                                        const rocke_type_t* storage_dtype,
+                                        rocke_value_t* batch_off_c,
+                                        void* fused_epilogue,
+                                        bool fused_is_mde)
+{
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
+    int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
+    bool f32 = rocke_type_eq(storage_dtype, rocke_f32());
+    bool wide_c = spec->trait.wide_addr;
+    rocke_mem_opts_t nt = ROCKE_MEM_OPTS_INIT;
+    nt.temporal_hint = ROCKE_TEMPORAL_STREAMING;
+    const rocke_mem_opts_t* st_opts = spec->trait.rve_store_nt ? &nt : NULL;
+    if(fused_epilogue != NULL && f32)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue out_f32 does not support a fused epilogue");
+        return;
+    }
+    if(wide_c)
+    {
+        /* wide_addr: C base = C + block_m_off * N * elem bytes (i64); the store
+         * offsets are relative to the tile's first row */
+        if(spec->batched)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "wide_addr: no batched C / rich-epilogue or tensor GETT hook");
+            return;
+        }
+        rocke_value_t* zb = rocke_b_zext(b, block_m_off, rocke_i64());
+        rocke_value_t* zn = rocke_b_zext(b, N, rocke_i64());
+        rocke_value_t* mn = rocke_b_mul(b, zb, zn);
+        rocke_value_t* eb = rocke_b_const_i64(b, rocke_i_type_bits(storage_dtype) / 8);
+        rocke_value_t* by = rocke_b_mul(b, mn, eb);
+        C = rocke_b_global_ptr_add(b, C, by);
+    }
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* q = rocke_b_div(b, lane, c16);
+    rocke_value_t* cn = rocke_b_mod(b, lane, c16);
+    rocke_value_t* rq = rocke_b_mul(b, q, rocke_b_const_i32(b, c_per_lane * mfmas_m));
+    rocke_value_t* row0 = rocke_b_add(b, block_warp_m_off, rq);
+    rocke_value_t* cq = rocke_b_mul(b, cn, rocke_b_const_i32(b, mfmas_n));
+    rocke_value_t* col0 = rocke_b_add(b, block_warp_n_off, cq);
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* hs[ROCKE_GEMM_MAX_ACCS];
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* a = accs[mi * mfmas_n + ni];
+            if(f32)
+                hs[ni] = rocke_gemm_acc_f32_out(b, spec, a);
+            else
+                hs[ni] = rocke_b_vec_cast_f32_to(
+                    b, rocke_gemm_acc_agpr_out(b, spec, a), storage_dtype);
+        }
+        for(int v = 0; v < c_per_lane; ++v)
+        {
+            rocke_value_t* cm = rocke_b_const_i32(b, v * mfmas_m + mi);
+            rocke_value_t* c_m = rocke_b_add(b, row0, cm);
+            for(int n0 = 0; n0 < mfmas_n; n0 += 8)
+            {
+                if(f32)
+                {
+                    /* prologue out_f32: 8 consecutive f32 = two 16-byte stores */
+                    rocke_value_t* cr = wide_c ? rocke_b_sub(b, c_m, block_m_off) : c_m;
+                    rocke_value_t* rn = rocke_b_mul(b, cr, N);
+                    rocke_value_t* cn0 = rocke_b_const_i32(b, n0);
+                    rocke_value_t* cc = rocke_b_add(b, col0, cn0);
+                    rocke_value_t* c_off = rocke_b_add(b, rn, cc);
+                    if(batch_off_c != NULL)
+                        c_off = rocke_b_add(b, batch_off_c, c_off);
+                    for(int h4 = 0; h4 < 8; h4 += 4)
+                    {
+                        rocke_value_t* xs[4];
+                        for(int k = 0; k < 4; ++k)
+                            xs[k] = rocke_b_vec_extract(b, hs[n0 + h4 + k], v);
+                        rocke_value_t* v4 = rocke_b_vec_pack(b, xs, 4, rocke_f32());
+                        rocke_value_t* o4 = c_off;
+                        if(h4 != 0)
+                        {
+                            rocke_value_t* c4 = rocke_b_const_i32(b, 4);
+                            o4 = rocke_b_add(b, c_off, c4);
+                        }
+                        rocke_b_global_store_vN_ex(b, C, o4, v4, 4, 16, st_opts);
+                    }
+                    continue;
+                }
+                rocke_value_t* xs[8];
+                for(int k = 0; k < 8; ++k)
+                    xs[k] = rocke_b_vec_extract(b, hs[n0 + k], v);
+                rocke_value_t* vec = rocke_b_vec_pack(b, xs, 8, storage_dtype);
+                rocke_value_t* cn0 = rocke_b_const_i32(b, n0);
+                rocke_value_t* c_n = rocke_b_add(b, col0, cn0);
+                rocke_value_t* cr = wide_c ? rocke_b_sub(b, c_m, block_m_off) : c_m;
+                rocke_value_t* rn = rocke_b_mul(b, cr, N);
+                rocke_value_t* c_off = rocke_b_add(b, rn, c_n);
+                if(batch_off_c != NULL)
+                    c_off = rocke_b_add(b, batch_off_c, c_off);
+                if(fused_epilogue != NULL)
+                {
+                    /* the op chain on the 8 consecutive columns */
+                    vec = rocke_gemm_fe_apply_vec(
+                        b, fused_epilogue, fused_is_mde, vec, c_m, c_n, 8);
+                }
+                rocke_b_global_store_vN_ex(b, C, c_off, vec, 8, 16, st_opts);
+            }
+        }
+    }
+}
+
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,
@@ -523,10 +651,15 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
     bool pad_n = spec->trait.pad_n;
     rocke_value_t* warp_m_off;
     rocke_value_t* warp_n_off;
+    int st_align;
 
     (void)num_accs;
     if(!rocke_ir_builder_ok(b))
         return;
+    /* prologue out_f32: f32 output (no rounding of the accumulator) */
+    if(rocke_gemm_out_f32(spec))
+        storage_dtype = rocke_f32();
+    st_align = rocke_i_type_bits(storage_dtype) / 8;
 
     warp_m_off = rocke_b_mul(b, warp_m_idx, rocke_b_const_i32(b, mfmas_m * t->warp_tile_m));
     warp_n_off = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * t->warp_tile_n));
@@ -557,6 +690,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         u.fused_is_mde = fused_is_mde;
         u.pad_m = pad_m;
         u.pad_n = pad_n;
+        u.st_align = st_align;
 
         for(mi = 0; mi < mfmas_m; ++mi)
         {
@@ -628,6 +762,25 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
             return;
         }
 
+        if(spec->trait.rilv_vec_epilogue)
+        {
+            gemm_emit_rilv_vec_epilogue(b,
+                                        spec,
+                                        accs,
+                                        lane,
+                                        block_m_off,
+                                        block_warp_m_off,
+                                        block_warp_n_off,
+                                        N,
+                                        C,
+                                        c_per_lane,
+                                        storage_dtype,
+                                        batch_off_c,
+                                        fused_epilogue,
+                                        fused_is_mde);
+            return;
+        }
+
         u.b = b;
         u.spec = spec;
         u.M = M;
@@ -638,6 +791,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         u.fused_is_mde = fused_is_mde;
         u.pad_m = pad_m;
         u.pad_n = pad_n;
+        u.st_align = st_align;
 
         rocke_gemm_emit_mfma_acc_scatter(b,
                                          spec,

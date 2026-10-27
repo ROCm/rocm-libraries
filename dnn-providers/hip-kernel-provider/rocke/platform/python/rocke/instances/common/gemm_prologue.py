@@ -1,13 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Fused operand prologues for the universal GEMM body (Python-only side channel).
+"""Fused operand prologues for the universal GEMM body (a spec side channel).
 
 A :class:`Prologue` is attached to a :class:`UniversalGemmSpec` with
 :func:`attach_prologue` (``spec._prologue``, the same frozen-dataclass side
 channel as ``_fused_epilogue``). Without it the GEMM emission is unchanged:
 :func:`build_universal_gemm` only reads the attribute and every hook below is
-skipped, so default kernels stay byte-identical (no TraitSpec field, no C++
-mirror: the IR it emits uses only existing dual-engine ops).
+skipped, so default kernels stay byte-identical (no TraitSpec field). The C++
+engine mirrors it (``cpp/instances/common/gemm_prologue.cpp``,
+``rocke_gemm_universal_spec_t._prologue``) except the operand ops
+(``unary_a`` / ``unary_b``), ``stage="vgpr"`` and ``epi``, which it refuses;
+the ``gemm_cf32`` parity family keeps the two engines byte-identical.
 
 What a prologue does, per operand fragment, between the LDS ``ds_read`` and the
 MFMA:

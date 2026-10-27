@@ -172,10 +172,7 @@ EW_ROWS_C2 = [("f32", "f32", "f32"), ("f64", "f64", "f64"), ("f64", "f32", "f32"
 # kernel (no recipe classes).
 _REAL = ("f16", "bf16", "f32", "f64")
 EW_ROWS_1_MIXED = [
-    (a, d)
-    for d in ("f16", "bf16")
-    for a in _REAL
-    if (a, d) not in EW_ROWS_1
+    (a, d) for d in ("f16", "bf16") for a in _REAL if (a, d) not in EW_ROWS_1
 ]
 EW_ROWS_2_MIXED = [
     (t, c, d)
@@ -200,6 +197,9 @@ GEMM_BODIES = {
     "cf32": ("RIW", "RIW_SK", "Q3_SK"),
 }
 GEMM_ARCHES = ("gfx950",)
+# The body of the 64-bit-address GEMM kernels (rocke.dispatch.gemm.cf32 picks it for operands
+# past the DMA buffer range: 64-bit tile origins need the non-persistent grid).
+GEMM_WIDE_BODY = "RIW"
 GETT64_CLASS_ARCHES = ("gfx90a", "gfx942", "gfx950")
 # The thresholds of rocKE's emulated-f32 body rule (rocke.dispatch.gemm.cf32), shipped in the
 # route table so the C++ runtime picks the body the rocKE rule picks.
@@ -301,6 +301,20 @@ def kernel_descriptors(arch, num_cus):
                                 dict(route=route, dtype=dt, body=body, batched=batched),
                             )
                         )
+                # the 64-bit-address body for operands past the DMA buffer range or a result
+                # past 2^31 elements (rocKE's wide_addr adjustment; one batch per launch)
+                out.append(
+                    (
+                        "gemm",
+                        dict(
+                            route=route,
+                            dtype=dt,
+                            body=GEMM_WIDE_BODY,
+                            batched=False,
+                            wide=True,
+                        ),
+                    )
+                )
     for key in tuned_gett_keys(arch) if not features["gett"] else []:
         out.append(("gett_plan", dict(key=key)))
     if arch in GETT64_CLASS_ARCHES and not features["gett64"]:
@@ -343,15 +357,24 @@ def _gemm_spec(params, arch):
     )
 
     route, dt, body = params["route"], params["dtype"], params["body"]
+    wide = bool(params.get("wide", False))
     tile, trait, bs = cf32_body(body, arch)
     spec = UniversalGemmSpec(
-        name=f"hiptensor_{route}_{body.lower()}",
+        name=f"hiptensor_{route}_{body.lower()}{'_w64' if wide else ''}",
         tile=tile,
         trait=trait,
         data=DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt),
         block_size=bs,
         batched=bool(params["batched"]),
     )
+    if wide:
+        # rocKE's own launch adjustment for 64-bit tile origins (launched on extents padded to
+        # tile multiples: no padding adjustments apply)
+        from rocke.dispatch.gemm.cf32 import _adjust_k
+
+        if params["batched"]:
+            return None, "the 64-bit-address body has no batched form"
+        spec = _adjust_k(spec, tile.tile_m, tile.tile_n, True)
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         return None, why
@@ -622,10 +645,15 @@ def build_kernel(family, params, arch, num_cus):
             streamk=int(bool(tr.streamk)),
             sk_flags_bytes=fb,
             sk_part_bytes=pb,
+            wide=int(bool(params.get("wide", False))),
             # capability: launched on extents padded to tile multiples; the operands within
-            # the DMA buffer range, C within the i32 element offsets, rows of tiles on grid y
+            # the DMA buffer range, C within the i32 element offsets, rows of tiles on grid y.
+            # The 64-bit-address body: only one tile's operand rows within the DMA buffer
+            # range and one tile's C rows within the i32 element offsets.
             limit_operand_bytes=DTL_BUFFER_NUM_RECORDS,
             limit_c_elements=(1 << 31) - 1,
+            limit_tile_operand_bytes=DTL_BUFFER_NUM_RECORDS,
+            limit_c_tile_elements=1 << 31,
             limit_grid_yz=65535,
         )
         return build_universal_gemm(spec, arch), attrs
@@ -885,7 +913,9 @@ def jit_class_params():
     from kernels.common.hiptensor_aot.ew import EwSpec
     from kernels.common.hiptensor_aot.jit_ew import jit_classes
 
-    bases = [EwSpec(**p) for idx64 in (False, True) for p in ew_params(idx64, mixed=False)]
+    bases = [
+        EwSpec(**p) for idx64 in (False, True) for p in ew_params(idx64, mixed=False)
+    ]
     return [(dict(c.base.__dict__), c.vec, tuple(c.unit)) for c in jit_classes(bases)]
 
 

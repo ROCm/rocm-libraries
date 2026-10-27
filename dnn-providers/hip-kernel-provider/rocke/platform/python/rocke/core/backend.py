@@ -462,9 +462,7 @@ def _import_engine():
 # that dropped one would make the cpp / both paths build a different kernel
 # than Python, so every converter refuses them instead.
 _PYTHON_ONLY_GEMM_LEVERS = (
-    # row-interleave LDS layout and hb_sched slot schedule
-    ("lds_row_interleave", False),
-    ("rilv_pad", 16),
+    # hb_sched slot schedule
     ("hb_sched", False),
     ("hb_rel_slot", -1),
     ("hb_acq_slot", -1),
@@ -488,14 +486,11 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("sia_tensile", False),
     ("sia_use_order", False),
     ("sia_merge_sync", False),
-    ("rilv_vec_epilogue", False),
-    ("rve_store_nt", False),
     # 16-byte swapped-accumulator epilogue (MN B only)
     ("sab_vec16", False),
     ("sab_store_nt", False),
     # DTL issue economy
     ("dtl_rsrc_word3", 0),
-    ("dtl_soff0", False),
     ("kloop_unroll", 1),
     ("dtl_addr_spread", False),
     ("hb_dtl_delay", 0),
@@ -570,8 +565,6 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("vp_mn_worder", 0),
     ("vp_mn_pipe", 0),
     ("vp_mn_wrap", 0),
-    # 64-bit tile origins (operands / C past the i32 offsets)
-    ("wide_addr", False),
     # DTL-ring MN operands on any leading dimension
     ("mn_ld_any", False),
 )
@@ -605,6 +598,10 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
             f"DataSpec layout {d.layout!r} (MN-contiguous operands): implemented by "
             "the Python engine only (no C++ mirror yet); lower it with backend='python'"
         )
+    extra: Dict[str, Any] = {}
+    pro = getattr(spec, "_prologue", None)
+    if pro is not None:
+        extra["prologue"] = _prologue_to_dict(pro)
     return dict(
         name=spec.name,
         # tile geometry
@@ -651,6 +648,48 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         wave_size=spec.wave_size,
         block_size=spec.block_size,
         batched=spec.batched,
+        **extra,
+    )
+
+
+# Prologue fields the C++ mirror (gemm_prologue.cpp) does not emit yet: a
+# prologue that sets one is refused rather than built without it.
+_PYTHON_ONLY_PROLOGUE = (
+    ("unary_a", ""),
+    ("unary_b", ""),
+    ("stage", "lds"),
+    ("epi", ""),
+)
+
+
+def _prologue_to_dict(pro: Any) -> Dict[str, Any]:
+    """The ``prologue`` sub-dict of a spec with a fused operand prologue
+    (``spec._prologue``, gemm_prologue.Prologue)."""
+    bad = [k for k, off in _PYTHON_ONLY_PROLOGUE if getattr(pro, k) != off]
+    if bad:
+        raise NotImplementedError(
+            f"Prologue {', '.join(bad)}: implemented by the Python engine only "
+            "(no C++ mirror yet); lower it with backend='python'"
+        )
+    return dict(
+        src=pro.src,
+        recipe=pro.recipe,
+        unary_a=pro.unary_a,
+        unary_b=pro.unary_b,
+        unary_impl=pro.unary_impl,
+        out_f32=pro.out_f32,
+        cap=pro.cap,
+        order=pro.order,
+        split_at=pro.split_at,
+        stage=pro.stage,
+        pin_v=pro.pin_v,
+        fast_exp=pro.fast_exp,
+        psub=pro.psub,
+        cplx_b=pro.cplx_b,
+        conj_a=pro.conj_a,
+        conj_b=pro.conj_b,
+        epi=pro.epi,
+        agpr_out=pro.agpr_out,
     )
 
 
@@ -837,6 +876,13 @@ def _gemm_lever_keys(tr: Any) -> Dict[str, Any]:
         acc_out_vgpr=tr.acc_out_vgpr,
         ilv_read_span=tr.ilv_read_span,
         ilv_dtl_span=tr.ilv_dtl_span,
+        # row-interleave LDS layout, its vector epilogue and the DTL origin levers
+        lds_row_interleave=tr.lds_row_interleave,
+        rilv_pad=tr.rilv_pad,
+        rilv_vec_epilogue=tr.rilv_vec_epilogue,
+        rve_store_nt=tr.rve_store_nt,
+        dtl_soff0=tr.dtl_soff0,
+        wide_addr=tr.wide_addr,
     )
 
 

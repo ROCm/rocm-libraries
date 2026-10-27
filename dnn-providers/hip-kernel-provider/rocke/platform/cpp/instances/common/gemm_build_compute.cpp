@@ -110,7 +110,7 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
     warp_n_off = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, mfmas_n * t->warp_tile_n));
 
     /* Lane-local K base inside the current K-tile, hoisted once. */
-    k_blk_kbase = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, ctx->a_per_lane));
+    k_blk_kbase = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, ctx->a_per_lane * ctx->kmul));
 
     /* new_accs = list(iter_vars) */
     for(i = 0; i < num_iter_vars; ++i)
@@ -127,8 +127,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
         for(mi = 0; mi < mfmas_m; ++mi)
         {
             /* _read_a(kk, mi) */
-            rocke_value_t* col_base
-                = rocke_b_add(b, k_blk_kbase, rocke_b_const_i32(b, kk * t->warp_tile_k));
+            rocke_value_t* col_base = rocke_b_add(
+                b, k_blk_kbase, rocke_b_const_i32(b, kk * t->warp_tile_k * ctx->kmul));
             rocke_value_t* a_row = rocke_b_add(
                 b,
                 warp_m_off,
@@ -136,19 +136,15 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
                     b, rocke_b_const_i32(b, mi * t->warp_tile_m + a_row_parity_off), m_in_atom));
             if(a_par_row_v != NULL)
                 a_row = rocke_b_add(b, a_row, a_par_row_v);
-            a_rows[mi] = rocke_gemm_emit_smem_load(b,
-                                                   A_src,
-                                                   a_row,
-                                                   rocke_gemm_swz_col(ctx, col_base, a_row),
-                                                   ctx->a_per_lane,
-                                                   ctx->storage_dtype);
+            a_rows[mi] = rocke_gemm_frag_ld(
+                ctx, A_src, a_row, col_base, a_row, ctx->a_per_lane, 'A', true);
         }
 
         for(ni = 0; ni < mfmas_n; ++ni)
         {
             /* _read_b(kk, ni) */
-            rocke_value_t* col_base
-                = rocke_b_add(b, k_blk_kbase, rocke_b_const_i32(b, kk * t->warp_tile_k));
+            rocke_value_t* col_base = rocke_b_add(
+                b, k_blk_kbase, rocke_b_const_i32(b, kk * t->warp_tile_k * ctx->kmul));
             rocke_value_t* b_row = rocke_b_add(
                 b,
                 warp_n_off,
@@ -156,12 +152,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
                     b, rocke_b_const_i32(b, ni * t->warp_tile_n + b_row_parity_off), n_in_atom));
             if(b_par_row_v != NULL)
                 b_row = rocke_b_add(b, b_row, b_par_row_v);
-            b_cols[ni] = rocke_gemm_emit_smem_load(b,
-                                                   B_src,
-                                                   b_row,
-                                                   rocke_gemm_swz_col(ctx, col_base, b_row),
-                                                   ctx->b_per_lane,
-                                                   ctx->storage_dtype);
+            b_cols[ni] = rocke_gemm_frag_ld(
+                ctx, B_src, b_row, col_base, b_row, ctx->b_per_lane, 'B', true);
         }
 
         /* _mma_cluster(a_rows, b_cols): bracket each m-row's MFMA cluster
@@ -180,12 +172,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
                 {
                     int flat = mi * mfmas_n + ni;
                     /* _mma_ab: mfma_swap_ab feeds (B, A); acc_agpr pins the result */
-                    out_accs[flat] = ctx->swap_ab
-                                         ? rocke_gemm_emit_mma(
-                                               b, ctx->op, b_cols[ni], a_rows[mi], out_accs[flat])
-                                         : rocke_gemm_emit_mma(
-                                               b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
-                    out_accs[flat] = rocke_gemm_pin_acc_agpr(b, ctx->spec, out_accs[flat]);
+                    out_accs[flat]
+                        = rocke_gemm_mma_ab(ctx, a_rows[mi], b_cols[ni], out_accs[flat], ni);
                 }
             }
             rocke_b_s_setprio(b, 0);
@@ -199,11 +187,7 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
             for(ni = 0; ni < mfmas_n; ++ni)
             {
                 int flat = mi * mfmas_n + ni;
-                out_accs[flat]
-                    = ctx->swap_ab
-                          ? rocke_gemm_emit_mma(b, ctx->op, b_cols[ni], a_rows[mi], out_accs[flat])
-                          : rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
-                out_accs[flat] = rocke_gemm_pin_acc_agpr(b, ctx->spec, out_accs[flat]);
+                out_accs[flat] = rocke_gemm_mma_ab(ctx, a_rows[mi], b_cols[ni], out_accs[flat], ni);
             }
             if(ctx->swz && ctx->sched_hints)
             {

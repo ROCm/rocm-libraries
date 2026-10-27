@@ -160,6 +160,113 @@ rocke_kernel_def_t* rocke_build_gett_f64_reduce(rocke_ir_builder_t* b,
                                                 const rocke_gett_f64_spec_t* spec,
                                                 const char* arch);
 
+/* ------------------------------------------------------------------------
+ * Spec policy (gett_f64_policy.cpp): the per-arch defaults and the tuned
+ * configurations of gett_f64.py, so a C++ caller resolves the same spec the
+ * Python policy resolves.
+ * ---------------------------------------------------------------------- */
+
+/* Python _MAX_SPAN: bytes one buffer resource addresses. */
+#define ROCKE_GETT_F64_MAX_SPAN ((int64_t)((1LL << 31) - 16))
+/* Python K_BLOCK_MIN_K / K_BLOCK_ELEMS. */
+#define ROCKE_GETT_F64_K_BLOCK_MIN_K 4096
+#define ROCKE_GETT_F64_K_BLOCK_ELEMS 256
+
+/* Python GettF64Problem.addr_span_bytes(which, tile_k); which is 'A', 'B',
+ * 'C' or 'D'. */
+int64_t
+    rocke_gett_f64_addr_span_bytes(const rocke_gett_f64_problem_t* problem, char which, int tile_k);
+
+/* Python k_split(digits, tile) is not None. */
+bool rocke_gett_f64_k_splits(const rocke_gett_digits_t* digits, int tile);
+
+/* Python gemm_problem(M, N, K, ...): a (batched) strided GEMM. c_strides NULL:
+ * D's strides; c_batch_stride NULL: batch_strides[2]. */
+rocke_gett_f64_problem_t rocke_gett_f64_gemm_problem(int64_t M,
+                                                     int64_t N,
+                                                     int64_t K,
+                                                     const int64_t a_strides[2],
+                                                     const int64_t b_strides[2],
+                                                     const int64_t d_strides[2],
+                                                     const int64_t* c_strides,
+                                                     int64_t batch,
+                                                     const int64_t batch_strides[3],
+                                                     const int64_t* c_batch_stride,
+                                                     bool complex_,
+                                                     bool conj_a,
+                                                     bool conj_b);
+
+/* Python pick_tile_k(problem, preferred, max_tile_k). */
+int rocke_gett_f64_pick_tile_k(const rocke_gett_f64_problem_t* problem,
+                               int preferred,
+                               int max_tile_k);
+
+/* A set of GettF64Spec knob overrides (the Python **knobs of arch_spec):
+ * only the fields whose ROCKE_GETT_F64_KNOB_* bit is in `set` apply. */
+enum
+{
+    ROCKE_GETT_F64_KNOB_TILE_M = 1u << 0,
+    ROCKE_GETT_F64_KNOB_TILE_N = 1u << 1,
+    ROCKE_GETT_F64_KNOB_TILE_K = 1u << 2,
+    ROCKE_GETT_F64_KNOB_WARPS_M = 1u << 3,
+    ROCKE_GETT_F64_KNOB_WARPS_N = 1u << 4,
+    ROCKE_GETT_F64_KNOB_LDS_PAD = 1u << 5,
+    ROCKE_GETT_F64_KNOB_LDS_SWIZZLE = 1u << 6,
+    ROCKE_GETT_F64_KNOB_GROUP_M = 1u << 7,
+    ROCKE_GETT_F64_KNOB_XCDS = 1u << 8,
+    ROCKE_GETT_F64_KNOB_WAVES_PER_EU = 1u << 9,
+    ROCKE_GETT_F64_KNOB_BILINEAR = 1u << 10,
+    ROCKE_GETT_F64_KNOB_SCHED_FENCE = 1u << 11,
+    ROCKE_GETT_F64_KNOB_LDS_SWIZZLE_MODE = 1u << 12,
+    ROCKE_GETT_F64_KNOB_LDS_STAGES = 1u << 13,
+    ROCKE_GETT_F64_KNOB_PREFETCH_DEPTH = 1u << 14,
+    ROCKE_GETT_F64_KNOB_UNROLL2 = 1u << 15,
+    ROCKE_GETT_F64_KNOB_RUNTIME_SIZES = 1u << 16
+};
+
+typedef struct rocke_gett_f64_knobs
+{
+    unsigned set;
+    int tile_m;
+    int tile_n;
+    int tile_k;
+    int warps_m;
+    int warps_n;
+    int lds_pad; /* < 0: None */
+    bool lds_swizzle;
+    int group_m;
+    int xcds;
+    int waves_per_eu; /* 0: None */
+    bool bilinear;
+    bool sched_fence;
+    int lds_swizzle_mode;
+    int lds_stages;
+    int prefetch_depth;
+    bool unroll2;
+    bool runtime_sizes;
+} rocke_gett_f64_knobs_t;
+
+/* Python arch_spec(problem, arch, **knobs). knobs NULL: no overrides. */
+rocke_gett_f64_spec_t rocke_gett_f64_arch_spec(const rocke_gett_f64_problem_t* problem,
+                                               const char* arch,
+                                               const rocke_gett_f64_knobs_t* knobs);
+
+/* Python TUNED_CONFIGS[(arch, kind, cls)] (kind "real" or "complex") as
+ * knobs. False when the table has no such entry. */
+bool rocke_gett_f64_tuned_config(const char* arch,
+                                 const char* kind,
+                                 const char* cls,
+                                 rocke_gett_f64_knobs_t* out);
+
+/* The shape classes TUNED_CONFIGS has for (arch, kind), sorted by name: the
+ * i-th name, or NULL past the end. */
+const char* rocke_gett_f64_tuned_class_at(const char* arch, const char* kind, int index);
+
+/* Python _with_k_block(spec, arch): spec with k_block = K_BLOCK_ELEMS /
+ * tile_k (even with unroll2) when that spec is valid on arch, else spec. */
+rocke_gett_f64_spec_t rocke_gett_f64_with_k_block(const rocke_gett_f64_spec_t* spec,
+                                                  const char* arch);
+
 #ifdef __cplusplus
 }
 #endif

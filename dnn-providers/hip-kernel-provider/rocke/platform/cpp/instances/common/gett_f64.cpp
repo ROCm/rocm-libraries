@@ -2199,6 +2199,22 @@ bool rocke_gett_f64_arch_supported(const char* arch)
     return f64_atom(arch) != nullptr;
 }
 
+int64_t
+    rocke_gett_f64_addr_span_bytes(const rocke_gett_f64_problem_t* problem, char which, int tile_k)
+{
+    if(problem == nullptr)
+        return 0;
+    return addr_span_bytes(*problem, which, tile_k);
+}
+
+bool rocke_gett_f64_k_splits(const rocke_gett_digits_t* digits, int tile)
+{
+    if(digits == nullptr)
+        return false;
+    digits_t local, tiled;
+    return k_split(*digits, tile, &local, &tiled);
+}
+
 bool rocke_gett_f64_runtime_template(const rocke_gett_f64_problem_t* problem,
                                      rocke_gett_f64_problem_t* out)
 {

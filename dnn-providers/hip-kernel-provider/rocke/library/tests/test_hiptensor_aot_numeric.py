@@ -30,6 +30,8 @@ from kernels.common.hiptensor_aot.host import (
 )  # noqa: E402
 from kernels.common.hiptensor_aot.reduce import ReduceSpec, build_reduce  # noqa: E402
 
+from ._hiptensor_aot_rounding import round_rne, rounding_probes  # noqa: E402
+
 TD = {
     "f16": torch.float16,
     "bf16": torch.bfloat16,
@@ -349,11 +351,177 @@ def test_ew_zero_scale_skips_input_and_operator(dt):
     that maps the placeholder zero to -inf (LOG) do not reach D."""
     shape = [37, 5]
     a = torch.full(shape, float("nan"), dtype=TD[dt], device="cuda")
-    c = (torch.arange(37 * 5, dtype=torch.float64).reshape(shape) % 7 - 3).to(TD[dt]).cuda()
+    c = (
+        (torch.arange(37 * 5, dtype=torch.float64).reshape(shape) % 7 - 3)
+        .to(TD[dt])
+        .cuda()
+    )
     d = torch.zeros(shape, dtype=TD[dt], device="cuda")
     dims = [(shape[i], [a.stride()[i], c.stride()[i], d.stride()[i]]) for i in range(2)]
     vals, grid, idx64 = ew_args(canonicalize(dims, 2), ["A", "C", "D"])
     k = build_ew(EwSpec(arity=2, a=dt, c=dt, d=dt, idx64=idx64))
-    vals.update(A=a, C=c, D=d, opA=C.OP_LOG, opC=C.OP_IDENTITY, opAB=C.OP_ADD, alpha=0.0, gamma=-2.0)
+    vals.update(
+        A=a,
+        C=c,
+        D=d,
+        opA=C.OP_LOG,
+        opC=C.OP_IDENTITY,
+        opAB=C.OP_ADD,
+        alpha=0.0,
+        gamma=-2.0,
+    )
     _run(k, vals, grid, (256, 1, 1))
     assert torch.equal(d.cpu().double(), (-2.0 * c.cpu().double()).to(TD[dt]).double())
+
+
+# ---------------------------------------------------------------- conversions of mixed types
+
+
+@pytest.mark.parametrize("arity", [1, 2])
+@pytest.mark.parametrize("dt", ["f16", "bf16"])
+def test_ew_f64_to_16bit_rounds_once(dt, arity):
+    """f64 -> f16 / bf16 (the pack step of a 16-bit compute type, the epilogue of the F64
+    route) rounds once to nearest even: values a tiny distance from a midpoint, which an f32
+    intermediate would move onto the midpoint (double rounding), round to the correct side.
+    """
+    vals = rounding_probes(dt)
+    x = torch.tensor(vals, dtype=torch.float64, device="cuda")
+    out = torch.zeros(len(vals), dtype=TD[dt], device="cuda")
+    names = ["A", "D"] if arity == 1 else ["A", "C", "D"]
+    c = torch.full_like(out, float("nan"))  # not read: its scale is zero
+    dims = canonicalize([(len(vals), [1] * len(names))], len(names) - 1)
+    args, grid, idx64 = ew_args(dims, names)
+    spec = EwSpec(arity=arity, a="f64", c=dt if arity == 2 else None, d=dt, idx64=idx64)
+    args.update(A=x, D=out, opA=C.OP_IDENTITY, alpha=1.0)
+    if arity == 2:
+        args.update(C=c, opC=C.OP_IDENTITY, opAB=C.OP_ADD, gamma=0.0)
+    _run(build_ew(spec), args, grid, (256, 1, 1))
+    got = out.cpu().double().tolist()
+    bad = []
+    for v, g in zip(vals, got):
+        want = round_rne(v, dt)
+        # arity 2 adds the unread C's zero term: a zero result is +0 (IEEE -0 + +0)
+        signed = arity == 1 or want != 0.0
+        same = (math.isnan(want) and math.isnan(g)) or (
+            g == want
+            and (not signed or math.copysign(1.0, g) == math.copysign(1.0, want))
+        )
+        if not same:
+            bad.append((v, g, want))
+    assert not bad, bad[:8]
+
+
+@pytest.mark.parametrize(
+    "a,d", [("f16", "f16"), ("f32", "f16"), ("f32", "bf16"), ("f64", "f16")]
+)
+def test_ew_permute_keeps_signed_zeros(a, d):
+    """A permutation keeps the sign of zero results: -0 * 1, -0 * 2, +0 * -1, NEG(+0), and an
+    underflow to zero keeps its sign (the f16 conversion of a product is not folded into an FMA
+    with a +0 addend)."""
+    tiny = 2.0**-30 if d == "f16" else 2.0**-140
+    vals = [-0.0, 0.0, -0.0, 0.0, -tiny, tiny]
+    x = torch.tensor(vals, dtype=torch.float64).to(TD[a]).cuda()
+    for alpha, op in (
+        (1.0, C.OP_IDENTITY),
+        (2.0, C.OP_IDENTITY),
+        (-1.0, C.OP_IDENTITY),
+        (1.0, C.OP_NEG),
+    ):
+        out = torch.full([len(vals)], 7.0, dtype=TD[d], device="cuda")
+        args, grid, idx64 = ew_args(canonicalize([(len(vals), [1, 1])], 1), ["A", "D"])
+        args.update(A=x, D=out, opA=op, alpha=alpha)
+        _run(build_ew(EwSpec(arity=1, a=a, d=d, idx64=idx64)), args, grid, (256, 1, 1))
+        src = x.cpu().double().tolist()
+        for v, g in zip(src, out.cpu().double().tolist()):
+            w = alpha * (-v if op == C.OP_NEG else v)
+            assert g == 0.0 and math.copysign(1.0, g) == math.copysign(1.0, w), (
+                alpha,
+                op,
+                v,
+                g,
+            )
+
+
+@pytest.mark.parametrize(
+    "a,d", [("bf16", "f16"), ("f16", "bf16"), ("f32", "f16"), ("f32", "bf16")]
+)
+def test_ew_16bit_conversions_round_once(a, d):
+    """The pack conversions of mixed operand types to a 16-bit compute type: every value
+    (random significands over the whole range, both signs, specials) rounds once to nearest
+    even (from f32 compute, which holds every source value exactly)."""
+    rng = random.Random(len(a) * 17 + len(d))
+    vals = [0.0, -0.0, math.inf, -math.inf, math.nan]
+    for _ in range(4000):
+        e = rng.randrange(-30, 18) if a != "f32" else rng.randrange(-40, 40)
+        vals.append(rng.choice([-1, 1]) * rng.random() * 2.0**e)
+    x = torch.tensor(vals, dtype=torch.float64).to(TD[a])  # exact source values
+    src = x.double().tolist()
+    out = torch.zeros(len(vals), dtype=TD[d], device="cuda")
+    args, grid, idx64 = ew_args(canonicalize([(len(vals), [1, 1])], 1), ["A", "D"])
+    args.update(A=x.cuda(), D=out, opA=C.OP_IDENTITY, alpha=1.0)
+    _run(build_ew(EwSpec(arity=1, a=a, d=d, idx64=idx64)), args, grid, (256, 1, 1))
+    got = out.cpu().double().tolist()
+    bad = [
+        (v, g, round_rne(v, d))
+        for v, g in zip(src, got)
+        if not (
+            (math.isnan(v) and math.isnan(g))
+            or (g == round_rne(v, d) and math.copysign(1.0, g) == math.copysign(1.0, v))
+        )
+    ]
+    assert not bad, bad[:8]
+
+
+MIXED_EPILOGUES = [
+    ("f32", "f16", "f64", False),
+    ("f32", "bf16", "f32", False),
+    ("f32", "f64", "bf16", False),
+    ("f32", "f32", "f16", False),
+    ("f64", "f32", "f64", False),
+    ("f64", "f16", "bf16", False),
+    ("f64", "bf16", "f32", False),
+    ("f64", "f64", "f16", False),
+    ("f32", "f64", "f32", True),
+    ("f32", "f32", "f64", True),
+    ("f64", "f32", "f64", True),
+    ("f64", "f64", "f32", True),
+]
+
+
+@pytest.mark.parametrize("t,c,d,cplx", MIXED_EPILOGUES)
+def test_ew_mixed_epilogue_exact(t, c, d, cplx):
+    """The epilogue rows of mixed-type contractions, D = alpha * T + beta * C with T, C and D
+    of different types (integer data and scales: exact)."""
+    rng = random.Random(sum(map(ord, t + c + d)) + int(cplx))
+    shape = [37, 6]
+
+    def make(dt):
+        g = torch.Generator().manual_seed(rng.randrange(1 << 30))
+        re = torch.randint(-20, 21, shape, generator=g).double()
+        if not cplx:
+            return re.to(TD[dt])
+        im = torch.randint(-20, 21, shape, generator=g).double()
+        return torch.complex(re, im).to(
+            torch.complex64 if dt == "f32" else torch.complex128
+        )
+
+    T, Cm = make(t), make(c)
+    Tt = T.t().contiguous().t()  # T column-major, C row-major, D row-major
+    od = (torch.complex64 if d == "f32" else torch.complex128) if cplx else TD[d]
+    out = torch.zeros(shape, dtype=od, device="cuda")
+    Td, Cd = Tt.cuda(), Cm.cuda()
+    dims = [
+        (shape[i], [Td.stride()[i], Cd.stride()[i], out.stride()[i]]) for i in range(2)
+    ]
+    args, grid, idx64 = ew_args(canonicalize(dims, 2), ["A", "C", "D"])
+    spec = EwSpec(arity=2, a=t, c=c, d=d, cplx=cplx, idx64=idx64)
+    args.update(A=Td, C=Cd, D=out, opA=C.OP_IDENTITY, opC=C.OP_IDENTITY, opAB=C.OP_ADD)
+    if cplx:
+        args.update(alpha_re=2.0, alpha_im=-1.0, gamma_re=-3.0, gamma_im=1.0)
+        ref = (2 - 1j) * T.to(torch.complex128) + (-3 + 1j) * Cm.to(torch.complex128)
+    else:
+        args.update(alpha=2.0, gamma=-3.0)
+        ref = 2.0 * T.double() + (-3.0) * Cm.double()
+    _run(build_ew(spec), args, grid, (256, 1, 1))
+    want = ref.to(od)
+    assert torch.equal(out.cpu(), want), (out.cpu() - want).abs().max()

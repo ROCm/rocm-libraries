@@ -149,13 +149,43 @@ a plan selects (of the candidates ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times, of e
 least workspace some candidate runs with; for ``HIPTENSOR_WORKSPACE_MAX``, the workspace every candidate runs with.
 The plan's ``HIPTENSOR_PLAN_REQUIRED_WORKSPACE`` is the workspace of the selected candidate.
 
-The rocKE backend serves contractions (f16, bf16, and f32 with an f32, f16 or bf16 compute type; f64; complex f32;
-complex f64), permutations, elementwise binary and trinary operations, and reductions on the GPU targets it has a
-kernel pack for (gfx90a and gfx942: every contraction on the f64 route; gfx950: the routes of each data type, and
-the f64 route when those decline). Its kernels take their sizes and strides at run time. Tensors with more than eight modes
-after merging contiguous modes, unary operators other than identity, square root, ReLU, conjugate, reciprocal, sigmoid,
-tanh, exp, log, abs and negation, trinary contractions, and problems past the kernels' 32-bit offsets are declined, and
-the fallback backend serves them. Contractions need workspace for packed copies of A and B and an f32 (f64) result.
+The rocKE backend serves contractions and trinary contractions, permutations, elementwise binary and trinary
+operations, and reductions on the GPU targets it has a kernel pack for (gfx90a and gfx942: every contraction on the
+f64 route; gfx950: the routes of each data type, and the f64 route when those decline). Its kernels take their
+sizes and strides at run time. Unary operators other than identity, square root, ReLU, conjugate, reciprocal,
+sigmoid, tanh, exp, log, abs and negation, and contractions of real with complex tensors are declined; the
+fallback backend serves what it supports of them. Contractions need workspace for packed copies of A and B and an
+f32 (f64) result.
+
+The data types of a contraction's A, B, C and D may differ: each is f16, bf16, f32 or f64, or each is complex f32
+or complex f64. The compute type sets the precision of the products. With ``HIPTENSOR_COMPUTE_DESC_16F`` and
+``HIPTENSOR_COMPUTE_DESC_16BF`` every operand is rounded once to that type (to nearest even, from any type
+including f64; values past its range become infinities; on gfx90a and gfx942, only operands that already have that
+type are served). With ``HIPTENSOR_COMPUTE_DESC_32F`` and
+``HIPTENSOR_COMPUTE_DESC_C32F`` the operands keep their values (every f16 and bf16 value is an f32 value) and
+operands of f64 data run on the f64 route. With ``HIPTENSOR_COMPUTE_DESC_64F`` and ``HIPTENSOR_COMPUTE_DESC_C64F``
+every contraction runs on the f64 route. Products accumulate in f32 (f64 on the f64 route), C is read with its own
+type, and the result is rounded once to D's type. The error of an element of D against the exact result of the
+rounded operands is then at most ``2 (K + 4) u_c |alpha| sum |a b| + 2 u_d |d| + 4 u_c |beta c|``, with K the
+number of products, ``u_c`` the unit roundoff of the accumulation (2^-24 for f32, 2^-53 for f64) and ``u_d`` that
+of D's type.
+
+A trinary contraction runs as the library's two contractions: T = opA(A) opB(B), stored with E's data type at the
+start of the workspace (its size is part of the plan's required workspace), then
+E = alpha T opC(C) + beta opD(D). The first step writes all of T without reading it, so earlier contents of the
+workspace never reach E. Each step's candidates are ranked by that step's selection, and the candidates of the
+trinary contraction pair them: every candidate of a step with the best one of the other step, and the first three
+of each step with each other, ordered by the sum of their ranks. ``KERNEL_RANK`` and
+``HIPTENSOR_ALGO_DEFAULT_PATIENT`` apply to these pairs.
+
+Tensors of 2 GiB and more are served. The elementwise and reduction kernels have 64-bit-offset variants, the
+contraction routes of gfx950 have a GEMM body with 64-bit tile addresses (one launch per batch and per 65535 rows
+of tiles), and the f64 GEMM runs as several launches over ranges of its rows, columns and batches. When one row
+of A or B is past 2 GiB, the f64 GEMM splits K into ranges that run as the batches of one launch, each writing an
+f64 partial result, and a reduction adds the partial results in f64 before the epilogue. What one launch can't
+address (a mode of more than 2^31 elements, more than eight modes after merging contiguous modes, more than 2^31
+rows of a kernel) runs as launches over pieces of the tensors, and the partial results of a reduction's pieces are
+combined by its final kernel. Each of these steps has at most 4096 launches; larger problems are declined.
 
 JIT and kernel cache
 ^^^^^^^^^^^^^^^^^^^^

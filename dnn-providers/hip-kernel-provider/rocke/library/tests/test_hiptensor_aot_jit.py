@@ -30,6 +30,8 @@ from kernels.common.hiptensor_aot.jit_ew import (
     roll_jit_ew,
 )
 
+from ._hiptensor_aot_rounding import round_rne, rounding_probes
+
 ROWS = [
     EwSpec(arity=1, a="f16", d="f16"),
     EwSpec(arity=1, a="f32", d="f16", idx64=True),
@@ -90,6 +92,29 @@ def test_class_rule():
     )
     vals2.update(ops)
     assert jit_class_of(base, vals2)[0].vec == 1
+
+
+def test_reference_rounding_matches_numpy():
+    """The exact rational reference of one f64 -> f16 rounding agrees with numpy's direct
+    conversion on every probe (it is then trusted for bf16, which numpy lacks)."""
+    np = pytest.importorskip("numpy")
+    for v in rounding_probes("f16"):
+        with np.errstate(over="ignore"):
+            want = float(np.float16(v))
+        got = round_rne(v, "f16")
+        assert (math.isnan(want) and math.isnan(got)) or (
+            got == want and math.copysign(1.0, got) == math.copysign(1.0, want)
+        ), v
+
+
+@pytest.mark.parametrize("d", ["f16", "bf16"])
+def test_f64_to_16bit_rows_roll(d):
+    """The single-rounding f64 -> f16 / bf16 store (round to odd through f32) rolls into a
+    recipe that the expander reproduces, for the scalar and the vector class."""
+    base = EwSpec(arity=2, a="f64", c=d, d=d)
+    for spec in jit_classes([base])[:2]:
+        recipe = roll_jit_ew(spec, verify=2)
+        assert recipe["kernel_name_fmt"] == spec.kernel_name()
 
 
 torch = pytest.importorskip("torch")
@@ -250,3 +275,43 @@ def test_jit_permute_padding_limits():
     want[:32] = 3.0 * x.double()
     assert torch.equal(out.cpu().double(), want)
     assert math.isfinite(float(out.abs().max()))
+
+
+@pytest.mark.parametrize("d", ["f16", "bf16"])
+def test_jit_f64_to_16bit_rounds_once(d):
+    """The vector class of the F64 route's epilogue row (f64, d, d) rounds every value once to
+    nearest even (values next to midpoints, subnormals, overflow, zeros, infinities, NaN).
+    """
+    _gpu()
+    vals = rounding_probes(d)
+    vals += [0.0] * (-len(vals) % 64)
+    n = len(vals)
+    x = torch.tensor(vals, dtype=torch.float64, device="cuda")
+    c = torch.full(
+        [n], float("nan"), dtype=TD[d], device="cuda"
+    )  # zero scale: not read
+    out = torch.zeros(n, dtype=TD[d], device="cuda")
+    args, _, _ = ew_args(canonicalize([(n, [1, 1, 1])], 2), ["A", "C", "D"])
+    args.update(opA=C.OP_IDENTITY, opC=C.OP_IDENTITY, opAB=C.OP_ADD)
+    spec, geom, n_in = jit_class_of(EwSpec(arity=2, a="f64", c=d, d=d), args)
+    assert spec.vec > 1 and all(spec.unit)
+    k = build_ew_jit(spec, geom)
+    _run(
+        k,
+        {"A": x, "C": c, "D": out, "alpha": 1.0, "gamma": 0.0},
+        (-(-n_in // 256), geom["ystep"], 1),
+    )
+    got = out.cpu().double().tolist()
+    bad = []
+    for v, g in zip(vals, got):
+        want = round_rne(v, d)
+        # the unread C adds a zero term: a zero result is +0 (IEEE -0 + +0)
+        if not (
+            (math.isnan(want) and math.isnan(g))
+            or (
+                g == want
+                and (want == 0.0 or math.copysign(1.0, g) == math.copysign(1.0, want))
+            )
+        ):
+            bad.append((v, g, want))
+    assert not bad, bad[:8]

@@ -25,8 +25,9 @@
  *******************************************************************************/
 
 // The rocKE backend through the public API (HIPTENSOR_BACKEND=rocke, no fallback): contractions
-// of every data type, permutations, elementwise binary and trinary operations and reductions with
-// random mode orders, extents and padded strides, executed on a non-blocking stream.
+// of every data type (also of mixed data types), trinary contractions, permutations, elementwise
+// binary and trinary operations and reductions with random mode orders, extents and padded
+// strides, executed on a non-blocking stream, and tensors of 2 GiB and more.
 //
 // Every result is compared with a plain loop reference over all indices in double precision
 // (complex double), not with the library's CPU reference:
@@ -49,6 +50,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <numeric>
@@ -56,6 +58,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "api_test_helpers.hpp"
@@ -2155,5 +2158,1699 @@ namespace
         }
         EXPECT_EQ(status, HIPTENSOR_STATUS_NOT_SUPPORTED) << log.all();
         EXPECT_TRUE(log.contains("KERNEL_RANK 1 is past the 1 rocKE candidates")) << log.all();
+    }
+
+    // ---------------------------------------------------------------------- one rounding
+
+    // `v` rounded once to nearest even to data type `t` (f16, bf16, f32; complex f32 per
+    // component), with subnormals and overflow to infinity: an independent reference of the
+    // conversions to a compute type (roundTo above rounds to bf16 through f32).
+    double roundOnce(double v, hiptensorDataType_t t)
+    {
+        int p = 0, emin = 0, emax = 0;
+        switch(t)
+        {
+        case HIPTENSOR_R_16F:
+            p = 11, emin = -14, emax = 15;
+            break;
+        case HIPTENSOR_R_16BF:
+            p = 8, emin = -126, emax = 127;
+            break;
+        case HIPTENSOR_R_32F:
+        case HIPTENSOR_C_32F:
+            p = 24, emin = -126, emax = 127;
+            break;
+        default:
+            return v;
+        }
+        if(!std::isfinite(v) || v == 0.0)
+        {
+            return v;
+        }
+        int e = 0;
+        std::frexp(std::fabs(v), &e);
+        int const    q   = std::max(e - 1, emin) - (p - 1); // exponent of the last bit
+        double const r   = std::ldexp(std::nearbyint(std::ldexp(std::fabs(v), -q)), q);
+        double const top = std::ldexp(2.0 - std::ldexp(1.0, 1 - p), emax);
+        return std::copysign(r > top ? std::numeric_limits<double>::infinity() : r, v);
+    }
+
+    cplx roundOnce(cplx v, hiptensorDataType_t t)
+    {
+        return cplx(roundOnce(v.real(), t), roundOnce(v.imag(), t));
+    }
+
+    // got against want per component: NaN matches NaN, an infinity itself, a finite value the
+    // same value (exact) or one within `bound`.
+    bool matches(cplx got, cplx want, double bound, bool exact)
+    {
+        auto one = [&](double g, double w) {
+            if(std::isnan(w))
+            {
+                return std::isnan(g);
+            }
+            if(std::isinf(w))
+            {
+                return g == w;
+            }
+            return exact ? g == w : std::fabs(g - w) <= bound;
+        };
+        return one(got.real(), want.real()) && one(got.imag(), want.imag());
+    }
+
+    // The precision a compute type gives an operand: rounded once to f16 / bf16 for the 16-bit
+    // compute types; exact otherwise (f16, bf16 and f32 values are f32 values, and f64 operands
+    // take the f64 route).
+    hiptensorDataType_t operandPrecision(hiptensorComputeDescriptor_t compute)
+    {
+        return compute == HIPTENSOR_COMPUTE_DESC_16F    ? HIPTENSOR_R_16F
+               : compute == HIPTENSOR_COMPUTE_DESC_16BF ? HIPTENSOR_R_16BF
+                                                        : HIPTENSOR_R_64F;
+    }
+
+    // The unit roundoff of the products' accumulation.
+    double accumulationRoundoff(hiptensorComputeDescriptor_t compute)
+    {
+        return compute == HIPTENSOR_COMPUTE_DESC_64F || compute == HIPTENSOR_COMPUTE_DESC_C64F
+                   ? std::ldexp(1.0, -53)
+                   : std::ldexp(1.0, -24);
+    }
+
+    cplx applyOp(hiptensorOperator_t op, cplx x)
+    {
+        switch(op)
+        {
+        case HIPTENSOR_OP_CONJ:
+            return std::conj(x);
+        case HIPTENSOR_OP_RELU:
+            return cplx(std::max(x.real(), 0.0), 0.0);
+        case HIPTENSOR_OP_NEG:
+            return -x;
+        default:
+            return x;
+        }
+    }
+
+    // ---------------------------------------------------------------------- mixed data types
+
+    // A contraction whose A, B, C and D have different data types. The operands are rounded
+    // once to the compute type's precision (operandPrecision), the products accumulate in the
+    // compute type and the result is rounded once to D's type. C keeps its own type.
+    struct MixedCase
+    {
+        hiptensorDataType_t          a, b, c, d;
+        hiptensorComputeDescriptor_t compute;
+        bool                         exact;
+        bool                         scale; // no C
+        int                          seed;
+    };
+
+    void runMixed(MixedCase const& c, Choice const& choice = {}, SelectionLog* selection = nullptr)
+    {
+        std::mt19937              rng(c.seed);
+        std::optional<ApiObjects> own;
+        if(choice.api == nullptr)
+        {
+            own.emplace();
+        }
+        ApiObjects& api = choice.api != nullptr ? *choice.api : *own;
+        for(auto t : {c.a, c.b, c.c, c.d})
+        {
+            if(!api.supports(t))
+            {
+                GTEST_SKIP() << "data type not supported on this device";
+            }
+        }
+        if(deviceArch() != "gfx950"
+           && (c.compute == HIPTENSOR_COMPUTE_DESC_16F || c.compute == HIPTENSOR_COMPUTE_DESC_16BF))
+        {
+            GTEST_SKIP() << "16-bit compute types of mixed operands run on gfx950's GEMM routes";
+        }
+        LogCapture                 log;
+        std::vector<int64_t>       pick = {1, 3, 5, 8, 17, 33, 64, 70};
+        std::map<int32_t, int64_t> ext;
+        for(auto mode : {'m', 'p', 'n', 'k', 'q'})
+        {
+            ext[mode] = pick[rng() % pick.size()];
+        }
+        if(!c.exact)
+        {
+            ext['k'] = 96;
+            ext['q'] = 3;
+        }
+        std::vector<int32_t> ma = {'m', 'k', 'p', 'q'}, mb = {'k', 'n', 'q'}, md = {'n', 'm', 'p'},
+                             kmodes = {'k', 'q'};
+        std::shuffle(ma.begin(), ma.end(), rng);
+        std::shuffle(mb.begin(), mb.end(), rng);
+        std::shuffle(md.begin(), md.end(), rng);
+        auto A = makeTensor(c.a, ma, ext, rng, c.exact);
+        auto B = makeTensor(c.b, mb, ext, rng, c.exact);
+        auto C = makeTensor(c.c, md, ext, rng, c.exact);
+        auto D = makeTensor(c.d, md, ext, rng, c.exact);
+        if(isComplex(c.d) || rng() % 2)
+        {
+            // complex contractions need C with D's layout
+            D.strides = C.strides;
+            D.values.assign(C.values.size(), cplx(0, 0));
+        }
+        auto   scalarType = scalarTypeOf(c.compute);
+        Scalar alpha, beta;
+        alpha.re = c.exact ? 2.0 : 0.75;
+        beta.re  = c.scale ? 0.0 : (c.exact ? -1.0 : 0.5);
+        if(isComplex(c.d))
+        {
+            alpha.im = 1.0;
+            beta.im  = c.scale ? 0.0 : 2.0;
+        }
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto dA = describe(api, A), dB = describe(api, B), dD = describe(api, D);
+        auto dC = c.scale ? nullptr : describe(api, C);
+        ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                             &desc,
+                                             dA,
+                                             A.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dB,
+                                             B.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dC,
+                                             c.scale ? nullptr : C.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dD,
+                                             D.modes.data(),
+                                             c.compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t workspaceSize = 0;
+        auto     plan          = planWith(api, desc, choice, log, workspaceSize, selection);
+        if(plan == nullptr)
+        {
+            return;
+        }
+        Device dev;
+        void*  pA = dev.upload(A);
+        void*  pB = dev.upload(B);
+        void*  pC = c.scale ? nullptr : dev.upload(C);
+        void*  pD = dev.upload(D);
+        void*  ws = nullptr;
+        if(workspaceSize > 0)
+        {
+            ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
+            dev.buffers.push_back(ws);
+        }
+        Stream stream;
+        ASSERT_EQ(hiptensorContract(api.handle,
+                                    plan,
+                                    alpha.as(scalarType),
+                                    pA,
+                                    pB,
+                                    beta.as(scalarType),
+                                    pC,
+                                    pD,
+                                    ws,
+                                    workspaceSize,
+                                    stream.s),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        Tensor got = D;
+        dev.download(pD, got);
+
+        auto const          prec  = operandPrecision(c.compute);
+        double const        uc    = accumulationRoundoff(c.compute);
+        double const        uo    = unitRoundoff(D.type);
+        int64_t             kSize = ext['k'] * ext['q'];
+        std::vector<cplx>   want(D.values.size(), cplx(0, 0));
+        std::vector<double> bound(D.values.size(), 0.0);
+        std::vector<bool>   written(D.values.size(), false);
+        forEachIndex(md, ext, [&](auto index) {
+            cplx   sum  = 0;
+            double mags = 0;
+            forEachIndex(kmodes, ext, [&](auto kindex) {
+                auto full = index;
+                for(auto& kv : kindex)
+                {
+                    full[kv.first] = kv.second;
+                }
+                cplx const a = roundOnce(A.values[A.offset(full)], prec);
+                cplx const b = roundOnce(B.values[B.offset(full)], prec);
+                sum += a * b;
+                mags += std::abs(a) * std::abs(b);
+            });
+            auto off   = D.offset(index);
+            cplx cval  = c.scale ? cplx(0, 0) : C.values[C.offset(index)];
+            want[off]  = alpha.value() * sum + beta.value() * cval;
+            bound[off] = (kSize + 4) * uc * std::abs(alpha.value()) * mags * 2
+                         + 2 * uo * std::abs(want[off]) + 4 * uc * std::abs(beta.value() * cval);
+            written[off] = true;
+        });
+        int64_t bad = 0;
+        for(size_t i = 0; i < got.values.size(); i++)
+        {
+            if(!written[i])
+            {
+                continue;
+            }
+            // exact data: the reference rounded once to D's type (f64 types keep it)
+            cplx const w = c.exact ? roundOnce(want[i], D.type) : want[i];
+            if(!matches(got.values[i], w, bound[i], c.exact) && bad++ < 5)
+            {
+                ADD_FAILURE() << "mixed contraction: element " << i << " got " << got.values[i]
+                              << " want " << w << " (bound " << bound[i] << ")";
+            }
+        }
+        EXPECT_EQ(bad, 0) << log.all();
+    }
+
+    class RockeMixedContraction : public ::testing::TestWithParam<MixedCase>
+    {
+    };
+
+    TEST_P(RockeMixedContraction, MatchesLoopReference)
+    {
+        runMixed(GetParam());
+    }
+
+    // Every candidate of an exact mixed case (KERNEL_RANK 0, 1, ...) computes the exact result.
+    TEST_P(RockeMixedContraction, EveryCandidateExact)
+    {
+        auto c = GetParam();
+        if(!c.exact)
+        {
+            GTEST_SKIP() << "random data: covered by MatchesLoopReference";
+        }
+        Choice all;
+        all.workspace = HIPTENSOR_WORKSPACE_MAX;
+        SelectionLog first;
+        runMixed(c, all, &first);
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        ASSERT_GE(first.candidates, 1);
+        std::set<std::string> picks{first.pick};
+        for(int32_t r = 1; r < first.candidates; r++)
+        {
+            Choice choice = all;
+            choice.rank   = r;
+            SelectionLog s;
+            runMixed(c, choice, &s);
+            ASSERT_FALSE(HasFailure()) << "KERNEL_RANK " << r << ": " << s.pick;
+            picks.insert(s.pick);
+        }
+        EXPECT_EQ(picks.size(), size_t(first.candidates));
+    }
+
+    std::vector<MixedCase> mixedCases()
+    {
+        struct Row
+        {
+            hiptensorDataType_t          a, b, c, d;
+            hiptensorComputeDescriptor_t compute;
+        };
+        auto const r16 = HIPTENSOR_R_16F, rb16 = HIPTENSOR_R_16BF, r32 = HIPTENSOR_R_32F,
+                   r64 = HIPTENSOR_R_64F, c32 = HIPTENSOR_C_32F, c64 = HIPTENSOR_C_64F;
+        Row const rows[] = {
+            // 32F: x6 (mixed or f32 operands), h16 (equal 16-bit operands), the f64 route
+            {r16, r32, r32, r32, HIPTENSOR_COMPUTE_DESC_32F},
+            {rb16, r16, r16, r16, HIPTENSOR_COMPUTE_DESC_32F},
+            {r16, r16, r32, r32, HIPTENSOR_COMPUTE_DESC_32F},
+            {rb16, rb16, rb16, r32, HIPTENSOR_COMPUTE_DESC_32F},
+            {r32, r32, r16, r64, HIPTENSOR_COMPUTE_DESC_32F},
+            {r32, r64, r64, r32, HIPTENSOR_COMPUTE_DESC_32F},
+            // 16-bit compute types: every operand rounded once
+            {r32, r16, r16, r16, HIPTENSOR_COMPUTE_DESC_16F},
+            {r64, r32, r32, r16, HIPTENSOR_COMPUTE_DESC_16F},
+            {r64, r64, r64, rb16, HIPTENSOR_COMPUTE_DESC_16BF},
+            {r16, rb16, r32, rb16, HIPTENSOR_COMPUTE_DESC_16BF},
+            // 64F: the f64 route (D written directly, or through T when C's type differs)
+            {r16, r32, r64, r64, HIPTENSOR_COMPUTE_DESC_64F},
+            {r64, r64, r32, r64, HIPTENSOR_COMPUTE_DESC_64F},
+            // complex
+            {c32, c64, c64, c64, HIPTENSOR_COMPUTE_DESC_C64F},
+            {c64, c32, c32, c32, HIPTENSOR_COMPUTE_DESC_C32F},
+            {c32, c32, c32, c64, HIPTENSOR_COMPUTE_DESC_C32F},
+            {c32, c32, c64, c32, HIPTENSOR_COMPUTE_DESC_C32F},
+        };
+        std::vector<MixedCase> out;
+        int                    seed = 2100;
+        for(auto const& r : rows)
+        {
+            out.push_back({r.a, r.b, r.c, r.d, r.compute, true, false, seed++});
+            out.push_back({r.a, r.b, r.c, r.d, r.compute, true, true, seed++});
+            out.push_back({r.a, r.b, r.c, r.d, r.compute, false, false, seed++});
+        }
+        return out;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke, RockeMixedContraction, ::testing::ValuesIn(mixedCases()));
+
+    // Operands of another type than a 16-bit compute type are rounded once to it, also from
+    // f64 (no rounding through f32) and to infinity past its range; NaN propagates.
+    // D[m, n] = A[m, 0] * 1 + A[m, 1] * 0 with A's values next to the rounding boundaries.
+    TEST(RockeMixed, OperandsRoundOnceToTheComputeType)
+    {
+        if(deviceArch() != "gfx950")
+        {
+            GTEST_SKIP() << "16-bit compute types of mixed operands run on gfx950's GEMM routes";
+        }
+        for(auto compute : {HIPTENSOR_COMPUTE_DESC_16F, HIPTENSOR_COMPUTE_DESC_16BF})
+        {
+            auto const          prec   = operandPrecision(compute);
+            int const           p      = prec == HIPTENSOR_R_16F ? 11 : 8;
+            int const           emin   = prec == HIPTENSOR_R_16F ? -14 : -126;
+            int const           emax   = prec == HIPTENSOR_R_16F ? 15 : 127;
+            std::vector<double> probes = {0.0,
+                                          -0.0,
+                                          1.0,
+                                          std::numeric_limits<double>::infinity(),
+                                          std::numeric_limits<double>::quiet_NaN(),
+                                          1e300,
+                                          -1e300};
+            std::mt19937        rng(7);
+            for(int e : {emin - p, emin - 2, emin, -3, 0, 5, emax - 1, emax})
+            {
+                double const ulp = std::ldexp(1.0, std::max(e, emin) - (p - 1));
+                for(int i = 0; i < 6; i++)
+                {
+                    double const base = (e >= emin ? std::ldexp(1.0, e) : 0.0)
+                                        + double(rng() % (1u << (p - 1))) * ulp;
+                    double const mid = base + ulp / 2;
+                    for(double d : {-std::ldexp(1.0, -12),
+                                    -std::ldexp(1.0, -30),
+                                    -std::ldexp(1.0, -38),
+                                    0.0,
+                                    std::ldexp(1.0, -38),
+                                    std::ldexp(1.0, -30),
+                                    std::ldexp(1.0, -12)})
+                    {
+                        probes.push_back(mid + ulp * d);
+                        probes.push_back(-(mid + ulp * d));
+                    }
+                }
+            }
+            double const top = std::ldexp(2.0 - std::ldexp(1.0, 1 - p), emax);
+            for(double v : {top, top + std::ldexp(1.0, emax - p), top * (1 + 1e-12)})
+            {
+                probes.push_back(v);
+                probes.push_back(-v);
+            }
+            int64_t const M = int64_t(probes.size()), N = 3;
+            ApiObjects    api;
+            LogCapture    log;
+            // A[m, k] (f64, m fastest), B[k, n] (f32), D[m, n] (f32 holds every 16-bit value)
+            std::vector<double> a(M * 2, 0.0);
+            for(int64_t m = 0; m < M; m++)
+            {
+                a[m]     = probes[m];
+                a[m + M] = 3.0;
+            }
+            std::vector<float> b(2 * N);
+            for(int64_t n = 0; n < N; n++)
+            {
+                b[0 + 2 * n] = 1.0f;
+                b[1 + 2 * n] = 0.0f;
+            }
+            int32_t const                  ma[] = {'m', 'k'}, mb[] = {'k', 'n'}, md[] = {'m', 'n'};
+            auto                           dA   = api.tensor({M, 2}, {}, HIPTENSOR_R_64F);
+            auto                           dB   = api.tensor({2, N}, {}, HIPTENSOR_R_32F);
+            auto                           dD   = api.tensor({M, N}, {}, HIPTENSOR_R_32F);
+            hiptensorOperationDescriptor_t desc = nullptr;
+            ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                                 &desc,
+                                                 dA,
+                                                 ma,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dB,
+                                                 mb,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 nullptr,
+                                                 nullptr,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dD,
+                                                 md,
+                                                 compute),
+                      HIPTENSOR_STATUS_SUCCESS);
+            api.keep(desc);
+            uint64_t ws   = 0;
+            auto     plan = planOf(api, desc, ws, log);
+            ASSERT_NE(plan, nullptr);
+            void *pA = nullptr, *pB = nullptr, *pD = nullptr, *pW = nullptr;
+            ASSERT_EQ(hipMalloc(&pA, a.size() * 8), hipSuccess);
+            ASSERT_EQ(hipMalloc(&pB, b.size() * 4), hipSuccess);
+            ASSERT_EQ(hipMalloc(&pD, M * N * 4), hipSuccess);
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+            }
+            ASSERT_EQ(hipMemcpy(pA, a.data(), a.size() * 8, hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(hipMemcpy(pB, b.data(), b.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+            Scalar alpha, beta;
+            alpha.re = 1.0;
+            Stream stream;
+            ASSERT_EQ(hiptensorContract(api.handle,
+                                        plan,
+                                        alpha.as(scalarTypeOf(compute)),
+                                        pA,
+                                        pB,
+                                        beta.as(scalarTypeOf(compute)),
+                                        nullptr,
+                                        pD,
+                                        pW,
+                                        ws,
+                                        stream.s),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            std::vector<float> d(M * N);
+            ASSERT_EQ(hipMemcpy(d.data(), pD, d.size() * 4, hipMemcpyDeviceToHost), hipSuccess);
+            for(auto* ptr : {pA, pB, pD, pW})
+            {
+                static_cast<void>(hipFree(ptr));
+            }
+            int64_t bad = 0;
+            for(int64_t m = 0; m < M; m++)
+            {
+                double const want = roundOnce(probes[m], prec);
+                for(int64_t n = 0; n < N; n++)
+                {
+                    double const g = d[m + M * n];
+                    if(!matches(g, want, 0.0, true) && bad++ < 8)
+                    {
+                        ADD_FAILURE() << "compute " << compute << ": A = " << probes[m] << " gave "
+                                      << g << ", want " << want;
+                    }
+                }
+            }
+            EXPECT_EQ(bad, 0) << log.all();
+        }
+    }
+
+    // ---------------------------------------------------------------------- trinary contraction
+
+    // E = alpha * opA(A) * B * opC(C) + beta * opD(D) in hipTensor's two steps: T = opA(A) * B,
+    // stored in E's data type, then E = alpha * T * opC(C) + beta * opD(D); every operand of a
+    // step rounded to the precision of a 16-bit compute type. Modes: A {m, k, j}, B {k, u},
+    // C {u, j, n}, D and E {m, n}: step 1 contracts k, T has {m, j, u}, step 2 contracts j, u.
+    struct TrinaryCase
+    {
+        hiptensorDataType_t          type;
+        hiptensorComputeDescriptor_t compute;
+        int                          seed;
+        bool                         exact;
+        bool                         bilinear; // D given
+        hiptensorOperator_t          opA     = HIPTENSOR_OP_IDENTITY;
+        hiptensorOperator_t          opC     = HIPTENSOR_OP_IDENTITY;
+        hiptensorOperator_t          opD     = HIPTENSOR_OP_IDENTITY;
+        bool                         inPlace = false; // D is E's buffer
+    };
+
+    void runTrinary(TrinaryCase const& c,
+                    Choice const&      choice    = {},
+                    SelectionLog*      selection = nullptr)
+    {
+        std::mt19937              rng(c.seed);
+        std::optional<ApiObjects> own;
+        if(choice.api == nullptr)
+        {
+            own.emplace();
+        }
+        ApiObjects& api = choice.api != nullptr ? *choice.api : *own;
+        if(!api.supports(c.type))
+        {
+            GTEST_SKIP() << "data type not supported on this device";
+        }
+        char const* route = std::getenv("HIPTENSOR_ROCKE_CONTRACTION_ROUTE");
+        bool const  f64Route
+            = (route != nullptr && std::string(route) == "f64") || deviceArch() != "gfx950";
+        if(f64Route && c.type == HIPTENSOR_R_32F && c.compute != HIPTENSOR_COMPUTE_DESC_32F)
+        {
+            GTEST_SKIP() << "the f64 route declines f32 data with a 16-bit compute type";
+        }
+        LogCapture                 log;
+        std::vector<int64_t>       pick = {1, 2, 3, 5, 8, 17};
+        std::map<int32_t, int64_t> ext;
+        for(auto mode : {'m', 'k', 'j', 'u', 'n'})
+        {
+            ext[mode] = pick[rng() % pick.size()];
+        }
+        if(!c.exact)
+        {
+            ext['k'] = 48;
+            ext['u'] = 6;
+        }
+        std::vector<int32_t> ma = {'m', 'k', 'j'}, mb = {'k', 'u'}, mc = {'u', 'j', 'n'},
+                             me = {'m', 'n'};
+        std::shuffle(ma.begin(), ma.end(), rng);
+        std::shuffle(mb.begin(), mb.end(), rng);
+        std::shuffle(mc.begin(), mc.end(), rng);
+        std::shuffle(me.begin(), me.end(), rng);
+        auto A = makeTensor(c.type, ma, ext, rng, c.exact, 2);
+        auto B = makeTensor(c.type, mb, ext, rng, c.exact, 2);
+        auto C = makeTensor(c.type, mc, ext, rng, c.exact, 2);
+        auto D = makeTensor(c.type, me, ext, rng, c.exact, 2);
+        auto E = makeTensor(c.type, me, ext, rng, c.exact, 2);
+        if(isComplex(c.type) || c.inPlace || rng() % 2)
+        {
+            // complex contractions need D with E's layout
+            E.strides = D.strides;
+            E.values  = c.inPlace ? D.values : std::vector<cplx>(D.values.size(), cplx(0, 0));
+        }
+        auto   scalarType = scalarTypeOf(c.compute);
+        Scalar alpha, beta;
+        alpha.re = c.exact ? 2.0 : 0.75;
+        beta.re  = c.bilinear ? (c.exact ? -1.0 : 0.5) : 0.0;
+        if(isComplex(c.type))
+        {
+            alpha.im = 1.0;
+            beta.im  = c.bilinear ? 2.0 : 0.0;
+        }
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto dA = describe(api, A), dB = describe(api, B), dC = describe(api, C);
+        auto dE = describe(api, E);
+        auto dD = c.bilinear ? describe(api, D) : nullptr;
+        ASSERT_EQ(hiptensorCreateContractionTrinary(api.handle,
+                                                    &desc,
+                                                    dA,
+                                                    A.modes.data(),
+                                                    c.opA,
+                                                    dB,
+                                                    B.modes.data(),
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dC,
+                                                    C.modes.data(),
+                                                    c.opC,
+                                                    dD,
+                                                    c.bilinear ? D.modes.data() : nullptr,
+                                                    c.opD,
+                                                    dE,
+                                                    E.modes.data(),
+                                                    c.compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t workspaceSize = 0;
+        auto     plan          = planWith(api, desc, choice, log, workspaceSize, selection);
+        if(plan == nullptr)
+        {
+            return;
+        }
+        // the intermediate T needs workspace whatever the steps run on
+        int64_t tCount = ext['m'] * ext['j'] * ext['u'];
+        EXPECT_GE(workspaceSize, uint64_t(tCount) * sizeOf(c.type));
+        Device dev;
+        void*  pA = dev.upload(A);
+        void*  pB = dev.upload(B);
+        void*  pC = dev.upload(C);
+        void*  pE = dev.upload(E);
+        void*  pD = c.inPlace ? pE : (c.bilinear ? dev.upload(D) : nullptr);
+        void*  ws = nullptr;
+        if(workspaceSize > 0)
+        {
+            // NaN in every byte: nothing of the workspace's earlier contents may reach E
+            ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
+            ASSERT_EQ(hipMemset(ws, 0xFF, workspaceSize), hipSuccess);
+            dev.buffers.push_back(ws);
+        }
+        Stream stream;
+        ASSERT_EQ(hiptensorContractTrinary(api.handle,
+                                           plan,
+                                           alpha.as(scalarType),
+                                           pA,
+                                           pB,
+                                           pC,
+                                           beta.as(scalarType),
+                                           pD,
+                                           pE,
+                                           ws,
+                                           workspaceSize,
+                                           stream.s),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        Tensor got = E;
+        dev.download(pE, got);
+
+        // reference: the two steps, T rounded to E's data type
+        auto const   prec   = operandPrecision(c.compute);
+        double const uc     = isComplex(c.type) || c.type == HIPTENSOR_R_64F
+                                  ? accumulationRoundoff(c.compute)
+                                  : std::ldexp(1.0, -24);
+        double const ut     = unitRoundoff(c.type); // T and E
+        double const up     = prec == HIPTENSOR_R_64F ? 0.0 : unitRoundoff(prec);
+        auto const   tStore = isComplex(c.type) ? HIPTENSOR_C_32F : c.type;
+        std::map<std::tuple<int64_t, int64_t, int64_t>, std::pair<cplx, double>> T; // value, bound
+        for(int64_t m = 0; m < ext['m']; m++)
+        {
+            for(int64_t j = 0; j < ext['j']; j++)
+            {
+                for(int64_t u = 0; u < ext['u']; u++)
+                {
+                    cplx   sum  = 0;
+                    double mags = 0;
+                    for(int64_t k = 0; k < ext['k']; k++)
+                    {
+                        std::map<int32_t, int64_t> i{{'m', m}, {'k', k}, {'j', j}, {'u', u}};
+                        cplx const a = roundOnce(applyOp(c.opA, A.values[A.offset(i)]), prec);
+                        cplx const b = roundOnce(B.values[B.offset(i)], prec);
+                        sum += a * b;
+                        mags += std::abs(a) * std::abs(b);
+                    }
+                    cplx const   t     = c.type == HIPTENSOR_R_64F || c.type == HIPTENSOR_C_64F
+                                             ? sum
+                                             : roundOnce(sum, tStore);
+                    double const accum = 2 * (ext['k'] + 4) * uc * mags;
+                    T[{m, j, u}]       = {t, accum * (1 + 2 * ut) + 2 * ut * std::abs(sum)};
+                }
+            }
+        }
+        std::vector<cplx>   want(E.values.size(), cplx(0, 0));
+        std::vector<double> bound(E.values.size(), 0.0);
+        std::vector<bool>   written(E.values.size(), false);
+        int64_t const       k2 = ext['j'] * ext['u'];
+        for(int64_t m = 0; m < ext['m']; m++)
+        {
+            for(int64_t n = 0; n < ext['n']; n++)
+            {
+                std::map<int32_t, int64_t> i{{'m', m}, {'n', n}};
+                cplx                       sum  = 0;
+                double                     mags = 0, carried = 0;
+                for(int64_t j = 0; j < ext['j']; j++)
+                {
+                    for(int64_t u = 0; u < ext['u']; u++)
+                    {
+                        i['j']              = j;
+                        i['u']              = u;
+                        auto const& [t, bt] = T[{m, j, u}];
+                        cplx const tc       = roundOnce(t, prec);
+                        cplx const cc = roundOnce(applyOp(c.opC, C.values[C.offset(i)]), prec);
+                        sum += tc * cc;
+                        mags += std::abs(tc) * std::abs(cc);
+                        carried += (bt + 2 * up * std::abs(t)) * std::abs(cc);
+                    }
+                }
+                cplx const dval = c.bilinear ? applyOp(c.opD, D.values[D.offset(i)]) : cplx(0, 0);
+                auto const off  = E.offset(i);
+                want[off]       = alpha.value() * sum + beta.value() * dval;
+                bound[off]      = std::abs(alpha.value()) * (2 * (k2 + 4) * uc * mags + carried)
+                             + 2 * ut * std::abs(want[off])
+                             + 4 * uc * std::abs(beta.value() * dval);
+                written[off] = true;
+            }
+        }
+        int64_t bad = 0;
+        for(size_t i = 0; i < got.values.size(); i++)
+        {
+            if(!written[i])
+            {
+                continue;
+            }
+            cplx const w = c.exact && c.type != HIPTENSOR_R_64F && c.type != HIPTENSOR_C_64F
+                               ? roundOnce(want[i], tStore)
+                               : want[i];
+            if(!matches(got.values[i], w, bound[i], c.exact) && bad++ < 5)
+            {
+                ADD_FAILURE() << "trinary contraction: element " << i << " got " << got.values[i]
+                              << " want " << w << " (bound " << bound[i] << ")";
+            }
+        }
+        EXPECT_EQ(bad, 0) << log.all();
+    }
+
+    class RockeTrinaryContraction : public ::testing::TestWithParam<TrinaryCase>
+    {
+    };
+
+    TEST_P(RockeTrinaryContraction, MatchesLoopReference)
+    {
+        runTrinary(GetParam());
+    }
+
+    // Every candidate (a pair of a candidate of each step) computes the exact result.
+    TEST_P(RockeTrinaryContraction, EveryCandidateExact)
+    {
+        auto const c = GetParam();
+        if(!c.exact)
+        {
+            GTEST_SKIP() << "random data: covered by MatchesLoopReference";
+        }
+        Choice all;
+        all.workspace = HIPTENSOR_WORKSPACE_MAX;
+        SelectionLog first;
+        runTrinary(c, all, &first);
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        ASSERT_GE(first.candidates, 1);
+        EXPECT_EQ(first.pick.rfind("tri:", 0), 0u) << first.pick;
+        std::set<std::string> picks{first.pick};
+        for(int32_t r = 1; r < first.candidates; r++)
+        {
+            Choice choice = all;
+            choice.rank   = r;
+            SelectionLog s;
+            runTrinary(c, choice, &s);
+            ASSERT_FALSE(HasFailure()) << "KERNEL_RANK " << r << ": " << s.pick;
+            EXPECT_EQ(s.candidates, first.candidates);
+            picks.insert(s.pick);
+        }
+        EXPECT_EQ(picks.size(), size_t(first.candidates));
+    }
+
+    std::vector<TrinaryCase> trinaryCases()
+    {
+        struct Row
+        {
+            hiptensorDataType_t          type;
+            hiptensorComputeDescriptor_t compute;
+        };
+        Row const                rows[] = {{HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F},
+                                           {HIPTENSOR_R_16BF, HIPTENSOR_COMPUTE_DESC_32F},
+                                           {HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F},
+                                           {HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_16F},
+                                           {HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F},
+                                           {HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F},
+                                           {HIPTENSOR_C_64F, HIPTENSOR_COMPUTE_DESC_C64F}};
+        std::vector<TrinaryCase> out;
+        int                      seed = 2300;
+        for(auto const& r : rows)
+        {
+            bool const cx = isComplex(r.type);
+            auto const op = cx ? HIPTENSOR_OP_CONJ : HIPTENSOR_OP_RELU;
+            auto const od = cx ? HIPTENSOR_OP_CONJ : HIPTENSOR_OP_NEG;
+            out.push_back({r.type, r.compute, seed++, true, true});
+            out.push_back({r.type, r.compute, seed++, true, false});
+            out.push_back({r.type, r.compute, seed++, true, true, op, op, od});
+            out.push_back({r.type,
+                           r.compute,
+                           seed++,
+                           true,
+                           true,
+                           HIPTENSOR_OP_IDENTITY,
+                           HIPTENSOR_OP_IDENTITY,
+                           HIPTENSOR_OP_IDENTITY,
+                           true});
+            out.push_back({r.type, r.compute, seed++, false, true});
+        }
+        return out;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke, RockeTrinaryContraction, ::testing::ValuesIn(trinaryCases()));
+
+    // The API's checks of a trinary contraction's execution: alpha, A, B, C and E are needed,
+    // D when beta is not zero, and the workspace the plan requires.
+    TEST(RockeTrinary, ExecutionChecks)
+    {
+        ApiObjects    api;
+        LogCapture    log;
+        int64_t const M = 9, K = 5, U = 4, N = 7;
+        int32_t const ma[] = {'m', 'k'}, mb[] = {'k', 'u'}, mc[] = {'u', 'n'}, me[] = {'m', 'n'};
+        auto          f32 = HIPTENSOR_R_32F;
+        auto          dA = api.tensor({M, K}, {}, f32), dB = api.tensor({K, U}, {}, f32);
+        auto          dC = api.tensor({U, N}, {}, f32), dE = api.tensor({M, N}, {}, f32);
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreateContractionTrinary(api.handle,
+                                                    &desc,
+                                                    dA,
+                                                    ma,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dB,
+                                                    mb,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dC,
+                                                    mc,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dE,
+                                                    me,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dE,
+                                                    me,
+                                                    HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t ws   = 0;
+        auto     plan = planOf(api, desc, ws, log);
+        ASSERT_NE(plan, nullptr);
+        ASSERT_GE(ws, uint64_t(M * U * 4));
+        std::vector<float> a(M * K, 1.0f), b(K * U, 1.0f), cc(U * N, 1.0f), e(M * N, 2.0f);
+        void *             pA = nullptr, *pB = nullptr, *pC = nullptr, *pE = nullptr, *pW = nullptr;
+        for(auto [p, v] : {std::make_pair(&pA, &a),
+                           std::make_pair(&pB, &b),
+                           std::make_pair(&pC, &cc),
+                           std::make_pair(&pE, &e)})
+        {
+            ASSERT_EQ(hipMalloc(p, v->size() * 4), hipSuccess);
+            ASSERT_EQ(hipMemcpy(*p, v->data(), v->size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        }
+        ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+        float const one = 1.0f, zero = 0.0f;
+        auto        run = [&](void const* alpha,
+                       void const* A,
+                       void const* C,
+                       void const* beta,
+                       void const* D,
+                       void*       W,
+                       uint64_t    size) {
+            return hiptensorContractTrinary(
+                api.handle, plan, alpha, A, pB, C, beta, D, pE, W, size, nullptr);
+        };
+        EXPECT_EQ(run(nullptr, pA, pC, &one, pE, pW, ws), HIPTENSOR_STATUS_INVALID_VALUE);
+        EXPECT_EQ(run(&one, nullptr, pC, &one, pE, pW, ws), HIPTENSOR_STATUS_INVALID_VALUE);
+        EXPECT_EQ(run(&one, pA, nullptr, &one, pE, pW, ws), HIPTENSOR_STATUS_INVALID_VALUE);
+        EXPECT_EQ(run(&one, pA, pC, &one, nullptr, pW, ws), HIPTENSOR_STATUS_INVALID_VALUE);
+        EXPECT_EQ(run(&one, pA, pC, &one, pE, pW, ws - 1), HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE);
+        EXPECT_EQ(run(&one, pA, pC, &one, pE, nullptr, ws),
+                  HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE);
+        // beta 0: D is not read (may be null); E = A * B * C = K * U everywhere
+        ASSERT_EQ(run(&one, pA, pC, &zero, nullptr, pW, ws), HIPTENSOR_STATUS_SUCCESS) << log.all();
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        ASSERT_EQ(hipMemcpy(e.data(), pE, e.size() * 4, hipMemcpyDeviceToHost), hipSuccess);
+        for(auto v : e)
+        {
+            EXPECT_EQ(v, float(K * U));
+        }
+        for(auto* p : {pA, pB, pC, pE, pW})
+        {
+            static_cast<void>(hipFree(p));
+        }
+    }
+
+    // The intermediate T has E's data type: with f32 A and B and an f16 E, T = A * B is rounded
+    // to f16 before the second step (integer data whose T values are past f16's integer
+    // range, so the rounding of T changes E; everything else is exact). Every candidate.
+    TEST(RockeTrinary, IntermediateInOutputType)
+    {
+        ApiObjects    api;
+        int64_t const M = 5, K = 701, U = 2, N = 3;
+        int32_t const ma[] = {'m', 'k'}, mb[] = {'k', 'u'}, mc[] = {'u', 'n'}, me[] = {'m', 'n'};
+        auto          dA                    = api.tensor({M, K}, {}, HIPTENSOR_R_32F),
+             dB                             = api.tensor({K, U}, {}, HIPTENSOR_R_32F);
+        auto dC                             = api.tensor({U, N}, {}, HIPTENSOR_R_32F),
+             dE                             = api.tensor({M, N}, {}, HIPTENSOR_R_16F);
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreateContractionTrinary(api.handle,
+                                                    &desc,
+                                                    dA,
+                                                    ma,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dB,
+                                                    mb,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dC,
+                                                    mc,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    nullptr,
+                                                    nullptr,
+                                                    HIPTENSOR_OP_IDENTITY,
+                                                    dE,
+                                                    me,
+                                                    HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        std::vector<float> a(M * K), b(K * U), c(U * N);
+        for(int64_t i = 0; i < M * K; i++)
+        {
+            a[i] = float(1 + (i * 7) % 3);
+        }
+        for(int64_t i = 0; i < K * U; i++)
+        {
+            b[i] = float(1 + (i * 5) % 3);
+        }
+        for(int64_t i = 0; i < U * N; i++)
+        {
+            c[i] = float(1 + i % 2);
+        }
+        // reference: T rounded once to f16, then E = sum_u T * C rounded once to f16
+        std::vector<double> want(M * N);
+        int64_t             rounded = 0;
+        for(int64_t m = 0; m < M; m++)
+        {
+            for(int64_t n = 0; n < N; n++)
+            {
+                double e = 0;
+                for(int64_t u = 0; u < U; u++)
+                {
+                    double t = 0;
+                    for(int64_t k = 0; k < K; k++)
+                    {
+                        t += double(a[m + M * k]) * double(b[k + K * u]);
+                    }
+                    double const tr = roundOnce(t, HIPTENSOR_R_16F);
+                    rounded += tr != t ? 1 : 0;
+                    e += tr * double(c[u + U * n]);
+                }
+                want[m + M * n] = roundOnce(e, HIPTENSOR_R_16F);
+            }
+        }
+        ASSERT_GT(rounded, 0) << "the case must round T";
+        void *pA = nullptr, *pB = nullptr, *pC = nullptr, *pE = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, a.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pB, b.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pC, c.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pE, M * N * 2), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pA, a.data(), a.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pB, b.data(), b.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pC, c.data(), c.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        int32_t candidates = 1;
+        for(int32_t rank = 0; rank < candidates; rank++)
+        {
+            LogCapture log;
+            Choice     choice;
+            choice.rank      = rank;
+            choice.workspace = HIPTENSOR_WORKSPACE_MAX;
+            choice.api       = &api;
+            uint64_t     ws  = 0;
+            SelectionLog sel;
+            auto         plan = planWith(api, desc, choice, log, ws, &sel);
+            ASSERT_NE(plan, nullptr);
+            candidates = sel.candidates;
+            void* pW   = nullptr;
+            ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+            float const alpha = 1.0f, beta = 0.0f;
+            ASSERT_EQ(
+                hiptensorContractTrinary(
+                    api.handle, plan, &alpha, pA, pB, pC, &beta, nullptr, pE, pW, ws, nullptr),
+                HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            static_cast<void>(hipFree(pW));
+            std::vector<_Float16> e(M * N);
+            ASSERT_EQ(hipMemcpy(e.data(), pE, e.size() * 2, hipMemcpyDeviceToHost), hipSuccess);
+            for(int64_t i = 0; i < M * N; i++)
+            {
+                EXPECT_EQ(double(e[i]), want[i]) << sel.pick << " E element " << i;
+            }
+        }
+        for(auto* p : {pA, pB, pC, pE})
+        {
+            static_cast<void>(hipFree(p));
+        }
+    }
+
+    // NaN in an input reaches exactly the outputs it contributes to; NaN in D does not reach E
+    // when beta is zero; an infinity in A gives infinite outputs (f64 and f16 data).
+    TEST(RockeTrinary, NonFiniteValues)
+    {
+        for(auto type : {HIPTENSOR_R_64F, HIPTENSOR_R_16F})
+        {
+            ApiObjects api;
+            if(!api.supports(type))
+            {
+                continue;
+            }
+            LogCapture    log;
+            int64_t const M = 6, K = 4, U = 3, N = 5;
+            int32_t const ma[] = {'m', 'k'}, mb[] = {'k', 'u'}, mc[] = {'u', 'n'},
+                          me[] = {'m', 'n'};
+            auto dA = api.tensor({M, K}, {}, type), dB = api.tensor({K, U}, {}, type);
+            auto dC = api.tensor({U, N}, {}, type), dE = api.tensor({M, N}, {}, type);
+            auto compute
+                = type == HIPTENSOR_R_64F ? HIPTENSOR_COMPUTE_DESC_64F : HIPTENSOR_COMPUTE_DESC_32F;
+            hiptensorOperationDescriptor_t desc = nullptr;
+            ASSERT_EQ(hiptensorCreateContractionTrinary(api.handle,
+                                                        &desc,
+                                                        dA,
+                                                        ma,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        dB,
+                                                        mb,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        dC,
+                                                        mc,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        dE,
+                                                        me,
+                                                        HIPTENSOR_OP_IDENTITY,
+                                                        dE,
+                                                        me,
+                                                        compute),
+                      HIPTENSOR_STATUS_SUCCESS);
+            api.keep(desc);
+            uint64_t ws   = 0;
+            auto     plan = planOf(api, desc, ws, log);
+            ASSERT_NE(plan, nullptr);
+            double const nan = std::numeric_limits<double>::quiet_NaN();
+            double const inf = std::numeric_limits<double>::infinity();
+            Tensor       A, B, C, D, E;
+            auto         packed = [&](Tensor& t, std::vector<int32_t> modes, int64_t r, int64_t c) {
+                t.type    = type;
+                t.modes   = modes;
+                t.extents = {r, c};
+                t.strides = {1, r};
+                t.values.assign(r * c, cplx(1.0, 0.0));
+            };
+            packed(A, {'m', 'k'}, M, K);
+            packed(B, {'k', 'u'}, K, U);
+            packed(C, {'u', 'n'}, U, N);
+            packed(D, {'m', 'n'}, M, N);
+            packed(E, {'m', 'n'}, M, N);
+            A.values[1 + M * 2] = nan; // row m = 1
+            A.values[3 + M * 0] = inf; // row m = 3
+            for(auto& v : D.values)
+            {
+                v = nan; // beta 0: not read
+            }
+            Device dev;
+            void*  pA = dev.upload(A);
+            void*  pB = dev.upload(B);
+            void*  pC = dev.upload(C);
+            void*  pD = dev.upload(D);
+            void*  pE = dev.upload(E);
+            void*  pW = nullptr;
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+                dev.buffers.push_back(pW);
+            }
+            Scalar alpha, beta;
+            alpha.re = 1.0;
+            Stream stream;
+            ASSERT_EQ(hiptensorContractTrinary(api.handle,
+                                               plan,
+                                               alpha.as(scalarTypeOf(compute)),
+                                               pA,
+                                               pB,
+                                               pC,
+                                               beta.as(scalarTypeOf(compute)),
+                                               pD,
+                                               pE,
+                                               pW,
+                                               ws,
+                                               stream.s),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            Tensor got = E;
+            dev.download(pE, got);
+            for(int64_t m = 0; m < M; m++)
+            {
+                for(int64_t n = 0; n < N; n++)
+                {
+                    double const g    = got.values[m + M * n].real();
+                    double const want = m == 1 ? nan : m == 3 ? inf : double(K * U);
+                    EXPECT_TRUE(matches(g, want, 0.0, true))
+                        << "type " << type << " E[" << m << "," << n << "] = " << g << "\n"
+                        << log.all();
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------- tensors of 2 GiB
+
+    // Tensors of 2 GiB and more, on the 64-bit-address paths: the 64-bit-address GEMM body
+    // (f16, f32, complex f32), the f64 GEMM in host-iterated launches over M (and over K for a
+    // row of A past 2 GiB), elementwise pieces of a mode past 2^31 elements, and reductions
+    // over more than 2^31 reduced elements or outputs. Integer data: sampled outputs exact.
+    // Every candidate of a contraction (KERNEL_RANK) is checked.
+    bool hugeMemory(uint64_t bytes)
+    {
+        size_t freeBytes = 0, totalBytes = 0;
+        return hipMemGetInfo(&freeBytes, &totalBytes) == hipSuccess && freeBytes >= bytes;
+    }
+
+    // Values of a huge tensor: small integers (-1, 0, 1) from a hash of the element index (no
+    // period, so an element read from a wrong offset shows).
+    int64_t hugeInt(int64_t i, int seed)
+    {
+        uint64_t z = uint64_t(i) * 4 + uint64_t(seed) + 0x9E3779B97F4A7C15ull;
+        z          = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z          = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        z ^= z >> 31;
+        return int64_t(z % 3) - 1;
+    }
+
+    double hugeValue(int64_t i, int seed)
+    {
+        return double(hugeInt(i, seed));
+    }
+
+    template <typename T>
+    std::vector<T> hugeFill(int64_t count, int seed)
+    {
+        std::vector<T> v(count);
+        for(int64_t i = 0; i < count; i++)
+        {
+            v[i] = static_cast<T>(hugeValue(i, seed));
+        }
+        return v;
+    }
+
+    struct HugeContractionCase
+    {
+        hiptensorDataType_t          type;
+        hiptensorComputeDescriptor_t compute;
+        int64_t                      M, N, K;
+        bool                         bilinear;
+    };
+
+    // D[m, n] = alpha * sum_k A[k, m] B[k, n] + beta * C[m, n], packed column-major, every
+    // candidate; 512 sampled outputs against the loop reference (exact).
+    void runHugeContraction(HugeContractionCase const& c)
+    {
+        ApiObjects api;
+        if(!api.supports(c.type))
+        {
+            GTEST_SKIP() << "data type not supported on this device";
+        }
+        bool const     cx     = isComplex(c.type);
+        size_t const   es     = sizeOf(c.type);
+        uint64_t const aBytes = uint64_t(c.M) * c.K * es, bBytes = uint64_t(c.N) * c.K * es;
+        if(!hugeMemory(4 * (aBytes + bBytes) + (uint64_t(16) << 30)))
+        {
+            GTEST_SKIP() << "not enough free device memory for tensors of 2 GiB";
+        }
+        // host values (complex: interleaved components)
+        int64_t const comps  = cx ? 2 : 1;
+        auto          hostOf = [&](int64_t count, int seed) {
+            std::vector<uint8_t> bytes(count * es);
+            for(int64_t i = 0; i < count * comps; i++)
+            {
+                double const v = hugeValue(i, seed);
+                switch(c.type)
+                {
+                case HIPTENSOR_R_16F:
+                {
+                    _Float16 h = static_cast<_Float16>(v);
+                    std::memcpy(bytes.data() + 2 * i, &h, 2);
+                    break;
+                }
+                case HIPTENSOR_R_32F:
+                case HIPTENSOR_C_32F:
+                {
+                    float f = static_cast<float>(v);
+                    std::memcpy(bytes.data() + 4 * i, &f, 4);
+                    break;
+                }
+                default:
+                    std::memcpy(bytes.data() + 8 * i, &v, 8);
+                    break;
+                }
+            }
+            return bytes;
+        };
+        auto value = [&](int64_t i, int seed) {
+            return cx ? cplx(hugeValue(2 * i, seed), hugeValue(2 * i + 1, seed))
+                      : cplx(hugeValue(i, seed), 0.0);
+        };
+        auto  hA = hostOf(c.M * c.K, 1), hB = hostOf(c.N * c.K, 2), hC = hostOf(c.M * c.N, 3);
+        void *pA = nullptr, *pB = nullptr, *pC = nullptr, *pD = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, hA.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pB, hB.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pC, hC.size()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pD, hC.size()), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pA, hA.data(), hA.size(), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pB, hB.data(), hB.size(), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pC, hC.data(), hC.size(), hipMemcpyHostToDevice), hipSuccess);
+        hA.clear();
+        hA.shrink_to_fit();
+        hB.clear();
+        hB.shrink_to_fit();
+        int32_t const ma[] = {'k', 'm'}, mb[] = {'k', 'n'}, md[] = {'m', 'n'};
+        auto dA = api.tensor({c.K, c.M}, {}, c.type), dB = api.tensor({c.K, c.N}, {}, c.type);
+        auto dD                             = api.tensor({c.M, c.N}, {}, c.type);
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                             &desc,
+                                             dA,
+                                             ma,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dB,
+                                             mb,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             c.bilinear ? dD : nullptr,
+                                             c.bilinear ? md : nullptr,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dD,
+                                             md,
+                                             c.compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        Scalar alpha, beta;
+        alpha.re = 2.0;
+        beta.re  = c.bilinear ? -1.0 : 0.0;
+        if(cx)
+        {
+            alpha.im = 1.0;
+            beta.im  = c.bilinear ? 1.0 : 0.0;
+        }
+        auto const scalarType = scalarTypeOf(c.compute);
+        // sampled outputs (the corners first) and their exact values
+        std::mt19937                             rng(17);
+        std::uniform_int_distribution<int64_t>   pm(0, c.M - 1), pn(0, c.N - 1);
+        std::vector<std::pair<int64_t, int64_t>> samples;
+        if(c.M * c.N <= 512)
+        {
+            for(int64_t m = 0; m < c.M; m++)
+            {
+                for(int64_t n = 0; n < c.N; n++)
+                {
+                    samples.emplace_back(m, n);
+                }
+            }
+        }
+        else
+        {
+            samples = {{0, 0}, {c.M - 1, c.N - 1}};
+            while(samples.size() < 512)
+            {
+                samples.emplace_back(pm(rng), pn(rng));
+            }
+        }
+        // exact integer sums (complex: of the component products)
+        std::vector<cplx> want;
+        for(auto [m, n] : samples)
+        {
+            int64_t re = 0, im = 0;
+            for(int64_t k = 0; k < c.K; k++)
+            {
+                int64_t const ia = k + c.K * m, ib = k + c.K * n;
+                if(cx)
+                {
+                    int64_t const ar = hugeInt(2 * ia, 1), ai = hugeInt(2 * ia + 1, 1);
+                    int64_t const br = hugeInt(2 * ib, 2), bi = hugeInt(2 * ib + 1, 2);
+                    re += ar * br - ai * bi;
+                    im += ar * bi + ai * br;
+                }
+                else
+                {
+                    re += hugeInt(ia, 1) * hugeInt(ib, 2);
+                }
+            }
+            cplx const sum{double(re), double(im)};
+            cplx       w
+                = alpha.value() * sum + (c.bilinear ? beta.value() * value(m + c.M * n, 3) : 0.0);
+            want.push_back(roundOnce(w, cx ? HIPTENSOR_C_32F : c.type));
+        }
+        int32_t               candidates = 1;
+        std::set<std::string> picks;
+        for(int32_t rank = 0; rank < candidates; rank++)
+        {
+            LogCapture log;
+            Choice     choice;
+            choice.rank      = rank;
+            choice.workspace = HIPTENSOR_WORKSPACE_MAX;
+            choice.api       = &api;
+            uint64_t     ws  = 0;
+            SelectionLog sel;
+            auto         plan = planWith(api, desc, choice, log, ws, &sel);
+            ASSERT_NE(plan, nullptr) << "KERNEL_RANK " << rank;
+            candidates = sel.candidates;
+            picks.insert(sel.pick);
+            void* pW = nullptr;
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess) << ws;
+            }
+            ASSERT_EQ(hipMemset(pD, 0xFF, hC.size()), hipSuccess);
+            Stream stream;
+            ASSERT_EQ(hiptensorContract(api.handle,
+                                        plan,
+                                        alpha.as(scalarType),
+                                        pA,
+                                        pB,
+                                        beta.as(scalarType),
+                                        c.bilinear ? pC : nullptr,
+                                        pD,
+                                        pW,
+                                        ws,
+                                        stream.s),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            static_cast<void>(hipFree(pW));
+            int64_t bad = 0;
+            for(size_t s = 0; s < samples.size(); s++)
+            {
+                auto [m, n] = samples[s];
+                uint8_t raw[16];
+                ASSERT_EQ(hipMemcpy(raw,
+                                    static_cast<uint8_t*>(pD) + (m + c.M * n) * es,
+                                    es,
+                                    hipMemcpyDeviceToHost),
+                          hipSuccess);
+                Tensor one;
+                one.type = c.type;
+                one.values.resize(1);
+                one.fromBytes(std::vector<uint8_t>(raw, raw + es));
+                if(!matches(one.values[0], want[s], 0.0, true) && bad++ < 5)
+                {
+                    ADD_FAILURE() << sel.pick << ": D[" << m << "," << n << "] = " << one.values[0]
+                                  << ", want " << want[s];
+                }
+            }
+            EXPECT_EQ(bad, 0) << sel.pick << "\n" << log.all();
+        }
+        EXPECT_EQ(picks.size(), size_t(candidates));
+        for(auto* p : {pA, pB, pC, pD})
+        {
+            static_cast<void>(hipFree(p));
+        }
+    }
+
+    class RockeHugeContraction : public ::testing::TestWithParam<HugeContractionCase>
+    {
+    };
+
+    TEST_P(RockeHugeContraction, SampledOutputsEveryCandidate)
+    {
+        runHugeContraction(GetParam());
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        Rocke,
+        RockeHugeContraction,
+        ::testing::Values(
+            // A of 2.15 GB: the 64-bit-address h16 body and the f64 route in row ranges
+            HugeContractionCase{
+                HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 65536, 256, 16400, true},
+            // A of 2.16 GB: the 64-bit-address x6 body
+            HugeContractionCase{
+                HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 33000, 64, 16384, true},
+            // A of 2.68 GB: the 64-bit-address cf32 body
+            HugeContractionCase{
+                HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 20480, 64, 16384, true},
+            // M past 65535 rows of 256-row tiles (A of 2.18 GB, T of more than 2^31 elements):
+            // the 64-bit-address h16 body in two row ranges
+            HugeContractionCase{
+                HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 17000001, 96, 64, true},
+            // A of 2.42 GB: the f64 GEMM in row ranges
+            HugeContractionCase{
+                HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F, 36864, 64, 8192, false},
+            // rows of A and B past 2 GiB (K = 2^28 + 1024): K ranges accumulated in f64, with
+            // and without C
+            HugeContractionCase{
+                HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F, 2, 3, (int64_t(1) << 28) + 1024, true},
+            HugeContractionCase{HIPTENSOR_R_64F,
+                                HIPTENSOR_COMPUTE_DESC_64F,
+                                2,
+                                3,
+                                (int64_t(1) << 28) + 1024,
+                                false}));
+
+    // A mode of more than 2^31 elements (B = -A, f16, 4.3 GB each): pieces of 2^30.
+    TEST(RockeHugeTensor, PermutationOfALongMode)
+    {
+        int64_t const count = (int64_t(1) << 31) + 77;
+        if(!hugeMemory(uint64_t(count) * 4 + (uint64_t(4) << 30)))
+        {
+            GTEST_SKIP() << "not enough free device memory for tensors of 2 GiB";
+        }
+        ApiObjects                     api;
+        LogCapture                     log;
+        int32_t const                  mode[] = {'m'};
+        auto                           dA     = api.tensor({count}, {}, HIPTENSOR_R_16F);
+        hiptensorOperationDescriptor_t desc   = nullptr;
+        ASSERT_EQ(hiptensorCreatePermutation(api.handle,
+                                             &desc,
+                                             dA,
+                                             mode,
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dA,
+                                             mode,
+                                             HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t ws   = 0;
+        auto     plan = planOf(api, desc, ws, log);
+        ASSERT_NE(plan, nullptr);
+        auto  a  = hugeFill<_Float16>(count, 5);
+        void *pA = nullptr, *pB = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, count * 2), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pB, count * 2), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pA, a.data(), count * 2, hipMemcpyHostToDevice), hipSuccess);
+        float const alpha = -1.0f;
+        Stream      stream;
+        ASSERT_EQ(hiptensorPermute(api.handle, plan, &alpha, pA, pB, stream.s),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        std::vector<_Float16> b(count);
+        ASSERT_EQ(hipMemcpy(b.data(), pB, count * 2, hipMemcpyDeviceToHost), hipSuccess);
+        static_cast<void>(hipFree(pA));
+        static_cast<void>(hipFree(pB));
+        int64_t bad = 0;
+        for(int64_t i = 0; i < count; i++)
+        {
+            if(double(b[i]) != -double(a[i]) && bad++ < 5)
+            {
+                ADD_FAILURE() << "B[" << i << "] = " << double(b[i]) << ", want " << -double(a[i]);
+            }
+        }
+        EXPECT_EQ(bad, 0) << log.all();
+    }
+
+    // Reductions past 2^31 elements: a sum over more than 2^31 reduced elements (partials of
+    // host-iterated pieces), and more than 2^31 outputs (pieces of the kept modes).
+    TEST(RockeHugeTensor, Reductions)
+    {
+        int64_t const R = (int64_t(1) << 31) + 33, O = (int64_t(1) << 31) + 5;
+        if(!hugeMemory(uint64_t(O) * 2 * 3 + (uint64_t(8) << 30)))
+        {
+            GTEST_SKIP() << "not enough free device memory for tensors of 2 GiB";
+        }
+        ApiObjects api;
+        Stream     stream;
+        {
+            // D[c] = 2 * sum_r A[r, c] - C[c], A f16 [R, 2] (r fastest): +1 and -1 in
+            // alternating runs of 64 with a few 3s, so the partial sums of every order the
+            // kernels take (64 lanes reading 64 consecutive elements, contiguous ranges) are
+            // small integers (exact in f32)
+            LogCapture            log;
+            std::vector<_Float16> a(R * 2);
+            for(int64_t i = 0; i < R * 2; i++)
+            {
+                a[i] = static_cast<_Float16>(i % 1000003 == 0 ? 3.0 : ((i >> 6) & 1 ? -1.0 : 1.0));
+            }
+            int32_t const                  ma[] = {'r', 'c'}, mc[] = {'c'};
+            auto                           dA   = api.tensor({R, 2}, {}, HIPTENSOR_R_16F);
+            auto                           dC   = api.tensor({2}, {}, HIPTENSOR_R_16F);
+            hiptensorOperationDescriptor_t desc = nullptr;
+            ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                               &desc,
+                                               dA,
+                                               ma,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               dC,
+                                               mc,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               dC,
+                                               mc,
+                                               HIPTENSOR_OP_ADD,
+                                               HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+            api.keep(desc);
+            uint64_t ws   = 0;
+            auto     plan = planOf(api, desc, ws, log);
+            ASSERT_NE(plan, nullptr);
+            _Float16 c[2] = {static_cast<_Float16>(5.0), static_cast<_Float16>(-7.0)}, d[2];
+            void *   pA = nullptr, *pC = nullptr, *pD = nullptr, *pW = nullptr;
+            ASSERT_EQ(hipMalloc(&pA, a.size() * 2), hipSuccess);
+            ASSERT_EQ(hipMalloc(&pC, 4), hipSuccess);
+            ASSERT_EQ(hipMalloc(&pD, 4), hipSuccess);
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+            }
+            ASSERT_EQ(hipMemcpy(pA, a.data(), a.size() * 2, hipMemcpyHostToDevice), hipSuccess);
+            ASSERT_EQ(hipMemcpy(pC, c, 4, hipMemcpyHostToDevice), hipSuccess);
+            float const alpha = 2.0f, beta = -1.0f;
+            ASSERT_EQ(
+                hiptensorReduce(api.handle, plan, &alpha, pA, &beta, pC, pD, pW, ws, stream.s),
+                HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            ASSERT_EQ(hipMemcpy(d, pD, 4, hipMemcpyDeviceToHost), hipSuccess);
+            for(auto* p : {pA, pC, pD, pW})
+            {
+                static_cast<void>(hipFree(p));
+            }
+            for(int64_t col = 0; col < 2; col++)
+            {
+                double sum = 0;
+                for(int64_t r = 0; r < R; r++)
+                {
+                    sum += double(a[r + R * col]);
+                }
+                double const want = roundOnce(2.0 * sum - double(c[col]), HIPTENSOR_R_16F);
+                EXPECT_EQ(double(d[col]), want) << "column " << col << "\n" << log.all();
+            }
+        }
+        {
+            // D[o] = max(A[o, 0], A[o, 1]), more than 2^31 outputs (f16)
+            LogCapture                     log;
+            auto                           a    = hugeFill<_Float16>(O * 2, 9);
+            int32_t const                  ma[] = {'o', 'c'}, md[] = {'o'};
+            auto                           dA   = api.tensor({O, 2}, {}, HIPTENSOR_R_16F);
+            auto                           dD   = api.tensor({O}, {}, HIPTENSOR_R_16F);
+            hiptensorOperationDescriptor_t desc = nullptr;
+            ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                               &desc,
+                                               dA,
+                                               ma,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               dD,
+                                               md,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               dD,
+                                               md,
+                                               HIPTENSOR_OP_MAX,
+                                               HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+            api.keep(desc);
+            uint64_t ws   = 0;
+            auto     plan = planOf(api, desc, ws, log);
+            ASSERT_NE(plan, nullptr);
+            void *pA = nullptr, *pD = nullptr, *pW = nullptr;
+            ASSERT_EQ(hipMalloc(&pA, a.size() * 2), hipSuccess);
+            ASSERT_EQ(hipMalloc(&pD, O * 2), hipSuccess);
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+            }
+            ASSERT_EQ(hipMemcpy(pA, a.data(), a.size() * 2, hipMemcpyHostToDevice), hipSuccess);
+            float const alpha = 1.0f, beta = 0.0f;
+            ASSERT_EQ(
+                hiptensorReduce(api.handle, plan, &alpha, pA, &beta, nullptr, pD, pW, ws, stream.s),
+                HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            std::vector<_Float16> d(O);
+            ASSERT_EQ(hipMemcpy(d.data(), pD, O * 2, hipMemcpyDeviceToHost), hipSuccess);
+            for(auto* p : {pA, pD, pW})
+            {
+                static_cast<void>(hipFree(p));
+            }
+            int64_t bad = 0;
+            for(int64_t o = 0; o < O; o++)
+            {
+                double const want = std::max(double(a[o]), double(a[o + O]));
+                if(double(d[o]) != want && bad++ < 5)
+                {
+                    ADD_FAILURE() << "D[" << o << "] = " << double(d[o]) << ", want " << want;
+                }
+            }
+            EXPECT_EQ(bad, 0) << log.all();
+        }
+    }
+
+    // A reduction with more kept and more reduced modes than the kernels' 8 slots (9 of each,
+    // interleaved so that none merge): pieces of the kept modes are separate reductions, pieces
+    // of the reduced modes write partials that the final kernel combines. Exact (integer data).
+    TEST(RockeReductionPieces, MoreThanEightKeptAndReducedModes)
+    {
+        ApiObjects                 api;
+        LogCapture                 log;
+        int const                  pairs = 9;
+        std::vector<int32_t>       modesA, modesD;
+        std::vector<int64_t>       extA, strideA, extD, strideD;
+        int64_t                    sa = 1, sd = 1;
+        std::map<int32_t, int64_t> ext;
+        for(int i = 0; i < pairs; i++)
+        {
+            int32_t const k = 'a' + i, r = 'n' + i;
+            int64_t const ek = i == 4 ? 3 : 2, er = i == 6 ? 3 : 2;
+            ext[k] = ek;
+            ext[r] = er;
+            modesA.insert(modesA.end(), {k, r});
+            extA.insert(extA.end(), {ek, er});
+            strideA.insert(strideA.end(), {sa, sa * ek});
+            sa *= ek * er;
+            modesD.push_back(k);
+            extD.push_back(ek);
+            strideD.push_back(sd);
+            sd *= ek;
+        }
+        std::vector<float> a(sa), c(sd);
+        for(int64_t i = 0; i < sa; i++)
+        {
+            a[i] = float(int64_t(hugeInt(i, 21)));
+        }
+        for(int64_t i = 0; i < sd; i++)
+        {
+            c[i] = float(i % 5) - 2.0f;
+        }
+        auto                           dA   = api.tensor(extA, strideA, HIPTENSOR_R_32F);
+        auto                           dD   = api.tensor(extD, strideD, HIPTENSOR_R_32F);
+        hiptensorOperationDescriptor_t desc = nullptr;
+        ASSERT_EQ(hiptensorCreateReduction(api.handle,
+                                           &desc,
+                                           dA,
+                                           modesA.data(),
+                                           HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           modesD.data(),
+                                           HIPTENSOR_OP_IDENTITY,
+                                           dD,
+                                           modesD.data(),
+                                           HIPTENSOR_OP_ADD,
+                                           HIPTENSOR_COMPUTE_DESC_32F),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        void *pA = nullptr, *pC = nullptr, *pD = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, a.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pC, c.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pD, c.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pA, a.data(), a.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pC, c.data(), c.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        // reference: D[k] = 2 * sum_r A[k, r] - C[k]
+        std::vector<double> want(sd, 0.0);
+        for(int64_t i = 0; i < sa; i++)
+        {
+            int64_t rest = i, d = 0;
+            for(int j = 0; j < pairs; j++)
+            {
+                int64_t const ik = rest % extA[2 * j];
+                rest /= extA[2 * j];
+                rest /= extA[2 * j + 1];
+                d += ik * strideD[j];
+            }
+            want[d] += 2.0 * a[i];
+        }
+        for(int64_t i = 0; i < sd; i++)
+        {
+            want[i] -= c[i];
+        }
+        int32_t candidates = 1;
+        for(int32_t rank = 0; rank < candidates; rank++)
+        {
+            Choice choice;
+            choice.rank      = rank;
+            choice.workspace = HIPTENSOR_WORKSPACE_MAX;
+            choice.api       = &api;
+            uint64_t     ws  = 0;
+            SelectionLog sel;
+            auto         plan = planWith(api, desc, choice, log, ws, &sel);
+            ASSERT_NE(plan, nullptr);
+            candidates = sel.candidates;
+            void* pW   = nullptr;
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&pW, ws), hipSuccess);
+            }
+            ASSERT_EQ(hipMemset(pD, 0xFF, c.size() * 4), hipSuccess);
+            float const alpha = 2.0f, beta = -1.0f;
+            ASSERT_EQ(hiptensorReduce(api.handle, plan, &alpha, pA, &beta, pC, pD, pW, ws, nullptr),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            static_cast<void>(hipFree(pW));
+            std::vector<float> d(sd);
+            ASSERT_EQ(hipMemcpy(d.data(), pD, d.size() * 4, hipMemcpyDeviceToHost), hipSuccess);
+            int64_t bad = 0;
+            for(int64_t i = 0; i < sd; i++)
+            {
+                if(double(d[i]) != want[i] && bad++ < 5)
+                {
+                    ADD_FAILURE() << sel.pick << ": D[" << i << "] = " << d[i] << ", want "
+                                  << want[i];
+                }
+            }
+            EXPECT_EQ(bad, 0) << log.all();
+        }
+        for(auto* p : {pA, pC, pD})
+        {
+            static_cast<void>(hipFree(p));
+        }
     }
 } // namespace

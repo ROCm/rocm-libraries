@@ -18,6 +18,13 @@ Operator codes are `hiptensorOperator_t` values; unary IDENTITY, SQRT, RELU, CON
 TANH, EXP, LOG, ABS, NEG; binary ADD, MUL, MAX, MIN (MAX / MIN propagate NaN). A tensor whose
 scale is zero is not read.
 
+Conversions: every value rounds once to nearest even into the output type. Kernels with an f64
+operand compute in f64; their f16 / bf16 outputs go through an f32 rounded to odd
+(`Emit.f64_to_f32_odd`), which then rounds to nearest even exactly as one rounding from f64 would
+(f32 has at least two more significand bits than f16 and bf16), so f64 -> f16 / bf16 never rounds
+twice.
+
 Tests: `library/tests/test_hiptensor_aot_numeric.py` (GPU, float64 references; the `row`
-reduction cases need a wave64 device), `library/tests/test_hiptensor_aot_jit.py` (recipes roll and
-reproduce the builder; specialized kernels against float64 references).
+reduction cases need a wave64 device; the conversions against the exact rational rounding of
+`library/tests/_hiptensor_aot_rounding.py`), `library/tests/test_hiptensor_aot_jit.py` (recipes
+roll and reproduce the builder; specialized kernels against float64 references).

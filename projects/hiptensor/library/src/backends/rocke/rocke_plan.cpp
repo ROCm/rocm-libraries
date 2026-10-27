@@ -428,12 +428,12 @@ namespace hiptensor
                                        std::vector<std::pair<std::string, int64_t>> const&     ints,
                                        std::vector<std::pair<std::string, std::string>> const& strs,
                                        std::vector<Dim>                                        dims,
-                                       std::vector<EwOperand> const&  operands,
-                                       std::vector<uint64_t> const&   bytes,
-                                       std::array<int, 2> const&      binaryOps,
-                                       std::vector<LaunchStep>&       steps,
-                                       int64_t&                       budget,
-                                       std::string&                   reason)
+                                       std::vector<EwOperand> const& operands,
+                                       std::vector<uint64_t> const&  bytes,
+                                       std::array<int, 2> const&     binaryOps,
+                                       std::vector<LaunchStep>&      steps,
+                                       int64_t&                      budget,
+                                       std::string&                  reason)
             {
                 int const tensors = static_cast<int>(operands.size());
                 // Host-iterated pieces of mode `i`, `piece` long: one ewPieces each, with the
@@ -452,9 +452,13 @@ namespace hiptensor
                     for(int64_t first = 0; first < dims[i].extent; first += piece)
                     {
                         std::vector<int64_t> offsets;
-                        auto const           sub = restrictMode(
-                            dims, i, first, std::min(piece, dims[i].extent - first), tensors, offsets);
-                        auto moved = operands;
+                        auto const           sub   = restrictMode(dims,
+                                                      i,
+                                                      first,
+                                                      std::min(piece, dims[i].extent - first),
+                                                      tensors,
+                                                      offsets);
+                        auto                 moved = operands;
                         for(int t = 0; t < tensors; t++)
                         {
                             moved[t].bytes += uint64_t(offsets[t]) * bytes[t];
@@ -792,6 +796,67 @@ namespace hiptensor
             constexpr int kRowMode  = 0;
             constexpr int kColMode  = 1;
 
+            // A piece of a reduction's kept or reduced modes that one launch addresses, and the
+            // element offset of the piece in each tensor.
+            struct ReductionPiece
+            {
+                std::vector<Dim>     dims;
+                std::vector<int64_t> offsets;
+            };
+
+            // Splits canonical modes into pieces one launch addresses: a mode of more than 2^31
+            // elements into pieces of 2^30, modes past the kernels' 8 slots one index of the
+            // outermost mode at a time, more than 2^31 elements into halves of the outermost
+            // mode. False past kMaxLaunches pieces.
+            bool reductionPieces(std::vector<Dim> const&      dims,
+                                 int                          tensors,
+                                 std::vector<ReductionPiece>& out)
+            {
+                out.clear();
+                std::function<bool(std::vector<Dim> const&, std::vector<int64_t> const&)> walk;
+                walk = [&](std::vector<Dim> const& ds, std::vector<int64_t> const& base) {
+                    auto pieces = [&](size_t i, int64_t piece) {
+                        for(int64_t first = 0; first < ds[i].extent; first += piece)
+                        {
+                            std::vector<int64_t> off;
+                            auto const           sub = restrictMode(
+                                ds, i, first, std::min(piece, ds[i].extent - first), tensors, off);
+                            for(int t = 0; t < tensors; t++)
+                            {
+                                off[t] += base[t];
+                            }
+                            if(!walk(sub, off))
+                            {
+                                return false;
+                            }
+                        }
+                        return true;
+                    };
+                    for(size_t i = 0; i < ds.size(); i++)
+                    {
+                        if(ds[i].extent > kI32Max)
+                        {
+                            return pieces(i, kLongModePiece);
+                        }
+                    }
+                    if(ds.size() > size_t(kMaxRank))
+                    {
+                        return pieces(ds.size() - 1, 1);
+                    }
+                    if(product(ds, 0, ds.size()) > kI32Max)
+                    {
+                        return pieces(ds.size() - 1, (ds.back().extent + 1) / 2);
+                    }
+                    if(int64_t(out.size()) >= kMaxLaunches)
+                    {
+                        return false;
+                    }
+                    out.push_back({ds, base});
+                    return true;
+                };
+                return walk(dims, std::vector<int64_t>(tensors, 0));
+            }
+
             // `mode` is kRuleMode (row when the innermost reduced mode is the innermost mode of A),
             // kRowMode or kColMode. The split of the reduced elements targets `splitWaves` times the
             // waves (row) or blocks (col) that fill the device; 0 does not split.
@@ -909,28 +974,28 @@ namespace hiptensor
                 }
                 canonicalize(kept, 3, 0);
                 canonicalize(red, 1, 0);
-                if(kept.size() > size_t(kMaxRank) || red.size() > size_t(kMaxRank))
-                {
-                    reason = "more than 8 kept or reduced modes after merging";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
-                }
-                kept.resize(kMaxRank);
-                red.resize(kMaxRank);
-                int64_t nOut = product(kept, 0, kMaxRank);
-                int64_t nRed = product(red, 0, kMaxRank);
-                if(nOut > kI32Max || nRed > kI32Max)
-                {
-                    reason = "more than 2^31 outputs or reduced elements";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
-                }
-                bool const ruleRow
-                    = nRed > 1
-                      && (nOut == 1
-                          || std::llabs(red[0].stride[0]) < std::llabs(kept[0].stride[0]));
+                int64_t const nOutAll = product(kept, 0, kept.size());
+                int64_t const nRedAll = product(red, 0, red.size());
+                Dim const     kept0   = kept.empty() ? Dim{} : kept[0];
+                Dim const     red0    = red.empty() ? Dim{} : red[0];
+                bool const    ruleRow
+                    = nRedAll > 1
+                      && (nOutAll == 1 || std::llabs(red0.stride[0]) < std::llabs(kept0.stride[0]));
                 bool const row = mode == kRuleMode ? ruleRow : mode == kRowMode;
-                if(row && nRed <= 1)
+                if(row && nRedAll <= 1)
                 {
                     reason = "the row reduction needs a reduced mode";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                // What one launch cannot address is split into host-iterated pieces: pieces of
+                // the kept modes are separate reductions (each writes its own outputs), pieces
+                // of the reduced modes write partial results that the final kernel combines.
+                std::vector<ReductionPiece> keptPieces, redPieces;
+                if(!reductionPieces(kept, 3, keptPieces) || !reductionPieces(red, 1, redPieces)
+                   || int64_t(keptPieces.size() * (redPieces.size() + 1)) > kMaxLaunches)
+                {
+                    reason = "the reduction needs more than " + std::to_string(kMaxLaunches)
+                             + " launches of the generic kernels";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 bool idx64 = spanOf(kept, 0) + spanOf(red, 0) > kI32Max || spanOf(kept, 1) > kI32Max
@@ -947,104 +1012,65 @@ namespace hiptensor
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 int64_t const  block  = kernel->attr("block", 256);
+                int64_t const  fblock = final->attr("block", 256);
                 int64_t const  cus    = std::max(1, problem.device.cuCount);
                 uint64_t const wbytes = d == "f64" || a == "f64" ? 8 : 4;
-
-                // Work units and the split that fills the device.
-                int64_t split = 1, chunk = 0, nchunk = 0, gridX = 0, gridY = 1, units = 0;
-                if(row)
-                {
-                    nchunk         = ceilDiv(red[0].extent, kWave);
-                    int64_t trips  = nchunk * (nRed / red[0].extent);
-                    int64_t waves  = nOut;
-                    int64_t target = int64_t(splitWaves) * 8 * cus * 4; // waves
-                    split          = std::clamp<int64_t>(ceilDiv(target, waves), 1, trips);
-                    chunk          = ceilDiv(trips, split);
-                    split          = ceilDiv(trips, chunk);
-                    gridX          = ceilDiv(nOut, block / kWave);
-                    units          = gridX;
-                }
-                else
-                {
-                    int64_t outer  = nOut / kept[0].extent;
-                    gridX          = ceilDiv(kept[0].extent, block);
-                    gridY          = std::min<int64_t>(outer, kGridYZMax);
-                    int64_t blocks = gridX * gridY;
-                    int64_t target = int64_t(splitWaves) * 4 * cus;
-                    split          = std::clamp<int64_t>(ceilDiv(target, blocks), 1, nRed);
-                    split          = std::min<int64_t>(split, kGridYZMax);
-                    chunk          = ceilDiv(nRed, split);
-                    split          = ceilDiv(nRed, chunk);
-                    units          = blocks;
-                }
-                static_cast<void>(units);
-                auto workspaceFor
-                    = [&](int64_t s) { return s > 1 ? uint64_t(s) * nOut * wbytes : 0; };
-                while(split > 1
-                      && (workspaceFor(split) > workspaceLimit || split * nOut > kI32Max
-                          || (row && split > kGridYZMax)))
-                {
-                    // Fewer, longer ranges until the partials fit.
-                    if(row)
-                    {
-                        int64_t trips = nchunk * (nRed / red[0].extent);
-                        chunk         = ceilDiv(trips, split / 2);
-                        split         = ceilDiv(trips, chunk);
-                    }
-                    else
-                    {
-                        chunk = ceilDiv(nRed, split / 2);
-                        split = ceilDiv(nRed, chunk);
-                    }
-                }
-                if(split == 1)
-                {
-                    chunk = row ? nchunk * (nRed / red[0].extent) : nRed;
-                }
+                uint64_t const aBytes = elementBytes(a), dBytes = elementBytes(d);
 
                 program                 = Program{};
                 program.pack            = &pack;
                 program.scalarType      = problem.scalarType;
                 program.description     = kernel->name;
-                program.workspaceBytes  = alignUp(workspaceFor(split), kWorkspaceAlign);
                 program.nullStatus      = HIPTENSOR_STATUS_NOT_INITIALIZED;
                 program.requiredScalars = {0, 1};
                 program.requiredBuffers
                     = {{BufferRole::A, 0}, {BufferRole::C, 1}, {BufferRole::Out, -1}};
 
-                auto geometry = [&](ArgWriter& w, bool withRed) {
+                // Kernel arguments of a launch over kept modes `kd` and reduced modes `rd` (8
+                // each), with A, C, D offset by `off` elements and the partials at W + `wOff`.
+                auto geometry = [&](ArgWriter&                       w,
+                                    std::array<Dim, kMaxRank> const& kd,
+                                    std::array<Dim, kMaxRank> const& rd,
+                                    bool                             withRed) {
                     bool ok = true;
                     for(int i = 0; i < kMaxRank; i++)
                     {
                         auto n = std::to_string(i);
-                        ok     = ok && w.set("ke" + n, kept[i].extent)
-                             && w.set("kC" + n, kept[i].extent == 1 ? 0 : kept[i].stride[1])
-                             && w.set("kD" + n, kept[i].extent == 1 ? 0 : kept[i].stride[2]);
+                        ok     = ok && w.set("ke" + n, kd[i].extent)
+                             && w.set("kC" + n, kd[i].extent == 1 ? 0 : kd[i].stride[1])
+                             && w.set("kD" + n, kd[i].extent == 1 ? 0 : kd[i].stride[2]);
                         if(withRed)
                         {
-                            ok = ok && w.set("kA" + n, kept[i].extent == 1 ? 0 : kept[i].stride[0])
-                                 && w.set("re" + n, red[i].extent)
-                                 && w.set("rA" + n, red[i].extent == 1 ? 0 : red[i].stride[0]);
+                            ok = ok && w.set("kA" + n, kd[i].extent == 1 ? 0 : kd[i].stride[0])
+                                 && w.set("re" + n, rd[i].extent)
+                                 && w.set("rA" + n, rd[i].extent == 1 ? 0 : rd[i].stride[0]);
                         }
                         if(i < kMaxRank - 1)
                         {
                             ok = ok
                                  && setMagic(
-                                     w, ("km" + n).c_str(), ("ks" + n).c_str(), kept[i].extent);
+                                     w, ("km" + n).c_str(), ("ks" + n).c_str(), kd[i].extent);
                             if(withRed)
                             {
                                 ok = ok
                                      && setMagic(
-                                         w, ("rm" + n).c_str(), ("rs" + n).c_str(), red[i].extent);
+                                         w, ("rm" + n).c_str(), ("rs" + n).c_str(), rd[i].extent);
                             }
                         }
                     }
                     return ok;
                 };
-                auto common = [&](ArgWriter& w, bool withA) {
-                    bool ok = w.pointer("C", C.present ? BufferRole::C : BufferRole::None)
-                              && w.pointer("D", BufferRole::Out)
-                              && w.pointer("W", BufferRole::Workspace)
+                auto common = [&](ArgWriter&                    w,
+                                  bool                          withA,
+                                  std::array<int64_t, 3> const& off,
+                                  uint64_t                      wOff,
+                                  int64_t                       nOut,
+                                  int64_t                       split) {
+                    bool ok = w.pointer("C",
+                                        C.present ? BufferRole::C : BufferRole::None,
+                                        uint64_t(off[1]) * dBytes)
+                              && w.pointer("D", BufferRole::Out, uint64_t(off[2]) * dBytes)
+                              && w.pointer("W", BufferRole::Workspace, wOff)
                               && w.scalar("alpha", ScalarRole::Alpha)
                               && w.scalar("beta", C.present ? ScalarRole::Beta : ScalarRole::Zero)
                               && w.set("opC", static_cast<int>(opC))
@@ -1052,88 +1078,265 @@ namespace hiptensor
                               && w.set("n_out", nOut) && w.set("split", split);
                     if(withA)
                     {
-                        ok = ok && w.pointer("A", BufferRole::A)
+                        ok = ok && w.pointer("A", BufferRole::A, uint64_t(off[0]) * aBytes)
                              && w.set("opA", static_cast<int>(A.unaryOp));
                     }
                     return ok;
                 };
-
-                LaunchStep step;
-                step.kernel = kernel;
-                ArgWriter w(step);
-                bool      ok = common(w, true) && geometry(w, true);
-                if(row)
+                auto padded = [](std::vector<Dim> const& dims) {
+                    std::array<Dim, kMaxRank> out{};
+                    for(auto& x : out)
+                    {
+                        x = Dim{};
+                    }
+                    for(size_t i = 0; i < dims.size() && i < size_t(kMaxRank); i++)
+                    {
+                        out[i] = dims[i];
+                    }
+                    return out;
+                };
+                // The split of one launch: `split` ranges of `chunk` reduced trips (row) or
+                // elements (col), within `maxSplit` partials.
+                struct Split
                 {
-                    auto magic = magicU31(static_cast<uint32_t>(nchunk));
-                    ok         = ok && w.set("nchunk", nchunk) && w.set("jchunk", chunk)
-                         && w.setU32("jm", magic.first) && w.set("js", magic.second);
-                    step.grid = dim3(static_cast<uint32_t>(gridX), static_cast<uint32_t>(split), 1);
-                }
-                else
-                {
-                    ok = ok && w.set("n_red", nRed) && w.set("rchunk", chunk)
-                         && w.set("ystep", gridY) && w.set("n_outer", nOut / kept[0].extent);
-                    step.grid = dim3(static_cast<uint32_t>(gridX),
-                                     static_cast<uint32_t>(gridY),
-                                     static_cast<uint32_t>(split));
-                }
-                step.block = dim3(static_cast<uint32_t>(block), 1, 1);
-                if(!ok)
-                {
-                    reason = "reduction arguments do not fit the kernel arguments";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
-                }
-                if(auto status = finishStep(step, w, reason); status != HIPTENSOR_STATUS_SUCCESS)
-                {
-                    return status;
-                }
-                program.steps.push_back(std::move(step));
-                if(split > 1)
-                {
+                    int64_t split = 1, chunk = 0, nchunk = 0, gridX = 0, gridY = 1, trips = 0;
+                };
+                auto splitOf = [&](std::array<Dim, kMaxRank> const& kd,
+                                   std::array<Dim, kMaxRank> const& rd,
+                                   int64_t                          maxSplit) {
+                    Split   s;
+                    int64_t nOut = 1, nRed = 1;
+                    for(int i = 0; i < kMaxRank; i++)
+                    {
+                        nOut *= kd[i].extent;
+                        nRed *= rd[i].extent;
+                    }
+                    if(row)
+                    {
+                        s.nchunk       = ceilDiv(rd[0].extent, kWave);
+                        s.trips        = s.nchunk * (nRed / rd[0].extent);
+                        int64_t target = int64_t(splitWaves) * 8 * cus * 4; // waves
+                        s.split        = std::clamp<int64_t>(ceilDiv(target, nOut), 1, s.trips);
+                        s.gridX        = ceilDiv(nOut, block / kWave);
+                        maxSplit       = std::min<int64_t>(maxSplit, kGridYZMax);
+                    }
+                    else
+                    {
+                        int64_t outer  = nOut / kd[0].extent;
+                        s.trips        = nRed;
+                        s.gridX        = ceilDiv(kd[0].extent, block);
+                        s.gridY        = std::min<int64_t>(outer, kGridYZMax);
+                        int64_t target = int64_t(splitWaves) * 4 * cus;
+                        s.split  = std::clamp<int64_t>(ceilDiv(target, s.gridX * s.gridY), 1, nRed);
+                        maxSplit = std::min<int64_t>(maxSplit, kGridYZMax);
+                    }
+                    s.split = std::clamp<int64_t>(s.split, 1, std::max<int64_t>(maxSplit, 1));
+                    s.chunk = ceilDiv(s.trips, s.split);
+                    s.split = ceilDiv(s.trips, s.chunk);
+                    return s;
+                };
+                // The main kernel's launch of one piece (split > 1 or `partial`: partials at W +
+                // wOff; else D written).
+                auto mainStep = [&](std::array<Dim, kMaxRank> const& kd,
+                                    std::array<Dim, kMaxRank> const& rd,
+                                    std::array<int64_t, 3> const&    off,
+                                    Split const&                     s,
+                                    int64_t                          splitArg,
+                                    uint64_t                         wOff,
+                                    std::string&                     why) {
+                    int64_t nOut = 1;
+                    for(auto const& x : kd)
+                    {
+                        nOut *= x.extent;
+                    }
+                    LaunchStep step;
+                    step.kernel = kernel;
+                    ArgWriter w(step);
+                    bool      ok
+                        = common(w, true, off, wOff, nOut, splitArg) && geometry(w, kd, rd, true);
+                    if(row)
+                    {
+                        auto magic = magicU31(static_cast<uint32_t>(s.nchunk));
+                        ok         = ok && w.set("nchunk", s.nchunk) && w.set("jchunk", s.chunk)
+                             && w.setU32("jm", magic.first) && w.set("js", magic.second);
+                        step.grid = dim3(
+                            static_cast<uint32_t>(s.gridX), static_cast<uint32_t>(s.split), 1);
+                    }
+                    else
+                    {
+                        ok = ok && w.set("n_red", s.trips) && w.set("rchunk", s.chunk)
+                             && w.set("ystep", s.gridY) && w.set("n_outer", nOut / kd[0].extent);
+                        step.grid = dim3(static_cast<uint32_t>(s.gridX),
+                                         static_cast<uint32_t>(s.gridY),
+                                         static_cast<uint32_t>(s.split));
+                    }
+                    step.block = dim3(static_cast<uint32_t>(block), 1, 1);
+                    if(!ok)
+                    {
+                        why = "reduction arguments do not fit the kernel arguments";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    if(auto status = finishStep(step, w, why); status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return status;
+                    }
+                    program.steps.push_back(std::move(step));
+                    return HIPTENSOR_STATUS_SUCCESS;
+                };
+                auto finalStep = [&](std::array<Dim, kMaxRank> const& kd,
+                                     std::array<int64_t, 3> const&    off,
+                                     int64_t                          split,
+                                     std::string&                     why) {
+                    int64_t nOut = 1;
+                    for(auto const& x : kd)
+                    {
+                        nOut *= x.extent;
+                    }
                     LaunchStep fin;
                     fin.kernel = final;
                     ArgWriter fw(fin);
-                    if(!(common(fw, false) && geometry(fw, false)))
+                    if(!(common(fw, false, off, 0, nOut, split) && geometry(fw, kd, kd, false)))
                     {
-                        reason = "reduction arguments do not fit the kernel arguments";
+                        why = "reduction arguments do not fit the kernel arguments";
                         return HIPTENSOR_STATUS_NOT_SUPPORTED;
                     }
-                    int64_t const fblock = final->attr("block", 256);
-                    fin.grid             = dim3(static_cast<uint32_t>(ceilDiv(nOut, fblock)), 1, 1);
-                    fin.block            = dim3(static_cast<uint32_t>(fblock), 1, 1);
-                    if(auto status = finishStep(fin, fw, reason);
-                       status != HIPTENSOR_STATUS_SUCCESS)
+                    fin.grid  = dim3(static_cast<uint32_t>(ceilDiv(nOut, fblock)), 1, 1);
+                    fin.block = dim3(static_cast<uint32_t>(fblock), 1, 1);
+                    if(auto status = finishStep(fin, fw, why); status != HIPTENSOR_STATUS_SUCCESS)
                     {
                         return status;
                     }
                     program.steps.push_back(std::move(fin));
+                    return HIPTENSOR_STATUS_SUCCESS;
+                };
+
+                uint64_t workspace  = 0;
+                int64_t  firstSplit = 1, firstChunk = 0;
+                bool     usedFinal = false;
+                for(size_t kp = 0; kp < keptPieces.size(); kp++)
+                {
+                    auto const& kpiece = keptPieces[kp];
+                    auto const  kd     = padded(kpiece.dims);
+                    int64_t     nOut   = 1;
+                    for(auto const& x : kd)
+                    {
+                        nOut *= x.extent;
+                    }
+                    // partials that fit the workspace limit and the i32 partial index
+                    // (the limit rounded down to the workspace alignment, which the program's
+                    // workspace size is rounded up to)
+                    uint64_t const usable      = workspaceLimit / kWorkspaceAlign * kWorkspaceAlign;
+                    int64_t const  maxPartials = std::min<int64_t>(
+                        kI32Max / nOut,
+                        static_cast<int64_t>(std::min<uint64_t>(usable / (uint64_t(nOut) * wbytes),
+                                                                uint64_t(kI32Max))));
+                    std::vector<Split> splits;
+                    int64_t            total = 0;
+                    for(auto const& rpiece : redPieces)
+                    {
+                        splits.push_back(splitOf(kd, padded(rpiece.dims), maxPartials));
+                        total += splits.back().split;
+                    }
+                    bool const partial = redPieces.size() > 1;
+                    if(partial && total > maxPartials)
+                    {
+                        // fewer, longer ranges until the partials of every piece fit
+                        if(int64_t(redPieces.size()) > maxPartials)
+                        {
+                            reason = "the partial results of the reduction need more workspace "
+                                     "than the limit";
+                            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                        }
+                        total              = 0;
+                        int64_t const each = maxPartials / int64_t(redPieces.size());
+                        for(size_t rp = 0; rp < redPieces.size(); rp++)
+                        {
+                            splits[rp] = splitOf(kd, padded(redPieces[rp].dims), each);
+                            total += splits[rp].split;
+                        }
+                    }
+                    int64_t const splitArg
+                        = partial ? std::max<int64_t>(total, 2) : splits[0].split;
+                    uint64_t base = 0; // partials of the pieces before this one
+                    for(size_t rp = 0; rp < redPieces.size(); rp++)
+                    {
+                        auto const&            rpiece = redPieces[rp];
+                        std::array<int64_t, 3> off{kpiece.offsets[0] + rpiece.offsets[0],
+                                                   kpiece.offsets[1],
+                                                   kpiece.offsets[2]};
+                        std::string            why;
+                        auto                   status = mainStep(kd,
+                                               padded(rpiece.dims),
+                                               off,
+                                               splits[rp],
+                                               partial ? splitArg : splits[rp].split,
+                                               base * uint64_t(nOut) * wbytes,
+                                               why);
+                        if(status != HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            reason = why;
+                            return status;
+                        }
+                        base += uint64_t(splits[rp].split);
+                    }
+                    int64_t const partials = partial ? total : splits[0].split;
+                    if(partials > 1)
+                    {
+                        std::array<int64_t, 3> off{0, kpiece.offsets[1], kpiece.offsets[2]};
+                        std::string            why;
+                        if(auto status = finalStep(kd, off, partials, why);
+                           status != HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            reason = why;
+                            return status;
+                        }
+                        usedFinal = true;
+                        workspace
+                            = std::max(workspace, uint64_t(partials) * uint64_t(nOut) * wbytes);
+                    }
+                    if(kp == 0)
+                    {
+                        firstSplit = partials;
+                        firstChunk = splits[0].chunk;
+                    }
+                }
+                if(usedFinal)
+                {
                     program.description += "+" + final->name;
+                }
+                if(program.steps.size() > 2)
+                {
+                    program.description += "x" + std::to_string(program.steps.size());
+                }
+                program.workspaceBytes = alignUp(workspace, kWorkspaceAlign);
+                if(program.workspaceBytes > workspaceLimit)
+                {
+                    reason = "the partial results of the reduction need more workspace than the "
+                             "limit";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 facts           = CandidateFacts{};
                 facts.route     = Route::Reduction;
                 facts.body      = row ? kRowMode : kColMode;
-                facts.M         = nOut;
-                facts.K         = nRed;
-                facts.modesM    = static_cast<int>(std::count_if(
-                    kept.begin(), kept.end(), [](Dim const& x) { return x.extent > 1; }));
-                facts.modesK    = static_cast<int>(std::count_if(
-                    red.begin(), red.end(), [](Dim const& x) { return x.extent > 1; }));
-                facts.inner     = red[0].extent;
-                facts.innerKept = kept[0].extent;
-                facts.unitA     = red[0].extent > 1 && std::llabs(red[0].stride[0]) == 1     ? 3
-                                  : kept[0].extent > 1 && std::llabs(kept[0].stride[0]) == 1 ? 1
-                                                                                             : 0;
-                facts.split     = split;
-                facts.chunk     = chunk;
+                facts.M         = nOutAll;
+                facts.K         = nRedAll;
+                facts.modesM    = static_cast<int>(kept.size());
+                facts.modesK    = static_cast<int>(red.size());
+                facts.inner     = red0.extent;
+                facts.innerKept = kept0.extent;
+                facts.unitA     = red0.extent > 1 && std::llabs(red0.stride[0]) == 1     ? 3
+                                  : kept0.extent > 1 && std::llabs(kept0.stride[0]) == 1 ? 1
+                                                                                         : 0;
+                facts.split     = firstSplit;
+                facts.chunk     = firstChunk;
                 facts.block     = block;
                 facts.ctas      = int64_t(program.steps[0].grid.x) * program.steps[0].grid.y
                              * program.steps[0].grid.z;
                 facts.main      = kernel;
                 facts.operandOp = A.unaryOp != HIPTENSOR_OP_IDENTITY;
                 facts.bilinear  = C.present;
-                facts.bytes     = uint64_t(nOut) * uint64_t(nRed) * elementBytes(a)
-                              + uint64_t(nOut) * elementBytes(d) * (C.present ? 2 : 1)
-                              + 2 * workspaceFor(split);
+                facts.bytes     = uint64_t(nOutAll) * uint64_t(nRedAll) * aBytes
+                              + uint64_t(nOutAll) * dBytes * (C.present ? 2 : 1) + 2 * workspace;
                 return HIPTENSOR_STATUS_SUCCESS;
             }
         } // namespace
@@ -1399,9 +1602,9 @@ namespace hiptensor
                 cin.scale = C.present ? ScalarRole::Beta : ScalarRole::Zero;
                 cin.op    = C.present ? static_cast<int>(C.unaryOp) : HIPTENSOR_OP_IDENTITY;
                 EwOperand out;
-                out.name    = "D";
-                out.role    = BufferRole::Out;
-                auto dt = dtypeName(D.type);
+                out.name = "D";
+                out.role = BufferRole::Out;
+                auto dt  = dtypeName(D.type);
                 // C may have another data type than D (the scale form reads no C: D's type)
                 auto ct     = C.present ? dtypeName(C.type) : dt;
                 auto status = ewSteps(pack,
@@ -1509,14 +1712,26 @@ namespace hiptensor
                 return f;
             }
 
+            // Why a GEMM body declines a problem whose operands or result are past its 32-bit
+            // offsets (the 64-bit-address body may then serve it).
+            constexpr char kPastGemmOffsets[]
+                = "operands past the 32-bit offsets of the GEMM bodies";
+            // The body of the 64-bit-address GEMM kernels in the pack (make_rocke_pack.py
+            // GEMM_WIDE_BODY).
+            constexpr char kGemmWideBody[] = "RIW";
+
             // f16 / bf16 (and f32 with a 16-bit compute type), f32 and complex f32 contractions
             // on one universal GEMM body with an f32 output: pack A and B, GEMM, epilogue.
+            // `wide`: the 64-bit-address body (rocKE's wide_addr RIW form), for operands past the
+            // DMA buffer range or a result past 2^31 elements; one launch per batch and per
+            // 65535 rows of tiles.
             hiptensorStatus_t planGemmBody(Problem const&     p,
                                            Pack const&        pack,
                                            Classified const&  c,
                                            std::string const& route,
                                            std::string const& storage,
                                            std::string const& b,
+                                           bool               wide,
                                            uint64_t           workspaceLimit,
                                            Program&           program,
                                            CandidateFacts&    facts,
@@ -1526,15 +1741,17 @@ namespace hiptensor
                 int64_t const M = c.M.size(), N = c.N.size(), K = c.K.size(), L = c.L.size();
                 // kernel extents per problem element: K in 16-bit halves (f32 pairs for x6,
                 // complex quadruples for cf32), N doubled for complex
-                int64_t const kUnit  = route == "h16" ? 1 : route == "x6" ? 2 : 4;
-                int64_t const nUnit  = cplx ? 2 : 1;
-                int const     cus    = std::max(1, p.device.cuCount);
-                auto const*   kernel = pack.find(kGemm,
-                                                 {{"batched", L > 1 ? 1 : 0}},
-                                                 {{"route", route}, {"dtype", storage}, {"body", b}});
+                int64_t const kUnit = route == "h16" ? 1 : route == "x6" ? 2 : 4;
+                int64_t const nUnit = cplx ? 2 : 1;
+                int const     cus   = std::max(1, p.device.cuCount);
+                auto const*   kernel
+                    = pack.find(kGemm,
+                                {{"batched", !wide && L > 1 ? 1 : 0}, {"wide", wide ? 1 : 0}},
+                                {{"route", route}, {"dtype", storage}, {"body", b}});
                 if(kernel == nullptr)
                 {
-                    reason = "no " + route + " GEMM body " + b + (L > 1 ? " (batched)" : "");
+                    reason = "no " + route + " GEMM body " + b + (wide ? " (64-bit addresses)" : "")
+                             + (!wide && L > 1 ? " (batched)" : "");
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 int64_t const P = kernel->attr("persistent_ctas", 0);
@@ -1552,20 +1769,52 @@ namespace hiptensor
                 std::string const pType
                     = route == "h16" ? (storage == "fp16" ? "f16" : "bf16") : "f32";
                 uint64_t const es     = elementBytes(pType, cplx);
-                uint64_t const aBytes = uint64_t(L * Mp * Kp) * es;
-                uint64_t const bBytes = uint64_t(L * Np * Kp) * es;
-                uint64_t const tElems = uint64_t(L * Mp * Np * nUnit);
+                uint64_t const aBytes = uint64_t(L) * uint64_t(Mp) * uint64_t(Kp) * es;
+                uint64_t const bBytes = uint64_t(L) * uint64_t(Np) * uint64_t(Kp) * es;
+                uint64_t const tElems = uint64_t(L) * uint64_t(Mp) * uint64_t(Np) * uint64_t(nUnit);
+                int64_t const  kM = Mp, kN = Np * nUnit, kK = Kp * kUnit;
                 // the kernel's capability limits (pack attributes)
-                auto const opLimit = static_cast<uint64_t>(
-                    kernel->attr("limit_operand_bytes", int64_t(kDtlBufferRange)));
-                auto const cLimit
-                    = static_cast<uint64_t>(kernel->attr("limit_c_elements", kI32Max));
                 auto const gridLimit = kernel->attr("limit_grid_yz", kGridYZMax);
-                if(aBytes >= opLimit || bBytes >= opLimit || tElems > cLimit
-                   || ceilDiv(Mp, tm) > gridLimit || L > gridLimit)
+                // rows of tiles per launch (grid y)
+                int64_t rowsPerLaunch = Mp;
+                if(wide)
                 {
-                    reason = "operands past the 32-bit offsets of the GEMM bodies";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    // only one tile's operand rows and one tile's result rows need the 32-bit
+                    // offsets (a complex B tile spans tile_n / 2 rows)
+                    auto const tileLimit = static_cast<uint64_t>(
+                        kernel->attr("limit_tile_operand_bytes", int64_t(kDtlBufferRange)));
+                    auto const cTileLimit = static_cast<uint64_t>(
+                        kernel->attr("limit_c_tile_elements", int64_t(1) << 31));
+                    uint64_t const rowBytes = uint64_t(kK) * 2;
+                    if(uint64_t(tm) * rowBytes > tileLimit
+                       || uint64_t(cplx ? tn / 2 : tn) * rowBytes > tileLimit
+                       || uint64_t(tm) * uint64_t(kN) > cTileLimit)
+                    {
+                        reason = "a tile of the 64-bit-address GEMM body is past its 32-bit "
+                                 "offsets";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    rowsPerLaunch          = std::min<int64_t>(Mp, gridLimit * tm);
+                    int64_t const launches = L * ceilDiv(Mp, rowsPerLaunch);
+                    if(launches > kMaxLaunches)
+                    {
+                        reason = "the 64-bit-address GEMM body needs more than "
+                                 + std::to_string(kMaxLaunches) + " launches";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                else
+                {
+                    auto const opLimit = static_cast<uint64_t>(
+                        kernel->attr("limit_operand_bytes", int64_t(kDtlBufferRange)));
+                    auto const cLimit
+                        = static_cast<uint64_t>(kernel->attr("limit_c_elements", kI32Max));
+                    if(aBytes >= opLimit || bBytes >= opLimit || tElems > cLimit
+                       || ceilDiv(Mp, tm) > gridLimit || L > gridLimit)
+                    {
+                        reason = kPastGemmOffsets;
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
                 }
                 uint64_t const offA     = 0;
                 uint64_t const offB     = alignUp(offA + aBytes, kWorkspaceAlign);
@@ -1595,59 +1844,94 @@ namespace hiptensor
                 {
                     return status;
                 }
-                LaunchStep g;
-                g.kernel = kernel;
-                ArgWriter     w(g);
-                int64_t const kM = Mp, kN = Np * nUnit, kK = Kp * kUnit;
-                bool          ok = w.pointer("A", BufferRole::Workspace, offA)
-                          && w.pointer("B", BufferRole::Workspace, offB)
-                          && w.pointer("C", BufferRole::Workspace, offT) && w.set("M", kM)
-                          && w.set("N", kN) && w.set("K", kK);
-                if(parts > 0)
+                // the GEMM launches: one, or (64-bit addresses) one per batch and row range
+                int64_t const batchesPerLaunch = wide ? 1 : L;
+                int64_t       ctas             = 0;
+                bool          firstLaunch      = true;
+                for(int64_t l = 0; l < L; l += batchesPerLaunch)
                 {
-                    ok = ok && w.pointer("SkFlags", BufferRole::Workspace, offFlags)
-                         && w.pointer("SkPart", BufferRole::Workspace, offPart);
-                    prog.memsets.push_back({offFlags, flags, flags, 1});
+                    for(int64_t m0 = 0; m0 < Mp; m0 += rowsPerLaunch)
+                    {
+                        int64_t const  rows = std::min(rowsPerLaunch, Mp - m0);
+                        uint64_t const aOff
+                            = offA
+                              + (uint64_t(l) * uint64_t(Mp) + uint64_t(m0)) * uint64_t(Kp) * es;
+                        uint64_t const bOff = offB + uint64_t(l) * uint64_t(Np) * uint64_t(Kp) * es;
+                        uint64_t const tOff
+                            = offT + (uint64_t(l) * uint64_t(Mp) + uint64_t(m0)) * uint64_t(kN) * 4;
+                        LaunchStep g;
+                        g.kernel = kernel;
+                        ArgWriter w(g);
+                        bool      ok = w.pointer("A", BufferRole::Workspace, aOff)
+                                  && w.pointer("B", BufferRole::Workspace, bOff)
+                                  && w.pointer("C", BufferRole::Workspace, tOff)
+                                  && w.set("M", wide ? rows : kM) && w.set("N", kN)
+                                  && w.set("K", kK);
+                        if(parts > 0)
+                        {
+                            ok = ok && w.pointer("SkFlags", BufferRole::Workspace, offFlags)
+                                 && w.pointer("SkPart", BufferRole::Workspace, offPart);
+                        }
+                        if(!wide && L > 1)
+                        {
+                            // per-batch strides in elements of each kernel pointer (16-bit
+                            // halves for A and B, f32 for C)
+                            int64_t const halves = int64_t(es / 2);
+                            ok                   = ok && w.set("stride_a", Mp * Kp * halves)
+                                 && w.set("stride_b", Np * Kp * halves)
+                                 && w.set("stride_c", kM * kN);
+                        }
+                        int64_t const tilesM = ceilDiv(wide ? rows : kM, tm),
+                                      tilesN = ceilDiv(kN, tn);
+                        if(kernel->attr("streamk", 0) == 1)
+                        {
+                            g.grid = dim3(static_cast<uint32_t>(P), 1, 1);
+                        }
+                        else if(P > 0)
+                        {
+                            g.grid = dim3(static_cast<uint32_t>(std::max<int64_t>(
+                                              1, std::min<int64_t>(P, tilesM * tilesN))),
+                                          1,
+                                          1);
+                        }
+                        else
+                        {
+                            g.grid = dim3(static_cast<uint32_t>(tilesN),
+                                          static_cast<uint32_t>(tilesM),
+                                          static_cast<uint32_t>(!wide && L > 1 ? L : 1));
+                        }
+                        g.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
+                        if(!ok)
+                        {
+                            reason = "GEMM arguments do not fit the kernel arguments";
+                            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                        }
+                        if(auto s = finishStep(g, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            return s;
+                        }
+                        if(firstLaunch)
+                        {
+                            ctas = int64_t(g.grid.x) * g.grid.y * g.grid.z;
+                            if(parts > 0)
+                            {
+                                // stream-K flags zeroed before the GEMM launch
+                                prog.memsets.push_back({offFlags,
+                                                        flags,
+                                                        flags,
+                                                        1,
+                                                        static_cast<uint32_t>(prog.steps.size())});
+                            }
+                        }
+                        firstLaunch = false;
+                        prog.steps.push_back(std::move(g));
+                    }
                 }
-                if(L > 1)
+                prog.description = kernel->name;
+                if(wide && prog.steps.size() > 3)
                 {
-                    // per-batch strides in elements of each kernel pointer (16-bit halves for A
-                    // and B, f32 for C)
-                    int64_t const halves = int64_t(es / 2);
-                    ok                   = ok && w.set("stride_a", Mp * Kp * halves)
-                         && w.set("stride_b", Np * Kp * halves) && w.set("stride_c", kM * kN);
+                    prog.description += "x" + std::to_string(L * ceilDiv(Mp, rowsPerLaunch));
                 }
-                int64_t const tilesM = ceilDiv(kM, tm), tilesN = ceilDiv(kN, tn);
-                if(kernel->attr("streamk", 0) == 1)
-                {
-                    g.grid = dim3(static_cast<uint32_t>(P), 1, 1);
-                }
-                else if(P > 0)
-                {
-                    g.grid = dim3(static_cast<uint32_t>(
-                                      std::max<int64_t>(1, std::min<int64_t>(P, tilesM * tilesN))),
-                                  1,
-                                  1);
-                }
-                else
-                {
-                    g.grid = dim3(static_cast<uint32_t>(tilesN),
-                                  static_cast<uint32_t>(tilesM),
-                                  static_cast<uint32_t>(L > 1 ? L : 1));
-                }
-                g.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
-                if(!ok)
-                {
-                    reason = "GEMM arguments do not fit the kernel arguments";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
-                }
-                if(auto s = finishStep(g, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
-                {
-                    return s;
-                }
-                int64_t const ctas = int64_t(g.grid.x) * g.grid.y * g.grid.z;
-                prog.description   = kernel->name;
-                prog.steps.push_back(std::move(g));
                 // T is [L][Mp][Np] (complex elements for cf32)
                 status = epilogue(pack, p, c, "f32", cplx, Np, Mp * Np, offT, false, prog, reason);
                 if(status != HIPTENSOR_STATUS_SUCCESS)
@@ -1671,8 +1955,9 @@ namespace hiptensor
                 facts.ctas         = ctas;
                 facts.paddedVolume = Mp * Np * Kp * L;
                 facts.main         = kernel;
-                facts.bytes        = uint64_t(M * K * L) * esA + uint64_t(N * K * L) * esB + 2 * (aBytes + bBytes)
-                              + 2 * tBytes + uint64_t(M * N * L) * esOut * (p.t[2].present ? 2 : 1);
+                facts.bytes        = uint64_t(M * K * L) * esA + uint64_t(N * K * L) * esB
+                              + 2 * (aBytes + bBytes) + 2 * tBytes
+                              + uint64_t(M * N * L) * esOut * (p.t[2].present ? 2 : 1);
                 program = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
             }
@@ -1822,6 +2107,14 @@ namespace hiptensor
 
             // A contraction on one f64 strided GEMM kernel (f64 / complex f64 data, and every
             // data type on the F64 route). `c` is ordered by D.
+            //
+            // One launch addresses at most 2^31 bytes per operand buffer (packed A and B rows,
+            // the result's rows) and 65535 batches. Past that the GEMM runs as host-iterated
+            // launches over ranges of M, N and L, each with its operands offset to its range.
+            // A row of A or B past 2^31 bytes splits K: the K ranges are the batches of one
+            // launch per row range (a last, shorter range its own launch), each writing an f64
+            // partial result, and a reduction adds the partials into T (the epilogue then writes
+            // D as without K ranges).
             hiptensorStatus_t planGett64(Problem const&      p,
                                          Pack const&         pack,
                                          Classified const&   c,
@@ -1834,38 +2127,149 @@ namespace hiptensor
                                          std::string&        reason)
             {
                 int64_t const  M = c.M.size(), N = c.N.size(), K = c.K.size(), L = c.L.size();
-                int64_t const  Kp     = roundUp(K, 2); // even K: one layout class
-                bool const     direct = g.direct;
-                uint64_t const es0    = cplx ? 16 : 8;
-                auto           span   = [&](int64_t sm, int64_t sn) {
-                    return ((M - 1) * sm + (N - 1) * sn + 1) * int64_t(es0);
-                };
-                uint64_t const es        = cplx ? 16 : 8;
-                std::string    pt        = "f64";
-                int64_t const  spanLimit = kernel.attr("limit_span_bytes", kGett64SpanLimit);
-                if(L > kernel.attr("limit_batch", kGridYZMax) || M * Kp > spanLimit / int64_t(es)
-                   || N * Kp > spanLimit / int64_t(es)
-                   || (direct
-                       && (span(g.dsm, g.dsn) > spanLimit || span(g.csm, g.csn) > spanLimit)))
+                int64_t const  Kp         = roundUp(K, 2); // even K: one layout class
+                uint64_t const es         = cplx ? 16 : 8;
+                std::string    pt         = "f64";
+                int64_t const  spanLimit  = kernel.attr("limit_span_bytes", kGett64SpanLimit);
+                int64_t const  batchLimit = kernel.attr("limit_batch", kGridYZMax);
+                int64_t const  tm = kernel.attr("tile_m"), tn = kernel.attr("tile_n");
+                int const      cus = std::max(1, p.device.cuCount);
+                // elements one buffer resource addresses
+                int64_t const span = spanLimit / int64_t(es);
+
+                // K ranges: when a row of A or B is past one buffer, as batches of one launch
+                // (enough of them to fill the device, each at least kMinKRange long)
+                constexpr int64_t kMinKRange = int64_t(1) << 16;
+                bool const        splitK     = Kp > span;
+                int64_t           kc = Kp, nk = 1;
+                if(splitK)
                 {
-                    reason = "operands past the 32-bit offsets of the f64 GEMM";
+                    int64_t const align = std::max<int64_t>(2, kernel.attr("tile_k", 2));
+                    int64_t const most  = std::max<int64_t>(2, span / align * align);
+                    nk = std::max(ceilDiv(Kp, most), std::min<int64_t>(4 * cus, Kp / kMinKRange));
+                    nk = std::min(nk, batchLimit);
+                    kc = roundUp(ceilDiv(Kp, nk), align);
+                    if(kc > most)
+                    {
+                        kc = most;
+                    }
+                    nk = ceilDiv(Kp, kc);
+                    if(nk > batchLimit + 1)
+                    {
+                        reason = "the f64 GEMM needs more than " + std::to_string(batchLimit + 1)
+                                 + " K ranges";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                bool const direct  = g.direct && !splitK;
+                auto       rowsFor = [&](int64_t rows) {
+                    // (rows - 1) * Kp + kc elements
+                    return std::min<int64_t>(rows, std::max<int64_t>(1, (span - kc) / Kp + 1));
+                };
+                int64_t mc = rowsFor(M), nc = rowsFor(N);
+                // the result's rows: D (and C) through their strides, or T [L][M][N]
+                int64_t const dsm = direct ? g.dsm : N, dsn = direct ? g.dsn : 1;
+                auto          outSpan
+                    = [&](int64_t sm, int64_t sn) { return (mc - 1) * sm + (nc - 1) * sn + 1; };
+                while(outSpan(dsm, dsn) > span
+                      || (direct && g.bilinear && outSpan(g.csm, g.csn) > span))
+                {
+                    if((mc - 1) * std::max(dsm, g.bilinear ? g.csm : 0)
+                       >= (nc - 1) * std::max(dsn, g.bilinear ? g.csn : 0))
+                    {
+                        mc = std::max<int64_t>(1, mc / 2);
+                    }
+                    else
+                    {
+                        nc = std::max<int64_t>(1, nc / 2);
+                    }
+                }
+                // whole tiles per range
+                if(mc < M && mc >= tm)
+                {
+                    mc = mc / tm * tm;
+                }
+                if(nc < N && nc >= tn)
+                {
+                    nc = nc / tn * tn;
+                }
+                // batches per launch (K ranges: one batch dimension, so one launch per batch)
+                int64_t const lc       = splitK ? 1 : std::min<int64_t>(L, batchLimit);
+                int64_t const kLaunch  = splitK ? (Kp % kc != 0 ? 2 : 1) : 1;
+                int64_t const launches = ceilDiv(M, mc) * ceilDiv(N, nc) * ceilDiv(L, lc) * kLaunch;
+                if(launches > kMaxLaunches)
+                {
+                    reason = "the f64 GEMM needs more than " + std::to_string(kMaxLaunches)
+                             + " launches for operands of this size";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                uint64_t const aBytes = uint64_t(L * M * Kp) * es;
-                uint64_t const bBytes = uint64_t(L * N * Kp) * es;
-                uint64_t const offA   = 0;
-                uint64_t const offB   = alignUp(aBytes, kWorkspaceAlign);
-                uint64_t const offT   = alignUp(offB + bBytes, kWorkspaceAlign);
-                uint64_t const tBytes = direct ? 0 : uint64_t(L * M * N) * es;
-                uint64_t const total  = alignUp(offT + tBytes, kWorkspaceAlign);
+
+                // partial results of the K ranges: P[l][range][..] in the layout the kernel's
+                // D class writes (m or n contiguous, or neither: every second element)
+                auto const     dclass = kernel.attrStr("dclass");
+                int64_t const  psm    = dclass == "m" ? 1 : dclass == "n" ? N : 2;
+                int64_t const  psn    = dclass == "m" ? M : dclass == "n" ? 1 : 2 * M;
+                int64_t const  pRange = dclass == "x" ? 2 * M * N : M * N;
+                uint64_t const aBytes = uint64_t(L) * uint64_t(M) * uint64_t(Kp) * es;
+                uint64_t const bBytes = uint64_t(L) * uint64_t(N) * uint64_t(Kp) * es;
+                uint64_t const tBytes = direct ? 0 : uint64_t(L) * uint64_t(M) * uint64_t(N) * es;
+                uint64_t const pBytes
+                    = splitK ? uint64_t(L) * uint64_t(nk) * uint64_t(pRange) * es : 0;
+                uint64_t const offA = 0;
+                uint64_t const offB = alignUp(aBytes, kWorkspaceAlign);
+                uint64_t const offT = alignUp(offB + bBytes, kWorkspaceAlign);
+                uint64_t const offP = alignUp(offT + tBytes, kWorkspaceAlign);
+                uint64_t const offW = alignUp(offP + pBytes, kWorkspaceAlign);
+
+                // the reduction of the partials into T: a reduction of P over the ranges
+                // (complex: of its components, one more kept mode), alpha 1 and no C
+                Program sum;
+                if(splitK)
+                {
+                    int64_t const    unit = cplx ? 2 : 1;
+                    backend::Problem r;
+                    r.kind       = OpKind::Reduction;
+                    r.opReduce   = HIPTENSOR_OP_ADD;
+                    r.compute    = HIPTENSOR_COMPUTE_DESC_64F;
+                    r.scalarType = HIPTENSOR_R_64F;
+                    r.device     = p.device;
+                    TensorArg P, T;
+                    P.present = T.present = true;
+                    P.type = T.type = HIPTENSOR_R_64F;
+                    auto add = [](TensorArg& t, int32_t mode, int64_t extent, int64_t stride) {
+                        t.modes.push_back(mode);
+                        t.extents.push_back(extent);
+                        t.strides.push_back(stride);
+                    };
+                    if(cplx)
+                    {
+                        add(P, 0, 2, 1);
+                        add(T, 0, 2, 1);
+                    }
+                    add(P, 1, M, psm * unit);
+                    add(P, 2, N, psn * unit);
+                    add(P, 3, nk, pRange * unit);
+                    add(P, 4, L, nk * pRange * unit);
+                    add(T, 1, M, N * unit);
+                    add(T, 2, N, unit);
+                    add(T, 4, L, M * N * unit);
+                    r.t[0] = P;
+                    r.t[2] = T; // C: the API's reductions have one; beta 0 does not read it
+                    r.t[3] = T;
+                    CandidateFacts sumFacts;
+                    std::string    why;
+                    uint64_t const left = workspaceLimit > offW ? workspaceLimit - offW : 0;
+                    auto status = planReduction(r, pack, left, kRuleMode, 1, sum, sumFacts, why);
+                    if(status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        reason = "the reduction of the K ranges: " + why;
+                        return status;
+                    }
+                }
+                uint64_t const total = alignUp(offW + sum.workspaceBytes, kWorkspaceAlign);
                 if(total > workspaceLimit)
                 {
                     reason = "the f64 route needs more workspace than the limit";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
-                }
-                if(!direct && M * N > spanLimit / int64_t(es))
-                {
-                    reason = "the f64 GEMM result is past its 32-bit offsets";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 Program prog;
@@ -1882,65 +2286,188 @@ namespace hiptensor
                 {
                     return status;
                 }
-                LaunchStep step;
-                step.kernel = &kernel;
-                ArgWriter w(step);
-                bool      ok = w.pointer("A", BufferRole::Workspace, offA)
-                          && w.pointer("B", BufferRole::Workspace, offB);
-                if(direct)
+                // what the GEMM writes: D (direct), T, or the partials P
+                auto const     outRole = direct ? BufferRole::Out : BufferRole::Workspace;
+                uint64_t const outBase = direct ? 0 : splitK ? offP : offT;
+                int64_t const  osm     = direct ? g.dsm : splitK ? psm : N;
+                int64_t const  osn     = direct ? g.dsn : splitK ? psn : 1;
+                int64_t const  osl     = direct ? g.dsl : splitK ? nk * pRange : M * N;
+                int64_t        ctas    = 0;
+                // K ranges of one launch: [k0, k0 + kc * batches), batch stride kc
+                std::vector<std::pair<int64_t, int64_t>> kLaunches; // first range, ranges
+                if(splitK)
                 {
-                    ok = ok && w.pointer("D", BufferRole::Out) && w.set("d_sm", g.dsm)
-                         && w.set("d_sn", g.dsn) && w.set("d_sl", g.dsl);
-                    if(g.bilinear)
+                    int64_t const full = Kp / kc;
+                    if(full > 0)
                     {
-                        ok = ok && w.pointer("C", BufferRole::C) && w.set("c_sm", g.csm)
-                             && w.set("c_sn", g.csn) && w.set("c_sl", g.csl);
+                        kLaunches.emplace_back(0, full);
+                    }
+                    if(Kp % kc != 0)
+                    {
+                        kLaunches.emplace_back(full, 1);
                     }
                 }
                 else
                 {
-                    ok = ok && w.pointer("D", BufferRole::Workspace, offT) && w.set("d_sm", N)
-                         && w.set("d_sn", 1) && w.set("d_sl", M * N);
+                    kLaunches.emplace_back(0, 1);
                 }
-                auto alpha = direct ? ScalarRole::Alpha : ScalarRole::One;
-                if(cplx)
+                for(auto const& [range0, ranges] : kLaunches)
                 {
-                    ok = ok && w.scalar("alpha_re", alpha, false)
-                         && w.scalar("alpha_im", alpha, true);
-                    if(g.bilinear)
+                    int64_t const k0 = range0 * kc;
+                    int64_t const kk = std::min(kc, Kp - k0);
+                    for(int64_t l0 = 0; l0 < L; l0 += lc)
                     {
-                        ok = ok && w.scalar("beta_re", ScalarRole::Beta, false)
-                             && w.scalar("beta_im", ScalarRole::Beta, true);
+                        for(int64_t m0 = 0; m0 < M; m0 += mc)
+                        {
+                            for(int64_t n0 = 0; n0 < N; n0 += nc)
+                            {
+                                int64_t const km = std::min(mc, M - m0), kn = std::min(nc, N - n0);
+                                // batches: the K ranges, or the problem's L
+                                int64_t const kl = splitK ? ranges : std::min(lc, L - l0);
+                                LaunchStep    step;
+                                step.kernel = &kernel;
+                                ArgWriter w(step);
+                                // a stride of a range of extent 1 is not used: 0 (it may not fit
+                                // the i32 argument)
+                                auto s = [](int64_t extent, int64_t stride) {
+                                    return extent > 1 ? stride : 0;
+                                };
+                                uint64_t const aOff
+                                    = offA
+                                      + ((uint64_t(l0) * uint64_t(M) + uint64_t(m0)) * uint64_t(Kp)
+                                         + uint64_t(k0))
+                                            * es;
+                                uint64_t const bOff
+                                    = offB
+                                      + ((uint64_t(l0) * uint64_t(N) + uint64_t(n0)) * uint64_t(Kp)
+                                         + uint64_t(k0))
+                                            * es;
+                                int64_t const outIndex = splitK ? l0 * nk * pRange + range0 * pRange
+                                                                      + m0 * osm + n0 * osn
+                                                                : l0 * osl + m0 * osm + n0 * osn;
+                                uint64_t const dOff    = outBase + uint64_t(outIndex) * es;
+                                // batch strides: K ranges move A and B by kc, the result by one
+                                // range of partials
+                                int64_t const aSl = splitK ? kc : M * Kp;
+                                int64_t const bSl = splitK ? kc : N * Kp;
+                                int64_t const dSl = splitK ? pRange : osl;
+                                bool          ok  = w.pointer("A", BufferRole::Workspace, aOff)
+                                          && w.pointer("B", BufferRole::Workspace, bOff)
+                                          && w.pointer("D", outRole, dOff)
+                                          && w.set("d_sm", s(km, osm)) && w.set("d_sn", s(kn, osn))
+                                          && w.set("d_sl", s(kl, dSl));
+                                if(g.bilinear)
+                                {
+                                    // direct: the problem's C; K ranges: the kernel's C is not
+                                    // read (beta 0)
+                                    uint64_t const cOff
+                                        = direct
+                                              ? uint64_t(l0 * g.csl + m0 * g.csm + n0 * g.csn) * es
+                                              : 0;
+                                    ok = ok
+                                         && w.pointer(
+                                             "C", direct ? BufferRole::C : BufferRole::None, cOff)
+                                         && w.set("c_sm", direct ? s(km, g.csm) : 0)
+                                         && w.set("c_sn", direct ? s(kn, g.csn) : 0)
+                                         && w.set("c_sl", direct ? s(kl, g.csl) : 0);
+                                }
+                                auto const alpha = direct ? ScalarRole::Alpha : ScalarRole::One;
+                                auto const beta  = direct ? ScalarRole::Beta : ScalarRole::Zero;
+                                if(cplx)
+                                {
+                                    ok = ok && w.scalar("alpha_re", alpha, false)
+                                         && w.scalar("alpha_im", alpha, true);
+                                    if(g.bilinear)
+                                    {
+                                        ok = ok && w.scalar("beta_re", beta, false)
+                                             && w.scalar("beta_im", beta, true);
+                                    }
+                                }
+                                else
+                                {
+                                    ok = ok && w.scalar("alpha", alpha);
+                                    if(g.bilinear)
+                                    {
+                                        ok = ok && w.scalar("beta", beta);
+                                    }
+                                }
+                                ok = ok && w.set("M", km) && w.set("N", kn) && w.set("K", kk)
+                                     && w.set("L", kl) && w.set("a_sm", s(km, Kp))
+                                     && w.set("a_sk", 1) && w.set("b_sn", s(kn, Kp))
+                                     && w.set("b_sk", 1) && w.set("a_sl", s(kl, aSl))
+                                     && w.set("b_sl", s(kl, bSl));
+                                if(!ok)
+                                {
+                                    reason = "f64 GEMM arguments do not fit the kernel arguments";
+                                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                                }
+                                step.grid
+                                    = dim3(static_cast<uint32_t>(ceilDiv(km, tm) * ceilDiv(kn, tn)),
+                                           static_cast<uint32_t>(kl),
+                                           1);
+                                step.block
+                                    = dim3(static_cast<uint32_t>(kernel.attr("block", 256)), 1, 1);
+                                if(auto st = finishStep(step, w, reason);
+                                   st != HIPTENSOR_STATUS_SUCCESS)
+                                {
+                                    return st;
+                                }
+                                if(ctas == 0)
+                                {
+                                    ctas = int64_t(step.grid.x) * step.grid.y * step.grid.z;
+                                }
+                                prog.steps.push_back(std::move(step));
+                            }
+                        }
                     }
                 }
-                else
+                prog.description = kernel.name;
+                if(launches > 1)
                 {
-                    ok = ok && w.scalar("alpha", alpha);
-                    if(g.bilinear)
+                    prog.description += "x" + std::to_string(launches);
+                }
+                if(splitK)
+                {
+                    // the partials' sum into T: P (A) and T (D) in the workspace, alpha 1, no C
+                    auto const base = static_cast<uint32_t>(prog.steps.size());
+                    for(auto m : sum.memsets)
                     {
-                        ok = ok && w.scalar("beta", ScalarRole::Beta);
+                        m.offset += offW;
+                        m.beforeStep += base;
+                        prog.memsets.push_back(m);
                     }
+                    for(auto step : sum.steps)
+                    {
+                        for(auto& ptr : step.pointers)
+                        {
+                            switch(ptr.role)
+                            {
+                            case BufferRole::A:
+                                ptr.role = BufferRole::Workspace;
+                                ptr.bytes += offP;
+                                break;
+                            case BufferRole::Out:
+                                ptr.role = BufferRole::Workspace;
+                                ptr.bytes += offT;
+                                break;
+                            case BufferRole::Workspace:
+                                ptr.bytes += offW;
+                                break;
+                            default:
+                                ptr.role = BufferRole::None;
+                                break;
+                            }
+                        }
+                        for(auto& sc : step.scalars)
+                        {
+                            sc.role = sc.role == ScalarRole::Alpha || sc.role == ScalarRole::One
+                                          ? ScalarRole::One
+                                          : ScalarRole::Zero;
+                        }
+                        prog.steps.push_back(std::move(step));
+                    }
+                    prog.description += "+k" + std::to_string(nk);
                 }
-                ok = ok && w.set("M", M) && w.set("N", N) && w.set("K", Kp) && w.set("L", L)
-                     && w.set("a_sm", Kp) && w.set("a_sk", 1) && w.set("b_sn", Kp)
-                     && w.set("b_sk", 1) && w.set("a_sl", M * Kp) && w.set("b_sl", N * Kp);
-                if(!ok)
-                {
-                    reason = "f64 GEMM arguments do not fit the kernel arguments";
-                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
-                }
-                int64_t const tm = kernel.attr("tile_m"), tn = kernel.attr("tile_n");
-                step.grid  = dim3(static_cast<uint32_t>(ceilDiv(M, tm) * ceilDiv(N, tn)),
-                                 static_cast<uint32_t>(L),
-                                 1);
-                step.block = dim3(static_cast<uint32_t>(kernel.attr("block", 256)), 1, 1);
-                if(auto s = finishStep(step, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
-                {
-                    return s;
-                }
-                int64_t const ctas = int64_t(step.grid.x) * step.grid.y * step.grid.z;
-                prog.description   = kernel.name;
-                prog.steps.push_back(std::move(step));
                 if(!direct)
                 {
                     status = epilogue(pack, p, c, "f64", cplx, N, M * N, offT, false, prog, reason);
@@ -1956,19 +2483,20 @@ namespace hiptensor
                 facts                = contractionFacts(p, c, cplx);
                 facts.route          = Route::Gett64;
                 facts.body           = gett64ClassId(kernel.attrStr("cls"));
-                facts.f64Route       = dtypeName(p.t[0].type) != "f64";
-                facts.direct         = direct;
-                facts.kBlock         = kernel.attr("kblock", 0) > 0;
-                facts.tileM          = tm;
-                facts.tileN          = tn;
-                facts.tileK          = kernel.attr("tile_k", 0);
-                facts.block          = kernel.attr("block", 256);
-                facts.ctas           = ctas;
+                facts.f64Route = p.t[0].type != HIPTENSOR_R_64F && p.t[0].type != HIPTENSOR_C_64F;
+                facts.direct   = direct;
+                facts.kBlock   = kernel.attr("kblock", 0) > 0;
+                facts.tileM    = tm;
+                facts.tileN    = tn;
+                facts.tileK    = kernel.attr("tile_k", 0);
+                facts.block    = kernel.attr("block", 256);
+                facts.ctas     = ctas;
+                facts.split    = nk;
                 facts.paddedVolume   = M * N * Kp * L;
                 facts.main           = &kernel;
                 uint64_t const outIo = uint64_t(M * N * L) * esOut * (p.t[2].present ? 2 : 1);
-                facts.bytes = uint64_t(M * K * L) * esA + uint64_t(N * K * L) * esB + 2 * (aBytes + bBytes)
-                              + 2 * tBytes + outIo;
+                facts.bytes          = uint64_t(M * K * L) * esA + uint64_t(N * K * L) * esB
+                              + 2 * (aBytes + bBytes) + 2 * tBytes + 2 * pBytes + outIo;
                 program = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
             }
@@ -2201,11 +2729,12 @@ namespace hiptensor
             ContractionRoutes contractionRoutes(Problem const& p)
             {
                 ContractionRoutes r;
-                auto const&       A    = p.t[0];
-                auto const&       B    = p.t[1];
-                bool const        cplx = isComplex(p.t[3].type);
-                auto const        f64Data
-                    = [](hiptensorDataType_t t) { return t == HIPTENSOR_R_64F || t == HIPTENSOR_C_64F; };
+                auto const&       A       = p.t[0];
+                auto const&       B       = p.t[1];
+                bool const        cplx    = isComplex(p.t[3].type);
+                auto const        f64Data = [](hiptensorDataType_t t) {
+                    return t == HIPTENSOR_R_64F || t == HIPTENSOR_C_64F;
+                };
                 switch(p.compute)
                 {
                 case HIPTENSOR_COMPUTE_DESC_64F:
@@ -2432,9 +2961,18 @@ namespace hiptensor
                     std::string const& route   = routes.route;
                     std::string const& storage = routes.storage;
                     int64_t const      nk      = c.N.size() * (cplx ? 2 : 1);
-                    int const     cus = std::max(1, problem.device.cuCount);
-                    for(auto const& body : gemmBodies(pack, c.M.size(), nk, cus, cplx))
+                    int const          cus     = std::max(1, problem.device.cuCount);
+                    // the bodies of the route, then (only for operands or a result past their
+                    // 32-bit offsets) the 64-bit-address body
+                    bool pastOffsets = false;
+                    auto bodies      = gemmBodies(pack, c.M.size(), nk, cus, cplx);
+                    for(size_t i = 0; i <= bodies.size(); i++)
                     {
+                        bool const wide = i == bodies.size();
+                        if(wide && !pastOffsets)
+                        {
+                            break;
+                        }
                         Program        program;
                         CandidateFacts facts;
                         std::string    why;
@@ -2443,7 +2981,8 @@ namespace hiptensor
                                                    c,
                                                    route,
                                                    storage,
-                                                   body,
+                                                   wide ? std::string(kGemmWideBody) : bodies[i],
+                                                   wide,
                                                    workspaceLimit,
                                                    program,
                                                    facts,
@@ -2454,6 +2993,7 @@ namespace hiptensor
                         }
                         else if(isDecline(status))
                         {
+                            pastOffsets = pastOffsets || why == kPastGemmOffsets;
                             note(why);
                         }
                         else
@@ -2558,7 +3098,8 @@ namespace hiptensor
                     T.modes.push_back(mode);
                     T.extents.push_back(extent);
                     T.strides.push_back(stride);
-                    stride = extent > 0 && stride > INT64_MAX / extent ? INT64_MAX : stride * extent;
+                    stride
+                        = extent > 0 && stride > INT64_MAX / extent ? INT64_MAX : stride * extent;
                 };
                 for(int i = 0; i < A.numModes(); i++)
                 {
@@ -2631,8 +3172,8 @@ namespace hiptensor
                             for(auto& s : step.scalars)
                             {
                                 s.role = s.role == ScalarRole::Alpha ? ScalarRole::One
-                                         : s.role == ScalarRole::One ? ScalarRole::One
-                                                                     : ScalarRole::Zero;
+                                             : s.role == ScalarRole::One ? ScalarRole::One
+                                                                         : ScalarRole::Zero;
                             }
                         }
                         out.steps.push_back(std::move(step));
@@ -2681,8 +3222,8 @@ namespace hiptensor
                     reason = "data type not supported by the rocKE kernels";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                auto const     T  = intermediateOf(problem);
-                uint64_t const es = elementBytes(tType, isComplex(E.type));
+                auto const     T        = intermediateOf(problem);
+                uint64_t const es       = elementBytes(tType, isComplex(E.type));
                 uint64_t       elements = 1;
                 for(auto e : T.extents)
                 {

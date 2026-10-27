@@ -53,6 +53,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_t, rocke_archtarget_t */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_hotloop_inst_list_t, policy */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t, descriptors */
+#include "rocke/instance_gemm_prologue.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/ir.h"
 
@@ -70,6 +71,10 @@ extern "C" {
 /* DTLA pass arrays: chunks_total / block_size is small (a handful of passes);
  * 64 covers every legal tile. */
 #define ROCKE_GEMM_MAX_DTL_PASSES 64
+
+/* The fused operand prologue's per-kernel emitter (gemm_prologue.cpp; Python
+ * PrologueEmitter). Owned by rocke_build_universal_gemm. */
+typedef struct rocke_gemm_pro_emitter rocke_gemm_pro_emitter_t;
 
 /* ===================================================================== *
  *  rocke_gemm_build_ctx_t
@@ -253,6 +258,14 @@ typedef struct rocke_gemm_build_ctx
      * epilogue reads _for_results. */
     rocke_value_t* for_results[ROCKE_GEMM_MAX_ACCS];
     int num_for_results;
+    /* ---- fused operand prologue (spec->_prologue; NULL = none) -- */
+    const rocke_gemm_prologue_t* pro; /* _pro                          */
+    rocke_gemm_pro_emitter_t* pe; /* _pe (NULL without a prologue)      */
+    int kmul; /* _kmul: 2 for the f32 pair view, else 1          */
+    bool cplx; /* _cplx: complex B through its real embedding     */
+    /* ---- row-interleave LDS layout (trait.lds_row_interleave) -- */
+    bool rilv; /* _rilv                                           */
+    int rilv_cols; /* _rilv_cols: 8 * block_k + rilv_pad / elem bytes */
 } rocke_gemm_build_ctx_t;
 
 /* ===================================================================== *
@@ -557,6 +570,62 @@ rocke_value_t* rocke_gemm_load_smem_scalar(rocke_ir_builder_t* b,
                                            const rocke_type_t* dtype);
 
 /* _load_smem_vec(b, smem, row, col, n, dtype): f16/n==4 fast path else vN. */
+/* ---- fused operand prologue (gemm_prologue.cpp; Python PrologueEmitter) -- */
+rocke_gemm_pro_emitter_t* rocke_gemm_pro_emitter_new(rocke_ir_builder_t* b,
+                                                     const rocke_gemm_prologue_t* pro,
+                                                     const rocke_type_t* compute,
+                                                     int frag_len);
+void rocke_gemm_pro_emitter_free(rocke_gemm_pro_emitter_t* pe);
+/* raw_len(): 16-bit elements one lane reads per fragment */
+int rocke_gemm_pro_raw_len(const rocke_gemm_pro_emitter_t* pe);
+/* cplx_mode "ni" (row-interleaved bodies) / "lane" with the lane-parity i1 */
+void rocke_gemm_pro_set_cplx_ni(rocke_gemm_pro_emitter_t* pe);
+void rocke_gemm_pro_set_cplx_lane(rocke_gemm_pro_emitter_t* pe, rocke_value_t* lane_odd);
+/* after_load(raw, which): which is 'A' or 'B' */
+rocke_value_t*
+    rocke_gemm_pro_after_load(rocke_gemm_pro_emitter_t* pe, rocke_value_t* raw, char which);
+/* mma(...): every product of the recipe into `acc` (pinned with acc_agpr_pin);
+ * ni < 0 means None */
+rocke_value_t* rocke_gemm_pro_mma(rocke_gemm_pro_emitter_t* pe,
+                                  const rocke_gemm_universal_spec_t* spec,
+                                  const rocke_mmaop_t* op,
+                                  rocke_value_t* a_frag,
+                                  rocke_value_t* b_frag,
+                                  rocke_value_t* acc,
+                                  bool swap,
+                                  int ni);
+
+/* _frag_ld(src, row, col_base, key, n, which, swz): one operand fragment
+ * (_emit_smem_load + the prologue hook); key NULL / swz false = no swizzle */
+rocke_value_t* rocke_gemm_frag_ld(rocke_gemm_build_ctx_t* ctx,
+                                  rocke_value_t* src,
+                                  rocke_value_t* row,
+                                  rocke_value_t* col_base,
+                                  rocke_value_t* key,
+                                  int n,
+                                  char which,
+                                  bool swz);
+
+/* _brow(r): the global B row of B' row r (complex B: r / 2) */
+rocke_value_t* rocke_gemm_brow(rocke_gemm_build_ctx_t* ctx, rocke_value_t* r);
+
+/* _mma_ab(a, b, acc, ni): one MFMA (or the prologue's products); ni < 0 = None */
+rocke_value_t* rocke_gemm_mma_ab(rocke_gemm_build_ctx_t* ctx,
+                                 rocke_value_t* a_frag,
+                                 rocke_value_t* b_frag,
+                                 rocke_value_t* acc,
+                                 int ni);
+
+/* _acc_f32_out(acc): the f32 store's view of one accumulator (prologue
+ * out_f32 + acc_agpr without agpr_out: asm "", "=v,0"; else _acc_agpr_out) */
+rocke_value_t* rocke_gemm_acc_f32_out(rocke_ir_builder_t* b,
+                                      const rocke_gemm_universal_spec_t* spec,
+                                      rocke_value_t* acc);
+
+/* The storage type of the epilogue stores: f32 with the prologue's out_f32,
+ * else the GEMM storage dtype. */
+bool rocke_gemm_out_f32(const rocke_gemm_universal_spec_t* spec);
+
 rocke_value_t* rocke_gemm_load_smem_vec(rocke_ir_builder_t* b,
                                         rocke_value_t* smem,
                                         rocke_value_t* row,
