@@ -649,7 +649,7 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
     yc = 0;
     for(r = 0; r < ctx->SOFTMAX_STATE_SLOTS; ++r)
     {
-        yields[yc++] = in->m_new[r];
+        yields[yc++] = in->m_carry[r];
         yields[yc++] = in->new_l_vals[r];
     }
     for(n = 0; n < ctx->ACC_N_TILES; ++n)

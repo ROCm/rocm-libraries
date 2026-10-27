@@ -576,7 +576,7 @@ typedef struct rocke_gfx942_attn2d_pv_inputs
     rocke_value_t* const* alpha_regs; /* SOFTMAX_STATE_SLOTS                       */
     int alpha_count;
     rocke_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
-    rocke_value_t* const* m_new; /* SOFTMAX_STATE_SLOTS                       */
+    rocke_value_t* const* m_carry; /* SOFTMAX_STATE_SLOTS: unclamped running max */
     /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
      * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
     rocke_value_t* const* pt32_g0;

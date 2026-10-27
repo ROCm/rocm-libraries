@@ -706,7 +706,7 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
         int y = 0;
         for(int r = 0; r < S; ++r)
         {
-            yields[y++] = in->m_new[r];
+            yields[y++] = in->m_carry[r];
             yields[y++] = in->new_l_vals[r];
         }
         for(int n = 0; n < ACC_N_TILES; ++n)

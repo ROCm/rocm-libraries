@@ -262,7 +262,9 @@ static rocke_value_t*
  *  gated by ctx flags so the default narrow build is byte-faithful.
  *
  *  On return the front half has populated, for reg in [0, REGS_PER_LANE):
- *    - ctx->m_cur[reg]  = m_new[reg]   (running max, this tile)
+ *    - m_carry_out[reg] = raw max      (unclamped running max, yielded as the carry;
+ *                                       the clamped m_new[reg] stays local as the
+ *                                       exponent reference for P and alpha)
  *    - ctx->l_cur[reg]  = l_local[reg] (this tile's local L, pre alpha-fold)
  *  and (non-register-PV path) published P into ctx->P_lds. The PV phase reads the
  *  per-reg P (register-PV) or P_lds (LDS path) and finishes the carry.
@@ -418,12 +420,12 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
      * path below; alpha/new_l/m_new per softmax state slot). */
     rocke_value_t* alpha_regs[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
-    rocke_value_t* m_new_out[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* m_carry_out[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     for(int _i = 0; _i < ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE; ++_i)
     {
         alpha_regs[_i] = NULL;
         new_l_vals[_i] = NULL;
-        m_new_out[_i] = NULL;
+        m_carry_out[_i] = NULL;
     }
 
     /* PT32 register groups for the transposed register-P PV (Python PT32_groups,
@@ -696,6 +698,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             m_new[r] = st_m_new;
+            m_carry_out[r] = st_m_raw;
             l_local[r] = st_l_sum;
         }
 
@@ -730,7 +733,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else if(ctx->USE_MFMA_32X32)
@@ -900,6 +902,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+            m_carry_out[reg] = full_max_raw;
         }
 
         /* ---- P = exp2(S - m_new), store to P_lds, per-row L (Python
@@ -928,7 +931,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else
@@ -1125,6 +1127,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+            m_carry_out[reg] = full_max_raw;
         }
 
         /* ============================================================ *
@@ -1190,7 +1193,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
 
@@ -1248,7 +1250,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         pv_in.alpha_regs = alpha_regs;
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
-        pv_in.m_new = m_new_out;
+        pv_in.m_carry = m_carry_out;
         if(ctx->REGISTER_PV)
         {
             pv_in.p_regs_f32 = p_regs_f32_buf;
