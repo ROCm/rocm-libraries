@@ -1556,8 +1556,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                void* smem_ptr,
                float sink_v) const
     {
-        static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
-                      "qr_tdm split-kv does not implement bias");
         static_assert(!kQuantized, "qr_tdm split-kv does not implement quantization");
 
         // The navigators are forwarded as-is: run_ builds its own K/V windows

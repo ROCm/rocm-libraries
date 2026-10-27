@@ -403,9 +403,6 @@ class FmhaFwdSplitKVApiTrait:
             else:
                 assert False
         elif self.pipeline_tag == "qr_tdm":
-            # Mirrors fmha_fwd.py: TDM stores the head dim at its true length,
-            # so the unpadded check uses the TDM map (96 and 160 map to
-            # themselves), and the padded one still needs 8-element alignment.
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
@@ -928,11 +925,17 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
         pipelines = KernelComponentFactoryBase.get_pipelines(dtype, hdim, mask_impl)
         if dtype in ["fp16", "bf16"] and hdim == 128:
-            # qr_tdm is generated for no bias / no logits soft cap only:
-            #   soft cap  the pipeline static_asserts it away
-            #   bias      the pipeline static_asserts it away too ("qr_tdm
-            #             split-kv does not implement bias"); the prefill
-            #             qr_tdm does implement it, the split-kv copy does not
+            # Logits soft cap is left out because the pipeline static_asserts
+            # it away, as does the prefill qr_tdm.
+            #
+            # Bias is left out for a different reason: the pipeline does handle
+            # it (the variants compile and validate, elementwise and alibi
+            # alike), but the BUILD_TESTING instance filter keeps split-kv to
+            # *_nbias* in the dispatch api while still building the instances,
+            # so generating them would add compile time for kernels no test can
+            # reach. qr already pays that for its own 396. Lift this once the
+            # filter drops the instances too.
+            #
             # Like fmha_fwd.py it pads both sequence lengths together and both
             # head dims together; the qr entries padding one side only stay as
             # they are, which is why the dispatch chain still has to put qr_tdm
