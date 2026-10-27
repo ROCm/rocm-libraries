@@ -947,9 +947,7 @@ class TestDenseKvSegmentsNumeric:
             p = torch.softmax(torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale, -1)
             ref = torch.einsum("bhqk,bhkd->bhqd", p, vh).transpose(1, 2)
         else:
-            ref = _bottom_right_reference(
-                q, k, v, None, scale, top_left=mask == "tl"
-            )
+            ref = _bottom_right_reference(q, k, v, None, scale, top_left=mask == "tl")
         err = (out.float() - ref).abs().max().item()
         assert err < _BOTTOM_RIGHT_TOL, (
             f"{geometry} {mask} split={diag_split} S={segments} {sq}x{skv} D{d}: "

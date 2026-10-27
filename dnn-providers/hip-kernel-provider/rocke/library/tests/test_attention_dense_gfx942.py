@@ -846,9 +846,10 @@ def test_kv_segments_admission():
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
     assert spec.kernel_name().endswith("_kvs4")
-    assert attention_dense_grid(spec)[0] == 4 * attention_dense_grid(
-        Gfx942AttentionDenseSpec(**base)
-    )[0]
+    assert (
+        attention_dense_grid(spec)[0]
+        == 4 * attention_dense_grid(Gfx942AttentionDenseSpec(**base))[0]
+    )
     for over in (
         {"persistent": True},
         {"use_sinks": True},

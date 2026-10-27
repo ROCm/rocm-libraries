@@ -569,9 +569,7 @@ def build_unified_attention_3d_tiled(
     # 6 KB Q buffer takes the CTA from 24 KB to 18 KB of LDS (2 -> 3 CTAs/CU).
     Q_IN_V_SLOT = HD == 192 and T >= BLOCK_M
     Q_lds = (
-        None
-        if Q_IN_V_SLOT
-        else b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
+        None if Q_IN_V_SLOT else b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
     )
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
     # One V slot: V(i) is loaded after QK(i) and consumed by PV(i) in the same
@@ -1101,9 +1099,7 @@ def build_unified_attention_3d_tiled(
                 )
             )
         else:
-            Q_kits.append(
-                b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=4)
-            )
+            Q_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=4))
 
     kvloop = b.scf_for_iter(
         tile_start, tile_end, b.const_i32(1), iter_args, iv_name="kv_tile"
