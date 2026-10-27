@@ -597,14 +597,18 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("Test*", policy.unit_test_patterns)
         self.assertIn("unit_test_*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
-        self.assertIn("projects/rocsparse/clients/unittests/**", policy.unit_test_patterns)
+        self.assertIn(
+            "projects/rocsparse/clients/unittests/**", policy.unit_test_patterns
+        )
 
     def test_rocsparse_unit_test_file_satisfies_requirement(self) -> None:
         policy_path = THIS_DIR / "policy.yml"
         if not policy_path.exists():
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
-        library = "projects/rocsparse/library/src/conversion/rocsparse_csxsldu_preprocess.cpp"
+        library = (
+            "projects/rocsparse/library/src/conversion/rocsparse_csxsldu_preprocess.cpp"
+        )
         cases = [
             "projects/rocsparse/clients/unittests/unit_test_host_internal_branches.cpp",
             "projects/rocsparse/clients/unittests/rocsparse_unit_test_main.cpp",
