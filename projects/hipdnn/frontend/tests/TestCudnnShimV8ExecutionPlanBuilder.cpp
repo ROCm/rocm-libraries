@@ -1,9 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The ported v0.x ExecutionPlanBuilder against the shim's backend C API and the
-// mock hipDNN backend: building without a plan handle, tags, notes, JSON and
-// copies.
+// The ported v0.x ExecutionPlanBuilder against the mock hipDNN backend: building
+// without a plan handle, tags, notes, JSON and copies.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_ExecutionPlan.h>
 
 #include <gtest/gtest.h>
@@ -25,8 +24,8 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-using hipdnn_shim_test::BuilderFailure;
-using hipdnn_shim_test::builderFailureOf;
+using hipdnn_shim_test::BuildFailure;
+using hipdnn_shim_test::failureOf;
 
 class TestCudnnShimV8ExecutionPlanBuilder : public hipdnn_shim_test::ShimV8PlanFixture
 {
@@ -50,7 +49,7 @@ TEST_F(TestCudnnShimV8ExecutionPlanBuilder, PlanBuildsWithoutPlanHandle)
 
     EXPECT_EQ(cudnnBackendExecute(_handle, plan.get_raw_desc(), pack.get_raw_desc()),
               CUDNN_STATUS_SUCCESS)
-        << hipdnn_shim_test::lastShimError();
+        << hipdnn_shim_test::shimLastError();
     ASSERT_EQ(executions().size(), 1U);
     EXPECT_EQ(static_cast<void*>(executions().back().handle), static_cast<void*>(_handle));
     EXPECT_EQ(executedEngineIds(), std::vector<std::int64_t>{1});
@@ -174,7 +173,7 @@ TEST_F(TestCudnnShimV8ExecutionPlanBuilder, LoadFromJsonRoundTrip)
     EXPECT_NE(loaded.get_raw_desc(), plan.get_raw_desc());
 
     fe::ExecutionPlanBuilder_v8 noHandle;
-    const BuilderFailure failure = builderFailureOf([&noHandle, &plan] {
+    const BuildFailure failure = failureOf([&noHandle, &plan] {
         [[maybe_unused]] auto built = noHandle.loadFromJson(plan.getJsonRepresentation());
     });
     ASSERT_TRUE(failure.thrown);
@@ -190,8 +189,8 @@ TEST_F(TestCudnnShimV8ExecutionPlanBuilder, KernelCacheNotSupported)
     fe::ExecutionPlanBuilder_v8 builder;
     builder.setEngineConfig(configs[0], graph.getTag())
         .setKernelCache(std::make_shared<fe::KernelCache>());
-    const BuilderFailure failure
-        = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
 
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);

@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "fake_backend/ShimV8MockBackendFixture.hpp"
 
@@ -420,16 +421,15 @@ TEST_F(TestCudnnShimV8Utils, DescriptorStreamsOnlyWhenLoggingEnabled)
 TEST_F(TestCudnnShimV8Utils, GetEnvironmentIsNullForUnsetOrEmpty)
 {
     const char* const name = "HIPDNN_CUDNN_SHIM_V8_UTILS_PROBE";
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter variable(name);
     hipdnn_data_sdk::utilities::unsetEnv(name);
     EXPECT_EQ(fe::get_environment(name), nullptr);
 
-    hipdnn_data_sdk::utilities::setEnv(name, "");
+    variable.setValue("");
     EXPECT_EQ(fe::get_environment(name), nullptr);
 
-    hipdnn_data_sdk::utilities::setEnv(name, "set");
+    variable.setValue("set");
     EXPECT_EQ(text(fe::get_environment(name)), text("set"));
-
-    hipdnn_data_sdk::utilities::unsetEnv(name);
 }
 
 // make_shared_backend_pointer gives an empty pointer: builders attach a record (and, where
@@ -443,9 +443,9 @@ TEST_F(TestCudnnShimV8Utils, EmptyOpaquePointerOwnsNothing)
         = fe::make_shared_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
     ASSERT_NE(pointer, nullptr);
     EXPECT_TRUE(pointer->is_good());
-    EXPECT_EQ(pointer->get_type(), CUDNN_BACKEND_TENSOR_DESCRIPTOR);
+    EXPECT_EQ(v8::RecordAccess::type(*pointer), CUDNN_BACKEND_TENSOR_DESCRIPTOR);
     EXPECT_EQ(pointer->get_backend_descriptor(), nullptr);
-    EXPECT_EQ(pointer->get_record(), nullptr);
+    EXPECT_EQ(v8::RecordAccess::record(*pointer), nullptr);
     EXPECT_EQ(v8::recordOf<v8::TensorRecord>(pointer), nullptr);
 }
 

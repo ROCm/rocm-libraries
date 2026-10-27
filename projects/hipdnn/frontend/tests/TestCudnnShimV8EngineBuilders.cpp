@@ -1,16 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The ported v0.x Engine and EngineConfig builders against the shim's backend
-// C API and the mock hipDNN backend: knob projection, the knob maximum, and
-// configs that choose only some knobs.
+// The ported v0.x Engine and EngineConfig builders against the mock hipDNN
+// backend: knob projection, the knob maximum, and configs that choose only
+// some knobs.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_EngineConfig.h>
 
 #include <gtest/gtest.h>
 
 #include "fake_backend/ShimV8PlanFixture.hpp"
 
-#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,15 +19,10 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-using hipdnn_shim_test::BuilderFailure;
-using hipdnn_shim_test::builderFailureOf;
+using hipdnn_shim_test::BuildFailure;
+using hipdnn_shim_test::failureOf;
 
 constexpr std::int64_t KNOB_ENGINE = 0;
-
-std::string knobSegment(cudnnBackendKnobType_t type, std::int64_t value)
-{
-    return "_k" + std::to_string(static_cast<int>(type)) + "=" + std::to_string(value);
-}
 
 class TestCudnnShimV8EngineBuilders : public hipdnn_shim_test::ShimV8PlanFixture
 {
@@ -54,16 +48,8 @@ TEST_F(TestCudnnShimV8EngineBuilders, KnobMaxValueIsMaximum)
 
 TEST_F(TestCudnnShimV8EngineBuilders, KnobsListVisibleOnly)
 {
-    // BLOCK_SIZE has explicit valid values, "int_knob" has no cuDNN type and
-    // the two STAGES knobs collide: only TILE_SIZE can be shown.
-    installEngineKnobs(KNOB_ENGINE,
-                       {
-                           {"prov.tile_size", 8, 0, 64, 8, {}},
-                           {"prov.block_size", 8, 0, 64, 1, {8, 16}},
-                           {"prov.int_knob", 1, 0, 10, 1, {}},
-                           {"first.stages", 1, 1, 4, 1, {}},
-                           {"second.stages", 1, 1, 4, 1, {}},
-                       });
+    // Only TILE_SIZE of the mixed knobs can be shown.
+    installEngineKnobs(KNOB_ENGINE, mixedKnobs());
     const fe::OperationGraph_v8 graph = convGraph();
 
     fe::Engine_v8 built = engine(graph, KNOB_ENGINE);
@@ -87,13 +73,8 @@ TEST_F(TestCudnnShimV8EngineBuilders, PartialKnobChoiceBuilds)
     const fe::OperationGraph_v8 graph = convGraph();
     fe::Engine_v8 built = engine(graph, KNOB_ENGINE);
     ASSERT_EQ(built.get_status(), CUDNN_STATUS_SUCCESS) << built.get_error();
-    auto& knobs = built.getSupportedKnobs();
-    ASSERT_EQ(knobs.size(), 2U);
-    const auto tileSize = std::find_if(knobs.begin(), knobs.end(), [](const auto& knob) {
-        return knob.getKnobType() == CUDNN_KNOB_TYPE_TILE_SIZE;
-    });
-    ASSERT_NE(tileSize, knobs.end());
-    tileSize->setChoice(16);
+    ASSERT_EQ(built.getSupportedKnobs().size(), 2U);
+    choose(built, CUDNN_KNOB_TYPE_TILE_SIZE, 16);
 
     const fe::EngineConfig_v8 config = fe::EngineConfigBuilder_v8().setEngine(built).build();
     ASSERT_EQ(config.get_status(), CUDNN_STATUS_SUCCESS) << config.get_error();
@@ -103,7 +84,7 @@ TEST_F(TestCudnnShimV8EngineBuilders, PartialKnobChoiceBuilds)
     ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
     // Every stored choice stays in the tag; only TILE_SIZE reaches hipDNN.
     std::string expected = "ConvFwd_eng0";
-    for(const auto& knob : knobs)
+    for(const auto& knob : built.getSupportedKnobs())
     {
         expected += knobSegment(knob.getKnobType(), knob.getChoice());
     }
@@ -112,7 +93,7 @@ TEST_F(TestCudnnShimV8EngineBuilders, PartialKnobChoiceBuilds)
     EXPECT_EQ(created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).size(), 1U);
 }
 
-TEST_F(TestCudnnShimV8EngineBuilders, GlobalIndexOutOfRangeRejected)
+TEST_F(TestCudnnShimV8EngineBuilders, GlobalIndexPastEngineCountNotSupported)
 {
     const fe::OperationGraph_v8 graph = convGraph();
 
@@ -121,10 +102,10 @@ TEST_F(TestCudnnShimV8EngineBuilders, GlobalIndexOutOfRangeRejected)
         SCOPED_TRACE(index);
         fe::EngineBuilder_v8 builder;
         builder.setOperationGraph(graph).setGlobalEngineIdx(index);
-        const BuilderFailure failure
-            = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        const BuildFailure failure
+            = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
         ASSERT_TRUE(failure.thrown);
-        EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+        EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
         EXPECT_NE(failure.what.find("EngineBuilder: global engine index = "), std::string::npos)
             << failure.what;
     }
@@ -132,8 +113,8 @@ TEST_F(TestCudnnShimV8EngineBuilders, GlobalIndexOutOfRangeRejected)
     // Negative indices are rejected before the graph's engine space is consulted.
     fe::EngineBuilder_v8 negative;
     negative.setOperationGraph(graph).setGlobalEngineIdx(-1);
-    const BuilderFailure failure
-        = builderFailureOf([&negative] { [[maybe_unused]] auto built = negative.build(); });
+    const BuildFailure failure
+        = failureOf([&negative] { [[maybe_unused]] auto built = negative.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_NE(failure.what.find("EngineBuilder: the global engine index must be non-negative"),

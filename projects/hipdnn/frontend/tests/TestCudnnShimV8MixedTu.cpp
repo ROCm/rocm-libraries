@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "fake_backend/ShimV8MockBackendFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <array>
 #include <cstddef>
@@ -21,31 +21,10 @@ namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 namespace
 {
 
-using Dims = std::vector<int64_t>;
+using hipdnn_shim_test::Dims;
+using hipdnn_shim_test::packedStrides;
 
-Dims packedStrides(const Dims& dims)
-{
-    Dims strides(dims.size(), 1);
-    for(std::size_t i = dims.size() - 1; i > 0; --i)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
-
-cudnn_frontend::Tensor tensor(int64_t uid, const Dims& dims)
-{
-    const Dims strides = packedStrides(dims);
-    return cudnn_frontend::TensorBuilder()
-        .setDataType(cudnn_frontend::DataType_t::FLOAT)
-        .setDim(static_cast<int64_t>(dims.size()), dims.data())
-        .setStride(static_cast<int64_t>(strides.size()), strides.data())
-        .setId(uid)
-        .setAlignment(16)
-        .build();
-}
-
-class TestCudnnShimV8MixedTu : public hipdnn_shim_test::ShimV8MockBackendFixture
+class TestCudnnShimV8MixedTu : public hipdnn_shim_test::ShimV8BuilderFixture
 {
 };
 

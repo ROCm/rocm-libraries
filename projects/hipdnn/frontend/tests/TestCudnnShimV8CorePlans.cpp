@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "fake_backend/ShimV8MockBackendFixture.hpp"
+#include "fake_backend/ShimV8TestSupport.hpp"
 
 #include <algorithm>
 #include <array>
@@ -34,26 +35,11 @@ namespace
 namespace v8 = hipdnn_frontend::compatibility::cudnn_frontend::detail::v8;
 
 using hipdnn_shim_test::CapturedSetAttribute;
+using hipdnn_shim_test::shimErrorOf;
 
 constexpr std::string_view CHOICES_LABEL = "knobChoices";
-constexpr v8::PlanLabels PLAN_LABELS{"planHandle", "graphHandle", "planJson"};
+constexpr std::string_view JSON_LABEL = "planJson";
 constexpr v8::VariantPackLabels PACK_LABELS{"dataPointers", "uniqueIds"};
-
-// Runs `body`, which must throw ShimError; returns it.
-template <typename Body>
-v8::ShimError shimErrorOf(Body&& body)
-{
-    try
-    {
-        body();
-    }
-    catch(const v8::ShimError& error)
-    {
-        return error;
-    }
-    ADD_FAILURE() << "no ShimError thrown";
-    return {CUDNN_STATUS_SUCCESS, ""};
-}
 
 class TestCudnnShimV8CorePlans : public hipdnn_shim_test::ShimV8MockBackendFixture
 {
@@ -87,21 +73,6 @@ protected:
     {
         return v8::makeEngineRecord(graph(), ENGINE_INDEX, "index");
     }
-
-    std::vector<CapturedSetAttribute> callsOn(hipdnnBackendDescriptor_t descriptor,
-                                              hipdnnBackendAttributeName_t name) const
-    {
-        std::vector<CapturedSetAttribute> calls = setAttributesOf(descriptor);
-        std::vector<CapturedSetAttribute> named;
-        for(CapturedSetAttribute& call : calls)
-        {
-            if(call.name == name)
-            {
-                named.push_back(std::move(call));
-            }
-        }
-        return named;
-    }
 };
 
 TEST_F(TestCudnnShimV8CorePlans, EngineIndexMapsToRankedId)
@@ -121,8 +92,12 @@ TEST_F(TestCudnnShimV8CorePlans, EngineIndexMapsToRankedId)
 TEST_F(TestCudnnShimV8CorePlans, EngineIndexOutsideSpaceNamesLabel)
 {
     const v8::ShimError error = shimErrorOf([&] { v8::makeEngineRecord(graph(), 2, "theIndex"); });
-    EXPECT_EQ(error.status(), CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(error.status(), CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_STREQ(error.what(), "theIndex = 2 is outside [0, 2)");
+
+    const v8::ShimError negative
+        = shimErrorOf([&] { v8::makeEngineRecord(graph(), -1, "theIndex"); });
+    EXPECT_EQ(negative.status(), CUDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestCudnnShimV8CorePlans, RankedRecordsKeepRankOrder)
@@ -210,13 +185,22 @@ TEST_F(TestCudnnShimV8CorePlans, KnobConfigBuiltOnceOnFirstUse)
 
 TEST_F(TestCudnnShimV8CorePlans, LoadedConfigHasNoGraph)
 {
-    const std::shared_ptr<const v8::ConfigRecord> loaded = v8::makeLoadedConfigRecord(
-        -31, 2, {CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION}, {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}, "x");
+    const v8::KnobChoices requested
+        = {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}, {CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1}};
+    const std::shared_ptr<const v8::ConfigRecord> loaded
+        = v8::makeLoadedConfigRecord(-31,
+                                     2,
+                                     {CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION},
+                                     {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}},
+                                     requested,
+                                     "x");
     EXPECT_TRUE(loaded->isLoaded());
     EXPECT_EQ(loaded->engineId(), -31);
     EXPECT_EQ(loaded->engineIndex(), 2);
     EXPECT_EQ(loaded->engine().name(), std::optional<std::string>("x"));
     EXPECT_TRUE(loaded->engine().knobs().empty());
+    EXPECT_EQ(loaded->knobChoices(), (v8::KnobChoices{{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}));
+    EXPECT_EQ(loaded->requestedChoices(), requested);
     EXPECT_EQ(shimErrorOf([&] { loaded->hipdnnEngineConfig(); }).status(),
               CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(shimErrorOf([&] { loaded->engine().graph(); }).status(), CUDNN_STATUS_NOT_SUPPORTED);
@@ -236,15 +220,14 @@ TEST_F(TestCudnnShimV8CorePlans, RecordAsChecksKind)
               CUDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestCudnnShimV8CorePlans, PlanBuildReadsWorkspaceOnGraphHandle)
+TEST_F(TestCudnnShimV8CorePlans, PlanBuildReadsWorkspace)
 {
     const std::shared_ptr<const v8::ConfigRecord> config
         = v8::makeConfigRecord(engine(), {}, CHOICES_LABEL);
-    const std::shared_ptr<const v8::PlanRecord> plan = v8::buildPlan(config, nullptr, PLAN_LABELS);
+    const std::shared_ptr<const v8::PlanRecord> plan = v8::buildPlan(config);
 
     EXPECT_EQ(plan->kind(), CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
     EXPECT_EQ(plan->workspaceSize(), WORKSPACE_SIZE);
-    EXPECT_EQ(plan->contextHandle(), _handle);
     EXPECT_EQ(plan->configRecord(), config);
     ASSERT_EQ(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).size(), 1U);
     EXPECT_EQ(plan->hipdnnPlan(), created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).front());
@@ -253,21 +236,6 @@ TEST_F(TestCudnnShimV8CorePlans, PlanBuildReadsWorkspaceOnGraphHandle)
     ASSERT_EQ(configCalls.size(), 1U);
     EXPECT_EQ(configCalls.front().value<hipdnnBackendDescriptor_t>(), config->hipdnnEngineConfig());
     EXPECT_TRUE(setCountAtFinalize(plan->hipdnnPlan()).has_value());
-
-    // Naming the graph's own handle is accepted.
-    EXPECT_EQ(v8::buildPlan(config, _handle, PLAN_LABELS)->contextHandle(), _handle);
-}
-
-TEST_F(TestCudnnShimV8CorePlans, PlanHandleOtherThanGraphHandleIsBadParam)
-{
-    const std::shared_ptr<const v8::ConfigRecord> config
-        = v8::makeConfigRecord(engine(), {}, CHOICES_LABEL);
-    const v8::ShimError error = shimErrorOf(
-        [&] { v8::buildPlan(config, reinterpret_cast<cudnnHandle_t>(0x23456789), PLAN_LABELS); });
-    EXPECT_EQ(error.status(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_STREQ(error.what(),
-                 "planHandle differs from the graphHandle of the engine config's graph");
-    EXPECT_TRUE(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).empty());
 }
 
 TEST_F(TestCudnnShimV8CorePlans, PlanJsonRoundTrip)
@@ -278,10 +246,13 @@ TEST_F(TestCudnnShimV8CorePlans, PlanJsonRoundTrip)
     installBehaviorNotes(ENGINE_ID, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     const std::shared_ptr<const v8::ConfigRecord> config
         = v8::makeConfigRecord(engine(), {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}, CHOICES_LABEL);
-    const std::shared_ptr<const v8::PlanRecord> built = v8::buildPlan(config, nullptr, PLAN_LABELS);
+    const std::shared_ptr<const v8::PlanRecord> built = v8::buildPlan(config);
 
-    const std::string& json = built->json();
-    EXPECT_EQ(&built->json(), &json);
+    const std::string json = built->json();
+    // Serialized once: a later payload never reaches the built plan's JSON.
+    installSerializedPlan({0x01});
+    EXPECT_EQ(built->json(), json);
+    installSerializedPlan(payload);
     const std::optional<v8::plan_json::Plan> parsed = v8::plan_json::read(json, "json");
     ASSERT_TRUE(parsed.has_value()) << json;
     EXPECT_EQ(parsed->id, ENGINE_ID);
@@ -290,17 +261,18 @@ TEST_F(TestCudnnShimV8CorePlans, PlanJsonRoundTrip)
     EXPECT_EQ(parsed->behaviorNotes,
               std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     EXPECT_EQ(parsed->knobs, (v8::KnobChoices{{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}));
+    // Every requested choice was applied, so the JSON does not repeat them.
+    EXPECT_FALSE(parsed->requestedKnobs.has_value());
+    EXPECT_EQ(json.find("requestedKnobs"), std::string::npos) << json;
     EXPECT_EQ(parsed->payload, payload);
 
-    const auto loadHandle = reinterpret_cast<cudnnHandle_t>(0x34567890);
-    const std::shared_ptr<const v8::PlanRecord> loaded
-        = v8::loadPlan(loadHandle, json, PLAN_LABELS);
-    EXPECT_EQ(loaded->contextHandle(), loadHandle);
+    const std::shared_ptr<const v8::PlanRecord> loaded = v8::loadPlan(_handle, json, JSON_LABEL);
     EXPECT_EQ(loaded->workspaceSize(), WORKSPACE_SIZE);
     EXPECT_TRUE(loaded->config().isLoaded());
     EXPECT_EQ(loaded->config().engineId(), ENGINE_ID);
     EXPECT_EQ(loaded->config().engineIndex(), ENGINE_INDEX);
     EXPECT_EQ(loaded->config().knobChoices(), config->knobChoices());
+    EXPECT_EQ(loaded->config().requestedChoices(), config->requestedChoices());
     EXPECT_EQ(loaded->config().engine().name(), parsed->name);
     EXPECT_EQ(loaded->config().engine().behaviorNotes(), parsed->behaviorNotes);
     EXPECT_EQ(loaded->hipdnnPlan(), created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).back());
@@ -312,13 +284,13 @@ TEST_F(TestCudnnShimV8CorePlans, PlanJsonIdMismatchIsBadParam)
 {
     installSerializedPlan({0x01, 0x02, 0x03});
     const std::shared_ptr<const v8::PlanRecord> built
-        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL), nullptr, PLAN_LABELS);
+        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL));
     std::optional<v8::plan_json::Plan> parsed = v8::plan_json::read(built->json(), "json");
     ASSERT_TRUE(parsed.has_value());
     parsed->id = 8;
 
     const v8::ShimError error = shimErrorOf(
-        [&] { v8::loadPlan(_handle, v8::plan_json::write(*parsed, true), PLAN_LABELS); });
+        [&] { v8::loadPlan(_handle, v8::plan_json::write(*parsed, true), JSON_LABEL); });
     EXPECT_EQ(error.status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_STREQ(error.what(), "planJson: \"id\" 8 does not match engine 7 of the serialized plan");
 }
@@ -328,7 +300,7 @@ TEST_F(TestCudnnShimV8CorePlans, PlanJsonWithoutPayloadIsNotSupported)
     v8::plan_json::Plan plan;
     plan.id = ENGINE_ID;
     const v8::ShimError error = shimErrorOf(
-        [&] { v8::loadPlan(_handle, v8::plan_json::write(plan, false), PLAN_LABELS); });
+        [&] { v8::loadPlan(_handle, v8::plan_json::write(plan, false), JSON_LABEL); });
     EXPECT_EQ(error.status(), CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_STREQ(error.what(),
                  "planJson has no \"payload\": the engine could not serialize the plan, so it "
@@ -449,25 +421,9 @@ TEST_F(TestCudnnShimV8CorePlans, KnobConfigBuiltOnceAcrossThreads)
     const std::size_t choices = created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).size();
 
     constexpr std::size_t THREAD_COUNT = 8;
-    std::atomic<bool> start{false};
     std::array<hipdnnBackendDescriptor_t, THREAD_COUNT> seen{};
-    std::vector<std::thread> threads;
-    threads.reserve(THREAD_COUNT);
-    for(std::size_t i = 0; i < THREAD_COUNT; ++i)
-    {
-        threads.emplace_back([&config, &start, &seen, i] {
-            while(!start.load())
-            {
-                std::this_thread::yield();
-            }
-            seen[i] = config->hipdnnEngineConfig();
-        });
-    }
-    start.store(true);
-    for(std::thread& thread : threads)
-    {
-        thread.join();
-    }
+    runConcurrently(THREAD_COUNT,
+                    [&config, &seen](std::size_t i) { seen.at(i) = config->hipdnnEngineConfig(); });
 
     ASSERT_EQ(created(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR).size(), configs + 1);
     EXPECT_EQ(created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).size(), choices + 1);
@@ -503,30 +459,35 @@ TEST_F(TestCudnnShimV8CorePlans, PlanTagKeepsEveryRequestedChoice)
 {
     installSerializedPlan({0x01, 0x02});
     const std::shared_ptr<const v8::EngineRecord> record = engine();
-    EXPECT_EQ(
-        v8::buildPlan(v8::makeConfigRecord(record, {}, CHOICES_LABEL), nullptr, PLAN_LABELS)->tag(),
-        "eng1");
+    EXPECT_EQ(v8::buildPlan(v8::makeConfigRecord(record, {}, CHOICES_LABEL))->tag(), "eng1");
 
     // TILE_SIZE -1 is unset, so it never reaches hipDNN, but the tag keeps it.
     const std::shared_ptr<const v8::PlanRecord> plan = v8::buildPlan(
         v8::makeConfigRecord(record,
                              {{CUDNN_KNOB_TYPE_TILE_SIZE, -1}, {CUDNN_KNOB_TYPE_SPLIT_K_SLC, 2}},
-                             CHOICES_LABEL),
-        nullptr,
-        PLAN_LABELS);
+                             CHOICES_LABEL));
     const std::string tile = std::to_string(static_cast<int>(CUDNN_KNOB_TYPE_TILE_SIZE));
     const std::string splitK = std::to_string(static_cast<int>(CUDNN_KNOB_TYPE_SPLIT_K_SLC));
     EXPECT_EQ(plan->tag(), "eng1_k" + tile + "=-1_k" + splitK + "=2");
 
-    // A restored plan's tag has the validated choices its JSON carries.
-    EXPECT_EQ(v8::loadPlan(_handle, plan->json(), PLAN_LABELS)->tag(), "eng1_k" + splitK + "=2");
+    // The JSON carries the requested choices, so a restored plan keeps the tag.
+    const std::optional<v8::plan_json::Plan> parsed = v8::plan_json::read(plan->json(), "json");
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->knobs, (v8::KnobChoices{{CUDNN_KNOB_TYPE_SPLIT_K_SLC, 2}}));
+    EXPECT_EQ(parsed->requestedKnobs,
+              (v8::KnobChoices{{CUDNN_KNOB_TYPE_TILE_SIZE, -1}, {CUDNN_KNOB_TYPE_SPLIT_K_SLC, 2}}));
+    const std::shared_ptr<const v8::PlanRecord> loaded
+        = v8::loadPlan(_handle, plan->json(), JSON_LABEL);
+    EXPECT_EQ(loaded->tag(), plan->tag());
+    EXPECT_EQ(loaded->config().knobChoices(), parsed->knobs);
+    EXPECT_EQ(loaded->json(), plan->json());
 }
 
 TEST_F(TestCudnnShimV8CorePlans, PlanNotesComeFromItsEngine)
 {
     installBehaviorNotes(ENGINE_ID, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     const std::shared_ptr<const v8::PlanRecord> plan
-        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL), nullptr, PLAN_LABELS);
+        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL));
     EXPECT_EQ(plan->behaviorNotes(),
               std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     EXPECT_EQ(plan->numericalNotes(),
@@ -540,12 +501,12 @@ TEST_F(TestCudnnShimV8CorePlans, PlanJsonOmitsPayloadWhenSerializeFails)
                 ::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .WillByDefault(::testing::Return(HIPDNN_STATUS_NOT_SUPPORTED));
     const std::shared_ptr<const v8::PlanRecord> plan
-        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL), nullptr, PLAN_LABELS);
+        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL));
 
     const std::string& json = plan->json();
     EXPECT_EQ(json.find("payload"), std::string::npos) << json;
     EXPECT_FALSE(v8::plan_json::read(json, "json").has_value()) << json;
-    EXPECT_EQ(shimErrorOf([&] { v8::loadPlan(_handle, json, PLAN_LABELS); }).status(),
+    EXPECT_EQ(shimErrorOf([&] { v8::loadPlan(_handle, json, JSON_LABEL); }).status(),
               CUDNN_STATUS_NOT_SUPPORTED);
 }
 
@@ -553,8 +514,7 @@ TEST_F(TestCudnnShimV8CorePlans, PlanLoadWorkspaceFailureIsReported)
 {
     installSerializedPlan({0x01, 0x02});
     const std::string json
-        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL), nullptr, PLAN_LABELS)
-              ->json();
+        = v8::buildPlan(v8::makeConfigRecord(engine(), {}, CHOICES_LABEL))->json();
     ON_CALL(*_mockBackend,
             backendGetAttribute(::testing::_,
                                 HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
@@ -564,23 +524,12 @@ TEST_F(TestCudnnShimV8CorePlans, PlanLoadWorkspaceFailureIsReported)
                                 ::testing::_))
         .WillByDefault(::testing::Return(HIPDNN_STATUS_BAD_PARAM));
 
-    const v8::ShimError error = shimErrorOf([&] { v8::loadPlan(_handle, json, PLAN_LABELS); });
+    const v8::ShimError error = shimErrorOf([&] { v8::loadPlan(_handle, json, JSON_LABEL); });
     EXPECT_EQ(error.status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(std::string(error.what())
                   .rfind("reading the workspace size of the hipDNN execution plan: ", 0),
               0U)
         << error.what();
-}
-
-TEST_F(TestCudnnShimV8CorePlans, PlanLoadNeedsHandle)
-{
-    EXPECT_CALL(*_mockBackend,
-                backendCreateAndDeserializeExecutionPlanExt(
-                    ::testing::_, ::testing::_, ::testing::_, ::testing::_))
-        .Times(0);
-    const v8::ShimError error = shimErrorOf([&] { v8::loadPlan(nullptr, "{", PLAN_LABELS); });
-    EXPECT_EQ(error.status(), CUDNN_STATUS_BAD_PARAM);
-    EXPECT_STREQ(error.what(), "planHandle is required to load a serialized execution plan");
 }
 
 TEST_F(TestCudnnShimV8CorePlans, RawConfigNotesReadTheEngine)

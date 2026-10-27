@@ -79,8 +79,10 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderPlans.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderInputs.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8BuilderContracts.cpp>
-    # The errata filter exists only when the frontend keeps its JSON library.
+    # The errata filter and the shim's json alias exist only when the frontend keeps its JSON
+    # library.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnShimV8Errata.cpp>
+    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnShimGlobalJson.cpp>
     # SDPA node coverage additionally needs the SDPA build.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
@@ -180,41 +182,48 @@ target_link_libraries(
 # it -- a frontend-only build, where there is no backend to find -- its absence is
 # tolerated. Gating on the target rather than on what happens to be installed is what keeps
 # a genuinely missing backend from degrading into a silent skip.
-if(TARGET hipdnn_backend)
-    add_dependencies(hipdnn_frontend_dynamic_load_tests hipdnn_backend)
-    target_compile_definitions(
-        hipdnn_frontend_dynamic_load_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
-    )
-endif()
+function(hipdnn_frontend_expect_backend_library test_target)
+    if(TARGET hipdnn_backend)
+        add_dependencies(${test_target} hipdnn_backend)
+        target_compile_definitions(${test_target} PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY)
+    endif()
+endfunction()
+
+hipdnn_frontend_expect_backend_library(hipdnn_frontend_dynamic_load_tests)
 
 add_hipdnn_test(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Compiles the shipped public frontend umbrella as C++20, the standard under which
-# std::filesystem::path::u8string() returns std::u8string -- concatenating its result
-# with a narrow literal would break C++20 consumers at include time. There is nothing to
-# run: the target is object-only, consuming hipdnn_frontend_dynamic for its usage
-# requirements and linking nothing -- in particular not the backend, which runtime-load
-# mode must never require. hipdnn_frontend_dynamic_load_tests above is the C++17 control.
-if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-    add_library(hipdnn_frontend_runtime_load_header_cpp20 OBJECT TestRuntimeLoadHeaderCpp20.cpp)
-    target_compile_features(hipdnn_frontend_runtime_load_header_cpp20 PRIVATE cxx_std_20)
-    # CXX_CLANG_TIDY is cleared because a superbuild sets CMAKE_CXX_CLANG_TIDY globally,
-    # which would otherwise lint this C++17 header as if it were C++20 source. Checks
-    # like modernize-use-ranges and modernize-use-constraints are gated on the standard,
-    # so they stay silent everywhere else and fire only here -- demanding std::ranges and
-    # requires in a header that must keep compiling as C++17. This target proves the
-    # header compiles at C++20; every other target lints it at the standard it ships as.
+# A compile-only C++20 object target for `source`. CXX_CLANG_TIDY is cleared because a
+# superbuild sets CMAKE_CXX_CLANG_TIDY globally, which would otherwise lint the C++17 headers
+# as if they were C++20 source. Checks like modernize-use-ranges and modernize-use-constraints
+# are gated on the standard, so they stay silent everywhere else and fire only here --
+# demanding std::ranges and requires in headers that must keep compiling as C++17. These
+# targets prove the headers compile at C++20; every other target lints them at the standard
+# they ship as.
+function(hipdnn_frontend_cpp20_object object_target source)
+    add_library(${object_target} OBJECT ${source})
+    target_compile_features(${object_target} PRIVATE cxx_std_20)
     set_target_properties(
-        hipdnn_frontend_runtime_load_header_cpp20
+        ${object_target}
         PROPERTIES CXX_STANDARD 20
                    CXX_STANDARD_REQUIRED ON
                    CXX_EXTENSIONS OFF
                    CXX_CLANG_TIDY ""
     )
-    target_compile_options(
-        hipdnn_frontend_runtime_load_header_cpp20 PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+    target_compile_options(${object_target} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+endfunction()
+
+# Compiles the shipped public frontend umbrella as C++20, the standard under which
+# std::filesystem::path::u8string() returns std::u8string -- concatenating its result
+# with a narrow literal would break C++20 consumers at include time. There is nothing to
+# run: the target consumes hipdnn_frontend_dynamic for its usage requirements and links
+# nothing -- in particular not the backend, which runtime-load mode must never require.
+# hipdnn_frontend_dynamic_load_tests above is the C++17 control.
+if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    hipdnn_frontend_cpp20_object(
+        hipdnn_frontend_runtime_load_header_cpp20 TestRuntimeLoadHeaderCpp20.cpp
     )
     target_link_libraries(
         hipdnn_frontend_runtime_load_header_cpp20 PRIVATE hipdnn_frontend_dynamic
@@ -236,6 +245,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         TestCudnnShimV8NoexceptOperations.cpp
         TestCudnnShimV8NoexceptPlans.cpp
         TestCudnnShimV8NoexceptBoundary.cpp
+        TestCudnnShimV8NoexceptEngines.cpp
     )
     target_compile_definitions(
         hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE NV_CUDNN_DISABLE_EXCEPTION
@@ -260,50 +270,42 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         hipdnn_frontend_cudnn_v8_dynamic_link_tests
         GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
     )
-    if(TARGET hipdnn_backend)
-        add_dependencies(hipdnn_frontend_cudnn_v8_dynamic_link_tests hipdnn_backend)
-        target_compile_definitions(
-            hipdnn_frontend_cudnn_v8_dynamic_link_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
-        )
-    endif()
+    hipdnn_frontend_expect_backend_library(hipdnn_frontend_cudnn_v8_dynamic_link_tests)
     clang_tidy_check(hipdnn_frontend_cudnn_v8_dynamic_link_tests)
     add_hipdnn_test(hipdnn_frontend_cudnn_v8_dynamic_link_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-    # Compile-only: the umbrella with each JSON opt-out.
-    add_library(hipdnn_frontend_cudnn_v8_skip_cudnn_json OBJECT TestCudnnShimV8SkipCudnnJson.cpp)
-    target_compile_definitions(
-        hipdnn_frontend_cudnn_v8_skip_cudnn_json PRIVATE CUDNN_FRONTEND_SKIP_JSON_LIB
-    )
-    target_compile_options(
-        hipdnn_frontend_cudnn_v8_skip_cudnn_json PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
-    )
-    target_link_libraries(
-        hipdnn_frontend_cudnn_v8_skip_cudnn_json PRIVATE hipdnn_frontend hip::host
-    )
-
+    # Compile-only: the umbrella with logging compiled out and without SDPA. HIPDNN_ENABLE_SDPA
+    # is a directory-wide and hipdnn_frontend interface definition, so it is undefined here;
+    # compile options follow the definitions on the command line.
     add_library(
-        hipdnn_frontend_cudnn_v8_skip_hipdnn_json OBJECT TestCudnnShimV8SkipHipdnnJson.cpp
+        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa OBJECT TestCudnnShimNoLoggingNoSdpa.cpp
     )
     target_compile_definitions(
-        hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE HIPDNN_FRONTEND_SKIP_JSON_LIB
+        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa PRIVATE NV_CUDNN_FRONTEND_DISABLE_LOGGING
     )
     target_compile_options(
-        hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa
+        PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} -UHIPDNN_ENABLE_SDPA
     )
     target_link_libraries(
-        hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE hipdnn_frontend hip::host
+        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa PRIVATE hipdnn_frontend hip::host
     )
 
-    # Compile-only: each autotune header outside the umbrella, first and alone in its TU,
-    # plain and under each JSON opt-out (CUDNN_ / HIPDNN_FRONTEND_SKIP_JSON_LIB).
+    # Compile-only: the umbrella under each JSON opt-out (CUDNN_ / HIPDNN_FRONTEND_SKIP_JSON_LIB;
+    # the plain umbrella is in hipdnn_frontend_tests), and each autotune header outside the
+    # umbrella, first and alone in its TU, plain and under each opt-out.
+    set(_hipdnn_cudnn_v8_header_umbrella TestCudnnShimV8SkipJson.cpp)
     set(_hipdnn_cudnn_v8_header_find_plan TestCudnnShimV8HeaderFindPlan.cpp)
     set(_hipdnn_cudnn_v8_header_get_plan TestCudnnShimV8HeaderGetPlan.cpp)
     set(_hipdnn_cudnn_v8_header_engine_config_generator
         TestCudnnShimV8HeaderEngineConfigGenerator.cpp
     )
     set(_hipdnn_cudnn_v8_header_targets)
-    foreach(_header find_plan get_plan engine_config_generator)
+    foreach(_header umbrella find_plan get_plan engine_config_generator)
         foreach(_skip_owner NONE CUDNN HIPDNN)
+            if(_header STREQUAL "umbrella" AND _skip_owner STREQUAL "NONE")
+                continue()
+            endif()
             set(_target hipdnn_frontend_cudnn_v8_header_${_header})
             if(NOT _skip_owner STREQUAL "NONE")
                 string(TOLOWER "${_skip_owner}" _owner)
@@ -322,21 +324,11 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     endforeach()
 
     # PyTorch consumes these headers as C++20; every other target here compiles them as C++17.
-    # CXX_CLANG_TIDY is cleared for the reason given on the runtime-load C++20 target above.
+    # The wrapper source keeps TestCudnnShimV8Tu.cpp at one compile_commands.json entry, which
+    # the -p lookup of the unit binary's tidy step would otherwise also lint as C++20.
     set(_hipdnn_cudnn_v8_cpp20_targets)
     if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-        add_library(hipdnn_frontend_cudnn_v8_tu_cpp20 OBJECT TestCudnnShimV8Tu.cpp)
-        target_compile_features(hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE cxx_std_20)
-        set_target_properties(
-            hipdnn_frontend_cudnn_v8_tu_cpp20
-            PROPERTIES CXX_STANDARD 20
-                       CXX_STANDARD_REQUIRED ON
-                       CXX_EXTENSIONS OFF
-                       CXX_CLANG_TIDY ""
-        )
-        target_compile_options(
-            hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
-        )
+        hipdnn_frontend_cpp20_object(hipdnn_frontend_cudnn_v8_tu_cpp20 TestCudnnShimV8TuCpp20.cpp)
         target_link_libraries(
             hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE hipdnn_frontend hip::host GTest::gtest
         )
@@ -349,8 +341,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     # Attached to the unit binary so targeted builds cannot skip the gates.
     add_dependencies(
         hipdnn_frontend_tests
-        hipdnn_frontend_cudnn_v8_skip_cudnn_json
-        hipdnn_frontend_cudnn_v8_skip_hipdnn_json
+        hipdnn_frontend_cudnn_shim_no_logging_no_sdpa
         ${_hipdnn_cudnn_v8_header_targets}
         ${_hipdnn_cudnn_v8_cpp20_targets}
     )

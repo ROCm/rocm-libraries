@@ -33,17 +33,6 @@ using ::testing::_;
 
 class TestCudnnShimV8NoexceptBoundary : public hipdnn_shim_test::ShimV8BuilderPlanFixture
 {
-protected:
-    void createThrows(hipdnnBackendDescriptorType_t type, std::function<void()> raise)
-    {
-        ON_CALL(*_mockBackend, backendCreateDescriptor(type, _))
-            .WillByDefault(
-                [raise = std::move(raise)](hipdnnBackendDescriptorType_t,
-                                           hipdnnBackendDescriptor_t*) -> hipdnnStatus_t {
-                    raise();
-                    return HIPDNN_STATUS_INTERNAL_ERROR;
-                });
-    }
 };
 
 TEST_F(TestCudnnShimV8NoexceptBoundary, BuildersReturnCoreStatus)
@@ -55,6 +44,9 @@ TEST_F(TestCudnnShimV8NoexceptBoundary, BuildersReturnCoreStatus)
                                   .setDim(4, dims.data())
                                   .setStride(4, strides.data())
                                   .setId(1)
+                                  .setAlignment(16)
+                                  .setVirtual()
+                                  .setByValue()
                                   .build();
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(tensor.get_raw_desc(), nullptr);
@@ -237,6 +229,26 @@ TEST_F(TestCudnnShimV8NoexceptBoundary, ExecuteWithFailedVariantPackIsBadParam)
 
     EXPECT_EQ(cudnnBackendExecute(_handle, plan.get_raw_desc(), pack.get_raw_desc()),
               CUDNN_STATUS_BAD_PARAM);
+}
+
+// Upstream hands a negative count to reserve()/resize(), which throws std::length_error even
+// with exceptions disabled. The shim records BAD_PARAM on the object instead; build() then
+// reports the missing operands with the same status.
+TEST_F(TestCudnnShimV8NoexceptBoundary, NegativeCountsSetBadParam)
+{
+    std::array<void*, 1> pointers = {nullptr};
+    const std::array<std::int64_t, 1> uids = {1};
+
+    const fe::VariantPack dataPointers
+        = fe::VariantPackBuilder().setDataPointers(-1, pointers.data()).build();
+    EXPECT_EQ(dataPointers.get_status(), CUDNN_STATUS_BAD_PARAM);
+
+    const fe::VariantPack uidPack = fe::VariantPackBuilder().setUids(-1, uids.data()).build();
+    EXPECT_EQ(uidPack.get_status(), CUDNN_STATUS_BAD_PARAM);
+
+    const fe::OperationGraph graph
+        = fe::OperationGraphBuilder().setOperationGraph(-1, nullptr).build();
+    EXPECT_EQ(graph.get_status(), CUDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace

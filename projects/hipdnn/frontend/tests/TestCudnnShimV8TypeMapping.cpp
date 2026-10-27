@@ -219,12 +219,6 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
     X(TILE_N)                       \
     X(WARP_SPEC_CFG)
 
-#define HIPDNN_TEST_FE_HEUR_MODE(X) \
-    X(A)                            \
-    X(B)                            \
-    X(FALLBACK)                     \
-    X(OPENSOURCE)
-
 #define HIPDNN_TEST_FE_RNG_DISTRIBUTION(X) \
     X(NOT_SET)                             \
     X(BERNOULLI)                           \
@@ -328,7 +322,6 @@ HIPDNN_TEST_FE_ENUM(NumericalNote_t, HIPDNN_TEST_FE_NUMERICAL_NOTE)
 HIPDNN_TEST_FE_ENUM(TensorReordering_t, HIPDNN_TEST_FE_TENSOR_REORDERING)
 HIPDNN_TEST_FE_ENUM(ReshapeMode_t, HIPDNN_TEST_FE_RESHAPE_MODE)
 HIPDNN_TEST_FE_ENUM(KnobType_t, HIPDNN_TEST_FE_KNOB_TYPE)
-HIPDNN_TEST_FE_ENUM(HeurMode_t, HIPDNN_TEST_FE_HEUR_MODE)
 HIPDNN_TEST_FE_ENUM(RngDistribution_t, HIPDNN_TEST_FE_RNG_DISTRIBUTION)
 HIPDNN_TEST_FE_ENUM(DescriptorType_t, HIPDNN_TEST_FE_DESCRIPTOR_TYPE)
 #if defined(__GNUC__) || defined(__clang__)
@@ -365,7 +358,6 @@ HIPDNN_TEST_MAPPING(cudnnBackendNumericalNote_t, NumericalNote_t, "CUDNN_NUMERIC
 HIPDNN_TEST_MAPPING(cudnnBackendTensorReordering_t, TensorReordering_t, "CUDNN_TENSOR_REORDERING_")
 HIPDNN_TEST_MAPPING(cudnnBackendReshapeMode_t, ReshapeMode_t, "CUDNN_RESHAPE_")
 HIPDNN_TEST_MAPPING(cudnnBackendKnobType_t, KnobType_t, "CUDNN_KNOB_TYPE_")
-HIPDNN_TEST_MAPPING(cudnnBackendHeurMode_t, HeurMode_t, "CUDNN_HEUR_MODE_")
 HIPDNN_TEST_MAPPING(cudnnRngDistribution_t, RngDistribution_t, "CUDNN_RNG_DISTRIBUTION_")
 HIPDNN_TEST_MAPPING(cudnnBackendDescriptorType_t, DescriptorType_t, "CUDNN_BACKEND_")
 
@@ -382,7 +374,6 @@ using MappedTypes = std::tuple<cudnnDataType_t,
                                cudnnBackendTensorReordering_t,
                                cudnnBackendReshapeMode_t,
                                cudnnBackendKnobType_t,
-                               cudnnBackendHeurMode_t,
                                cudnnRngDistribution_t,
                                cudnnBackendDescriptorType_t>;
 
@@ -394,18 +385,14 @@ struct Contains<T, std::tuple<Ts...>> : std::disjunction<std::is_same<T, Ts>...>
 {
 };
 
-constexpr std::array<std::string_view, 4> UNMAPPED_C_TYPES = {"cudnnBnFinalizeStatsMode_t",
+constexpr std::array<std::string_view, 5> UNMAPPED_C_TYPES = {"cudnnBackendHeurMode_t",
+                                                              "cudnnBnFinalizeStatsMode_t",
                                                               "cudnnGenStatsMode_t",
                                                               "cudnnNanPropagation_t",
                                                               "cudnnTensorFormat_t"};
 
-constexpr std::array<std::string_view, 4> COUNT_SENTINELS = {"CUDNN_BEHAVIOR_NOTE_TYPE_COUNT",
-                                                             "CUDNN_HEUR_MODES_COUNT",
-                                                             "CUDNN_KNOB_TYPE_COUNTS",
-                                                             "CUDNN_NUMERICAL_NOTE_TYPE_COUNT"};
-
-// Enumerators whose counterpart is not the same-named enumerator; nullopt means
-// no counterpart. NOT_SET and the *_COUNT sentinels never map and are not listed.
+// FE enumerators whose counterpart is not the same-named cuDNN enumerator;
+// nullopt means no counterpart. NOT_SET never maps and is not listed.
 struct Exception
 {
     std::string_view cType;
@@ -413,13 +400,7 @@ struct Exception
     std::optional<std::string_view> counterpart;
 };
 
-constexpr std::array<Exception, 2> C_EXCEPTIONS = {
-    // cuDNN declares AVGPOOL as an alias of AVGPOOL_INCLUDE_PADDING.
-    Exception{"cudnnResampleMode_t", "CUDNN_RESAMPLE_AVGPOOL", "AVGPOOL_INCLUDE_PADDING"},
-    Exception{"cudnnBackendHeurMode_t", "CUDNN_HEUR_MODE_INSTANT", std::nullopt},
-};
-
-constexpr std::array<Exception, 11> FE_EXCEPTIONS = {
+constexpr std::array<Exception, 10> FE_EXCEPTIONS = {
     Exception{"cudnnDataType_t", "FP6_E2M3", std::nullopt},
     Exception{"cudnnDataType_t", "FP6_E3M2", std::nullopt},
     Exception{"cudnnDataType_t", "FP8_E4M3_FNUZ", std::nullopt},
@@ -429,8 +410,6 @@ constexpr std::array<Exception, 11> FE_EXCEPTIONS = {
     Exception{"cudnnBackendBehaviorNote_t", "SUPPORTS_GRAPH_CAPTURE", std::nullopt},
     Exception{"cudnnBackendBehaviorNote_t", "EXTERNAL_LIBRARY_DEPENDENCY", std::nullopt},
     Exception{"cudnnBackendBehaviorNote_t", "SUPPORTS_EXECUTION_PLAN_SERIALIZATION", std::nullopt},
-    // Open-source heuristics run in the frontend; there is no backend mode.
-    Exception{"cudnnBackendHeurMode_t", "OPENSOURCE", std::nullopt},
     // Upstream converts both CONCAT spellings to the one backend type.
     Exception{"cudnnBackendDescriptorType_t",
               "OPERATION_CONCATENATE_DESCRIPTOR",
@@ -452,18 +431,6 @@ const Exception* findException(const std::array<Exception, N>& exceptions,
     return nullptr;
 }
 
-bool isCountSentinel(std::string_view name)
-{
-    for(const std::string_view sentinel : COUNT_SENTINELS)
-    {
-        if(sentinel == name)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 struct CEnumerator
 {
     std::string_view cType;
@@ -475,8 +442,12 @@ const std::vector<CEnumerator>& cEnumerators()
 {
     static const std::vector<CEnumerator> s_all = {
 #define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE) {#ENUM_T, #NAME, VALUE},
+#define HIPDNN_CUDNN_SHIM_ENUM_COUNT(ENUM_T, NAME, VALUE) {#ENUM_T, #NAME, VALUE},
+#define HIPDNN_CUDNN_SHIM_ENUM_ALIAS(ENUM_T, NAME, TARGET)
 #include "data/cudnn_v8/cudnn_v8_enum_values.inc"
 #undef HIPDNN_CUDNN_SHIM_ENUM_VALUE
+#undef HIPDNN_CUDNN_SHIM_ENUM_COUNT
+#undef HIPDNN_CUDNN_SHIM_ENUM_ALIAS
     };
     return s_all;
 }
@@ -511,16 +482,16 @@ class CSideChecker
 public:
     std::set<std::string_view> mappedTypes;
     std::set<std::string_view> unmappedTypes;
-    std::set<std::string_view> usedExceptions;
 
+    // A COUNT sentinel has no FE counterpart.
     template <typename C>
-    void visit(C value, std::string_view cType, std::string_view name)
+    void visit(C value, std::string_view cType, std::string_view name, bool isCount)
     {
         if constexpr(Mapping<C>::MAPPED)
         {
             static_assert(Contains<C, MappedTypes>::value, "add the type to MappedTypes");
             mappedTypes.insert(cType);
-            check<C>(value, name);
+            check<C>(value, name, isCount);
         }
         else
         {
@@ -530,40 +501,20 @@ public:
 
 private:
     template <typename C>
-    void check(C value, std::string_view name)
+    void check(C value, std::string_view name, bool isCount)
     {
         using Fe = typename Mapping<C>::Fe;
         const std::optional<Fe> result = shim::toFe(value);
-        if(isCountSentinel(name))
+        if(isCount)
         {
             EXPECT_FALSE(result.has_value()) << name;
             return;
         }
-
-        std::optional<std::string_view> expected;
-        const Exception* exception = findException(C_EXCEPTIONS, Mapping<C>::C_TYPE, name);
-        if(exception != nullptr)
-        {
-            usedExceptions.insert(name);
-            expected = exception->counterpart;
-        }
-        else
-        {
-            ASSERT_EQ(name.substr(0, Mapping<C>::C_PREFIX.size()), Mapping<C>::C_PREFIX) << name;
-            expected = name.substr(Mapping<C>::C_PREFIX.size());
-        }
-
-        if(!expected)
-        {
-            EXPECT_FALSE(result.has_value()) << name << " must have no FE counterpart";
-            return;
-        }
-        ASSERT_TRUE(result.has_value()) << name << " must map to " << *expected;
+        ASSERT_EQ(name.substr(0, Mapping<C>::C_PREFIX.size()), Mapping<C>::C_PREFIX) << name;
+        const std::string_view expected = name.substr(Mapping<C>::C_PREFIX.size());
+        ASSERT_TRUE(result.has_value()) << name << " must map to " << expected;
         EXPECT_EQ(feName(*result), expected) << name;
-        if(exception == nullptr)
-        {
-            EXPECT_EQ(shim::toCudnn(*result), value) << name << " must round-trip";
-        }
+        EXPECT_EQ(shim::toCudnn(*result), value) << name << " must round-trip";
     }
 };
 
@@ -578,7 +529,6 @@ public:
         using Fe = typename Mapping<C>::Fe;
         for(const FeEnumerator<Fe>& enumerator : FeEnumerators<Fe>::all())
         {
-            EXPECT_TRUE(FeEnumerators<Fe>::listed(enumerator.value));
             const std::optional<C> result = shim::toCudnn(enumerator.value);
             if(enumerator.name == "NOT_SET")
             {
@@ -619,8 +569,59 @@ public:
     }
 };
 
-static_assert(shim::toFe(CUDNN_DATA_HALF) == fe::DataType_t::HALF);
-static_assert(shim::toCudnn(fe::PointwiseMode_t::RELU_FWD) == CUDNN_POINTWISE_RELU_FWD);
+// Each table row maps both ways: its FE value to its cuDNN value, and its cuDNN
+// value to an FE value that maps back to it.
+template <typename Table>
+constexpr bool rowsRoundTrip(const Table& table)
+{
+    for(const auto& row : table)
+    {
+        const auto fe = shim::toFe(row.cudnn);
+        if(shim::toCudnn(row.fe) != row.cudnn || !fe || shim::toCudnn(*fe) != row.cudnn)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Rows whose FE value aliases another row's cuDNN value, so toFe returns the other FE value.
+template <typename Table>
+constexpr int feAliasRows(const Table& table)
+{
+    int aliases = 0;
+    for(const auto& row : table)
+    {
+        aliases += shim::toFe(row.cudnn) == row.fe ? 0 : 1;
+    }
+    return aliases;
+}
+
+static_assert(rowsRoundTrip(shim::DATA_TYPE_MAP) && feAliasRows(shim::DATA_TYPE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::POINTWISE_MODE_MAP)
+              && feAliasRows(shim::POINTWISE_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::CONVOLUTION_MODE_MAP)
+              && feAliasRows(shim::CONVOLUTION_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::REDUCTION_MODE_MAP)
+              && feAliasRows(shim::REDUCTION_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::RESAMPLE_MODE_MAP) && feAliasRows(shim::RESAMPLE_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::PADDING_MODE_MAP) && feAliasRows(shim::PADDING_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::NORM_FWD_PHASE_MAP)
+              && feAliasRows(shim::NORM_FWD_PHASE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::NORM_MODE_MAP) && feAliasRows(shim::NORM_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::BEHAVIOR_NOTE_MAP) && feAliasRows(shim::BEHAVIOR_NOTE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::NUMERICAL_NOTE_MAP)
+              && feAliasRows(shim::NUMERICAL_NOTE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::TENSOR_REORDERING_MAP)
+              && feAliasRows(shim::TENSOR_REORDERING_MAP) == 0);
+static_assert(rowsRoundTrip(shim::RESHAPE_MODE_MAP) && feAliasRows(shim::RESHAPE_MODE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::KNOB_TYPE_MAP) && feAliasRows(shim::KNOB_TYPE_MAP) == 0);
+static_assert(rowsRoundTrip(shim::RNG_DISTRIBUTION_MAP)
+              && feAliasRows(shim::RNG_DISTRIBUTION_MAP) == 0);
+// OPERATION_CONCATENATE_DESCRIPTOR aliases OPERATION_CONCAT_DESCRIPTOR.
+static_assert(rowsRoundTrip(shim::DESCRIPTOR_TYPE_MAP)
+              && feAliasRows(shim::DESCRIPTOR_TYPE_MAP) == 1);
+static_assert(shim::toFe(CUDNN_RESAMPLE_AVGPOOL) == fe::ResampleMode_t::AVGPOOL_INCLUDE_PADDING);
 static_assert(!shim::toCudnn(fe::DataType_t::NOT_SET).has_value());
 
 } // namespace
@@ -628,19 +629,19 @@ static_assert(!shim::toCudnn(fe::DataType_t::NOT_SET).has_value());
 TEST(TestCudnnShimV8TypeMapping, CEnumeratorsMapToSameNamedFeEnumerators)
 {
     CSideChecker checker;
-#define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE) checker.visit(NAME, #ENUM_T, #NAME);
+#define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE) \
+    checker.visit(NAME, #ENUM_T, #NAME, false);
+#define HIPDNN_CUDNN_SHIM_ENUM_COUNT(ENUM_T, NAME, VALUE) checker.visit(NAME, #ENUM_T, #NAME, true);
+#define HIPDNN_CUDNN_SHIM_ENUM_ALIAS(ENUM_T, NAME, TARGET)
 #include "data/cudnn_v8/cudnn_v8_enum_values.inc"
 #undef HIPDNN_CUDNN_SHIM_ENUM_VALUE
+#undef HIPDNN_CUDNN_SHIM_ENUM_COUNT
+#undef HIPDNN_CUDNN_SHIM_ENUM_ALIAS
 
     EXPECT_EQ(checker.mappedTypes.size(), std::tuple_size_v<MappedTypes>);
     EXPECT_EQ(checker.unmappedTypes,
               std::set<std::string_view>(UNMAPPED_C_TYPES.begin(), UNMAPPED_C_TYPES.end()))
         << "every cuDNN C enum needs a mapping decision";
-    for(const Exception& exception : C_EXCEPTIONS)
-    {
-        EXPECT_EQ(checker.usedExceptions.count(exception.enumerator), 1u)
-            << "stale exception " << exception.enumerator;
-    }
 }
 
 TEST(TestCudnnShimV8TypeMapping, FeEnumeratorsMapBackToSameNamedCEnumerators)

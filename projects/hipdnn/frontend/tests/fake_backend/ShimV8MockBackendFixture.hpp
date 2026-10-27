@@ -10,15 +10,20 @@
 
 #include "MockBackendFixture.hpp"
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -69,6 +74,12 @@ struct CapturedExecute
     hipdnnHandle_t handle;
     hipdnnBackendDescriptor_t plan;
     hipdnnBackendDescriptor_t variantPack;
+};
+
+struct CapturedDeserialize
+{
+    hipdnnHandle_t handle;
+    std::vector<std::uint8_t> bytes;
 };
 
 // An INT64 hipDNN knob as the backend's KNOB_INFO descriptor reports it.
@@ -178,12 +189,8 @@ protected:
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([this](char* message, std::size_t size) {
                 const std::lock_guard<std::mutex> lock(_mutex);
-                if(message != nullptr && size > 0)
-                {
-                    const std::size_t length = std::min(_lastError.size(), size - 1);
-                    std::memcpy(message, _lastError.data(), length);
-                    message[length] = '\0';
-                }
+                hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+                    message, _lastError.c_str(), size);
                 _lastError.clear();
             });
         ON_CALL(*_mockBackend, getErrorString(_)).WillByDefault(::testing::Return("mock status"));
@@ -253,8 +260,9 @@ protected:
     }
 
     // Every hipDNN plan serializes to `bytes`; deserializing gives a new plan
-    // for the engine of the plan serialized last, and a plan reports its
-    // engine ID through EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT.
+    // for the engine of the plan serialized last (or the one set with
+    // setDeserializedEngineId), and a plan reports its engine ID through
+    // EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT.
     void installSerializedPlan(std::vector<std::uint8_t> bytes)
     {
         using ::testing::_;
@@ -269,6 +277,10 @@ protected:
                                   std::size_t* size,
                                   std::uint8_t* serialized) {
                 const std::lock_guard<std::mutex> lock(_mutex);
+                if(_serializeStatus != HIPDNN_STATUS_SUCCESS)
+                {
+                    return _serializeStatus;
+                }
                 const auto engine = _planIds.find(plan);
                 _lastSerializedEngineId = engine == _planIds.end() ? -1 : engine->second;
                 *size = _serializedPlan.size();
@@ -279,17 +291,18 @@ protected:
                 return HIPDNN_STATUS_SUCCESS;
             });
         ON_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _))
-            .WillByDefault([this](hipdnnHandle_t,
+            .WillByDefault([this](hipdnnHandle_t handle,
                                   hipdnnBackendDescriptor_t* descriptor,
-                                  const std::uint8_t*,
-                                  std::size_t) {
+                                  const std::uint8_t* serialized,
+                                  std::size_t size) {
                 const std::lock_guard<std::mutex> lock(_mutex);
+                _deserializations.push_back({handle, {serialized, serialized + size}});
                 *descriptor = allocate(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
                 if(*descriptor == nullptr)
                 {
                     return HIPDNN_STATUS_ALLOC_FAILED;
                 }
-                _planIds[*descriptor] = _lastSerializedEngineId;
+                _planIds[*descriptor] = _deserializedEngineId.value_or(_lastSerializedEngineId);
                 return HIPDNN_STATUS_SUCCESS;
             });
         ON_CALL(
@@ -314,6 +327,26 @@ protected:
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
+    }
+
+    // Serializing a hipDNN plan returns `status` (SUCCESS restores the payload).
+    void setSerializeStatus(hipdnnStatus_t status)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _serializeStatus = status;
+    }
+
+    // Every later deserialized plan reports `engineId`, whatever was serialized.
+    void setDeserializedEngineId(std::int64_t engineId)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _deserializedEngineId = engineId;
+    }
+
+    std::vector<CapturedDeserialize> deserializations() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _deserializations;
     }
 
     // Successive PROFILING_ELAPSED_MS_EXT reads return these times in order
@@ -413,6 +446,87 @@ protected:
         return all;
     }
 
+    // SetAttribute calls on hipDNN descriptors of `type` that set `name`.
+    std::vector<CapturedSetAttribute> calls(hipdnnBackendDescriptorType_t type,
+                                            hipdnnBackendAttributeName_t name) const
+    {
+        return named(setAttributesOn(type), name);
+    }
+
+    std::vector<CapturedSetAttribute> callsNamed(hipdnnBackendAttributeName_t name) const
+    {
+        return named(setAttributes(), name);
+    }
+
+    std::vector<CapturedSetAttribute> callsOn(hipdnnBackendDescriptor_t descriptor,
+                                              hipdnnBackendAttributeName_t name) const
+    {
+        return named(setAttributesOf(descriptor), name);
+    }
+
+    std::optional<CapturedSetAttribute> callOn(hipdnnBackendDescriptor_t descriptor,
+                                               hipdnnBackendAttributeName_t name) const
+    {
+        std::vector<CapturedSetAttribute> all = callsOn(descriptor, name);
+        if(all.empty())
+        {
+            return std::nullopt;
+        }
+        return std::move(all.front());
+    }
+
+    // callOn for an attribute that must be set: a missing one fails the test and reads as an
+    // empty call instead of dereferencing an empty optional.
+    CapturedSetAttribute attributeOn(hipdnnBackendDescriptor_t descriptor,
+                                     hipdnnBackendAttributeName_t name) const
+    {
+        std::optional<CapturedSetAttribute> call = callOn(descriptor, name);
+        EXPECT_TRUE(call.has_value()) << "attribute " << static_cast<int>(name) << " not set";
+        return call ? *std::move(call) : CapturedSetAttribute{};
+    }
+
+    // The hipDNN tensor an operation slot refers to, or null if unset.
+    hipdnnBackendDescriptor_t slotTensor(hipdnnBackendDescriptor_t op,
+                                         hipdnnBackendAttributeName_t slot) const
+    {
+        const auto reference = callOn(op, slot);
+        return reference ? reference->value<hipdnnBackendDescriptor_t>() : nullptr;
+    }
+
+    // UID of the hipDNN tensor an operation slot refers to, or -1 if unset.
+    std::int64_t slotUid(hipdnnBackendDescriptor_t op, hipdnnBackendAttributeName_t slot) const
+    {
+        const auto uid = callOn(slotTensor(op, slot), HIPDNN_ATTR_TENSOR_UNIQUE_ID);
+        return uid ? uid->value<std::int64_t>() : -1;
+    }
+
+    // The hipDNN tensor created for `uid` (the last one, if several graphs used it).
+    hipdnnBackendDescriptor_t hipdnnTensor(std::int64_t uid) const
+    {
+        hipdnnBackendDescriptor_t found = nullptr;
+        for(const CapturedSetAttribute& call : callsNamed(HIPDNN_ATTR_TENSOR_UNIQUE_ID))
+        {
+            if(call.value<std::int64_t>() == uid)
+            {
+                found = call.descriptor;
+            }
+        }
+        EXPECT_NE(found, nullptr) << "no hipDNN tensor with UID " << uid;
+        return found;
+    }
+
+    // The OPS array of the last hipDNN OPERATIONGRAPH, in order.
+    std::vector<hipdnnBackendDescriptor_t> graphOps() const
+    {
+        const std::vector<CapturedSetAttribute> ops
+            = calls(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, HIPDNN_ATTR_OPERATIONGRAPH_OPS);
+        if(ops.empty())
+        {
+            return {};
+        }
+        return ops.back().values<hipdnnBackendDescriptor_t>();
+    }
+
     // Descriptors of `type` in creation order.
     std::vector<hipdnnBackendDescriptor_t> created(hipdnnBackendDescriptorType_t type) const
     {
@@ -426,6 +540,13 @@ protected:
             }
         }
         return result;
+    }
+
+    hipdnnBackendDescriptor_t onlyCreated(hipdnnBackendDescriptorType_t type) const
+    {
+        const std::vector<hipdnnBackendDescriptor_t> all = created(type);
+        EXPECT_EQ(all.size(), 1U);
+        return all.empty() ? nullptr : all.front();
     }
 
     hipdnnBackendDescriptorType_t typeOf(hipdnnBackendDescriptor_t descriptor) const
@@ -454,22 +575,25 @@ protected:
         return _executions;
     }
 
-    // Engine ID behind a mock ENGINE, ENGINECFG or EXECUTION_PLAN descriptor, or -1.
-    std::int64_t engineIdOf(hipdnnBackendDescriptor_t descriptor) const
+    // Engine ID behind a mock ENGINE, ENGINECFG or EXECUTION_PLAN descriptor, or nullopt.
+    std::optional<std::int64_t> knownEngineIdOf(hipdnnBackendDescriptor_t descriptor) const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        const auto engine = _engineIds.find(descriptor);
-        if(engine != _engineIds.end())
+        for(const auto* ids : {&_engineIds, &_configIds, &_planIds})
         {
-            return engine->second;
+            const auto found = ids->find(descriptor);
+            if(found != ids->end())
+            {
+                return found->second;
+            }
         }
-        const auto config = _configIds.find(descriptor);
-        if(config != _configIds.end())
-        {
-            return config->second;
-        }
-        const auto plan = _planIds.find(descriptor);
-        return plan == _planIds.end() ? -1 : plan->second;
+        return std::nullopt;
+    }
+
+    // knownEngineIdOf, or -1.
+    std::int64_t engineIdOf(hipdnnBackendDescriptor_t descriptor) const
+    {
+        return knownEngineIdOf(descriptor).value_or(-1);
     }
 
     // Hands out a typed mock descriptor, for tests that replace the create action.
@@ -479,7 +603,54 @@ protected:
         return allocate(type);
     }
 
+    // Creating a hipDNN descriptor of `type` raises whatever `raise` throws.
+    void createThrows(hipdnnBackendDescriptorType_t type, std::function<void()> raise)
+    {
+        ON_CALL(*_mockBackend, backendCreateDescriptor(type, ::testing::_))
+            .WillByDefault(
+                [raise = std::move(raise)](hipdnnBackendDescriptorType_t,
+                                           hipdnnBackendDescriptor_t*) -> hipdnnStatus_t {
+                    raise();
+                    return HIPDNN_STATUS_INTERNAL_ERROR;
+                });
+    }
+
+    // Runs body(0..threadCount-1) on as many threads, released together.
+    static void runConcurrently(std::size_t threadCount,
+                                const std::function<void(std::size_t)>& body)
+    {
+        std::atomic<bool> start{false};
+        std::vector<std::thread> threads;
+        threads.reserve(threadCount);
+        for(std::size_t i = 0; i < threadCount; ++i)
+        {
+            threads.emplace_back([&start, &body, i] {
+                while(!start.load())
+                {
+                    std::this_thread::yield();
+                }
+                body(i);
+            });
+        }
+        start.store(true);
+        for(std::thread& thread : threads)
+        {
+            thread.join();
+        }
+    }
+
 private:
+    static std::vector<CapturedSetAttribute> named(std::vector<CapturedSetAttribute> all,
+                                                   hipdnnBackendAttributeName_t name)
+    {
+        all.erase(
+            std::remove_if(all.begin(),
+                           all.end(),
+                           [name](const CapturedSetAttribute& call) { return call.name != name; }),
+            all.end());
+        return all;
+    }
+
     hipdnnBackendDescriptor_t allocate(hipdnnBackendDescriptorType_t type)
     {
         if(_nextDescriptor >= _pool.size())
@@ -866,6 +1037,9 @@ private:
     std::unordered_map<hipdnnBackendDescriptor_t, std::int64_t> _planIds;
     std::vector<std::uint8_t> _serializedPlan;
     std::int64_t _lastSerializedEngineId = -1;
+    hipdnnStatus_t _serializeStatus = HIPDNN_STATUS_SUCCESS;
+    std::optional<std::int64_t> _deserializedEngineId;
+    std::vector<CapturedDeserialize> _deserializations;
     std::vector<float> _profilingTimes;
     std::size_t _nextProfilingTime = 0;
     bool _failProfilingCreate = false;

@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "CudnnShimV8BuilderFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <algorithm>
 #include <array>
@@ -126,14 +126,21 @@ protected:
         return lower(op, HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
     }
 
-    hipdnnBackendDescriptor_t lowerPointwise(const fe::PointWiseDesc& pointwise) const
+    // Backward modes take dy and dx in place of y.
+    hipdnnBackendDescriptor_t lowerPointwise(const fe::PointWiseDesc& pointwise,
+                                             bool backward = false) const
     {
-        const fe::Operation op
-            = fe::OperationBuilder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR)
-                  .setpwDesc(pointwise)
-                  .setxDesc(tensor(1, PW_DIMS))
-                  .setyDesc(tensor(2, PW_DIMS))
-                  .build();
+        fe::OperationBuilder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
+        builder.setpwDesc(pointwise).setxDesc(tensor(1, PW_DIMS));
+        if(backward)
+        {
+            builder.setdyDesc(tensor(2, PW_DIMS)).setdxDesc(tensor(3, PW_DIMS));
+        }
+        else
+        {
+            builder.setyDesc(tensor(2, PW_DIMS));
+        }
+        const fe::Operation op = builder.build();
         return lower(op, HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR);
     }
 
@@ -323,6 +330,97 @@ TEST_F(TestCudnnShimV8BuilderParameters, ConvDescUnlowerableComputeTypeIsNotSupp
     expectBuildStatus(builder, CUDNN_STATUS_NOT_SUPPORTED);
 }
 
+// Upstream's argument checks still apply; arguments that pass them get NOT_SUPPORTED, never a
+// SUCCESS that would leave the caller with an unreordered filter.
+TEST_F(TestCudnnShimV8BuilderParameters, ReorderFilterAndBiasInt8x32Statuses)
+{
+    const auto conv = [](std::size_t spatialDims) {
+        const Dims ones(spatialDims, 1);
+        fe::ConvDescBuilder builder;
+        builder.setComputeType(DataType_t::FLOAT).setMathMode(CUDNN_CROSS_CORRELATION);
+        describeConvolution(builder, ones, ones, ones, ones);
+        return fe::ConvDesc(builder.build());
+    };
+    const fe::ConvDesc conv1d = conv(1);
+    const fe::ConvDesc conv2d = conv(2);
+    const fe::Tensor filter3d = tensor(1, {8, 4, 3});
+    const fe::Tensor filter4d = tensor(2, W_DIMS);
+    int filter = 0;
+    int reorderedFilter = 0;
+    int bias = 0;
+    int reorderedBias = 0;
+
+    struct Case
+    {
+        const char* label;
+        const fe::Tensor* tensor;
+        const fe::ConvDesc* conv;
+        void* filter;
+        void* reorderedFilter;
+        void* bias;
+        void* reorderedBias;
+        cudnnStatus_t status;
+    };
+    const std::vector<Case> cases = {
+        {"filter without reordered filter",
+         &filter4d,
+         &conv2d,
+         &filter,
+         nullptr,
+         nullptr,
+         nullptr,
+         CUDNN_STATUS_BAD_PARAM},
+        {"bias without reordered bias",
+         &filter4d,
+         &conv2d,
+         &filter,
+         &reorderedFilter,
+         &bias,
+         nullptr,
+         CUDNN_STATUS_BAD_PARAM},
+        {"3-D filter, 2-D convolution",
+         &filter3d,
+         &conv2d,
+         &filter,
+         &reorderedFilter,
+         &bias,
+         &reorderedBias,
+         CUDNN_STATUS_BAD_PARAM},
+        {"3-D filter, 1-D convolution",
+         &filter3d,
+         &conv1d,
+         &filter,
+         &reorderedFilter,
+         &bias,
+         &reorderedBias,
+         CUDNN_STATUS_BAD_PARAM},
+        {"4-D filter, 2-D convolution",
+         &filter4d,
+         &conv2d,
+         &filter,
+         &reorderedFilter,
+         &bias,
+         &reorderedBias,
+         CUDNN_STATUS_NOT_SUPPORTED},
+        {"no bias",
+         &filter4d,
+         &conv2d,
+         &filter,
+         &reorderedFilter,
+         nullptr,
+         nullptr,
+         CUDNN_STATUS_NOT_SUPPORTED},
+    };
+    for(const Case& c : cases)
+    {
+        SCOPED_TRACE(c.label);
+        EXPECT_EQ(
+            fe::cudnnReorderFilterAndBiasInt8x32(
+                _handle, *c.tensor, *c.conv, c.filter, c.reorderedFilter, c.bias, c.reorderedBias),
+            c.status);
+    }
+}
+
 // ---- PointWiseDesc ----
 
 TEST_F(TestCudnnShimV8BuilderParameters, PointwiseModeSupportFollowsHipdnnMapping)
@@ -453,19 +551,23 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseDefaultParametersElideAtLoweri
 
 TEST_F(TestCudnnShimV8BuilderParameters, PointwiseExplicitParametersReachHipdnn)
 {
-    const fe::PointWiseDesc relu = fe::PointWiseDescBuilder()
-                                       .setMode(CUDNN_POINTWISE_RELU_FWD)
-                                       .setMathPrecision(CUDNN_DATA_FLOAT)
-                                       .setReluLowerClip(-1.0)
-                                       .setReluUpperClip(6.0)
-                                       .setReluLowerClipSlope(0.1)
-                                       .build();
-    hipdnnBackendDescriptor_t reluOp = lowerPointwise(relu);
-    EXPECT_EQ(scalarOn<hipdnnDataType_t>(reluOp, HIPDNN_ATTR_POINTWISE_MATH_PREC),
-              HIPDNN_DATA_FLOAT);
-    EXPECT_EQ(scalarOn<float>(reluOp, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP), -1.0F);
-    EXPECT_EQ(scalarOn<float>(reluOp, HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP), 6.0F);
-    EXPECT_EQ(scalarOn<float>(reluOp, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE), 0.1F);
+    for(const PointwiseMode_t mode : {PointwiseMode_t::RELU_FWD, PointwiseMode_t::RELU_BWD})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        const fe::PointWiseDesc relu = fe::PointWiseDescBuilder()
+                                           .setMode(mode)
+                                           .setMathPrecision(CUDNN_DATA_FLOAT)
+                                           .setReluLowerClip(-1.0)
+                                           .setReluUpperClip(6.0)
+                                           .setReluLowerClipSlope(0.1)
+                                           .build();
+        hipdnnBackendDescriptor_t reluOp = lowerPointwise(relu, mode == PointwiseMode_t::RELU_BWD);
+        EXPECT_EQ(scalarOn<hipdnnDataType_t>(reluOp, HIPDNN_ATTR_POINTWISE_MATH_PREC),
+                  HIPDNN_DATA_FLOAT);
+        EXPECT_EQ(scalarOn<float>(reluOp, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP), -1.0F);
+        EXPECT_EQ(scalarOn<float>(reluOp, HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP), 6.0F);
+        EXPECT_EQ(scalarOn<float>(reluOp, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE), 0.1F);
+    }
 
     const fe::PointWiseDesc clipped = fe::PointWiseDescBuilder()
                                           .setMode(PointwiseMode_t::RELU_FWD)
@@ -480,6 +582,7 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseExplicitParametersReachHipdnn)
     {
         const char* label;
         PointwiseMode_t mode;
+        bool backward;
         std::function<void(fe::PointWiseDescBuilder&)> describe;
         hipdnnBackendAttributeName_t name;
         float expected;
@@ -487,19 +590,40 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseExplicitParametersReachHipdnn)
     const std::vector<Case> cases = {
         {"elu alpha",
          PointwiseMode_t::ELU_FWD,
+         false,
+         [](fe::PointWiseDescBuilder& b) { b.setEluAlpha(0.5); },
+         HIPDNN_ATTR_POINTWISE_ELU_ALPHA,
+         0.5F},
+        {"elu backward alpha",
+         PointwiseMode_t::ELU_BWD,
+         true,
          [](fe::PointWiseDescBuilder& b) { b.setEluAlpha(0.5); },
          HIPDNN_ATTR_POINTWISE_ELU_ALPHA,
          0.5F},
         {"softplus beta",
          PointwiseMode_t::SOFTPLUS_FWD,
+         false,
+         [](fe::PointWiseDescBuilder& b) { b.setSoftplusBeta(2.0); },
+         HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA,
+         2.0F},
+        {"softplus backward beta",
+         PointwiseMode_t::SOFTPLUS_BWD,
+         true,
          [](fe::PointWiseDescBuilder& b) { b.setSoftplusBeta(2.0); },
          HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA,
          2.0F},
         {"swish beta",
          PointwiseMode_t::SWISH_FWD,
+         false,
          [](fe::PointWiseDescBuilder& b) { b.setSwishBeta(3.0); },
          HIPDNN_ATTR_POINTWISE_SWISH_BETA,
          3.0F},
+        {"swish backward beta",
+         PointwiseMode_t::SWISH_BWD,
+         true,
+         [](fe::PointWiseDescBuilder& b) { b.setSwishBeta(2.0); },
+         HIPDNN_ATTR_POINTWISE_SWISH_BETA,
+         2.0F},
     };
     for(const Case& c : cases)
     {
@@ -508,7 +632,7 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseExplicitParametersReachHipdnn)
         builder.setMode(c.mode).setComputeType(DataType_t::FLOAT);
         c.describe(builder);
         const fe::PointWiseDesc desc = builder.build();
-        EXPECT_EQ(scalarOn<float>(lowerPointwise(desc), c.name), c.expected);
+        EXPECT_EQ(scalarOn<float>(lowerPointwise(desc, c.backward), c.name), c.expected);
     }
 
     const fe::PointWiseDesc genIndex = fe::PointWiseDescBuilder()
@@ -544,14 +668,26 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseNonFiniteParametersAreBadParam
         {"relu lower clip slope",
          PointwiseMode_t::RELU_FWD,
          [](fe::PointWiseDescBuilder& b, double v) { b.setReluLowerClipSlope(v); }},
+        {"relu backward lower clip slope",
+         PointwiseMode_t::RELU_BWD,
+         [](fe::PointWiseDescBuilder& b, double v) { b.setReluLowerClipSlope(v); }},
         {"elu alpha",
          PointwiseMode_t::ELU_FWD,
+         [](fe::PointWiseDescBuilder& b, double v) { b.setEluAlpha(v); }},
+        {"elu backward alpha",
+         PointwiseMode_t::ELU_BWD,
          [](fe::PointWiseDescBuilder& b, double v) { b.setEluAlpha(v); }},
         {"softplus beta",
          PointwiseMode_t::SOFTPLUS_FWD,
          [](fe::PointWiseDescBuilder& b, double v) { b.setSoftplusBeta(v); }},
+        {"softplus backward beta",
+         PointwiseMode_t::SOFTPLUS_BWD,
+         [](fe::PointWiseDescBuilder& b, double v) { b.setSoftplusBeta(v); }},
         {"swish beta",
          PointwiseMode_t::SWISH_FWD,
+         [](fe::PointWiseDescBuilder& b, double v) { b.setSwishBeta(v); }},
+        {"swish backward beta",
+         PointwiseMode_t::SWISH_BWD,
          [](fe::PointWiseDescBuilder& b, double v) { b.setSwishBeta(v); }},
     };
     for(const Case& c : cases)
@@ -567,6 +703,33 @@ TEST_F(TestCudnnShimV8BuilderParameters, PointwiseNonFiniteParametersAreBadParam
             c.set(builder, value);
             expectBuildStatus(builder, CUDNN_STATUS_BAD_PARAM);
         }
+    }
+}
+
+TEST_F(TestCudnnShimV8BuilderParameters, PointwiseReluClipsAndOtherModesParameters)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for(const PointwiseMode_t mode : {PointwiseMode_t::RELU_FWD, PointwiseMode_t::RELU_BWD})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        fe::PointWiseDescBuilder lower;
+        lower.setMode(mode).setComputeType(DataType_t::FLOAT).setReluLowerClip(nan);
+        expectBuildStatus(lower, CUDNN_STATUS_BAD_PARAM);
+        fe::PointWiseDescBuilder upper;
+        upper.setMode(mode).setComputeType(DataType_t::FLOAT).setReluUpperClip(nan);
+        expectBuildStatus(upper, CUDNN_STATUS_BAD_PARAM);
+
+        // Infinite clips are unbounded sides; other modes' parameters are not sent, as upstream.
+        const fe::PointWiseDesc unbounded = fe::PointWiseDescBuilder()
+                                                .setMode(mode)
+                                                .setComputeType(DataType_t::FLOAT)
+                                                .setClipping(-inf, inf)
+                                                .setEluAlpha(nan)
+                                                .setSoftplusBeta(nan)
+                                                .setSwishBeta(nan)
+                                                .build();
+        EXPECT_EQ(unbounded.get_status(), CUDNN_STATUS_SUCCESS) << unbounded.get_error();
     }
 }
 
@@ -761,7 +924,8 @@ TEST_F(TestCudnnShimV8BuilderParameters, ResampleRequiredFieldStatuses)
         expectBuildStatus(builder, c.status);
     }
 
-    // Upstream leaves the spatial dimension count 0 until setSpatialDim.
+    // Upstream leaves the spatial dimension count 0 until setSpatialDim, with or without the
+    // paddings and stride, through either enum family.
     const std::array<std::int64_t, 2> zeros = {0, 0};
     fe::ResampleDescBuilder_v8 noWindow;
     noWindow.setResampleMode(fe::ResampleMode_t::MAXPOOL)
@@ -771,6 +935,12 @@ TEST_F(TestCudnnShimV8BuilderParameters, ResampleRequiredFieldStatuses)
         .setPostPadding(2, zeros.data())
         .setSpatialStride(2, window.data());
     expectBuildStatus(noWindow, CUDNN_STATUS_BAD_PARAM);
+
+    fe::ResampleDescBuilder_v8 onlyModes;
+    onlyModes.setResampleMode(CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING)
+        .setComputeType(DataType_t::FLOAT)
+        .setPaddingMode(CUDNN_ZERO_PAD);
+    expectBuildStatus(onlyModes, CUDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestCudnnShimV8BuilderParameters, ResampleZeroDenominatorIsBadParam)
@@ -852,6 +1022,24 @@ TEST_F(TestCudnnShimV8BuilderParameters, ResampleNearestAndBilinearAreNotSupport
         builder.setResampleMode(mode);
         const fe::ResampleDesc_v8 resample = builder.build();
         EXPECT_EQ(resample.get_status(), CUDNN_STATUS_SUCCESS);
+    }
+}
+
+// EDGE_VAL_PAD is the one padding mode hipDNN cannot lower.
+TEST_F(TestCudnnShimV8BuilderParameters, ResampleEdgeValuePaddingIsNotSupported)
+{
+    fe::ResampleDescBuilder_v8 cudnnPadding;
+    configureMaxPool(cudnnPadding);
+    cudnnPadding.setPaddingMode(CUDNN_EDGE_VAL_PAD);
+    fe::ResampleDescBuilder_v8 fePadding;
+    configureMaxPool(fePadding);
+    fePadding.setPaddingMode(fe::PaddingMode_t::EDGE_VAL_PAD);
+    for(fe::ResampleDescBuilder_v8* builder : {&cudnnPadding, &fePadding})
+    {
+        const BuildFailure failure = buildFailure(*builder);
+        EXPECT_TRUE(failure.thrown);
+        EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED) << failure.what;
+        EXPECT_NE(failure.what.find("padding mode"), std::string::npos) << failure.what;
     }
 }
 
@@ -973,11 +1161,11 @@ TEST_F(TestCudnnShimV8BuilderParameters, VariantPackFromUidPointerSet)
     const std::vector<hipdnnBackendDescriptor_t> packs
         = created(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
     ASSERT_EQ(packs.size(), 1U);
-    EXPECT_EQ(callOn(packs[0], HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS)->values<void*>(),
+    EXPECT_EQ(attributeOn(packs[0], HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS).values<void*>(),
               (std::vector<void*>{&a, &b, &c}));
-    EXPECT_EQ(callOn(packs[0], HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS)->values<std::int64_t>(),
+    EXPECT_EQ(attributeOn(packs[0], HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS).values<std::int64_t>(),
               (std::vector<std::int64_t>{10, 20, 30}));
-    EXPECT_EQ(callOn(packs[0], HIPDNN_ATTR_VARIANT_PACK_WORKSPACE)->value<void*>(), nullptr);
+    EXPECT_EQ(attributeOn(packs[0], HIPDNN_ATTR_VARIANT_PACK_WORKSPACE).value<void*>(), nullptr);
 }
 
 TEST_F(TestCudnnShimV8BuilderParameters, VariantPackUidCountMismatchIsBadParam)

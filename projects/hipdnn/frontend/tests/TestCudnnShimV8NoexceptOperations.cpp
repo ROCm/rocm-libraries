@@ -12,7 +12,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "fake_backend/ShimV8MockBackendFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <array>
 #include <cstddef>
@@ -29,36 +29,12 @@ using fe::DataType_t;
 using fe::DescriptorType_t;
 using ::testing::HasSubstr;
 
-using Dims = std::vector<std::int64_t>;
+using hipdnn_shim_test::Dims;
 
 const Dims X_DIMS = {2, 4, 8, 8};
 
-class TestCudnnShimV8NoexceptOperations : public hipdnn_shim_test::ShimV8MockBackendFixture
+class TestCudnnShimV8NoexceptOperations : public hipdnn_shim_test::ShimV8BuilderFixture
 {
-protected:
-    void SetUp() override
-    {
-        ShimV8MockBackendFixture::SetUp();
-        std::array<char, 1024> message{};
-        cudnnGetLastErrorString(message.data(), message.size());
-    }
-
-    static fe::Tensor
-        tensor(std::int64_t uid, const Dims& dims, DataType_t dataType = DataType_t::FLOAT)
-    {
-        Dims strides(dims.size(), 1);
-        for(std::size_t i = dims.size() - 1; i > 0; --i)
-        {
-            strides[i - 1] = strides[i] * dims[i];
-        }
-        return fe::TensorBuilder()
-            .setDataType(dataType)
-            .setDim(static_cast<std::int64_t>(dims.size()), dims.data())
-            .setStride(static_cast<std::int64_t>(strides.size()), strides.data())
-            .setId(uid)
-            .setAlignment(16)
-            .build();
-    }
 };
 
 TEST_F(TestCudnnShimV8NoexceptOperations, UnloweredOpSetsStatus)
@@ -80,8 +56,8 @@ TEST_F(TestCudnnShimV8NoexceptOperations, UnloweredOpSetsStatus)
     const fe::Operation pagedCacheLoad
         = fe::OperationBuilder(DescriptorType_t::OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR)
               .setcontainerDesc(tensor(1, {8, 2, 16, 64}))
-              .setpageTableDesc(tensor(2, {2, 1, 4, 1}, DataType_t::INT32))
-              .setsequenceDesc(tensor(3, {2, 1, 1, 1}, DataType_t::INT32))
+              .setpageTableDesc(tensor(2, {2, 1, 4, 1}, false, DataType_t::INT32))
+              .setsequenceDesc(tensor(3, {2, 1, 1, 1}, false, DataType_t::INT32))
               .setyDesc(tensor(4, {2, 2, 64, 64}))
               .build();
 
@@ -104,11 +80,13 @@ TEST_F(TestCudnnShimV8NoexceptOperations, WrongKindSetterSetsStatus)
         .setyDesc(tensor(3, X_DIMS));
     const fe::Operation onPointwise = pointwiseBuilder.build();
 
-    // build() reports the status the setter recorded and creates no descriptor.
+    // build() reports the status the setter recorded and creates no descriptor, so the raw
+    // descriptor reads as null rather than dereferencing the missing pointer.
     EXPECT_EQ(onPointwise.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_THAT(std::string(onPointwise.get_error()),
                 HasSubstr("Operation not initialized properly"));
     EXPECT_EQ(onPointwise.get_desc(), nullptr);
+    EXPECT_EQ(onPointwise.get_raw_desc(), nullptr);
 
     fe::OperationBuilder convBuilder(DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
     convBuilder.setbDesc(tensor(4, {1, 8, 1, 1}));
@@ -116,6 +94,7 @@ TEST_F(TestCudnnShimV8NoexceptOperations, WrongKindSetterSetsStatus)
 
     EXPECT_EQ(onConv.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(onConv.get_desc(), nullptr);
+    EXPECT_EQ(onConv.get_raw_desc(), nullptr);
 }
 
 // A failed tensor in an optional slot is a caller error, not an absent slot: a
@@ -163,7 +142,7 @@ TEST_F(TestCudnnShimV8NoexceptOperations, FailedTensorInOptionalSlotIsBadParam)
               .setResampleDesc(pool)
               .setdxDesc(tensor(1, X_DIMS))
               .setdyDesc(tensor(2, pooled))
-              .setidxDesc(tensor(3, pooled, DataType_t::INT32))
+              .setidxDesc(tensor(3, pooled, false, DataType_t::INT32))
               .setxDesc(failed)
               .build();
     EXPECT_EQ(backward.get_status(), CUDNN_STATUS_BAD_PARAM);

@@ -28,26 +28,13 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-using hipdnn_shim_test::BuilderFailure;
-using hipdnn_shim_test::builderFailureOf;
+using hipdnn_shim_test::BuildFailure;
 using hipdnn_shim_test::CapturedSetAttribute;
+using hipdnn_shim_test::failureOf;
 using hipdnn_shim_test::MockKnob;
 using KnobChoice = std::pair<std::string, std::int64_t>;
 
 constexpr std::int64_t KNOB_ENGINE = 7;
-
-// TILE_SIZE is the only knob the shim can show: BLOCK_SIZE has explicit valid
-// values, "int_knob" has no cuDNN type, and the two STAGES knobs collide.
-std::vector<MockKnob> mixedKnobs()
-{
-    return {
-        {"prov.tile_size", 8, 0, 64, 8, {}},
-        {"prov.block_size", 8, 0, 64, 1, {8, 16}},
-        {"prov.int_knob", 1, 0, 10, 1, {}},
-        {"first.stages", 1, 1, 4, 1, {}},
-        {"second.stages", 1, 1, 4, 1, {}},
-    };
-}
 
 std::size_t warningsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
                                const std::string& text)
@@ -59,11 +46,6 @@ std::size_t warningsContaining(const hipdnn_test_sdk::utilities::SharedLogRecord
         }));
 }
 
-std::string knobSegment(cudnnBackendKnobType_t type, std::int64_t value)
-{
-    return "_k" + std::to_string(static_cast<int>(type)) + "=" + std::to_string(value);
-}
-
 // Appends a knob the engine did not report, as a caller can through
 // getSupportedKnobs(). EngineConfigBuilder sends it only if a reported knob is set.
 void appendKnob(fe::Engine_v8& built, cudnnBackendKnobType_t type, std::int64_t choice)
@@ -72,16 +54,6 @@ void appendKnob(fe::Engine_v8& built, cudnnBackendKnobType_t type, std::int64_t 
     Knob knob(type, 64, 0, 1);
     knob.setChoice(static_cast<std::uint64_t>(choice));
     built.getSupportedKnobs().push_back(knob);
-}
-
-void choose(fe::Engine_v8& built, cudnnBackendKnobType_t type, std::int64_t choice)
-{
-    auto& knobs = built.getSupportedKnobs();
-    const auto knob = std::find_if(knobs.begin(), knobs.end(), [type](const auto& candidate) {
-        return candidate.getKnobType() == type;
-    });
-    ASSERT_NE(knob, knobs.end());
-    knob->setChoice(static_cast<std::uint64_t>(choice));
 }
 
 class TestCudnnShimV8BuilderEngines : public hipdnn_shim_test::ShimV8BuilderPlanFixture
@@ -117,18 +89,6 @@ protected:
         return calls.empty() ? nullptr : calls.front().value<hipdnnBackendDescriptor_t>();
     }
 
-    std::vector<CapturedSetAttribute> callsOn(hipdnnBackendDescriptor_t descriptor,
-                                              hipdnnBackendAttributeName_t name) const
-    {
-        std::vector<CapturedSetAttribute> result = setAttributesOf(descriptor);
-        result.erase(
-            std::remove_if(result.begin(),
-                           result.end(),
-                           [name](const CapturedSetAttribute& call) { return call.name != name; }),
-            result.end());
-        return result;
-    }
-
     // Every hipDNN KNOB_CHOICE: the provider knob ID and value it was given.
     std::vector<KnobChoice> hipdnnKnobChoices() const
     {
@@ -157,9 +117,9 @@ protected:
         return fe::EngineHeuristicsBuilder_v8().setOperationGraph(graph).setHeurMode(mode).build();
     }
 
-    static BuilderFailure configFailure(const fe::Engine_v8& built)
+    static BuildFailure configFailure(const fe::Engine_v8& built)
     {
-        return builderFailureOf([&built] {
+        return failureOf([&built] {
             [[maybe_unused]] auto config = fe::EngineConfigBuilder_v8().setEngine(built).build();
         });
     }
@@ -227,24 +187,26 @@ TEST_F(TestCudnnShimV8BuilderEngines, UnhonoredModesWarnOncePerProcess)
                                              CUDNN_HEUR_MODE_A,
                                              CUDNN_HEUR_MODE_INSTANT,
                                              CUDNN_HEUR_MODE_FALLBACK,
-                                             CUDNN_HEUR_MODE_INSTANT})
+                                             CUDNN_HEUR_MODE_B,
+                                             CUDNN_HEUR_MODE_INSTANT,
+                                             CUDNN_HEUR_MODE_B})
     {
         [[maybe_unused]] const fe::EngineHeuristics_v8 built = heuristics(graph, mode);
     }
 
     EXPECT_EQ(warningsContaining(recorder, "heuristic mode A "), 1U);
     EXPECT_EQ(warningsContaining(recorder, "heuristic mode INSTANT "), 1U);
-    EXPECT_EQ(warningsContaining(recorder, "heuristic mode B "), 0U);
+    EXPECT_EQ(warningsContaining(recorder, "heuristic mode B "), 1U);
     EXPECT_EQ(warningsContaining(recorder, "heuristic mode FALLBACK"), 0U);
-    EXPECT_EQ(warningsContaining(recorder, "not honored"), 2U);
+    EXPECT_EQ(warningsContaining(recorder, "not honored"), 3U);
 }
 
 TEST_F(TestCudnnShimV8BuilderEngines, HeuristicRequiresGraph)
 {
     fe::EngineHeuristicsBuilder_v8 builder;
     builder.setHeurMode(CUDNN_HEUR_MODE_FALLBACK);
-    const BuilderFailure failure
-        = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -257,7 +219,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, WrongKindGraphRejected)
     fe::EngineHeuristicsBuilder_v8 heuristicsBuilder;
     heuristicsBuilder.setOperationGraph(notAGraph.get_desc(), "")
         .setHeurMode(CUDNN_HEUR_MODE_FALLBACK);
-    const BuilderFailure heuristicsFailure = builderFailureOf(
+    const BuildFailure heuristicsFailure = failureOf(
         [&heuristicsBuilder] { [[maybe_unused]] auto built = heuristicsBuilder.build(); });
     ASSERT_TRUE(heuristicsFailure.thrown);
     EXPECT_EQ(heuristicsFailure.status, CUDNN_STATUS_BAD_PARAM);
@@ -265,8 +227,8 @@ TEST_F(TestCudnnShimV8BuilderEngines, WrongKindGraphRejected)
 
     fe::EngineBuilder_v8 engineBuilder;
     engineBuilder.setOperationGraph(notAGraph.get_desc()).setGlobalEngineIdx(0);
-    const BuilderFailure engineFailure = builderFailureOf(
-        [&engineBuilder] { [[maybe_unused]] auto built = engineBuilder.build(); });
+    const BuildFailure engineFailure
+        = failureOf([&engineBuilder] { [[maybe_unused]] auto built = engineBuilder.build(); });
     ASSERT_TRUE(engineFailure.thrown);
     EXPECT_EQ(engineFailure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -352,21 +314,23 @@ TEST_F(TestCudnnShimV8BuilderEngines, EngineIndexResolvesId)
         EXPECT_EQ(lastPlanEngineId(), byIndex[index]);
     }
 
-    for(const std::int64_t outOfRange : {std::int64_t{3}, std::int64_t{-1}})
+    // Past the engine count is NOT_SUPPORTED, as cuDNN reports; a negative index is BAD_PARAM.
+    for(const auto& [outOfRange, status] : {std::pair{std::int64_t{3}, CUDNN_STATUS_NOT_SUPPORTED},
+                                            std::pair{std::int64_t{-1}, CUDNN_STATUS_BAD_PARAM}})
     {
         SCOPED_TRACE(outOfRange);
         fe::EngineBuilder_v8 builder;
         builder.setOperationGraph(graph).setGlobalEngineIdx(outOfRange);
-        const BuilderFailure failure
-            = builderFailureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+        const BuildFailure failure
+            = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
         ASSERT_TRUE(failure.thrown);
-        EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+        EXPECT_EQ(failure.status, status);
     }
 
     fe::EngineBuilder_v8 noGraph;
     noGraph.setGlobalEngineIdx(0);
-    const BuilderFailure failure
-        = builderFailureOf([&noGraph] { [[maybe_unused]] auto built = noGraph.build(); });
+    const BuildFailure failure
+        = failureOf([&noGraph] { [[maybe_unused]] auto built = noGraph.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -445,32 +409,17 @@ TEST_F(TestCudnnShimV8BuilderEngines, ConcurrentPlansShareOneKnobConfig)
     const fe::EngineConfig_v8 config = fe::EngineConfigBuilder_v8().setEngine(built).build();
 
     constexpr std::size_t THREAD_COUNT = 8;
-    std::atomic<bool> start{false};
     std::atomic<int> failures{0};
-    std::vector<std::thread> threads;
-    threads.reserve(THREAD_COUNT);
-    for(std::size_t i = 0; i < THREAD_COUNT; ++i)
-    {
-        threads.emplace_back([&] {
-            while(!start.load())
-            {
-                std::this_thread::yield();
-            }
-            const BuilderFailure failure = builderFailureOf([&config] {
-                [[maybe_unused]] auto plan
-                    = fe::ExecutionPlanBuilder_v8().setEngineConfig(config).build();
-            });
-            if(failure.thrown)
-            {
-                ++failures;
-            }
+    runConcurrently(THREAD_COUNT, [&](std::size_t /*thread*/) {
+        const BuildFailure failure = failureOf([&config] {
+            [[maybe_unused]] auto plan
+                = fe::ExecutionPlanBuilder_v8().setEngineConfig(config).build();
         });
-    }
-    start.store(true);
-    for(std::thread& thread : threads)
-    {
-        thread.join();
-    }
+        if(failure.thrown)
+        {
+            ++failures;
+        }
+    });
 
     EXPECT_EQ(failures.load(), 0);
     EXPECT_EQ(created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).size(), 1U);
@@ -503,7 +452,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, HiddenKnobChoiceNotSupported)
         fe::Engine_v8 built = knobEngine(graph);
         choose(built, CUDNN_KNOB_TYPE_TILE_SIZE, 8);
         appendKnob(built, type, 8);
-        const BuilderFailure failure = configFailure(built);
+        const BuildFailure failure = configFailure(built);
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
     }
@@ -517,7 +466,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, DuplicateKnobChoiceRejected)
     choose(built, CUDNN_KNOB_TYPE_TILE_SIZE, 8);
     appendKnob(built, CUDNN_KNOB_TYPE_TILE_SIZE, 16);
 
-    const BuilderFailure failure = configFailure(built);
+    const BuildFailure failure = configFailure(built);
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -531,7 +480,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, DuplicateHiddenKnobNotSupported)
     appendKnob(built, CUDNN_KNOB_TYPE_BLOCK_SIZE, 8);
     appendKnob(built, CUDNN_KNOB_TYPE_BLOCK_SIZE, 16);
 
-    const BuilderFailure failure = configFailure(built);
+    const BuildFailure failure = configFailure(built);
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
 }
@@ -547,7 +496,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, InvalidKnobValueRejected)
         SCOPED_TRACE(value);
         fe::Engine_v8 built = knobEngine(graph);
         choose(built, CUDNN_KNOB_TYPE_TILE_SIZE, value);
-        const BuilderFailure failure = configFailure(built);
+        const BuildFailure failure = configFailure(built);
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     }
@@ -581,6 +530,22 @@ TEST_F(TestCudnnShimV8BuilderEngines, UnsetKnobChoiceIgnored)
     EXPECT_NE(plan.getTag().find(knobSegment(CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1)), std::string::npos);
 }
 
+// An unreported knob's choice is not sent while every reported knob is unset.
+TEST_F(TestCudnnShimV8BuilderEngines, UnreportedKnobChoiceIgnoredWhileReportedUnset)
+{
+    installKnobEngine();
+    const fe::OperationGraph_v8 graph = convGraph();
+    fe::Engine_v8 built = knobEngine(graph);
+    appendKnob(built, CUDNN_KNOB_TYPE_BLOCK_SIZE, 8);
+
+    const fe::ExecutionPlan_v8 plan = planFor(built);
+    ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
+    EXPECT_TRUE(created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).empty());
+    auto* const config = lastPlanConfig();
+    ASSERT_NE(config, nullptr);
+    EXPECT_TRUE(callsOn(config, HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES).empty());
+}
+
 TEST_F(TestCudnnShimV8BuilderEngines, MinusOneKeptWhenInRange)
 {
     installKnobEngine({{"prov.tile_size", 8, 0, 64, 8, {}}, {"prov.split_k_slc", 1, -1, 8, 1, {}}});
@@ -597,7 +562,7 @@ TEST_F(TestCudnnShimV8BuilderEngines, MinusOneKeptWhenInRange)
 
     // A real choice, so a repeat is a duplicate.
     appendKnob(built, CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1);
-    const BuilderFailure failure = configFailure(built);
+    const BuildFailure failure = configFailure(built);
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }

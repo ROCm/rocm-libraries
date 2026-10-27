@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "CudnnShimV8BuilderFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <array>
 #include <cstdint>
@@ -49,6 +49,7 @@ struct LoweringCase
     hipdnnBackendDescriptorType_t type;
     hipdnnBackendAttributeName_t computeType;
     SlotMap slots;
+    hipdnnDataType_t loweredComputeType = HIPDNN_DATA_FLOAT;
 };
 
 struct Pooling
@@ -59,6 +60,7 @@ struct Pooling
     Dims prePadding;
     Dims postPadding;
     Dims strides;
+    DataType_t computeType = DataType_t::FLOAT;
 };
 
 class TestCudnnShimV8BuilderLowering : public hipdnn_shim_test::ShimV8BuilderFixture
@@ -67,36 +69,19 @@ protected:
     static v8fe::ConvDesc convolution(const Dims& prePadding,
                                       const Dims& postPadding,
                                       const Dims& strides,
-                                      const Dims& dilations)
+                                      const Dims& dilations,
+                                      cudnnConvolutionMode_t mode = CUDNN_CROSS_CORRELATION,
+                                      DataType_t computeType = DataType_t::FLOAT)
     {
         const auto count = static_cast<std::int64_t>(prePadding.size());
         v8fe::ConvDescBuilder builder;
-        return builder.setComputeType(DataType_t::FLOAT)
-            .setMathMode(CUDNN_CROSS_CORRELATION)
+        return builder.setComputeType(computeType)
+            .setMathMode(mode)
             .setSpatialDimCount(count)
             .setPrePadding(count, prePadding.data())
             .setPostPadding(count, postPadding.data())
             .setSpatialStride(count, strides.data())
             .setDilation(count, dilations.data())
-            .build();
-    }
-
-    // 3x3 filter, unit padding, stride and dilation.
-    static v8fe::ConvDesc sameConvolution()
-    {
-        return convolution({1, 1}, {1, 1}, {1, 1}, {1, 1});
-    }
-
-    static v8fe::Operation convolutionForward(const v8fe::Tensor& x,
-                                              const v8fe::Tensor& w,
-                                              const v8fe::Tensor& y,
-                                              const v8fe::ConvDesc& conv)
-    {
-        return v8fe::OperationBuilder(DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-            .setxDesc(x)
-            .setwDesc(w)
-            .setyDesc(y)
-            .setcDesc(conv)
             .build();
     }
 
@@ -128,31 +113,6 @@ protected:
             .build();
     }
 
-    static v8fe::PointWiseDesc pointwiseDesc(PointwiseMode_t mode)
-    {
-        v8fe::PointWiseDescBuilder builder;
-        return builder.setMode(mode).setComputeType(DataType_t::FLOAT).build();
-    }
-
-    static v8fe::Operation pointwise(const v8fe::PointWiseDesc& desc,
-                                     const v8fe::Tensor& x,
-                                     const v8fe::Tensor& y,
-                                     const v8fe::Tensor* b = nullptr,
-                                     const v8fe::Tensor* t = nullptr)
-    {
-        v8fe::OperationBuilder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-        builder.setpwDesc(desc).setxDesc(x).setyDesc(y);
-        if(b != nullptr)
-        {
-            builder.setbDesc(*b);
-        }
-        if(t != nullptr)
-        {
-            builder.settDesc(*t);
-        }
-        return builder.build();
-    }
-
     static v8fe::Operation pointwiseBackward(const v8fe::PointWiseDesc& desc,
                                              const v8fe::Tensor& dy,
                                              const v8fe::Tensor& x,
@@ -166,10 +126,13 @@ protected:
             .build();
     }
 
-    static v8fe::Operation matmul(std::int64_t aUid, std::int64_t bUid, std::int64_t cUid)
+    static v8fe::Operation matmul(std::int64_t aUid,
+                                  std::int64_t bUid,
+                                  std::int64_t cUid,
+                                  DataType_t computeType = DataType_t::FLOAT)
     {
         v8fe::MatMulDescBuilder descBuilder;
-        const v8fe::MatMulDesc desc = descBuilder.setComputeType(DataType_t::FLOAT).build();
+        const v8fe::MatMulDesc desc = descBuilder.setComputeType(computeType).build();
         return v8fe::OperationBuilder(DescriptorType_t::OPERATION_MATMUL_DESCRIPTOR)
             .setaMatDesc(tensor(aUid, {1, 4, 8}))
             .setbMatDesc(tensor(bUid, {1, 8, 5}))
@@ -178,11 +141,13 @@ protected:
             .build();
     }
 
-    static v8fe::Operation
-        reduction(std::int64_t xUid, std::int64_t yUid, std::optional<bool> isDeterministic)
+    static v8fe::Operation reduction(std::int64_t xUid,
+                                     std::int64_t yUid,
+                                     std::optional<bool> isDeterministic,
+                                     DataType_t computeType = DataType_t::FLOAT)
     {
         v8fe::ReductionDescBuilder descBuilder;
-        descBuilder.setComputeType(DataType_t::FLOAT).setReductionOp(v8fe::ReductionMode_t::ADD);
+        descBuilder.setComputeType(computeType).setReductionOp(v8fe::ReductionMode_t::ADD);
         if(isDeterministic)
         {
             descBuilder.setIsDeterministic(*isDeterministic);
@@ -200,7 +165,7 @@ protected:
         const auto count = static_cast<std::int64_t>(pooling.window.size());
         v8fe::ResampleDescBuilder_v8 builder;
         return builder.setResampleMode(pooling.mode)
-            .setComputeType(DataType_t::FLOAT)
+            .setComputeType(pooling.computeType)
             .setPaddingMode(pooling.padding)
             .setSpatialDim(count, pooling.window.data())
             .setPrePadding(count, pooling.prePadding.data())
@@ -220,14 +185,15 @@ protected:
                          {2, 2}});
     }
 
-    static v8fe::ResampleDesc_v8 averagePool()
+    static v8fe::ResampleDesc_v8 averagePool(DataType_t computeType = DataType_t::FLOAT)
     {
         return resample({v8fe::ResampleMode_t::AVGPOOL_INCLUDE_PADDING,
                          v8fe::PaddingMode_t::ZERO_PAD,
                          {2, 2},
                          {0, 0},
                          {0, 0},
-                         {2, 2}});
+                         {2, 2},
+                         computeType});
     }
 
     static v8fe::Operation resampleForward(const v8fe::ResampleDesc_v8& desc,
@@ -318,7 +284,7 @@ protected:
             {"ConvolutionForward",
              [] {
                  return convolutionForward(
-                     tensor(1, IMAGE), tensor(2, FILTER), tensor(3, FEATURES), sameConvolution());
+                     tensor(1, IMAGE), tensor(2, FILTER), tensor(3, FEATURES), convDesc());
              },
              HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
              HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
@@ -327,24 +293,30 @@ protected:
               {HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, 3}}},
             {"ConvolutionBackwardData",
              [] {
-                 return convolutionBackwardData(
-                     tensor(1, FEATURES), tensor(2, FILTER), tensor(3, IMAGE), sameConvolution());
+                 return convolutionBackwardData(tensor(1, FEATURES),
+                                                tensor(2, FILTER),
+                                                tensor(3, IMAGE),
+                                                convDesc(DataType_t::HALF));
              },
              HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
              HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY, 1},
               {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W, 2},
-              {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX, 3}}},
+              {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX, 3}},
+             HIPDNN_DATA_HALF},
             {"ConvolutionBackwardFilter",
              [] {
-                 return convolutionBackwardFilter(
-                     tensor(1, FEATURES), tensor(2, IMAGE), tensor(3, FILTER), sameConvolution());
+                 return convolutionBackwardFilter(tensor(1, FEATURES),
+                                                  tensor(2, IMAGE),
+                                                  tensor(3, FILTER),
+                                                  convDesc(DataType_t::BFLOAT16));
              },
              HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
              HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY, 1},
               {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X, 2},
-              {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW, 3}}},
+              {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW, 3}},
+             HIPDNN_DATA_BFLOAT16},
             {"PointwiseMathUnary",
              [] {
                  return pointwise(pointwiseDesc(PointwiseMode_t::SQRT),
@@ -360,7 +332,7 @@ protected:
             {"PointwiseMathBinary",
              [] {
                  const v8fe::Tensor b = tensor(2, CHANNEL);
-                 return pointwise(pointwiseDesc(PointwiseMode_t::ADD),
+                 return pointwise(pointwiseDesc(PointwiseMode_t::ADD, DataType_t::HALF),
                                   tensor(1, ACTIVATION),
                                   tensor(3, ACTIVATION),
                                   &b);
@@ -370,7 +342,8 @@ protected:
              {{HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, 1},
               {HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT, 2},
               {HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, -1},
-              {HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, 3}}},
+              {HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, 3}},
+             HIPDNN_DATA_HALF},
             {"PointwiseBinarySelect",
              [] {
                  const v8fe::Tensor b = tensor(2, ACTIVATION);
@@ -424,32 +397,42 @@ protected:
               {HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, -1},
               {HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, 3}}},
             {"Matmul",
-             [] { return matmul(1, 2, 3); },
+             [] { return matmul(1, 2, 3, DataType_t::INT32); },
              HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR,
              HIPDNN_ATTR_MATMUL_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_MATMUL_ADESC, 1},
               {HIPDNN_ATTR_OPERATION_MATMUL_BDESC, 2},
-              {HIPDNN_ATTR_OPERATION_MATMUL_CDESC, 3}}},
+              {HIPDNN_ATTR_OPERATION_MATMUL_CDESC, 3}},
+             HIPDNN_DATA_INT32},
             {"Reduction",
-             [] { return reduction(1, 2, std::nullopt); },
+             [] { return reduction(1, 2, std::nullopt, DataType_t::DOUBLE); },
              HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR,
              HIPDNN_ATTR_REDUCTION_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, 1},
-              {HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, 2}}},
+              {HIPDNN_ATTR_OPERATION_REDUCTION_YDESC, 2}},
+             HIPDNN_DATA_DOUBLE},
             {"ResampleForward",
-             [] { return resampleForward(averagePool(), tensor(1, IMAGE), tensor(2, POOLED)); },
+             [] {
+                 return resampleForward(
+                     averagePool(DataType_t::HALF), tensor(1, IMAGE), tensor(2, POOLED));
+             },
              HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR,
              HIPDNN_ATTR_RESAMPLE_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC, 1},
               {HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC, 2},
-              {HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC, -1}}},
+              {HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC, -1}},
+             HIPDNN_DATA_HALF},
             {"ResampleBackward",
-             [] { return resampleBackward(averagePool(), tensor(1, POOLED), tensor(2, IMAGE)); },
+             [] {
+                 return resampleBackward(
+                     averagePool(DataType_t::BFLOAT16), tensor(1, POOLED), tensor(2, IMAGE));
+             },
              HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR,
              HIPDNN_ATTR_RESAMPLE_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, 1},
               {HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC, 2},
-              {HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC, -1}}},
+              {HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC, -1}},
+             HIPDNN_DATA_BFLOAT16},
             {"NormForwardBatchTraining",
              [] {
                  return v8fe::OperationBuilder(DescriptorType_t::OPERATION_NORM_FORWARD_DESCRIPTOR)
@@ -620,13 +603,6 @@ protected:
         return ops.empty() ? nullptr : ops.front();
     }
 
-    hipdnnBackendDescriptor_t slotTensor(hipdnnBackendDescriptor_t op,
-                                         hipdnnBackendAttributeName_t slot) const
-    {
-        const auto reference = callOn(op, slot);
-        return reference ? reference->value<hipdnnBackendDescriptor_t>() : nullptr;
-    }
-
     // Each slot holds the one hipDNN tensor lowered for its UID, or is never set.
     void expectSlots(hipdnnBackendDescriptor_t op, const SlotMap& slots) const
     {
@@ -696,7 +672,7 @@ TEST_F(TestCudnnShimV8BuilderLowering, ComputeTypeReachesEveryOperation)
         ASSERT_NE(hipdnnOp, nullptr);
         const auto computeType = callOn(hipdnnOp, item.computeType);
         ASSERT_TRUE(computeType);
-        EXPECT_EQ(computeType->value<hipdnnDataType_t>(), HIPDNN_DATA_FLOAT);
+        EXPECT_EQ(computeType->value<hipdnnDataType_t>(), item.loweredComputeType);
     }
 }
 
@@ -720,9 +696,9 @@ TEST_F(TestCudnnShimV8BuilderLowering, UnsupportedOperationHasNoTarget)
 TEST_F(TestCudnnShimV8BuilderLowering, ConvolutionParametersReachEveryKind)
 {
     // Pre and post paddings differ per axis but keep the per-axis sums, so the
-    // output is [1,8,4,6].
+    // output is [1,8,4,6]. True convolution is not hipDNN's default mode.
     const Dims output = {1, 8, 4, 6};
-    const v8fe::ConvDesc conv = convolution({1, 0}, {1, 2}, {2, 1}, {1, 2});
+    const v8fe::ConvDesc conv = convolution({1, 0}, {1, 2}, {2, 1}, {1, 2}, CUDNN_CONVOLUTION);
     const v8fe::Operation forward
         = convolutionForward(tensor(1, IMAGE), tensor(2, FILTER), tensor(3, output), conv);
     const v8fe::Operation data
@@ -750,23 +726,25 @@ TEST_F(TestCudnnShimV8BuilderLowering, ConvolutionParametersReachEveryKind)
         SCOPED_TRACE("hipDNN descriptor type " + std::to_string(type));
         hipdnnBackendDescriptor_t op = onlyCreated(type);
         ASSERT_NE(op, nullptr);
-        EXPECT_EQ(callOn(op, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS)->values<std::int64_t>(),
+        EXPECT_EQ(attributeOn(op, HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS).values<std::int64_t>(),
                   (Dims{1, 0}));
-        EXPECT_EQ(callOn(op, HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS)->values<std::int64_t>(),
+        EXPECT_EQ(attributeOn(op, HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS).values<std::int64_t>(),
                   (Dims{1, 2}));
-        EXPECT_EQ(callOn(op, HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES)->values<std::int64_t>(),
+        EXPECT_EQ(attributeOn(op, HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES).values<std::int64_t>(),
                   (Dims{2, 1}));
-        EXPECT_EQ(callOn(op, HIPDNN_ATTR_CONVOLUTION_DILATIONS)->values<std::int64_t>(),
+        EXPECT_EQ(attributeOn(op, HIPDNN_ATTR_CONVOLUTION_DILATIONS).values<std::int64_t>(),
                   (Dims{1, 2}));
-        EXPECT_EQ(callOn(op, HIPDNN_ATTR_CONVOLUTION_CONV_MODE)->value<hipdnnConvolutionMode_t>(),
-                  HIPDNN_CROSS_CORRELATION);
+        EXPECT_EQ(
+            attributeOn(op, HIPDNN_ATTR_CONVOLUTION_CONV_MODE).value<hipdnnConvolutionMode_t>(),
+            HIPDNN_CONVOLUTION);
         expectSlots(op, slots);
     }
 
     hipdnnBackendDescriptor_t graphDescriptor
         = onlyCreated(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
-    EXPECT_EQ(callOn(graphDescriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE)->value<hipdnnHandle_t>(),
-              _handle);
+    EXPECT_EQ(
+        attributeOn(graphDescriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE).value<hipdnnHandle_t>(),
+        _handle);
 }
 
 TEST_F(TestCudnnShimV8BuilderLowering, PointwiseModeAndSlotsPerClass)
@@ -793,9 +771,9 @@ TEST_F(TestCudnnShimV8BuilderLowering, PointwiseModeAndSlotsPerClass)
             pointwiseDesc(item.mode), tensor(10, ACTIVATION), tensor(13, ACTIVATION), &b, &t);
         hipdnnBackendDescriptor_t hipdnnOp = lowered(op);
         ASSERT_NE(hipdnnOp, nullptr);
-        EXPECT_EQ(callOn(hipdnnOp, HIPDNN_ATTR_POINTWISE_MODE)->value<hipdnnPointwiseMode_t>(),
+        EXPECT_EQ(attributeOn(hipdnnOp, HIPDNN_ATTR_POINTWISE_MODE).value<hipdnnPointwiseMode_t>(),
                   item.lowered);
-        EXPECT_EQ(callOn(hipdnnOp, HIPDNN_ATTR_POINTWISE_MATH_PREC)->value<hipdnnDataType_t>(),
+        EXPECT_EQ(attributeOn(hipdnnOp, HIPDNN_ATTR_POINTWISE_MATH_PREC).value<hipdnnDataType_t>(),
                   HIPDNN_DATA_FLOAT);
         expectSlots(hipdnnOp,
                     {{HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, 10},
@@ -810,7 +788,7 @@ TEST_F(TestCudnnShimV8BuilderLowering, PointwiseModeAndSlotsPerClass)
                                                            tensor(22, ACTIVATION));
     hipdnnBackendDescriptor_t backward = lowered(reluBackward);
     ASSERT_NE(backward, nullptr);
-    EXPECT_EQ(callOn(backward, HIPDNN_ATTR_POINTWISE_MODE)->value<hipdnnPointwiseMode_t>(),
+    EXPECT_EQ(attributeOn(backward, HIPDNN_ATTR_POINTWISE_MODE).value<hipdnnPointwiseMode_t>(),
               HIPDNN_POINTWISE_RELU_BWD);
     expectSlots(backward,
                 {{HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT, 20},
@@ -950,9 +928,12 @@ TEST_F(TestCudnnShimV8BuilderLowering, LayerNormNormalizedDimCountFromScale)
         Dims statistics;
         std::int64_t expected;
     };
-    // Trailing non-1 dims of a full-rank scale, else the scale's rank.
+    // A full-rank scale normalizes from its first non-1 dim on, else the scale's rank. [1, C, 1, 1]
+    // is cuDNN's layer-norm layout ([B*S, H, 1, 1] activations); hipDNN's backward node rejects
+    // any count under 3 for it.
     for(const DimCase& item : {DimCase{{1, 1, 4, 4}, {2, 3, 1, 1}, 2},
                                DimCase{{1, 3, 4, 4}, {2, 1, 1, 1}, 3},
+                               DimCase{{1, 3, 1, 1}, {2, 1, 1, 1}, 3},
                                DimCase{{3, 4, 4}, {2}, 3}})
     {
         SCOPED_TRACE(std::to_string(item.scale.size()) + "-D scale, "
@@ -1146,17 +1127,18 @@ TEST_F(TestCudnnShimV8BuilderLowering, ResampleParametersAndIndexPresence)
         = resampleForward(paddedMax, tensor(1, IMAGE), tensor(2, POOLED), &forwardIndex);
     hipdnnBackendDescriptor_t indexedOp = lowered(indexed);
     ASSERT_NE(indexedOp, nullptr);
-    EXPECT_EQ(callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_MODE)->value<hipdnnResampleMode_t>(),
+    EXPECT_EQ(attributeOn(indexedOp, HIPDNN_ATTR_RESAMPLE_MODE).value<hipdnnResampleMode_t>(),
               HIPDNN_RESAMPLE_MAXPOOL);
-    EXPECT_EQ(callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_PADDING_MODE)->value<hipdnnPaddingMode_t>(),
-              HIPDNN_PADDING_NEG_INF_PAD);
-    EXPECT_EQ(callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS)->values<std::int64_t>(),
+    EXPECT_EQ(
+        attributeOn(indexedOp, HIPDNN_ATTR_RESAMPLE_PADDING_MODE).value<hipdnnPaddingMode_t>(),
+        HIPDNN_PADDING_NEG_INF_PAD);
+    EXPECT_EQ(attributeOn(indexedOp, HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS).values<std::int64_t>(),
               (Dims{3, 3}));
-    EXPECT_EQ(callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS)->values<std::int64_t>(),
+    EXPECT_EQ(attributeOn(indexedOp, HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS).values<std::int64_t>(),
               (Dims{1, 0}));
-    EXPECT_EQ(callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_POST_PADDINGS)->values<std::int64_t>(),
+    EXPECT_EQ(attributeOn(indexedOp, HIPDNN_ATTR_RESAMPLE_POST_PADDINGS).values<std::int64_t>(),
               (Dims{0, 1}));
-    EXPECT_EQ(callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_STRIDES)->values<std::int64_t>(),
+    EXPECT_EQ(attributeOn(indexedOp, HIPDNN_ATTR_RESAMPLE_STRIDES).values<std::int64_t>(),
               (Dims{2, 2}));
     const auto generateIndex = callOn(indexedOp, HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT);
     ASSERT_TRUE(generateIndex);
@@ -1169,18 +1151,48 @@ TEST_F(TestCudnnShimV8BuilderLowering, ResampleParametersAndIndexPresence)
     const v8fe::Operation plain = resampleForward(maxPool(), tensor(4, IMAGE), tensor(5, POOLED));
     hipdnnBackendDescriptor_t plainOp = lowered(plain);
     ASSERT_NE(plainOp, nullptr);
-    EXPECT_EQ(callOn(plainOp, HIPDNN_ATTR_RESAMPLE_PADDING_MODE)->value<hipdnnPaddingMode_t>(),
+    EXPECT_EQ(attributeOn(plainOp, HIPDNN_ATTR_RESAMPLE_PADDING_MODE).value<hipdnnPaddingMode_t>(),
               HIPDNN_PADDING_NEG_INF_PAD);
     EXPECT_FALSE(callOn(plainOp, HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT));
     expectSlots(plainOp,
                 {{HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC, 5},
                  {HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC, -1}});
 
+    // Only max pooling produces indices; no provider takes one for another mode.
+    for(const v8fe::ResampleMode_t mode : {v8fe::ResampleMode_t::AVGPOOL_INCLUDE_PADDING,
+                                           v8fe::ResampleMode_t::AVGPOOL_EXCLUDE_PADDING})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        const v8fe::ResampleDesc_v8 average
+            = resample({mode, v8fe::PaddingMode_t::ZERO_PAD, {2, 2}, {0, 0}, {0, 0}, {2, 2}});
+        const v8fe::Tensor averageIndex = indexTensor(13);
+        const hipdnn_shim_test::BuildFailure failure = hipdnn_shim_test::failureOf([&] {
+            [[maybe_unused]] const v8fe::Operation op
+                = resampleForward(average, tensor(11, IMAGE), tensor(12, POOLED), &averageIndex);
+        });
+        ASSERT_TRUE(failure.thrown);
+        EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
+        EXPECT_NE(failure.what.find("index tensor is not supported by the hipDNN cuDNN shim except "
+                                    "for CUDNN_RESAMPLE_MAXPOOL"),
+                  std::string::npos)
+            << failure.what;
+    }
+
+    // The backward op keeps the asymmetric forward geometry.
     const v8fe::Tensor backwardIndex = indexTensor(8);
     const v8fe::Operation maxBackward
-        = resampleBackward(maxPool(), tensor(6, POOLED), tensor(7, IMAGE), &backwardIndex);
+        = resampleBackward(paddedMax, tensor(6, POOLED), tensor(7, IMAGE), &backwardIndex);
     hipdnnBackendDescriptor_t maxBackwardOp = lowered(maxBackward);
     ASSERT_NE(maxBackwardOp, nullptr);
+    EXPECT_EQ(
+        attributeOn(maxBackwardOp, HIPDNN_ATTR_RESAMPLE_PADDING_MODE).value<hipdnnPaddingMode_t>(),
+        HIPDNN_PADDING_NEG_INF_PAD);
+    EXPECT_EQ(attributeOn(maxBackwardOp, HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS).values<std::int64_t>(),
+              (Dims{3, 3}));
+    EXPECT_EQ(attributeOn(maxBackwardOp, HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS).values<std::int64_t>(),
+              (Dims{1, 0}));
+    EXPECT_EQ(attributeOn(maxBackwardOp, HIPDNN_ATTR_RESAMPLE_POST_PADDINGS).values<std::int64_t>(),
+              (Dims{0, 1}));
     expectSlots(maxBackwardOp,
                 {{HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC, 6},
                  {HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC, 7},
@@ -1190,6 +1202,9 @@ TEST_F(TestCudnnShimV8BuilderLowering, ResampleParametersAndIndexPresence)
         = resampleBackward(averagePool(), tensor(9, POOLED), tensor(10, IMAGE));
     hipdnnBackendDescriptor_t averageBackwardOp = lowered(averageBackward);
     ASSERT_NE(averageBackwardOp, nullptr);
+    EXPECT_EQ(attributeOn(averageBackwardOp, HIPDNN_ATTR_RESAMPLE_PADDING_MODE)
+                  .value<hipdnnPaddingMode_t>(),
+              HIPDNN_PADDING_ZERO_PAD);
     expectSlots(averageBackwardOp, {{HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC, -1}});
 }
 
@@ -1203,11 +1218,11 @@ TEST_F(TestCudnnShimV8BuilderLowering, ReductionForwardsDeterminism)
         = created(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR);
     ASSERT_EQ(ops.size(), 2U);
     EXPECT_EQ(slotUid(ops[0], HIPDNN_ATTR_OPERATION_REDUCTION_YDESC), 2);
-    EXPECT_EQ(callOn(ops[0], HIPDNN_ATTR_REDUCTION_OPERATOR)->value<hipdnnReduceTensorOp_t>(),
+    EXPECT_EQ(attributeOn(ops[0], HIPDNN_ATTR_REDUCTION_OPERATOR).value<hipdnnReduceTensorOp_t>(),
               HIPDNN_REDUCE_TENSOR_ADD);
-    EXPECT_FALSE(callOn(ops[0], HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC)->value<bool>());
+    EXPECT_FALSE(attributeOn(ops[0], HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value<bool>());
     EXPECT_EQ(slotUid(ops[1], HIPDNN_ATTR_OPERATION_REDUCTION_YDESC), 4);
-    EXPECT_TRUE(callOn(ops[1], HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC)->value<bool>());
+    EXPECT_TRUE(attributeOn(ops[1], HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value<bool>());
 }
 
 } // namespace

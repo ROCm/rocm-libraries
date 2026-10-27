@@ -7,11 +7,10 @@
 
 #include <gtest/gtest.h>
 
-#include "CudnnShimV8BuilderFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -48,29 +47,9 @@ constexpr std::int64_t KNOB_ID_BASE = 1000;
 class TestCudnnShimV8BuilderGraph : public hipdnn_shim_test::ShimV8BuilderFixture
 {
 protected:
-    static v8fe::Operation pointwise(PointwiseMode_t mode,
-                                     const v8fe::Tensor& x,
-                                     const v8fe::Tensor* b,
-                                     const v8fe::Tensor& y)
-    {
-        v8fe::OperationBuilder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-        builder
-            .setpwDesc(v8fe::PointWiseDescBuilder()
-                           .setMode(mode)
-                           .setComputeType(DataType_t::FLOAT)
-                           .build())
-            .setxDesc(x)
-            .setyDesc(y);
-        if(b != nullptr)
-        {
-            builder.setbDesc(*b);
-        }
-        return builder.build();
-    }
-
     static v8fe::Operation unary(PointwiseMode_t mode, const v8fe::Tensor& x, const v8fe::Tensor& y)
     {
-        return pointwise(mode, x, nullptr, y);
+        return pointwise(pointwiseDesc(mode), x, y);
     }
 
     static v8fe::Operation binary(PointwiseMode_t mode,
@@ -78,28 +57,13 @@ protected:
                                   const v8fe::Tensor& b,
                                   const v8fe::Tensor& y)
     {
-        return pointwise(mode, x, &b, y);
+        return pointwise(pointwiseDesc(mode), x, y, &b);
     }
 
     // conv(x:1, w:2) -> y, 3x3 filter with unit padding, stride and dilation.
     static v8fe::Operation convolution(const v8fe::Tensor& y)
     {
-        const std::array<std::int64_t, 2> ones = {1, 1};
-        const v8fe::ConvDesc conv = v8fe::ConvDescBuilder()
-                                        .setComputeType(DataType_t::FLOAT)
-                                        .setMathMode(CUDNN_CROSS_CORRELATION)
-                                        .setSpatialDimCount(2)
-                                        .setPrePadding(2, ones.data())
-                                        .setPostPadding(2, ones.data())
-                                        .setDilation(2, ones.data())
-                                        .setSpatialStride(2, ones.data())
-                                        .build();
-        return v8fe::OperationBuilder(DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-            .setxDesc(tensor(1, {1, 4, 8, 8}))
-            .setwDesc(tensor(2, {8, 4, 3, 3}))
-            .setyDesc(y)
-            .setcDesc(conv)
-            .build();
+        return convolutionForward(tensor(1, {1, 4, 8, 8}), tensor(2, {8, 4, 3, 3}), y, convDesc());
     }
 
     static v8fe::Operation smallConvolution(bool yVirtual = true)
@@ -311,6 +275,25 @@ TEST_F(TestCudnnShimV8BuilderGraph, UnorderedChainSortedStably)
                   HIPDNN_POINTWISE_NEG, -1, HIPDNN_POINTWISE_ADD, HIPDNN_POINTWISE_RELU_FWD}));
 }
 
+TEST_F(TestCudnnShimV8BuilderGraph, ReleasedConsumerKeepsItsPlaceAheadOfReadyOperations)
+{
+    // Already topological: add is released by conv while the independent neg
+    // is already ready, so a FIFO ready queue would run neg before add.
+    const v8fe::Operation conv = smallConvolution();
+    const v8fe::Operation add = binary(PointwiseMode_t::ADD,
+                                       tensor(3, CONV_Y, true),
+                                       tensor(5, {1, 8, 1, 1}),
+                                       tensor(6, CONV_Y, true));
+    const v8fe::Operation neg = unary(PointwiseMode_t::NEG, tensor(8, SHAPE), tensor(9, SHAPE));
+    const v8fe::Operation relu
+        = unary(PointwiseMode_t::RELU_FWD, tensor(6, CONV_Y, true), tensor(7, CONV_Y));
+    graph({&conv, &add, &neg, &relu});
+
+    EXPECT_EQ(pointwiseModesInGraphOrder(),
+              (std::vector<int>{
+                  -1, HIPDNN_POINTWISE_ADD, HIPDNN_POINTWISE_NEG, HIPDNN_POINTWISE_RELU_FWD}));
+}
+
 TEST_F(TestCudnnShimV8BuilderGraph, DisconnectedComponentsAccepted)
 {
     const v8fe::Operation first = unary(PointwiseMode_t::ABS, tensor(1, SHAPE), tensor(2, SHAPE));
@@ -326,11 +309,17 @@ TEST_F(TestCudnnShimV8BuilderGraph, CycleRejected)
         = unary(PointwiseMode_t::ABS, tensor(1, SHAPE, true), tensor(2, SHAPE, true));
     const v8fe::Operation second
         = unary(PointwiseMode_t::NEG, tensor(2, SHAPE, true), tensor(1, SHAPE, true));
+    // An in-place operation reads its own output.
+    const v8fe::Operation inPlace = unary(PointwiseMode_t::ABS, tensor(1, SHAPE), tensor(1, SHAPE));
 
-    const BuildFailure failure = graphFailure({&first, &second});
-    ASSERT_TRUE(failure.thrown);
-    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
-    EXPECT_NE(failure.what.find("cycle"), std::string::npos) << failure.what;
+    for(const Ops& ops : {Ops{&first, &second}, Ops{&inPlace}})
+    {
+        SCOPED_TRACE(ops.size());
+        const BuildFailure failure = graphFailure(ops);
+        ASSERT_TRUE(failure.thrown);
+        EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+        EXPECT_NE(failure.what.find("cycle"), std::string::npos) << failure.what;
+    }
 }
 
 TEST_F(TestCudnnShimV8BuilderGraph, UidWrittenTwiceRejected)
@@ -412,28 +401,57 @@ TEST_F(TestCudnnShimV8BuilderGraph, ConstantTensorLowersAsValue)
     const v8fe::Operation floatAdd = addConstant(constant(10, DataType_t::FLOAT, 2.5F), 1);
     const v8fe::Operation intAdd = addConstant(constant(20, DataType_t::INT32, std::int32_t{7}), 3);
     const v8fe::Operation boolAdd = addConstant(constant(30, DataType_t::BOOLEAN, true), 5);
-    graph({&floatAdd, &intAdd, &boolAdd});
+    // 1.5 as half and as bfloat16 bits; the INT64 value has a nonzero high word.
+    const v8fe::Operation halfAdd
+        = addConstant(constant(50, DataType_t::HALF, std::uint16_t{0x3E00}), 101);
+    const v8fe::Operation bfloatAdd
+        = addConstant(constant(60, DataType_t::BFLOAT16, std::uint16_t{0x3FC0}), 103);
+    const v8fe::Operation byteAdd
+        = addConstant(constant(70, DataType_t::UINT8, std::uint8_t{200}), 105);
+    const v8fe::Operation wideAdd
+        = addConstant(constant(80, DataType_t::INT64, std::int64_t{0x100000002}), 107);
+    graph({&floatAdd, &intAdd, &boolAdd, &halfAdd, &bfloatAdd, &byteAdd, &wideAdd});
 
     hipdnnBackendDescriptor_t floatConstant = hipdnnTensor(10);
-    EXPECT_EQ(callOn(floatConstant, HIPDNN_ATTR_TENSOR_VALUE_EXT)->values<float>(),
+    EXPECT_EQ(attributeOn(floatConstant, HIPDNN_ATTR_TENSOR_VALUE_EXT).values<float>(),
               (std::vector<float>{2.5F}));
-    EXPECT_EQ(callOn(floatConstant, HIPDNN_ATTR_TENSOR_DATA_TYPE)->value<hipdnnDataType_t>(),
+    EXPECT_EQ(attributeOn(floatConstant, HIPDNN_ATTR_TENSOR_DATA_TYPE).value<hipdnnDataType_t>(),
               HIPDNN_DATA_FLOAT);
-    EXPECT_EQ(callOn(hipdnnTensor(20), HIPDNN_ATTR_TENSOR_VALUE_EXT)->values<std::int32_t>(),
+    EXPECT_EQ(attributeOn(hipdnnTensor(20), HIPDNN_ATTR_TENSOR_VALUE_EXT).values<std::int32_t>(),
               (std::vector<std::int32_t>{7}));
-    EXPECT_EQ(callOn(hipdnnTensor(30), HIPDNN_ATTR_TENSOR_VALUE_EXT)->values<std::uint8_t>(),
+    EXPECT_EQ(attributeOn(hipdnnTensor(30), HIPDNN_ATTR_TENSOR_VALUE_EXT).values<std::uint8_t>(),
               (std::vector<std::uint8_t>{1}));
-    for(const std::int64_t uid : {10, 20, 30})
+    EXPECT_EQ(attributeOn(hipdnnTensor(50), HIPDNN_ATTR_TENSOR_VALUE_EXT).values<std::uint16_t>(),
+              (std::vector<std::uint16_t>{0x3E00}));
+    EXPECT_EQ(attributeOn(hipdnnTensor(60), HIPDNN_ATTR_TENSOR_VALUE_EXT).values<std::uint16_t>(),
+              (std::vector<std::uint16_t>{0x3FC0}));
+    EXPECT_EQ(attributeOn(hipdnnTensor(70), HIPDNN_ATTR_TENSOR_VALUE_EXT).values<std::uint8_t>(),
+              (std::vector<std::uint8_t>{200}));
+    EXPECT_EQ(attributeOn(hipdnnTensor(80), HIPDNN_ATTR_TENSOR_VALUE_EXT).values<std::int64_t>(),
+              (std::vector<std::int64_t>{0x100000002}));
+    for(const auto& [uid, dataType] :
+        std::vector<std::pair<std::int64_t, hipdnnDataType_t>>{{50, HIPDNN_DATA_HALF},
+                                                               {60, HIPDNN_DATA_BFLOAT16},
+                                                               {70, HIPDNN_DATA_UINT8},
+                                                               {80, HIPDNN_DATA_INT64}})
+    {
+        SCOPED_TRACE(uid);
+        EXPECT_EQ(
+            attributeOn(hipdnnTensor(uid), HIPDNN_ATTR_TENSOR_DATA_TYPE).value<hipdnnDataType_t>(),
+            dataType);
+    }
+    for(const std::int64_t uid : {10, 20, 30, 50, 60, 70, 80})
     {
         SCOPED_TRACE(uid);
         EXPECT_FALSE(callOn(hipdnnTensor(uid), HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT));
         // The value is set before the shape, which would otherwise collapse to {1}.
-        EXPECT_EQ(callOn(hipdnnTensor(uid), HIPDNN_ATTR_TENSOR_DIMENSIONS)->values<std::int64_t>(),
-                  SCALAR);
+        EXPECT_EQ(
+            attributeOn(hipdnnTensor(uid), HIPDNN_ATTR_TENSOR_DIMENSIONS).values<std::int64_t>(),
+            SCALAR);
     }
 
     const v8fe::Operation unsupported
-        = addConstant(constant(40, DataType_t::INT8, std::int8_t{1}), 7);
+        = addConstant(constant(40, DataType_t::INT8, std::int8_t{1}), 17);
     const BuildFailure failure = graphFailure({&unsupported});
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
@@ -573,13 +591,13 @@ TEST_F(TestCudnnShimV8BuilderGraph, EngineIndexFollowsSignedId)
     EXPECT_EQ(engineIdsByIndex(built), (OptionalIds{-40, -2, 5, 300}));
     const BuildFailure pastEnd = engineFailureAt(built, 4);
     ASSERT_TRUE(pastEnd.thrown);
-    EXPECT_EQ(pastEnd.status, CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(pastEnd.status, CUDNN_STATUS_NOT_SUPPORTED);
 
     hipdnnBackendDescriptor_t heuristic = onlyCreated(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
-    EXPECT_EQ(callOn(heuristic, HIPDNN_ATTR_ENGINEHEUR_MODE)->value<hipdnnBackendHeurMode_t>(),
+    EXPECT_EQ(attributeOn(heuristic, HIPDNN_ATTR_ENGINEHEUR_MODE).value<hipdnnBackendHeurMode_t>(),
               HIPDNN_HEUR_MODE_FALLBACK);
-    EXPECT_EQ(callOn(heuristic, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH)
-                  ->value<hipdnnBackendDescriptor_t>(),
+    EXPECT_EQ(attributeOn(heuristic, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH)
+                  .value<hipdnnBackendDescriptor_t>(),
               onlyCreated(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR));
 }
 
@@ -599,25 +617,8 @@ TEST_F(TestCudnnShimV8BuilderGraph, EnginesEnumeratedOnceAcrossThreads)
         });
 
     constexpr std::size_t THREAD_COUNT = 8;
-    std::atomic<bool> start{false};
     std::array<std::int64_t, THREAD_COUNT> counts{};
-    std::vector<std::thread> threads;
-    threads.reserve(THREAD_COUNT);
-    for(std::size_t i = 0; i < THREAD_COUNT; ++i)
-    {
-        threads.emplace_back([&, i] {
-            while(!start.load())
-            {
-                std::this_thread::yield();
-            }
-            counts.at(i) = built.getEngineCount();
-        });
-    }
-    start.store(true);
-    for(std::thread& thread : threads)
-    {
-        thread.join();
-    }
+    runConcurrently(THREAD_COUNT, [&](std::size_t i) { counts.at(i) = built.getEngineCount(); });
 
     for(const std::int64_t count : counts)
     {
@@ -638,7 +639,7 @@ TEST_F(TestCudnnShimV8BuilderGraph, FailingConfigDropsEngine)
     EXPECT_EQ(engineIdsByIndex(built), (OptionalIds{4, 7}));
     const BuildFailure pastEnd = engineFailureAt(built, 2);
     EXPECT_TRUE(pastEnd.thrown);
-    EXPECT_EQ(pastEnd.status, CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(pastEnd.status, CUDNN_STATUS_NOT_SUPPORTED);
 }
 
 TEST_F(TestCudnnShimV8BuilderGraph, NoApplicableEngineCountsZero)
@@ -650,7 +651,7 @@ TEST_F(TestCudnnShimV8BuilderGraph, NoApplicableEngineCountsZero)
     EXPECT_TRUE(created(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR).empty());
     const BuildFailure failure = engineFailureAt(built, 0);
     ASSERT_TRUE(failure.thrown);
-    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
 }
 
 TEST_F(TestCudnnShimV8BuilderGraph, FailedEnumerationRetried)

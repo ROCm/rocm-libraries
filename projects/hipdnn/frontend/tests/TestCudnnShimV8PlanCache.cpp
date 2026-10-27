@@ -18,6 +18,8 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
+using hipdnn_shim_test::Dims;
+
 class TestCudnnShimV8PlanCache : public hipdnn_shim_test::ShimV8PlanFixture
 {
 protected:
@@ -25,41 +27,11 @@ protected:
     fe::OperationGraph_v8 convPointwiseGraph(fe::PointwiseMode_t mode)
     {
         const Dims yDims = {2, 8, 8, 8};
-        const Dims yStrides = packedStrides(yDims);
-        const fe::Tensor_v8 y = fe::TensorBuilder_v8()
-                                    .setDataType(fe::DataType_t::FLOAT)
-                                    .setDim(4, yDims.data())
-                                    .setStride(4, yStrides.data())
-                                    .setId(Y_UID)
-                                    .setAlignment(16)
-                                    .setVirtual(true)
-                                    .build();
-        const std::array<std::int64_t, 2> pads = {1, 1};
-        const std::array<std::int64_t, 2> ones = {1, 1};
+        const fe::Tensor_v8 y = tensor(Y_UID, yDims, true);
         std::vector<fe::Operation_v8> ops;
-        ops.push_back(
-            fe::OperationBuilder_v8(fe::DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-                .setxDesc(tensor(X_UID, {2, 4, 8, 8}))
-                .setwDesc(tensor(W_UID, {8, 4, 3, 3}))
-                .setyDesc(y)
-                .setcDesc(fe::ConvDescBuilder_v8()
-                              .setComputeType(fe::DataType_t::FLOAT)
-                              .setMathMode(CUDNN_CROSS_CORRELATION)
-                              .setSpatialDimCount(2)
-                              .setPrePadding(2, pads.data())
-                              .setPostPadding(2, pads.data())
-                              .setDilation(2, ones.data())
-                              .setSpatialStride(2, ones.data())
-                              .build())
-                .build());
-        ops.push_back(fe::OperationBuilder_v8(fe::DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR)
-                          .setpwDesc(fe::PointWiseDescBuilder_v8()
-                                         .setMode(mode)
-                                         .setComputeType(fe::DataType_t::FLOAT)
-                                         .build())
-                          .setxDesc(y)
-                          .setyDesc(tensor(Y_UID + 1, yDims))
-                          .build());
+        ops.push_back(convolutionForward(
+            tensor(X_UID, {2, 4, 8, 8}), tensor(W_UID, {8, 4, 3, 3}), y, convDesc()));
+        ops.push_back(pointwise(pointwiseDesc(mode), y, tensor(Y_UID + 1, yDims)));
         return fe::OperationGraphBuilder_v8().setHandle(_handle).setOperationGraph(ops).build();
     }
 };

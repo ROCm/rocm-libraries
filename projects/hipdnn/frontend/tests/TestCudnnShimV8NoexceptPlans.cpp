@@ -29,23 +29,8 @@ namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 using ::testing::HasSubstr;
 
-fe::EngineConfigList heuristicSource(fe::OperationGraph& graph)
-{
-    fe::EngineHeuristics heuristics = fe::EngineHeuristicsBuilder()
-                                          .setOperationGraph(graph)
-                                          .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-                                          .build();
-    return heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-}
-
 class TestCudnnShimV8NoexceptPlans : public hipdnn_shim_test::ShimV8PlanFixture
 {
-protected:
-    static fe::EngineConfigGenerator heuristicGenerator()
-    {
-        const std::array<fe::GeneratorSource, 1> sources = {heuristicSource};
-        return {static_cast<int>(sources.size()), sources.data()};
-    }
 };
 
 TEST_F(TestCudnnShimV8NoexceptPlans, PlanFailureSetsStatus)

@@ -24,9 +24,10 @@ namespace
 {
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
+using fe::json;
 
-using hipdnn_shim_test::BuilderFailure;
-using hipdnn_shim_test::builderFailureOf;
+using hipdnn_shim_test::BuildFailure;
+using hipdnn_shim_test::failureOf;
 
 constexpr const char* ERRATA_VARIABLE = "CUDNN_ERRATA_JSON_FILE";
 
@@ -190,7 +191,7 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleWithoutFormatRejected)
     json shaped = rule("ConvFwd", 0);
     shaped["input_shape"] = json::array({-1, 4, -1, -1});
 
-    const BuilderFailure failure = builderFailureOf([&] {
+    const BuildFailure failure = failureOf([&] {
         [[maybe_unused]] const bool blocked
             = fe::check_errata(rules({shaped}), "ConvFwd_eng0", _handle, graph, always);
     });
@@ -223,8 +224,10 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsMissingDimensionAsZero)
     EXPECT_TRUE(fe::check_errata(rules({filterWidth}), "ConvFwd_eng0", _handle, graph, always));
 }
 
-// ConvBwdFilter reads input X and filter DW; ConvBwdData reads input DX and filter W. Only
-// the width decides (see above), and DY's width 6 would unblock a rule written for 8.
+// ConvBwdFilter reads input X and filter DW; ConvBwdData reads input DX and filter W. With a
+// wildcard only the last compared entry decides (see above), and DY's width 6 would unblock a
+// rule written for 8. blocked_shape[i] meets dims[i + 1], so X/DX {1,4,5,6,8} reads as
+// {4,5,6,8} in either format; NHWC compares W, blocked_shape[2], last.
 TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsBackwardSlots)
 {
     const std::array<std::pair<const char*, fe::DescriptorType_t>, 2> kinds = {{
@@ -237,17 +240,31 @@ TEST_F(TestCudnnShimV8Errata, ShapeRuleReadsBackwardSlots)
         SCOPED_TRACE(operation);
         const fe::OperationGraph_v8 graph = backwardGraph(kind);
         const std::string tag = operation + "_eng0";
+        const auto blocksShape
+            = [&](const char* format, const char* key, const std::vector<std::int64_t>& shape) {
+                  json shaped = rule(operation, 0);
+                  shaped["shape_format"] = format;
+                  shaped[key] = shape;
+                  return fe::check_errata(rules({shaped}), tag, _handle, graph, always);
+              };
         const auto blocks = [&](const char* key, std::int64_t width) {
-            json shaped = rule(operation, 0);
-            shaped["shape_format"] = "NCHW";
-            shaped[key] = json::array({-1, -1, -1, width});
-            return fe::check_errata(rules({shaped}), tag, _handle, graph, always);
+            return blocksShape("NCHW", key, {-1, -1, -1, width});
         };
 
         EXPECT_TRUE(blocks("input_shape", 8));
         EXPECT_FALSE(blocks("input_shape", 6));
         EXPECT_TRUE(blocks("filter_shape", 3));
         EXPECT_FALSE(blocks("filter_shape", 8));
+
+        EXPECT_TRUE(blocksShape("NHWC", "input_shape", {-1, -1, 6, -1}));
+        EXPECT_FALSE(blocksShape("NHWC", "input_shape", {-1, -1, 8, -1}));
+
+        // Fully specified, every entry decides.
+        EXPECT_TRUE(blocksShape("NCHW", "input_shape", {4, 5, 6, 8}));
+        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {9, 5, 6, 8}));
+        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 9, 6, 8}));
+        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 5, 9, 8}));
+        EXPECT_FALSE(blocksShape("NCHW", "input_shape", {4, 5, 6, 9}));
     }
 }
 

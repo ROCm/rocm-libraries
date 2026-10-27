@@ -12,20 +12,28 @@ Writes the committed fixtures next to this script (or to --output):
 
 Run manually; this is not part of the build. Nothing is downloaded: --pytorch
 points at a checkout, or at a directory holding the pinned files at their
-repository paths.
+repository paths. Both inputs must match their pins: a git checkout must be at
+the pinned commit, and the scanned files must match the pinned sha256 digests
+(computed with CRLF normalized to LF). The cudnn-frontend repository, tag,
+commit and version come from the cudnn-samples harness manifest
+(tests/cudnn_samples/manifest.json, "corpus"), which pins the same checkout;
+pins.json holds the digests and the PyTorch pin.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PINS_FILE = HERE / "pins.json"
+CORPUS_MANIFEST = HERE.parents[3] / "tests" / "cudnn_samples" / "manifest.json"
 IDENTIFIERS_FILE = "cudnn_v8_identifiers.inc"
 ENUM_VALUES_FILE = "cudnn_v8_enum_values.inc"
 
@@ -68,19 +76,20 @@ EXCLUDED = {
     "cudnnCausalConv1dBackward": "causal-conv1d C API, out of scope",
     "cudnnCausalConv1dActivation_t": "causal-conv1d C API, out of scope",
     "cudnnGetExecutionPlanWorkspaceSize": "v1-only entry point, out of scope",
-    "cudnnBackendCreateDescriptor": "raw descriptor C API removed; only cudnnBackendExecute stays",
-    "cudnnBackendDestroyDescriptor": "raw descriptor C API removed; only cudnnBackendExecute stays",
-    "cudnnBackendSetAttribute": "raw descriptor C API removed; only cudnnBackendExecute stays",
-    "cudnnBackendGetAttribute": "raw descriptor C API removed; only cudnnBackendExecute stays",
-    "cudnnBackendFinalize": "raw descriptor C API removed; only cudnnBackendExecute stays",
+    "cudnnBackendCreateDescriptor": "out of scope: only cudnnBackendExecute is shimmed",
+    "cudnnBackendDestroyDescriptor": "out of scope: only cudnnBackendExecute is shimmed",
+    "cudnnBackendSetAttribute": "out of scope: only cudnnBackendExecute is shimmed",
+    "cudnnBackendGetAttribute": "out of scope: only cudnnBackendExecute is shimmed",
+    "cudnnBackendFinalize": "out of scope: only cudnnBackendExecute is shimmed",
 }
 
-# Whole enums the scan finds that the shim no longer declares: no shim code names
-# them (the raw descriptor C API is gone) or only type converters did. Their
-# enumerators are dropped with them; their pinned values are retired.
+# Whole enums the scan finds that the shim does not declare: no shim code names
+# them (only cudnnBackendExecute of the descriptor C API is shimmed) or only type
+# converters did. Their enumerators are dropped with them; their pinned values are
+# retired.
 EXCLUDED_ENUMS = {
-    "cudnnBackendAttributeName_t": "raw descriptor C API removed",
-    "cudnnBackendAttributeType_t": "raw descriptor C API removed",
+    "cudnnBackendAttributeName_t": "out of scope: only cudnnBackendExecute is shimmed",
+    "cudnnBackendAttributeType_t": "out of scope: only cudnnBackendExecute is shimmed",
     "cudnnMoeGroupedMatmulMode_t": "named only by type converters",
 }
 
@@ -152,9 +161,8 @@ CLASSIFIERS = (
 # TYPE names that are not enums; c_types.h declares them by hand.
 NON_ENUM_TYPES = ("cudnnBackendDescriptor_t", "cudnnFraction_t")
 
-# Initial value order where the alphabetical rule does not apply. Upstream
-# Tensor.h sets the FE TensorReordering_t bytes as CUDNN_TYPE_TENSOR_REORDERING_MODE,
-# so the C values must equal the shim's TensorReordering_t values.
+# Initial value order where the alphabetical rule does not apply. The C values
+# are kept equal to the shim's TensorReordering_t values; values are append-only.
 SEED_ORDER = {
     "cudnnBackendTensorReordering_t": (
         "CUDNN_TENSOR_REORDERING_NONE",
@@ -171,6 +179,12 @@ COUNT_SENTINELS = {
     "CUDNN_HEUR_MODES_COUNT",
     "CUDNN_KNOB_TYPE_COUNTS",
     "CUDNN_NUMERICAL_NOTE_TYPE_COUNT",
+}
+
+# cuDNN declares these with the same value as another enumerator of their enum.
+# They take no value of their own; c_types.h declares each as its target.
+ENUM_ALIASES = {
+    "CUDNN_RESAMPLE_AVGPOOL": "CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING",
 }
 TOKEN_PATTERN = re.compile(r"\b(CUDNN_[A-Za-z0-9_]+|cudnn[A-Z][A-Za-z0-9_]*)\b")
 DEFINE_PATTERN = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)", re.MULTILINE)
@@ -248,7 +262,11 @@ def _is_digit_separator(text: str, i: int) -> bool:
 
 
 def load_pins() -> dict:
-    return json.loads(PINS_FILE.read_text(encoding="utf-8"))
+    pins = json.loads(PINS_FILE.read_text(encoding="utf-8"))
+    corpus = json.loads(CORPUS_MANIFEST.read_text(encoding="utf-8"))["corpus"]
+    for key in ("repo", "tag", "commit", "frontend_version"):
+        pins["cudnn_frontend"][key] = corpus[key]
+    return pins
 
 
 def check_frontend_version(frontend: Path, pins: dict) -> None:
@@ -266,23 +284,81 @@ def check_frontend_version(frontend: Path, pins: dict) -> None:
     expected = pins["cudnn_frontend"]["frontend_version"]
     if version != expected:
         raise ExtractionError(
-            f"cudnn-frontend checkout is {version}, pins.json requires {expected}"
+            f"cudnn-frontend checkout is {version}, the pin requires {expected}"
         )
 
 
-def input_files(frontend: Path, pytorch: Path, pins: dict) -> list[Path]:
+def input_files(
+    frontend: Path, pytorch: Path, pins: dict
+) -> tuple[list[Path], list[Path]]:
     include = frontend / "include"
     legacy_samples = frontend / "samples" / "legacy_samples"
-    files = [include / "cudnn_frontend.h"]
-    files += sorted(include.glob("cudnn_frontend_*.h"))
-    files.append(include / "cudnn_backend_base.h")
-    files += sorted(p for p in legacy_samples.rglob("*") if p.suffix in (".h", ".cpp"))
-    files += [frontend / p for p in EXTRA_FRONTEND_INPUTS]
-    files += [pytorch / p for p in pins["pytorch"]["files"]]
-    missing = [str(p) for p in files if not p.is_file()]
+    frontend_files = [include / "cudnn_frontend.h"]
+    frontend_files += sorted(include.glob("cudnn_frontend_*.h"))
+    frontend_files.append(include / "cudnn_backend_base.h")
+    frontend_files += sorted(
+        p for p in legacy_samples.rglob("*") if p.suffix in (".h", ".cpp")
+    )
+    frontend_files += [frontend / p for p in EXTRA_FRONTEND_INPUTS]
+    pytorch_files = [pytorch / p for p in pins["pytorch"]["files"]]
+    missing = [str(p) for p in frontend_files + pytorch_files if not p.is_file()]
     if missing:
         raise ExtractionError("missing inputs:\n  " + "\n  ".join(missing))
-    return files
+    return frontend_files, pytorch_files
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def tree_digest(root: Path, files: list[Path]) -> str:
+    """Digest of the file set and contents, so an added or removed input also counts."""
+    digest = hashlib.sha256()
+    for relative, path in sorted((p.relative_to(root).as_posix(), p) for p in files):
+        digest.update(f"{relative}\0{file_digest(path)}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def git_head(directory: Path) -> str | None:
+    """HEAD of the checkout rooted at directory, or None if it is not a checkout root."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(directory), "rev-parse", "--show-toplevel", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    lines = result.stdout.splitlines()
+    if len(lines) != 2 or Path(lines[0]).resolve() != directory.resolve():
+        return None
+    return lines[1]
+
+
+def check_inputs(
+    frontend: Path, frontend_files: list[Path], pytorch: Path, pins: dict
+) -> None:
+    problems = []
+    for label, root, pin in (
+        ("cudnn-frontend", frontend, pins["cudnn_frontend"]),
+        ("PyTorch", pytorch, pins["pytorch"]),
+    ):
+        head = git_head(root)
+        if head is not None and head != pin["commit"]:
+            problems.append(f"{label} checkout is at {head}, pinned {pin['commit']}")
+    actual = tree_digest(frontend, frontend_files)
+    expected = pins["cudnn_frontend"]["inputs_sha256"]
+    if actual != expected:
+        problems.append(f"cudnn-frontend inputs sha256 is {actual}, pinned {expected}")
+    for relative, expected in pins["pytorch"]["files"].items():
+        actual = file_digest(pytorch / relative)
+        if actual != expected:
+            problems.append(f"PyTorch {relative} sha256 is {actual}, pinned {expected}")
+    if problems:
+        raise ExtractionError(
+            "inputs do not match their pins:\n  " + "\n  ".join(problems)
+        )
 
 
 @dataclass
@@ -310,12 +386,14 @@ def classify(scanned: Scan) -> list[Identifier]:
             | set(EXCLUDED_ENUMS)
             | set(ALREADY_DECLARED_NAMES)
             | COUNT_SENTINELS
+            | set(ENUM_ALIASES)
+            | set(ENUM_ALIASES.values())
         )
         - names
     )
     if stale:
         raise ExtractionError(
-            "EXCLUDED/EXCLUDED_ENUMS/ALREADY_DECLARED/COUNT_SENTINELS entries"
+            "EXCLUDED/EXCLUDED_ENUMS/ALREADY_DECLARED/COUNT_SENTINELS/ENUM_ALIASES entries"
             " no longer found: " + ", ".join(stale)
         )
     identifiers = []
@@ -356,13 +434,19 @@ def classify(scanned: Scan) -> list[Identifier]:
         counts = [m for m in members if m in COUNT_SENTINELS]
         if len(counts) > 1 or (counts and len(counts) == len(members)):
             problems.append(f"enum {enum} has an unusable COUNT shape: {members}")
+    enum_of = {i.name: i.enum for i in identifiers if i.kind == ENUMERATOR}
+    for alias, target in sorted(ENUM_ALIASES.items()):
+        if alias not in enum_of or enum_of.get(target) != enum_of[alias]:
+            problems.append(
+                f"alias {alias} and {target} are not enumerators of one enum"
+            )
     if problems:
         raise ExtractionError("\n".join(problems))
     return identifiers
 
 
 ENUM_VALUE_LINE = re.compile(
-    r"^HIPDNN_CUDNN_SHIM_ENUM_VALUE\((\w+), (\w+), (\d+)\)$", re.MULTILINE
+    r"^HIPDNN_CUDNN_SHIM_ENUM_(?:VALUE|COUNT)\((\w+), (\w+), (\d+)\)$", re.MULTILINE
 )
 
 
@@ -386,10 +470,13 @@ def assign_enum_values(
     """
     members_by_enum: dict[str, set[str]] = {}
     for identifier in identifiers:
-        if identifier.kind == ENUMERATOR:
+        if identifier.kind == ENUMERATOR and identifier.name not in ENUM_ALIASES:
             members_by_enum.setdefault(identifier.enum, set()).add(identifier.name)
     for enum, members in pinned.items():
         members_by_enum.setdefault(enum, set()).update(members)
+        aliased = sorted(set(members) & set(ENUM_ALIASES))
+        if aliased:
+            raise ExtractionError(f"aliases must not have pinned values: {aliased}")
 
     table = {}
     for enum in sorted(members_by_enum):
@@ -423,8 +510,9 @@ def header(pins: dict, *extra: str) -> str:
         "// SPDX-License-Identifier:  MIT",
         "//",
         "// Generated by extract_cudnn_v8_identifiers.py; rerun it instead of editing.",
-        f"// cudnn-frontend {frontend['tag']} ({frontend['frontend_version']}),"
-        f" PyTorch {pytorch['tag']} ({pytorch['commit']}).",
+        f"// cudnn-frontend {frontend['tag']} ({frontend['commit']}),"
+        f" version {frontend['frontend_version']}.",
+        f"// PyTorch {pytorch['tag']} ({pytorch['commit']}).",
     ]
     lines += [f"// {line}" if line else "//" for line in extra]
     return "\n".join(lines) + "\n\n"
@@ -454,15 +542,24 @@ def render_identifiers(pins: dict, identifiers: list[Identifier]) -> str:
     return header(pins) + "\n".join(body) + "\n"
 
 
+def aliases_of(values: dict[str, int]) -> list[tuple[str, str]]:
+    return [(a, t) for a, t in sorted(ENUM_ALIASES.items()) if t in values]
+
+
 def render_enum_values(pins: dict, table: dict[str, dict[str, int]]) -> str:
     body = []
     for enum, values in table.items():
         for name, value in sorted(values.items(), key=lambda item: (item[1], item[0])):
-            body.append(f"HIPDNN_CUDNN_SHIM_ENUM_VALUE({enum}, {name}, {value})")
+            kind = "COUNT" if name in COUNT_SENTINELS else "VALUE"
+            body.append(f"HIPDNN_CUDNN_SHIM_ENUM_{kind}({enum}, {name}, {value})")
+        for alias, target in aliases_of(values):
+            body.append(f"HIPDNN_CUDNN_SHIM_ENUM_ALIAS({enum}, {alias}, {target})")
     text = header(
         pins,
         "Append-only: the script keeps every value listed here and gives new",
-        "enumerators the next free value. *_COUNT(S) is always last + 1.",
+        "enumerators the next free value. An ENUM_COUNT sentinel is always",
+        "last + 1.",
+        "An ENUM_ALIAS has no value of its own; it equals its target.",
     )
     return text + "\n".join(body) + "\n"
 
@@ -472,6 +569,14 @@ C_TYPES_PROLOGUE = """\
 // SPDX-License-Identifier:  MIT
 //
 // Declares identifiers matching the NVIDIA cuDNN C API, for source compatibility.
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend_*.h, include/cudnn_backend_base.h
+//     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+//   include/cudnn_frontend/knobs.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file c_types.h
@@ -519,6 +624,7 @@ typedef struct
 
 def render_c_types(table: dict[str, dict[str, int]]) -> str:
     parts = [C_TYPES_PROLOGUE]
+    last_enumerators = []
     for enum, values in table.items():
         ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
         lines = [
@@ -528,6 +634,7 @@ def render_c_types(table: dict[str, dict[str, int]]) -> str:
             "{",
         ]
         lines += [f"    {name} = {value}," for name, value in ordered]
+        lines += [f"    {alias} = {target}," for alias, target in aliases_of(values)]
         lines += [
             f"}} {enum};",
             f'static_assert(sizeof({enum}) == 4, "{enum} must be 4 bytes");',
@@ -539,6 +646,17 @@ def render_c_types(table: dict[str, dict[str, int]]) -> str:
                 f'static_assert({count} == {real[-1]} + 1, "{count} must be last + 1");'
             )
         parts.append("\n".join(lines) + "\n")
+        last_enumerators.append(
+            f"template <>\ninline constexpr int LAST_ENUMERATOR<{enum}> = {real[-1]};"
+        )
+    parts.append(
+        "\nnamespace hipdnn_frontend::compatibility::cudnn_frontend::detail\n{\n\n"
+        "// Largest value of each enum above; the shim rejects anything past it as\n"
+        "// BAD_PARAM.\n"
+        "template <typename CEnum>\ninline constexpr int LAST_ENUMERATOR = -1;\n\n"
+        + "\n\n".join(last_enumerators)
+        + "\n\n} // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail\n"
+    )
     parts.append("\n// NOLINTEND(readability-identifier-naming)\n")
     return "".join(parts)
 
@@ -547,7 +665,10 @@ def run(arguments: argparse.Namespace) -> int:
     pins = load_pins()
     frontend = Path(arguments.cudnn_frontend)
     check_frontend_version(frontend, pins)
-    scanned = scan(input_files(frontend, Path(arguments.pytorch), pins))
+    pytorch = Path(arguments.pytorch)
+    frontend_files, pytorch_files = input_files(frontend, pytorch, pins)
+    check_inputs(frontend, frontend_files, pytorch, pins)
+    scanned = scan(frontend_files + pytorch_files)
     identifiers = classify(scanned)
 
     output = Path(arguments.output)

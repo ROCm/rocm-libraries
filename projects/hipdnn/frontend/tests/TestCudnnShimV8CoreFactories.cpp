@@ -1,13 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The v8 record factories called directly, without the C API: every
+// The v8 record factories called directly, without the builders: every
 // validation and normalization rule, check order, and the caller's labels in
 // the messages.
 #include <hipdnn_compatibility/cudnn/detail/v8/records.h>
 #include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 #include <gtest/gtest.h>
+
+#include "fake_backend/ShimV8TestSupport.hpp"
 
 #include <array>
 #include <cfloat>
@@ -34,6 +36,7 @@ using hipdnn_frontend::compatibility::cudnn_frontend::PointwiseMode_t;
 using hipdnn_frontend::compatibility::cudnn_frontend::ReductionMode_t;
 using hipdnn_frontend::compatibility::cudnn_frontend::ResampleMode_t;
 using hipdnn_frontend::compatibility::cudnn_frontend::RngDistribution_t;
+using hipdnn_shim_test::expectShimError;
 using v8::OperationTarget;
 using v8::PointwiseModeClass;
 
@@ -44,7 +47,8 @@ constexpr v8::TensorLabels TENSOR_LABELS{"dataType",
                                          "alignment",
                                          "vectorCount",
                                          "reordering",
-                                         "constant"};
+                                         "constant",
+                                         "virtual"};
 constexpr v8::ConvolutionLabels CONV_LABELS{"computeType",
                                             "mode",
                                             "spatialDims",
@@ -52,8 +56,14 @@ constexpr v8::ConvolutionLabels CONV_LABELS{"computeType",
                                             "postPaddings",
                                             "dilations",
                                             "filterStrides"};
-constexpr v8::PointwiseLabels POINTWISE_LABELS{
-    "mode", "computeType", "slope", "eluAlpha", "softplusBeta", "swishBeta"};
+constexpr v8::PointwiseLabels POINTWISE_LABELS{"mode",
+                                               "computeType",
+                                               "lowerClip",
+                                               "upperClip",
+                                               "slope",
+                                               "eluAlpha",
+                                               "softplusBeta",
+                                               "swishBeta"};
 constexpr v8::ResampleLabels RESAMPLE_LABELS{"mode",
                                              "computeType",
                                              "padding",
@@ -95,31 +105,12 @@ constexpr v8::NormBackwardOperationLabels NORM_BWD_LABELS{"mode",
                                                           "dbias",
                                                           "peerStats"};
 
-template <typename Fn>
-void expectShimError(Fn&& fn, cudnnStatus_t status, const std::string& message)
-{
-    try
-    {
-        std::forward<Fn>(fn)();
-        ADD_FAILURE() << "expected ShimError: " << message;
-    }
-    catch(const v8::ShimError& error)
-    {
-        EXPECT_EQ(error.status(), status);
-        EXPECT_EQ(std::string(error.what()), message);
-    }
-}
-
 v8::TensorInputs tensorInputs(std::vector<std::int64_t> dims = {1, 4, 8, 8},
                               std::int64_t uniqueId = 1)
 {
     v8::TensorInputs inputs;
     inputs.dataType = CUDNN_DATA_FLOAT;
-    inputs.strides.assign(dims.size(), 1);
-    for(std::size_t i = dims.size() - 1; i > 0; --i)
-    {
-        inputs.strides[i - 1] = inputs.strides[i] * dims[i];
-    }
+    inputs.strides = hipdnn_shim_test::packedStrides(dims);
     inputs.dimensions = std::move(dims);
     inputs.uniqueId = uniqueId;
     inputs.alignment = 16;
@@ -279,19 +270,55 @@ TEST(TestCudnnShimV8CoreFactories, TensorChecksRunInOrderWithCallerLabels)
         inputs, CUDNN_STATUS_NOT_SUPPORTED, "reordering other than NONE is not supported");
 
     inputs = tensorInputs();
-    inputs.constantValue = static_cast<const void*>(nullptr);
-    expectTensorError(inputs, CUDNN_STATUS_BAD_PARAM, "constant is null");
+    inputs.isVirtual = true;
+    inputs.isByValue = true;
+    inputs.dataType = CUDNN_DATA_INT8x32;
+    expectTensorError(inputs,
+                      CUDNN_STATUS_BAD_PARAM,
+                      "virtual (UID 1) cannot be passed by value or hold a constant");
+
+    inputs = tensorInputs();
+    inputs.isVirtual = true;
+    inputs.constantValue = std::vector<std::byte>(sizeof(float));
+    expectTensorError(inputs,
+                      CUDNN_STATUS_BAD_PARAM,
+                      "virtual (UID 1) cannot be passed by value or hold a constant");
+
+    inputs = tensorInputs({1});
+    inputs.dataType = CUDNN_DATA_INT64;
+    inputs.constantValue = std::vector<std::byte>(sizeof(std::int32_t));
+    expectTensorError(
+        inputs, CUDNN_STATUS_BAD_PARAM, "constant has 4 bytes; the tensor data type needs 8");
+
+    // A wider constant is a type mismatch too: its leading bytes are not the value.
+    inputs = tensorInputs({1});
+    inputs.constantValue = std::vector<std::byte>(sizeof(double));
+    expectTensorError(
+        inputs, CUDNN_STATUS_BAD_PARAM, "constant has 8 bytes; the tensor data type needs 4");
+
+    inputs = tensorInputs({1});
+    inputs.dataType = CUDNN_DATA_BOOLEAN;
+    inputs.constantValue = std::vector<std::byte>(4);
+    expectTensorError(
+        inputs, CUDNN_STATUS_BAD_PARAM, "constant has 4 bytes; the tensor data type needs 1");
+}
+
+template <typename T>
+std::vector<std::byte> bytesOf(const T& value)
+{
+    std::vector<std::byte> bytes(sizeof(T));
+    std::memcpy(bytes.data(), &value, sizeof(T));
+    return bytes;
 }
 
 TEST(TestCudnnShimV8CoreFactories, TensorConstantCopiedAndWinsOverByValue)
 {
     v8::TensorPtr record;
     {
-        const double value = 2.5;
         v8::TensorInputs inputs = tensorInputs({1});
         inputs.dataType = CUDNN_DATA_DOUBLE;
         inputs.isByValue = true;
-        inputs.constantValue = static_cast<const void*>(&value);
+        inputs.constantValue = bytesOf(2.5);
         record = v8::makeTensorRecord(std::move(inputs), TENSOR_LABELS);
     }
     ASSERT_TRUE(record->constantValue().has_value());
@@ -304,8 +331,9 @@ TEST(TestCudnnShimV8CoreFactories, TensorConstantCopiedAndWinsOverByValue)
     const bool flag = true;
     v8::TensorInputs boolean = tensorInputs({1});
     boolean.dataType = CUDNN_DATA_BOOLEAN;
-    boolean.constantValue = static_cast<const void*>(&flag);
-    EXPECT_EQ(v8::makeTensorRecord(std::move(boolean), TENSOR_LABELS)->constantValue()->size(), 1U);
+    boolean.constantValue = bytesOf(flag);
+    EXPECT_EQ(v8::makeTensorRecord(std::move(boolean), TENSOR_LABELS)->constantValue(),
+              std::vector<std::byte>{std::byte{1}});
 
     v8::TensorInputs runtime = tensorInputs({1});
     runtime.isByValue = true;
@@ -448,6 +476,31 @@ TEST(TestCudnnShimV8CoreFactories, PointwiseRejectsMissingAndNonFinite)
                     "eluAlpha must be finite");
 }
 
+TEST(TestCudnnShimV8CoreFactories, PointwiseReluClipsRejectNaNButAcceptInfinity)
+{
+    v8::PointwiseInputs inputs;
+    inputs.mode = CUDNN_POINTWISE_RELU_FWD;
+    inputs.computeType = CUDNN_DATA_FLOAT;
+    inputs.reluLowerClip = std::nan("");
+    expectShimError([&] { v8::makePointwiseRecord(inputs, POINTWISE_LABELS); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "lowerClip must not be NaN");
+
+    inputs.reluLowerClip.reset();
+    inputs.reluUpperClip = std::nan("");
+    expectShimError([&] { v8::makePointwiseRecord(inputs, POINTWISE_LABELS); },
+                    CUDNN_STATUS_BAD_PARAM,
+                    "upperClip must not be NaN");
+
+    inputs.reluLowerClip = -std::numeric_limits<double>::infinity();
+    inputs.reluUpperClip = std::numeric_limits<double>::infinity();
+    const std::shared_ptr<const v8::PointwiseRecord> record
+        = v8::makePointwiseRecord(inputs, POINTWISE_LABELS);
+    EXPECT_EQ(record->reluLowerClip(),
+              std::optional<double>(-std::numeric_limits<double>::infinity()));
+    EXPECT_FALSE(record->reluUpperClip().has_value());
+}
+
 TEST(TestCudnnShimV8CoreFactories, MatmulReductionAndRngRecords)
 {
     expectShimError([] { v8::makeMatmulRecord({std::nullopt, true}, {"computeType", "padding"}); },
@@ -519,9 +572,7 @@ TEST(TestCudnnShimV8CoreFactories, ConvolutionOperationRankAndScaling)
             {convolution(), tensors, 1.0, 0.0}, CONV_OP_LABELS);
     EXPECT_EQ(wgrad->kind(), CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR);
     EXPECT_EQ(wgrad->target(), OperationTarget::CONVOLUTION_WGRAD);
-    EXPECT_EQ(wgrad->dy(), tensors[0]);
-    EXPECT_EQ(wgrad->x(), tensors[1]);
-    EXPECT_EQ(wgrad->dw(), tensors[2]);
+    EXPECT_EQ(wgrad->tensors(), tensors);
 
     expectShimError(
         [&] {
@@ -593,7 +644,7 @@ TEST(TestCudnnShimV8CoreFactories, ReductionOperationRequiresDescThenTensors)
 
 TEST(TestCudnnShimV8CoreFactories, ResampleForwardOperationRequiredBeforeScaling)
 {
-    const v8::ResampleForwardOperationLabels labels{"resample", "x", "y", "alpha", "beta"};
+    const v8::ResampleForwardOperationLabels labels{"resample", "x", "y", "index", "alpha", "beta"};
     v8::ResampleForwardOperationInputs inputs;
     inputs.x = tensor({1, 4, 8, 8}, 1);
     inputs.alpha = 2.0;
@@ -634,6 +685,17 @@ TEST(TestCudnnShimV8CoreFactories, ResampleForwardOperationRequiredBeforeScaling
     inputs.index = tensor({1, 4, 4, 4}, 3);
     record = v8::makeOperationRecord(inputs, labels);
     EXPECT_EQ(record->index(), inputs.index);
+
+    for(const cudnnResampleMode_t mode :
+        {CUDNN_RESAMPLE_AVGPOOL_INCLUDE_PADDING, CUDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING})
+    {
+        SCOPED_TRACE(mode);
+        inputs.resample = v8::makeResampleRecord(resampleInputs(mode), RESAMPLE_LABELS);
+        expectShimError(
+            [&] { v8::makeOperationRecord(inputs, labels); },
+            CUDNN_STATUS_NOT_SUPPORTED,
+            "index is not supported by the hipDNN cuDNN shim except for CUDNN_RESAMPLE_MAXPOOL");
+    }
 }
 
 TEST(TestCudnnShimV8CoreFactories, SetTimeRulesApplyWithoutTheCApi)
@@ -670,6 +732,19 @@ TEST(TestCudnnShimV8CoreFactories, SetTimeRulesApplyWithoutTheCApi)
         [] { v8::makeTensorRecord(tensorInputs({1, 1, 1, 1, 1, 1, 1, 1, 1, 1}), TENSOR_LABELS); },
         CUDNN_STATUS_BAD_PARAM,
         "dimensions: element count 10 outside [0, 9]");
+    EXPECT_EQ(v8::makeTensorRecord(tensorInputs({1, 1, 1, 1, 1, 1, 1, 1, 1}), TENSOR_LABELS)
+                  ->dimensions(),
+              std::vector<std::int64_t>(9, 1));
+
+    v8::ConvolutionInputs atCap;
+    atCap.computeType = CUDNN_DATA_FLOAT;
+    atCap.mode = CUDNN_CROSS_CORRELATION;
+    atCap.spatialDims = 8;
+    atCap.prePaddings.assign(8, 0);
+    atCap.postPaddings.assign(8, 0);
+    atCap.dilations.assign(8, 1);
+    atCap.filterStrides.assign(8, 1);
+    EXPECT_EQ(v8::makeConvRecord(std::move(atCap), CONV_LABELS)->prePaddings().size(), 8U);
 
     v8::ConvolutionInputs conv;
     conv.computeType = CUDNN_DATA_FLOAT;
@@ -740,8 +815,20 @@ TEST(TestCudnnShimV8CoreFactories, PointwiseOperationRejectsUnusedSlotsBeforeSca
 
     unary.b = nullptr;
     unary.alpha1.reset();
+    // ALPHA2 scales B, which a one-input mode does not have: ignored, as cuDNN does.
     unary.alpha2 = 2.0;
-    expectShimError([&] { v8::makeOperationRecord(unary, POINTWISE_OP_LABELS); },
+    EXPECT_NE(v8::makeOperationRecord(unary, POINTWISE_OP_LABELS), nullptr);
+    unary.pointwise = pointwise(CUDNN_POINTWISE_RELU_FWD);
+    unary.alpha2 = 0.0;
+    EXPECT_NE(v8::makeOperationRecord(unary, POINTWISE_OP_LABELS), nullptr);
+
+    v8::PointwiseOperationInputs binary;
+    binary.pointwise = pointwise(CUDNN_POINTWISE_ADD);
+    binary.x = tensor({4}, 1);
+    binary.b = tensor({4}, 2);
+    binary.y = tensor({4}, 3);
+    binary.alpha2 = 2.0;
+    expectShimError([&] { v8::makeOperationRecord(binary, POINTWISE_OP_LABELS); },
                     CUDNN_STATUS_NOT_SUPPORTED,
                     "alpha2 = 2 is not supported by the hipDNN cuDNN shim; only 1 is");
 
@@ -757,6 +844,13 @@ TEST(TestCudnnShimV8CoreFactories, PointwiseOperationRejectsUnusedSlotsBeforeSca
     expectShimError([&] { v8::makeOperationRecord(backward, POINTWISE_OP_LABELS); },
                     CUDNN_STATUS_BAD_PARAM,
                     "y is not used by a pointwise activation-backward mode with 3 ports");
+
+    // cuDNN does not say what ALPHA2 scales on a backward activation, so it stays rejected.
+    backward.y = nullptr;
+    backward.alpha2 = 2.0;
+    expectShimError([&] { v8::makeOperationRecord(backward, POINTWISE_OP_LABELS); },
+                    CUDNN_STATUS_NOT_SUPPORTED,
+                    "alpha2 = 2 is not supported by the hipDNN cuDNN shim; only 1 is");
 }
 
 TEST(TestCudnnShimV8CoreFactories, MatmulAndResampleOperationRules)
@@ -910,12 +1004,13 @@ TEST(TestCudnnShimV8CoreFactories, RecordAsChecksTheKindTag)
 {
     const std::shared_ptr<const v8::Record> record = tensor();
     EXPECT_EQ(&v8::recordAs<v8::TensorRecord>(*record), record.get());
-    expectShimError([&] { v8::recordAs<v8::ConvolutionRecord>(*record); },
-                    CUDNN_STATUS_BAD_PARAM,
-                    "record of descriptor type "
-                        + std::to_string(static_cast<int>(CUDNN_BACKEND_TENSOR_DESCRIPTOR))
-                        + " does not have the expected type");
-    EXPECT_THROW(v8::recordAs<v8::OperationRecord>(*record), v8::ShimError);
+    const std::string mismatch = "record of descriptor type "
+                                 + std::to_string(static_cast<int>(CUDNN_BACKEND_TENSOR_DESCRIPTOR))
+                                 + " does not have the expected type";
+    expectShimError(
+        [&] { v8::recordAs<v8::ConvolutionRecord>(*record); }, CUDNN_STATUS_BAD_PARAM, mismatch);
+    expectShimError(
+        [&] { v8::recordAs<v8::OperationRecord>(*record); }, CUDNN_STATUS_BAD_PARAM, mismatch);
 
     v8::PointwiseOperationInputs inputs;
     inputs.pointwise = pointwise(CUDNN_POINTWISE_SQRT);

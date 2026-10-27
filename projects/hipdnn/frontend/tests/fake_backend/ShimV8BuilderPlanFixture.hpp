@@ -6,14 +6,7 @@
 // helpers to build configs, plans and variant packs through the builders only.
 #pragma once
 
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_Engine.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_EngineConfig.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_ExecutionPlan.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_Heuristics.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_OperationGraph.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_VariantPack.h>
-
-#include "ShimV8MockBackendFixture.hpp"
+#include "ShimV8BuilderFixture.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,44 +21,9 @@
 namespace hipdnn_shim_test
 {
 
-namespace v8fe = hipdnn_frontend::compatibility::cudnn_frontend;
-
-struct BuilderFailure
-{
-    bool thrown = false;
-    cudnnStatus_t status = CUDNN_STATUS_SUCCESS;
-    std::string what;
-};
-
-template <typename Action>
-BuilderFailure builderFailureOf(Action&& action)
-{
-    BuilderFailure failure;
-    try
-    {
-        std::forward<Action>(action)();
-    }
-    catch(v8fe::cudnnException& e)
-    {
-        failure.thrown = true;
-        failure.status = e.getCudnnStatus();
-        failure.what = e.what();
-    }
-    return failure;
-}
-
-inline std::string lastShimError()
-{
-    std::array<char, 1024> message{};
-    cudnnGetLastErrorString(message.data(), message.size());
-    return message.data();
-}
-
-class ShimV8BuilderPlanFixture : public ShimV8MockBackendFixture
+class ShimV8BuilderPlanFixture : public ShimV8BuilderFixture
 {
 protected:
-    using Dims = std::vector<std::int64_t>;
-
     static constexpr std::int64_t WORKSPACE_SIZE = 4096;
     static constexpr std::int64_t X_UID = 1;
     static constexpr std::int64_t W_UID = 2;
@@ -73,8 +31,7 @@ protected:
 
     void SetUp() override
     {
-        ShimV8MockBackendFixture::SetUp();
-        lastShimError();
+        ShimV8BuilderFixture::SetUp();
         installPlanWorkspace(WORKSPACE_SIZE);
         installEngines(3);
     }
@@ -87,65 +44,54 @@ protected:
         installHeuristicResults(std::move(ids));
     }
 
-    // Dense index of `id` among `ids` (the shim numbers engines in ID order).
+    // Dense index of `id` among `ids` (the shim numbers engines in ID order); an `id` that is
+    // not among them fails the test and reads as -1.
     static std::int64_t denseIndex(std::vector<std::int64_t> ids, std::int64_t id)
     {
         std::sort(ids.begin(), ids.end());
-        return static_cast<std::int64_t>(
-            std::distance(ids.begin(), std::lower_bound(ids.begin(), ids.end(), id)));
-    }
-
-    static Dims packedStrides(const Dims& dims)
-    {
-        Dims strides(dims.size(), 1);
-        for(std::size_t i = dims.size() - 1; i > 0; --i)
+        const auto found = std::lower_bound(ids.begin(), ids.end(), id);
+        if(found == ids.end() || *found != id)
         {
-            strides[i - 1] = strides[i] * dims[i];
+            ADD_FAILURE() << "engine " << id << " is not in the engine space";
+            return -1;
         }
-        return strides;
+        return static_cast<std::int64_t>(std::distance(ids.begin(), found));
     }
 
-    static v8fe::Tensor_v8 tensor(std::int64_t uid, const Dims& dims)
+    // TILE_SIZE is the only knob the shim can show: BLOCK_SIZE has explicit valid
+    // values, "int_knob" has no cuDNN type, and the two STAGES knobs collide.
+    static std::vector<MockKnob> mixedKnobs()
     {
-        const Dims strides = packedStrides(dims);
-        return v8fe::TensorBuilder_v8()
-            .setDataType(v8fe::DataType_t::FLOAT)
-            .setDim(static_cast<std::int64_t>(dims.size()), dims.data())
-            .setStride(static_cast<std::int64_t>(strides.size()), strides.data())
-            .setId(uid)
-            .setAlignment(16)
-            .build();
+        return {
+            {"prov.tile_size", 8, 0, 64, 8, {}},
+            {"prov.block_size", 8, 0, 64, 1, {8, 16}},
+            {"prov.int_knob", 1, 0, 10, 1, {}},
+            {"first.stages", 1, 1, 4, 1, {}},
+            {"second.stages", 1, 1, 4, 1, {}},
+        };
+    }
+
+    // The tag segment a plan gets for one knob choice.
+    static std::string knobSegment(cudnnBackendKnobType_t type, std::int64_t value)
+    {
+        return "_k" + std::to_string(static_cast<int>(type)) + "=" + std::to_string(value);
+    }
+
+    // Sets the choice of the reported knob of `type`, which must exist.
+    static void choose(v8fe::Engine_v8& built, cudnnBackendKnobType_t type, std::int64_t choice)
+    {
+        auto& knobs = built.getSupportedKnobs();
+        const auto knob = std::find_if(knobs.begin(), knobs.end(), [type](const auto& candidate) {
+            return candidate.getKnobType() == type;
+        });
+        ASSERT_NE(knob, knobs.end());
+        knob->setChoice(static_cast<std::uint64_t>(choice));
     }
 
     static v8fe::Operation_v8 convForward(const Dims& xDims, const Dims& wDims, const Dims& yDims)
     {
-        const std::array<std::int64_t, 2> pads = {1, 1};
-        const std::array<std::int64_t, 2> ones = {1, 1};
-        const v8fe::ConvDesc_v8 conv = v8fe::ConvDescBuilder_v8()
-                                           .setComputeType(v8fe::DataType_t::FLOAT)
-                                           .setMathMode(CUDNN_CROSS_CORRELATION)
-                                           .setSpatialDimCount(2)
-                                           .setPrePadding(2, pads.data())
-                                           .setPostPadding(2, pads.data())
-                                           .setDilation(2, ones.data())
-                                           .setSpatialStride(2, ones.data())
-                                           .build();
-        return v8fe::OperationBuilder_v8(
-                   v8fe::DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-            .setxDesc(tensor(X_UID, xDims))
-            .setwDesc(tensor(W_UID, wDims))
-            .setyDesc(tensor(Y_UID, yDims))
-            .setcDesc(conv)
-            .build();
-    }
-
-    v8fe::OperationGraph_v8 graphOf(const v8fe::Operation_v8& op)
-    {
-        const v8fe::Operation_v8* ops = &op;
-        return v8fe::OperationGraphBuilder_v8()
-            .setHandle(_handle)
-            .setOperationGraph(1, &ops)
-            .build();
+        return convolutionForward(
+            tensor(X_UID, xDims), tensor(W_UID, wDims), tensor(Y_UID, yDims), convDesc());
     }
 
     // conv(x {2,4,8,8}, w {8,4,3,3}) -> y {2,8,8,8}; tag "ConvFwd_".

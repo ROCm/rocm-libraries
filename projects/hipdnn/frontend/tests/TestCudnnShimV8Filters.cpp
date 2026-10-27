@@ -5,6 +5,7 @@
 // PyTorch's quantized-op use of them.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_Filters.h>
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
@@ -37,6 +38,25 @@ TEST_F(TestCudnnShimV8Filters, FilterKeepsFalsePredicate)
     // `from` in their original order.
     EXPECT_EQ(indicesOf(to), (std::vector<std::int64_t>{0, 0, 2}));
     EXPECT_EQ(indicesOf(from), (std::vector<std::int64_t>{1, 3}));
+}
+
+// The index helpers the expectations here rely on fail on a config or engine outside the
+// engine space instead of reading it as some index.
+TEST_F(TestCudnnShimV8Filters, IndexHelpersRejectForeignConfigs)
+{
+    installEngines(2);
+    ::testing::TestPartResultArray failures;
+    std::int64_t foreign = 0;
+    std::int64_t absent = 0;
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+        foreign = indexOf(newMockDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR));
+        absent = denseIndex({0, 2}, 1);
+    }
+    EXPECT_EQ(foreign, -1);
+    EXPECT_EQ(absent, -1);
+    EXPECT_EQ(failures.size(), 2);
 }
 
 // PyTorch's quantized ops filter into a new list but then try the configs

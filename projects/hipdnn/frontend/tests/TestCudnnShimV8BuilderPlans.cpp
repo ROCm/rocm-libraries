@@ -30,12 +30,11 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-using hipdnn_shim_test::BuilderFailure;
-using hipdnn_shim_test::builderFailureOf;
+using hipdnn_shim_test::BuildFailure;
 using hipdnn_shim_test::CapturedExecute;
 using hipdnn_shim_test::CapturedSetAttribute;
-using hipdnn_shim_test::lastShimError;
-using ::testing::_;
+using hipdnn_shim_test::failureOf;
+using hipdnn_shim_test::shimLastError;
 
 // getJsonRepresentation() keeps the NUL the backend counts.
 std::string withoutNul(std::string text)
@@ -57,67 +56,12 @@ protected:
     static constexpr std::array<std::uint8_t, 5> PAYLOAD = {0x00, 0xFF, 0x10, 0x80, 0x7F};
     static constexpr const char* PAYLOAD_BASE64 = "AP8QgH8=";
 
-    std::mutex _recordMutex;
-    hipdnnStatus_t _serializeStatus = HIPDNN_STATUS_SUCCESS;
-    std::vector<std::uint8_t> _payload{PAYLOAD.begin(), PAYLOAD.end()};
-    std::int64_t _deserializedEngineId = ENGINE_ID;
-    int _deserializeCalls = 0;
-    hipdnnHandle_t _deserializeHandle = nullptr;
-    std::vector<std::uint8_t> _deserializedBytes;
-
     void SetUp() override
     {
         ShimV8BuilderPlanFixture::SetUp();
         installHeuristicResults({ENGINE_ID, -2});
-
-        ON_CALL(
-            *_mockBackend,
-            backendGetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT, _, _, _, _))
-            .WillByDefault([this](hipdnnBackendDescriptor_t,
-                                  hipdnnBackendAttributeName_t,
-                                  hipdnnBackendAttributeType_t,
-                                  std::int64_t,
-                                  std::int64_t* count,
-                                  void* elements) {
-                const std::lock_guard<std::mutex> lock(_recordMutex);
-                *static_cast<std::int64_t*>(elements) = _deserializedEngineId;
-                if(count != nullptr)
-                {
-                    *count = 1;
-                }
-                return HIPDNN_STATUS_SUCCESS;
-            });
-        ON_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(_, _, _, _))
-            .WillByDefault([this](hipdnnBackendDescriptor_t,
-                                  std::size_t requested,
-                                  std::size_t* size,
-                                  std::uint8_t* bytes) {
-                const std::lock_guard<std::mutex> lock(_recordMutex);
-                if(_serializeStatus != HIPDNN_STATUS_SUCCESS)
-                {
-                    return _serializeStatus;
-                }
-                *size = _payload.size();
-                if(bytes != nullptr && requested >= _payload.size())
-                {
-                    std::memcpy(bytes, _payload.data(), _payload.size());
-                }
-                return HIPDNN_STATUS_SUCCESS;
-            });
-        ON_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _))
-            .WillByDefault([this](hipdnnHandle_t handle,
-                                  hipdnnBackendDescriptor_t* descriptor,
-                                  const std::uint8_t* bytes,
-                                  std::size_t size) {
-                {
-                    const std::lock_guard<std::mutex> lock(_recordMutex);
-                    ++_deserializeCalls;
-                    _deserializeHandle = handle;
-                    _deserializedBytes.assign(bytes, bytes + size);
-                }
-                *descriptor = newMockDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
-                return HIPDNN_STATUS_SUCCESS;
-            });
+        installSerializedPlan({PAYLOAD.begin(), PAYLOAD.end()});
+        setDeserializedEngineId(ENGINE_ID);
     }
 
     void TearDown() override
@@ -137,9 +81,9 @@ protected:
         return fe::ExecutionPlanBuilder_v8().setHandle(_handle).loadFromJson(json);
     }
 
-    BuilderFailure loadFailure(const std::string& json)
+    BuildFailure loadFailure(const std::string& json)
     {
-        return builderFailureOf([this, &json] { [[maybe_unused]] auto plan = loaded(json); });
+        return failureOf([this, &json] { [[maybe_unused]] auto plan = loaded(json); });
     }
 
     // The hipDNN ENGINECFG of the engine's knob-free plans.
@@ -162,10 +106,9 @@ protected:
         return R"({"version":1,"engine":{"globalIndex":1,"id":"7")";
     }
 
-    int deserializeCalls()
+    int deserializeCalls() const
     {
-        const std::lock_guard<std::mutex> lock(_recordMutex);
-        return _deserializeCalls;
+        return static_cast<int>(deserializations().size());
     }
 
     static cudnnStatus_t execute(cudnnHandle_t handle,
@@ -203,8 +146,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, WorkspaceSizeReadFromHipdnnPlan)
 TEST_F(TestCudnnShimV8BuilderPlans, ConfigRequired)
 {
     fe::ExecutionPlanBuilder_v8 builder;
-    const BuilderFailure failure
-        = builderFailureOf([&builder] { [[maybe_unused]] auto plan = builder.build(); });
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto plan = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).empty());
@@ -217,8 +160,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, WrongKindConfigRejected)
     fe::ExecutionPlanBuilder_v8 builder;
     builder.setEngineConfig(notAConfig.get_desc(), "ConvFwd_");
 
-    const BuilderFailure failure
-        = builderFailureOf([&builder] { [[maybe_unused]] auto plan = builder.build(); });
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto plan = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR).empty());
@@ -229,7 +172,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, HandleRequiredForLoadedPlan)
     const std::string text = builtPlan().getJsonRepresentation();
 
     fe::ExecutionPlanBuilder_v8 noHandle;
-    const BuilderFailure failure = builderFailureOf(
+    const BuildFailure failure = failureOf(
         [&noHandle, &text] { [[maybe_unused]] auto plan = noHandle.loadFromJson(text); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
@@ -253,7 +196,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonCarriesEngineAndPayload)
 
 TEST_F(TestCudnnShimV8BuilderPlans, JsonWithoutPayloadWhenSerializeFails)
 {
-    _serializeStatus = HIPDNN_STATUS_NOT_SUPPORTED;
+    setSerializeStatus(HIPDNN_STATUS_NOT_SUPPORTED);
     const std::string text = withoutNul(builtPlan().getJsonRepresentation());
 
     EXPECT_EQ(text.rfind(expectedJsonPrefix(), 0), 0U) << text;
@@ -261,7 +204,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonWithoutPayloadWhenSerializeFails)
     ASSERT_FALSE(text.empty());
     EXPECT_EQ(text.back(), '}');
 
-    const BuilderFailure failure = loadFailure(text);
+    const BuildFailure failure = loadFailure(text);
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(deserializeCalls(), 0);
@@ -274,12 +217,10 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonLoadRoundTrip)
 
     const fe::ExecutionPlan_v8 plan = loaded(text);
     ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
-    {
-        const std::lock_guard<std::mutex> lock(_recordMutex);
-        EXPECT_EQ(_deserializeCalls, 1);
-        EXPECT_EQ(_deserializeHandle, _handle);
-        EXPECT_EQ(_deserializedBytes, std::vector<std::uint8_t>(PAYLOAD.begin(), PAYLOAD.end()));
-    }
+    const std::vector<hipdnn_shim_test::CapturedDeserialize> calls = deserializations();
+    ASSERT_EQ(calls.size(), 1U);
+    EXPECT_EQ(calls.front().handle, _handle);
+    EXPECT_EQ(calls.front().bytes, std::vector<std::uint8_t>(PAYLOAD.begin(), PAYLOAD.end()));
     EXPECT_EQ(plan.getWorkspaceSize(), WORKSPACE_SIZE);
     EXPECT_EQ(plan.getJsonRepresentation(), text);
     // The tag carries the dense index read back from the loaded plan.
@@ -289,21 +230,33 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonLoadRoundTrip)
 TEST_F(TestCudnnShimV8BuilderPlans, LoadedPlanKeepsNotesKnobsAndName)
 {
     const std::int64_t tileSize = 16;
-    installEngineKnobs(ENGINE_ID, {{"prov.tile_size", 8, 0, 64, 8, {}}});
+    // SPLIT_K_SLC stays unset: the builder sends it as -1, which the tag keeps.
+    installEngineKnobs(ENGINE_ID,
+                       {{"prov.tile_size", 8, 0, 64, 8, {}}, {"prov.split_k_slc", 1, 1, 8, 1, {}}});
     installBehaviorNotes(ENGINE_ID, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     installEngineName(ENGINE_ID, "restored");
     const fe::OperationGraph_v8 graph = convGraph();
     fe::Engine_v8 built = engine(graph, ENGINE_INDEX);
-    ASSERT_EQ(built.getSupportedKnobs().size(), 1U);
-    built.getSupportedKnobs().front().setChoice(static_cast<std::uint64_t>(tileSize));
+    ASSERT_EQ(built.getSupportedKnobs().size(), 2U);
+    for(auto& knob : built.getSupportedKnobs())
+    {
+        if(knob.getKnobType() == CUDNN_KNOB_TYPE_TILE_SIZE)
+        {
+            knob.setChoice(static_cast<std::uint64_t>(tileSize));
+        }
+    }
     const fe::EngineConfig_v8 config = fe::EngineConfigBuilder_v8().setEngine(built).build();
     const fe::ExecutionPlan_v8 plan = fe::ExecutionPlanBuilder_v8().setEngineConfig(config).build();
     const std::string text = plan.getJsonRepresentation();
 
     const fe::ExecutionPlan_v8 restored = loaded(text);
     ASSERT_EQ(restored.get_status(), CUDNN_STATUS_SUCCESS) << restored.get_error();
-    EXPECT_EQ(restored.getTag(),
-              "eng1_k" + std::to_string(static_cast<int>(CUDNN_KNOB_TYPE_TILE_SIZE)) + "=16");
+    const std::string tile = std::to_string(static_cast<int>(CUDNN_KNOB_TYPE_TILE_SIZE));
+    const std::string splitK = std::to_string(static_cast<int>(CUDNN_KNOB_TYPE_SPLIT_K_SLC));
+    // The engine part survives the round trip; a loaded plan has no graph tag to prefix.
+    const std::string engineTag = "eng1_k" + tile + "=16_k" + splitK + "=-1";
+    EXPECT_EQ(plan.getTag(), "ConvFwd_" + engineTag);
+    EXPECT_EQ(restored.getTag(), engineTag);
     EXPECT_EQ(restored.getAllBehaviorNotes(),
               std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     EXPECT_EQ(restored.getAllNumericNotes(),
@@ -348,6 +301,12 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonMalformedRejected)
         version + engine + R"(,"payload":"AB=C"})",
         version + engine + R"(,"knobs":[{"type":999,"value":1}],)" + payload + "}",
         version + engine + R"(,"extra":1,)" + payload + "}",
+        version + R"("engine":{"globalIndex":1,"id":"7x"},)" + payload + "}",
+        version + R"("engine":{"globalIndex":1,"id":"7","behaviorNotes":[99]},)" + payload + "}",
+        version + R"("engine":{"globalIndex":1,"id":"7","behaviorNotes":[-1]},)" + payload + "}",
+        version + engine + R"(,"knobs":[{"type":3,"type":4,"value":1}],)" + payload + "}",
+        version + engine + R"(,"requestedKnobs":[{"type":999,"value":1}],)" + payload + "}",
+        version + engine + R"(,"requestedKnobs":[],"requestedKnobs":[],)" + payload + "}",
         version + R"("version":1,)" + engine + "," + payload + "}",
         version + engine + "," + payload + "} x",
         version + engine + "," + payload,
@@ -355,7 +314,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonMalformedRejected)
     for(const std::string& text : malformed)
     {
         SCOPED_TRACE(text);
-        const BuilderFailure failure = loadFailure(text);
+        const BuildFailure failure = loadFailure(text);
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     }
@@ -365,11 +324,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, JsonMalformedRejected)
 TEST_F(TestCudnnShimV8BuilderPlans, JsonEngineIdMismatchRejected)
 {
     const std::string text = builtPlan().getJsonRepresentation();
-    {
-        const std::lock_guard<std::mutex> lock(_recordMutex);
-        _deserializedEngineId = 8;
-    }
-    const BuilderFailure failure = loadFailure(text);
+    setDeserializedEngineId(8);
+    const BuildFailure failure = loadFailure(text);
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
@@ -381,10 +337,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, ExtremeEngineIdsLoad)
                                  std::int64_t{0x637C0BB90F065BA2}})
     {
         SCOPED_TRACE(id);
-        {
-            const std::lock_guard<std::mutex> lock(_recordMutex);
-            _deserializedEngineId = id;
-        }
+        setDeserializedEngineId(id);
         const std::string idField = R"("id":")" + std::to_string(id) + "\"";
         const fe::ExecutionPlan_v8 plan = loaded(R"({"version":1,"engine":{"globalIndex":0,)"
                                                  + idField + R"(},"payload":"AP8QgH8="})");
@@ -405,17 +358,15 @@ TEST_F(TestCudnnShimV8BuilderPlans, Base64PayloadsRoundTrip)
     for(const auto& [bytes, encoded] : cases)
     {
         SCOPED_TRACE(encoded);
-        {
-            const std::lock_guard<std::mutex> lock(_recordMutex);
-            _payload = bytes;
-        }
+        installSerializedPlan(bytes);
         const std::string text = builtPlan().getJsonRepresentation();
         EXPECT_NE(text.find(R"("payload":")" + encoded + "\""), std::string::npos) << text;
 
         const fe::ExecutionPlan_v8 plan = loaded(text);
         ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
-        const std::lock_guard<std::mutex> lock(_recordMutex);
-        EXPECT_EQ(_deserializedBytes, bytes);
+        const std::vector<hipdnn_shim_test::CapturedDeserialize> calls = deserializations();
+        ASSERT_FALSE(calls.empty());
+        EXPECT_EQ(calls.back().bytes, bytes);
     }
 }
 
@@ -467,8 +418,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, VariantPackCountMismatchRejected)
     builder.setDataPointers(static_cast<std::int64_t>(pointers.size()), pointers.data())
         .setUids(static_cast<std::int64_t>(uids.size()), uids.data());
 
-    const BuilderFailure failure
-        = builderFailureOf([&builder] { [[maybe_unused]] auto pack = builder.build(); });
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto pack = builder.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     EXPECT_TRUE(created(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR).empty());
@@ -485,8 +436,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, VariantPackRequiresPointersAndIds)
         {
             builder.setDataPointers(static_cast<std::int64_t>(pointers.size()), pointers.data());
         }
-        const BuilderFailure failure
-            = builderFailureOf([&builder] { [[maybe_unused]] auto pack = builder.build(); });
+        const BuildFailure failure
+            = failureOf([&builder] { [[maybe_unused]] auto pack = builder.build(); });
         ASSERT_TRUE(failure.thrown);
         EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
     }
@@ -496,8 +447,8 @@ TEST_F(TestCudnnShimV8BuilderPlans, VariantPackRequiresPointersAndIds)
     const std::vector<std::int64_t> noUids;
     fe::VariantPackBuilder_v8 empty;
     empty.setDataPointers(0, noPointers.data()).setUids(0, noUids.data());
-    const BuilderFailure failure
-        = builderFailureOf([&empty] { [[maybe_unused]] auto pack = empty.build(); });
+    const BuildFailure failure
+        = failureOf([&empty] { [[maybe_unused]] auto pack = empty.build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 
@@ -528,7 +479,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, ExecuteFailureKeepsStatus)
     const fe::VariantPack_v8 pack = variantPack();
     failExecuteFor(ENGINE_ID, 0);
 
-    EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_EXECUTION_FAILED) << lastShimError();
+    EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_EXECUTION_FAILED) << shimLastError();
 }
 
 TEST_F(TestCudnnShimV8BuilderPlans, LoadedPlanExecutes)
@@ -537,7 +488,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, LoadedPlanExecutes)
     const fe::ExecutionPlan_v8 plan = loaded(text);
     const fe::VariantPack_v8 pack = variantPack();
 
-    EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_SUCCESS) << lastShimError();
+    EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_SUCCESS) << shimLastError();
     const std::vector<CapturedExecute> calls = executions();
     ASSERT_EQ(calls.size(), 1U);
     EXPECT_EQ(calls[0].handle, _handle);
@@ -588,7 +539,7 @@ TEST_F(TestCudnnShimV8BuilderPlans, PlansFromTwoThreadsShareDefaultConfig)
     const auto build = [&] {
         for(int i = 0; i < PLANS; ++i)
         {
-            const BuilderFailure failure = builderFailureOf(
+            const BuildFailure failure = failureOf(
                 [&config] { [[maybe_unused]] auto plan = planFor(config, "ConvFwd_"); });
             if(failure.thrown)
             {
@@ -613,36 +564,45 @@ TEST_F(TestCudnnShimV8BuilderPlans, PlansFromTwoThreadsShareDefaultConfig)
     }
 }
 
+enum class PlanSource
+{
+    BUILT,
+    LOADED
+};
+
 // Executing a plan on a handle other than the one it was built or loaded on.
-class TestCudnnShimV8BuilderPlansForeignHandle : public TestCudnnShimV8BuilderPlans
+class TestCudnnShimV8BuilderPlansForeignHandle : public TestCudnnShimV8BuilderPlans,
+                                                 public ::testing::WithParamInterface<PlanSource>
 {
 protected:
-    // cudnnBackendExecute passes straight through, so hipDNN runs the plan on the given handle.
-    static constexpr cudnnStatus_t FOREIGN_HANDLE_STATUS = CUDNN_STATUS_SUCCESS;
+    fe::ExecutionPlan_v8 plan()
+    {
+        return GetParam() == PlanSource::BUILT ? builtPlan()
+                                               : loaded(builtPlan().getJsonRepresentation());
+    }
 
     cudnnHandle_t _otherHandle = reinterpret_cast<cudnnHandle_t>(0x23456789);
 };
 
-TEST_F(TestCudnnShimV8BuilderPlansForeignHandle, BuiltPlan)
+// cudnnBackendExecute passes straight through, so hipDNN runs the plan on the given handle.
+TEST_P(TestCudnnShimV8BuilderPlansForeignHandle, RunsOnGivenHandle)
 {
-    const fe::ExecutionPlan_v8 plan = builtPlan();
+    const fe::ExecutionPlan_v8 executionPlan = plan();
     const fe::VariantPack_v8 pack = variantPack();
 
-    EXPECT_EQ(execute(_otherHandle, plan, pack), FOREIGN_HANDLE_STATUS);
-    EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_SUCCESS) << lastShimError();
-    ASSERT_FALSE(executions().empty());
-    EXPECT_EQ(executions().back().handle, _handle);
+    EXPECT_EQ(execute(_otherHandle, executionPlan, pack), CUDNN_STATUS_SUCCESS) << shimLastError();
+    EXPECT_EQ(execute(_handle, executionPlan, pack), CUDNN_STATUS_SUCCESS) << shimLastError();
+    const std::vector<CapturedExecute> calls = executions();
+    ASSERT_EQ(calls.size(), 2U);
+    EXPECT_EQ(calls[0].handle, _otherHandle);
+    EXPECT_EQ(calls[1].handle, _handle);
 }
 
-TEST_F(TestCudnnShimV8BuilderPlansForeignHandle, LoadedPlan)
-{
-    const fe::ExecutionPlan_v8 plan = loaded(builtPlan().getJsonRepresentation());
-    const fe::VariantPack_v8 pack = variantPack();
-
-    EXPECT_EQ(execute(_otherHandle, plan, pack), FOREIGN_HANDLE_STATUS);
-    EXPECT_EQ(execute(_handle, plan, pack), CUDNN_STATUS_SUCCESS) << lastShimError();
-    ASSERT_FALSE(executions().empty());
-    EXPECT_EQ(executions().back().handle, _handle);
-}
+INSTANTIATE_TEST_SUITE_P(Source,
+                         TestCudnnShimV8BuilderPlansForeignHandle,
+                         ::testing::Values(PlanSource::BUILT, PlanSource::LOADED),
+                         [](const ::testing::TestParamInfo<PlanSource>& info) {
+                             return info.param == PlanSource::BUILT ? "Built" : "Loaded";
+                         });
 
 } // namespace

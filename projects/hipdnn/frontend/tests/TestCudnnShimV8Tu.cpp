@@ -33,6 +33,17 @@ constexpr bool IS_MOVE_ONLY_BACKEND_DESCRIPTOR
     = std::is_base_of_v<cudnn_frontend::BackendDescriptor, Descriptor>
       && !std::is_copy_constructible_v<Descriptor> && std::is_move_constructible_v<Descriptor>;
 
+template <typename T, typename = void>
+constexpr bool HAS_GET_TYPE = false;
+template <typename T>
+constexpr bool HAS_GET_TYPE<T, std::void_t<decltype(std::declval<const T&>().get_type())>> = true;
+
+template <typename T, typename = void>
+constexpr bool HAS_GET_RECORD = false;
+template <typename T>
+constexpr bool HAS_GET_RECORD<T, std::void_t<decltype(std::declval<const T&>().get_record())>>
+    = true;
+
 } // namespace
 
 static_assert(IS_ALIAS_OF<cudnn_frontend::Tensor, cudnn_frontend::Tensor_v8>);
@@ -88,6 +99,15 @@ static_assert(IS_ALIAS_OF<cudnn_frontend::EngineConfigList,
                           std::vector<cudnn_frontend::ManagedOpaqueDescriptor>>);
 static_assert(IS_ALIAS_OF<cudnn_frontend::ManagedOpaqueDescriptor,
                           std::shared_ptr<cudnn_frontend::OpaqueBackendPointer>>);
+// Upstream's OpaqueBackendPointer surface only: the shim's record and type stay internal.
+static_assert(!HAS_GET_TYPE<cudnn_frontend::OpaqueBackendPointer>);
+static_assert(!HAS_GET_RECORD<cudnn_frontend::OpaqueBackendPointer>);
+static_assert(!std::is_constructible_v<cudnn_frontend::OpaqueBackendPointer,
+                                       cudnnBackendDescriptorType_t,
+                                       std::shared_ptr<const cudnn_frontend::detail::v8::Record>,
+                                       cudnnBackendDescriptor_t>);
+static_assert(
+    std::is_constructible_v<cudnn_frontend::OpaqueBackendPointer, cudnnBackendDescriptorType_t>);
 static_assert(
     IS_ALIAS_OF<cudnn_frontend::executionPlans_t, std::vector<cudnn_frontend::ExecutionPlan>>);
 static_assert(IS_ALIAS_OF<cudnn_frontend::Predicate,
@@ -166,15 +186,16 @@ static_assert(std::is_same_v<decltype(cudnn_frontend::cudnnReorderFilterAndBiasI
                                  std::declval<void*>())),
                              cudnnStatus_t>);
 #if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
-static_assert(std::is_same_v<decltype(cudnn_frontend::load_from_config(
-                                 std::declval<json&>(), std::declval<const std::string&>())),
-                             bool>);
 static_assert(
-    std::is_same_v<decltype(cudnn_frontend::check_errata(std::declval<const json&>(),
-                                                         std::declval<const std::string&>(),
-                                                         std::declval<cudnnHandle_t>(),
-                                                         std::declval<bool (*)()>())),
+    std::is_same_v<decltype(cudnn_frontend::load_from_config(std::declval<cudnn_frontend::json&>(),
+                                                             std::declval<const std::string&>())),
                    bool>);
+static_assert(std::is_same_v<
+              decltype(cudnn_frontend::check_errata(std::declval<const cudnn_frontend::json&>(),
+                                                    std::declval<const std::string&>(),
+                                                    std::declval<cudnnHandle_t>(),
+                                                    std::declval<bool (*)()>())),
+              bool>);
 #endif
 
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::Tensor_v8>);
@@ -197,8 +218,8 @@ static_assert(static_cast<int>(cudnn_frontend::PointwiseMode_t::RECIPROCAL) == 5
 
 static_assert(std::is_base_of_v<std::runtime_error, cudnn_frontend::cudnnException>);
 static_assert(std::is_same_v<cudnn_frontend::feature_vector_t, std::vector<int64_t>>);
-#ifndef CUDNN_FRONTEND_SKIP_JSON_LIB
-static_assert(std::is_same_v<::json, nlohmann::json>);
+#if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
+static_assert(std::is_same_v<cudnn_frontend::json, nlohmann::json>);
 #endif
 static_assert(cudnn_frontend::detail::get_compiled_version() == 92200);
 

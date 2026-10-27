@@ -8,6 +8,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_graph.h>
+#include <hipdnn_compatibility/cudnn/detail/v8/validate.h>
 
 #include <gtest/gtest.h>
 
@@ -49,43 +50,36 @@ namespace
 #define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE)                      \
     static_assert(std::is_same_v<decltype(NAME), ENUM_T> && (NAME) == (VALUE), \
                   #NAME " must keep its pinned value " #VALUE);
+#define HIPDNN_CUDNN_SHIM_ENUM_COUNT(ENUM_T, NAME, VALUE) \
+    HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE)
+#define HIPDNN_CUDNN_SHIM_ENUM_ALIAS(ENUM_T, NAME, TARGET)                      \
+    static_assert(std::is_same_v<decltype(NAME), ENUM_T> && (NAME) == (TARGET), \
+                  #NAME " must equal " #TARGET);
 #include "data/cudnn_v8/cudnn_v8_enum_values.inc"
 #undef HIPDNN_CUDNN_SHIM_ENUM_VALUE
+#undef HIPDNN_CUDNN_SHIM_ENUM_COUNT
+#undef HIPDNN_CUDNN_SHIM_ENUM_ALIAS
 
 struct PinnedValue
 {
     std::string_view enumType;
     std::string_view name;
     int value;
+    bool isCount;
 };
 
 // The X-macro initializer determines the size, which std::array cannot deduce in C++17.
 // NOLINTNEXTLINE(modernize-avoid-c-arrays)
 constexpr PinnedValue PINNED_VALUES[] = {
-#define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE) {#ENUM_T, #NAME, VALUE},
+#define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE) {#ENUM_T, #NAME, VALUE, false},
+#define HIPDNN_CUDNN_SHIM_ENUM_COUNT(ENUM_T, NAME, VALUE) {#ENUM_T, #NAME, VALUE, true},
+#define HIPDNN_CUDNN_SHIM_ENUM_ALIAS(ENUM_T, NAME, TARGET)
 #include "data/cudnn_v8/cudnn_v8_enum_values.inc"
 #undef HIPDNN_CUDNN_SHIM_ENUM_VALUE
+#undef HIPDNN_CUDNN_SHIM_ENUM_COUNT
+#undef HIPDNN_CUDNN_SHIM_ENUM_ALIAS
 };
 // NOLINTEND(cppcoreguidelines-macro-usage)
-
-constexpr std::array<std::string_view, 4> COUNT_SENTINELS = {
-    "CUDNN_BEHAVIOR_NOTE_TYPE_COUNT",
-    "CUDNN_HEUR_MODES_COUNT",
-    "CUDNN_KNOB_TYPE_COUNTS",
-    "CUDNN_NUMERICAL_NOTE_TYPE_COUNT",
-};
-
-constexpr bool isCountSentinel(std::string_view name)
-{
-    for(const auto sentinel : COUNT_SENTINELS)
-    {
-        if(sentinel == name)
-        {
-            return true;
-        }
-    }
-    return false;
-}
 
 // The value table lists each enum as one block in value order, so a single pass
 // proves the values are 0..N-1 and that a COUNT sentinel is last + 1.
@@ -114,7 +108,7 @@ constexpr bool pinnedValuesAreDense()
         {
             return false;
         }
-        if(isCountSentinel(entry.name))
+        if(entry.isCount)
         {
             sawSentinel = true;
         }
@@ -129,23 +123,40 @@ constexpr bool pinnedValuesAreDense()
 static_assert(pinnedValuesAreDense(),
               "cudnn_v8_enum_values.inc must number each enum 0..N-1 with COUNT = N");
 
-constexpr std::size_t countSentinelsPinned()
+constexpr int largestPinnedValue(std::string_view enumType)
 {
-    std::size_t found = 0;
+    int largest = -1;
     for(const auto& entry : PINNED_VALUES)
     {
-        found += isCountSentinel(entry.name) ? 1U : 0U;
+        if(entry.enumType == enumType && !entry.isCount && entry.value > largest)
+        {
+            largest = entry.value;
+        }
     }
-    return found;
+    return largest;
 }
 
-static_assert(countSentinelsPinned() == std::size(COUNT_SENTINELS),
-              "every COUNT sentinel must be in the value table");
+namespace v8 = hipdnn_frontend::compatibility::cudnn_frontend::detail::v8;
+namespace shim_detail = hipdnn_frontend::compatibility::cudnn_frontend::detail;
+
+// The range check's bound is each enum's largest pinned enumerator: a stale bound
+// would reject an appended enumerator as BAD_PARAM, and one past the end would
+// accept a COUNT sentinel.
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+#define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE)                              \
+    static_assert(shim_detail::LAST_ENUMERATOR<ENUM_T> == largestPinnedValue(#ENUM_T), \
+                  "LAST_ENUMERATOR<" #ENUM_T "> must be its largest pinned value");
+#define HIPDNN_CUDNN_SHIM_ENUM_COUNT(ENUM_T, NAME, VALUE)
+#define HIPDNN_CUDNN_SHIM_ENUM_ALIAS(ENUM_T, NAME, TARGET)
+#include "data/cudnn_v8/cudnn_v8_enum_values.inc"
+#undef HIPDNN_CUDNN_SHIM_ENUM_VALUE
+#undef HIPDNN_CUDNN_SHIM_ENUM_COUNT
+#undef HIPDNN_CUDNN_SHIM_ENUM_ALIAS
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-// Upstream's Tensor.h passes the FE TensorReordering_t bytes as the C value, so both
-// enums keep the same values.
+// The C values are kept equal to TensorReordering_t; values are append-only.
 constexpr bool reorderingMatches(fe::TensorReordering_t feValue,
                                  cudnnBackendTensorReordering_t cValue)
 {
@@ -158,9 +169,8 @@ static_assert(reorderingMatches(fe::TensorReordering_t::F16x16, CUDNN_TENSOR_REO
 static_assert(reorderingMatches(fe::TensorReordering_t::F8_128x4,
                                 CUDNN_TENSOR_REORDERING_F8_128x4));
 
-// Upstream's exact signatures (cudnn_frontend_shim.h); the dynamic-loading path
-// casts symbols to decltype of these. The descriptor is hipDNN's, so plans and
-// variant packs pass straight through.
+// Upstream's exact signatures (cudnn_frontend_shim.h). The descriptor is hipDNN's, so plans
+// and variant packs pass straight through.
 static_assert(std::is_same_v<cudnnBackendDescriptor_t, hipdnnBackendDescriptor_t>);
 static_assert(
     std::is_same_v<
@@ -168,14 +178,8 @@ static_assert(
         cudnnStatus_t (*)(cudnnHandle_t, cudnnBackendDescriptor_t, cudnnBackendDescriptor_t)>);
 static_assert(std::is_same_v<decltype(&cudnnGetLastErrorString), void (*)(char*, std::size_t)>);
 
-// The checks above are compile-time; these cases keep them visible in test
-// reports and pin the few invariants worth a runtime assertion.
-TEST(TestCudnnShimV8Identifiers, PinnedEnumValuesAreDense)
-{
-    EXPECT_TRUE(pinnedValuesAreDense());
-    EXPECT_EQ(countSentinelsPinned(), std::size(COUNT_SENTINELS));
-}
-
+// The checks above are compile-time; these cases pin the few invariants worth a
+// runtime assertion.
 TEST(TestCudnnShimV8Identifiers, CountSentinelsBoundUpstreamArrays)
 {
     // Upstream sizes std::array and fetch buffers with these; zero would make
@@ -185,6 +189,24 @@ TEST(TestCudnnShimV8Identifiers, CountSentinelsBoundUpstreamArrays)
     EXPECT_GT(CUDNN_BEHAVIOR_NOTE_TYPE_COUNT, 0);
     EXPECT_GT(CUDNN_HEUR_MODES_COUNT, 0);
     EXPECT_EQ(CUDNN_DIM_MAX, 8);
+}
+
+TEST(TestCudnnShimV8Identifiers, RangeCheckAcceptsEveryPinnedEnumerator)
+{
+    const auto accepts = [](auto value) {
+        return v8::guarded([value] { v8::requireEnumerator(value, "value"); }).status;
+    };
+    // NOLINTBEGIN(cppcoreguidelines-macro-usage)
+#define HIPDNN_CUDNN_SHIM_ENUM_VALUE(ENUM_T, NAME, VALUE) \
+    EXPECT_EQ(accepts(NAME), CUDNN_STATUS_SUCCESS) << #NAME;
+#define HIPDNN_CUDNN_SHIM_ENUM_COUNT(ENUM_T, NAME, VALUE) \
+    EXPECT_EQ(accepts(NAME), CUDNN_STATUS_BAD_PARAM) << #NAME;
+#define HIPDNN_CUDNN_SHIM_ENUM_ALIAS(ENUM_T, NAME, TARGET)
+#include "data/cudnn_v8/cudnn_v8_enum_values.inc"
+#undef HIPDNN_CUDNN_SHIM_ENUM_VALUE
+#undef HIPDNN_CUDNN_SHIM_ENUM_COUNT
+#undef HIPDNN_CUDNN_SHIM_ENUM_ALIAS
+    // NOLINTEND(cppcoreguidelines-macro-usage)
 }
 
 TEST(TestCudnnShimV8Identifiers, FractionHoldsTwoInt64Fields)

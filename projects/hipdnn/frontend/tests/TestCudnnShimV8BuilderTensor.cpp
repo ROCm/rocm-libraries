@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "CudnnShimV8BuilderFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <array>
 #include <cstdint>
@@ -68,31 +68,12 @@ protected:
         return describe(builder, TensorSpec{uid, X_DIMS});
     }
 
-    static v8fe::PointWiseDesc pointwiseDesc(PointwiseMode_t mode)
-    {
-        return v8fe::PointWiseDescBuilder().setMode(mode).setComputeType(DataType_t::FLOAT).build();
-    }
-
-    static v8fe::Operation pointwise(PointwiseMode_t mode,
-                                     const v8fe::Tensor& x,
-                                     const v8fe::Tensor* b,
-                                     const v8fe::Tensor& y)
-    {
-        v8fe::OperationBuilder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-        builder.setpwDesc(pointwiseDesc(mode)).setxDesc(x).setyDesc(y);
-        if(b != nullptr)
-        {
-            builder.setbDesc(*b);
-        }
-        return builder.build();
-    }
-
     // Lowers y = x + b in a one-op graph.
     void lowerAdd(const v8fe::Tensor& b)
     {
         const v8fe::Tensor x = tensor(1, X_DIMS);
         const v8fe::Tensor y = tensor(3, X_DIMS);
-        const v8fe::Operation add = pointwise(PointwiseMode_t::ADD, x, &b, y);
+        const v8fe::Operation add = pointwise(pointwiseDesc(PointwiseMode_t::ADD), x, y, &b);
         [[maybe_unused]] const v8fe::OperationGraph built = graph({&add});
     }
 
@@ -157,8 +138,8 @@ TEST_F(TestCudnnShimV8BuilderTensor, LoweringCarriesTensorFields)
     const v8fe::Tensor x = tensor(inputSpec);
     const v8fe::Tensor v = tensor(virtualSpec);
     const v8fe::Tensor y = tensor(outputSpec);
-    const v8fe::Operation first = pointwise(PointwiseMode_t::RELU_FWD, x, nullptr, v);
-    const v8fe::Operation second = pointwise(PointwiseMode_t::RELU_FWD, v, nullptr, y);
+    const v8fe::Operation first = pointwise(pointwiseDesc(PointwiseMode_t::RELU_FWD), x, v);
+    const v8fe::Operation second = pointwise(pointwiseDesc(PointwiseMode_t::RELU_FWD), v, y);
     [[maybe_unused]] const v8fe::OperationGraph built = graph({&first, &second});
 
     for(const std::int64_t uid : {1, 2, 3})
@@ -189,7 +170,8 @@ TEST_F(TestCudnnShimV8BuilderTensor, AlignmentForwardedOnlyBelowSixteen)
     const v8fe::Tensor wide = tensor(wideSpec);
     const v8fe::Tensor narrow = tensor(narrowSpec);
     const v8fe::Tensor exact = tensor(3, X_DIMS);
-    const v8fe::Operation add = pointwise(PointwiseMode_t::ADD, wide, &narrow, exact);
+    const v8fe::Operation add
+        = pointwise(pointwiseDesc(PointwiseMode_t::ADD), wide, exact, &narrow);
     [[maybe_unused]] const v8fe::OperationGraph built = graph({&add});
 
     const auto alignments = callsNamed(HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT);
@@ -440,8 +422,10 @@ TEST_F(TestCudnnShimV8BuilderTensor, ConstantValueCopiedBeforeSourceIsFreed)
             .setConstValue(*source);
         source.reset();
         const v8fe::Tensor constantTensor = builder.build();
-        add.emplace(
-            pointwise(PointwiseMode_t::ADD, tensor(1, X_DIMS), &constantTensor, tensor(3, X_DIMS)));
+        add.emplace(pointwise(pointwiseDesc(PointwiseMode_t::ADD),
+                              tensor(1, X_DIMS),
+                              tensor(3, X_DIMS),
+                              &constantTensor));
     }
     // The builder, the Tensor and the caller's value are all gone before lowering.
     [[maybe_unused]] const v8fe::OperationGraph built = graph({&*add});
@@ -453,10 +437,9 @@ TEST_F(TestCudnnShimV8BuilderTensor, ConstantValueCopiedBeforeSourceIsFreed)
               HIPDNN_DATA_DOUBLE);
 }
 
-TEST_F(TestCudnnShimV8BuilderTensor, BooleanConstantReadAsOneByte)
+TEST_F(TestCudnnShimV8BuilderTensor, BooleanConstantLowersAsOneByte)
 {
-    // Only the first byte is the value; the rest must not turn false into true.
-    lowerAdd(constant(2, DataType_t::BOOLEAN, std::array<std::uint8_t, 4>{0, 0x7F, 0x7F, 0x7F}));
+    lowerAdd(constant(2, DataType_t::BOOLEAN, false));
     const auto falseValue = loweredField(2, HIPDNN_ATTR_TENSOR_VALUE_EXT);
     ASSERT_TRUE(falseValue);
     EXPECT_EQ(falseValue->values<std::uint8_t>(), (std::vector<std::uint8_t>{0}));
@@ -469,6 +452,58 @@ TEST_F(TestCudnnShimV8BuilderTensor, BooleanConstantReadAsOneByte)
               HIPDNN_DATA_BOOLEAN);
 }
 
+TEST_F(TestCudnnShimV8BuilderTensor, ConstantSizeMismatchRejected)
+{
+    // A narrower constant would be read past its end; a wider one would be read as its leading
+    // bytes. Both are BAD_PARAM.
+    const auto build = [](DataType_t dataType, const auto& value) {
+        v8fe::TensorBuilder builder;
+        describe(builder, TensorSpec{2, {1, 1, 1, 1}});
+        builder.setDataType(dataType).setConstValue(value);
+        return buildFailure(builder);
+    };
+    struct Case
+    {
+        const char* label;
+        BuildFailure failure;
+        cudnnStatus_t expected;
+    };
+    const std::vector<Case> cases = {
+        {"INT64 from int32", build(DataType_t::INT64, std::int32_t{5}), CUDNN_STATUS_BAD_PARAM},
+        {"DOUBLE from float", build(DataType_t::DOUBLE, 1.0F), CUDNN_STATUS_BAD_PARAM},
+        {"FLOAT from double", build(DataType_t::FLOAT, 1.0), CUDNN_STATUS_BAD_PARAM},
+        {"BOOLEAN from 4 bytes",
+         build(DataType_t::BOOLEAN, std::array<std::uint8_t, 4>{0, 0x7F, 0x7F, 0x7F}),
+         CUDNN_STATUS_BAD_PARAM},
+        {"INT64 from int64", build(DataType_t::INT64, std::int64_t{5}), CUDNN_STATUS_SUCCESS},
+    };
+    for(const Case& item : cases)
+    {
+        SCOPED_TRACE(item.label);
+        EXPECT_EQ(item.failure.thrown, item.expected != CUDNN_STATUS_SUCCESS) << item.failure.what;
+        EXPECT_EQ(item.failure.status, item.expected) << item.failure.what;
+        if(item.expected != CUDNN_STATUS_SUCCESS)
+        {
+            EXPECT_NE(item.failure.what.find("TensorBuilder: constant value"), std::string::npos)
+                << item.failure.what;
+        }
+    }
+}
+
+TEST_F(TestCudnnShimV8BuilderTensor, VirtualTensorWithValueRejected)
+{
+    v8fe::TensorBuilder byValue;
+    complete(byValue).setVirtual().setByValue();
+    v8fe::TensorBuilder constantValue;
+    complete(constantValue).setVirtual().setConstValue(1.0F);
+    for(v8fe::TensorBuilder* builder : {&byValue, &constantValue})
+    {
+        const BuildFailure failure = buildFailure(*builder);
+        EXPECT_TRUE(failure.thrown);
+        EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
+    }
+}
+
 TEST_F(TestCudnnShimV8BuilderTensor, RaggedOffsetLowersAsLinkedTensor)
 {
     TensorSpec offsetSpec{9, {3, 1, 1, 1}};
@@ -478,7 +513,7 @@ TEST_F(TestCudnnShimV8BuilderTensor, RaggedOffsetLowersAsLinkedTensor)
     complete(builder, 1).setRaggedOffset(offsets);
     const v8fe::Tensor x = builder.build();
     const v8fe::Tensor y = tensor(2, X_DIMS);
-    const v8fe::Operation abs = pointwise(PointwiseMode_t::ABS, x, nullptr, y);
+    const v8fe::Operation abs = pointwise(pointwiseDesc(PointwiseMode_t::ABS), x, y);
     [[maybe_unused]] const v8fe::OperationGraph built = graph({&abs});
 
     const auto ragged = loweredField(1, HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC);
@@ -601,7 +636,7 @@ TEST_F(TestCudnnShimV8BuilderTensor, UndeclaredEnumValuesRejected)
         return [this, mode] {
             const v8fe::Tensor x = tensor(1, X_DIMS);
             const v8fe::Tensor y = tensor(2, X_DIMS);
-            const v8fe::Operation abs = pointwise(PointwiseMode_t::ABS, x, nullptr, y);
+            const v8fe::Operation abs = pointwise(pointwiseDesc(PointwiseMode_t::ABS), x, y);
             v8fe::OperationGraph opGraph = graph({&abs});
             v8fe::EngineHeuristicsBuilder builder;
             builder.setOperationGraph(opGraph).setHeurMode(mode);
@@ -729,7 +764,7 @@ TEST_F(TestCudnnShimV8BuilderTensor, UndeclaredEnumValuesRejected)
         installEngineKnobs(ENGINE_ID, {{"prov.tile_size", 8, 0, 64, 8, {}}});
         const v8fe::Tensor x = tensor(1, X_DIMS);
         const v8fe::Tensor y = tensor(2, X_DIMS);
-        const v8fe::Operation abs = pointwise(PointwiseMode_t::ABS, x, nullptr, y);
+        const v8fe::Operation abs = pointwise(pointwiseDesc(PointwiseMode_t::ABS), x, y);
         const v8fe::OperationGraph opGraph = graph({&abs});
         v8fe::EngineBuilder engineBuilder;
         engineBuilder.setOperationGraph(opGraph).setGlobalEngineIdx(0);
@@ -854,6 +889,32 @@ TEST_F(TestCudnnShimV8BuilderTensor, RetryAfterFailedPrecheckSucceeds)
                   nullptr);
     });
     EXPECT_FALSE(retry.thrown) << retry.what;
+}
+
+TEST_F(TestCudnnShimV8BuilderTensor, RetryAfterFailedCoreCheckSucceeds)
+{
+    // A failed core check leaves only a placeholder pointer, which does not count as built.
+    v8fe::TensorBuilder builder;
+    describe(builder, TensorSpec{2, {1, 1, 1, 1}});
+    builder.setDataType(DataType_t::INT64).setConstValue(std::int32_t{5});
+    const BuildFailure failure = buildFailure(builder);
+    ASSERT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
+
+    builder.setConstValue(std::int64_t{5});
+    const BuildFailure retry = buildFailure(builder);
+    EXPECT_FALSE(retry.thrown) << retry.what;
+}
+
+TEST_F(TestCudnnShimV8BuilderTensor, SecondBuildOfAKeptTensorRejected)
+{
+    v8fe::TensorBuilder builder;
+    complete(builder);
+    // Binding the result by reference leaves the built tensor in the builder.
+    [[maybe_unused]] const v8fe::Tensor& first = builder.build();
+    const BuildFailure second = buildFailure(builder);
+    EXPECT_TRUE(second.thrown);
+    EXPECT_EQ(second.status, CUDNN_STATUS_BAD_PARAM) << second.what;
 }
 
 } // namespace

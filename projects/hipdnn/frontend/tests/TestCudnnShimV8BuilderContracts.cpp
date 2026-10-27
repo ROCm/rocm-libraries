@@ -32,8 +32,8 @@ namespace
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 namespace v8 = fe::detail::v8;
 
-using hipdnn_shim_test::BuilderFailure;
-using hipdnn_shim_test::builderFailureOf;
+using hipdnn_shim_test::BuildFailure;
+using hipdnn_shim_test::failureOf;
 using ::testing::_;
 
 constexpr std::int64_t KNOB_ENGINE = 1;
@@ -62,31 +62,9 @@ cudnnStatus_t thrownStatus(Action&& action)
     return CUDNN_STATUS_SUCCESS;
 }
 
-void choose(fe::Engine_v8& built, cudnnBackendKnobType_t type, std::int64_t choice)
-{
-    auto& knobs = built.getSupportedKnobs();
-    const auto knob = std::find_if(knobs.begin(), knobs.end(), [type](const auto& candidate) {
-        return candidate.getKnobType() == type;
-    });
-    ASSERT_NE(knob, knobs.end());
-    knob->setChoice(static_cast<std::uint64_t>(choice));
-}
-
 class TestCudnnShimV8BuilderContracts : public hipdnn_shim_test::ShimV8BuilderPlanFixture
 {
 protected:
-    // Creating a hipDNN descriptor of `type` raises whatever `raise` throws.
-    void createThrows(hipdnnBackendDescriptorType_t type, std::function<void()> raise)
-    {
-        ON_CALL(*_mockBackend, backendCreateDescriptor(type, _))
-            .WillByDefault(
-                [raise = std::move(raise)](hipdnnBackendDescriptorType_t,
-                                           hipdnnBackendDescriptor_t*) -> hipdnnStatus_t {
-                    raise();
-                    return HIPDNN_STATUS_INTERNAL_ERROR;
-                });
-    }
-
     void createSucceeds(hipdnnBackendDescriptorType_t type)
     {
         ON_CALL(*_mockBackend, backendCreateDescriptor(type, _))
@@ -133,21 +111,6 @@ protected:
         installEngineKnobs(KNOB_ENGINE, {{"prov.tile_size", 8, 0, 64, 8, {}}});
     }
 
-    static fe::ConvDesc_v8 convDesc()
-    {
-        const std::array<std::int64_t, 2> pads = {1, 1};
-        const std::array<std::int64_t, 2> ones = {1, 1};
-        return fe::ConvDescBuilder_v8()
-            .setComputeType(fe::DataType_t::FLOAT)
-            .setMathMode(CUDNN_CROSS_CORRELATION)
-            .setSpatialDimCount(2)
-            .setPrePadding(2, pads.data())
-            .setPostPadding(2, pads.data())
-            .setDilation(2, ones.data())
-            .setSpatialStride(2, ones.data())
-            .build();
-    }
-
     static fe::ResampleDesc_v8 resampleDesc()
     {
         const std::array<std::int64_t, 2> window = {2, 2};
@@ -178,6 +141,9 @@ TEST_F(TestCudnnShimV8BuilderContracts, DescriptorBuildersReportCoreErrors)
                       .setDim(4, dims.data())
                       .setStride(4, strides.data())
                       .setId(1)
+                      .setAlignment(16)
+                      .setVirtual()
+                      .setByValue()
                       .build();
               }),
               CUDNN_STATUS_BAD_PARAM);
@@ -276,7 +242,7 @@ TEST_F(TestCudnnShimV8BuilderContracts, EngineLayerBuildersMapAnyCoreException)
 
     installKnobEngine();
     const fe::OperationGraph_v8 graph = convGraph();
-    EXPECT_EQ(thrownStatus([&] { engine(graph, 99); }), CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(thrownStatus([&] { engine(graph, 99); }), CUDNN_STATUS_NOT_SUPPORTED);
 
     fe::Engine_v8 built = engine(graph, KNOB_ENGINE);
     choose(built, CUDNN_KNOB_TYPE_TILE_SIZE, 16);
@@ -538,7 +504,7 @@ TEST_F(TestCudnnShimV8BuilderContracts, DroppedEngineLeavesNoHipdnnText)
     const fe::OperationGraph_v8 graph = convGraph();
     ASSERT_EQ(graph.getEngineCount(), 2);
 
-    const BuilderFailure failure = builderFailureOf([] {
+    const BuildFailure failure = failureOf([] {
         const std::array<std::int64_t, 4> dims = {1, 2, 3, 4};
         fe::TensorBuilder_v8().setDataType(fe::DataType_t::FLOAT).setDim(4, dims.data()).build();
     });
@@ -572,10 +538,83 @@ TEST_F(TestCudnnShimV8BuilderContracts, FailedFilterGetLeavesNoHipdnnText)
     EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(foreign));
     EXPECT_FALSE(fe::hasBehaviorNote<CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION>(foreign));
 
-    const BuilderFailure failure = builderFailureOf(
-        [] { fe::ConvDescBuilder_v8().setComputeType(fe::DataType_t::FLOAT).build(); });
+    const BuildFailure failure
+        = failureOf([] { fe::ConvDescBuilder_v8().setComputeType(fe::DataType_t::FLOAT).build(); });
     ASSERT_TRUE(failure.thrown);
     EXPECT_EQ(failure.what.find("hipDNN rejected"), std::string::npos) << failure.what;
+}
+
+// The config's engine resolves, but the engine's own GET (GLOBAL_INDEX for the numerical
+// filter, BEHAVIOR_NOTE for the behavior filter) fails: each filter answers false and drains
+// the hipDNN text that failure left.
+TEST_F(TestCudnnShimV8BuilderContracts, FailedEngineGetInFilterLeavesNoHipdnnText)
+{
+    std::string pending;
+    ON_CALL(*_mockBackend, getLastErrorString(_, _))
+        .WillByDefault([&pending](char* message, std::size_t size) {
+            const std::size_t length = std::min(pending.size(), size - 1);
+            std::copy_n(pending.begin(), length, message);
+            message[length] = '\0';
+            pending.clear();
+        });
+    hipdnnBackendDescriptor_t config = newMockDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
+    hipdnnBackendDescriptor_t engine = newMockDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR);
+    ON_CALL(*_mockBackend, backendGetAttribute(config, HIPDNN_ATTR_ENGINECFG_ENGINE, _, _, _, _))
+        .WillByDefault([engine](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                std::int64_t,
+                                std::int64_t*,
+                                void* elements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(elements) = engine;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    std::vector<hipdnnBackendAttributeName_t> failedGets;
+    ON_CALL(*_mockBackend, backendGetAttribute(engine, _, _, _, _, _))
+        .WillByDefault([&pending, &failedGets](hipdnnBackendDescriptor_t,
+                                               hipdnnBackendAttributeName_t name,
+                                               hipdnnBackendAttributeType_t,
+                                               std::int64_t,
+                                               std::int64_t*,
+                                               void*) {
+            failedGets.push_back(name);
+            pending = "hipDNN rejected the GET";
+            return HIPDNN_STATUS_BAD_PARAM;
+        });
+
+    EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(config));
+    EXPECT_EQ(failedGets,
+              std::vector<hipdnnBackendAttributeName_t>{HIPDNN_ATTR_ENGINE_GLOBAL_INDEX});
+    EXPECT_TRUE(pending.empty()) << pending;
+
+    failedGets.clear();
+    EXPECT_FALSE(fe::hasBehaviorNote<CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION>(config));
+    EXPECT_EQ(failedGets,
+              std::vector<hipdnnBackendAttributeName_t>{HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE});
+    EXPECT_TRUE(pending.empty()) << pending;
+}
+
+// Upstream hands a negative count to reserve()/resize(), so std::length_error escapes a
+// catch(cudnnException&). The shim reports BAD_PARAM.
+TEST_F(TestCudnnShimV8BuilderContracts, NegativeCountsAreBadParam)
+{
+    std::array<void*, 1> pointers{};
+    const std::array<std::int64_t, 1> uids{};
+
+    fe::VariantPackBuilder_v8 dataPointers;
+    BuildFailure failure = failureOf([&] { dataPointers.setDataPointers(-1, pointers.data()); });
+    EXPECT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
+
+    fe::VariantPackBuilder_v8 uidPack;
+    failure = failureOf([&] { uidPack.setUids(-1, uids.data()); });
+    EXPECT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
+
+    fe::OperationGraphBuilder_v8 graph;
+    failure = failureOf([&] { graph.setOperationGraph(-1, nullptr); });
+    EXPECT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM) << failure.what;
 }
 
 } // namespace

@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "CudnnShimV8BuilderFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <array>
 #include <cstddef>
@@ -159,6 +159,9 @@ v8fe::feature_vector_t upstreamConvFeatureVector(DescriptorType_t opType, const 
 class TestCudnnShimV8BuilderOperations : public hipdnn_shim_test::ShimV8BuilderFixture
 {
 public:
+    // Public for the free scale-case helpers below.
+    using ShimV8BuilderFixture::convDesc;
+
     static const std::vector<OpCase>& cases();
 
     static const OpCase& find(std::string_view label)
@@ -191,16 +194,6 @@ protected:
             .setDilation(count, dilation.data())
             .setSpatialStride(count, stride.data())
             .build();
-    }
-
-    static v8fe::ConvDesc convolution2d(DataType_t computeType = DataType_t::FLOAT)
-    {
-        return convolution({1, 1}, {1, 1}, {1, 1}, computeType);
-    }
-
-    static v8fe::PointWiseDesc pointwise(PointwiseMode_t mode)
-    {
-        return v8fe::PointWiseDescBuilder().setMode(mode).setComputeType(DataType_t::FLOAT).build();
     }
 
     static v8fe::MatMulDesc matmul()
@@ -261,7 +254,7 @@ protected:
 
     static Slot pointwiseSlot(PointwiseMode_t mode)
     {
-        return {"Pointwise", [mode](Builder& builder) { builder.setpwDesc(pointwise(mode)); }};
+        return {"Pointwise", [mode](Builder& builder) { builder.setpwDesc(pointwiseDesc(mode)); }};
     }
 
     // The case's setup and every required slot except `skip`.
@@ -328,9 +321,14 @@ protected:
         {
             EXPECT_EQ(op->getTag(), opCase.tag);
         }
-        const BuildFailure lowering
-            = failureOf([&] { [[maybe_unused]] const auto built = graph({&*op}); });
+        std::optional<v8fe::OperationGraph> opGraph;
+        const BuildFailure lowering = failureOf([&] { opGraph.emplace(graph({&*op})); });
         ASSERT_FALSE(lowering.thrown) << lowering.what;
+        ASSERT_EQ(opGraph->get_status(), CUDNN_STATUS_SUCCESS) << opGraph->get_error();
+        if(opCase.tag != nullptr)
+        {
+            EXPECT_EQ(opGraph->getTag(), std::string(opCase.tag) + "_");
+        }
         EXPECT_EQ(created(opCase.lowered).size(), loweredBefore + 1);
     }
 
@@ -361,42 +359,14 @@ protected:
         return false;
     }
 
-    static v8fe::Operation pointwiseOp(PointwiseMode_t mode,
-                                       const v8fe::Tensor& x,
-                                       const v8fe::Tensor* b,
-                                       const v8fe::Tensor& y)
-    {
-        Builder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-        builder.setpwDesc(pointwise(mode)).setxDesc(x).setyDesc(y);
-        if(b != nullptr)
-        {
-            builder.setbDesc(*b);
-        }
-        return builder.build();
-    }
-
-    static v8fe::Operation convForward(const v8fe::Tensor& x,
-                                       const v8fe::Tensor& w,
-                                       const v8fe::Tensor& y,
-                                       const v8fe::ConvDesc& conv)
-    {
-        return Builder(DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-            .setxDesc(x)
-            .setwDesc(w)
-            .setyDesc(y)
-            .setcDesc(conv)
-            .build();
-    }
-
     static v8fe::Operation relu(std::int64_t xUid, std::int64_t yUid)
     {
-        return pointwiseOp(
-            PointwiseMode_t::RELU_FWD, tensor(xUid, X_DIMS), nullptr, tensor(yUid, X_DIMS));
+        return pointwise(
+            pointwiseDesc(PointwiseMode_t::RELU_FWD), tensor(xUid, X_DIMS), tensor(yUid, X_DIMS));
     }
 };
 
-// Mirrors the per-kind attribute oracle of the cuDNN backend operation
-// descriptors, expressed as builder setters.
+// One case per operation kind, as builder setters.
 const std::vector<OpCase>& TestCudnnShimV8BuilderOperations::cases()
 {
     const auto normForward = [](NormMode_t mode, NormFwdPhase_t phase) -> Setter {
@@ -407,7 +377,7 @@ const std::vector<OpCase>& TestCudnnShimV8BuilderOperations::cases()
     const auto normBackward = [](NormMode_t mode) -> Setter {
         return [mode](Builder& builder) { builder.setNormalizationMode(mode); };
     };
-    const Slot conv = {"Convolution", [](Builder& builder) { builder.setcDesc(convolution2d()); }};
+    const Slot conv = {"Convolution", [](Builder& builder) { builder.setcDesc(convDesc()); }};
     const Slot epsilon = scalarSlot("Epsilon", &Builder::setEpsilonTensor, 4);
     const Slot normX = tensorSlot("X", &Builder::setxDesc, 1, NORM_DIMS);
     const Slot normY = tensorSlot("Y", &Builder::setyDesc, 5, NORM_DIMS);
@@ -764,7 +734,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, UnloweredKindsCheckSlotsFirst)
                                       .setRngDistribution(CUDNN_RNG_DISTRIBUTION_BERNOULLI)
                                       .setBernoulliDistProbability(0.5)
                                       .build();
-    const v8fe::ManagedOpaqueDescriptor notTensor = convolution2d().get_desc();
+    const v8fe::ManagedOpaqueDescriptor notTensor = convDesc().get_desc();
     struct MissingSlot
     {
         const char* label;
@@ -818,7 +788,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, UnloweredKindsCheckSlotsFirst)
 // error, even where a built tensor would be dropped (index) or NOT_SUPPORTED.
 TEST_F(TestCudnnShimV8BuilderOperations, NonTensorInSentSlotIsBadParam)
 {
-    const v8fe::ManagedOpaqueDescriptor notTensor = convolution2d().get_desc();
+    const v8fe::ManagedOpaqueDescriptor notTensor = convDesc().get_desc();
     const v8fe::ManagedOpaqueDescriptor unbuilt
         = v8fe::make_shared_backend_pointer(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
     for(const v8fe::ManagedOpaqueDescriptor& desc : {notTensor, unbuilt})
@@ -871,9 +841,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, WrongKindSetterRejected)
     const DescriptorType_t convKind = DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR;
     const std::vector<WrongKind> cases = {
         {"W on pointwise", pointwiseKind, [](Builder& b) { b.setwDesc(tensor(1, W_DIMS)); }},
-        {"Convolution on pointwise",
-         pointwiseKind,
-         [](Builder& b) { b.setcDesc(convolution2d()); }},
+        {"Convolution on pointwise", pointwiseKind, [](Builder& b) { b.setcDesc(convDesc()); }},
         {"A on pointwise", pointwiseKind, [](Builder& b) { b.setaMatDesc(tensor(1, {2, 4, 8})); }},
         {"B matrix on pointwise",
          pointwiseKind,
@@ -900,7 +868,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, WrongKindSetterRejected)
         {"T on convolution", convKind, [](Builder& b) { b.settDesc(tensor(1, Y_DIMS)); }},
         {"Pointwise on convolution",
          convKind,
-         [](Builder& b) { b.setpwDesc(pointwise(PointwiseMode_t::ADD)); }},
+         [](Builder& b) { b.setpwDesc(pointwiseDesc(PointwiseMode_t::ADD)); }},
     };
     for(const WrongKind& wrongKind : cases)
     {
@@ -982,7 +950,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, PointwiseModeClassesBuild)
         {
             SCOPED_TRACE(static_cast<int>(mode));
             Builder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-            builder.setpwDesc(pointwise(mode));
+            builder.setpwDesc(pointwiseDesc(mode));
             modeClass.slots(builder);
             expectStatus(buildFailure(builder), CUDNN_STATUS_SUCCESS);
         }
@@ -1035,7 +1003,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, PointwiseSlotsOutsideModeClassIgnored)
     {
         SCOPED_TRACE(static_cast<int>(mode));
         Builder builder(DescriptorType_t::OPERATION_POINTWISE_DESCRIPTOR);
-        builder.setpwDesc(pointwise(mode))
+        builder.setpwDesc(pointwiseDesc(mode))
             .setxDesc(tensor(1, X_DIMS))
             .setbDesc(tensor(STRAY_UID, X_DIMS))
             .setyDesc(tensor(2, X_DIMS));
@@ -1082,20 +1050,6 @@ const std::vector<ScaleCase>& scaleCases()
     return s_cases;
 }
 
-v8fe::ConvDesc doubleComputeConvolution2d()
-{
-    const std::array<std::int64_t, 2> ones = {1, 1};
-    return v8fe::ConvDescBuilder()
-        .setComputeType(DataType_t::DOUBLE)
-        .setMathMode(CUDNN_CROSS_CORRELATION)
-        .setSpatialDimCount(2)
-        .setPrePadding(2, ones.data())
-        .setPostPadding(2, ones.data())
-        .setDilation(2, ones.data())
-        .setSpatialStride(2, ones.data())
-        .build();
-}
-
 // Sets `scale` through the float or the double overload; a double-compute
 // convolution makes the builder store alpha/beta as double.
 Setter scaleSetter(const ScaleCase& scaleCase, double value, bool asFloat)
@@ -1103,7 +1057,7 @@ Setter scaleSetter(const ScaleCase& scaleCase, double value, bool asFloat)
     return [scaleCase, value, asFloat](Builder& builder) {
         if(scaleCase.doubleCompute)
         {
-            builder.setcDesc(doubleComputeConvolution2d());
+            builder.setcDesc(TestCudnnShimV8BuilderOperations::convDesc(DataType_t::DOUBLE));
         }
         const auto narrow = static_cast<float>(value);
         switch(scaleCase.scale)
@@ -1164,6 +1118,28 @@ TEST_F(TestCudnnShimV8BuilderOperations, ScaleOtherThanIdentityNotSupported)
                 expectStatus(failureWith(scaleCase.row, scaleSetter(scaleCase, value, asFloat)),
                              CUDNN_STATUS_NOT_SUPPORTED);
             }
+        }
+    }
+}
+
+// A value float rounds to the identity is kept only by the double overload on a double-compute
+// convolution, the one case where upstream sends the double.
+TEST_F(TestCudnnShimV8BuilderOperations, ScaleBelowFloatResolutionFollowsComputeType)
+{
+    for(const ScaleCase& scaleCase : scaleCases())
+    {
+        if(std::string_view(scaleCase.row).rfind("Convolution", 0) != 0)
+        {
+            continue;
+        }
+        const double nearIdentity = scaleCase.identity == 0.0 ? 1e-50 : scaleCase.identity + 1e-12;
+        ASSERT_EQ(static_cast<float>(nearIdentity), static_cast<float>(scaleCase.identity));
+        for(const bool asFloat : {true, false})
+        {
+            SCOPED_TRACE(scaleLabel(scaleCase, asFloat));
+            const bool sentAsDouble = scaleCase.doubleCompute && !asFloat;
+            expectStatus(failureWith(scaleCase.row, scaleSetter(scaleCase, nearIdentity, asFloat)),
+                         sentAsDouble ? CUDNN_STATUS_NOT_SUPPORTED : CUDNN_STATUS_SUCCESS);
         }
     }
 }
@@ -1424,7 +1400,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, ReferentsMayBeReleasedBeforeBuild)
         const v8fe::Tensor x = tensor(1, xDims);
         const v8fe::Tensor w = tensor(2, W_DIMS);
         const v8fe::Tensor y = tensor(3, {2, 8, 9, 7});
-        const v8fe::ConvDesc conv = convolution2d();
+        const v8fe::ConvDesc conv = convDesc();
         builder.setxDesc(x).setwDesc(w).setyDesc(y).setcDesc(conv);
     }
     std::optional<v8fe::Operation> op;
@@ -1472,14 +1448,66 @@ TEST_F(TestCudnnShimV8BuilderOperations, ConvolutionSlotsReachHipdnn)
     }
 }
 
+// setxDesc, setwDesc and setyDesc stand in for the unset gradient slots of a backward convolution,
+// the way PyTorch builds them.
+TEST_F(TestCudnnShimV8BuilderOperations, BackwardConvolutionForwardSettersStandIn)
+{
+    struct AliasRow
+    {
+        const char* row;
+        hipdnnBackendDescriptorType_t type;
+        std::vector<std::pair<hipdnnBackendAttributeName_t, std::int64_t>> slots;
+    };
+    const std::vector<AliasRow> rows = {
+        {"ConvolutionBackwardData",
+         HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
+         {{HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX, 1},
+          {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W, 2},
+          {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY, 3}}},
+        {"ConvolutionBackwardFilter",
+         HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+         {{HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X, 1},
+          {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW, 2},
+          {HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY, 3}}},
+    };
+    for(const AliasRow& row : rows)
+    {
+        SCOPED_TRACE(row.row);
+        OpCase aliased = find(row.row);
+        aliased.required = {{"Convolution", [](Builder& builder) { builder.setcDesc(convDesc()); }},
+                            tensorSlot("X", &Builder::setxDesc, 1, X_DIMS),
+                            tensorSlot("W", &Builder::setwDesc, 2, W_DIMS),
+                            tensorSlot("Y", &Builder::setyDesc, 3, Y_DIMS)};
+        expectBuildsAndLowers(aliased, nullptr);
+        expectSlotUids(row.type, row.slots);
+    }
+}
+
+TEST_F(TestCudnnShimV8BuilderOperations, BackwardConvolutionBothSettersAmbiguous)
+{
+    const std::vector<std::pair<const char*, Slot>> rows = {
+        {"ConvolutionBackwardData", tensorSlot("Y", &Builder::setyDesc, STRAY_UID, Y_DIMS)},
+        {"ConvolutionBackwardData", tensorSlot("X", &Builder::setxDesc, STRAY_UID, X_DIMS)},
+        {"ConvolutionBackwardFilter", tensorSlot("Y", &Builder::setyDesc, STRAY_UID, Y_DIMS)},
+        {"ConvolutionBackwardFilter", tensorSlot("W", &Builder::setwDesc, STRAY_UID, W_DIMS)},
+    };
+    for(const auto& [row, extra] : rows)
+    {
+        SCOPED_TRACE(std::string(row) + " with set" + extra.name + "Desc");
+        const BuildFailure failure = failureWith(row, extra.set);
+        expectStatus(failure, CUDNN_STATUS_BAD_PARAM);
+        EXPECT_NE(failure.what.find("Ambiguous specification"), std::string::npos) << failure.what;
+    }
+}
+
 TEST_F(TestCudnnShimV8BuilderOperations, PointwiseTagIsUpstreamName)
 {
     const v8fe::Tensor bias = tensor(2, BIAS_DIMS);
-    const v8fe::Operation add
-        = pointwiseOp(PointwiseMode_t::ADD, tensor(1, X_DIMS), &bias, tensor(3, X_DIMS));
+    const v8fe::Operation add = pointwise(
+        pointwiseDesc(PointwiseMode_t::ADD), tensor(1, X_DIMS), tensor(3, X_DIMS), &bias);
     const v8fe::Operation activation = relu(4, 5);
-    const v8fe::Operation gelu = pointwiseOp(
-        PointwiseMode_t::GELU_APPROX_TANH_FWD, tensor(6, X_DIMS), nullptr, tensor(7, X_DIMS));
+    const v8fe::Operation gelu = pointwise(
+        pointwiseDesc(PointwiseMode_t::GELU_APPROX_TANH_FWD), tensor(6, X_DIMS), tensor(7, X_DIMS));
 
     EXPECT_EQ(add.getTag(), pointwiseTag(PointwiseMode_t::ADD, "ADD"));
     EXPECT_EQ(activation.getTag(), pointwiseTag(PointwiseMode_t::RELU_FWD, "RELU_FWD"));
@@ -1537,7 +1565,7 @@ TEST_F(TestCudnnShimV8BuilderOperations, ConvFeatureVectorMatchesUpstream)
     for(const ConvSpec* spec : {&twoD, &threeD, &maxRank})
     {
         SCOPED_TRACE(spec->x.size());
-        const v8fe::Operation op = convForward(
+        const v8fe::Operation op = convolutionForward(
             tensor(1, spec->x, false, spec->xType),
             tensor(2, spec->w, false, spec->wType),
             tensor(3, spec->y, false, spec->yType),
@@ -1554,11 +1582,11 @@ TEST_F(TestCudnnShimV8BuilderOperations, OutputTensorFollowsOpKind)
 {
     const v8fe::Tensor convY = tensor(3, Y_DIMS);
     v8fe::Operation conv
-        = convForward(tensor(1, X_DIMS), tensor(2, W_DIMS), convY, convolution2d());
+        = convolutionForward(tensor(1, X_DIMS), tensor(2, W_DIMS), convY, convDesc());
 
     const v8fe::Tensor reluY = tensor(5, X_DIMS);
     v8fe::Operation activation
-        = pointwiseOp(PointwiseMode_t::RELU_FWD, tensor(4, X_DIMS), nullptr, reluY);
+        = pointwise(pointwiseDesc(PointwiseMode_t::RELU_FWD), tensor(4, X_DIMS), reluY);
 
     const v8fe::Tensor matmulC = tensor(8, {2, 4, 16});
     v8fe::Operation product = Builder(DescriptorType_t::OPERATION_MATMUL_DESCRIPTOR)
@@ -1573,36 +1601,16 @@ TEST_F(TestCudnnShimV8BuilderOperations, OutputTensorFollowsOpKind)
     EXPECT_EQ(product.getOutputTensor(), matmulC.get_desc());
 }
 
-TEST_F(TestCudnnShimV8BuilderOperations, OptionalOperationEmplaces)
-{
-    Builder builder(DescriptorType_t::OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
-    builder.setxDesc(tensor(1, X_DIMS))
-        .setwDesc(tensor(2, W_DIMS))
-        .setyDesc(tensor(3, Y_DIMS))
-        .setcDesc(convolution2d());
-
-    std::optional<v8fe::Operation> op;
-    op.emplace(builder.build());
-
-    ASSERT_TRUE(op.has_value());
-    ASSERT_EQ(op->get_status(), CUDNN_STATUS_SUCCESS) << op->get_error();
-    EXPECT_EQ(op->getTag(), "ConvFwd");
-
-    const v8fe::OperationGraph opGraph = graph({&*op});
-    EXPECT_EQ(opGraph.get_status(), CUDNN_STATUS_SUCCESS) << opGraph.get_error();
-    EXPECT_EQ(opGraph.getTag(), "ConvFwd_");
-    EXPECT_EQ(created(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR).size(), 1U);
-}
-
 TEST_F(TestCudnnShimV8BuilderOperations, GraphTagConcatenatesOps)
 {
     const v8fe::Tensor convOut = tensor(3, Y_DIMS, true);
     const v8fe::Tensor bias = tensor(4, {1, 8, 1, 1});
     const v8fe::Tensor biasOut = tensor(5, Y_DIMS, true);
     std::vector<v8fe::Operation> ops;
-    ops.emplace_back(convForward(tensor(1, X_DIMS), tensor(2, W_DIMS), convOut, convolution2d()));
-    ops.emplace_back(pointwiseOp(PointwiseMode_t::ADD, convOut, &bias, biasOut));
-    ops.emplace_back(pointwiseOp(PointwiseMode_t::RELU_FWD, biasOut, nullptr, tensor(6, Y_DIMS)));
+    ops.emplace_back(convolutionForward(tensor(1, X_DIMS), tensor(2, W_DIMS), convOut, convDesc()));
+    ops.emplace_back(pointwise(pointwiseDesc(PointwiseMode_t::ADD), convOut, biasOut, &bias));
+    ops.emplace_back(
+        pointwise(pointwiseDesc(PointwiseMode_t::RELU_FWD), biasOut, tensor(6, Y_DIMS)));
 
     v8fe::OperationGraphBuilder builder;
     builder.setHandle(_handle).setOperationGraph(ops);
@@ -1629,13 +1637,22 @@ TEST_F(TestCudnnShimV8BuilderOperations, GraphWithoutHandleRejected)
     EXPECT_TRUE(created(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR).empty());
 }
 
+// Over-limit counts are rejected before any operation is copied. A removed check makes the huge
+// count throw std::length_error from the feature-vector resize rather than read past the array; a
+// check that is off by one or moved after the copy dereferences the null entries and aborts.
 TEST_F(TestCudnnShimV8BuilderOperations, GraphOpLimitEnforced)
 {
     static_assert(MAX_OPGRAPH_OPS == 250);
     const v8fe::Operation op = relu(1, 2);
     std::vector<const v8fe::Operation*> ops(MAX_OPGRAPH_OPS, &op);
-    // Null entries crash the case if the limit check ever moves after the copy.
     std::vector<const v8fe::Operation*> tooMany(MAX_OPGRAPH_OPS + 1, nullptr);
+
+    v8fe::OperationGraphBuilder huge;
+    expectStatus(failureOf([&] {
+                     huge.setOperationGraph(std::numeric_limits<std::int64_t>::max(),
+                                            tooMany.data());
+                 }),
+                 CUDNN_STATUS_BAD_PARAM);
 
     v8fe::OperationGraphBuilder atLimit;
     EXPECT_FALSE(failureOf([&] { atLimit.setOperationGraph(MAX_OPGRAPH_OPS, ops.data()); }).thrown);
@@ -1645,14 +1662,25 @@ TEST_F(TestCudnnShimV8BuilderOperations, GraphOpLimitEnforced)
         failureOf([&] { overLimit.setOperationGraph(MAX_OPGRAPH_OPS + 1, tooMany.data()); }),
         CUDNN_STATUS_BAD_PARAM);
 
+    std::vector<v8fe::Operation> vectorOps;
+    vectorOps.reserve(static_cast<std::size_t>(MAX_OPGRAPH_OPS) + 1);
+    for(std::int64_t i = 0; i < MAX_OPGRAPH_OPS; ++i)
+    {
+        vectorOps.emplace_back(relu(1, 2));
+    }
+    v8fe::OperationGraphBuilder vectorAtLimit;
+    EXPECT_FALSE(failureOf([&] { vectorAtLimit.setOperationGraph(vectorOps); }).thrown);
+    vectorOps.emplace_back(relu(1, 2));
+    v8fe::OperationGraphBuilder vectorOverLimit;
+    expectStatus(failureOf([&] { vectorOverLimit.setOperationGraph(vectorOps); }),
+                 CUDNN_STATUS_BAD_PARAM);
+
     v8fe::OperationGraphBuilder appended;
     for(std::int64_t i = 0; i < MAX_OPGRAPH_OPS; ++i)
     {
         appended.addOperation(op.get_desc());
     }
     expectStatus(failureOf([&] { appended.addOperation(op.get_desc()); }), CUDNN_STATUS_BAD_PARAM);
-
-    EXPECT_TRUE(created(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR).empty());
 }
 
 // Upstream indexes ops[numOps] with numOps still -1 on a fresh builder; the
@@ -1663,10 +1691,11 @@ TEST_F(TestCudnnShimV8BuilderOperations, GraphAddOperationOnFreshBuilder)
     const v8fe::Tensor bias = tensor(4, {1, 8, 1, 1});
     const v8fe::Tensor biasOut = tensor(5, Y_DIMS, true);
     const v8fe::Operation conv
-        = convForward(tensor(1, X_DIMS), tensor(2, W_DIMS), convOut, convolution2d());
-    const v8fe::Operation add = pointwiseOp(PointwiseMode_t::ADD, convOut, &bias, biasOut);
+        = convolutionForward(tensor(1, X_DIMS), tensor(2, W_DIMS), convOut, convDesc());
+    const v8fe::Operation add
+        = pointwise(pointwiseDesc(PointwiseMode_t::ADD), convOut, biasOut, &bias);
     const v8fe::Operation activation
-        = pointwiseOp(PointwiseMode_t::RELU_FWD, biasOut, nullptr, tensor(6, Y_DIMS));
+        = pointwise(pointwiseDesc(PointwiseMode_t::RELU_FWD), biasOut, tensor(6, Y_DIMS));
 
     v8fe::OperationGraphBuilder builder;
     builder.setHandle(_handle);

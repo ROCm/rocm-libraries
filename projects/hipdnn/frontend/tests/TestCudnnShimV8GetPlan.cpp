@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The ported EngineConfigGenerator and cudnnGetPlan against the shim's backend
-// C API and the mock hipDNN backend.
+// The ported EngineConfigGenerator and cudnnGetPlan against the mock hipDNN
+// backend.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_get_plan.h>
 
 #include <gtest/gtest.h>
@@ -19,30 +19,15 @@ namespace
 
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
-fe::EngineConfigList heuristicSource(fe::OperationGraph& graph)
-{
-    fe::EngineHeuristics_v8 heuristics = fe::EngineHeuristicsBuilder_v8()
-                                             .setOperationGraph(graph)
-                                             .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-                                             .build();
-    return heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-}
-
-// The heuristic list's last config only.
-fe::EngineConfigList lastConfigSource(fe::OperationGraph& graph)
-{
-    fe::EngineConfigList configs = heuristicSource(graph);
-    configs.erase(configs.begin(), configs.end() - 1);
-    return configs;
-}
-
 class TestCudnnShimV8GetPlan : public hipdnn_shim_test::ShimV8PlanFixture
 {
 protected:
-    static fe::EngineConfigGenerator heuristicGenerator()
+    // The heuristic list's last config only.
+    static fe::EngineConfigList lastConfigSource(fe::OperationGraph& graph)
     {
-        const std::array<fe::GeneratorSource, 1> sources = {heuristicSource};
-        return {static_cast<int>(sources.size()), sources.data()};
+        fe::EngineConfigList configs = heuristicSource(graph);
+        configs.erase(configs.begin(), configs.end() - 1);
+        return configs;
     }
 };
 

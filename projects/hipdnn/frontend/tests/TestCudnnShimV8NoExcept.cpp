@@ -12,7 +12,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "fake_backend/ShimV8MockBackendFixture.hpp"
+#include "fake_backend/ShimV8BuilderFixture.hpp"
 
 #include <array>
 #include <cstdint>
@@ -28,21 +28,9 @@ using ::testing::HasSubstr;
 constexpr std::array<int64_t, 4> DIMS{1, 2, 3, 4};
 constexpr std::array<int64_t, 4> STRIDES{24, 12, 4, 1};
 
-class TestCudnnShimV8NoExcept : public hipdnn_shim_test::ShimV8MockBackendFixture
+class TestCudnnShimV8NoExcept : public hipdnn_shim_test::ShimV8BuilderFixture
 {
 protected:
-    void SetUp() override
-    {
-        ShimV8MockBackendFixture::SetUp();
-        clearLastError();
-    }
-
-    static void clearLastError()
-    {
-        std::array<char, 1024> message{};
-        cudnnGetLastErrorString(message.data(), message.size());
-    }
-
     static fe::TensorBuilder& describeTensor(fe::TensorBuilder& builder)
     {
         return builder.setDataType(fe::DataType_t::FLOAT)
@@ -61,6 +49,21 @@ TEST_F(TestCudnnShimV8NoExcept, FailedPrecheckReturnsStatus)
 
     EXPECT_EQ(tensor.get_status(), CUDNN_STATUS_BAD_PARAM);
     EXPECT_THAT(std::string(tensor.get_error()), HasSubstr("TensorBuilder: byte alignment"));
+}
+
+TEST_F(TestCudnnShimV8NoExcept, RetryAfterFailedPrecheckSucceeds)
+{
+    // The failed tensor's placeholder pointer stays in the builder; it must not count as built.
+    fe::TensorBuilder builder;
+    describeTensor(builder);
+    {
+        const fe::Tensor first = builder.build();
+        ASSERT_EQ(first.get_status(), CUDNN_STATUS_BAD_PARAM);
+    }
+
+    const fe::Tensor retry = builder.setAlignment(16).build();
+    EXPECT_EQ(retry.get_status(), CUDNN_STATUS_SUCCESS) << retry.get_error();
+    EXPECT_NE(fe::detail::v8::recordOf<fe::detail::v8::TensorRecord>(retry.get_desc()), nullptr);
 }
 
 TEST_F(TestCudnnShimV8NoExcept, FailedFinalizeCarriesShimMessage)
