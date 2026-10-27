@@ -58,13 +58,16 @@ extern "C" {
  *                  place for the life of the process: other devices load it
  *                  when they first run one of its kernels.
  *  @param[out]
- *  kernelIndices   Receives the assigned indices, up to ``maxIndices``.
+ *  kernelIndices   Receives the assigned indices, up to ``maxIndices``, or
+ *                  NULL if not wanted.
  *  @param[in]
- *  maxIndices      Capacity of ``kernelIndices``.
+ *  maxIndices      Capacity of ``kernelIndices``. No indices are written if
+ *                  this is nonpositive.
  *  @param[out]
  *  numIndices      Number of solutions registered, which may exceed
  *                  ``maxIndices``; in that case only the first ``maxIndices``
- *                  are written.
+ *                  are written. May be NULL if not wanted. A call with no
+ *                  output buffer still registers the payload.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The payload was registered.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE    A file could not be read, the shard
@@ -127,12 +130,15 @@ hipblasStatus_t
     hipblasLtLocalKernelGetCounts(hipblasLtHandle_t handle, size_t* registered, size_t* selectable);
 
 /*! \ingroup library_module
- *  \brief Whether an algorithm refers to a registered local kernel.
+ *  \brief Whether an algorithm's index is in the local kernel range.
+ *
+ *  \details This checks the index range alone. It does not verify that the
+ *  index is registered or that it can run on the current device.
  *
  *  @param[in]
  *  algo          The algorithm to inspect.
  *  @param[out]
- *  isLocalKernel  Set to a nonzero value if the algorithm is a registered kernel.
+ *  isLocalKernel  Set to a nonzero value if the index is in the local kernel range.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS          The result was written.
  *  \retval HIPBLAS_STATUS_INVALID_VALUE    A pointer argument was NULL.
