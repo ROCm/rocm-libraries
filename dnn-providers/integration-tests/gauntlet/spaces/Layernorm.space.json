@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "Layernorm",
-  "description": "Layernorm forward (training phase: y plus saved mean and inverse variance) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, y, scale and bias, and mean and inverse variance that the engine and both references accept (pure, mixed io, upcast), scale and bias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. Template: quick Layernorm/Default, the topology with the full tensor set (y, mean and inv_variance outputs, scale, bias, epsilon). Domain axis: x takes the domain fill (large uses scale 32, safe for half and bfloat16 since y is O(1) and the stats are bounded by 64); the nan and inf domains put the special fill on scale and bias (uids 5 and 3), which is elementwise-local (y is non-finite only in the poisoned columns and mean and inv_variance stay finite) while x stays free(-1,1). Alignment and placement axes: tensor_patches sets the declared alignment of every device tensor (uids 0, 1, 2, 3, 5, 6; not the epsilon scalar, uid 4) to the alignment axis, and placement (default, exact or under; exact when under would need alignment 1) acts on x (uid 6).",
+  "description": "Layernorm forward (training phase: y plus saved mean and inverse variance) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, y, scale and bias, and mean and inverse variance that the engine and both references accept (pure, mixed io, upcast), scale and bias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. Template: quick Layernorm/Default, the topology with the full tensor set (y, mean and inv_variance outputs, scale, bias, epsilon). Domain axis: x takes the domain fill (large uses scale 32, safe for half and bfloat16 since y is O(1) and the stats are bounded by 64); the nan and inf domains put the special fill on scale and bias (uids 5 and 3), which is elementwise-local (y is non-finite only in the poisoned columns and mean and inv_variance stay finite) while x stays free(-1,1). A scale and bias of fewer than 4 elements (a normalized extent under 4) would be covered whole by the one element the special fill always plants, so y would have no finite element and the non-finite mask fails a reference like that by design; those shapes put the special fill on x instead (a non-finite x element reaches only its own normalization group) and scale and bias stay free(-1,1). Alignment and placement axes: tensor_patches sets the declared alignment of every device tensor (uids 0, 1, 2, 3, 5, 6; not the epsilon scalar, uid 4) to the alignment axis, and placement (default, exact or under; exact when under would need alignment 1) acts on x (uid 6).",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/Layernorm/Default/graph.template.json",
   "axes": {
@@ -53,8 +53,9 @@
     "stride_x": "[xs_n, xs_c, xs_h, xs_w] if ndim == 4 else [xs_n, xs_c, xs_d, xs_h, xs_w]",
     "stride_p": "[ps_n, ps_c, ps_h, ps_w] if ndim == 4 else [ps_n, ps_c, ps_d, ps_h, ps_w]",
     "stride_s": "[ss_n, ss_c, ss_h, ss_w] if ndim == 4 else [ss_n, ss_c, ss_d, ss_h, ss_w]",
+    "poi_m":         "pc * pd * ph * pw",
     "dm":            "'default' if domain in ['nan', 'inf'] else domain",
-    "dom_kind":      "dm if dm in ['nonzero', 'zeros', 'large', 'subnormal'] else ('fixed' if dm == 'constant' else 'free')",
+    "dom_kind":      "'special' if domain in ['nan', 'inf'] and poi_m < 4 else (dm if dm in ['nonzero', 'zeros', 'large', 'subnormal'] else ('fixed' if dm == 'constant' else 'free'))",
     "dom_lo":        "-0.01 if dm == 'narrow' else (-8 if dm == 'wide' else (0.25 if dm == 'positive' else (0.5 if dm == 'constant' else -1)))",
     "dom_hi":        "0.01 if dm == 'narrow' else (8 if dm == 'wide' else (4 if dm == 'positive' else (0.5 if dm == 'constant' else 1)))",
     "dom_value":     "0.5 if dm == 'constant' else 0",
@@ -62,7 +63,7 @@
     "dom_special":   "'inf' if domain == 'inf' else 'nan'",
     "dom_fraction":  "0.05",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'",
+    "poi_kind":      "'special' if domain in ['nan', 'inf'] and poi_m >= 4 else 'free'",
     "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [

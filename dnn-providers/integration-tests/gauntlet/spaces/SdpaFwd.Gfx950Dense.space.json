@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaFwd",
-  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64). The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 128-wide head stay inside the half range before the softmax scale. The nan and inf domains put the special fill on V alone and leave Q and K at free(-1,1): a non-finite Q or K element spreads over a whole softmax row, while one in V reaches only its own head-dim column of the output; no operand is elementwise-local, so most samples with a long kv sequence turn every output element non-finite and fail the non-finite mask by design. The alignment axis declares that alignment on K, Q, O and V (uids 0, 1, 2, 3) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
+  "description": "SDPA forward in the hipkernel:Gfx950AttentionDense (rocKE) region, from Gfx950AttentionDenseNative.cpp and the shipped gfx950_attention_dense KDP: BSHD only, head size 64 or 128, bfloat16 or half, the (query heads, kv heads) pairs the KDP ships for that head size (the pair set differs between 64 and 128), seqlen_q a multiple of block_m (128), seqlen_kv a multiple of block_n (32), bottom-right causal only when seqlen_q == seqlen_kv, scale inside [2^-64, 2^4], no stats, no window. A pair the KDP does not ship for the head size is declined (probed on gfx950: (64, 4) at head size 64). The domain axis fills Q, K and V; large uses scale 8 instead of 32 so Q.K sums of a 128-wide head stay inside the half range before the softmax scale. V keeps a smaller range than Q and K under wide (free(-2,2)) and large (scale 2): the kernel rounds P to bfloat16 or half for the P.V product, which errs by about 2^-9 per unit of |V| per term, and a cancelling sum leaves an output below that error, so atol 0.01 does not grade a V of magnitude 4 or more (probed on gfx950, Q and K wide or large: V in +-8 or large scale 8 fails 21 of 60 samples, V in +-4 fails 14 of 60, V in +-2 fails none of 60). The nan and inf domains put the special fill on V alone, 2^-12 of its elements, and leave Q and K at free(-1,1): a non-finite element of Q or K reaches a whole softmax row or every row, and the reference zeroes the output row of a NaN logit row where the kernel gives NaN (probed with a poisoned Q), while one in V reaches only its own head-dim column of the output; the sparse share keeps most columns finite, which the non-finite mask needs (it fails a reference with no finite element, so the earlier 5% share failed every long-kv sample by design). They poison only where the reference and the kernel agree and draw the default fill elsewhere: a causal sample (probed: NaN in the reference where the kernel is finite, as if the kernel never read the masked kv positions) and an infinity over half or with a softmax scale above 1 (probed: inf in one and NaN in the other, as when P underflows to zero at different logit gaps and 0 * inf is NaN). The alignment axis declares that alignment on K, Q, O and V (uids 0, 1, 2, 3) through tensor_patches, and the placement axis puts the device pointers at exactly that alignment (exact) or misaligns Q (placement_uid 1) below it, a case that passes only if the backend rejects it (under, drawn as exact at alignment 1); default leaves the pointers where they are.",
   "engine": "hipkernel:Gfx950AttentionDense",
   "template": "../../integration-test-bundles/quick/SdpaFwd/Default/graph.template.json",
   "axes": {
@@ -29,15 +29,20 @@
     "dims_kv":   "[b, hkv, skv, d]",
     "stride_q":  "[sq*hq*d, d, hq*d, 1]",
     "stride_kv": "[skv*hkv*d, d, hkv*d, 1]",
-    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if domain in ['nan', 'inf'] else ('free' if domain in ['default', 'narrow', 'wide', 'positive'] else domain))",
+    "nf_ok":     "not causal and not (domain == 'inf' and (dtype == 'half' or scale > 1))",
+    "dom_poison": "domain in ['nan', 'inf'] and nf_ok",
+    "dom_kind":  "'fixed' if domain == 'constant' else ('special' if dom_poison else ('free' if domain in ['default', 'narrow', 'wide', 'positive', 'nan', 'inf'] else domain))",
     "dom_lo":    "-0.01 if domain == 'narrow' else (-8 if domain == 'wide' else (0.25 if domain == 'positive' else (0.5 if domain == 'constant' else -1)))",
     "dom_hi":    "0.01 if domain == 'narrow' else (8 if domain == 'wide' else (4 if domain == 'positive' else (0.5 if domain == 'constant' else 1)))",
     "dom_value": "0.5 if domain == 'constant' else 0",
     "dom_scale": "8 if domain == 'large' else 1",
     "dom_special": "'inf' if domain == 'inf' else 'nan'",
-    "dom_fraction": "0.05",
-    "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "dom_qk_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "dom_fraction": "0.000244140625",
+    "dom_validator": "'match_nonfinite' if dom_poison else 'default'",
+    "dom_clean_kind": "'free' if domain in ['nan', 'inf'] else dom_kind",
+    "dom_v_lo": "-2 if domain == 'wide' else dom_lo",
+    "dom_v_hi": "2 if domain == 'wide' else dom_hi",
+    "dom_v_scale": "2 if domain == 'large' else dom_scale",
     "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
@@ -64,9 +69,9 @@
       "purpose": "probe",
       "validator": "${dom_validator}",
       "inputs": {
-        "0": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
-        "1": {"kind": "${dom_qk_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
-        "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
+        "0": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "1": {"kind": "${dom_clean_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "3": {"kind": "${dom_kind}", "lo": "${dom_v_lo}", "hi": "${dom_v_hi}", "value": "${dom_value}", "scale": "${dom_v_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"}
       },
       "placement": "${eff_placement}",
       "placement_uid": 1

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "LayernormBackward",
-  "description": "Layernorm backward with saved mean and inverse variance as graph inputs (stats:saved) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale, dbias, mean and inverse variance that the engine and both references accept (pure, mixed io, upcast dy), scale, dscale and dbias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. x and dx always share one dtype because LayernormBwd.cpp writes dx as InputType (the x type) whatever the dx tensor says. Template: quick LayernormBackward/Variant2, the topology with the full tensor set (saved mean and rstd inputs); the engine's recomputed-stats path (Default topology, no mean or rstd) is not covered by this space. Domain axis: x and dy take the domain fill, with large narrowed to scale 4 because dscale and dbias are sums of dy*x and dy over the batch groups and overflow half at scale 32; the nan and inf domains put the special fill on the saved inverse variance (uid 7, range 0..1 for the finite elements), which is per-group: only the dx rows of poisoned groups go non-finite and dbias (a sum of dy) stays finite, while x and dy stay free(-1,1). Alignment and placement axes: tensor_patches sets the declared alignment of every device tensor (uids 0, 1, 2, 3, 4, 6, 7, 8; not the epsilon scalar, uid 5) to the alignment axis, and placement (default, exact or under; exact when under would need alignment 1) acts on x (uid 3).",
+  "description": "Layernorm backward with saved mean and inverse variance as graph inputs (stats:saved) in the HIP_MLOPS_ENGINE region: rank 4 or 5 (IValidator::validateDimensionCount, ApplicabilityChecks.cpp:31), NCHW/NCDHW or NHWC/NDHWC packed strides (IValidator::validateSupportedLayout, ApplicabilityChecks.cpp:76), the float/half/bfloat16 combinations of x, dx, dy, scale, dscale, dbias, mean and inverse variance that the engine and both references accept (pure, mixed io, upcast dy), scale, dscale and dbias covering the trailing normalized_dim_count dims (leading dims 1), mean and inverse variance covering the leading dims (normalized dims 1). Axis k is the first normalized axis, so normalized_dim_count = ndim - k as in the quick sweeps. x and dx always share one dtype because LayernormBwd.cpp writes dx as InputType whatever the dx tensor says. Template: quick LayernormBackward/Variant2, the topology with the full tensor set (saved mean and rstd inputs); the engine's recomputed-stats path (Default topology, no mean or rstd) is not covered by this space. Domain axis: x and dy take the domain fill, with large narrowed to scale 4 because dscale and dbias are sums of dy*x and dy over the batch groups and overflow half at scale 32; the nan and inf domains plant exactly one non-finite element in dy (uid 4; fraction 1e-12 rounds to zero and the special fill plants at least one, FillInputs.cpp:494-498) and keep x free(-1,1) and the inverse variance free(0,1). One element is the only poison that leaves finite elements in every output: dscale is a sum over all groups, so a poisoned inverse variance, mean or any group makes every dscale element non-finite and the comparison fails for lack of a finite reference element (NonFiniteMask.hpp:31); a poisoned dy element touches one dbias and dscale element and the dx row of its group, so the constraint below requires at least two groups and at least two normalized elements. Alignment and placement axes: tensor_patches sets the declared alignment of every device tensor (uids 0, 1, 2, 3, 4, 6, 7, 8; not the epsilon scalar, uid 5) to the alignment axis, and placement (default, exact or under; exact when under would need alignment 1) acts on x (uid 3).",
   "engine": "HIP_MLOPS_ENGINE",
   "template": "../../integration-test-bundles/quick/LayernormBackward/Variant2/graph.template.json",
   "axes": {
@@ -60,15 +60,16 @@
     "dom_value":     "0.5 if dm == 'constant' else 0",
     "dom_scale":     "4 if dm == 'large' else 1",
     "dom_special":   "'inf' if domain == 'inf' else 'nan'",
-    "dom_fraction":  "0.05",
+    "dom_fraction":  "1e-12",
     "dom_validator": "'match_nonfinite' if domain in ['nan', 'inf'] else 'default'",
-    "poi_kind":      "'special' if domain in ['nan', 'inf'] else 'free'",
+    "dy_kind":       "'special' if domain in ['nan', 'inf'] else dom_kind",
     "eff_placement": "'exact' if placement == 'under' and alignment < 2 else placement"
   },
   "constraints": [
     {"rule": "k < ndim", "reason": "the frontend keeps scale batch dim 1 (LayernormBackwardNode.hpp:108 batchDimCount = ndim - normalized_dim_count must leave the one-padded scale dims 1) and the quick sweeps use normalized_dim_count <= ndim - 1; SUPPORT_MATRIX_OVERVIEW.md op-layernormbackward lists norm:all_dims as used by no test graph"},
     {"rule": "(dy_dtype == x_dtype or dy_dtype == 'float') and (p_dtype == 'float' or (x_dtype != 'float' and p_dtype == x_dtype and dy_dtype == x_dtype))", "reason": "x and dx share one dtype (LayernormBwd.cpp: dx is InputType), dy is x's dtype or float, scale, dscale, dbias, mean and inverse variance share one dtype (LayernormApplicabilityChecks.cpp:137 checkTensorDataTypesSupported), and the CPU and GPU references register only these (dy, scale/stats, dx) combinations: float everywhere; half or bfloat16 dx with float scale/stats and dy equal to dx or float; pure half or bfloat16 (LayernormBpropSignatureKey.hpp:109 getPlanBuilders, GpuLayernormBwdSignatureKey.hpp:111 getPlanBuilders)"},
-    {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling (RFC 0023 section 14); it also keeps outerSize * stride far below UINT32_MAX, the work-group limit in LayernormBwdPlan.cpp:164"}
+    {"rule": "n * c * d * h * w <= 2**30", "reason": "GPU reference cost ceiling (RFC 0023 section 14); it also keeps outerSize * stride far below UINT32_MAX, the work-group limit in LayernormBwdPlan.cpp:164"},
+    {"rule": "domain not in ['nan', 'inf'] or (n * sc * sd * sh >= 2 and pc * pd * ph * pw >= 2)", "reason": "the special fill plants at least one non-finite element in dy (FillInputs.cpp:494-498): with a single normalization group the whole dx is that group's row, and with a single normalized element the whole dscale and dbias are that column, so a reference with no finite element in an output fails (NonFiniteMask.hpp:31)"}
   ],
   "case": {
     "values": {
@@ -92,8 +93,8 @@
       "validator": "${dom_validator}",
       "inputs": {
         "3": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
-        "4": {"kind": "${dom_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
-        "7": {"kind": "${poi_kind}", "lo": 0, "hi": 1, "value": 0, "scale": 1, "special": "${dom_special}", "fraction": "${dom_fraction}"}
+        "4": {"kind": "${dy_kind}", "lo": "${dom_lo}", "hi": "${dom_hi}", "value": "${dom_value}", "scale": "${dom_scale}", "special": "${dom_special}", "fraction": "${dom_fraction}"},
+        "7": {"kind": "free", "lo": 0, "hi": 1, "value": 0, "scale": 1, "special": "nan", "fraction": 0.05}
       }
     },
     "tensor_patches": [

@@ -634,6 +634,33 @@ LARGE_SCALE = {
     "SdpaFwd/Default": 8,
     "SdpaFwd/Gfx950Dense": 8,
 }
+# The poisoned share of V: a non-finite element of V reaches only its own head-dim column of the
+# output, so the share keeps part of the columns finite for the non-finite mask to grade
+# (NonFiniteMask.hpp fails a reference with no finite element). At the 5% of the other spaces
+# nearly every column of a long kv sequence holds one and the reference has none.
+POISON_FRACTION = {
+    "SdpaFwd/Default": 2**-12,
+    "SdpaFwd/Gfx950Dense": 2**-12,
+    # dscale and dbias sum over every normalization group, so one poisoned group (or stat) makes
+    # every dscale element non-finite; one poisoned dy element (the fill plants at least one,
+    # which this fraction rounds down to) leaves the other columns and rows finite
+    "LayernormBackward/Default": 1e-12,
+    "RMSNormBackward/Default": 1e-12,
+}
+# What a domain renders for one operand of a space instead of the table's row: (lo, hi, scale).
+# The kernels round P to bf16 or half for the P.V product, which errs by about 2**-9 * |V| per
+# term, and a cancelling sum leaves an output below that error, so atol 0.01 only grades a V of
+# magnitude up to about 2. Probed on gfx950 with Q and K wide or large (ASM_SDPA_ENGINE, then
+# Gfx950AttentionDense): V in +-8 or large scale 8 fails 82 of 100 and 21 of 60 samples, V in
+# +-4 fails 41 of 150 and 14 of 60, V in +-2 fails none of 150 and 60.
+OPERAND_DOMAIN = {
+    ("SdpaFwd/Default", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
+    ("SdpaFwd/Gfx950Dense", "V"): {"wide": (-2, 2, 1), "large": (-1, 1, 2)},
+}
+# The sample the domain test renders when seed 11 is not one the nan and inf domains poison (a
+# causal sample, half, or a softmax scale above 1 falls back to the default fill, see
+# test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree): the first that is.
+POISONABLE_SEED = {"SdpaFwd/Gfx950Dense": 12}
 # the tensors (by template name) whose fill the domain axis drives, per space
 PRIMARY_OPERANDS = {
     "Batchnorm/Default": ["X"],
@@ -655,9 +682,9 @@ POISONED_OPERANDS = {
     "BatchnormBackward/Default": ["scale"],
     "BatchnormInference/Default": ["X"],
     "Layernorm/Default": ["bias", "scale"],
-    "LayernormBackward/Default": ["rstd"],
+    "LayernormBackward/Default": ["dY"],
     "RMSNorm/Default": ["bias", "scale"],
-    "RMSNormBackward/Default": ["inv_rms"],
+    "RMSNormBackward/Default": ["dy"],
     "ResampleFwd/Default": ["X"],
     "SdpaFwd/Default": ["V"],
     "SdpaFwd/Gfx950Dense": ["V"],
@@ -743,10 +770,11 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     sp = space_by_id(space_id)
     template = json.loads(sp.template_path.read_text())
     uid_of = {t["name"]: str(t["uid"]) for t in template["tensors"]}
+    name_of = {v: k for k, v in uid_of.items()}
     primary = [uid_of[name] for name in PRIMARY_OPERANDS[space_id]]
     poisoned = [uid_of[name] for name in POISONED_OPERANDS[space_id]]
     quick = json.loads((sp.template_path.parent / "sweep.json").read_text())["cases"]
-    metas = _rendered_by_domain(sp)
+    metas = _rendered_by_domain(sp, seed=POISONABLE_SEED.get(space_id, 11))
     default = metas["default"]["inputs"]
     for domain, (
         kind,
@@ -764,6 +792,7 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
         assert meta["validator"] == validator
         if domain == "large":
             scale = LARGE_SCALE.get(space_id, scale)
+        fraction = POISON_FRACTION.get(space_id, fraction)
         for uid in primary:
             leaf = inputs[uid]
             if domain == "default":
@@ -789,8 +818,11 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
                     space_id, domain, uid, leaf,
                 )  # fmt: skip
                 continue
+            lo_u, hi_u, scale_u = OPERAND_DOMAIN.get((space_id, name_of[uid]), {}).get(
+                domain, (lo, hi, scale)
+            )
             expected = dict(
-                zip(LEAF_KEYS, (kind, lo, hi, value, scale, special, fraction))
+                zip(LEAF_KEYS, (kind, lo_u, hi_u, value, scale_u, special, fraction))
             )
             assert {k: leaf[k] for k in LEAF_KEYS} == expected, (
                 space_id,
@@ -825,6 +857,78 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     }
     assert all(o == others["default"] for o in others.values()), others
     assert all(set(primary + poisoned) <= set(m["inputs"]) for m in metas.values())
+
+
+def test_layernorm_poisons_x_when_scale_and_bias_are_too_small_to_leave_a_finite_column():
+    # bug caught: the one element a special fill always plants covers a scale and bias of a single
+    # element whole, y has no finite element and the non-finite mask fails the reference by design
+    sp = space_by_id("Layernorm/Default")
+    template = json.loads(sp.template_path.read_text())
+    uid = {t["name"]: str(t["uid"]) for t in template["tensors"]}
+    seen = set()
+    for seed in range(400):
+        axes = sampler.sample(sp, seed).axis_values
+        for domain in POISONING_DOMAINS:
+            env = sp.derive_env(dict(axes, domain=domain))
+            inputs = sp.render(env)["metadata"]["inputs"]
+            small = env["poi_m"] < 4
+            kinds = {name: inputs[uid[name]]["kind"] for name in ("x", "scale", "bias")}
+            assert kinds == (
+                {"x": "special", "scale": "free", "bias": "free"}
+                if small
+                else {"x": "free", "scale": "special", "bias": "special"}
+            ), (seed, domain, env["poi_m"], kinds)  # fmt: skip
+            seen.add(small)
+    assert seen == {True, False}
+
+
+def test_resample_nan_domain_plants_infinity_under_maxpool_only():
+    # bug caught: a NaN in a maxpool window. The HIP kernel never selects it, the CPU reference
+    # keeps it only as the first element of the window, so the two disagree on most such windows
+    sp = space_by_id("ResampleFwd/Default")
+    template = json.loads(sp.template_path.read_text())
+    x_uid = {t["name"]: str(t["uid"]) for t in template["tensors"]}["X"]
+    seen = set()
+    for seed in range(200):
+        axes = sampler.sample(sp, seed).axis_values
+        for domain in POISONING_DOMAINS:
+            leaf = sp.render(sp.derive_env(dict(axes, domain=domain)))["metadata"][
+                "inputs"
+            ][x_uid]
+            planted = "nan" if domain == "nan" and axes["mode"] != "maxpool" else "inf"
+            assert (leaf["kind"], leaf["special"]) == ("special", planted), (
+                seed,
+                domain,
+                leaf,
+            )
+            seen.add((domain, axes["mode"] == "maxpool"))
+    assert seen == {("nan", True), ("nan", False), ("inf", True), ("inf", False)}
+
+
+@pytest.mark.parametrize("space_id", ["SdpaFwd/Default", "SdpaFwd/Gfx950Dense"])
+def test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree(space_id):
+    # bug caught: a non-finite V under a causal mask (probed on gfx950: NaN in the reference where
+    # the kernel is finite) and an infinity where P underflows (half, or a softmax scale above 1
+    # over bfloat16; probed: inf in one side and NaN in the other, as when 0 * inf meets a P that
+    # rounds to zero at different logit gaps); both fail a case that no engine defect explains
+    sp = space_by_id(space_id)
+    template = json.loads(sp.template_path.read_text())
+    v_uid = {t["name"]: str(t["uid"]) for t in template["tensors"]}["V"]
+    seen = set()
+    for seed in range(300):
+        axes = sampler.sample(sp, seed).axis_values
+        for domain in POISONING_DOMAINS:
+            env = sp.derive_env(dict(axes, domain=domain))
+            meta = sp.render(env)["metadata"]
+            underflows = axes["dtype"] == "half" or axes["scale"] > 1
+            poisoned = not axes["causal"] and not (domain == "inf" and underflows)
+            leaf = meta["inputs"][v_uid]
+            assert (leaf["kind"], meta["validator"]) == (
+                ("special", "match_nonfinite") if poisoned else ("free", "default")
+            ), (seed, domain, leaf)  # fmt: skip
+            assert (leaf["lo"], leaf["hi"]) == (-1, 1)
+            seen.add((domain, poisoned))
+    assert seen == {("nan", True), ("nan", False), ("inf", True), ("inf", False)}
 
 
 @pytest.mark.parametrize("space_id", DOMAIN_SPACE_IDS)
