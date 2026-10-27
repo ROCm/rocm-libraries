@@ -1009,7 +1009,22 @@ def test_paired_mx_alignment_counts_gaps_but_not_unused_final_tail():
     assert paired_buffer_offsets(s) is None
 
 
-def test_paired_emitted_read_swap_preserves_lane_bank_phase():
+@pytest.fixture
+def _gfx1250_read_swap():
+    from rocisa import rocIsa
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from tensilelite.Toolchain.Validators import validateToolchain
+
+    with preserve_rocisa_kernel_state():
+        ri = rocIsa.getInstance()
+        ri.init((12, 5, 0), validateToolchain("amdclang++"))
+        ri.setKernel((12, 5, 0), 32)
+        if not ri.getAsmCaps()["SupportedISA"]:
+            pytest.skip("amdclang++ does not support gfx1250")
+        yield
+
+
+def test_paired_emitted_read_swap_preserves_lane_bank_phase(_gfx1250_read_swap):
     from types import SimpleNamespace
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     s = _vw8_state(DepthU=64, VectorWidthB=1, PrefetchGlobalRead=2,
@@ -1028,9 +1043,10 @@ def test_paired_emitted_read_swap_preserves_lane_bank_phase():
                 regs = {"v[vgprLocalReadAddr%s]" % tc: ping}
                 for item in mod.flatitems():
                     op, dst, *srcs = str(item).split("//")[0].replace(",", " ").split()
+                    assert op in ("v_add_nc_u32", "v_xor_b32"), op
                     values = [regs[src] if src in regs else int(src, 0)
                               for src in srcs if src != "vcc_lo"]
-                    regs[dst] = (values[0] + values[1] if op == "v_add_u32"
+                    regs[dst] = (values[0] + values[1] if op == "v_add_nc_u32"
                                  else values[0] ^ values[1])
                 mask = regs["v[vgprLocalReadSwapAddr%s]" % tc]
                 pong = ping ^ mask
