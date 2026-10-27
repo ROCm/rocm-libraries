@@ -549,8 +549,8 @@ TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
 TEST(LayoutCpp, FactoriesAndExplicitOrders) {
     const Shape shape{2, 3, 5};
     const Layout rowMajor(shape, {15, 5, 1}, 0);
-    EXPECT_EQ(Layout::contiguous(shape), rowMajor);
     EXPECT_EQ(Layout::contiguousLastDimensionFastest(shape), rowMajor);
+    EXPECT_EQ(Layout::contiguous(shape, {0, 1, 2}), rowMajor);
     EXPECT_EQ(Layout::contiguousFirstDimensionFastest(shape), (Layout(shape, {1, 2, 6}, 0)));
     const std::array<size_t, 3> order{1, 2, 0};
     const auto checked = Layout::getContiguousLayout(shape, order);
@@ -574,7 +574,8 @@ TEST(LayoutCpp, InvalidStrideRanksAndDimensionsThrow) {
     EXPECT_THROW((Layout(shape, std::vector<ptrdiff_t>{1}, 0)), std::runtime_error);
     EXPECT_THROW(Layout(shape, {3, 1}, 0).stride(shape.rank()), std::runtime_error);
     EXPECT_THROW(Layout::contiguous(shape, {0}), std::runtime_error);
-    EXPECT_THROW(Layout::contiguous(Shape{std::numeric_limits<size_t>::max()}), std::runtime_error);
+    EXPECT_THROW(Layout::contiguousLastDimensionFastest(Shape{std::numeric_limits<size_t>::max()}),
+                 std::runtime_error);
 }
 
 TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
@@ -617,13 +618,14 @@ TEST(LayoutCpp, CopiesAndMovesPreserveLayoutMetadata) {
 
 TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
     using namespace roc::hostnumerics::detail;
-    const auto result = Layout::getContiguousLayout(Shape{std::numeric_limits<size_t>::max()});
+    const auto result =
+        Layout::getContiguousLayoutLastDimensionFastest(Shape{std::numeric_limits<size_t>::max()});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().error, LayoutError::ExtentOutOfRange);
     EXPECT_EQ(result.error().dimension, 0);
     EXPECT_EQ(result.error().value, std::numeric_limits<size_t>::max());
     EXPECT_EQ(result.error().limit, static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()));
-    const auto valid = Layout::getContiguousLayout(Shape{2, 3});
+    const auto valid = Layout::getContiguousLayoutLastDimensionFastest(Shape{2, 3});
     ASSERT_TRUE(valid);
     EXPECT_EQ(valid->stride(0), 3);
     EXPECT_EQ(valid->stride(1), 1);
@@ -643,7 +645,7 @@ TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
     EXPECT_EQ(rank.error().value, 1);
     EXPECT_EQ(rank.error().limit, 2);
     const size_t halfRange = (static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) + 1) / 2;
-    const auto overflow = Layout::getContiguousLayout(Shape{2, halfRange});
+    const auto overflow = Layout::getContiguousLayoutLastDimensionFastest(Shape{2, halfRange});
     ASSERT_FALSE(overflow);
     EXPECT_EQ(overflow.error().error, LayoutError::ContiguousStrideOverflow);
     EXPECT_EQ(overflow.error().dimension, 0);
