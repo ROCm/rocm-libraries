@@ -846,9 +846,10 @@ def test_kv_segments_admission():
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
     assert spec.kernel_name().endswith("_kvs4")
-    assert attention_dense_grid(spec)[0] == 4 * attention_dense_grid(
-        Gfx942AttentionDenseSpec(**base)
-    )[0]
+    assert (
+        attention_dense_grid(spec)[0]
+        == 4 * attention_dense_grid(Gfx942AttentionDenseSpec(**base))[0]
+    )
     for over in (
         {"persistent": True},
         {"use_sinks": True},
@@ -1720,6 +1721,22 @@ def test_waves_per_eu_selector_matches_measured_matrix(head_size, dtype, expecte
     assert _tuned_waves_per_eu(head_size, dtype) == expected
 
 
+@pytest.mark.parametrize(
+    "grid_ctas, num_cus, expected",
+    [(256, 304, 2), (304, 304, 2), (512, 304, 4), (256, 0, 4)],
+)
+def test_bf16_d64_waves_per_eu_keeps_2_without_a_second_wg(
+    grid_ctas, num_cus, expected
+):
+    """bf16 D64 caps at 4 waves/EU only when a second WG can share a CU: a grid of
+    at most one CTA per CU keeps the default 2 (an unknown CU count keeps 4)."""
+    assert (
+        _tuned_waves_per_eu(64, "bf16", grid_ctas=grid_ctas, num_cus=num_cus)
+        == expected
+    )
+    assert _tuned_waves_per_eu(128, "bf16", grid_ctas=grid_ctas, num_cus=num_cus) == 2
+
+
 def test_build_bakes_the_tuned_waves_per_eu_attribute():
     """The tuned value reaches the emitted ``amdgpu-waves-per-eu`` kernel attribute.
 
@@ -1784,18 +1801,21 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
         == 2
     )
 
+    # 8192 rows x 16 heads = 512 CTAs of 256 rows: more than one CTA per CU on
+    # the 304-CU part, so the bf16 D64 bump applies.
     def _req(dtype, d, arch):
         return AttentionRequest(
             batch=1,
             nhead_q=16,
             nhead_k=4,
-            seqlen_q=2048,
-            seqlen_k=2048,
+            seqlen_q=8192,
+            seqlen_k=8192,
             hdim_q=d,
             hdim_v=d,
             arch=arch,
             mask_type=1,
             dtype=dtype,
+            num_cus=304,
         )
 
     # gfx942: only bf16 D64 is bumped to 4.

@@ -934,7 +934,13 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     return _v_swizzle_width(block_n) - block_n
 
 
-def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
+def _tuned_waves_per_eu(
+    head_size: int,
+    dtype: str,
+    *,
+    grid_ctas: int | None = None,
+    num_cus: int | None = None,
+) -> int:
     """Tuned ``amdgpu-waves-per-eu`` per config (P3 occupancy).
 
     Default 2 (one WG/CU = 2 waves/SIMD at this kernel's ~178-220 VGPR on ROCm 10 /
@@ -954,10 +960,17 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
         reaches a 2nd WG/CU. Occupancy there is an LDS-footprint problem (P3 K/V-pad
         or single-buffer work), not a waves-per-eu knob.
 
+    The bf16 D64 override only pays when a second WG can co-reside. With
+    ``grid_ctas`` and ``num_cus`` given and a grid of at most one CTA per CU, no CU
+    ever holds a second WG, so the cap only costs ILP: keep 2 (measured on MI300X,
+    256-CTA S512 grids with and without sinks: 6-11% faster at 2).
+
     Consumed by the gfx942 dispatch base spec (``_base_spec``) so the kernel_name
     ``wpe{N}`` tag and the emitted ``amdgpu-waves-per-eu`` attribute always agree.
     """
     if dtype == "bf16" and head_size == 64:
+        if grid_ctas is not None and num_cus and grid_ctas <= num_cus:
+            return 2
         return 4
     return 2
 
