@@ -254,6 +254,16 @@ struct data_layout_t
     bool is_continuous_in(const data_layout_t& other) const;
 
     /**
+     * @return `true` if this layout logically contains `other`.
+     * That is, all of `other`'s coordinates are contained within
+     * this layout.
+     *
+     * @throw `std::invalid_argument` if these two layouts are not
+     * dimensionally consistent with one another.
+     */
+    bool logically_contains(const data_layout_t& other) const;
+
+    /**
      * @return A string reporting this object's state.
      */
     std::string str() const;
@@ -396,6 +406,25 @@ struct data_layout_t
      * found inconsistent.
      */
     std::vector<size_t> corresponding_axes_in_embedding() const;
+
+    /**
+     * @brief Assuming *this is a layout for complex data, return a
+     * copy of *this's layout, with the lengths and strides converted
+     * to be a same-shaped real data layout.
+     * @throw `std::logic_error` if the innermost axis stride is not 1.
+     */
+    data_layout_t convert_complex_to_real() const;
+
+    /**
+     * @brief Modify *this to collapse contiguous length dimensions
+     * together.  Does not consider batch axes.  Expects the layout
+     * to be a default one, with lower indexes on each axis to be 0.
+     *
+     * @note Axes are reordered to have increasing stride.
+     *
+     * @throw `std::invalid_argument` if any lower index is nonzero.
+     */
+    void collapse_contiguous_length_axes();
 
     /**
      * @return `true` iff the current object is registered as the data layout of a

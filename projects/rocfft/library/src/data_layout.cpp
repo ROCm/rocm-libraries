@@ -440,6 +440,20 @@ bool data_layout_t::is_continuous_in(const data_layout_t& other) const
     return ret;
 }
 
+bool data_layout_t::logically_contains(const data_layout_t& other) const
+{
+    if(!is_dimensionally_consistent_with(other))
+        throw std::invalid_argument(
+            "This object is not dimensionally consistent with the argument of "
+            + ROCFFT_CURRENT_FUNCTION);
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+    {
+        if(!(*this)[dim].logically_contains(other[dim]))
+            return false;
+    }
+    return true;
+}
+
 std::string data_layout_t::str() const
 {
     std::string ret;
@@ -705,4 +719,56 @@ std::vector<size_t> data_layout_t::corresponding_axes_in_embedding() const
                                     std::find(embedding->begin(), embedding->end(), len_idx)));
 
     return ret;
+}
+
+data_layout_t data_layout_t::convert_complex_to_real() const
+{
+    if(len_axes.front().inbuffer_stride != 1)
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " cannot convert strided complex layout to real");
+
+    data_layout_t ret = *this;
+
+    for(size_t dim = 0; dim < ret.get_full_rank(); dim++)
+    {
+        if(dim == 0)
+        {
+            ret[dim].lower *= 2;
+            ret[dim].upper *= 2;
+        }
+        else
+            ret[dim].inbuffer_stride *= 2;
+    }
+    return ret;
+}
+
+void data_layout_t::collapse_contiguous_length_axes()
+{
+    // We expect the layout to be default, with all lower indexes at 0
+    auto nonzero_axis_lower = [](const axis_t& axis) { return axis.lower != 0; };
+    if(std::any_of(len_axes.begin(), len_axes.end(), nonzero_axis_lower))
+    {
+        throw std::invalid_argument("Unexpected nonzero lower index length axis in "
+                                    + ROCFFT_CURRENT_FUNCTION);
+    }
+
+    reorder_length_axes(length_axes_by_increasing_strides(false));
+
+    size_t i = 0;
+    while(i < len_axes.size() - 1)
+    {
+        auto cur  = len_axes.begin() + i;
+        auto next = len_axes.begin() + i + 1;
+        if(cur->upper * cur->inbuffer_stride == next->inbuffer_stride)
+        {
+            // collapse next into i
+            cur->upper *= next->upper;
+            len_axes.erase(next);
+            // don't advance i, so we can re-evaluate against the next value
+        }
+        else
+        {
+            ++i;
+        }
+    }
 }
