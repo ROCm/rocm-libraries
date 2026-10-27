@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-09-10
+**Last Updated:** 2026-10-14
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -41,7 +41,10 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/rocsparse
-# -c builds samples + tests + benchmarks; -d fetches build dependencies (incl. googletest)
+# Test matrices; in a sparse checkout, run `git sparse-checkout add .dvc` first
+dvc pull -R clients/matrices
+# -c builds samples + tests + benchmarks; -d installs distro packages but not googletest
+# (install libgtest-dev or gtest-devel first)
 ./install.sh -dc -a gfx942
 # equivalently, out-of-source from this directory:
 cmake -B build/release -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
@@ -51,9 +54,9 @@ cmake --build build/release --parallel
 
 Out-of-source builds land in `build/<release|debug|release-debug>/clients/staging/`.
 
-The functional suites that read `.csr` inputs need the SuiteSparse test matrices, but you don't need a separate step to get them: the build above downloads and converts them automatically into `build/<release|debug|release-debug>/clients/matrices`.
+The functional suites that read `.csr` inputs need the SuiteSparse test matrices. The `.tar.gz` archives are stored with DVC in `clients/matrices/` (remote `sparse-matrices`); after the `dvc pull` above, the build converts them into `build/<release|debug|release-debug>/clients/matrices`. If they're missing, configuration fails unless you configure with `-DALLOW_FETCH_DEPS=ON`, which downloads them from SuiteSparse.
 
-> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them and avoid re-downloading on a rebuild:
+> **Note:** If you already have the converted matrices in a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them on a rebuild. `--matrices-dir` and `--matrices-dir-install` download any missing matrices that aren't pulled with DVC:
 >
 > ```bash
 > ./install.sh -c -a gfx942 --matrices-dir <path_to_matrix_folder>
@@ -72,8 +75,9 @@ The functional suites that read `.csr` inputs need the SuiteSparse test matrices
 | Any routine | `./clients/staging/rocsparse-test --gtest_filter='*quick*-*known_bug*'` | Yes |
 | A specific routine | `./clients/staging/rocsparse-test --gtest_filter='*csrmv*'` | Yes |
 | Something PR-scoped | `./clients/staging/rocsparse-test --gtest_filter='*quick*:*pre_checkin*-*known_bug*'` | Yes |
-| Host-pure util / enum / type helper | `./clients/staging/rocsparse-unit-test` (or `ctest -R '^rocsparse-unit-test$'`) | No |
-| Internal primitive / kernel / info struct | `HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device` | Yes |
+| Host-pure util / enum / type helper | `ctest -R '^rocsparse-unit-test$'` (or `./clients/staging/rocsparse-unit-test`) | No |
+| Internal primitive / kernel / info struct | `ctest -R '^rocsparse-unit-test-device$'`, or `HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device` | Yes |
+| The PR tier, including both unit binaries | `ctest -L standard` | Yes (the device unit binary needs a GPU; the CPU binary does not) |
 | Argument/format validation only | `./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` | No (bad-arg cases are host-side) |
 
 On the single-GPU container, run through the serializer pinned to device 0:
@@ -87,10 +91,11 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-test --gtest_filter='*
 
 **3. Add the right kind of test:** See [Choosing the Right Test Type](#choosing-the-right-test-type).
 
-**4. Open the PR targeting `develop`:** The merge gate is the TheRock CTest `standard` category
-(`quick` + `pre_checkin` on `rocsparse-test`, excluding `*known_bug*`). Internal Jenkins
-`precheckin` also runs the CPU `rocsparse-unit-test` binary first. Another rocSPARSE team member
-reviews and approves.
+**4. Open the PR targeting `develop`:** The merge gate is the TheRock CTest `standard` category.
+That is `quick` + `pre_checkin` on `rocsparse-test` (excluding `*known_bug*`), plus both unit-test
+binaries, which are CTest tests labeled `standard`. Internal Jenkins `precheckin` launches both
+binaries directly inside `runTestCommand` before the integration filter. Another rocSPARSE team
+member reviews and approves.
 
 ---
 
@@ -114,17 +119,19 @@ split into two binaries:
 
 * **`rocsparse-unit-test`** — fast, **GPU-independent** (CPU-only) unit tests with a minimal gtest
   main. Exercises host-pure components (e.g., enum-trait, index-type and data-type utilities, the
-  csrmv-adaptive analysis logic). Registered with CTest as `rocsparse-unit-test` (no labels). Run
-  it with `ctest -R '^rocsparse-unit-test$'` (a bare `-R rocsparse-unit-test` also matches
-  `rocsparse-unit-test-device`). Legacy Jenkins `precheckin.groovy` runs this binary as an early
-  no-GPU gate; it is **not** included in TheRock's CTest `standard` category (that YAML only
-  labels `rocsparse-test` suites named `quick/*` / `pre_checkin/*`).
+  csrmv-adaptive analysis logic). Registered with CTest as `rocsparse-unit-test` and labeled
+  `quick`, `standard`, `comprehensive`, and `full`. Run it alone with
+  `ctest -R '^rocsparse-unit-test$'` (a bare `-R rocsparse-unit-test` also matches
+  `rocsparse-unit-test-device`). `ctest -L <tier>` includes it in that tier. TheRock selects the
+  installed entry the same way (`-L <tier>` from `bin/rocsparse/CTestTestfile.cmake`).
 * **`rocsparse-unit-test-device`** — **GPU** unit tests that link `hip::device` and launch individual
   library kernels/primitives in isolation, or drive public C-API host paths that need a device
   (e.g., internal scan/find/sort/RLE primitives, collectives, info structs, conversion, preconditioner,
   reordering, generic paths, and host-path level-1/2/3 extras). It must run on a GPU through the
-  serializer and is CTest-labeled `gpu` only, so it is **not** part of the fast CPU gate and is
-  **not** invoked by Jenkins `precheckin` today.
+  serializer. Registered with CTest as `rocsparse-unit-test-device` with the `gpu` label plus
+  `quick`, `standard`, `comprehensive`, and `full`, so the same `ctest -L <tier>` run includes it.
+  gfx1151 uses twin entries (`rocsparse-unit-test_gfx1151`,
+  `rocsparse-unit-test-device_gfx1151`) that also carry `ex_gpu_gfx1151`.
 
 In addition, the integration binary `rocsparse-test` carries the hardware-independent cases that are
 naturally expressed through its YAML pipeline rather than as standalone units:
@@ -136,8 +143,9 @@ naturally expressed through its YAML pipeline rather than as standalone units:
 * **Auxiliary API tests:** `clients/tests/test_auxiliary.cpp` (`TEST(auxiliary_pre_checkin, ...)`)
   covers handle create/destroy and descriptor management directly.
 
-**Framework:** GoogleTest (pinned to `v1.15.2` in `deps/external-gtest.cmake`; auto-downloaded when
-absent via `deps/CMakeLists.txt` `BUILD_GTEST=ON`).
+**Framework:** GoogleTest (1.11.0 or later, found with `find_package(GTest)` in
+`cmake/rocsparse_gtest.cmake`; otherwise built from `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`, or `v1.15.2`
+is downloaded with `-DALLOW_FETCH_DEPS=ON`).
 
 **Location / structure:** unit tests live in `clients/unittests/` (`unit_test_*.cpp` +
 `rocsparse_unit_test_main.cpp`), with the internal library `.cpp` files under test compiled directly
@@ -146,12 +154,14 @@ into the two binaries. This is distinct from the integration suite's three-layer
 expanded by `clients/common/rocsparse_gentest.py` into `rocsparse_test.data`), which drives the
 `_bad_arg` and numerical cases.
 
-**How to run:** `ctest -R '^rocsparse-unit-test$'` (or `./clients/staging/rocsparse-unit-test`)
-runs the CPU-only unit binary (no GPU);
-`HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device` runs the device unit
-binary on the GPU. The integration binary's host-side subset runs via
-`./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` (a device/driver may be initialized,
-but no compute kernel is launched).
+**How to run:** `ctest -L standard` runs both unit binaries together with the `standard`
+integration category (the device binary still needs a GPU). To run one binary,
+`ctest -R '^rocsparse-unit-test$'` (or `./clients/staging/rocsparse-unit-test`) is the CPU-only
+unit binary, and `ctest -R '^rocsparse-unit-test-device$'` (or
+`HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device`) is the device unit
+binary. The same labels exist for `quick`, `comprehensive`, and `full`. The integration binary's
+host-side subset runs via `./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` (a
+device/driver may be initialized, but no compute kernel is launched).
 
 **What is NOT covered by the CPU-only unit binary:** numerical correctness of routines, kernel
 selection, and device-side conversions — these require a GPU and are exercised by
@@ -204,8 +214,12 @@ at one tier — e.g., `./rocsparse-test --gtest_filter=*quick/csrmv*` should fin
 > below).
 
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
-matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`) downloaded and MD5-verified by
-`cmake/ClientMatrices.cmake` (mirror overridable via `ROCSPARSE_TEST_MIRROR`). The runtime matrix
+matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`), MD5-verified and converted by
+`cmake/ClientMatrices.cmake`. The `.tar.gz` archives are stored with DVC in `clients/matrices/`
+(remote `sparse-matrices`; run `dvc pull -R projects/rocsparse/clients/matrices` from the repository
+root). Only with
+`ALLOW_FETCH_DEPS=ON` are missing archives downloaded from SuiteSparse (mirror overridable via
+`ROCSPARSE_TEST_MIRROR`). The runtime matrix
 directory is set with `--matrices-dir` or `ROCSPARSE_CLIENTS_MATRICES_DIR`.
 
 **What requires GPU hardware:** all numerical-correctness and conversion cases.
@@ -218,8 +232,10 @@ pre-checkin filter twice — once with `HSA_XNACK=0` and once with `HSA_XNACK=1`
 memory. `rtest.xml` also defines a dedicated `hmm` set (`--gtest_filter=*csrmv_managed*`, run with
 `HSA_XNACK=1`).
 
-**What runs on PRs:** the CTest `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`)
-on changed projects, via TheRock CI (default `test_type: standard`).
+**What runs on PRs:** the CTest `standard` category on changed projects, via TheRock CI (default
+`test_type: standard`). For `rocsparse-test` that is `quick` + `pre_checkin`, excluding
+`*known_bug*`. `rocsparse-unit-test` and `rocsparse-unit-test-device` are included because those
+CTest tests are labeled `standard`.
 
 **What runs nightly:** the `comprehensive` category (adds the `nightly` tier) via the TheRock nightly
 workflows; the legacy Jenkins `extended.groovy` mirrors this with `*nightly*` (timeout ~600 min).
@@ -289,11 +305,15 @@ type or index combination extends coverage without new hand-written cases.
 The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 (`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
 (`.github/scripts/therock_configure_ci.py`). It builds and tests only the projects whose files
-changed and, by default, runs the CTest **`standard`** category — i.e., `quick` + `pre_checkin`,
-excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). Those patterns apply only to
-the `rocsparse-test` binary; `rocsparse-unit-test` and `rocsparse-unit-test-device` are separate
-CTest names and are not in the `standard` (or any other) category. The scope can be widened per PR
-with labels (`test:rocsparse`, `test_type:comprehensive` / `test_type:full`); doc-only changes
+changed and, by default, runs the CTest **`standard`** category. For `rocsparse-test` that is
+`quick` + `pre_checkin`, excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). Those
+GTest patterns apply only to `rocsparse-test`. `rocsparse-unit-test` and
+`rocsparse-unit-test-device` are separate CTest tests labeled `quick`, `standard`,
+`comprehensive`, and `full` (`clients/unittests/CMakeLists.txt`), so `ctest -L standard` runs them
+with that category. TheRock selects them from the installed `bin/rocsparse/CTestTestfile.cmake`
+with `-L <tier>`; gfx1151 also selects the `*_gfx1151` entries with `-L ex_gpu_gfx1151`. The scope
+can be widened per PR with labels (`test:rocsparse`, `test_type:comprehensive` /
+`test_type:full`); doc-only changes
 (`*.md`, `docs/*`) skip CI. rocSPARSE and hipSPARSE share TheRock's `sparse` component
 (`projects_to_test: [rocsparse, hipsparse]` in `.github/scripts/therock_matrix.py`), so a PR touching
 either one builds and tests both. Broader tiers run in the TheRock nightly workflows
@@ -303,18 +323,20 @@ either one builds and tests both. Broader tiers run in the TheRock nightly workf
 
 Internal AMD **Jenkins** pipelines (`.jenkins/`) also exist but are legacy: they run across a range
 of GPUs (gfx908 / gfx90a / gfx942 / gfx950 / gfx1201) on cron/nightly triggers and mirror the same GTest filters —
-`precheckin.groovy` runs `rocsparse-unit-test` first (`runUnitTestCommand`) then `*quick*:*pre_checkin*`
-on `rocsparse-test`, `extended.groovy` runs `*nightly*`, `asan.groovy` runs `*quick*:*pre_checkin*`
-under AddressSanitizer (integration binary only; it does not run the unit-test binaries), and
-`codecov.groovy` runs `rocsparse-unit-test` then uploads coverage. All Jenkins `rocsparse-test`
-filters exclude `*known_bug*`. The device unit binary is not invoked by `precheckin` or `asan`.
+`precheckin.groovy` calls `runTestCommand`, which launches `rocsparse-unit-test` and
+`rocsparse-unit-test-device` directly (not via `ctest -L`) and then runs `*quick*:*pre_checkin*`
+on `rocsparse-test`. `extended.groovy` runs `*nightly*`. `asan.groovy` runs `*quick*:*pre_checkin*`
+under AddressSanitizer on the integration binary only; it does not run the unit-test binaries.
+`codecov.groovy` launches both unit binaries before `make coverage`, then uploads coverage. All
+Jenkins `rocsparse-test` filters exclude `*known_bug*`. The device unit binary is part of
+`precheckin`'s `runTestCommand`. It is not invoked by `asan`.
 
 ### Validation Gates and Ownership
 
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
 | Build (Linux; changed projects) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`static`/`debug` (legacy) |
-| Dedicated unit tests (`rocsparse-unit-test*`) | Partial | Component team | CPU binary: Jenkins `precheckin` / `codecov`. Device binary: local / `make coverage` only. Neither CTest name matches `test_categories.yaml`, so TheRock `standard` does not run them. |
+| Dedicated unit tests (`rocsparse-unit-test*`) | Yes | Component team | Both binaries are CTest tests labeled `quick` / `standard` / `comprehensive` / `full`, so TheRock `ctest -L standard` runs them. Jenkins `precheckin` also launches both inside `runTestCommand`. |
 | Bad-arg / auxiliary tests | Yes | Component team | Inside `rocsparse-test`, CTest `standard` (`quick`+`pre_checkin`) |
 | Integration tests | Yes | Component team | `standard` category, excluding `*known_bug*` |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
@@ -324,7 +346,9 @@ filters exclude `*known_bug*`. The device unit binary is not invoked by `prechec
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
 
-**Build command pattern (Jenkins pre-checkin):**
+**Build command pattern (Jenkins pre-checkin):** unless the node's matrices cache is complete,
+Jenkins first runs `dvc pull -R projects/rocsparse/clients/matrices` (`pullMatricesCommand` in
+`.jenkins/common.groovy`).
 
 ```bash
 ./install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices \
@@ -335,7 +359,7 @@ filters exclude `*known_bug*`. The device unit binary is not invoked by `prechec
 
 | Status | Applies to |
 |---|---|
-| Trusted gate | TheRock CI `standard` category (`quick`+`pre_checkin` on `rocsparse-test`, excluding `*known_bug*`) on changed projects; Jenkins `precheckin` also runs `rocsparse-unit-test` |
+| Trusted gate | TheRock CI `standard` category on changed projects: `quick`+`pre_checkin` on `rocsparse-test` (excluding `*known_bug*`) and both unit-test binaries via their `standard` CTest label. Jenkins `precheckin` launches both unit binaries directly |
 | Informational | Coverage upload (Codecov), including best-effort `rocsparse-unit-test*` under `coverage_analysis` (failures ignored); nightly `*nightly*` / comprehensive results; ASAN lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
@@ -370,6 +394,13 @@ The report is generated under `coverage-report/`, with exclusions applied by
 do not abort the coverage upload. Both binaries are passed as extra `llvm-cov` `-object`s, to
 attribute coverage to library translation units compiled into the test executables. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
 with flag `rocSPARSE`.
+
+`make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
+profiles (`rocsparse-unit-test` and `rocsparse-unit-test-device`) and the `rocsparse-test` profiles
+separately and writes `coverage-report/coverage-unit.info` and
+`coverage-report/coverage-integration.info`. Jenkins uploads them with the Codecov flags
+`rocSPARSE-unit` and `rocSPARSE-integration`, only if `coverage_split` succeeds; the combined
+`rocSPARSE` flag covers both. `make coverage_cleanup` deletes the profiles of a previous run.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
@@ -473,7 +504,6 @@ device configurations are not ASAN-covered.
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
 | Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `rocsparse-test` host instrumentation does not; reports are single-wavefront |
-| Dedicated unit binaries not in TheRock `standard`; device binary not in Jenkins `precheckin` | Medium | Medium | CPU binary on Jenkins `precheckin`/`codecov`; device binary local + `make coverage` (failures ignored) |
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
