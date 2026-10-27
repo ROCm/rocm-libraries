@@ -7,7 +7,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -29,11 +32,83 @@ namespace hipblaslt::hostnumerics
     {
         struct ComparisonEvidence
         {
-            ComparisonReport                   comparison;
-            ComparisonReport                   unitsInLastPlace;
-            double                             relativeFrobeniusError = 0.0;
-            std::optional<ComparisonTolerance> allCloseTolerance;
+            ComparisonReport                     comparison;
+            ComparisonReport                     unitsInLastPlace;
+            double                               relativeFrobeniusError = 0.0;
+            std::optional<ComparisonTolerance>   allCloseTolerance;
+            std::optional<MatmulAllCloseFailure> allCloseFailure;
         };
+
+        bool worseError(double candidate, double current)
+        {
+            return (std::isnan(candidate) && !std::isnan(current)) || candidate > current;
+        }
+
+        MatmulAllCloseFailure describeAllCloseFailure(const Tensor&           expected,
+                                                      const Tensor&           observed,
+                                                      std::span<const size_t> order)
+        {
+            const bool complex = roc::hostnumerics::scalarTypeInfo(expected.type()).category
+                                 == roc::hostnumerics::ScalarCategory::Complex;
+            const size_t          components = complex ? 2 : 1;
+            MatmulAllCloseFailure failure;
+            failure.comparedCount                = expected.elementCount() * components;
+            auto options                         = allCloseComparisonOptions(0.1, 0.1, false);
+            options.computeElementwiseStatistics = false;
+            options.computeFrobenius             = false;
+
+            // Bound diagnostic storage even when every component of a large output fails.
+            constexpr size_t chunkSize = 2048;
+            for(size_t first = 0; first < expected.elementCount();)
+            {
+                const size_t        count = std::min(chunkSize, expected.elementCount() - first);
+                std::vector<double> reference(count * components), result(count * components);
+                expected.shape().forEachCoordinate(
+                    roc::hostnumerics::IndexRange{first, first + count, 1},
+                    order,
+                    [&](size_t index, std::span<const size_t> coordinates) {
+                        const size_t offset = (index - first) * components;
+                        if(complex)
+                        {
+                            const auto want   = expected.loadAs<std::complex<double>>(coordinates);
+                            const auto got    = observed.loadAs<std::complex<double>>(coordinates);
+                            reference[offset] = want.real();
+                            reference[offset + 1] = want.imag();
+                            result[offset]        = got.real();
+                            result[offset + 1]    = got.imag();
+                        }
+                        else
+                        {
+                            reference[offset] = expected.loadAs<double>(coordinates);
+                            result[offset]    = observed.loadAs<double>(coordinates);
+                        }
+                    });
+                options.maxReportedMismatches = reference.size();
+                // The benchmark's relative tolerance is scaled by the GPU result.
+                const auto report = compare(Tensor::copyNativeStorage(std::span(reference)),
+                                            Tensor::copyNativeStorage(std::span(result)),
+                                            options);
+                for(const auto& sample : report.reportedMismatches)
+                {
+                    const double error = std::abs(sample.observed - sample.expected);
+                    if(failure.badCount == 0 || worseError(error, failure.error))
+                    {
+                        const auto coordinates = expected.shape().coordinates(
+                            first + sample.index / components, order);
+                        failure.row       = coordinates.empty() ? 0 : coordinates[0];
+                        failure.column    = coordinates.size() < 2 ? 0 : coordinates[1];
+                        failure.batch     = coordinates.size() < 3 ? 0 : coordinates[2];
+                        failure.imaginary = sample.index % components != 0;
+                        failure.observed  = sample.expected;
+                        failure.expected  = sample.observed;
+                        failure.error     = error;
+                    }
+                    ++failure.badCount;
+                }
+                first += count;
+            }
+            return failure;
+        }
 
         ComparisonOptions unitComparisonOptions(ScalarType type)
         {
@@ -87,7 +162,7 @@ namespace hipblaslt::hostnumerics
                 if(validation.compareAllClose)
                     options = tolerance.absolute != 0.0 || tolerance.relative != 0.0
                                   ? allCloseComparisonOptions(
-                                        tolerance.absolute, tolerance.relative, true)
+                                      tolerance.absolute, tolerance.relative, true)
                                   : unitComparisonOptions(expected.type());
                 else
                     options.allClose = false;
@@ -151,7 +226,9 @@ namespace hipblaslt::hostnumerics
 
             if(searchAllClose && expected.elementCount() != 0)
             {
-                ComparisonOptions options            = allCloseComparisonOptions(1e-8, 1e-5, false);
+                ComparisonOptions options = allCloseComparisonOptions(1e-8, 1e-5, false);
+                options.complexComparisonMode
+                    = roc::hostnumerics::ComplexComparisonMode::Componentwise;
                 options.computeElementwiseStatistics = false;
                 options.computeFrobenius             = false;
                 options.maxReportedMismatches        = 0;
@@ -165,13 +242,15 @@ namespace hipblaslt::hostnumerics
                     1e-1,
                 };
                 result.allCloseTolerance = findAllCloseTolerance(
-                    observed,
                     expected,
+                    observed,
                     candidates,
                     candidates,
                     options,
                     roc::hostnumerics::IndexRange::all(observed.elementCount()),
                     order);
+                if(!result.allCloseTolerance)
+                    result.allCloseFailure = describeAllCloseFailure(expected, observed, order);
             }
             return result;
         }
@@ -188,16 +267,18 @@ namespace hipblaslt::hostnumerics
         // Each output is searched independently. The componentwise maxima form
         // a tolerance that accepts every successful output; any failed search
         // dominates the aggregate regardless of output order.
-        bool   allCloseCompared = false;
-        bool   allCloseFailed   = false;
-        double requiredAbsolute = 0.0;
-        double requiredRelative = 0.0;
+        bool   allCloseCompared   = false;
+        bool   allCloseFailed     = false;
+        double requiredAbsolute   = 0.0;
+        double requiredRelative   = 0.0;
+        size_t allCloseComponents = 0;
         // All-close already rejects every non-finite mismatch. Norm-only validation needs the
         // separate consistency evidence because a Frobenius reduction cannot represent it.
         const bool needsSpecialValueStatistics = options.compareNorm && !options.compareAllClose;
 
-        for(const auto& validationCase : cases)
+        for(size_t caseIndex = 0; caseIndex < cases.size(); ++caseIndex)
         {
+            const auto&                     validationCase = cases[caseIndex];
             std::vector<ComparisonEvidence> outputReports;
             outputReports.reserve(validationCase.outputs.size());
             for(const auto& output : validationCase.outputs)
@@ -242,6 +323,12 @@ namespace hipblaslt::hostnumerics
                         continue;
 
                     allCloseCompared = true;
+                    allCloseComponents
+                        += expected.elementCount()
+                           * (roc::hostnumerics::scalarTypeInfo(expected.type()).category
+                                      == roc::hostnumerics::ScalarCategory::Complex
+                                  ? 2
+                                  : 1);
                     if(report.allCloseTolerance)
                     {
                         requiredAbsolute
@@ -250,7 +337,23 @@ namespace hipblaslt::hostnumerics
                             = std::max(requiredRelative, report.allCloseTolerance->relative);
                     }
                     else
+                    {
                         allCloseFailed = true;
+                        auto failure   = *report.allCloseFailure;
+                        failure.gemm   = caseIndex;
+                        if(expected.shape().rank() != 3)
+                            failure.batch = outputIndex;
+                        if(!summary.allCloseFailure)
+                            summary.allCloseFailure = failure;
+                        else
+                        {
+                            const size_t totalBad
+                                = summary.allCloseFailure->badCount + failure.badCount;
+                            if(worseError(failure.error, summary.allCloseFailure->error))
+                                summary.allCloseFailure = failure;
+                            summary.allCloseFailure->badCount = totalBad;
+                        }
+                    }
                 }
             }
 
@@ -313,10 +416,23 @@ namespace hipblaslt::hostnumerics
         {
             summary.absoluteTolerance = allCloseFailed ? 1.0 : requiredAbsolute;
             summary.relativeTolerance = allCloseFailed ? 1.0 : requiredRelative;
+            if(summary.allCloseFailure)
+                summary.allCloseFailure->comparedCount = allCloseComponents;
         }
         if(options.computeUlp && ulpCount != 0)
             summary.averageUlp = ulpSum / ulpCount;
         summary.passed = failedChecks == 0;
         return summary;
+    }
+
+    std::string formatAllCloseFailure(const MatmulAllCloseFailure& failure)
+    {
+        std::ostringstream output;
+        output << std::setprecision(9) << failure.badCount << " of " << failure.comparedCount
+               << " elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is GEMM "
+               << failure.gemm << ", batch " << failure.batch << ", row " << failure.row
+               << ", column " << failure.column << (failure.imaginary ? " (imaginary part)" : "")
+               << ": result " << failure.observed << ", reference " << failure.expected;
+        return output.str();
     }
 } // namespace hipblaslt::hostnumerics

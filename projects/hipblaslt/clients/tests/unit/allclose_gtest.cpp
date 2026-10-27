@@ -1,15 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for the allclose check in allclose.hpp, which hipblaslt-bench -v runs
-// against the CPU reference. See README.md in this directory for the HostUnit/smoke_ naming.
-//
-// The check tries a fixed list of (atol, rtol) pairs, tightest first, and reports the first pair
-// under which every element satisfies |cpu - gpu| <= atol + rtol * |gpu|. A reported pair of 1
-// means no pair in the list passed, and the bench prints "failed" in its atol and rtol columns.
+// Exercises the all-close search and failure reports used by hipblaslt-bench.
 
-#include "allclose.hpp"
 #include "hipblaslt_datatype2string.hpp"
+#include <hipblaslt/hostnumerics/MatmulValidation.hpp>
 
 #include <gtest/gtest.h>
 
@@ -22,6 +17,8 @@
 
 namespace
 {
+    using namespace hipblaslt::hostnumerics;
+    using namespace roc::hostnumerics;
     template <typename F>
     void with_type(hipDataType type, F&& f)
     {
@@ -94,20 +91,31 @@ namespace
         }
     };
 
-    // Runs the strided-batch check the bench uses on one cpu/gpu pair.
-    bool check(Matrices& cpu, Matrices& gpu, double& atol, double& rtol)
+    Tensor asTensor(Matrices& matrix)
     {
-        return allclose_check_general('F',
-                                      cpu.m,
-                                      cpu.n,
-                                      cpu.ld,
-                                      cpu.stride(),
-                                      cpu.data(),
-                                      gpu.data(),
-                                      cpu.batches,
-                                      atol,
-                                      rtol,
-                                      cpu.type);
+        return Tensor::copyEncodedBackingStorage(
+            *getScalarType(matrix.type),
+            Layout(Shape{size_t(matrix.m), size_t(matrix.n), size_t(matrix.batches)},
+                   {1, matrix.ld, matrix.stride()},
+                   0),
+            std::as_bytes(std::span(matrix.bytes)));
+    }
+
+    bool check(Matrices&              cpu,
+               Matrices&              gpu,
+               double&                atol,
+               double&                rtol,
+               MatmulAllCloseFailure* failure = nullptr)
+    {
+        MatmulValidationCase testCase;
+        testCase.outputs.emplace_back(asTensor(cpu), asTensor(gpu));
+        const auto summary
+            = validateMatmulOutputs({.searchAllClose = true}, std::span(&testCase, 1));
+        atol = summary.absoluteTolerance;
+        rtol = summary.relativeTolerance;
+        if(failure)
+            *failure = summary.allCloseFailure.value_or(MatmulAllCloseFailure{});
+        return !summary.allCloseFailure;
     }
 
     class HostUnitAllcloseTypes : public ::testing::TestWithParam<hipDataType>
@@ -199,16 +207,15 @@ namespace
 
     TEST(HostUnitAllclose, smoke_EmptyMatrixPassesAndReportsZero)
     {
-        Matrices        cpu(HIP_R_32F, 0, 2, 4, 2);
-        Matrices        gpu(HIP_R_32F, 0, 2, 4, 2);
-        double          atol = 1, rtol = 1;
-        AllcloseFailure failure;
-        EXPECT_TRUE(allclose_check_general(
-            'F', 0, 2, 4, 8, cpu.data(), gpu.data(), 2, atol, rtol, HIP_R_32F, &failure));
+        Matrices              cpu(HIP_R_32F, 0, 2, 4, 2);
+        Matrices              gpu(HIP_R_32F, 0, 2, 4, 2);
+        double                atol = 1, rtol = 1;
+        MatmulAllCloseFailure failure;
+        EXPECT_TRUE(check(cpu, gpu, atol, rtol, &failure));
         EXPECT_EQ(atol, 0);
         EXPECT_EQ(rtol, 0);
-        EXPECT_EQ(failure.compared_count, 0u);
-        EXPECT_EQ(failure.bad_count, 0u);
+        EXPECT_EQ(failure.comparedCount, 0u);
+        EXPECT_EQ(failure.badCount, 0u);
     }
 
     // Three wrong elements over three batches. Row 3 is padding (ld 4, M 3), so a difference
@@ -225,32 +232,21 @@ namespace
         gpu.set(2, 0, 0, 1);
         gpu.set(1, 3, 0, 7);
 
-        double          atol = 0, rtol = 0;
-        AllcloseFailure failure;
-        EXPECT_FALSE(allclose_check_general('F',
-                                            cpu.m,
-                                            cpu.n,
-                                            cpu.ld,
-                                            cpu.stride(),
-                                            cpu.data(),
-                                            gpu.data(),
-                                            cpu.batches,
-                                            atol,
-                                            rtol,
-                                            HIP_R_32F,
-                                            &failure));
+        double                atol = 0, rtol = 0;
+        MatmulAllCloseFailure failure;
+        EXPECT_FALSE(check(cpu, gpu, atol, rtol, &failure));
         EXPECT_EQ(atol, 1);
-        EXPECT_EQ(failure.bad_count, 3u);
-        EXPECT_EQ(failure.compared_count, 18u);
+        EXPECT_EQ(failure.badCount, 3u);
+        EXPECT_EQ(failure.comparedCount, 18u);
         EXPECT_EQ(failure.batch, 2);
         EXPECT_EQ(failure.row, 1);
-        EXPECT_EQ(failure.col, 1);
-        EXPECT_FALSE(failure.imag);
-        EXPECT_EQ(failure.got, 9);
+        EXPECT_EQ(failure.column, 1);
+        EXPECT_FALSE(failure.imaginary);
+        EXPECT_EQ(failure.observed, 9);
         EXPECT_EQ(failure.expected, 4);
-        EXPECT_EQ(allclose_failure_message(failure),
+        EXPECT_EQ(formatAllCloseFailure(failure),
                   "3 of 18 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is "
-                  "batch 2, row 1, column 1: result 9, reference 4");
+                  "GEMM 0, batch 2, row 1, column 1: result 9, reference 4");
     }
 
     TEST(HostUnitAllclose, smoke_FailureInImaginaryPartIsLabeled)
@@ -259,61 +255,93 @@ namespace
         Matrices gpu(HIP_C_32F, 3, 2, 4, 1);
         reinterpret_cast<std::complex<float>*>(gpu.data())[1 * gpu.ld + 2].imag(3);
 
-        double          atol = 0, rtol = 0;
-        AllcloseFailure failure;
-        EXPECT_FALSE(allclose_check_general(
-            'F', 3, 2, 4, 8, cpu.data(), gpu.data(), 1, atol, rtol, HIP_C_32F, &failure));
-        EXPECT_EQ(failure.bad_count, 1u);
+        double                atol = 0, rtol = 0;
+        MatmulAllCloseFailure failure;
+        EXPECT_FALSE(check(cpu, gpu, atol, rtol, &failure));
+        EXPECT_EQ(failure.badCount, 1u);
         EXPECT_EQ(failure.row, 2);
-        EXPECT_EQ(failure.col, 1);
-        EXPECT_TRUE(failure.imag);
-        EXPECT_EQ(failure.got, 3);
+        EXPECT_EQ(failure.column, 1);
+        EXPECT_TRUE(failure.imaginary);
+        EXPECT_EQ(failure.observed, 3);
         EXPECT_EQ(failure.expected, 0);
-        EXPECT_NE(allclose_failure_message(failure).find("column 1 (imaginary part)"),
+        EXPECT_NE(formatAllCloseFailure(failure).find("column 1 (imaginary part)"),
                   std::string::npos);
     }
 
-    // The pair order matches the search: a larger atol is looser whatever the rtol, and a pair
-    // of 1 (failed) beats every pair from the list.
-    TEST(HostUnitAllclose, smoke_MergePairKeepsLooserPair)
+    TEST(HostUnitAllclose, smoke_CombinedPairAcceptsEveryOutput)
     {
-        double atol = 0, rtol = 0;
-        allclose_merge_pair(atol, rtol, 1e-6, 1e-3);
-        EXPECT_EQ(atol, 1e-6);
-        EXPECT_EQ(rtol, 1e-3);
-        allclose_merge_pair(atol, rtol, 1e-4, 1e-6);
-        EXPECT_EQ(atol, 1e-4);
-        EXPECT_EQ(rtol, 1e-6);
-        allclose_merge_pair(atol, rtol, 1e-6, 1e-1);
-        EXPECT_EQ(atol, 1e-4);
-        EXPECT_EQ(rtol, 1e-6);
-        allclose_merge_pair(atol, rtol, 1, 1);
-        allclose_merge_pair(atol, rtol, 1e-1, 1e-1);
-        EXPECT_EQ(atol, 1);
-        EXPECT_EQ(rtol, 1);
+        MatmulValidationCase testCase;
+        testCase.outputs.emplace_back(Tensor(1.0), Tensor(1.005));
+        testCase.outputs.emplace_back(Tensor(0.0), Tensor(5e-5));
+        auto summary = validateMatmulOutputs({.searchAllClose = true}, std::span(&testCase, 1));
+        EXPECT_EQ(summary.absoluteTolerance, 1e-4);
+        EXPECT_EQ(summary.relativeTolerance, 1e-2);
+        EXPECT_FALSE(summary.allCloseFailure);
+        // Both independently required tolerances survive the aggregation.
+        auto options = allCloseComparisonOptions(
+            summary.absoluteTolerance, summary.relativeTolerance, false);
+        for(const auto& [cpu, gpu] : testCase.outputs)
+            EXPECT_TRUE(compare(cpu, gpu, options).passed());
+        testCase.outputs.emplace_back(Tensor(0.0), Tensor(1.0));
+        summary = validateMatmulOutputs({.searchAllClose = true}, std::span(&testCase, 1));
+        EXPECT_EQ(summary.absoluteTolerance, 1);
+        EXPECT_EQ(summary.relativeTolerance, 1);
     }
 
-    // The bench folds pointer-array batches one at a time; the worst element keeps its batch,
-    // and a NaN result ranks worse than any finite error.
-    TEST(HostUnitAllclose, smoke_MergeFailureKeepsWorstAndItsBatch)
+    TEST(HostUnitAllclose, smoke_MergedFailureKeepsWorstAndItsBatch)
     {
-        AllcloseFailure total;
-        AllcloseFailure one;
-        one.compared_count = 6;
-        one.bad_count      = 1;
-        one.error          = 2;
-        allclose_merge_failure(total, one, 0);
-        one.bad_count = 0;
-        allclose_merge_failure(total, one, 1);
-        one.bad_count = 1;
-        one.error     = std::numeric_limits<double>::quiet_NaN();
-        allclose_merge_failure(total, one, 3);
-        one.error = 100;
-        allclose_merge_failure(total, one, 4);
+        MatmulValidationCase testCase;
+        for(double value : {3.0, 1.0, std::numeric_limits<double>::quiet_NaN(), 100.0})
+            testCase.outputs.emplace_back(Tensor(1.0), Tensor(value));
+        const auto summary
+            = validateMatmulOutputs({.searchAllClose = true}, std::span(&testCase, 1));
+        ASSERT_TRUE(summary.allCloseFailure);
+        const auto& failure = *summary.allCloseFailure;
+        EXPECT_EQ(failure.comparedCount, 4u);
+        EXPECT_EQ(failure.badCount, 3u);
+        EXPECT_EQ(failure.batch, 2u);
+        EXPECT_TRUE(std::isnan(failure.error));
+        // The search remains informational for benchmark exit status.
+        EXPECT_TRUE(summary.passed);
+    }
 
-        EXPECT_EQ(total.compared_count, 24u);
-        EXPECT_EQ(total.bad_count, 3u);
-        EXPECT_EQ(total.batch, 3);
-        EXPECT_TRUE(std::isnan(total.error));
+    TEST(HostUnitAllclose, smoke_RelativeToleranceUsesResultMagnitude)
+    {
+        Matrices cpu(HIP_R_64F, 1, 1, 1, 1), gpu(HIP_R_64F, 1, 1, 1, 1);
+        cpu.set(0, 0, 0, 0.5);
+        gpu.set(0, 0, 0, 0.66);
+        double atol = 0, rtol = 0;
+        EXPECT_TRUE(check(cpu, gpu, atol, rtol));
+        EXPECT_EQ(atol, 0.1);
+        EXPECT_EQ(rtol, 0.1);
+    }
+
+    TEST(HostUnitAllclose, smoke_WorstElementBeyondDiagnosticChunkIsReported)
+    {
+        Matrices cpu(HIP_R_32F, 5000, 1, 5001, 1), gpu(HIP_R_32F, 5000, 1, 5001, 1);
+        for(int64_t row = 0; row < 5000; ++row)
+        {
+            cpu.set(0, row, 0, 0);
+            gpu.set(0, row, 0, row == 4999 ? 100 : 1);
+        }
+        double                atol = 0, rtol = 0;
+        MatmulAllCloseFailure failure;
+        EXPECT_FALSE(check(cpu, gpu, atol, rtol, &failure));
+        EXPECT_EQ(failure.comparedCount, 5000u);
+        EXPECT_EQ(failure.badCount, 5000u);
+        EXPECT_EQ(failure.row, 4999u);
+        EXPECT_EQ(failure.observed, 100);
+    }
+
+    TEST(HostUnitAllclose, smoke_ComplexFailuresCountEachComponent)
+    {
+        Matrices cpu(HIP_C_32F, 1, 1, 1, 1), gpu(HIP_C_32F, 1, 1, 1, 1);
+        reinterpret_cast<std::complex<float>*>(gpu.data())[0] = {2, 3};
+        double                atol = 0, rtol = 0;
+        MatmulAllCloseFailure failure;
+        EXPECT_FALSE(check(cpu, gpu, atol, rtol, &failure));
+        EXPECT_EQ(failure.comparedCount, 2u);
+        EXPECT_EQ(failure.badCount, 2u);
+        EXPECT_TRUE(failure.imaginary);
     }
 }
