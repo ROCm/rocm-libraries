@@ -130,25 +130,63 @@ static void orderForwardInRegion(RegionDAG& dag, StinkyInstruction* before,
     orderInRegion(dag, before, after, what);
 }
 
+/// signal/wait of each split all-wave barrier, keyed by both halves.
+using SplitBarrierPairs =
+    std::unordered_map<StinkyInstruction*, std::pair<StinkyInstruction*, StinkyInstruction*>>;
+
+static SplitBarrierPairs splitBarrierPairs(const RegionDAG& dag) {
+    SplitBarrierPairs pairs;
+    StinkyInstruction* pendingSignal = nullptr;
+    for (const DAGNode& node : dag.nodes) {
+        StinkyInstruction& inst = *node.inst;
+        if (isBarrierSignal(inst) && isSplitBarrierAllWave(inst)) {
+            pendingSignal = &inst;
+            continue;
+        }
+        if (isBarrierWait(inst) && isSplitBarrierAllWave(inst) && pendingSignal) {
+            pairs[pendingSignal] = {pendingSignal, &inst};
+            pairs[&inst] = {pendingSignal, &inst};
+            pendingSignal = nullptr;
+            continue;
+        }
+        if (isBarrier(inst)) pendingSignal = nullptr;
+    }
+    return pairs;
+}
+
 /// Pin the fence a cross-agent hazard is covered by between the two ends. Scheduling honours
 /// register edges and memory tokens only; a loop-carried pair shares neither, because its ends
 /// name two generations of one slot and therefore two different tokens. Without this the fence
 /// leaves the window and the wait pass finds an unfenced path.
+///
+/// Both halves are pinned. `owner.anchor` names the fence by its signal, and the token edges all
+/// land on the wait, so pinning the anchor alone gives the halves different windows to drift in.
 static void pinGirFenceWindows(RegionDAG& dag, const GirFrameHazardAnalysis::Result& hazards,
                                const GirPlanFenceCoverage& fenceCoverage) {
     const size_t covered = std::min(hazards.hazards.size(), fenceCoverage.byHazard.size());
+    if (covered == 0) return;
+    const SplitBarrierPairs pairs = splitBarrierPairs(dag);
     for (size_t h = 0; h < covered; ++h) {
         const GirFrameHazard& hazard = hazards.hazards[h];
         if (!hazard.crossAgent) continue;
         for (const GirHazardFenceOwner& owner : fenceCoverage.byHazard[h].owners) {
             if (owner.anchor == nullptr) continue;
+            auto pair = pairs.find(owner.anchor);
+            StinkyInstruction* signal = pair == pairs.end() ? owner.anchor : pair->second.first;
+            StinkyInstruction* wait = pair == pairs.end() ? owner.anchor : pair->second.second;
             const BasicBlock* anchorBlock = owner.anchor->getParent();
-            if (anchorBlock == hazard.producerBlock)
-                orderForwardInRegion(dag, hazard.producer, owner.anchor,
+            if (anchorBlock == hazard.producerBlock) {
+                orderForwardInRegion(dag, hazard.producer, signal,
                                      "GIR fence cannot be pinned after its hazard producer");
-            if (anchorBlock == hazard.consumerBlock)
-                orderForwardInRegion(dag, owner.anchor, hazard.consumer,
+                orderForwardInRegion(dag, hazard.producer, wait,
+                                     "GIR fence cannot be pinned after its hazard producer");
+            }
+            if (anchorBlock == hazard.consumerBlock) {
+                orderForwardInRegion(dag, signal, hazard.consumer,
                                      "GIR fence cannot be pinned before its hazard consumer");
+                orderForwardInRegion(dag, wait, hazard.consumer,
+                                     "GIR fence cannot be pinned before its hazard consumer");
+            }
         }
     }
 }

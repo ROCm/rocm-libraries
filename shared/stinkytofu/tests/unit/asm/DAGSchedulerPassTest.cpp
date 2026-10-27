@@ -2705,3 +2705,49 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
     EXPECT_EQ(shapes[0], shapes[1]);
     EXPECT_EQ(shapes[0], "WddWWWWWWWdddddd");
 }
+
+// `owner.anchor` names the fence by its signal, and the token edges all land on the wait, so
+// pinning the anchor alone gives the two halves different windows to drift in.
+TEST_F(DAGSchedulerPassTest, GirFenceWindowPinsBothHalvesOfTheBarrier) {
+    StinkyInstruction* producer = createMovableTensorLoad(bb, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    StinkyInstruction* consumer =
+        createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/1);
+
+    std::vector<StinkyInstruction*> region;
+    for (IRBase& ir : *bb)
+        if (ir.getType() == IRBase::IRType::StinkyTofu)
+            region.push_back(cast<StinkyInstruction>(&ir));
+
+    GirFrameHazardAnalysis::Result hazards;
+    GirFrameHazard hazard;
+    hazard.kind = GirHazardKind::RAW;
+    hazard.producer = producer;
+    hazard.consumer = consumer;
+    hazard.producerBlock = bb;
+    hazard.consumerBlock = bb;
+    hazard.crossAgent = true;
+    hazards.hazards.push_back(hazard);
+
+    GirPlanFenceCoverage coverage;
+    GirHazardFenceCover cover;
+    cover.hasHazardPath = true;
+    GirHazardFenceOwner owner;
+    owner.anchor = signal;
+    cover.owners.push_back(owner);
+    coverage.byHazard.push_back(cover);
+
+    dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(region);
+    dag::addGirFrameHazardEdges(regionDag, hazards, coverage);
+
+    const auto ordered = [&](StinkyInstruction* before, StinkyInstruction* after) {
+        auto from = regionDag.instToId.find(before);
+        auto to = regionDag.instToId.find(after);
+        return from != regionDag.instToId.end() && to != regionDag.instToId.end() &&
+               regionDag.graph[from->second].contains(to->second);
+    };
+    EXPECT_TRUE(ordered(producer, signal));
+    EXPECT_TRUE(ordered(producer, wait));
+    EXPECT_TRUE(ordered(signal, consumer));
+    EXPECT_TRUE(ordered(wait, consumer)) << "the wait needs the consumer pin too";
+}
