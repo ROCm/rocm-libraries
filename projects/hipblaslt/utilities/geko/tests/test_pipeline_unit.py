@@ -355,21 +355,24 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
         return pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])
 
     monkeypatch.setattr(pipeline.optim, "analyze", _fake_analyze)
-    monkeypatch.setattr(
-        pipeline.library,
-        "from_dataframe",
-        lambda *_a, **_k: _FakeLibs(),
-    )
-    monkeypatch.setattr(
-        pipeline.library,
-        "from_full_dataframe",
-        lambda *_a, **_k: _FakeLibs(),
-    )
+    uid_checkouts = {}
+
+    def _fake_from_dataframe(*_a, **kwargs):
+        uid_checkouts["final"] = kwargs.get("hipblaslt_path")
+        return _FakeLibs()
+
+    def _fake_from_full_dataframe(*_a, **kwargs):
+        uid_checkouts["full"] = kwargs.get("hipblaslt_path")
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library, "from_dataframe", _fake_from_dataframe)
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", _fake_from_full_dataframe)
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(workdir))
     assert (workdir / "final_libs" / "lib.yaml").is_file()
     assert extracted["match_table"] == hip / "build/release/device-library/MatchTable.yaml"
     assert analyze_called["ref_custom_lib_dir"] is None
+    assert uid_checkouts == {"final": hip, "full": hip}
 
 
 def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(

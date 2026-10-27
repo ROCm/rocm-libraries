@@ -134,6 +134,7 @@ def merge_solutions(
     epilogues: bool = True,
     pattern: str = "**/3_LibraryLogic/*.yaml",
     trim_size: bool = True,
+    hipblaslt_path: str | Path | None = None,
 ) -> LibraryCollection:
     """Merge optimized solutions from multiple build directories into single libraries.
 
@@ -148,6 +149,8 @@ def merge_solutions(
             Defaults to Tensile format.
         trim_size (bool, optional): Whether to use [M, N, B, K] format or to keep leading dimensions.
             Defaults to True.
+        hipblaslt_path (str | Path, optional): hipBLASLt checkout that provides
+            ``SolutionIdGen.py``. Defaults to the checkout containing Geko.
 
     Returns:
         LibraryCollection: LibraryCollection with all merged solutions.
@@ -166,7 +169,7 @@ def merge_solutions(
     lib_paths = sorted(input_dir.glob(pattern))
     if not lib_paths:
         raise ValueError(f"No valid YAML libraries found in '{input_dir}'")
-    rewritten = uniquify_generated_logic(lib_paths)
+    rewritten = uniquify_generated_logic(lib_paths, hipblaslt_path)
     logger.debug(
         f"Merging solutions, discovered {len(lib_paths)} library files; "
         f"rewrote {rewritten} colliding SolutionUID values"
@@ -525,6 +528,7 @@ def from_dataframe(
     df: pd.DataFrame,
     lib_dir: str | Path,
     type_override: str = None,
+    hipblaslt_path: str | Path | None = None,
 ) -> LibraryCollection:
     """Create filtered libraries from a DataFrame of selected solutions.
 
@@ -534,6 +538,8 @@ def from_dataframe(
         output_dir (str | Path): Output directory for filtered libraries.
         type_override (str, optional): Library type to override (e.g., "Equality").
             Defaults to None.
+        hipblaslt_path (str | Path, optional): hipBLASLt checkout that provides
+            ``SolutionIdGen.py``. Defaults to the checkout containing Geko.
 
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
@@ -601,7 +607,7 @@ def from_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
-    assign_fresh_solution_uids(libs.libs)
+    assign_fresh_solution_uids(libs.libs, hipblaslt_path)
     return libs
 
 
@@ -610,6 +616,7 @@ def from_full_dataframe(
     lib_dir: str | Path,
     match_table_path: str | Path,
     type_override: str = None,
+    hipblaslt_path: str | Path | None = None,
 ) -> LibraryCollection:
     """Create full libraries from a DataFrame of solutions.
     Args:
@@ -618,6 +625,8 @@ def from_full_dataframe(
         match_table_path (str | Path): Path to the MatchTable.yaml file.
         type_override (str, optional): Library type to override (e.g., "Equality").
             Defaults to None.
+        hipblaslt_path (str | Path, optional): hipBLASLt checkout that provides
+            ``SolutionIdGen.py``. Defaults to the checkout containing Geko.
     Raises:
         ValueError: If DataFrame missing necessary columns or solution count mismatch.
     Returns:
@@ -715,7 +724,7 @@ def from_full_dataframe(
     if processed != n_sols:
         raise ValueError(f"Number of processed solutions mismatch: {n_sols} vs {processed}")
 
-    assign_fresh_solution_uids(libs.libs)
+    assign_fresh_solution_uids(libs.libs, hipblaslt_path)
     return libs
     
 
@@ -901,7 +910,9 @@ def prune_library(
         logger.info(f"'{cn}': removed {n_before - n_after} solutions out of {n_before}")
     logger.info(f"Final lib: removed {n_before_all - n_after_all} solutions out of {n_before_all}")
 
-    merged = merge_solutions(workdir, epilogues=False, pattern="*/lib/*.yaml")
+    merged = merge_solutions(
+        workdir, epilogues=False, pattern="*/lib/*.yaml", hipblaslt_path=hipblaslt_path
+    )
     if len(merged) != 1:
         raise RuntimeError(f"Found {len(merged)} libraries after merging, check the results in {workdir}")
 
