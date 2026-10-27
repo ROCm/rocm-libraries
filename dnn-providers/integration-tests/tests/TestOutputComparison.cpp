@@ -972,7 +972,7 @@ std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensorWithSentinelAt(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, int position, float value)
 {
     auto tensor = floatTensor(attrs, value);
-    const float sentinel = hipdnn_test_sdk::utilities::payloadNanSentinelValue<float>();
+    const auto sentinel = hipdnn_test_sdk::utilities::payloadNanSentinelValue<float>();
     std::memcpy(static_cast<float*>(tensor->rawHostData()) + position, &sentinel, sizeof(float));
     tensor->markHostModified();
     return tensor;

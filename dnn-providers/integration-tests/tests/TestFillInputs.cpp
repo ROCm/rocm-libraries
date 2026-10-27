@@ -1283,7 +1283,7 @@ using DomainTypes = ::testing::Types<float,
                                      hipdnn_data_sdk::types::bfloat16,
                                      hipdnn_data_sdk::types::fp8_e4m3,
                                      hipdnn_data_sdk::types::fp8_e5m2>;
-TYPED_TEST_SUITE(TestFillInputsDomain, DomainTypes);
+TYPED_TEST_SUITE(TestFillInputsDomain, DomainTypes, );
 
 // A seed that is ignored, or a generator reading state it never set, gives the same bytes
 // for every seed or different bytes for the same one.
