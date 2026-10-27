@@ -196,12 +196,16 @@ using WarpGemmWmma_f32_16x16x128_bf8_f8 =
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
-using WarpGemmWmma_f32_32x16x128_f4 =
-    WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_32x16x128_f4,
-                                       kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+template <bool kTransC                      = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,
+          bool IsScale16                    = false>
+using WarpGemmWmma_f32_32x16x128_f4 = WarpGemmImpl<
+    WarpGemmAttributeWmma<std::conditional_t<IsScale16,
+                                             WarpGemmAttributeWmmaImpl_f32_32x16x128_f4_scale16,
+                                             WarpGemmAttributeWmmaImpl_f32_32x16x128_f4>,
+                          kTransC,
+                          AttrNumAccess,
+                          AttrNumAccess>>;
 
 template <bool kTransC                      = false,
           WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default,

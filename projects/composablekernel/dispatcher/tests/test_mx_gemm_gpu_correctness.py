@@ -12,7 +12,7 @@ to fp16. This test builds a real mx_gemm dispatcher .so, runs it on-device via
 ``mx_gemm_reference`` within a low-precision (5e-2) tolerance.
 
 Supported devices: gfx950 and gfx1250. gfx1250 uses the non-cluster
-16x16x128 WMMA scale32 path, including revision 0.
+WMMA scale32 path, including revision 0.
 
 Run from the CK root:
   CK_TILE_BENCH_WARMUP=1 CK_TILE_BENCH_REPEAT=2 \
@@ -125,6 +125,17 @@ class TestMxGemmGpu(unittest.TestCase):
                 )
                 for pipeline in ("comp_tdm", "comp_tdm_v2")
             ]
+            if dtype == "fp4":
+                configs += [
+                    MxGemmKernelConfig(
+                        datatype=dtype,
+                        gpu_target=self.ARCH,
+                        pipeline=pipeline,
+                        warp_tile_m=32,
+                        warp_tile_n=16,
+                    )
+                    for pipeline in ("comp_tdm", "comp_tdm_v2")
+                ]
         so_paths = setup_multiple_mx_gemm_dispatchers(
             configs,
             output_dir=Path(build_dir.name),

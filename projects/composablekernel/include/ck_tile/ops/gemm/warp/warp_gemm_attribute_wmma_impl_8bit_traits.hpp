@@ -818,21 +818,75 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
     }
 };
 
-// 32x16x128 f4 specialization - GFX125
-#if defined(__gfx1250__)
-template <>
-struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
+template <bool IsScale16>
+struct WmmaTraitsGfx125PkFp4F32_32x16x128
     : WmmaTraitsBase<gfx12_t, pk_fp4_t, pk_fp4_t, float, 128, false, 32, 16>
 {
-    using ArchType = gfx125_t;
+    using ArchType  = gfx125_t;
+    using ScaleType = std::conditional_t<IsScale16, int64_t, int32_t>;
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
+                                                  const ScaleType& a_scale,
+                                                  const BVecType& b_vec,
+                                                  const ScaleType& b_scale,
+                                                  const CVecType& c_vec)
+    {
+#ifdef __gfx1250__
+        using P = WarpGemmParamsParser<Params...>;
+
+        if constexpr(IsScale16)
+        {
+            return bit_cast<CVecType>(__builtin_amdgcn_wmma_scale16_f32_32x16x128_f4(
+                bit_cast<int32x16_t>(a_vec),
+                bit_cast<int32x8_t>(b_vec),
+                0,
+                bit_cast<fp32x16_t>(c_vec),
+                1,          // OPSEL[0] - fixed to 1 for F4
+                P::scale_a, // OPSEL_HI[0] - scale data type for A
+                a_scale,
+                0,          // OPSEL[1] - select the sole B scale
+                P::scale_b, // OPSEL_HI[1] - scale data type for B
+                b_scale,
+                0, // NEG
+                0  // NEG_HI
+                ));
+        }
+        else
+        {
+            return bit_cast<CVecType>(__builtin_amdgcn_wmma_scale_f32_32x16x128_f4(
+                bit_cast<int32x16_t>(a_vec),
+                bit_cast<int32x8_t>(b_vec),
+                0,
+                bit_cast<fp32x16_t>(c_vec),
+                1,          // OPSEL[0] - fixed to 1 for F4
+                P::scale_a, // OPSEL_HI[0] - scale data type for A
+                a_scale,
+                0,          // OPSEL[1] - select the sole B scale
+                P::scale_b, // OPSEL_HI[1] - scale data type for B
+                b_scale,
+                0, // NEG
+                0  // NEG_HI
+                ));
+        }
+#else
+        ck_tile::ignore = a_vec;
+        ck_tile::ignore = a_scale;
+        ck_tile::ignore = b_vec;
+        ck_tile::ignore = b_scale;
+        ck_tile::ignore = c_vec;
+        return CVecType{0};
+#endif
+    }
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
     {
-#ifdef __gfx125__
-        return __builtin_amdgcn_wmma_f32_32x16x128_f4(
-            bit_cast<int32x16_t>(a_vec), bit_cast<int32x8_t>(b_vec), 0, bit_cast<fp32x16_t>(c_vec));
+#ifdef __gfx1250__
+        Packed4Scale_E8M0 pkscale(1.0f, 1.0f, 1.0f, 1.0f);
+        const auto default_scale = static_cast<ScaleType>(pkscale);
+        return wmma_intrinsic(a_vec, default_scale, b_vec, default_scale, c_vec);
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -841,7 +895,18 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
 #endif
     }
 };
-#endif
+
+template <>
+struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
+    : WmmaTraitsGfx125PkFp4F32_32x16x128<false>
+{
+};
+
+template <>
+struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128, WmmaScale16Tag>
+    : WmmaTraitsGfx125PkFp4F32_32x16x128<true>
+{
+};
 
 template <bool IsScale16>
 struct WmmaTraitsGfx125PkFp4F32_32x32x128

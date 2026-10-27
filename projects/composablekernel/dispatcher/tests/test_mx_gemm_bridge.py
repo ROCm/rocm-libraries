@@ -670,8 +670,16 @@ class TestMxArchitectureKernels(unittest.TestCase):
                 kernels = builder._get_sampled_kernel_list()
                 self.assertEqual(
                     Counter(k["trait_combo"][0] for k in kernels),
-                    {"comp_tdm": 32, "comp_tdm_v2": 32},
+                    {
+                        "comp_tdm": 96 if dtype == "fp4" else 64,
+                        "comp_tdm_v2": 96 if dtype == "fp4" else 64,
+                    },
                 )
+                if dtype == "fp4":
+                    self.assertTrue(
+                        any(k["tile_config"]["warp_tile_n"] == 16 and
+                            k["tile_config"]["warp_tile_m"] == 32 for k in kernels)
+                    )
 
     def test_benchmark_metadata_preserves_pipeline_names(self):
         from mx_gemm_benchmark import MxGemmBenchmark

@@ -32,12 +32,14 @@
         },
         "warp_tile_m": {
             "values": [
-                16
+                16,
+                32
             ]
         },
         "warp_tile_n": {
             "values": [
-                16
+                16,
+                32
             ]
         },
         "warp_tile_k": {

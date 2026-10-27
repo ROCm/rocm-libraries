@@ -61,13 +61,11 @@ operations. A 32 × 32 warp tile uses 32 FP32 accumulators per lane, compared
 with eight for 16 × 16. Total register use depends on the block shape and
 compiler; a larger warp tile does not guarantee higher throughput.
 
-FP4 32 × 16 × 128 is an opt-in configuration to request the native
-`v_wmma_scale_f32_32x16x128_f4` path. Tile Engine and the bridge do not
+FP4 32 × 16 × 128 selects the native
+`v_wmma_scale_f32_32x16x128_f4` path. It is enabled for gfx1250 TDM V1/V2
+and is included in the full gfx1250 sweep. Tile Engine and the bridge do not
 distinguish gfx1250 A0/B0 revisions; instruction support is left to the native
-pipeline. The current C++ 32 × 16 trait has only the unscaled operation, and
-both TDM V1/V2 reject MX builds with a missing scaled `wmma_intrinsic`
-overload. Exposing the configuration does not imply a successful device
-build. It is excluded from the default and CI sweeps.
+pipeline.
 All exposed warp tiles retain E8M0 scales per 32 K elements.
 
 The dispatcher generator reuses `MxGemmKernelBuilder` from Tile Engine. Both
@@ -170,7 +168,7 @@ used as given.
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all five gfx1250 pipelines. |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
 | `default_config.json` | Old-TE full gfx950 sweep (194 FP4 / 150 FP8 kernels). |
-| `default_config_gfx1250.json` | Old-TE full gfx1250 sweep (64 kernels per input type). |
+| `default_config_gfx1250.json` | Old-TE full gfx1250 sweep (192 FP4 / 128 FP8 kernels). |
 | `user_provided_config.json` | Template for a custom sweep. |
 
 Each field takes either `{"values": [...]}` or `{"min": a, "max": b, "step": c}`.
@@ -370,11 +368,12 @@ For Tile Engine, enable `BUILD_CK_TILE_ENGINE`, use `GPU_TARGETS=gfx1250`, and
 build `benchmark_mx_gemm_all`. The MX operation selects
 `default_config_gfx1250.json` automatically unless a custom MX config is
 provided. It uses both `comp_tdm` and `comp_tdm_v2` with the TDM epilogue,
-intrawave scheduling, `2 x 2 x 1` warps,
-a `16 x 16 x 128` warp tile, and no padding or persistent execution. Block M/N
-range from 64 to 256 in steps of 64; block K is 128 or 256. All 32 block shapes
-fit gfx1250's 320 KiB LDS capacity with both FP4 and FP8, including TDM descriptor
-padding and both staging buffers: 64 kernels per pipeline, for 128 kernels total.
+intrawave scheduling, `2 x 2 x 1` warps, and no padding or persistent execution.
+FP4 uses the `16 x 16 x 128`, `32 x 16 x 128`, and `32 x 32 x 128` warp tiles;
+FP8 uses the first and third. Block M/N range from 64 to 256 in steps of 64;
+block K is 128 or 256. All configurations fit gfx1250's 320 KiB LDS capacity
+with TDM descriptor padding and both staging buffers: 96 FP4 or 64 FP8 kernels
+per pipeline, for 192 FP4 or 128 FP8 kernels total.
 Both the bridge and Tile Engine use this architecture-aware capacity check.
 This default set contains TDM kernels. The three CShuffle pipelines
 are available through explicit configuration or the Python helpers above.
