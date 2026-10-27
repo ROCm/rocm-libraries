@@ -8379,6 +8379,35 @@ namespace
             *adapter = a;
         return rocblaslt_status_success;
     }
+
+    // Loads a payload shard with all of its solutions parsed, or returns null
+    // if it cannot be read or parsed. The loader returns null for most
+    // malformed files but lets msgpack's type errors through, which a bad
+    // payload must not turn into an internal error.
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+        loadPayloadShard(std::string const& path)
+    {
+        try
+        {
+            auto shard = std::dynamic_pointer_cast<
+                TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>(
+                TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm,
+                                             TensileLite::ContractionSolution>(path));
+            // An indexed shard parses solutions on demand; parse them all first.
+            if(shard)
+                shard->materializeAllSolutions();
+            return shard;
+        }
+        catch(std::bad_alloc const&)
+        {
+            throw;
+        }
+        catch(std::exception const& e)
+        {
+            log_error(__func__, path, e.what());
+            return nullptr;
+        }
+    }
 } // namespace
 
 rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
@@ -8417,18 +8446,12 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
         return rocblaslt_status_invalid_value;
     }
 
-    auto loaded = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm,
-                                               TensileLite::ContractionSolution>(libraryPath);
-    auto shard  = std::dynamic_pointer_cast<
-         TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>(loaded);
+    auto shard = loadPayloadShard(libraryPath);
     if(!shard)
     {
         log_error(__func__, "cannot load library", libraryPath);
         return rocblaslt_status_invalid_value;
     }
-
-    // An indexed shard parses solutions on demand; parse them all first.
-    shard->materializeAllSolutions();
     if(shard->solutions.empty())
     {
         log_error(__func__, "library holds no solutions", libraryPath);
