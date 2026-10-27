@@ -3,11 +3,85 @@
 
 #pragma once
 
+#include <chrono>
+#include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace hipdnn_integration_tests
 {
+
+struct ReferenceBenchmarkRequest
+{
+    bool enabled = false;
+    bool skipGraphValidation = false;
+    bool captureBundles = false;
+    bool writeSupportClaims = false;
+};
+
+inline std::optional<std::string>
+    validateReferenceBenchmark(const ReferenceBenchmarkRequest& request)
+{
+    if(request.enabled
+       && (request.skipGraphValidation || request.captureBundles || request.writeSupportClaims))
+    {
+        return "--benchmark-reference cannot be combined with --skip-graph-validation, "
+               "--capture-bundles or --write-support-claims: those modes do not "
+               "execute the reference";
+    }
+    return std::nullopt;
+}
+
+struct ReferenceBenchmarkResult
+{
+    std::string reference;
+    std::string validator;
+    std::string status = "pending";
+    double prepareMs = 0.0;
+    double executeMs = 0.0;
+    double materializeMs = 0.0;
+
+    double totalMs() const
+    {
+        return prepareMs + executeMs + materializeMs;
+    }
+};
+
+class ReferenceBenchmarkError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+class ReferenceBenchmarkTimer
+{
+public:
+    using Clock = std::chrono::steady_clock;
+    using Now = std::function<Clock::time_point()>;
+
+    explicit ReferenceBenchmarkTimer(
+        std::function<void()> synchronize = [] {}, Now now = [] { return Clock::now(); })
+        : _synchronize(std::move(synchronize))
+        , _now(std::move(now))
+    {
+    }
+
+    template <typename Work>
+    void measure(double& elapsedMs, Work&& work) const
+    {
+        _synchronize();
+        const auto start = _now();
+        std::forward<Work>(work)();
+        _synchronize();
+        elapsedMs += std::chrono::duration<double, std::milli>(_now() - start).count();
+    }
+
+private:
+    std::function<void()> _synchronize;
+    Now _now;
+};
 
 /// How --benchmark times one verified graph.
 struct BenchmarkSettings

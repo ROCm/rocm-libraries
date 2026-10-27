@@ -65,6 +65,159 @@ AutotuneResult failedResult(std::string message)
 
 } // namespace
 
+TEST(TestReferenceBenchmark, RejectsModesThatDoNotExecute)
+{
+    EXPECT_FALSE(validateReferenceBenchmark({}).has_value());
+    EXPECT_FALSE(validateReferenceBenchmark({true}).has_value());
+    for(const auto& request : {ReferenceBenchmarkRequest{true, true, false, false},
+                               ReferenceBenchmarkRequest{true, false, true, false},
+                               ReferenceBenchmarkRequest{true, false, false, true}})
+    {
+        ASSERT_TRUE(validateReferenceBenchmark(request).has_value());
+        EXPECT_NE(validateReferenceBenchmark(request)->find("--benchmark-reference"),
+                  std::string::npos);
+    }
+}
+
+TEST(TestReferenceBenchmark, ExcludesPendingEngineWorkAndIncludesReferenceCompletion)
+{
+    using Clock = ReferenceBenchmarkTimer::Clock;
+    auto now = Clock::time_point{};
+    int synchronizations = 0;
+    const ReferenceBenchmarkTimer timer(
+        [&] { now += std::chrono::milliseconds(++synchronizations == 1 ? 100 : 7); },
+        [&] { return now; });
+    ReferenceBenchmarkResult result;
+    timer.measure(result.executeMs, [&] { now += std::chrono::milliseconds(3); });
+
+    EXPECT_EQ(synchronizations, 2);
+    EXPECT_DOUBLE_EQ(result.executeMs, 10.0);
+    result.prepareMs = 2.0;
+    result.materializeMs = 4.0;
+    EXPECT_DOUBLE_EQ(result.totalMs(), 16.0);
+}
+
+TEST(TestReferenceBenchmark, GoldenOutputsAreNotReadWithSharedInputs)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory directory(
+        hipdnn_test_sdk::utilities::claimScratchDirectory("reference_benchmark_golden"));
+    const auto bundle = fixtures::loadBundle(directory.path(), "golden", true);
+    auto tensors = bundle->loadInputs();
+    EXPECT_EQ(tensors.count(fixtures::K_OUTPUT_UID), 0u);
+    EXPECT_EQ(tensors.size(), 5u);
+    bundle->loadGoldenOutputs(tensors);
+    ASSERT_EQ(tensors.count(fixtures::K_OUTPUT_UID), 1u);
+    const auto* data = static_cast<const float*>(tensors.at(fixtures::K_OUTPUT_UID)->rawHostData());
+    EXPECT_FLOAT_EQ(data[0], fixtures::K_OUTPUT_VALUE);
+    EXPECT_FLOAT_EQ(data[fixtures::K_OUTPUT_ELEMS - 1], fixtures::K_OUTPUT_VALUE);
+}
+
+TEST(TestReferenceBenchmark, ReportsFailedFallbackAttemptsWithoutSuccessfulSamples)
+{
+    using ::testing::_;
+    using ::testing::Return;
+    testing_support::ensureTestConfigInitialized();
+    for(const bool throwDuringProbe : {false, true})
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory directory(
+            hipdnn_test_sdk::utilities::claimScratchDirectory("reference_benchmark_fallback"));
+        testing_support::HarnessMocks mocks;
+        testing_support::engineWrites(
+            mocks.engineRunner, fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+        ON_CALL(mocks.gpuReference, isApplicable(_, _))
+            .WillByDefault([throwDuringProbe](void*, size_t) {
+                if(throwDuringProbe)
+                {
+                    throw std::runtime_error("probe failed");
+                }
+                return false;
+            });
+        ON_CALL(mocks.cpuReference, execute(_, _, _))
+            .WillByDefault([](void*, size_t, const VariantPack& pack) {
+                auto writable = pack;
+                fixtures::writeOutput(writable, fixtures::K_OUTPUT_VALUE);
+            });
+        auto policy = testing_support::hostPolicy();
+        policy.benchmarkReference = true;
+        IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+        harness.setBundle(fixtures::loadBundle(directory.path(), "fallback", false), "fallback");
+        ::testing::TestPartResultArray results;
+        testing_support::driveHarness(harness, &results);
+
+        EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+        const auto& timings = harness.referenceBenchmarks();
+        ASSERT_EQ(timings.size(), 2u);
+        EXPECT_EQ(timings[0].reference, "gpu");
+        EXPECT_EQ(timings[0].status, throwDuringProbe ? "error" : "declined");
+        EXPECT_EQ(timings[1].reference, "cpu");
+        EXPECT_EQ(timings[1].status, "verified");
+    }
+}
+
+TEST(TestReferenceBenchmark, SynchronizationFailureStopsBeforeReferenceFallback)
+{
+    using ::testing::_;
+    testing_support::ensureTestConfigInitialized();
+    const hipdnn_test_sdk::utilities::ScopedDirectory directory(
+        hipdnn_test_sdk::utilities::claimScratchDirectory("reference_benchmark_sync_error"));
+    testing_support::HarnessMocks mocks;
+    testing_support::engineWrites(
+        mocks.engineRunner, fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
+    EXPECT_CALL(mocks.referenceExecutors, get(_)).Times(0);
+    auto policy = testing_support::hostPolicy();
+    policy.benchmarkReference = true;
+    auto deps = mocks.dependencies(policy);
+    deps.referenceTimer = ReferenceBenchmarkTimer(
+        [] { throw ReferenceBenchmarkError("reference benchmark synchronization failed"); });
+    IntegrationBundleVerificationHarness harness(std::move(deps));
+    harness.setBundle(fixtures::loadBundle(directory.path(), "sync_error", false), "sync_error");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find("synchronization failed"),
+              std::string::npos);
+    ASSERT_EQ(harness.referenceBenchmarks().size(), 1u);
+    EXPECT_EQ(harness.referenceBenchmarks()[0].status, "error");
+}
+
+TEST(TestReferenceBenchmark, PropertiesAndSummaryDistinguishFailedAndVerifiedAttempts)
+{
+    auto* unitTest = ::testing::UnitTest::GetInstance();
+    ReferenceBenchmarkSummary summary;
+    summary.OnTestIterationStart(*unitTest, 0);
+    ReferenceBenchmarkResult failed;
+    failed.reference = "gpu";
+    failed.status = "declined";
+    reportReferenceBenchmark(failed);
+    EXPECT_TRUE(ReferenceBenchmarkSummary::totals().empty());
+
+    ReferenceBenchmarkResult verified;
+    verified.reference = "cpu";
+    verified.validator = "cpu";
+    verified.status = "verified";
+    verified.prepareMs = 1.0;
+    verified.executeMs = 2.0;
+    verified.materializeMs = 3.0;
+    reportReferenceBenchmark(verified);
+    const auto* result = unitTest->current_test_info()->result();
+    std::map<std::string, std::string> properties;
+    for(int index = 0; index < result->test_property_count(); ++index)
+    {
+        const auto& property = result->GetTestProperty(index);
+        properties[property.key()] = property.value();
+    }
+    EXPECT_EQ(properties.at("reference_benchmark_gpu_status"), "declined");
+    EXPECT_EQ(properties.count("reference_benchmark_gpu_samples"), 0u);
+    EXPECT_EQ(properties.count("reference_benchmark_gpu_total_ms"), 0u);
+    EXPECT_EQ(properties.at("reference_benchmark_cpu_samples"), "1");
+    EXPECT_EQ(properties.at("reference_benchmark_cpu_total_ms"), "6.000000");
+    EXPECT_EQ(ReferenceBenchmarkSummary::totals().at("cpu").count, 1u);
+    EXPECT_DOUBLE_EQ(ReferenceBenchmarkSummary::totals().at("cpu").milliseconds, 6.0);
+    summary.OnTestIterationStart(*unitTest, 1);
+    EXPECT_TRUE(ReferenceBenchmarkSummary::totals().empty());
+}
+
 // ---- resolveBenchmark -----------------------------------------------------
 
 TEST(TestResolveBenchmark, OffWithoutFlagsHasNoSettingsAndNoError)
@@ -322,10 +475,12 @@ struct OracleCase
 
 /// AUTO with golden data and explicit GOLDEN compare against the golden file.
 /// AUTO without golden data falls through to the reference oracle chain.
-const std::array<OracleCase, 3> ORACLE_CASES{{
+const std::array<OracleCase, 5> ORACLE_CASES{{
     {"AutoGolden", VerificationMode::AUTO, true, Verifier::GOLDEN},
     {"AutoReference", VerificationMode::AUTO, false, Verifier::GPU_REFERENCE},
     {"GoldenMode", VerificationMode::GOLDEN, true, Verifier::GOLDEN},
+    {"CpuReference", VerificationMode::CPU, false, Verifier::CPU_REFERENCE},
+    {"GpuReference", VerificationMode::GPU, false, Verifier::GPU_REFERENCE},
 }};
 
 /// Expectations are checked after the harness returns: a gmock or EXPECT failure
@@ -346,6 +501,9 @@ protected:
     std::optional<std::string> _benchmarkThrows;
     /// The verifier the harness reported for each bundle it ran.
     std::vector<Verifier> _verifiers;
+    ReferenceBenchmarkTimer::Clock::time_point _now;
+    int _referenceSynchronizations = 0;
+    std::vector<ReferenceBenchmarkResult> _referenceResults;
 
     void SetUp() override
     {
@@ -371,7 +529,8 @@ protected:
         for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
         {
             ON_CALL(*reference, execute(_, _, _))
-                .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+                .WillByDefault([this](void*, size_t, const VariantPack& variantPack) {
+                    _now += std::chrono::milliseconds(3);
                     auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
                     std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
                 });
@@ -383,21 +542,91 @@ protected:
     /// fixtures::K_OUTPUT_VALUE.
     void run(float engineOutput,
              std::optional<BenchmarkSettings> benchmark,
-             ::testing::TestPartResultArray* results)
+             ::testing::TestPartResultArray* results,
+             bool benchmarkReference = false)
     {
-        testing_support::engineWrites(_mocks.engineRunner, &fixtures::writeOutput, engineOutput);
+        using ::testing::_;
+        ON_CALL(_mocks.engineRunner, execute(_, _, _))
+            .WillByDefault([this, engineOutput](GraphSession&,
+                                                const std::optional<LoadedEngine>&,
+                                                VariantPack& variantPack) {
+                _now += std::chrono::milliseconds(100);
+                fixtures::writeOutput(variantPack, engineOutput);
+                return EngineOpResult::succeeded();
+            });
 
         auto policy = testing_support::hostPolicy(GetParam().mode);
         policy.benchmark = benchmark;
-        IntegrationBundleVerificationHarness harness(_mocks.dependencies(policy));
+        policy.benchmarkReference = benchmarkReference;
+        auto deps = _mocks.dependencies(policy);
+        deps.referenceTimer = ReferenceBenchmarkTimer(
+            [this] {
+                ++_referenceSynchronizations;
+                _now += std::chrono::milliseconds(2);
+            },
+            [this] { return _now; });
+        IntegrationBundleVerificationHarness harness(std::move(deps));
         harness.setBundle(
             fixtures::loadBundle(_scopedDir->path(), "bench", GetParam().hasGoldenOutput), "bench");
 
         testing_support::driveHarness(harness, results);
+        _referenceResults = harness.referenceBenchmarks();
     }
 };
 
 } // namespace
+
+TEST_P(TestBundleHarnessBenchmark, ReferenceTimingExcludesEngineAndAccountsForEveryPhase)
+{
+    using ::testing::_;
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
+    ::testing::TestPartResultArray results;
+    run(fixtures::K_OUTPUT_VALUE, std::nullopt, &results, true);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_EQ(_referenceResults.size(), 1u);
+    const auto& timing = _referenceResults.front();
+    EXPECT_EQ(timing.status, "verified");
+    EXPECT_EQ(timing.validator, "cpu");
+    EXPECT_DOUBLE_EQ(timing.materializeMs, 2.0);
+    if(GetParam().hasGoldenOutput)
+    {
+        EXPECT_EQ(timing.reference, "golden");
+        EXPECT_DOUBLE_EQ(timing.prepareMs, 0.0);
+        EXPECT_DOUBLE_EQ(timing.executeMs, 2.0);
+        EXPECT_DOUBLE_EQ(timing.totalMs(), 4.0);
+        EXPECT_EQ(_referenceSynchronizations, 4);
+    }
+    else
+    {
+        EXPECT_EQ(timing.reference, GetParam().mode == VerificationMode::CPU ? "cpu" : "gpu");
+        EXPECT_DOUBLE_EQ(timing.prepareMs, 4.0);
+        EXPECT_DOUBLE_EQ(timing.executeMs, 5.0);
+        EXPECT_DOUBLE_EQ(timing.totalMs(), 11.0);
+        EXPECT_EQ(_referenceSynchronizations, 8);
+    }
+    EXPECT_TRUE(_benchmarkCalls.empty());
+}
+
+TEST_P(TestBundleHarnessBenchmark, DisabledReferenceTimingDoesNotSynchronizeOrReport)
+{
+    ::testing::TestPartResultArray results;
+    run(fixtures::K_OUTPUT_VALUE, std::nullopt, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_EQ(_referenceSynchronizations, 0);
+    EXPECT_TRUE(_referenceResults.empty());
+}
+
+TEST_P(TestBundleHarnessBenchmark, ReferenceTimingLabelsMismatches)
+{
+    ::testing::TestPartResultArray results;
+    run(fixtures::K_OUTPUT_VALUE + 100.0f, std::nullopt, &results, true);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    ASSERT_EQ(_referenceResults.size(), 1u);
+    EXPECT_EQ(_referenceResults.front().status, "mismatch");
+}
 
 TEST_P(TestBundleHarnessBenchmark, AVerifiedPassIsTimedWithThePolicySettings)
 {
