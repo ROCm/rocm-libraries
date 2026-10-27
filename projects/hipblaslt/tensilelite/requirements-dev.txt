@@ -1,4 +1,202 @@
--r ./requirements.txt
--r ./requirements-test.txt
+# Generated from pyproject.toml and uv.lock; do not edit directly.
+# Regenerate with: python scripts/generate_requirements.py
+
+# Full Python requirements for core builds, tests, and contributor tasks.
+
 ./rocisa
-memory_profiler
+bandit==1.9.4
+black==24.4.0
+cachetools==7.2.4
+    # via tox
+cfgv==3.5.0
+    # via pre-commit
+click==8.5.0
+    # via
+    #   black
+    #   mutmut
+    #   pycobertura
+cmake==4.3.1
+colorama==0.4.6
+    # via
+    #   bandit
+    #   pytest
+    #   tox
+coverage==7.13.5
+    # via
+    #   mutmut
+    #   pytest-cov
+distlib==0.4.3
+    # via virtualenv
+exceptiongroup==1.3.1 ; python_full_version < '3.11'
+    # via
+    #   pytest
+    #   scikit-build-core
+execnet==2.1.2
+    # via pytest-xdist
+filelock==3.25.2
+    # via
+    #   python-discovery
+    #   tensile
+    #   tox
+    #   virtualenv
+flake8==7.4.1
+hip-python==7.2.2.562.43 ; sys_platform != 'win32'
+    # via tensile
+identify==2.6.19
+    # via pre-commit
+iniconfig==2.3.0
+    # via pytest
+invoke==3.0.3
+isort==5.13.2
+jinja2==3.1.6
+    # via pycobertura
+joblib==1.5.3
+    # via tensile
+lcov-cobertura==2.1.1
+libcst==1.9.0
+    # via mutmut
+linkify-it-py==2.2.0
+    # via markdown-it-py
+lxml==6.1.3
+    # via pycobertura
+markdown-it-py==4.2.0
+    # via
+    #   mdit-py-plugins
+    #   rich
+    #   textual
+markupsafe==3.0.4
+    # via jinja2
+mccabe==0.7.0
+    # via flake8
+mdit-py-plugins==0.6.1
+    # via textual
+mdurl==0.1.2
+    # via markdown-it-py
+memory-profiler==0.61.0
+msgpack==1.1.2
+    # via tensile
+mutmut==3.8.0
+mypy-extensions==1.1.0
+    # via black
+nanobind==2.12.0
+ninja==1.13.2
+nodeenv==1.10.0
+    # via pre-commit
+numpy==2.2.6 ; python_full_version < '3.11'
+    # via tensile
+numpy==2.4.4 ; python_full_version >= '3.11'
+    # via tensile
+orjson==3.11.8
+    # via tensile
+packaging==26.0
+    # via
+    #   black
+    #   pyproject-api
+    #   pytest
+    #   scikit-build-core
+    #   tensile
+    #   tox
+pathspec==1.1.1
+    # via
+    #   black
+    #   scikit-build-core
+platformdirs==4.10.0
+    # via
+    #   black
+    #   python-discovery
+    #   textual
+    #   tox
+    #   virtualenv
+pluggy==1.6.0
+    # via
+    #   pytest
+    #   pytest-cov
+    #   tox
+pre-commit==4.6.0
+psutil==7.2.2
+    # via memory-profiler
+pycobertura==4.1.0
+pycodestyle==2.15.0
+    # via flake8
+pyflakes==4.0.3
+    # via flake8
+pygments==2.20.0
+    # via
+    #   pytest
+    #   rich
+    #   textual
+pyproject-api==1.11.2
+    # via tox
+pytest==9.0.3
+    # via
+    #   mutmut
+    #   pytest-cov
+    #   pytest-timeout
+    #   pytest-xdist
+    #   syrupy
+pytest-cov==7.1.0
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+python-discovery==1.4.4
+    # via
+    #   tox
+    #   virtualenv
+pyyaml==6.0.3
+    # via
+    #   bandit
+    #   libcst
+    #   pre-commit
+    #   tensile
+pyyaml-ft==8.0.0 ; python_full_version == '3.13.*'
+    # via libcst
+rich==15.0.0
+    # via
+    #   bandit
+    #   textual
+ruamel-yaml==0.19.1
+    # via pycobertura
+scikit-build-core==1.1.1
+setproctitle==1.3.8
+    # via mutmut
+setuptools==82.0.1
+simplejson==3.20.2
+    # via tensile
+stevedore==5.8.0 ; python_full_version < '3.11'
+    # via bandit
+stevedore==5.9.1 ; python_full_version >= '3.11'
+    # via bandit
+syrupy==5.3.2
+tabulate==0.10.0
+    # via pycobertura
+textual==8.2.8
+    # via mutmut
+toml==0.10.2 ; python_full_version < '3.11'
+    # via mutmut
+tomli==2.4.1 ; python_full_version <= '3.11'
+    # via
+    #   black
+    #   coverage
+    #   pyproject-api
+    #   pytest
+    #   scikit-build-core
+    #   tox
+tomli-w==1.2.0
+    # via tox
+tox==4.65.0 ; python_full_version < '3.11'
+tox==4.67.1 ; python_full_version >= '3.11'
+typing-extensions==4.15.0
+    # via
+    #   black
+    #   exceptiongroup
+    #   scikit-build-core
+    #   textual
+    #   tox
+    #   virtualenv
+ujson==5.12.0
+    # via tensile
+virtualenv==21.5.1
+    # via
+    #   pre-commit
+    #   tox
+yappi==1.7.6
+    # via tensile

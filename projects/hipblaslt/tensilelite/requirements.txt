@@ -1,19 +1,46 @@
-packaging
-pyyaml
-msgpack>=1.0
-joblib>=1.4.0
-simplejson
-ujson
-orjson
-yappi
-tox
-invoke
-filelock
-numpy
-hip-python
-# nanobind 3.0.0 does not build with clang on Windows: NB_SLOT_ALIAS constexpr-
-# initialises a function pointer to the dllimport'd PyObject_Vectorcall, which is not a
-# constant expression there. Fixed upstream by wjakob/nanobind#1421, so exclude just that
-# release rather than capping the 3.x line -- 3.0.1 will be picked up automatically.
-nanobind>=2.0,!=3.0.0
-scikit-build-core>=0.10
+# Generated from pyproject.toml and uv.lock; do not edit directly.
+# Regenerate with: python scripts/generate_requirements.py
+
+# Minimal Python requirements to build and use the core project.
+
+cmake==4.3.1
+exceptiongroup==1.3.1 ; python_full_version < '3.11'
+    # via scikit-build-core
+filelock==3.25.2
+    # via tensile
+hip-python==7.2.2.562.43 ; sys_platform != 'win32'
+    # via tensile
+invoke==3.0.3
+joblib==1.5.3
+    # via tensile
+msgpack==1.1.2
+    # via tensile
+nanobind==2.12.0
+numpy==2.2.6 ; python_full_version < '3.11'
+    # via tensile
+numpy==2.4.4 ; python_full_version >= '3.11'
+    # via tensile
+orjson==3.11.8
+    # via tensile
+packaging==26.0
+    # via
+    #   scikit-build-core
+    #   tensile
+pathspec==1.1.1
+    # via scikit-build-core
+pyyaml==6.0.3
+    # via tensile
+scikit-build-core==1.1.1
+setuptools==82.0.1
+simplejson==3.20.2
+    # via tensile
+tomli==2.4.1 ; python_full_version < '3.11'
+    # via scikit-build-core
+typing-extensions==4.15.0 ; python_full_version < '3.11'
+    # via
+    #   exceptiongroup
+    #   scikit-build-core
+ujson==5.12.0
+    # via tensile
+yappi==1.7.6
+    # via tensile
