@@ -223,8 +223,22 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       false,
                                       DataType::HALF),
-                   "mma_core_mode = HALF"},
-         false},
+                   "mma_core_mode = HALF (cuDNN-frontend default) on bf16 inputs"},
+         true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      DataType::BFLOAT16),
+                   "mma_core_mode = BFLOAT16 on bf16 inputs"},
+         true},
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       DataType::BFLOAT16,
@@ -380,7 +394,10 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
 // per-tensor scalar ([1,1,1,1]); pass a larger shape (e.g. [B,H_kv,1,1]) to build
 // the non-scalar descales the engine must reject.
 flatbuffers::FlatBufferBuilder
-    createSdpaFwdFp8Graph(bool withDescale, const std::vector<int64_t>& descaleDims = {1, 1, 1, 1})
+    createSdpaFwdFp8Graph(bool withDescale,
+                          const std::vector<int64_t>& descaleDims = {1, 1, 1, 1},
+                          hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
+                          = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -464,7 +481,7 @@ flatbuffers::FlatBufferBuilder
                                flatbuffers::nullopt, // right_bound
                                flatbuffers::nullopt, // max_seq_len_kv
                                DiagonalAlignment::TOP_LEFT,
-                               DataType::UNSET, // mma_core_mode (engine requires unset)
+                               mmaCoreMode,
                                AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -782,6 +799,31 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper))
         << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
+}
+
+// The fp8 kernels run fp8 MFMA, so a 16-bit mma_core_mode (HALF, the cuDNN-frontend
+// default that is accepted for bf16 inputs) does not describe them and must decline.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    auto unsetBuilder = createSdpaFwdFp8Graph(/*withDescale=*/true, {1, 1, 1, 1}, DataType::UNSET);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper unsetGraph(
+        unsetBuilder.GetBufferPointer(), unsetBuilder.GetSize());
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, unsetGraph))
+        << "control: fp8 inputs with scalar descales and UNSET mma_core_mode are accepted";
+
+    auto halfBuilder = createSdpaFwdFp8Graph(/*withDescale=*/true, {1, 1, 1, 1}, DataType::HALF);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfGraph(
+        halfBuilder.GetBufferPointer(), halfBuilder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, halfGraph))
+        << "fp8 inputs with mma_core_mode = HALF must be rejected";
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)

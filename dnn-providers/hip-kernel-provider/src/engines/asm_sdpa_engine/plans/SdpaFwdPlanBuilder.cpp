@@ -299,9 +299,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
     }
 
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
-                               "mma_core_mode must be unset");
-
     const auto& tensorMap = opGraph.getTensorMap();
 
     const int64_t qUid = attrs.q_tensor_uid();
@@ -405,6 +402,24 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + EnumNameDataType(oTensor->data_type())
             + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3_FNUZ (Actual type: "
             + EnumNameDataType(qTensor->data_type()) + ")");
+
+    // mma_core_mode is the MMA operand precision. The bf16 kernels run 16-bit MFMA on
+    // the graph's own bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
+    // all describe them. HALF is accepted on bf16 graphs because the cuDNN frontend,
+    // and hipDNN's cuDNN-compatibility shim, write HALF into Graph::sdpa() whenever
+    // the caller leaves the field unset. The fp8 kernels run fp8 MFMA, which no 16-bit
+    // mode describes, so they still require UNSET. An allow-list, so an enum value
+    // added later declines until judged.
+    const auto mmaCoreMode = attrs.mma_core_mode();
+    const bool isSixteenBitMmaMode
+        = mmaCoreMode == DataType::HALF || mmaCoreMode == DataType::BFLOAT16;
+    const bool mmaCoreModeSupported
+        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !mmaCoreModeSupported,
+        "mma_core_mode must be UNSET, or HALF/BFLOAT16 for bf16 inputs (Actual value: "
+            + EnumNameDataType(mmaCoreMode) + ", inputs: " + EnumNameDataType(qTensor->data_type())
+            + ")");
 
     // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). Without them
     // the kernel would read garbage dequantization scales.
