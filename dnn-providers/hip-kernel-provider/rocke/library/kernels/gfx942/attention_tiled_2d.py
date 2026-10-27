@@ -5775,6 +5775,9 @@ _4WGQA_LOG2E = 1.4426950408889634
 # lean body keeps Q streamed from global and fits. Other head sizes (e.g. D128)
 # are served by the general 4-warp body and the default tiled builder.
 _4WGQA_LEAN_HEAD_SIZES = (192, 256)
+# k-steps whose Q/K global loads the lean body issues ahead of their QK MFMAs.
+# Larger groups raise register pressure past the waves_per_eu=2 budget.
+_4WGQA_K_GROUP = 2
 
 
 def _online_softmax_rescale(
@@ -5844,8 +5847,6 @@ def _build_gfx942_4warp_gqa_lean(
     NK = HD // K
     NDdim = HD // 32
     NKpv = BN // K
-    # V-fill: elements per thread (256 = 4 wave64 threads), 8-wide loads.
-    v_fill_epw = (BN * HD) // 256
     ITERS = spec.binary_search_iters
 
     b = IRBuilder(spec.kernel_name() + "_4wgqa")
@@ -5893,7 +5894,14 @@ def _build_gfx942_4warp_gqa_lean(
     wq = b.mul(wid, b.const_i32(32))
     qhead = b.block_id_x()  # grid.x = num_query_heads
     kvh = b.div(qhead, b.const_i32(GQAG))
-    gqb = b.block_id_y()  # grid.y = total_q_blocks (BLOCK_M=128)
+    # grid.y = total_q_blocks (BLOCK_M=128) = total_q // 128 + num_seqs, the
+    # launcher's count. Walk the query blocks longest-first: under the causal
+    # mask a block's KV loop grows with its index, so issuing the longest
+    # blocks first shortens the tail once the grid spans more than one wave of
+    # workgroups. The mapping is a bijection over the grid.
+    total_q = b.global_load_i32(CUQ, num_seqs_p)
+    nqb_all = b.add(b.div(total_q, b.const_i32(128)), num_seqs_p)
+    gqb = b.sub(b.sub(nqb_all, b.const_i32(1)), b.block_id_y())
 
     # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
     sid = binary_search_seq_idx(b, CUQ, gqb, num_seqs_p, block_q=128, iterations=ITERS)
@@ -5910,7 +5918,11 @@ def _build_gfx942_4warp_gqa_lean(
     ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
         b.ret()
 
-    V_lds = b.smem_alloc(dtype, [BN, HD], name_hint="Vlds")
+    # V is staged key-chunk-major, [BN/4][HD][4]: each PV operand (4 consecutive
+    # keys of one head-dim row) is a single 8-byte LDS read at a per-lane base
+    # plus a compile-time offset, and the lanes of one read hit consecutive
+    # 8-byte slots. The fill writes 2 head dims x 4 keys per 16-byte store.
+    V_lds = b.smem_alloc(dtype, [BN // 4, HD * 4], name_hint="Vlds")
     q_desc = TensorDescriptor.naive(
         "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
     )
@@ -5954,40 +5966,71 @@ def _build_gfx942_4warp_gqa_lean(
         l_old = carry[1]
         accs = list(carry[2:])
         b.sync()  # WAR: prev iter's PV reads of V_lds must finish before this tile overwrites it
-        for c in range(v_fill_epw // 8):
-            lin = b.add(b.mul(tid, b.const_i32(v_fill_epw)), b.const_i32(c * 8))
-            key = b.div(lin, b.const_i32(HD))
-            hd = b.mod(lin, b.const_i32(HD))
-            pk = phys_key(kv, key)
-            velem = b.add(
-                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
-            )
-            b.smem_store_vN(
-                V_lds, [key, hd], b.global_load_vN(Vp, velem, dtype, 8, align=16), 8
-            )
+
+        def _v_fill_unit(u):
+            # One unit = 4 consecutive keys x 8 head dims: four 16-byte row loads,
+            # regrouped into four 16-byte key-chunk-major stores.
+            hd0 = b.mul(b.mod(u, b.const_i32(HD // 8)), b.const_i32(8))
+            kg = b.div(u, b.const_i32(HD // 8))
+            rows = []
+            for r in range(4):
+                key = b.add(b.mul(kg, b.const_i32(4)), b.const_i32(r))
+                pk = phys_key(kv, key)
+                velem = b.add(
+                    b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)),
+                    hd0,
+                )
+                rows.append(b.global_load_vN(Vp, velem, dtype, 8, align=16))
+            for e in range(0, 8, 2):
+                val = b.vec_pack(
+                    [b.vec_extract(rows[r], e) for r in range(4)]
+                    + [b.vec_extract(rows[r], e + 1) for r in range(4)],
+                    dtype,
+                )
+                col = b.mul(b.add(hd0, b.const_i32(e)), b.const_i32(4))
+                b.smem_store_vN(V_lds, [kg, col], val, 8)
+
+        v_units = (BN * HD) // 32
+        for i in range((v_units + 255) // 256):
+            u = b.add(tid, b.const_i32(i * 256))
+            if (i + 1) * 256 > v_units:
+                with b.scf_if(b.cmp_lt(u, b.const_i32(v_units))):
+                    _v_fill_unit(u)
+            else:
+                _v_fill_unit(u)
         b.sync()
         S_T = [at.zero_acc(b) for _ in range(NKEYT)]
         pk_kt = [
             phys_key(kv, b.add(b.const_i32(kt * 32), ld.m_in_atom))
             for kt in range(NKEYT)
         ]
-        for h in range(NK):
-            koff = b.add(
-                b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
-            )
-            q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
-            q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
-            q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
-            q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
-            for kt in range(NKEYT):
-                kelem = b.add(
-                    b.mul(
-                        b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh), b.const_i32(HD)
-                    ),
-                    koff,
+        # Issue the Q/K loads of _4WGQA_K_GROUP consecutive k-steps before their
+        # MFMAs so those global loads overlap instead of each waiting alone.
+        for h0 in range(0, NK, _4WGQA_K_GROUP):
+            staged = []
+            for h in range(h0, min(NK, h0 + _4WGQA_K_GROUP)):
+                koff = b.add(
+                    b.mul(b.const_i32(h), b.const_i32(K)),
+                    b.mul(ld.k_blk, b.const_i32(APL)),
                 )
-                kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
-                S_T[kt] = at.emit(b, kf, q, S_T[kt])
+                q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+                q_tok = b.select(b.cmp_lt(q_tok, q_last), q_tok, q_last)
+                q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+                q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
+                kfs = []
+                for kt in range(NKEYT):
+                    kelem = b.add(
+                        b.mul(
+                            b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh),
+                            b.const_i32(HD),
+                        ),
+                        koff,
+                    )
+                    kfs.append(b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2))
+                staged.append((q, kfs))
+            for q, kfs in staged:
+                for kt in range(NKEYT):
+                    S_T[kt] = at.emit(b, kfs[kt], q, S_T[kt])
         Sm = [[None] * CPL for _ in range(NKEYT)]
         for kt in range(NKEYT):
             for i in range(CPL):
@@ -6019,32 +6062,15 @@ def _build_gfx942_4warp_gqa_lean(
         )
         newaccs = []
         for nt in range(NDdim):
+            # Keep each head-dim tile's V reads next to its MFMAs: hoisting all
+            # of them ahead of the PV loop overflows the register budget.
+            b.sched_barrier(0)
             pv = at.zero_acc(b)
             for kk in range(NKpv):
-                va = b.vec_pack(
-                    [
-                        b.vec_extract(
-                            b.smem_load_vN(
-                                V_lds,
-                                b.add(
-                                    b.mul(b.const_i32(kk), b.const_i32(K)),
-                                    b.add(
-                                        b.mul(ld.k_blk, b.const_i32(APL)),
-                                        b.const_i32(j),
-                                    ),
-                                ),
-                                b.add(
-                                    b.mul(b.const_i32(nt), b.const_i32(32)),
-                                    ld.m_in_atom,
-                                ),
-                                dtype=dtype,
-                                n=1,
-                            ),
-                            0,
-                        )
-                        for j in range(APL)
-                    ],
-                    dtype,
+                hd_r = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), ld.m_in_atom)
+                c4 = b.add(b.mul(b.const_i32(kk), b.const_i32(K // 4)), ld.k_blk)
+                va = b.smem_load_vN(
+                    V_lds, c4, b.mul(hd_r, b.const_i32(4)), dtype=dtype, n=APL
                 )
                 pv = at.emit(b, va, Bp[kk], pv)
             na = b.vec_pack(
