@@ -196,6 +196,35 @@ rocke_status_t run_attr_recipe(const std::string& recipe, std::string* out_ll, s
     return st;
 }
 
+void check_invalid_integer_values()
+{
+    std::string ll, err;
+    for(const char* spelling : {"NaN", "Infinity", "-Infinity", "9007199254740993"})
+    {
+        const std::string label = std::string("kernel integer attr ") + spelling;
+        check(run_attr_recipe(
+                  attr_recipe("bad", std::string(R"json({"t":"i","v":)json") + spelling + "}"),
+                  &ll,
+                  &err)
+                  != ROCKE_OK,
+              (label + " is rejected").c_str());
+        check(err.find("not an integer") != std::string::npos,
+              (label + " has a diagnostic (got: " + err + ")").c_str());
+
+        const std::string recipe
+            = std::string(
+                  R"json({"schema":"rocke.recipe/v1","kernel_name_fmt":"bad_intexpr","spec":[],"attrs":{},"program":[{"op":"const_i32","bind":"bad","val":)json")
+              + spelling + R"json(},{"op":"ret"}]})json";
+        ll.clear();
+        err.clear();
+        const std::string expr_label = std::string("integer expression ") + spelling;
+        check(run_attr_recipe(recipe, &ll, &err) != ROCKE_OK,
+              (expr_label + " is rejected").c_str());
+        check(err.find("not an integer") != std::string::npos,
+              (expr_label + " has a diagnostic (got: " + err + ")").c_str());
+    }
+}
+
 // A list kernel attr is either carried exactly or the replay fails -- never
 // dropped, because a kernel compiled without its cluster_dims is a wrong launch.
 void check_kernel_list_attrs()
@@ -275,6 +304,7 @@ int main()
     std::printf("portable_ir recipe_vm_replay:\n");
 
     check_kernel_list_attrs();
+    check_invalid_integer_values();
 
     std::string ll4, name4, ll8, name8;
     if(!replay(4, "f32", &ll4, &name4) || !replay(8, "f32", &ll8, &name8))

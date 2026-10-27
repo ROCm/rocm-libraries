@@ -24,8 +24,10 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     F32,
+    F64,
     I32,
     _int_add_wrap_error,
+    _scf_for_carried_descriptor_error,
     KernelDef,
     Op,
     PtrType,
@@ -34,12 +36,14 @@ from .ir import (
     Type,
     Value,
     VectorType,
+    _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
     require_streaming_arch,
 )
+from .isa.backend import backend_for
 from .mma_operand import (
     MmaOperandRole,
     mma_operand_needs_reinterpret,
@@ -167,7 +171,7 @@ _ROCKE_VEC(bf16, bf16x, 1); _ROCKE_VEC(bf16, bf16x, 2); _ROCKE_VEC(bf16, bf16x, 
 _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
-_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);
+_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
 _ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
@@ -197,10 +201,6 @@ typedef short i16x4_raw __attribute__((ext_vector_type(4)));
 __device__ extern "C" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(
  const __attribute__((address_space(3))) void*)
  __asm("llvm.amdgcn.ds.read.tr16.b64");
-typedef short i16x8_raw __attribute__((ext_vector_type(8)));
-__device__ extern "C" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(
- const __attribute__((address_space(3))) void*)
- __asm("llvm.amdgcn.ds.read.tr16.b128");
 // ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to
 // {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},
 // which is what async-DMA pipelines (compv4 / split-KV attention) need.
@@ -771,6 +771,24 @@ class _Lowerer:
             return f"__builtin_bit_cast({_type_to_hip(register_type)}, {_name(value)})"
         return _name(value)
 
+    def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        op_id = "mfma_f64_16x16x4_f64"
+        a = self._mma_operand(op, op_id, "a", F64)
+        b = self._mma_operand(op, op_id, "b", F64)
+        self._emit(
+            f"f64x4 {_name(op.result)} = __builtin_amdgcn_mfma_f64_16x16x4f64("
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        op_id = "mfma_f64_4x4x4_f64"
+        a = self._mma_operand(op, op_id, "a", F64)
+        b = self._mma_operand(op, op_id, "b", F64)
+        self._emit(
+            f"f64x1 {_name(op.result)} = {{__builtin_amdgcn_mfma_f64_4x4x4f64("
+            f"{a}, {b}, {_name(op.operands[2])}[0], 0, 0, 0)}};"
+        )
+
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
         op_id = "mfma_f32_16x16x4_f32"
         a = self._mma_operand(op, op_id, "a", F32)
@@ -828,6 +846,13 @@ class _Lowerer:
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
+            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+        )
+
+    def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._emit(
+            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
 
@@ -1487,7 +1512,11 @@ class _Lowerer:
     def _op_arith_fabs(self, op: Op) -> None:
         (v,) = op.operands
         ty = _type_to_hip(op.result.type)
-        _reject_f64(op, op.result.type.name)
+        if op.result.type.name == "f64":
+            # The double overload stays in double; routing it through the
+            # float helper below would round the value to f32.
+            self._emit(f"{ty} {_name(op.result)} = fabs({_name(v)});")
+            return
         # `__builtin_fabsf` lowers to a free `abs` modifier on AMDGPU
         # (exactly what the LLVM `llvm.fabs.f32` intrinsic produces);
         # for f16/bf16 the matching builtin yields the same modifier.
@@ -1718,6 +1747,7 @@ class _Lowerer:
 
     def _op_arith_uitofp_f32(self, op: Op) -> None:
         # u8 -> f32: a uint8_t converts exactly.
+        _refuse_non_u8_source(op)
         (v,) = op.operands
         self._emit(f"float {_name(op.result)} = (float){_name(v)};")
 
@@ -2031,36 +2061,6 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
-    def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
-
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
-        """
-        a, b, c, a_scale, b_scale = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
         """HIP debug shim for the P13 register permutation."""
         (qk_c,) = op.operands
@@ -2230,23 +2230,22 @@ class _Lowerer:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
         # int num_records, int flags)``
         #
-        # The flags word is the rsrc DWORD3: it encodes
-        # ``TYPE=BUFFER_RESOURCE, DATA_FORMAT=32-bit dword, NUM_FORMAT=UINT``.
-        # Without it the AMDGPU compiler can lower buffer loads to
-        # "unbounded" single-dword loads (no bounds check) which then
-        # produce mismatching output for shapes whose OOB lanes need to
-        # see zero. Value matches the LLVM-direct path
-        # (``lower_llvm._op_tile_buffer_rsrc`` -> ``i32 159744`` =
-        # ``0x00027000``) and CK Tile's
-        # ``__builtin_amdgcn_make_buffer_rsrc(p, 0, bytes, 0x00027000)``
-        # in ``cktile_fixed_lean_kernel.hpp``.
+        # The flags word is the rsrc DWORD3. Its format / out-of-bounds
+        # encoding is ISA-specific (the gfx9 value makes every raw buffer
+        # access on gfx11 / gfx12 read 0 or drop the write), so it comes from
+        # the target's ISA backend -- the same ``buffer_rsrc_word3`` the
+        # LLVM-direct path (``lower_llvm._op_tile_buffer_rsrc``) emits. With
+        # the right word, out-of-range byte offsets return 0 on load and are
+        # dropped on store; without it the compiler can lower buffer loads to
+        # unbounded single-dword loads with no bounds check.
         ptr, num_bytes = op.operands
+        word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(
             f"rsrc_t {_name(op.result)} = "
             f"__builtin_amdgcn_make_buffer_rsrc("
             f"(void*){_name(ptr)}, /*stride=*/(short)0, "
             f"/*num_records=*/(int){_name(num_bytes)}, "
-            f"/*flags=*/(int)0x00027000);"
+            f"/*flags=*/(int)0x{word3:08X});"
         )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:
@@ -2446,26 +2445,6 @@ class _Lowerer:
             f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
         )
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
-
-    def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
-        # ``ds_read_b128_tr_b16`` -- wide gfx950 transpose-read.
-        # Same shape as the b64 variant, ``<8 x i16>`` per lane.
-        self._require_ds_read_tr("ds_read_tr16_b128")
-        smem = op.operands[0]
-        indices = op.operands[1:]
-        storage = smem.op.attrs.get("_storage")
-        if storage is None:
-            raise RuntimeError("ds_read_tr16_b128 before smem_alloc was lowered")
-        idx_str = "][".join(_name(i) for i in indices)
-        elem = op.attrs.get("elem_type", "f16")
-        vec_prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem, "f16x")
-        nice = _name(op.result)
-        raw_tmp = f"_trraw_{nice.lstrip('%')}"
-        self._emit(
-            f"i16x8_raw {raw_tmp} = _llvm_amdgcn_ds_read_tr16_b128("
-            f"(const __attribute__((address_space(3))) void*)&{storage}[{idx_str}]);"
-        )
-        self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands
@@ -2717,6 +2696,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
+        descriptor_error = _scf_for_carried_descriptor_error(op)
+        if descriptor_error is not None:
+            raise ValueError(descriptor_error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]
