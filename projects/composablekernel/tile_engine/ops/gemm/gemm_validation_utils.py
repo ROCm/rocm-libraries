@@ -1962,8 +1962,14 @@ def validate_gemm_mx(
     if pipeline not in GEMM_MX_PIPELINES_BY_ARCH.get(arch, ()):
         return False, f"MX pipeline {pipeline!r} is not supported on {arch}"
     if arch == "gfx1250" and pipeline in ("comp_tdm", "comp_tdm_v2"):
-        if (warp_m, warp_n, warp_k) != (2, 2, 1):
-            return False, "gfx1250 MX GEMM requires 2x2x1 warps"
+        valid_warp_grids = (
+            ((2, 2, 1), (2, 4, 1))
+            if pipeline == "comp_tdm"
+            else ((2, 2, 1),)
+        )
+        if (warp_m, warp_n, warp_k) not in valid_warp_grids:
+            expected = "2x2x1 or 2x4x1" if pipeline == "comp_tdm" else "2x2x1"
+            return False, f"gfx1250 MX {pipeline} requires {expected} warps"
         # TdmEpilogue stages the full FP16 output tile in the shared LDS allocation.
         if tile_m * tile_n * 2 > LDS_SIZE_MAP[arch]:
             return False, "MX TDM epilogue exceeds the architecture LDS capacity"

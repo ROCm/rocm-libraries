@@ -45,6 +45,7 @@ from mx_gemm_utils import (  # noqa: E402
     dequantize_fp8,
     quantize_fp4_packed,
     dequantize_fp4_packed,
+    expand_mx_sweep,
     mx_gemm_reference,
 )
 
@@ -469,6 +470,20 @@ class TestMxArchitectureKernels(unittest.TestCase):
                         for pipeline in ("comp_tdm", "comp_tdm_v2")
                     ],
                 )
+
+    def test_gfx1250_comp_tdm_accepts_eight_wave_maf_candidate(self):
+        config = (
+            _CK
+            / "tile_engine/ops/gemm/mx_gemm/configs"
+            / "comp_tdm_maf_warp_grid_sweep_gfx1250.json"
+        )
+        configs = expand_mx_sweep(config, "gfx1250", "fp4")
+        self.assertEqual(len(configs), 1)
+        cfg = configs[0]
+        self.assertEqual(cfg.pipeline, "comp_tdm")
+        self.assertEqual((cfg.tile_m, cfg.tile_n, cfg.tile_k), (256, 256, 128))
+        self.assertEqual((cfg.warp_m, cfg.warp_n, cfg.warp_k), (2, 4, 1))
+        self.assertTrue(cfg.is_valid())
 
     def test_all_native_mx_pipeline_defaults_and_codegen(self):
         from unified_mx_gemm_codegen import (
