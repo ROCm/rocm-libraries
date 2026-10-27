@@ -137,7 +137,12 @@ def solution_digest(solution):
 
 
 def solutions(path):
-    data = yaml.load(path.read_text(), Loader=SafeLoader)
+    content = path.read_text()
+    try:
+        data = yaml.load(content, Loader=SafeLoader)
+    except yaml.YAMLError:
+        # libyaml rejects some flow mappings emitted by ExactDict.
+        data = yaml.safe_load(content)
     headers = {
         "MinimumRequiredVersion",
         "ProblemSizes",

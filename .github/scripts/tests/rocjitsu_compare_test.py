@@ -22,6 +22,7 @@ from rocjitsu_compare import (
     compare,
     resource_statistics,
     solution_digest,
+    solutions,
     workload_coverage,
 )
 from rocjitsu_evidence import digest, retain
@@ -58,6 +59,19 @@ class CompareTest(unittest.TestCase):
             MIRAGE_PROFILE="mi450x",
             CASE_FILTER="sample",
         )
+
+    def test_solution_inventory_accepts_emitted_explicit_stride_headers(self):
+        path = self.root / "solutions.yaml"
+        header = (
+            "- MinimumRequiredVersion: 5.0.0\n"
+            "- ProblemSizes:\n"
+            "  - Exact: { sizes:[8192, 8192, 1, 192], stridesA:[1, 384, 0] }\n"
+        )
+        path.write_text(header + yaml.safe_dump(self.solutions))
+        self.assertEqual(solutions(path), self.solutions)
+        path.write_text(header + "- UnexpectedMetadata: true\n")
+        with self.assertRaisesRegex(ValueError, "unknown solution/header schema"):
+            solutions(path)
 
     def item(self, root, nodeid, sizes, candidate):
         output = root / "output" / nodeid.replace("/", "_")
