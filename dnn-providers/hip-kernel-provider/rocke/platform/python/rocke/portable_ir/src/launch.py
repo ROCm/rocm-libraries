@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.intexpr import eval_intexpr
-from rocke.core.ir import check_cluster_dims
+from rocke.core.ir import FACT_WORDS, check_cluster_dims
 from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
 
 # Kernarg representations, mirroring rv_arg_classify in recipe_vm.cpp:
@@ -244,12 +244,19 @@ def signature(
     runtime/packing.py and rv_plan_on. Packing fields back to back is correct
     only until a signature mixes widths -- (ptr, i32, ptr) puts its last pointer
     at 16, not 12 -- and then it is wrong for everything after the mix."""
-    flat = expand_recipe(recipe, {**spec_int, **(spec_str or {})})
+    return _signature(expand_recipe(recipe, {**spec_int, **(spec_str or {})}))
+
+
+def _param_instrs(flat: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The ``param`` instructions of an expanded recipe, in declaration order."""
+    return [instr for instr in flat["program"] if instr.get("op") == "param"]
+
+
+def _signature(flat: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """``signature`` of an already expanded recipe."""
     args: List[Dict[str, Any]] = []
     off = 0
-    for instr in flat["program"]:
-        if instr.get("op") != "param":
-            continue
+    for instr in _param_instrs(flat):
         kind, size = _classify(instr["type"])
         off = -(-off // size) * size
         args.append(
@@ -287,16 +294,34 @@ def plan(
     mirror of rocke_launch_plan_t, and the oracle the C plan is tested against.
 
     ``cluster`` is None for a kernel without ``cluster_dims``; otherwise launch
-    with hipDrvLaunchKernelEx and a cluster-dimension attribute of that shape."""
+    with hipDrvLaunchKernelEx and a cluster-dimension attribute of that shape.
+
+    Refuses a recipe whose parameters state facts (``ge``, ``le``,
+    ``multiple_of``, ...): the caller packs the arguments itself, so a plan
+    cannot check them, and the GPU would trust them unchecked. Pointer
+    attributes such as ``align`` are not facts and plan as before."""
     spec_str = spec_str or {}
-    args = signature(recipe, spec_int, spec_str)
+    kernel_name = format_kernel_name(
+        recipe.get("kernel_name_fmt", ""), spec_int, spec_str
+    )
+    flat = expand_recipe(recipe, {**spec_int, **spec_str})
+    _refuse_stated_facts(flat, kernel_name)
+    args = _signature(flat)
     geometry = eval_launch(recipe, spec_int, spec_str)
     return {
-        "kernel_name": format_kernel_name(
-            recipe.get("kernel_name_fmt", ""), spec_int, spec_str
-        ),
+        "kernel_name": kernel_name,
         "args": args,
         "kernarg_size": kernarg_size(args),
         "geometry": geometry,
         "cluster": eval_cluster(recipe, geometry),
     }
+
+
+def _refuse_stated_facts(flat: Dict[str, Any], kernel_name: str) -> None:
+    """Mirrors the refusal in rv_plan_on (recipe_vm.cpp), with its message."""
+    for instr in _param_instrs(flat):
+        if any(word in (instr.get("attrs") or {}) for word in FACT_WORDS):
+            raise ExpandError(
+                f"{kernel_name}: parameters carry facts, which the C++ launch plan "
+                "cannot check yet -- launch it through KernelLauncher.from_artifact"
+            )

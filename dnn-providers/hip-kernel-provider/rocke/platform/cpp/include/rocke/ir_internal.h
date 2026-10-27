@@ -344,6 +344,10 @@ int rocke_param_fact_errors(const rocke_param_t* const* params,
                             rocke_param_fact_sink_t sink,
                             void* ctx);
 
+/* Whether `p` states an integer fact: one of ir.FACT_WORDS (ge, gt, le, lt, eq,
+ * multiple_of) is among its attrs. Pointer attributes are not facts. */
+bool rocke_param_states_facts(const rocke_param_t* p);
+
 /* Mirrors ir_print._format_param's facts: appends " {ge = %N, le = 4096}" for
  * the facts `p` states, nothing when it states none. */
 void rocke_param_facts_print(const rocke_param_t* p, rocke_strbuf_t* out);

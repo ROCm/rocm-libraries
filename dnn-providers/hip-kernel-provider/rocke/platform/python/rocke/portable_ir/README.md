@@ -839,7 +839,9 @@ The C++ side lives in `platform/cpp/portable_ir/` (C++20, part of
   evaluator (+ `rocke/recipe_guard.h`), so that guards and recipes share one
   intexpr evaluator rather than two.
 - `recipe_vm.cpp` also carries the launch planner (+ `rocke/recipe_launch.h`):
-  kernel name, kernarg layout and grid/block/LDS for a shape.
+  kernel name, kernarg layout and grid/block/LDS for a shape. It refuses a
+  recipe whose params state facts (`ge`, `le`, `multiple_of`, ...), which it
+  cannot check; such a kernel launches through `KernelLauncher.from_artifact`.
 - `core/rocke_abi.cpp` (+ `rocke/abi.h`) — the two compatibility contracts, and
   the policy for bumping each. Distinct from `rocke/rocke_build_id.h`, which is
   provenance: build-ids change every commit, so they cannot gate anything

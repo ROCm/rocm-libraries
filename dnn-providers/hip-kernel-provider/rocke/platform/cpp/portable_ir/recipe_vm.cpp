@@ -58,6 +58,7 @@
 #include "rocke/cbor_dom.h"
 #include "rocke/error.hpp"
 #include "rocke/intexpr.h"
+#include "rocke/ir_internal.h"
 #include "rocke/json_dom.h"
 #include "rocke/recipe_guard.h"
 #include "rocke/recipe_launch.h"
@@ -2000,6 +2001,27 @@ static rocke_status_t rv_plan_on(jd_val_t* root,
     rocke_status_t st = rv_run_root(root, ints, n_ints, strs, n_strs, &b, &kernel, err, err_cap);
     if(st != ROCKE_OK)
         return st;
+
+    /* The caller copies argument values into the kernarg itself, so the plan
+     * never sees them and cannot check the facts a parameter states. Refuse
+     * such a recipe rather than describe a launch the GPU would trust
+     * unchecked. (Mirrored, with the same message, by launch.plan in
+     * portable_ir/src/launch.py.) */
+    for(int i = 0; kernel && i < kernel->num_params; i++)
+    {
+        if(rocke_param_states_facts(kernel->params[i]))
+        {
+            if(err && err_cap)
+                ROCKE_ERR_SNPRINTF(err,
+                                   err_cap,
+                                   "%s: parameters carry facts, which the C++ launch plan "
+                                   "cannot check yet -- launch it through "
+                                   "KernelLauncher.from_artifact",
+                                   kernel->name);
+            rocke_ir_builder_free(&b);
+            return ROCKE_ERR_VALUE;
+        }
+    }
 
     rocke_launch_plan_t* plan = (rocke_launch_plan_t*)calloc(1, sizeof *plan);
     if(!plan)

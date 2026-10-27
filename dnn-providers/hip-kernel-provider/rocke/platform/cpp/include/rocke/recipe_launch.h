@@ -120,7 +120,12 @@ typedef struct rocke_launch_plan rocke_launch_plan_t;
 /* Replay a recipe far enough to describe its launch. Returns ROCKE_ERR_VALUE if
  * the recipe's guard refuses this spec -- the same refusal the VM would give,
  * because planning a launch for a shape the kernel will not serve is not a
- * meaningful question. */
+ * meaningful question.
+ *
+ * Also ROCKE_ERR_VALUE for a recipe whose `param` instructions state facts
+ * (ge, gt, le, lt, eq, multiple_of): the caller copies the argument values into
+ * the kernarg itself, so the plan cannot check them, and the GPU would trust
+ * them unchecked. Pointer attributes such as `align` are not facts. */
 rocke_status_t rocke_recipe_plan_launch_cbor(const unsigned char* data,
                                              size_t len,
                                              const rocke_recipe_spec_int_t* ints,
