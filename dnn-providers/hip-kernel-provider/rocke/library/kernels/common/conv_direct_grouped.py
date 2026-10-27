@@ -7150,7 +7150,9 @@ def is_valid_depthwise_dgrad_stream_spec(
         spec.cpl * p.KH * p.KW > _DW_MAX_PRELOAD_TAPS
         or spec.cpl * spec.block_w * p.KH > _DW_DGRAD_CPL_MAX_ACC
     ):
-        # Past these the packed weights or accumulator slots spill.
+        # Hard ceilings on the packed weights and accumulator slots. They do
+        # not keep every valid spec spill-free: the AOT grid applies an
+        # arch-aware spill gate on top (direct_aot_jobs._dw_dgrad_packed_spills).
         return False, (
             f"cpl={spec.cpl} holds {spec.cpl * p.KH * p.KW} weights and "
             f"{spec.cpl * spec.block_w * p.KH} accumulator-rows per lane "
@@ -7159,9 +7161,10 @@ def is_valid_depthwise_dgrad_stream_spec(
     return True, "ok"
 
 
-#: Bound on ``cpl * block_w * KH`` for the channel-packed depthwise dgrad
-#: kernel: its accumulator slots (``stride * KH * block_w`` of ``cpl`` f32
-#: each) spill past it.
+#: Ceiling on ``cpl * block_w * KH`` for the channel-packed depthwise dgrad
+#: kernel's accumulator slots (``stride * KH * block_w`` of ``cpl`` f32 each).
+#: A validity bound, not a spill model: which valid specs spill depends on the
+#: arch, and the AOT grid gates that (direct_aot_jobs._dw_dgrad_packed_spills).
 _DW_DGRAD_CPL_MAX_ACC = 192
 
 

@@ -69,9 +69,11 @@ typedef struct rocke_direct_depthwise_dgrad_stream_spec
     int cpl; /* default 1 */
 } rocke_direct_depthwise_dgrad_stream_spec_t;
 
-/* Bound on cpl * block_w * KH for cpl > 1 (Python: _DW_DGRAD_CPL_MAX_ACC):
- * past it the packed accumulator slots spill. The packed weights are bounded
- * by the preloading depthwise tap limit (_DW_MAX_PRELOAD_TAPS). */
+/* Ceiling on cpl * block_w * KH for cpl > 1 (Python: _DW_DGRAD_CPL_MAX_ACC).
+ * The packed weights are bounded by the preloading depthwise tap limit
+ * (_DW_MAX_PRELOAD_TAPS). Validity bounds, not a spill model: the Python AOT
+ * grid drops the valid specs that spill on an arch
+ * (direct_aot_jobs._dw_dgrad_packed_spills). */
 #define ROCKE_DCONV_DW_DGRAD_CPL_MAX_ACC 192
 #define ROCKE_DCONV_DW_DGRAD_STREAM_MAX_PRELOAD_TAPS 200
 

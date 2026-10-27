@@ -8,27 +8,24 @@
   including per-axis padding for non-square filters.
 
 CPU: validators, the AOT grid entries and the shape gate of
-``direct_spec_for_problem``. GPU (wave32 targets): numerics against torch.
+``direct_spec_for_problem``. GPU (any arch rocke models): numerics against a
+numpy reference, at the arch's wave size; a case whose spec the arch refuses
+is skipped.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_depthwise_dgrad_v2.py -v
 """
 
 from __future__ import annotations
 
 import ctypes
-import importlib.util
 import unittest
 
+import numpy as np
+from rocke.core.arch import ArchTarget
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it.
-    import torch
-
-    torch.cuda.is_available()
 
 from kernels.common import conv_direct_grouped as dc
 from kernels.conv.direct_variants import (
@@ -200,12 +197,45 @@ class TestDepthwiseDgradSpecs(unittest.TestCase):
         self.assertEqual((ident.filter_h, ident.filter_w), (5, 51))
         self.assertEqual((ident.pad_h, ident.pad_w), (2, 25))
 
+    def test_aot_grid_drops_spilling_packed_dgrad(self):
+        from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES, _caps_jobs
+
+        _, caps_list = DIRECT_CAPABILITIES["direct_depthwise_dgrad"]
+
+        def packed(arch, KH, stride):
+            caps = next(c for c in caps_list if (c.KH, c.stride) == (KH, stride))
+            wave = ArchTarget.from_gfx(arch).wave_size
+            _, jobs = _caps_jobs(
+                arch, wave, "direct_depthwise_dgrad", "dgrad", caps, "bf16"
+            )
+            return {
+                (
+                    j.spec_kwargs["cpl"],
+                    j.spec_kwargs["block_w"],
+                    j.spec_kwargs["block_waves"],
+                )
+                for _, j in jobs
+                if j.spec_kwargs.get("cpl", 1) > 1
+            }
+
+        for arch in ("gfx942", "gfx950", "gfx1201"):
+            # Two channels per lane fit a 3x3 filter but spill on a 9x9 one.
+            self.assertIn((2, 8, 1), packed(arch, 3, 1))
+            self.assertFalse(any(cpl == 2 for cpl, _, _ in packed(arch, 9, 1)))
+            self.assertFalse(any(cpl == 8 for cpl, _, _ in packed(arch, 5, 2)))
+        # gfx1250 spills only in four-wave blocks.
+        k9 = packed("gfx1250", 9, 1)
+        self.assertIn((2, 8, 2), k9)
+        self.assertNotIn((2, 8, 4), k9)
+
 
 def _gpu_skip() -> str:
-    if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+    if GPU_ARCH is None:
+        return "no GPU"
+    try:
+        ArchTarget.from_gfx(GPU_ARCH)
+    except KeyError:
+        return f"rocke does not model {GPU_ARCH!r}"
     return ""
 
 
@@ -240,63 +270,97 @@ _CASES = (
 )
 
 
+def _to_bits(x: np.ndarray, dtype: str) -> np.ndarray:
+    if dtype == "bf16":
+        return f32_to_bf16(x)
+    return x.astype(np.float16).view(np.uint16)
+
+
+def _to_f32(bits: np.ndarray, dtype: str) -> np.ndarray:
+    if dtype == "bf16":
+        return bf16_to_f32(bits)
+    return bits.view(np.float16).astype(np.float32)
+
+
+def _reference(dy: np.ndarray, w: np.ndarray, p) -> np.ndarray:
+    """dX[n, ho * stride - PAD + r, wo * stride - PAD_W + s, c] +=
+    W[c, r, s] * dY[n, ho, wo, c]."""
+    dx = np.zeros((p.N, p.H, p.W, p.groups), np.float32)
+    ho, wo = np.arange(p.Ho), np.arange(p.Wo)
+    for r in range(p.KH):
+        hi = ho * p.stride - p.PAD + r
+        mh = (hi >= 0) & (hi < p.H)
+        for s in range(p.KW):
+            wi = wo * p.stride - p.PAD_W + s
+            mw = (wi >= 0) & (wi < p.W)
+            if not (mh.any() and mw.any()):
+                continue
+            # (ho, wo) -> (hi, wi) is one-to-one per tap: no repeated index.
+            dx[:, hi[mh][:, None], wi[mw][None, :], :] += (
+                w[:, r, s] * dy[:, ho[mh]][:, :, wo[mw]]
+            )
+    return dx
+
+
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDepthwiseDgradGpu(unittest.TestCase):
     def _check(self, pkw, kind, knobs):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
+        from rocke.runtime import synchronize_and_release
         from rocke.runtime.hip_module import Runtime
         from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
+        from kernels.common.conv_abi import conv_direct_args_signature
+        from kernels.common.conv_args import ConvArgs
+
         p = _problem(**pkw)
+        wave = ArchTarget.from_gfx(GPU_ARCH).wave_size
         if kind == "stream":
-            spec = _stream(p, **knobs)
+            spec = dc.DirectDepthwiseDgradStreamSpec(problem=p, wave_size=wave, **knobs)
             ok, why = dc.is_valid_depthwise_dgrad_stream_spec(spec, GPU_ARCH)
-            kernel = dc.build_direct_depthwise_dgrad_streaming(spec, GPU_ARCH)
+            build = dc.build_direct_depthwise_dgrad_streaming
         else:
-            spec = _tiled(p, **knobs)
+            spec = dc.DirectDepthwiseTiledSpec(
+                problem=p, wave_size=wave, dgrad=True, **knobs
+            )
             ok, why = dc.is_valid_depthwise_tiled_spec(spec, GPU_ARCH)
-            kernel = dc.build_direct_depthwise_tiled(spec, GPU_ARCH)
-        self.assertTrue(ok, why)
-        art = compile_kernel(kernel, arch=GPU_ARCH)
+            build = dc.build_direct_depthwise_tiled
+        if not ok:
+            self.skipTest(f"not valid on {GPU_ARCH}: {why}")
+        art = compile_kernel(build(spec, GPU_ARCH), arch=GPU_ARCH)
         grid, block = dc.direct_launch_geometry(spec)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.groups).uniform_(-1, 1).to(td)
-        w = torch.empty(p.groups, p.KH, p.KW, 1).uniform_(-1, 1).to(td)
-        dX = torch.zeros(p.N, p.H, p.W, p.groups, dtype=td)
+        rng = np.random.default_rng(0)
+        dy_b = _to_bits(
+            rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.groups)).astype(np.float32),
+            p.dtype,
+        )
+        w_b = _to_bits(
+            rng.uniform(-1, 1, (p.groups, p.KH, p.KW)).astype(np.float32), p.dtype
+        )
+        ref = _reference(_to_f32(dy_b, p.dtype), _to_f32(w_b, p.dtype), p)
+        dx_bytes = p.N * p.H * p.W * p.groups * 2
         rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (dY, w, dX)]
+        bufs = [rt.alloc(n) for n in (dy_b.nbytes, w_b.nbytes, dx_bytes)]
         try:
-            rt.memcpy_h2d(bufs[0], u8(dY), dY.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, dX.nbytes)  # poison: every element is written
+            rt.memcpy_h2d(bufs[0], dy_b.ctypes.data_as(ctypes.c_void_p), dy_b.nbytes)
+            rt.memcpy_h2d(bufs[1], w_b.ctypes.data_as(ctypes.c_void_p), w_b.nbytes)
+            rt.memset(bufs[2], 0x7F, dx_bytes)  # poison: every element is written
             vals = ConvArgs.from_problem(p, direction="dgrad").to_launch_values(
-                *(int(x) for x in bufs), dY.nbytes, w.nbytes, dX.nbytes
+                *(int(x) for x in bufs), dy_b.nbytes, w_b.nbytes, dx_bytes
             )
             KernelLauncher(
                 hsaco=art.hsaco,
                 kernel_name=art.kernel_name,
                 signature=conv_direct_args_signature(p.dtype, direction="dgrad"),
             )(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            rt.memcpy_d2h(u8(dX), bufs[2], dX.nbytes)
+            out = np.empty(dx_bytes // 2, np.uint16)
+            rt.memcpy_d2h(out.ctypes.data_as(ctypes.c_void_p), bufs[2], dx_bytes)
         finally:
             for x in bufs:
                 rt.free(x)
-        ref = torch.nn.grad.conv2d_input(
-            (p.N, p.groups, p.H, p.W),
-            w.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=(p.PAD, p.PAD_W),
-            groups=p.groups,
-        ).permute(0, 2, 3, 1)
-        err = float((dX.float() - ref).abs().max() / ref.abs().max())
+            synchronize_and_release(0)
+        dx = _to_f32(out, p.dtype).reshape(ref.shape)
+        err = float(np.abs(dx - ref).max() / np.abs(ref).max())
         self.assertLess(err, 1e-2, f"{pkw} {kind} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

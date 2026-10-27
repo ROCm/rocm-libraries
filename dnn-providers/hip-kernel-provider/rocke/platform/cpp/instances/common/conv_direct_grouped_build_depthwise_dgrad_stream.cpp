@@ -923,7 +923,8 @@ bool rocke_direct_depthwise_dgrad_stream_is_valid_spec(
         if(taps > ROCKE_DCONV_DW_DGRAD_STREAM_MAX_PRELOAD_TAPS
            || acc > ROCKE_DCONV_DW_DGRAD_CPL_MAX_ACC)
         {
-            /* Past these the packed weights or accumulator slots spill. */
+            /* Hard ceilings on the packed weights and accumulator slots; the
+             * AOT grid gates the specs within them that still spill. */
             if(reason && reason_cap > 0)
                 snprintf(reason,
                          reason_cap,

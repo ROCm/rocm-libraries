@@ -89,6 +89,16 @@ DW_DGRAD_CPL_GRID = (
     (4, (4,), (1, 2)),
     (8, (4, 8), (1, 4)),
 )
+# Spill gate of the channel-packed depthwise dgrad grid (see
+# _dw_dgrad_packed_spills): the live-register estimate past which the compiled
+# grid spills. Calibrated by compiling every cpl > 1 entry: on gfx942 / gfx950
+# each entry estimated past 288 overflows the 256 architectural VGPRs (most of
+# them to scratch), and on gfx1151 / gfx1201 each one spills to scratch, while
+# the entries at or below it compile spill-free bar a single register on a few.
+# gfx1250 gives a lane of a block of up to two waves far more registers and
+# spills only in four-wave blocks, past 448.
+DW_DGRAD_PACKED_LIVE_BUDGET = 288
+DW_DGRAD_PACKED_LIVE_BUDGET_GFX1250 = 448
 # Rotated-filter depthwise dgrad through the output-stationary kernel: wide
 # tiles amortize the KW-1 column halo of the large filters it serves.
 DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
@@ -1219,6 +1229,31 @@ def _nongrouped_spills(spec, arch: str) -> bool:
     return nongrouped_register_reason(spec, arch) is not None
 
 
+def _dw_dgrad_packed_spills(caps: DirectCaps, knobs: dict, arch: str) -> bool:
+    """Would this channel-packed (``cpl > 1``) depthwise dgrad binary spill?
+
+    Not a validity rule -- a spilling kernel is still correct -- but it costs
+    build time, cache size and tuning time for a binary selection would skip.
+    The estimate is per lane: two registers per packed weight tap (the
+    ``cpl * KH * KW`` taps are preloaded) plus the accumulator rows,
+    ``cpl * KH * block_w`` of them per stride step. The compiled grid tracks
+    the weights far more than the accumulator slots or the prefetched dY rows,
+    so neither the slot count's stride factor nor the prefetch is charged; see
+    :data:`DW_DGRAD_PACKED_LIVE_BUDGET` for the calibration.
+    """
+    from rocke.core.arch import ArchTarget
+
+    cpl = knobs.get("cpl", 1)
+    if cpl == 1:
+        return False
+    live = cpl * caps.KH * (2 * caps.KW + knobs["block_w"] / caps.stride)
+    if ArchTarget.from_gfx(arch).target_family == "gfx12_cdna":
+        if knobs["block_waves"] < 4:
+            return False
+        return live > DW_DGRAD_PACKED_LIVE_BUDGET_GFX1250
+    return live > DW_DGRAD_PACKED_LIVE_BUDGET
+
+
 def _depthwise_stream_spills(spec) -> bool:
     """Would this row-streaming depthwise kernel spill registers? Such a binary
     takes minutes to compile and runs far slower than the output-stationary
@@ -1598,6 +1633,10 @@ def _caps_jobs(
             continue
         if variant == "direct_grouped_dgrad_fused" and _dgrad_fused_policy_reason(
             caps, knobs, arch, dtype
+        ):
+            continue
+        if variant == "direct_depthwise_dgrad" and _dw_dgrad_packed_spills(
+            caps, knobs, arch
         ):
             continue
         spec = make_spec(variant, probe, knobs, wave_size)

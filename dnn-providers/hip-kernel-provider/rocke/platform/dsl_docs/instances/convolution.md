@@ -1015,8 +1015,12 @@ load and dX rows store as one `cpl`-wide vector per lane and every tap is
 scalar kernel unchanged. `groups` must be a multiple of `cpl`, `block_ch`
 grows by `cpl`, and the validator bounds the packed weights
 (`cpl * KH * KW <= 200`) and accumulator slots
-(`cpl * block_w * KH <= _DW_DGRAD_CPL_MAX_ACC = 192`). The kernel name gains
-`cpl{N}`; the AOT grid adds the `DW_DGRAD_CPL_GRID` knobs.
+(`cpl * block_w * KH <= _DW_DGRAD_CPL_MAX_ACC = 192`). Those are ceilings,
+not a spill model: the AOT grid adds the `DW_DGRAD_CPL_GRID` knobs and drops
+the entries whose per-lane estimate `cpl * KH * (2 * KW + block_w / stride)`
+exceeds `DW_DGRAD_PACKED_LIVE_BUDGET` (288; 448 for four-wave blocks on
+gfx1250, which spills in no smaller block), calibrated by compiling the grid.
+The kernel name gains `cpl{N}`.
 
 Grid: `(ceil(W / block_w), ceil(groups / block_ch), N)` with
 `block_ch = block_waves * wave_size * cpl`.
