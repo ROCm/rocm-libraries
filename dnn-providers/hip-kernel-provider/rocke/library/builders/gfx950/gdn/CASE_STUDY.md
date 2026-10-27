@@ -51,15 +51,19 @@ Tiles are `(num_warps, warp_threads_k, blocks_per_v_dim)`. bf16 I/O, bf16 and
   every tile in [`CONFIGURED_TILES`](../../../dispatch/gdn/gfx950.py); KDA at
   `32/32`, the three tiles in
   [`_TUNED_TILES_KDA`](../../../dispatch/gdn/gfx950.py); each with bf16 and
-  `f32` state. Dispatch accepts only a 16-bit state today, so the `f32` half is
-  not reachable from a request yet.
+  `f32` state. This table was collected before dispatch accepted `f32` state,
+  so the `f32` half was built as specs directly. Dispatch can now request an
+  `f32` state but still uses the same auto tile as the 16-bit state.
 - **Auto-route fallback (4):** GDN `(1,1,1)` at `DK = DV = 64` and `192`, where
   [`DEFAULT_TILE`](../../../dispatch/gdn/gfx950.py) `(2,16,8)` is illegal
   ([ALGORITHM.md §4.6](ALGORITHM.md#46-registry-and-tile-selection)).
 - **Fused tiles (228):** GDN and KDA at `16/16`, `BPV = 1`, every legal
   `(NW, WTK)` with `NW` in 1–16 and `WTK` in 1–32, with `fuse_conv`,
-  `fuse_out_norm` (`rn` below) or both (`cv+rn`). The registry never builds a
-  fused spec; callers pick these tiles themselves.
+  `fuse_out_norm` (`rn` below) or both (`cv+rn`). This table was collected
+  before dispatch had fusion request fields, so the measurements used
+  hand-built specs. Dispatch can now request fusion; `auto` routes the interim
+  `(4,16,1)` fused tile, and the other registered legal `BPV = 1` tiles remain
+  selectable by explicit `spec_id`.
 
 The merge base is `153bf493555`, the interleaved order; the head is the
 load-first emitter.
@@ -136,9 +140,9 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
   `(4,16,1)` bf16 gains a wave on ROCm 7.1, loses one on ROCm 7.13 and does not
   change on ROCm 10).
 - **The exemption stays keyed on `NW == 1`.** The tiles that start to spill are
-  multi-wave `fuse_conv` tiles, which dispatch never builds. Which ones spill
-  differs per compiler, so a footprint-keyed exemption would encode one
-  compiler's register allocator.
+  multi-wave `fuse_conv` tiles outside the interim `(4,16,1)` fused default.
+  Which ones spill differs per compiler, so a footprint-keyed exemption would
+  encode one compiler's register allocator.
 - **The scratch test holds the stable subset.**
   [`test_lowers_and_compiles_without_scratch`](../../../tests/test_gdn_decode_fused.py)
   lowers all 228 fused cases and
@@ -160,9 +164,10 @@ correctness gate and result in words and publishes no speed numbers.
 **Scope.** Single-token `DK = DV = 128` decode, bf16 I/O, batches 1, 16 and 128.
 GDN uses the default `(2,16,8)` tile. KDA uses the dispatcher's `(4,16,4)`,
 `(1,16,4)` and `(2,16,1)` tiles; the fused f32 case uses `(4,16,1)`. The f32-state
-and fused arms were built as specs directly: a dispatch request cannot ask for an
-`f32` state or for fusion today. GDN fused performance was not measured. The tile
-choices were made on the old load order ([§5](#5-decisions)).
+and fused arms were built as specs directly; a dispatch request can now ask for
+both, and `auto` serves a fused request `(4,16,1)`. No f32 or fused tile was
+tuned. GDN fused performance was not measured. The tile choices were made on the
+old load order ([§5](#5-decisions)).
 
 **Method.** Both trees run in one process, with their arms interleaved, and each
 result is the median of 3 independent runs. State, conv-state and output

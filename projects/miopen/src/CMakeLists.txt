@@ -207,10 +207,12 @@ set( MIOpen_Source
     solver/conv/conv_asm_implicit_gemm_wrw_v4r1_dynamic.cpp
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
+    solver/conv/conv_direct_depthwise_fwd_2d.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
+    solver/conv/conv_generic_depthwise_fwd_2d.cpp
 
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1_xdlops.cpp
@@ -551,6 +553,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         ${GPU_REFERENCE_KERNEL_ASM}
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
+        kernels/miopen_conv2d_depthwise_fwd.cpp
         kernels/miopen_conv2d_depthwise_fwd_generic.cpp
         kernels/miopen_conv3d_depthwise_fwd.cpp
         kernels/MIOpenAdam.cpp
@@ -952,6 +955,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_BINARY_DIR}/include
         ${CMAKE_BINARY_DIR}/include)
 
+    # Added here because the rocm_install_targets(INCLUDE ...) call below only
+    # adds the include path as a side effect of installing. PUBLIC so in-tree
+    # consumers, such as forwarding_failure_probe, find hipdnn_forwarding.h.
+    target_include_directories(MIOpen PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include_wrapper>)
+
     # The wrapper's only dependency is the private library, so every symbol it
     # references must resolve at link time. This turns "new API added, stub
     # written, rename #define forgotten" from a runtime failure into a link
@@ -1209,6 +1218,13 @@ set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
 set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
+# Installs hipdnn_forwarding.h. rocm_install_targets also adds the directory to
+# the include path of every target it installs, MIOpen_private included, but
+# MIOpen does not rely on that: it gets the path from its own include above.
+set(MIOPEN_WRAPPER_HEADER_PATH)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+set(MIOPEN_WRAPPER_HEADER_PATH ${PROJECT_SOURCE_DIR}/include_wrapper)
+endif()
 
 rocm_install_targets(
   TARGETS ${_MIOPEN_INSTALL_TARGETS}
@@ -1216,6 +1232,7 @@ rocm_install_targets(
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
     ${MIOPEN_CXX_HEADER_PATH}
+    ${MIOPEN_WRAPPER_HEADER_PATH}
 )
 
 rocm_export_targets(

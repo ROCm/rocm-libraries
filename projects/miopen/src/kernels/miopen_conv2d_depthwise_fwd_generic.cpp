@@ -3,7 +3,8 @@
 
 // General-shape 2D depthwise forward convolution for packed NCHW FP16/BF16 tensors.
 //
-// Compile-time parameters (set by ConvDepthwiseFwd2D, see conv_ck_grouped_conv_fwd.cpp). They
+// Compile-time parameters (set by ConvGenericDepthwiseFwd2D, see
+// solver/conv/conv_generic_depthwise_fwd_2d.cpp). They
 // depend only on the data type and the filter geometry, so one binary serves every spatial size:
 //   IO_DTYPE        __half or hip_bfloat16
 //   DW_FY, DW_FX    filter height and width

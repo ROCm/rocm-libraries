@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 # The cluster multicast is derived from ClusterDim (StreamK==3 and
 # ClusterDim[0] > 1) via this helper rather than stored as a state key.
-from Tensile.Common import streamKCluster, streamKMulticast
+from tensilelite.Common import streamKCluster, streamKMulticast
 
 _DESIGNED = os.path.join(
     os.path.dirname(__file__), "characterization",
@@ -49,16 +49,10 @@ _CK1_CLUSTER = [4, 1]
 # --- registration ----------------------------------------------------------
 
 class TestRegistration:
-    def test_not_a_valid_parameter(self):
-        """StreamKMulticast is derived-only (ClusterBarrier precedent): it must
-        NOT be a user/benchmark-settable validParameter."""
-        from Tensile.Common.ValidParameters import validParameters
+    def test_multicast_settings_are_derived_only(self):
+        from tensilelite.Common.ValidParameters import validParameters
+        from tensilelite.Common.GlobalParameters import defaultSolution
         assert "StreamKMulticast" not in validParameters
-
-    def test_not_a_default_benchmark_parameter(self):
-        """Not in defaultSolution either -- it is seeded/derived on state only by
-        Solution.assignProblemIndependentDerivedParameters."""
-        from Tensile.Common.GlobalParameters import defaultSolution
         assert "StreamKMulticast" not in defaultSolution
 
 
@@ -70,8 +64,8 @@ def _write_variant(tmp_path, name, *, fork_overrides=None):
     ``fork_overrides`` maps a fork parameter name to its single-element value
     list; an existing fork entry is replaced, otherwise appended.
     """
-    from Tensile import LibraryIO
-    from Tensile.ExecutionPolicy import ALIASES
+    from tensilelite import LibraryIO
+    from tensilelite.ExecutionPolicy import ALIASES
     import yaml
 
     cfg = copy.deepcopy(LibraryIO.read(_STREAMK_MULTICAST))
@@ -143,6 +137,48 @@ class TestValidation:
             # cluster-scope barrier handshake, so ClusterBarrier is derived on.
             assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
+    @pytest.mark.parametrize("shape", [[2, 1], [2, 2], [1, 2], [1, 4], [1, 8]])
+    def test_streamk_spatial_clusters_enable_multicast(self, tmp_path, shape):
+        cfg = _write_variant(tmp_path, "streamk.yaml", fork_overrides={
+            "TileProcessingStrategy": ["StreamK"], "ClusterDim": [shape],
+            "StreamKFixupTreeReduction": [1]})
+        states = _derive_states(cfg)
+        assert states
+        for state in states:
+            assert streamKCluster(state)
+            assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == 2
+            assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
+            assert state["Multicast"] is True
+            assert state["ClusterBarrier"] is True
+
+    @pytest.mark.parametrize("overrides", [
+        {"ClusterDim": [4, 8]}, {"PrefetchAcrossPersistent": 1},
+        {"PrefetchGlobalRead": 0}, {"StreamKAtomic": 1},
+        {"ReuseAcrossPersistent": 1}, {"SpaceFillingAlgo": [1]},
+        {"TDMInst": 2}, {"DebugStreamK": 1},
+        {"ProblemType": {"OutputAmaxD": True}},
+        {"ProblemType": {"Gradient": True, "UseBias": True}},
+    ])
+    def test_unsupported_spatial_capabilities_fail_explicitly(self, overrides):
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
+        state = _mc_state(TileProcessingStrategy="StreamK", StreamKFixupTreeReduction=1)
+        state.update(overrides)
+        assert not _validateStreamKMulticast(state, False, _isa_map())
+
+    def test_sixteen_n_peers_are_rejected_during_solution_derivation(self, tmp_path):
+        from pathlib import Path
+        import yaml
+        from config_harness import derive_states
+
+        fixture = Path(__file__).parents[1] / "common/streamk/gfx1250/static_streamk_cluster_multicast_boundaries.yaml"
+        config = yaml.safe_load(fixture.read_text())
+        config["BenchmarkProblems"][0] = config["BenchmarkProblems"][0][:2]
+        fork = config["BenchmarkProblems"][0][1]["ForkParameters"]
+        fork[:] = [entry for entry in fork if "ClusterDim" not in entry] + [{"ClusterDim": [[1, 16]]}]
+        path = tmp_path / "n_only_cluster.yaml"
+        path.write_text(yaml.safe_dump(config))
+        assert derive_states(str(path), arch="gfx1250", limit_solutions=1) == []
+
     def test_reject_atomic(self, tmp_path):
         cfg = _write_variant(tmp_path, "atomic.yaml",
                              fork_overrides={"StreamKAtomic": [1]})
@@ -153,7 +189,7 @@ class TestValidation:
         prefetch (PrefetchGlobalRead > 1): the prologue double-buffer prefetch
         multicast load is bracketed by a cluster-scope handshake in codegen, so
         both PrefetchGlobalRead 1 and 2 are accepted."""
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
 
         assert _validateStreamKMulticast(_mc_state(PrefetchGlobalRead=2), False, _isa_map()) is True
         assert _validateStreamKMulticast(_mc_state(PrefetchGlobalRead=1), False, _isa_map()) is True
@@ -187,7 +223,7 @@ class TestValidation:
         # ClusterDim = [2, 2] adds Ck = 2 N-axis peers on top of the Cs = 2 M-axis
         # peers, so A is multicast as well as B. It is the same cluster shape with
         # Ck > 1, accepted by the same validator.
-        from Tensile.Common import streamK2DCluster
+        from tensilelite.Common import streamK2DCluster
         cfg = _write_variant(tmp_path, "cd22.yaml",
                              fork_overrides={"ClusterDim": [[2, 2]]})
         states = _derive_states(cfg)
@@ -218,41 +254,41 @@ class TestValidation:
         # and _validateStreamKMulticast is a no-op (returns True) there. SK4/SK5 +
         # ClusterDim is rejected by the general Stream-K reconciliation (cluster
         # support is SK3-only), not by this validator.
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(TileProcessingStrategy="StreamK", WorkAssignment="DynamicWorkQueue")
         assert streamKCluster(st) is False
         assert streamKMulticast(st) is False
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 
     def test_reject_xcc_mapping_direct(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(PersistentXCCMapping=3), False, _isa_map()) is False
 
     def test_reject_non_gfx1250_isa(self):
         # The ISA gate rejects before indexing isaInfoMap, so a foreign ISA need
         # not be present in the map.
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(ISA=[9, 4, 2]), False, _isa_map()) is False
 
     def test_reject_missing_hastdm(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_tdm=False)) is False
 
     def test_reject_missing_hasclusterbarrier(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(), False, _isa_map(has_cluster_barrier=False)) is False
 
     def test_reject_space_filling_algo(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(SpaceFillingAlgo=[1]), False, _isa_map()) is False
 
     def test_reject_reuse_across_persistent(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         assert _validateStreamKMulticast(
             _mc_state(ReuseAcrossPersistent=1), False, _isa_map()) is False
 
@@ -264,13 +300,13 @@ class TestTDMInstValidation:
 
     @pytest.mark.parametrize("tdminst", [1, 2])
     def test_reject_non_tdm3(self, tdminst):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(TDMInst=tdminst)
         assert _validateStreamKMulticast(st, False, _isa_map()) is False
         assert st.get("Valid") is False
 
     def test_accept_tdm3(self):
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        from tensilelite.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(TDMInst=3)
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 
@@ -292,12 +328,48 @@ class TestMulticastGate:
         st = _mc_state(Multicast=True)
         assert streamKMulticast(st)
 
-    def test_next_tile_arrive_inert_without_cluster(self):
-        from Tensile.Components.WorkAssignment import StaticGrid
-        mod = StaticGrid().persistentClusterNextTileArrive(
-            writer=None, kernel=_mc_state(ClusterDim=[1, 1]))
-        items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
-        assert list(items) == []
+    @pytest.mark.parametrize("cluster", [[1, 1], [2, 1]])
+    def test_inert_handshake_without_cooperative_loads(self, cluster):
+        from tensilelite.Components.WorkAssignment import StaticGrid
+        assignment = StaticGrid()
+        for method in (assignment.persistentMulticastPrologueSignal,
+                       assignment.persistentClusterNextTileArrive,
+                       assignment.persistentMulticastZeroIterClusterWait):
+            module = method(writer=None, kernel=_mc_state(ClusterDim=cluster, ClusterBarrier=False))
+            assert not list(module.flatitems())
+
+
+def test_cluster_flags_and_workspace_address_the_same_physical_peer():
+    from rocisa.code import Module
+    from rocisa.container import sgpr
+    from rocisa.instruction import SAddCU32, SAddU32, SLShiftLeftB32, SMulHIU32, SMulI32
+    from tensilelite.Components.StreamK import StreamKTwoTileDPFirst
+    from test_data_parallel_static import _SKWriter
+
+    kernel = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid",
+              "ClusterDim": [4, 2], "BufferStore": True, "MacroTile0": 128, "MacroTile1": 64}
+    component = StreamKTwoTileDPFirst()
+    flags = list(component.flagOffset(kernel, "FlagOffset", sgpr("Producer")).flatitems())
+    assert [type(i) for i in flags] == [SLShiftLeftB32, SAddU32, SLShiftLeftB32]
+    assert [list(i.getParams()) for i in flags] == [
+        [sgpr("FlagOffset"), sgpr("Producer"), 3],
+        [sgpr("FlagOffset"), sgpr("FlagOffset"), sgpr("StreamKClusterPeer")],
+        [sgpr("FlagOffset"), sgpr("FlagOffset"), 2],
+    ]
+
+    writer = _SKWriter()
+    writer.states.bpeCinternal = 4
+    writer.shiftSrd = lambda _: Module("No base shift")
+    items = list(component.computeWorkspaceSrd(writer, kernel, sgpr("Producer")).flatitems())
+    shift, peer, low, high, add, carry = items[-6:]
+    assert [type(i) for i in (shift, peer, low, high, add, carry)] == [
+        SLShiftLeftB32, SAddU32, SMulI32, SMulHIU32, SAddU32, SAddCU32]
+    slot = shift.getParams()[0]
+    assert list(shift.getParams()) == [slot, sgpr("Producer"), 3]
+    assert list(peer.getParams()) == [slot, slot, sgpr("StreamKClusterPeer")]
+    assert list(low.getParams())[1:] == list(high.getParams())[1:] == ["0x8000", slot]
+    assert list(add.getParams()) == [sgpr("SrdWS+0"), sgpr("SrdWS+0"), low.getParams()[0]]
+    assert list(carry.getParams()) == [sgpr("SrdWS+1"), sgpr("SrdWS+1"), high.getParams()[0]]
 
 
 # --- emitted assembly ------------------------------------------------------

@@ -17,6 +17,7 @@
  */
 #include "rocke/dtypes.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/lower_llvm_internal.h" /* rocke_ll_backend_for: the target's buffer word3 */
 
 #include <stdint.h>
 #include <string.h>
@@ -1028,14 +1029,24 @@ static rocke_status_t _op_tile_buffer_rsrc(rocke_h_lowerer_t* lw, const rocke_op
     }
     ptr = op->operands[0];
     num_bytes = op->operands[1];
+    /* The flags word is the rsrc DWORD3, whose format / out-of-bounds encoding
+     * is ISA-specific. Take it from the target's ISA backend, the same source
+     * the LLVM lowerer's tile.buffer_rsrc reads, so both routes agree. */
+    rocke_status_t backend_status = ROCKE_OK;
+    const rocke_isa_backend_t* backend = rocke_ll_backend_for(lw->arch.gfx, &backend_status);
+    if(backend == NULL)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "no ISA backend registered for '%s'", lw->arch.gfx);
+    }
     rocke_h_emitf(lw,
                   "rsrc_t %s = __builtin_amdgcn_make_buffer_rsrc("
                   "(void*)%s, /*stride=*/(short)0, "
                   "/*num_records=*/(int)%s, "
-                  "/*flags=*/(int)0x00027000);",
+                  "/*flags=*/(int)0x%08X);",
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, num_bytes));
+                  rocke_h_name(lw, num_bytes),
+                  (unsigned)backend->buffer_rsrc_word3);
     return lw->status;
 }
 
