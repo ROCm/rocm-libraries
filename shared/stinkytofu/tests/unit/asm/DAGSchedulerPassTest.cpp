@@ -959,6 +959,39 @@ TEST_F(DAGSchedulerPassTest, AllDsLoadsIssueInDsReadPriorityOrder) {
         << "without LockDsReadOrder a ready lower-priority ds_load may issue first";
 }
 
+// DsReadOrder::ProgramOrder is "no reorder (AABB)": the ds_loads keep program
+// order even though the deadline grouping (earliest WMMA consumer) would pair
+// A0 with B0. Same LDS token, so LockDsReadOrder enforces the priorities.
+TEST_F(DAGSchedulerPassTest, ProgramOrderKeepsDsLoadsInProgramOrder) {
+    StinkyInstruction* a0 = createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    StinkyInstruction* a1 = createMovableDsLoad(/*destReg=*/208, /*addrReg=*/80, /*ldsToken=*/1);
+    StinkyInstruction* b0 = createMovableDsLoad(/*destReg=*/216, /*addrReg=*/80, /*ldsToken=*/1);
+    StinkyInstruction* b1 = createMovableDsLoad(/*destReg=*/224, /*addrReg=*/80, /*ldsToken=*/1);
+    auto wmma = [&](int dest, int srcA, int srcB) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, arch));
+        inst->addDestReg(StinkyRegister("v", dest, 8));
+        inst->addSrcReg(StinkyRegister("v", srcA, 8));
+        inst->addSrcReg(StinkyRegister("v", srcB, 8));
+        inst->addSrcReg(StinkyRegister("v", dest, 8));
+    };
+    wmma(/*dest=*/100, /*srcA=*/200, /*srcB=*/216);
+    wmma(/*dest=*/116, /*srcA=*/208, /*srcB=*/224);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadOrder = PassFeatureConfig::DsReadOrder::ProgramOrder;
+    pfc.dagFeatures.lockDsReadOrder = true;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    EXPECT_LT(positionOf(*bb, a0), positionOf(*bb, a1));
+    EXPECT_LT(positionOf(*bb, a1), positionOf(*bb, b0)) << "ProgramOrder must not pair A0 with B0";
+    EXPECT_LT(positionOf(*bb, b0), positionOf(*bb, b1));
+}
+
 // Same readiness shape as AllDsLoadsIssueInDsReadPriorityOrder, but the two
 // ds_loads carry different LDS tokens. Priority would still like `high` first.
 // Per-token chaining must not hold the already-ready `low` behind `high`.

@@ -424,7 +424,8 @@ static void scheduleRegionWithMovableSideEffects(
 
     // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
     // CDNA5ReadyQueue holds each behind the WMMA before its first consumer.
-    // Must run before dsReadPriority: parent-VALU inputs are the first DS tier.
+    // Must run before dsReadPriority: outside ProgramOrder, parent-VALU inputs are the
+    // first DS tier.
     for (unsigned i = 0; i < regionSize; ++i) {
         if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
         for (unsigned succId : dagGraph[i]) {
@@ -436,7 +437,8 @@ static void scheduleRegionWithMovableSideEffects(
     }
 
     // Pre-scan: assign dsReadPriority. Lower = pick first.
-    // A ds_load read by a feedsWmma VALU is issued first
+    // DsReadOrder::ProgramOrder keeps every load in DAG id order. Otherwise a
+    // ds_load read by a feedsWmma VALU is issued first
     // among loads with the same deadline so splat v_perm can start without
     // waiting dscnt 0; the parent tier ranks kinds A→MXSA→MXSB→B. Remaining
     // loads keep DsReadOrder: affinity, then program order, which Tensile
@@ -640,12 +642,6 @@ static void scheduleRegionWithMovableSideEffects(
                 return a.affinity != b.affinity ? a.affinity < b.affinity : a.idx < b.idx;
             });
 
-            if (dsOrder == DsReadOrder::ProgramOrder) {
-                // One counter across the parent tier and the deadline groups.
-                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
-                return;
-            }
-
             // Assign priority. Within each group, sort by DAG id
             // (ascending or descending per groupAsc).
             unsigned prevAff = UINT_MAX;
@@ -684,9 +680,15 @@ static void scheduleRegionWithMovableSideEffects(
         std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
         for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
         for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
-        for (auto& [deadline, tiers] : byDeadline) {
-            assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
-            assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
+        if (dsOrder == DsReadOrder::ProgramOrder) {
+            // No reorder (AABB): DAG id order; the deadline and parent-tier grouping is skipped.
+            for (const DsInfo& d : parentFed) dagNodes[d.idx].dsReadPriority = d.idx;
+            for (const DsInfo& d : rest) dagNodes[d.idx].dsReadPriority = d.idx;
+        } else {
+            for (auto& [deadline, tiers] : byDeadline) {
+                assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
+                assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
+            }
         }
 
         PASS_DEBUG({
