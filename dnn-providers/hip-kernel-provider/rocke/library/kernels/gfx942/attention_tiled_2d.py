@@ -5893,7 +5893,14 @@ def _build_gfx942_4warp_gqa_lean(
     wq = b.mul(wid, b.const_i32(32))
     qhead = b.block_id_x()  # grid.x = num_query_heads
     kvh = b.div(qhead, b.const_i32(GQAG))
-    gqb = b.block_id_y()  # grid.y = total_q_blocks (BLOCK_M=128)
+    # grid.y = total_q_blocks (BLOCK_M=128) = total_q // 128 + num_seqs, the
+    # launcher's count. Walk the query blocks longest-first: under the causal
+    # mask a block's KV loop grows with its index, so issuing the longest
+    # blocks first shortens the tail once the grid spans more than one wave of
+    # workgroups. The mapping is a bijection over the grid.
+    total_q = b.global_load_i32(CUQ, num_seqs_p)
+    nqb_all = b.add(b.div(total_q, b.const_i32(128)), num_seqs_p)
+    gqb = b.sub(b.sub(nqb_all, b.const_i32(1)), b.block_id_y())
 
     # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
     sid = binary_search_seq_idx(b, CUQ, gqb, num_seqs_p, block_q=128, iterations=ITERS)
