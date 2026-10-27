@@ -16,6 +16,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -717,6 +718,25 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
                                          MODE_BATCH,
                                          BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
+}
+
+// Bug caught: a ragged SDPA backward graph accepted and its packed buffers read through dense
+// strides. The unmodified graph is accepted, and the same graph is declined with any one of
+// its tensors ragged.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsRaggedTensors)
+{
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(
+        createSdpaBwdGraph(),
+        [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+            return _planBuilder.isApplicable(_handle, graph);
+        });
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)

@@ -12,6 +12,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -80,6 +81,21 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// Bug caught: a ragged tensor (packed buffer addressed through an offset table) read by the
+// dense-stride kernels, for both the single-node and the fused graph.
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
+{
+    const auto isApplicable
+        = [this](const IGraph& graph) { return _planBuilder.isApplicable(_dummyHandle, graph); };
+
+    for(const auto& graph :
+        {hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph()})
+    {
+        hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
+    }
 }
 
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)

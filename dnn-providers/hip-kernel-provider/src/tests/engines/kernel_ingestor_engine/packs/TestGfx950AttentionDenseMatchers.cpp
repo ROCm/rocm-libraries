@@ -214,6 +214,10 @@ struct GraphSpec
 
     std::optional<int64_t> virtualUid;
     std::optional<int64_t> passByValueUid;
+    /// Marks this operand ragged. The offset table's uid is EXTRA_UID; the matcher reads
+    /// only whether the field is set.
+    std::optional<int64_t> raggedUid;
+    bool overrideShape = false;
 
     // Mask. Defaults to top-left causal.
     std::optional<int64_t> leftBound = -1;
@@ -312,6 +316,9 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                data_objects::DataType dataType,
                                const std::vector<int64_t>* strides,
                                const std::vector<int64_t>& dims) {
+        const flatbuffers::Optional<int64_t> raggedOffset
+            = spec.raggedUid == uid ? flatbuffers::Optional<int64_t>(EXTRA_UID)
+                                    : flatbuffers::nullopt;
         return data_objects::CreateTensorAttributesDirect(builder,
                                                           uid,
                                                           nullptr,
@@ -321,7 +328,8 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                           spec.virtualUid == uid,
                                                           data_objects::TensorValue::NONE,
                                                           0,
-                                                          spec.passByValueUid == uid);
+                                                          spec.passByValueUid == uid,
+                                                          raggedOffset);
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -529,6 +537,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     graphBuilder.add_name(name);
     graphBuilder.add_tensors(tensorsVector);
     graphBuilder.add_nodes(nodesVector);
+    graphBuilder.add_is_override_shape_enabled(spec.overrideShape);
     builder.Finish(graphBuilder.Finish());
     return builder;
 }
@@ -1138,6 +1147,14 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
     sinks.sinkTokenUid = EXTRA_UID;
     cases.push_back({"sinks", sinks, "sinks"});
 
+    GraphSpec ragged;
+    ragged.raggedUid = K_UID;
+    cases.push_back({"ragged", ragged, "ragged"});
+
+    GraphSpec overrideShape;
+    overrideShape.overrideShape = true;
+    cases.push_back({"override shape", overrideShape, "override_shape"});
+
     GraphSpec composite;
     composite.implementation = data_objects::AttentionImplementation::COMPOSITE;
     cases.push_back({"implementation", composite, "implementation"});
@@ -1496,6 +1513,30 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAPassByValueOperand)
     // A runtime pass-by-value tensor is a scalar, not a buffer the ABI takes a pointer to.
     GraphSpec spec;
     spec.passByValueUid = V_UID;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// Bug caught: a ragged operand (packed buffer addressed through an offset table) bound as dense
+// BSHD. The descriptor's sdk_version 1.3.0 makes the host offer ragged graphs, so the matcher
+// must refuse every operand's ragged form.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesARaggedOperand)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        GraphSpec spec;
+        spec.raggedUid = uid;
+        EXPECT_FALSE(matchGraph(spec).has_value()) << "ragged operand uid " << uid;
+    }
+}
+
+// Bug caught: sdk_version 1.3.0 admits override-shape graphs (1.1.0), whose dims may differ at
+// execute from the dims the launch grid and arguments were bound from at prepare.
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOverrideShapeGraph)
+{
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+    GraphSpec spec;
+    spec.overrideShape = true;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 

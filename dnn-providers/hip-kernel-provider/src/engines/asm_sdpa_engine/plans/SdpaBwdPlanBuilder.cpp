@@ -18,6 +18,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -446,6 +447,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // rather than risk a mismatch (RFC 0008 §4.6).
     HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
                                "Graph has override shapes enabled");
+
+    // Ragged tensors address each batch through a device offset table; the kernels read
+    // dense strides, so a ragged graph must decline rather than be read as dense.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()),
+        "Graph has ragged tensors");
 
     auto& nodeWrappers = opGraph.nodeWrappers();
 

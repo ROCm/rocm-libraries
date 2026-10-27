@@ -444,7 +444,7 @@ TEST_F(TestGfx1151WmmaAttentionDecodePacks, EveryKernelDeclaresTheEmittedRuntime
 
 TEST_F(TestGfx1151WmmaAttentionDecodePacks, DeclaresTheConfiguredSdkVersion)
 {
-    EXPECT_EQ(_set->engine.sdkVersion, hipdnn_data_sdk::utilities::Version{std::string("1.2.0")});
+    EXPECT_EQ(_set->engine.sdkVersion, hipdnn_data_sdk::utilities::Version{std::string("1.3.0")});
 }
 
 TEST_F(TestGfx1151WmmaAttentionDecodePacks, ExposesTheConfiguredKnobs)

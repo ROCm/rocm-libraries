@@ -23,6 +23,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -408,6 +409,27 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
+
+    // --- 1b. Graph features that change what the buffers mean. The descriptor's
+    // sdk_version is 1.3.0, so the host offers this engine override-shape (1.1.0) and
+    // ragged (1.3.0) graphs; this engine serves neither. A ragged tensor addresses each
+    // batch through a device offset table, and the kernel reads dense BSHD strides. The
+    // launch grid and arguments are bound from the graph's own dims at prepare, so an
+    // override-shape graph (dims may differ at execute) cannot be served.
+    if(context.graph.getGraph().is_override_shape_enabled())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"override_shape"}
+                               << "override-shape graphs are not supported; the launch grid "
+                                  "and arguments are bound from the graph's own dims");
+        return std::nullopt;
+    }
+    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(context.graph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"ragged"}
+                               << "ragged tensors are not supported; the kernel reads dense "
+                                  "BSHD strides");
+        return std::nullopt;
+    }
 
     // --- 2. Operands. Q/K/V/O are the four the shipped 8-arg ABI has pointers for.
     const auto* q = findTensor(context, attributes.q_tensor_uid());

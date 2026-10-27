@@ -4,6 +4,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 
 #include <cmath>
 #include <fstream>
@@ -35,6 +36,12 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // Finding 2 fix: renamed to HIP_KERNEL_LOG_PREFIX (required by the macro)
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[HipFlash2FwdPlanBuilder::isApplicable] ";
+
+    // Ragged tensors address each batch through a device offset table; the kernel reads
+    // dense strides, so a ragged graph must decline rather than be read as dense.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()),
+        "Graph has ragged tensors");
 
     // Device check: gfx942 only (gfx950 not yet supported)
     std::string archId;

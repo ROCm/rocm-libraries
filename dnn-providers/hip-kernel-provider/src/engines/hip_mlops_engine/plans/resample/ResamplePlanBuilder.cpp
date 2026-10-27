@@ -6,6 +6,7 @@
 #include "ResampleApplicabilityChecks.hpp"
 #include "ResampleFwdPlan.hpp"
 
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <algorithm>
@@ -25,6 +26,14 @@ bool ResamplePlanBuilder::isApplicable(
     [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    // Ragged tensors address each batch through a device offset table; the kernels
+    // read dense strides only, so decline rather than read a packed buffer as dense.
+    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO("ResampleFwd plan builder does not support ragged tensors");
+        return false;
+    }
+
     if(opGraph.nodeCount() != 1)
     {
         HIPDNN_PLUGIN_LOG_INFO(

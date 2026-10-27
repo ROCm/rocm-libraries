@@ -14,6 +14,7 @@
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -298,6 +299,37 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsSinkToken)
         withSinkBuilder.GetBufferPointer(), withSinkBuilder.GetSize());
     EXPECT_TRUE(_builder.isApplicable(_handle, withoutSink));
     EXPECT_FALSE(_builder.isApplicable(_handle, withSink));
+}
+
+// Bug caught: a ragged SDPA graph accepted and its packed buffers read through dense strides.
+// The unmodified graph is accepted, and the same graph is declined with any one of its
+// tensors ragged.
+TEST_F(TestHipFlash2FwdPlanBuilder, RejectsRaggedTensors)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto base = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+
+    hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(
+        base, [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+            return _builder.isApplicable(_handle, graph);
+        });
 }
 
 using asm_sdpa_engine::DeprecatedCausalMaskCase;

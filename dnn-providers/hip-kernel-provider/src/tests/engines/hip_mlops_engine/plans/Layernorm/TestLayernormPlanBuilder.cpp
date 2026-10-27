@@ -22,6 +22,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
@@ -115,6 +116,20 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabled
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// Bug caught: a ragged tensor (packed buffer addressed through an offset table) read by the
+// dense-stride kernels, for both the forward and the backward graph.
+TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
+{
+    const auto isApplicable
+        = [this](const IGraph& graph) { return _planBuilder.isApplicable(_dummyHandle, graph); };
+
+    for(const auto& graph : {hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(),
+                             hipdnn_test_sdk::utilities::createValidLayernormBwdGraph()})
+    {
+        hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
+    }
 }
 
 TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)

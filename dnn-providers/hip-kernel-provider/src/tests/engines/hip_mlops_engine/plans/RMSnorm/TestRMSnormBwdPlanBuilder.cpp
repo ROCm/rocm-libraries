@@ -10,6 +10,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -305,6 +306,22 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnable
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// Bug caught: a ragged tensor (packed buffer addressed through an offset table) read by the
+// dense-stride kernels, for both the single-node and the activation-fused graph.
+TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    for(const auto& graph : {hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(),
+                             hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph()})
+    {
+        hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
+    }
 }
 
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledActivationGraph)

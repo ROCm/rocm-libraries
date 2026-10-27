@@ -12,6 +12,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -66,6 +67,23 @@ TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueForValidGraph)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// Bug caught: a ragged tensor (packed buffer addressed through an offset table) read by the
+// dense-stride kernel, with and without the max-pool index tensor.
+TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsFalseForRaggedTensors)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    for(const auto& graph : {hipdnn_test_sdk::utilities::createValidResampleBwdGraph(),
+                             hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+                                 false, ResampleMode::AVGPOOL_EXCLUDE_PADDING)})
+    {
+        hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
+    }
 }
 
 TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttributes)

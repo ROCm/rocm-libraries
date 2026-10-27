@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "4b3a0123-578f-4e9c-a965-b010a18ff107",
   "name": "hipkernel:Gfx950AttentionDense",
-  "sdk_version": "1.0.0",
+  "sdk_version": "1.3.0",
   "graph_match": {
     "native": "hipkernel.gfx950_attention_dense.graph_match"
   },

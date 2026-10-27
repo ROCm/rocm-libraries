@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -101,6 +102,14 @@ bool RMSnormBwdPlanBuilder::isApplicable(
     if(opGraph.getGraph().is_override_shape_enabled())
     {
         HIPDNN_PLUGIN_LOG_INFO("RMSnormBwd plan builder does not support override shapes");
+        return false;
+    }
+
+    // Ragged tensors address each batch through a device offset table; the kernels
+    // read dense strides only, so decline rather than read a packed buffer as dense.
+    if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO("RMSnormBwd plan builder does not support ragged tensors");
         return false;
     }
 

@@ -11,6 +11,7 @@
 #include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -97,6 +98,25 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabled
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// Bug caught: a ragged tensor (packed buffer addressed through an offset table) read by the
+// dense-stride kernels. Each graph family is accepted unmodified and declined when any one
+// of its tensors is ragged.
+TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForRaggedTensorsInEveryGraphFamily)
+{
+    const auto isApplicable
+        = [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+              return _planBuilder.isApplicable(_dummyHandle, graph);
+          };
+
+    for(const auto& graph : {hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(),
+                             hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+                             hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph(),
+                             hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph()})
+    {
+        hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(graph, isApplicable);
+    }
 }
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)

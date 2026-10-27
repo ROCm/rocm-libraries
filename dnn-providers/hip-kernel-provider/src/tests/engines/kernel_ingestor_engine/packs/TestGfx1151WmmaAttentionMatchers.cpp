@@ -593,7 +593,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRaggedOperands)
 
 // Launch arguments are bound from the graph's shapes at prepare, so a graph whose
 // shapes may be overridden at execute is declined (the engine declares schema
-// 1.2.0 for runtime scales, which would otherwise admit it).
+// 1.3.0, which would otherwise admit it).
 TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
 {
     GraphSpec spec;

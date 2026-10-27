@@ -20,6 +20,7 @@
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
+#include "tests/utilities/RaggedGraphTestUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -1209,6 +1210,27 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSinkToken)
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, withoutSink));
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, withSink));
+}
+
+// Bug caught: a ragged SDPA graph accepted and its packed buffers read through dense strides
+// (the GROUP-mode kernels would otherwise take it). The unmodified graph is accepted, and the
+// same graph is declined with any one of its tensors ragged.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsRaggedTensors)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    hip_kernel_provider::test_utils::expectRaggedGraphsDeclined(
+        createSdpaFwdGraph(),
+        [this](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph) {
+            return _planBuilder.isApplicable(_handle, graph);
+        });
 }
 
 // =============================================================================

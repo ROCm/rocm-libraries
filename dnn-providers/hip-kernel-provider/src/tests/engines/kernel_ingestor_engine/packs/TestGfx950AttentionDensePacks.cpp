@@ -1021,7 +1021,7 @@ TEST_F(TestGfx950AttentionDensePacks, EveryKernelDeclaresTheEmittedRuntimeSource
 
 TEST_F(TestGfx950AttentionDensePacks, DeclaresTheConfiguredSdkVersion)
 {
-    EXPECT_EQ(_set->engine.sdkVersion, hipdnn_data_sdk::utilities::Version{std::string("1.0.0")});
+    EXPECT_EQ(_set->engine.sdkVersion, hipdnn_data_sdk::utilities::Version{std::string("1.3.0")});
 }
 
 TEST_F(TestGfx950AttentionDensePacks, ExposesTheConfiguredKnobs)
