@@ -255,6 +255,12 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(2, source, (source->batch_count != 1), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(3, target, (target->batch_count != 1), rocsparse_status_not_implemented);
 
+        // Device pointer mode is not supported: this routine has no scalar argument.
+        ROCSPARSE_CHECKARG(0,
+                           handle,
+                           (handle->pointer_mode == rocsparse_pointer_mode_device),
+                           rocsparse_status_not_implemented);
+
         const rocsparse_status status = rocsparse::sparse_to_sparse_quickreturn(
             handle, descr, source, target, stage, buffer_size_in_bytes, buffer);
         if(status != rocsparse_status_continue)

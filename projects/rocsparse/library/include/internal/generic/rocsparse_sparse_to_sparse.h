@@ -52,7 +52,12 @@ extern "C" {
 *  \note
 *  This routine does not support batched computation.
 *
+*  \note
+*  \ref rocsparse_pointer_mode_device is not supported.
+*
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_not_implemented the handle is in
+*               \ref rocsparse_pointer_mode_device.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
@@ -82,6 +87,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \note
 *  This routine does not support batched computation.
 *
+*  \note
+*  \ref rocsparse_pointer_mode_device is not supported.
+*
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
@@ -98,6 +106,8 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_not_implemented the handle is in
+*               \ref rocsparse_pointer_mode_device.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example
