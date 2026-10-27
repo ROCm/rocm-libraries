@@ -1,4 +1,17 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": [
+      {
+        "cases": [
+          "clms1_b1h1k1v1_64x96_d128_bfp16_none_srt0p5_tolp"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }
