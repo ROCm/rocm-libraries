@@ -1569,6 +1569,9 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
     for dname, dlines in mod.dispatchers.items():
         if re.search(rf"\b{dname}\(", used_text):
             internals.append(dlines)
+    # an internal nothing calls (its exported entry was not written) would fail
+    # -Wunused-function under -Werror: internals are emitted only when used
+    internals = used_internals(internals, struct_lines + [x for s in shims for x in s])
     sha = hashlib.sha256(mod.src.encode()).hexdigest()[:12]
     rel = "/".join(
         (PKG.py_root, os.path.relpath(path, library_dir(rocke)).replace(os.sep, "/"))
@@ -1683,6 +1686,41 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
             lines.append("")
     res.code = "\n".join(lines)
     return res
+
+
+def _internal_name(body: list[str]) -> str | None:
+    """The py_* function an internal body defines (its head, before the "{")."""
+    head = []
+    for ln in body:
+        if ln.startswith("/*") and not head:
+            continue
+        if ln.strip() == "{":
+            break
+        head.append(ln)
+    m = re.search(r"\b(py_\w+)\(", " ".join(head))
+    return m.group(1) if m else None
+
+
+def used_internals(internals: list[list[str]], outside: list[str]) -> list[list[str]]:
+    """The internal functions (anonymous namespace) something uses: an exported
+    entry, a struct, or another used internal. One with no caller is dropped (a
+    static function nothing calls fails -Wunused-function under -Werror), until
+    nothing changes. A body that defines no py_* function is kept."""
+    keep = list(internals)
+    names = [_internal_name(b) for b in keep]
+    while True:
+        drop = set()
+        for n in {n for n in names if n}:
+            pat = re.compile(rf"\b{re.escape(n)}\b")
+            used = any(pat.search(x) for x in outside) or any(
+                pat.search(x) for b, bn in zip(keep, names) if bn != n for x in b
+            )
+            if not used:
+                drop.add(n)
+        if not drop:
+            return keep
+        pairs = [(b, n) for b, n in zip(keep, names) if n not in drop]
+        keep, names = [b for b, _ in pairs], [n for _, n in pairs]
 
 
 def _includes(env: Env, header: str, other: str, seen=None) -> bool:
