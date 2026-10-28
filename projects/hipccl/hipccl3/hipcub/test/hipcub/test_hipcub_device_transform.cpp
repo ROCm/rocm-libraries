@@ -29,6 +29,9 @@
 
 #include <gtest/gtest.h>
 
+#include _HIPCUB_LIBCXX_INCLUDE(devices)
+#include _HIPCUB_LIBCXX_INCLUDE(stream)
+
 #include <cstdint>
 #include <type_traits>
 
@@ -36,8 +39,7 @@ template<typename InputType, typename OutputType = InputType>
 struct DoubleIt
 {
     __device__ __host__
-    constexpr OutputType
-        operator()(const InputType& value) const
+    constexpr OutputType operator()(const InputType& value) const
     {
         return value * 2;
     }
@@ -46,11 +48,10 @@ struct DoubleIt
 template<typename InputType>
 struct PointerDiff
 {
-    InputType* base_pointer;
+    InputType*       base_pointer;
 
     __device__ __host__
-    constexpr size_t
-        operator()(const InputType& value) const
+    constexpr size_t operator()(const InputType& value) const
     {
         return &value - base_pointer;
     }
@@ -61,30 +62,38 @@ struct NonCopyable
 {
     T data;
 
-    __device__ __host__ NonCopyable() noexcept : data(T{}) {}
-
-    __device__ __host__ NonCopyable(const T& data) noexcept : data(data) {}
-
-    __device__ __host__ NonCopyable(NonCopyable&& other) noexcept : data(std::move(other.data)) {}
+    __device__ __host__
+    NonCopyable() noexcept
+        : data(T{})
+    {}
 
     __device__ __host__
-    NonCopyable&
-        operator=(NonCopyable&& other) noexcept
+    NonCopyable(const T& data) noexcept
+        : data(data)
+    {}
+
+    __device__ __host__
+    NonCopyable(NonCopyable&& other) noexcept
+        : data(std::move(other.data))
+    {}
+
+    __device__ __host__
+    NonCopyable& operator=(NonCopyable&& other) noexcept
     {
         data = std::move(other.data);
         return *this;
     }
 
-    __device__ __host__ NonCopyable(const NonCopyable&) = delete;
-
     __device__ __host__
-    NonCopyable&
-        operator=(const NonCopyable&)
+    NonCopyable(const NonCopyable&)
         = delete;
 
     __device__ __host__
-    constexpr
-        operator T() const noexcept
+    NonCopyable& operator=(const NonCopyable&)
+        = delete;
+
+    __device__ __host__
+    constexpr operator T() const noexcept
     {
         return data;
     }
@@ -96,17 +105,17 @@ static_assert(std::is_same_v<std::invoke_result_t<DoubleIt<int32_t>, int32_t>, i
 template<class InputType, class UnaryOp = DoubleIt<InputType>>
 struct HipcubDeviceTransformParams
 {
-    using input_type                 = InputType;
-    using output_type                = std::invoke_result_t<UnaryOp, input_type>;
-    using unary_op                   = UnaryOp;
+    using input_type  = InputType;
+    using output_type = std::invoke_result_t<UnaryOp, input_type>;
+    using unary_op    = UnaryOp;
 };
 
 template<class Params>
 struct HipcubDeviceTransformTests : public ::testing::Test
 {
-    using input_type                        = typename Params::input_type;
-    using output_type                       = typename Params::output_type;
-    using unary_op                          = typename Params::unary_op;
+    using input_type  = typename Params::input_type;
+    using output_type = typename Params::output_type;
+    using unary_op    = typename Params::unary_op;
 };
 
 using HipcubDeviceTransformTestsParams
@@ -889,6 +898,300 @@ TYPED_TEST(HipcubDeviceTransformTests, BinaryToTernaryTransform)
             }
         }
     }
+}
+
+struct stream_convertible
+{
+    hipStream_t stream;
+    operator hipStream_t() const noexcept
+    {
+        return stream;
+    }
+};
+
+struct stream_convertible_non_copyable
+{
+    hipStream_t stream;
+
+    stream_convertible_non_copyable(hipStream_t stream) : stream(stream) {}
+
+    stream_convertible_non_copyable(const stream_convertible_non_copyable&) = delete;
+    auto operator=(const stream_convertible_non_copyable&)
+        -> stream_convertible_non_copyable&                                               = delete;
+    stream_convertible_non_copyable(stream_convertible_non_copyable&&)                    = default;
+    auto operator=(stream_convertible_non_copyable&&) -> stream_convertible_non_copyable& = default;
+
+    operator hipStream_t() const noexcept
+    {
+        return stream;
+    }
+};
+
+struct with_stream_method
+{
+    hipStream_t s;
+    hipStream_t stream() const noexcept
+    {
+        return s;
+    }
+};
+
+struct with_get_stream_method
+{
+    hipStream_t stream;
+    hipStream_t get_stream() const noexcept
+    {
+        return stream;
+    }
+};
+
+template<typename TestFixture, typename F>
+void check_graph_nodes_with_different_streams(F func)
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    _HIPCUB_LIBCXX::stream stream_obj{_HIPCUB_LIBCXX::devices[device_id]};
+    hipStream_t            stream = stream_obj.get();
+
+    auto check_stream = [&](auto const& _stream, const char* _stream_name)
+    {
+        SCOPED_TRACE(testing::Message() << "with stream argument " << _stream_name);
+
+        test_utils::GraphHelper gHelper;
+        ASSERT_NO_FATAL_FAILURE(gHelper.startStreamCapture(stream));
+
+        // Do the thing
+        HIP_CHECK(func(_stream));
+
+        ASSERT_NO_FATAL_FAILURE(gHelper.createGraph());
+        ASSERT_NO_FATAL_FAILURE(gHelper.endStreamCapture(stream));
+        size_t num_nodes = 0;
+        ASSERT_NO_FATAL_FAILURE(gHelper.getGraphNodes(nullptr, &num_nodes));
+        ASSERT_EQ(num_nodes, 1);
+
+        ASSERT_NO_FATAL_FAILURE(gHelper.instantiateGraph());
+        ASSERT_NO_FATAL_FAILURE(gHelper.launchGraphHelper(stream, true /*sync*/));
+        ASSERT_NO_FATAL_FAILURE(gHelper.cleanupGraphHelper());
+    };
+
+    check_stream(stream, "hipStream_t");
+    check_stream(_HIPCUB_LIBCXX::stream_ref{stream}, "hip::stream_ref");
+    check_stream(stream_convertible{stream}, "stream_convertible");
+    check_stream(stream_convertible_non_copyable{stream}, "stream_convertible_non_copyable");
+    check_stream(with_stream_method{stream}, "with_stream_method");
+    check_stream(with_get_stream_method{stream}, "with_get_stream_method");
+    {
+        auto stream_prop = _HIPCUB_STD_EXEC::prop{_HIPCUB_LIBCXX::get_stream, stream};
+        check_stream(_HIPCUB_STD_EXEC::env{_HIPCUB_STD::move(stream_prop)},
+                     "environment with prop with hipStream_t");
+    }
+    {
+        auto stream_prop = _HIPCUB_STD_EXEC::prop{_HIPCUB_LIBCXX::get_stream,
+                                                  _HIPCUB_LIBCXX::stream_ref{stream}};
+        check_stream(_HIPCUB_STD_EXEC::env{_HIPCUB_STD::move(stream_prop)},
+                     "environment with prop with hip::stream_ref");
+    }
+}
+
+template<typename TestFixture>
+struct transform_graphs_data
+{
+    using input_type  = typename TestFixture::input_type;
+    using output_type = typename TestFixture::output_type;
+
+    size_t       size       = 0;
+    unsigned int seed_value = 0;
+
+    // Host pointers
+    std::vector<input_type>  h_input;
+    std::vector<output_type> h_output;
+
+    // Device pointers
+    input_type*  d_input  = nullptr;
+    output_type* d_output = nullptr;
+};
+
+template<typename TestFixture, typename CallF, typename VerifyF>
+void run_device_transform_with_graphs(CallF call, VerifyF verify)
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type  = typename TestFixture::input_type;
+    using output_type = typename TestFixture::output_type;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        const unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t size : test_utils::get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Device and host pointers
+            transform_graphs_data<TestFixture> data;
+            data.size       = size;
+            data.seed_value = seed_value;
+
+            // Generate data
+            data.h_input = test_utils::get_random_data<input_type>(size, 1, 100, seed_value);
+            data.h_output.resize(size);
+
+            // Allocate memory
+            const size_t num_input_bytes  = size * sizeof(input_type);
+            const size_t num_output_bytes = size * sizeof(output_type);
+            HIP_CHECK(test_common_utils::hipMallocHelper(&data.d_input, num_input_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&data.d_output, num_output_bytes));
+
+            // Prepare input
+            HIP_CHECK(hipMemcpy(data.d_input,
+                                data.h_input.data(),
+                                num_input_bytes,
+                                hipMemcpyHostToDevice));
+
+            // Run the API call with every supported stream argument form
+            check_graph_nodes_with_different_streams<TestFixture>(
+                [&](const auto& stream) -> hipError_t { return call(data, stream); });
+
+            // Fetch output
+            HIP_CHECK(hipMemcpy(data.h_output.data(),
+                                data.d_output,
+                                num_output_bytes,
+                                hipMemcpyDeviceToHost));
+
+            // Check output
+            verify(data);
+
+            HIP_CHECK(hipFree(data.d_input));
+            HIP_CHECK(hipFree(data.d_output));
+        }
+    }
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, TransformWithGraphs)
+{
+    using unary_op    = typename TestFixture::unary_op;
+    auto transform_op = unary_op{};
+
+    run_device_transform_with_graphs<TestFixture>(
+        /*call*/
+        [&](const auto& data, const auto& stream) -> hipError_t
+        {
+            return hipcub::DeviceTransform::Transform(data.d_input,
+                                                      data.d_output,
+                                                      data.size,
+                                                      transform_op,
+                                                      stream);
+        },
+        /*verify*/
+        [&](const auto& data)
+        {
+            for(size_t i = 0; i < data.size; ++i)
+            {
+                ASSERT_EQ(transform_op(data.h_input[i]), data.h_output[i]);
+            }
+        });
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, GenerateWithGraphs)
+{
+    using output_type = typename TestFixture::output_type;
+
+    run_device_transform_with_graphs<TestFixture>(
+        /*call*/
+        [](const auto& data, const auto& stream) -> hipError_t
+        {
+            return hipcub::DeviceTransform::Generate(data.d_output,
+                                                     data.size,
+                                                     generate_op<output_type>{42},
+                                                     stream);
+        },
+        /*verify*/
+        [](const auto& data)
+        {
+            for(size_t i = 0; i < data.size; ++i)
+            {
+                ASSERT_EQ(42, data.h_output[i]);
+            }
+        });
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, FillWithGraphs)
+{
+    run_device_transform_with_graphs<TestFixture>(
+        /*call*/
+        [](const auto& data, const auto& stream) -> hipError_t
+        { return hipcub::DeviceTransform::Fill(data.d_output, data.size, 42, stream); },
+        /*verify*/
+        [](const auto& data)
+        {
+            for(size_t i = 0; i < data.size; ++i)
+            {
+                ASSERT_EQ(42, data.h_output[i]);
+            }
+        });
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, TransformIfWithGraphs)
+{
+    using input_type = typename TestFixture::input_type;
+    using unary_op   = typename TestFixture::unary_op;
+
+    auto predicate    = predicate_t<input_type>{};
+    auto transform_op = unary_op{};
+
+    run_device_transform_with_graphs<TestFixture>(
+        /*call*/
+        [&](const auto& data, const auto& stream) -> hipError_t
+        {
+            return hipcub::DeviceTransform::TransformIf(data.d_input,
+                                                        data.d_output,
+                                                        data.size,
+                                                        predicate,
+                                                        transform_op,
+                                                        stream);
+        },
+        /*verify*/
+        [&](const auto& data)
+        {
+            for(size_t i = 0; i < data.size; ++i)
+            {
+                const auto h_input_val = data.h_input[i];
+                const auto expected
+                    = predicate(h_input_val) ? transform_op(h_input_val) : data.h_output[i];
+                ASSERT_EQ(expected, data.h_output[i]);
+            }
+        });
+}
+
+TYPED_TEST(HipcubDeviceTransformTests, TransformStableArgumentAddressesWithGraphs)
+{
+    using unary_op    = typename TestFixture::unary_op;
+    auto transform_op = unary_op{};
+
+    run_device_transform_with_graphs<TestFixture>(
+        /*call*/
+        [&](const auto& data, const auto& stream) -> hipError_t
+        {
+            return hipcub::DeviceTransform::TransformStableArgumentAddresses(data.d_input,
+                                                                             data.d_output,
+                                                                             data.size,
+                                                                             transform_op,
+                                                                             stream);
+        },
+        /*verify*/
+        [&](const auto& data)
+        {
+            for(size_t i = 0; i < data.size; ++i)
+            {
+                ASSERT_EQ(transform_op(data.h_input[i]), data.h_output[i]);
+            }
+        });
 }
 
 template<class T>
