@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "host_memory.hpp"
+#include "hipblaslt_ostream.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -111,20 +116,75 @@ namespace
     }
 } // namespace
 
+std::optional<size_t> parse_host_memory_size(const char* text)
+{
+    if(!text || !std::isdigit(static_cast<unsigned char>(*text)))
+        return std::nullopt;
+    char* end                = nullptr;
+    errno                    = 0;
+    unsigned long long value = std::strtoull(text, &end, 10);
+    if(errno == ERANGE)
+        return std::nullopt;
+    int shift = 0;
+    switch(std::toupper(static_cast<unsigned char>(*end)))
+    {
+    case '\0':
+        break;
+    case 'K':
+        shift = 10;
+        break;
+    case 'M':
+        shift = 20;
+        break;
+    case 'G':
+        shift = 30;
+        break;
+    case 'T':
+        shift = 40;
+        break;
+    default:
+        return std::nullopt;
+    }
+    if(shift && *++end != '\0')
+        return std::nullopt;
+    if(value > (std::numeric_limits<size_t>::max() >> shift))
+        return std::nullopt;
+    return size_t(value) << shift;
+}
+
+std::optional<size_t> host_memory_limit_override()
+{
+    const char* text = std::getenv("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT");
+    if(!text || !*text)
+        return std::nullopt;
+    auto                     limit = parse_host_memory_size(text);
+    static std::atomic<bool> warned{false};
+    if(!limit && !warned.exchange(true))
+        hipblaslt_cerr << "warning: ignoring HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT=" << text
+                       << ", which is not a byte count such as 64G" << std::endl;
+    return limit;
+}
+
 size_t available_host_memory_bytes(const HostMemorySources& sources)
 {
+    std::optional<size_t> available;
 #ifdef _WIN32
     (void)sources;
     MEMORYSTATUSEX status = {};
     status.dwLength       = sizeof(status);
-    return GlobalMemoryStatusEx(&status) ? size_t(status.ullAvailPhys) : 0;
+    if(GlobalMemoryStatusEx(&status))
+        available = size_t(status.ullAvailPhys);
 #else
-    auto kib = read_field(sources.meminfo, "MemAvailable:");
-    if(!kib)
-        return 0;
-    uint64_t available = *kib * 1024;
-    if(auto headroom = smallest_cgroup_headroom(sources))
-        available = std::min(available, *headroom);
-    return size_t(available);
+    if(auto kib = read_field(sources.meminfo, "MemAvailable:"))
+    {
+        uint64_t bytes = *kib * 1024;
+        if(auto headroom = smallest_cgroup_headroom(sources))
+            bytes = std::min(bytes, *headroom);
+        available = size_t(bytes);
+    }
 #endif
+    // When the system cannot be read, the limit is the only budget there is.
+    if(auto limit = host_memory_limit_override())
+        return std::min(available.value_or(*limit), *limit);
+    return available.value_or(0);
 }
