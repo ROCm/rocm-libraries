@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <variant>
@@ -43,12 +44,14 @@
 /// @file Gfx950ConvDgradNative.cpp
 /// hipkernel:Gfx950ConvDgradAot: shape-generic AOT instances of rocKE's backward-data
 /// (dgrad) convolution kernels. Each kernel is one rocKE dgrad KernelIdentity: an
-/// implicit-GEMM tile over the tilde sub-GEMMs (kernel_family 0), a direct depthwise or
-/// grouped-MFMA kernel (kernel_family 1), or one of the MFMA pipeline's weight transforms
-/// (kernel_family 2, never matched; the MFMA dispatch loads it beside its instance). Its
-/// metadata holds tuning and capability fields only and the problem reaches the kernel as
-/// AOT arguments, so matching is a capability check (Gfx950ConvDgradGeometry.hpp), not an
-/// equality on the geometry. Mirrors rocke/library/builders/common/convolution_backward_data.py.
+/// implicit-GEMM tile (kernel_family 0), one of rocKE's direct dgrad pipelines
+/// (kernel_family 1), or one of the MFMA pipelines' weight transforms (kernel_family 2,
+/// never matched; an MFMA dispatch loads it beside its instance). Its metadata holds
+/// tuning and capability fields only and the problem reaches the kernel as AOT
+/// arguments, so matching is the launch plan of Gfx950ConvDgradGeometry.hpp, not an
+/// equality on the geometry: a kernel serves a graph exactly when it has a plan there,
+/// and the dispatch runs that plan. Mirrors
+/// rocke/library/builders/common/convolution_backward_data.py.
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -115,7 +118,8 @@ bool hasPackedNhwcStrides(const data_objects::TensorAttributes* tensor)
     }
     const auto* dims = tensor->dims();
     const std::array<int64_t, 4> extents{dims->Get(0), dims->Get(1), dims->Get(2), dims->Get(3)};
-    if(!dgrad::tensorByteSize(extents))
+    if(std::any_of(extents.begin(), extents.end(), [](int64_t e) { return e <= 0; })
+       || !dgrad::wideProduct({extents[0], extents[1], extents[2], extents[3], 2}))
     {
         return false;
     }
@@ -285,355 +289,39 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
                        {std::string(PROBLEM_TOKEN), problemTokenValues(*matched)}};
 }
 
-template <typename T>
-bool metadataEquals(const KernelDefinition& kernel, const char* field, const T& expected)
+/// A kernel's metadata as parseAotInstance reads it.
+struct KernelMetadata
 {
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return false;
-    }
-    const auto* value = std::get_if<T>(&it->second);
-    return value != nullptr && *value == expected;
-}
+    const KernelDefinition& kernel;
 
-std::optional<int64_t> intMetadata(const KernelDefinition& kernel, const char* field)
+    std::optional<int64_t> intField(std::string_view field) const
+    {
+        const auto it = kernel.metadata.find(std::string(field));
+        const auto* value
+            = it == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&it->second);
+        return value == nullptr ? std::nullopt : std::optional<int64_t>(*value);
+    }
+
+    const std::string* stringField(std::string_view field) const
+    {
+        const auto it = kernel.metadata.find(std::string(field));
+        return it == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&it->second);
+    }
+};
+
+/// The instance @p kernel describes, when it is a kpack kernel whose metadata is a
+/// complete instance of one family (dgrad::parseAotInstance).
+std::optional<dgrad::AotInstance> aotInstance(const KernelDefinition& kernel)
 {
-    const auto it = kernel.metadata.find(field);
-    const auto* value = it == kernel.metadata.end() ? nullptr : std::get_if<int64_t>(&it->second);
-    return value == nullptr ? std::nullopt : std::optional<int64_t>(*value);
-}
-
-const std::string* stringMetadata(const KernelDefinition& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    return it == kernel.metadata.end() ? nullptr : std::get_if<std::string>(&it->second);
-}
-
-/// The implicit-GEMM tuning fields; a direct or helper kernel holds 0 in each.
-constexpr std::array<const char*, 8> GEMM_TUNING_FIELDS{
-    "tile_m", "tile_n", "tile_k", "warp_m", "warp_n", "warp_tile_m", "warp_tile_n", "warp_tile_k"};
-/// The implicit-GEMM fields after the tuning; a direct or helper kernel holds 0 in each.
-constexpr std::array<const char*, 6> GEMM_ONLY_FIELDS{
-    "vector_size_a", "vector_size_b", "vector_size_c", "lds_k_outer", "max_sub_gemms", "grouped"};
-/// What a direct or helper binary compiles in, in dgrad::DirectCapabilities order.
-constexpr std::array<const char*, 10> DIRECT_CAPABILITY_FIELDS{"filter_h",
-                                                               "filter_w",
-                                                               "stride_h",
-                                                               "stride_w",
-                                                               "pad_h",
-                                                               "pad_w",
-                                                               "dilation_h",
-                                                               "dilation_w",
-                                                               "cpg",
-                                                               "kpg"};
-/// The capabilities an implicit-GEMM binary may state, in dgrad::ImplicitInstance
-/// order, and the ones it must leave at 0. Together these partition
-/// DIRECT_CAPABILITY_FIELDS.
-constexpr std::array<const char*, 6> IMPLICIT_BAKEABLE_FIELDS{
-    "filter_h", "filter_w", "stride_h", "stride_w", "dilation_h", "dilation_w"};
-constexpr std::array<const char*, 4> IMPLICIT_RUNTIME_ONLY_FIELDS{
-    "pad_h", "pad_w", "cpg", "kpg"};
-/// The direct and helper knobs, each 0 where its variant does not use it
-/// (_KNOB_DEFAULTS in convolution_backward_data.py).
-constexpr std::array<const char*, 10> DIRECT_KNOB_FIELDS{"block_w",
-                                                         "block_waves",
-                                                         "block_h",
-                                                         "block_q",
-                                                         "block_groups",
-                                                         "fold_k32",
-                                                         "waves_k",
-                                                         "waves_q",
-                                                         "persistent_grid",
-                                                         "runtime_k_loop"};
-/// The 0/1 knobs.
-constexpr std::array<std::string_view, 3> DIRECT_FLAG_KNOBS{
-    "fold_k32", "persistent_grid", "runtime_k_loop"};
-
-/// The knobs @p variant states (AOT_DGRAD_DIRECT_KNOBS in convolution_backward_data.py);
-/// every other one must hold 0.
-bool directVariantUses(dgrad::DirectVariant variant, std::string_view field)
-{
-    const auto among = [&](std::initializer_list<std::string_view> fields) {
-        return std::find(fields.begin(), fields.end(), field) != fields.end();
-    };
-    switch(variant)
-    {
-    case dgrad::DirectVariant::DEPTHWISE:
-        return among({"block_w", "block_waves"});
-    case dgrad::DirectVariant::MFMA:
-        return among({"block_h",
-                      "block_q",
-                      "block_groups",
-                      "fold_k32",
-                      "waves_k",
-                      "waves_q",
-                      "persistent_grid",
-                      "runtime_k_loop"});
-    case dgrad::DirectVariant::TRANSPOSE:
-    case dgrad::DirectVariant::REORGANIZE:
-        return among({"fold_k32"});
-    case dgrad::DirectVariant::NONE:
-    default:
-        return false;
-    }
-}
-
-/// One instance of either family: implicit GEMM, or a direct or helper kernel.
-using AotKernel = std::variant<dgrad::ImplicitInstance, dgrad::DirectInstance>;
-
-/// The implicit-GEMM instance @p kernel describes (supports_gfx950_conv_dgrad_aot): an
-/// mem/compv3/compv4 pipeline, a default or cshuffle epilogue, positive tuning, widths in
-/// {1, 2, 4, 8}, 0/1 lds_k_outer and grouped, a positive max_sub_gemms, and every direct
-/// field and knob at its KMD default.
-std::optional<dgrad::ImplicitInstance> aotImplicitGemmInstance(const KernelDefinition& kernel)
-{
-    const auto* pipeline = stringMetadata(kernel, "pipeline");
-    const auto* epilogue = stringMetadata(kernel, "epilogue");
-    if(pipeline == nullptr || epilogue == nullptr
-       || (*pipeline != "mem" && *pipeline != "compv3" && *pipeline != "compv4")
-       || (*epilogue != "default" && *epilogue != "cshuffle"))
+    if(kernel.source.kind != KernelSourceKind::KPACK)
     {
         return std::nullopt;
     }
-    const auto isZero
-        = [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); };
-    // A tilde kernel may be compiled for one filter, stride and dilation instead of
-    // reading them from its sub-GEMM records (_IMPLICIT_BAKEABLE in
-    // convolution_backward_data.py); the rest of the direct capabilities stay 0, since
-    // nothing bakes padding or a channel count into an implicit-GEMM binary.
-    if(!std::all_of(IMPLICIT_RUNTIME_ONLY_FIELDS.begin(),
-                    IMPLICIT_RUNTIME_ONLY_FIELDS.end(),
-                    isZero)
-       || !std::all_of(DIRECT_KNOB_FIELDS.begin(), DIRECT_KNOB_FIELDS.end(), isZero))
-    {
-        return std::nullopt;
-    }
-    std::array<int64_t, IMPLICIT_BAKEABLE_FIELDS.size()> baked{};
-    for(size_t i = 0; i < IMPLICIT_BAKEABLE_FIELDS.size(); ++i)
-    {
-        const auto value = intMetadata(kernel, IMPLICIT_BAKEABLE_FIELDS[i]);
-        // 0 is "runtime"; anything else is an extent the binary indexes with.
-        if(!value || *value < 0 || *value > dgrad::I32_MAX)
-        {
-            return std::nullopt;
-        }
-        baked[i] = *value;
-    }
-    // Stated per axis pair, as the builder writes them: one axis alone would leave the
-    // other reading a record the code no longer consults.
-    if((baked[0] == 0) != (baked[1] == 0) || (baked[2] == 0) != (baked[3] == 0)
-       || (baked[4] == 0) != (baked[5] == 0))
-    {
-        return std::nullopt;
-    }
-    std::array<int64_t, GEMM_TUNING_FIELDS.size()> tuning{};
-    for(size_t i = 0; i < GEMM_TUNING_FIELDS.size(); ++i)
-    {
-        const auto value = intMetadata(kernel, GEMM_TUNING_FIELDS[i]);
-        if(!value || *value < 1 || *value > dgrad::I32_MAX)
-        {
-            return std::nullopt;
-        }
-        tuning[i] = *value;
-    }
-    std::array<int64_t, 3> vectors{};
-    for(size_t i = 0; i < vectors.size(); ++i)
-    {
-        const auto value = intMetadata(kernel, GEMM_ONLY_FIELDS[i]);
-        if(!value || (*value != 1 && *value != 2 && *value != 4 && *value != 8))
-        {
-            return std::nullopt;
-        }
-        vectors[i] = *value;
-    }
-    const auto ldsKOuter = intMetadata(kernel, "lds_k_outer");
-    const auto grouped = intMetadata(kernel, "grouped");
-    const auto maxSubGemms = intMetadata(kernel, "max_sub_gemms");
-    if(!ldsKOuter || (*ldsKOuter != 0 && *ldsKOuter != 1) || !grouped
-       || (*grouped != 0 && *grouped != 1) || !maxSubGemms || *maxSubGemms < 1
-       || *maxSubGemms > dgrad::I32_MAX)
-    {
-        return std::nullopt;
-    }
-    return dgrad::ImplicitInstance{tuning[0],
-                                   tuning[1],
-                                   tuning[2],
-                                   tuning[3],
-                                   tuning[4],
-                                   vectors[0],
-                                   vectors[1],
-                                   vectors[2],
-                                   *maxSubGemms,
-                                   *grouped == 1,
-                                   baked[0],
-                                   baked[1],
-                                   baked[2],
-                                   baked[3],
-                                   baked[4],
-                                   baked[5]};
-}
-
-/// The direct or helper instance @p kernel describes (_direct_error): the direct
-/// identity's placeholders (0 tuning, widths, lds_k_outer, max_sub_gemms and grouped;
-/// "direct" pipeline and epilogue), a variant of its family, a square undilated filter,
-/// positive channel counts, one positive stride and padding for a direct kernel and 0 for
-/// a helper, cpg == kpg == 1 for depthwise, and every knob its variant does not use at 0.
-/// An MFMA instance's knobs also split its own K / groups (_mfma_knobs_reason).
-std::optional<dgrad::DirectInstance> aotDirectInstance(const KernelDefinition& kernel,
-                                                       dgrad::KernelFamily family,
-                                                       dgrad::DirectVariant variant)
-{
-    const bool helper = dgrad::isHelperVariant(variant);
-    if(variant == dgrad::DirectVariant::NONE || (family == dgrad::KernelFamily::HELPER) != helper
-       || !metadataEquals(kernel, "pipeline", std::string("direct"))
-       || !metadataEquals(kernel, "epilogue", std::string("direct")))
-    {
-        return std::nullopt;
-    }
-    const auto isZero
-        = [&](const char* field) { return metadataEquals(kernel, field, int64_t{0}); };
-    if(!std::all_of(GEMM_TUNING_FIELDS.begin(), GEMM_TUNING_FIELDS.end(), isZero)
-       || !std::all_of(GEMM_ONLY_FIELDS.begin(), GEMM_ONLY_FIELDS.end(), isZero))
-    {
-        return std::nullopt;
-    }
-    std::array<int64_t, DIRECT_CAPABILITY_FIELDS.size()> compiled{};
-    for(size_t i = 0; i < DIRECT_CAPABILITY_FIELDS.size(); ++i)
-    {
-        const auto value = intMetadata(kernel, DIRECT_CAPABILITY_FIELDS[i]);
-        if(!value || *value < 0 || *value > dgrad::I32_MAX)
-        {
-            return std::nullopt;
-        }
-        compiled[i] = *value;
-    }
-    const dgrad::DirectCapabilities capabilities{compiled[0],
-                                                 compiled[1],
-                                                 compiled[2],
-                                                 compiled[3],
-                                                 compiled[4],
-                                                 compiled[5],
-                                                 compiled[6],
-                                                 compiled[7],
-                                                 compiled[8],
-                                                 compiled[9]};
-    if(capabilities.filterH < 1 || capabilities.filterH != capabilities.filterW
-       || capabilities.dilationH != 1 || capabilities.dilationW != 1 || capabilities.cpg < 1
-       || capabilities.kpg < 1)
-    {
-        return std::nullopt;
-    }
-    if(helper)
-    {
-        // A helper identity zeroes stride and padding: its code reads neither.
-        if(capabilities.strideH != 0 || capabilities.strideW != 0 || capabilities.padH != 0
-           || capabilities.padW != 0)
-        {
-            return std::nullopt;
-        }
-    }
-    else if(capabilities.strideH < 1 || capabilities.strideH != capabilities.strideW
-            || capabilities.padH != capabilities.padW)
-    {
-        return std::nullopt;
-    }
-    if(variant == dgrad::DirectVariant::DEPTHWISE
-       && (capabilities.cpg != 1 || capabilities.kpg != 1))
-    {
-        return std::nullopt;
-    }
-    std::array<int64_t, DIRECT_KNOB_FIELDS.size()> knobs{};
-    for(size_t i = 0; i < DIRECT_KNOB_FIELDS.size(); ++i)
-    {
-        const std::string_view field = DIRECT_KNOB_FIELDS[i];
-        const auto value = intMetadata(kernel, DIRECT_KNOB_FIELDS[i]);
-        if(!value)
-        {
-            return std::nullopt;
-        }
-        const bool flag = std::find(DIRECT_FLAG_KNOBS.begin(), DIRECT_FLAG_KNOBS.end(), field)
-                          != DIRECT_FLAG_KNOBS.end();
-        if(!directVariantUses(variant, field))
-        {
-            if(*value != 0)
-            {
-                return std::nullopt;
-            }
-        }
-        else if(flag ? (*value != 0 && *value != 1) : (*value < 1 || *value > dgrad::I32_MAX))
-        {
-            return std::nullopt;
-        }
-        knobs[i] = *value;
-    }
-    dgrad::DirectInstance instance{variant, capabilities};
-    instance.blockW = knobs[0];
-    instance.blockWaves = knobs[1];
-    instance.blockH = knobs[2];
-    instance.blockQ = knobs[3];
-    instance.blockGroups = knobs[4];
-    instance.foldK32 = knobs[5];
-    instance.wavesK = knobs[6];
-    instance.wavesQ = knobs[7];
-    instance.persistentGrid = knobs[8];
-    instance.runtimeKLoop = knobs[9];
-    // A transpose writes the plain layout; only a reorganize helper is keyed on fold_k32.
-    if(variant == dgrad::DirectVariant::TRANSPOSE && instance.foldK32 != 0)
-    {
-        return std::nullopt;
-    }
-    if(variant == dgrad::DirectVariant::DEPTHWISE
-       && instance.blockWaves > dgrad::MAX_BLOCK_THREADS / dgrad::WAVE_SIZE)
-    {
-        return std::nullopt;
-    }
-    if(variant == dgrad::DirectVariant::MFMA
-       && (!dgrad::mfmaKnobsFit(instance, capabilities.kpg)
-           || instance.blockGroups * instance.wavesQ * instance.wavesK
-                  > dgrad::MAX_BLOCK_THREADS / dgrad::WAVE_SIZE))
-    {
-        return std::nullopt;
-    }
-    return instance;
-}
-
-/// The instance @p kernel describes, when its metadata is a complete instance of one
-/// family with a launch contract this pack reviewed (supports_gfx950_conv_dgrad_aot):
-/// a kpack kernel, NHWC, wave64, then the family's own fields. kernel_family is read
-/// first, so no family's checks run on another's placeholders. Both value sets are closed
-/// and a missing field (the loader completes omitted ones from the KMD defaults) is
-/// malformed metadata.
-std::optional<AotKernel> aotInstance(const KernelDefinition& kernel)
-{
-    if(kernel.source.kind != KernelSourceKind::KPACK
-       || !metadataEquals(kernel, "layout", std::string("NHWC"))
-       || !metadataEquals(kernel, "wave_size", int64_t{64}))
-    {
-        return std::nullopt;
-    }
-    const auto familyValue = intMetadata(kernel, "kernel_family");
-    const auto family = familyValue ? dgrad::parseKernelFamily(*familyValue) : std::nullopt;
-    const auto* variantName = stringMetadata(kernel, "direct_variant");
-    const auto variant
-        = variantName == nullptr ? std::nullopt : dgrad::parseDirectVariant(*variantName);
-    if(!family || !variant)
-    {
-        return std::nullopt;
-    }
-    if(*family == dgrad::KernelFamily::IMPLICIT_GEMM)
-    {
-        if(*variant != dgrad::DirectVariant::NONE)
-        {
-            return std::nullopt;
-        }
-        return aotImplicitGemmInstance(kernel);
-    }
-    return aotDirectInstance(kernel, *family, *variant);
+    return dgrad::parseAotInstance(KernelMetadata{kernel});
 }
 
 /// Where a helper is looked up: the same pack, the same archive, the instance's dtype,
-/// and the identity fields gfx950_conv_dgrad_aot_helper_fields names (CONTRACT §4).
+/// and the identity fields gfx950_conv_dgrad_aot_helper_fields names.
 struct HelperKey
 {
     std::string archive;
@@ -726,51 +414,59 @@ HelperRegistry& helperRegistry()
     return s_registry;
 }
 
+/// A helper's own key, from its instance.
 HelperKey helperKey(const KernelDefinition& kernel,
                     const std::string& dtype,
-                    const dgrad::DirectInstance& instance,
-                    dgrad::DirectVariant variant)
+                    const dgrad::DirectInstance& helper)
 {
+    const bool reorganize = helper.variant == dgrad::DirectVariant::REORGANIZE
+                            || helper.variant == dgrad::DirectVariant::REORGANIZE_RTC;
     return HelperKey{archiveOf(kernel),
                      kernel.packId,
                      dtype,
-                     variant,
-                     instance.compiled.filterH,
-                     instance.compiled.cpg,
-                     instance.compiled.kpg,
-                     variant == dgrad::DirectVariant::REORGANIZE ? instance.foldK32 : 0};
+                     helper.variant,
+                     helper.compiled.filterH,
+                     helper.compiled.cpg,
+                     helper.compiled.kpg,
+                     reorganize ? helper.knobs.foldK32 : 0};
 }
 
-/// The helpers an MFMA instance's pipeline launches, in launch order: the transpose
-/// always, the reorganize when it reads coalesced weights. std::nullopt when either is
-/// missing from its pack, which refuses the instance.
-struct MfmaHelpers
-{
-    KernelDefinition transpose;
-    std::optional<KernelDefinition> reorganize;
-};
-
-std::optional<MfmaHelpers> findMfmaHelpers(const KernelDefinition& kernel,
+/// The helper a plan step of an MFMA instance launches: the transform of that kind
+/// for the instance's filter and channel counts (and, for a reorganize, its fold_k32).
+std::optional<KernelDefinition> findHelper(const KernelDefinition& kernel,
                                            const std::string& dtype,
-                                           const dgrad::DirectInstance& instance)
+                                           const dgrad::DirectInstance& instance,
+                                           dgrad::PlanKernel step)
 {
-    auto transpose = helperRegistry().find(
-        helperKey(kernel, dtype, instance, dgrad::DirectVariant::TRANSPOSE));
-    if(!transpose)
+    dgrad::DirectVariant variant{};
+    switch(step)
     {
+    case dgrad::PlanKernel::TRANSPOSE:
+        variant = dgrad::DirectVariant::TRANSPOSE;
+        break;
+    case dgrad::PlanKernel::REORGANIZE:
+        variant = dgrad::DirectVariant::REORGANIZE;
+        break;
+    case dgrad::PlanKernel::TRANSPOSE_RTC:
+        variant = dgrad::DirectVariant::TRANSPOSE_RTC;
+        break;
+    case dgrad::PlanKernel::REORGANIZE_RTC:
+        variant = dgrad::DirectVariant::REORGANIZE_RTC;
+        break;
+    case dgrad::PlanKernel::SELF:
+    default:
         return std::nullopt;
     }
-    MfmaHelpers helpers{std::move(*transpose), std::nullopt};
-    if(dgrad::usesCoalescedWeights(instance))
-    {
-        helpers.reorganize = helperRegistry().find(
-            helperKey(kernel, dtype, instance, dgrad::DirectVariant::REORGANIZE));
-        if(!helpers.reorganize)
-        {
-            return std::nullopt;
-        }
-    }
-    return helpers;
+    const bool reorganize
+        = step == dgrad::PlanKernel::REORGANIZE || step == dgrad::PlanKernel::REORGANIZE_RTC;
+    return helperRegistry().find(HelperKey{archiveOf(kernel),
+                                           kernel.packId,
+                                           dtype,
+                                           variant,
+                                           instance.compiled.filterH,
+                                           instance.compiled.cpg,
+                                           instance.compiled.kpg,
+                                           reorganize ? instance.knobs.foldK32 : 0});
 }
 
 /// What hipkernel:Gfx950ConvDgradAot reads of one kernel on every graph, decoded from its
@@ -779,32 +475,29 @@ std::optional<MfmaHelpers> findMfmaHelpers(const KernelDefinition& kernel,
 struct AotPrepared
 {
     std::string dtype;
-    std::optional<AotKernel> instance;
+    std::optional<dgrad::AotInstance> instance;
 };
 
 AotPrepared decodeAot(const KernelDefinition& kernel)
 {
-    const auto* dtype = stringMetadata(kernel, "dtype");
+    const auto* dtype = KernelMetadata{kernel}.stringField("dtype");
     return AotPrepared{dtype == nullptr ? std::string() : *dtype, aotInstance(kernel)};
 }
 
 /// The KernelPrepareFn registered under the kernel matcher's symbol: the SDK runs it once
 /// per kernel when the engine loads, so matching a graph reads AotPrepared instead of
-/// parsing some forty metadata fields per kernel. It also files each helper kernel for
-/// the MFMA pipeline to find. Must not throw.
+/// parsing some sixty metadata fields per kernel. It also files each helper kernel for
+/// the MFMA pipelines to find. Must not throw.
 std::shared_ptr<const void> aotPrepare(const KernelDefinition& kernel)
 {
     try
     {
         auto prepared = std::make_shared<const AotPrepared>(decodeAot(kernel));
-        const auto* direct = prepared->instance
-                                 ? std::get_if<dgrad::DirectInstance>(&*prepared->instance)
-                                 : nullptr;
-        if(direct != nullptr && dgrad::isHelperVariant(direct->variant)
+        const auto& instance = prepared->instance;
+        if(instance && instance->direct && dgrad::isHelperVariant(instance->direct->variant)
            && (prepared->dtype == "fp16" || prepared->dtype == "bf16"))
         {
-            helperRegistry().add(helperKey(kernel, prepared->dtype, *direct, direct->variant),
-                                 kernel);
+            helperRegistry().add(helperKey(kernel, prepared->dtype, *instance->direct), kernel);
         }
         return prepared;
     }
@@ -826,60 +519,15 @@ const AotPrepared& preparedOf(const KernelDefinition& kernel, AotPrepared& scrat
     return scratch;
 }
 
-/// A depthwise launch: one kernel, no workspace.
-struct DepthwiseLaunch
-{
-    dgrad::LaunchGeometry geometry;
-};
-
-/// Everything a kernel needs at launch on one problem, per family.
-using DgradLaunch = std::variant<dgrad::ImplicitLaunch, DepthwiseLaunch, dgrad::MfmaPlan>;
-
-/// The launch of @p instance on @p matched, through the family's own served predicate
-/// (dgrad::implicitInstanceLaunch, dgrad::depthwiseLaunch, dgrad::mfmaLaunchPlan); for
-/// MFMA its helpers must be in its pack too. A helper serves nothing.
-std::optional<DgradLaunch> aotInstanceLaunch(const MatchedProblem& matched,
-                                             const KernelDefinition& kernel,
-                                             const std::string& dtype,
-                                             const AotKernel& instance)
-{
-    if(const auto* gemm = std::get_if<dgrad::ImplicitInstance>(&instance))
-    {
-        auto launch = dgrad::implicitInstanceLaunch(matched.problem, matched.geometry, *gemm);
-        if(!launch
-           || !dgrad::implicitGemmKernargs(
-               matched.problem, matched.geometry, gemm->tileM, gemm->tileN))
-        {
-            return std::nullopt;
-        }
-        return DgradLaunch{std::move(*launch)};
-    }
-    const auto& direct = std::get<dgrad::DirectInstance>(instance);
-    if(direct.variant == dgrad::DirectVariant::DEPTHWISE)
-    {
-        const auto launch = dgrad::depthwiseLaunch(matched.problem, matched.geometry, direct);
-        return launch ? std::optional<DgradLaunch>(DepthwiseLaunch{*launch}) : std::nullopt;
-    }
-    if(direct.variant == dgrad::DirectVariant::MFMA)
-    {
-        const auto plan = dgrad::mfmaLaunchPlan(matched.problem, matched.geometry, direct);
-        if(!plan || !findMfmaHelpers(kernel, dtype, direct))
-        {
-            return std::nullopt;
-        }
-        return DgradLaunch{*plan};
-    }
-    return std::nullopt;
-}
-
 const char* dtypeName(data_objects::DataType dtype)
 {
     return dtype == data_objects::DataType::HALF ? "fp16" : "bf16";
 }
 
-/// The launch when @p kernel is packaged code that computes @p matched under a launch
-/// contract this pack reviewed: the dtype pinned, then the family's served predicate.
-std::optional<DgradLaunch> aotKernelFits(const MatchedProblem& matched,
+/// The plan of @p kernel on @p matched when it is packaged code of a reviewed launch
+/// contract that computes it: the dtype pinned, then the instance's plan, and every
+/// helper the plan launches present in its pack.
+std::optional<dgrad::Plan> aotKernelPlan(const MatchedProblem& matched,
                                          const KernelDefinition& kernel)
 {
     AotPrepared scratch;
@@ -888,7 +536,20 @@ std::optional<DgradLaunch> aotKernelFits(const MatchedProblem& matched,
     {
         return std::nullopt;
     }
-    return aotInstanceLaunch(matched, kernel, prepared.dtype, *prepared.instance);
+    auto plan = dgrad::instancePlan(matched.problem, *prepared.instance);
+    if(!plan)
+    {
+        return std::nullopt;
+    }
+    for(const auto& step : plan->steps)
+    {
+        if(step.kernel != dgrad::PlanKernel::SELF
+           && !findHelper(kernel, prepared.dtype, *prepared.instance->direct, step.kernel))
+        {
+            return std::nullopt;
+        }
+    }
+    return plan;
 }
 
 bool aotKernelMatches(const MatchContext& context,
@@ -896,7 +557,7 @@ bool aotKernelMatches(const MatchContext& context,
                       const KernelDefinition& kernel)
 {
     const auto matched = matchedFromBound(context, bound);
-    return matched && aotKernelFits(*matched, kernel).has_value();
+    return matched && aotKernelPlan(*matched, kernel).has_value();
 }
 
 double
@@ -904,30 +565,18 @@ double
 {
     // Deterministic fallback only; a trained ranker or BenchmarkPlan replaces it. Only
     // kernels the matcher admitted are scored, so a refusal (and every helper) ranks last.
-    // Depthwise ranks first, then MFMA, then implicit GEMM by its useful tile fraction
-    // (dgrad::directInstanceScore, dgrad::aotInstanceScore).
     const auto matched = matchedFromBound(context, bound);
+    if(!matched)
+    {
+        return -1.0;
+    }
+    const auto plan = aotKernelPlan(*matched, kernel);
+    if(!plan)
+    {
+        return -1.0;
+    }
     AotPrepared scratch;
-    const auto& prepared = preparedOf(kernel, scratch);
-    if(!matched || !prepared.instance || prepared.dtype != dtypeName(matched->dtype))
-    {
-        return -1.0;
-    }
-    const auto launch = aotInstanceLaunch(*matched, kernel, prepared.dtype, *prepared.instance);
-    if(!launch)
-    {
-        return -1.0;
-    }
-    if(const auto* gemm = std::get_if<dgrad::ImplicitInstance>(&*prepared.instance))
-    {
-        return dgrad::aotInstanceScore(
-            matched->problem, matched->geometry, *gemm, std::get<dgrad::ImplicitLaunch>(*launch));
-    }
-    const auto& direct = std::get<dgrad::DirectInstance>(*prepared.instance);
-    const auto geometry = std::holds_alternative<DepthwiseLaunch>(*launch)
-                              ? std::get<DepthwiseLaunch>(*launch).geometry
-                              : std::get<dgrad::MfmaPlan>(*launch).compute;
-    return dgrad::directInstanceScore(matched->problem, matched->geometry, direct, geometry);
+    return dgrad::planScore(*preparedOf(kernel, scratch).instance, *plan);
 }
 
 void requireBindings(const BoundTokens& bound, const Binding& binding)
@@ -988,53 +637,57 @@ std::vector<ArgumentSpec> directArguments(const std::array<std::string_view, 6>&
     return arguments;
 }
 
-/// The 44-argument dgrad implicit-GEMM ABI: (dY*, W*, dX*, dY_bytes, W_bytes, dX_bytes),
-/// the 36 i32 problem values, then sub_gemm_buf (a device pointer) and num_sub_gemms.
-const std::vector<KernelArgument>& implicitGemmSignature()
+/// The signature of a step's ABI: the 44-argument dgrad implicit-GEMM block (sub_gemm_buf
+/// a device pointer, num_sub_gemms last), the 20-argument direct dgrad block, the forward
+/// direct block, and the weight transforms' (A*, D*, A_bytes, D_bytes) with, for the
+/// runtime-channel ones, p_cpg and p_kpg.
+const std::vector<KernelArgument>& stepSignature(dgrad::Abi abi)
 {
-    static const auto s_signature = [] {
+    static const auto s_implicit = [] {
         auto arguments = directArguments({"dY", "W", "dX", "dY_bytes", "W_bytes", "dX_bytes"},
                                          dgrad::IMPLICIT_GEMM_KERNARG_NAMES);
         arguments.push_back({"sub_gemm_buf", true});
         arguments.push_back({"num_sub_gemms", false});
         return kernelSignature(arguments);
     }();
-    return s_signature;
-}
-
-/// The 20-argument dgrad direct ABI of the depthwise kernels.
-const std::vector<KernelArgument>& depthwiseSignature()
-{
-    static const auto s_signature = kernelSignature(directArguments(
-        {"A", "B", "D", "A_bytes", "B_bytes", "D_bytes"}, dgrad::DEPTHWISE_KERNARG_NAMES));
-    return s_signature;
-}
-
-/// The forward direct ABI the MFMA compute pass takes on the transposed problem.
-const std::vector<KernelArgument>& mfmaComputeSignature()
-{
-    static const auto s_signature = kernelSignature(directArguments(
+    static const auto s_directDgrad = kernelSignature(directArguments(
+        {"A", "B", "D", "A_bytes", "B_bytes", "D_bytes"}, dgrad::DIRECT_DGRAD_KERNARG_NAMES));
+    static const auto s_directFwd = kernelSignature(directArguments(
         {"A", "B", "D", "A_bytes", "B_bytes", "D_bytes"}, dgrad::DIRECT_KERNARG_NAMES));
-    return s_signature;
-}
-
-/// The weight transforms' (A*, D*, A_bytes, D_bytes).
-const std::vector<KernelArgument>& transformSignature()
-{
-    static const auto s_signature
+    static const auto s_transform
         = kernelSignature({{"A", true}, {"D", true}, {"A_bytes", false}, {"D_bytes", false}});
-    return s_signature;
+    static const auto s_transformRtc = kernelSignature({{"A", true},
+                                                        {"D", true},
+                                                        {"A_bytes", false},
+                                                        {"D_bytes", false},
+                                                        {"p_cpg", false},
+                                                        {"p_kpg", false}});
+    switch(abi)
+    {
+    case dgrad::Abi::IMPLICIT:
+        return s_implicit;
+    case dgrad::Abi::DIRECT_DGRAD:
+        return s_directDgrad;
+    case dgrad::Abi::DIRECT_FWD:
+        return s_directFwd;
+    case dgrad::Abi::TRANSFORM:
+        return s_transform;
+    case dgrad::Abi::TRANSFORM_RTC:
+    default:
+        return s_transformRtc;
+    }
 }
 
 IngestorKernelCode loadKernel(const compilation::KpackKernelLoader& loader,
                               const MatchContext& context,
                               const KernelDefinition& kernel,
-                              const std::vector<KernelArgument>& signature,
-                              const dgrad::LaunchGeometry& geometry)
+                              const dgrad::Step& step)
 {
-    auto code = buildIngestorKernelCode(loader, context, kernel, signature);
-    code.setBlockSize(geometry.blockX, 1, 1);
-    code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+    auto code = buildIngestorKernelCode(loader, context, kernel, stepSignature(step.abi));
+    code.setBlockSize(static_cast<unsigned int>(step.block), 1, 1);
+    code.setGridSize(static_cast<unsigned int>(step.grid[0]),
+                     static_cast<unsigned int>(step.grid[1]),
+                     static_cast<unsigned int>(step.grid[2]));
     // Every kernel of this pack uses statically allocated LDS only.
     code.setSharedMemBytes(0);
     return code;
@@ -1050,44 +703,26 @@ void checkHip(hipError_t status, const char* what)
     }
 }
 
-/// The implicit-GEMM launch: the kernel, its problem block, and the packed sub-GEMM table
-/// launch() uploads into the workspace on the stream before it runs.
-struct ImplicitPrepared
+/// One step of a prepared plan: its loaded kernel and the step it runs.
+struct PreparedStep
 {
     IngestorKernelCode code;
-    dgrad::ImplicitGemmKernargs kernargs;
-    std::vector<int32_t> table;
-    int32_t numSubGemms;
-    bool zeroDx;
-};
-
-struct DepthwisePrepared
-{
-    IngestorKernelCode code;
-    dgrad::DepthwiseKernargs kernargs;
-};
-
-/// The MFMA pipeline: transpose -> (reorganize) -> compute, with the workspace layout.
-struct MfmaPrepared
-{
-    IngestorKernelCode transpose;
-    std::optional<IngestorKernelCode> reorganize;
-    IngestorKernelCode compute;
-    dgrad::MfmaComputeKernargs kernargs;
-    int64_t wsTBytes;
-    int64_t wsCoaOffset;
-    int64_t wsCoaBytes;
+    dgrad::Step step;
 };
 
 class PreparedConvDgrad : public PreparedDispatch
 {
 public:
-    using Launch = std::variant<ImplicitPrepared, DepthwisePrepared, MfmaPrepared>;
-
-    PreparedConvDgrad(Binding binding, std::array<int32_t, 3> bytes, Launch launch)
+    PreparedConvDgrad(Binding binding,
+                      std::array<int64_t, 3> bytes,
+                      std::vector<PreparedStep> steps,
+                      std::vector<dgrad::Workspace> workspaces,
+                      bool zeroDx)
         : _binding(binding)
         , _bytes(bytes)
-        , _launch(std::move(launch))
+        , _steps(std::move(steps))
+        , _workspaces(std::move(workspaces))
+        , _zeroDx(zeroDx)
     {
     }
 
@@ -1096,20 +731,30 @@ public:
         return _binding;
     }
     /// dY, W, dX storage sizes in bytes.
-    const std::array<int32_t, 3>& bytes() const
+    const std::array<int64_t, 3>& bytes() const
     {
         return _bytes;
     }
-    const Launch& launch() const
+    const std::vector<PreparedStep>& steps() const
     {
-        return _launch;
+        return _steps;
+    }
+    const std::vector<dgrad::Workspace>& workspaces() const
+    {
+        return _workspaces;
+    }
+    bool zeroDx() const
+    {
+        return _zeroDx;
     }
 
 private:
     Binding _binding;
-    std::array<int32_t, 3> _bytes;
+    std::array<int64_t, 3> _bytes;
     // Holds every program/module and kernel view; owns no MatchContext data.
-    Launch _launch;
+    std::vector<PreparedStep> _steps;
+    std::vector<dgrad::Workspace> _workspaces;
+    bool _zeroDx;
 };
 
 class ConvDgradDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -1120,29 +765,16 @@ public:
     {
     }
 
-    /// The implicit-GEMM sub-GEMM table, (22 + 8) * num_sub_gemms * 4 bytes; the MFMA
-    /// pipeline's ws_t plus, when it reorganizes, ws_coa at ws_t rounded up to 256;
-    /// nothing for depthwise. A kernel the graph does not admit needs none: prepare()
-    /// refuses it.
+    /// The plan's workspace: the implicit-GEMM record tables, or the MFMA pipelines'
+    /// transposed (and reorganized) weights; none for the single-kernel direct pipelines.
+    /// A kernel the graph does not admit needs none: prepare() refuses it.
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
     {
         const auto matched = matchProblem(context);
-        const auto launch = matched ? aotKernelFits(*matched, kernel) : std::nullopt;
-        if(!launch)
-        {
-            return 0;
-        }
-        if(const auto* gemm = std::get_if<dgrad::ImplicitLaunch>(&*launch))
-        {
-            return gemm->workspaceBytes;
-        }
-        if(const auto* plan = std::get_if<dgrad::MfmaPlan>(&*launch))
-        {
-            return static_cast<size_t>(plan->workspaceBytes);
-        }
-        return 0;
+        const auto plan = matched ? aotKernelPlan(*matched, kernel) : std::nullopt;
+        return plan ? static_cast<size_t>(plan->workspaceBytes()) : 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -1150,8 +782,8 @@ public:
                                               const KernelDefinition& kernel) const override
     {
         const auto matched = matchProblem(context);
-        auto launch = matched ? aotKernelFits(*matched, kernel) : std::nullopt;
-        if(!launch)
+        auto plan = matched ? aotKernelPlan(*matched, kernel) : std::nullopt;
+        if(!plan)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1159,65 +791,34 @@ public:
                 "contract");
         }
         requireBindings(bound, matched->binding);
-        const auto& p = matched->problem;
-        const auto& g = matched->geometry;
-
-        // This pack ships prebuilt code objects only; aotKernelFits already refused every
-        // other source kind. Each family has its own ABI, so the signature follows it.
-        if(auto* gemm = std::get_if<dgrad::ImplicitLaunch>(&*launch))
-        {
-            AotPrepared scratch;
-            const auto& instance
-                = std::get<dgrad::ImplicitInstance>(*preparedOf(kernel, scratch).instance);
-            const auto kernargs = dgrad::implicitGemmKernargs(p, g, instance.tileM, instance.tileN);
-            return std::make_unique<PreparedConvDgrad>(
-                matched->binding,
-                g.tensorBytes,
-                ImplicitPrepared{
-                    loadKernel(_loader, context, kernel, implicitGemmSignature(), gemm->geometry),
-                    *kernargs,
-                    std::move(gemm->table),
-                    static_cast<int32_t>(gemm->numSubGemms),
-                    gemm->zeroDx});
-        }
-        if(const auto* depthwise = std::get_if<DepthwiseLaunch>(&*launch))
-        {
-            return std::make_unique<PreparedConvDgrad>(
-                matched->binding,
-                g.tensorBytes,
-                DepthwisePrepared{
-                    loadKernel(_loader, context, kernel, depthwiseSignature(), depthwise->geometry),
-                    dgrad::depthwiseKernargs(p, g)});
-        }
-        const auto& plan = std::get<dgrad::MfmaPlan>(*launch);
         AotPrepared scratch;
         const auto& prepared = preparedOf(kernel, scratch);
-        const auto& instance = std::get<dgrad::DirectInstance>(*prepared.instance);
-        const auto helpers = findMfmaHelpers(kernel, prepared.dtype, instance);
-        if(!helpers || helpers->reorganize.has_value() != plan.reorganize.has_value())
+        // This pack ships prebuilt code objects only; aotKernelPlan already refused every
+        // other source kind. Each step loads its own kernel under its ABI's signature.
+        std::vector<PreparedStep> steps;
+        for(auto& step : plan->steps)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "gfx950_conv_dgrad MFMA instance has no weight-transform helper in its pack");
+            if(step.kernel == dgrad::PlanKernel::SELF)
+            {
+                steps.push_back({loadKernel(_loader, context, kernel, step), std::move(step)});
+                continue;
+            }
+            const auto helper
+                = findHelper(kernel, prepared.dtype, *prepared.instance->direct, step.kernel);
+            if(!helper)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "gfx950_conv_dgrad MFMA instance has no weight-transform helper in its "
+                    "pack");
+            }
+            steps.push_back({loadKernel(_loader, context, *helper, step), std::move(step)});
         }
-        std::optional<IngestorKernelCode> reorganize;
-        if(plan.reorganize)
-        {
-            reorganize = loadKernel(
-                _loader, context, *helpers->reorganize, transformSignature(), *plan.reorganize);
-        }
-        return std::make_unique<PreparedConvDgrad>(
-            matched->binding,
-            g.tensorBytes,
-            MfmaPrepared{
-                loadKernel(
-                    _loader, context, helpers->transpose, transformSignature(), plan.transpose),
-                std::move(reorganize),
-                loadKernel(_loader, context, kernel, mfmaComputeSignature(), plan.compute),
-                dgrad::mfmaComputeKernargs(p, g, plan),
-                plan.wsTBytes,
-                plan.wsCoaOffset,
-                plan.wsCoaBytes});
+        return std::make_unique<PreparedConvDgrad>(matched->binding,
+                                                   matched->geometry.tensorBytes,
+                                                   std::move(steps),
+                                                   std::move(plan->workspaces),
+                                                   plan->zeroDx);
     }
 
     void launch(const Handle& handle,
@@ -1259,102 +860,105 @@ public:
                 "gfx950_conv_dgrad requires nonoverlapping gradient, filter, and input-gradient "
                 "storage");
         }
-        const auto stream = handle.getStream();
-        const auto requireWorkspace = [&] {
-            if(workspace == nullptr || reinterpret_cast<uintptr_t>(workspace) % 16 != 0)
+        const auto& workspaces = dgradPrepared.workspaces();
+        if(!workspaces.empty()
+           && (workspace == nullptr || reinterpret_cast<uintptr_t>(workspace) % 16 != 0))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950_conv_dgrad requires a workspace aligned to 16 bytes");
+        }
+        // Each buffer a step can bind, with its size: the graph tensors and the regions
+        // of the workspace.
+        const auto region = [&](dgrad::Buffer name) -> std::pair<char*, int64_t> {
+            switch(name)
             {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    "gfx950_conv_dgrad requires a workspace aligned to 16 bytes");
+            case dgrad::Buffer::DY:
+                return {static_cast<char*>(dy), bytes[0]};
+            case dgrad::Buffer::W:
+                return {static_cast<char*>(w), bytes[1]};
+            case dgrad::Buffer::DX:
+                return {static_cast<char*>(dx), bytes[2]};
+            default:
+                break;
             }
+            for(const auto& entry : workspaces)
+            {
+                if(entry.name == name)
+                {
+                    return {static_cast<char*>(workspace) + entry.offset, entry.bytes};
+                }
+            }
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "gfx950_conv_dgrad plan binds a buffer it does not lay out");
         };
         // Every step below goes on the launch stream, so the plan stays stream-ordered.
-        std::visit(
-            [&](const auto& launch) {
-                using T = std::decay_t<decltype(launch)>;
-                if constexpr(std::is_same_v<T, ImplicitPrepared>)
+        const auto stream = handle.getStream();
+        if(dgradPrepared.zeroDx())
+        {
+            // The records leave some dX rows or columns unwritten (a strided problem whose
+            // filter misses a residue): _dx_fully_written.
+            checkHip(hipMemsetAsync(dx, 0, static_cast<size_t>(bytes[2]), stream), "dX zero-fill");
+        }
+        for(const auto& [code, step] : dgradPrepared.steps())
+        {
+            void* table = nullptr;
+            if(step.abi == dgrad::Abi::IMPLICIT)
+            {
+                // The table lives in the prepared plan, so the host source outlives the
+                // copy even when it completes asynchronously. The upload runs on every
+                // launch, since the caller may reuse the workspace between launches.
+                table = region(dgrad::Buffer::SUB_GEMM).first + step.tableOffset;
+                checkHip(hipMemcpyAsync(table,
+                                        step.table.data(),
+                                        step.table.size() * sizeof(int32_t),
+                                        hipMemcpyHostToDevice,
+                                        stream),
+                         "sub-GEMM table upload");
+            }
+            // The operands, each through the step's view of it where it has one.
+            std::array<void*, 3> pointers{};
+            std::array<int32_t, 3> sizes{};
+            for(size_t i = 0; i < step.buffers.size(); ++i)
+            {
+                if(step.buffers[i] == dgrad::Buffer::NONE)
                 {
-                    requireWorkspace();
-                    if(launch.zeroDx)
-                    {
-                        // A strided problem leaves the dX rows and columns no tap reaches
-                        // unwritten: needs_zeroed_dx.
-                        checkHip(hipMemsetAsync(dx, 0, static_cast<size_t>(bytes[2]), stream),
-                                 "dX zero-fill");
-                    }
-                    // The table lives in the prepared plan, so the host source outlives the
-                    // copy even when it completes asynchronously. The upload runs on every
-                    // launch, since the caller may reuse the workspace between launches; its
-                    // cost is part of every implicit-GEMM candidate's measured time.
-                    checkHip(hipMemcpyAsync(workspace,
-                                            launch.table.data(),
-                                            launch.table.size() * sizeof(int32_t),
-                                            hipMemcpyHostToDevice,
-                                            stream),
-                             "sub-GEMM table upload");
-                    void* table = workspace;
-                    const int32_t numSubGemms = launch.numSubGemms;
-                    const auto& kernel = launch.code.kernelForStream(stream);
-                    std::apply(
-                        [&](const auto&... values) {
-                            kernel.launch(stream,
-                                          dy,
-                                          w,
-                                          dx,
-                                          bytes[0],
-                                          bytes[1],
-                                          bytes[2],
-                                          values...,
-                                          table,
-                                          numSubGemms);
-                        },
-                        launch.kernargs);
+                    continue;
                 }
-                else if constexpr(std::is_same_v<T, DepthwisePrepared>)
+                auto [base, size] = region(step.buffers[i]);
+                if(const auto& view = step.views[i])
                 {
-                    const auto& kernel = launch.code.kernelForStream(stream);
-                    std::apply(
-                        [&](const auto&... values) {
-                            kernel.launch(
-                                stream, dy, w, dx, bytes[0], bytes[1], bytes[2], values...);
-                        },
-                        launch.kernargs);
+                    base += view->offset;
+                    size = view->bytes;
                 }
-                else
-                {
-                    requireWorkspace();
-                    auto* base = static_cast<char*>(workspace);
-                    void* wsT = base;
-                    const auto wsTBytes = static_cast<int32_t>(launch.wsTBytes);
-                    launch.transpose.kernelForStream(stream).launch(
-                        stream, w, wsT, bytes[1], wsTBytes);
-                    void* weights = wsT;
-                    int32_t weightBytes = wsTBytes;
-                    if(launch.reorganize)
-                    {
-                        void* wsCoa = base + launch.wsCoaOffset;
-                        const auto wsCoaBytes = static_cast<int32_t>(launch.wsCoaBytes);
-                        launch.reorganize->kernelForStream(stream).launch(
-                            stream, wsT, wsCoa, wsTBytes, wsCoaBytes);
-                        weights = wsCoa;
-                        weightBytes = wsCoaBytes;
-                    }
-                    const auto& kernel = launch.compute.kernelForStream(stream);
-                    std::apply(
-                        [&](const auto&... values) {
-                            kernel.launch(stream,
-                                          dy,
-                                          weights,
-                                          dx,
-                                          bytes[0],
-                                          weightBytes,
-                                          bytes[2],
-                                          values...);
-                        },
-                        launch.kernargs);
-                }
-            },
-            dgradPrepared.launch());
+                pointers[i] = base;
+                sizes[i] = static_cast<int32_t>(size);
+            }
+            std::vector<void*> params;
+            if(step.abi == dgrad::Abi::TRANSFORM || step.abi == dgrad::Abi::TRANSFORM_RTC)
+            {
+                params = {&pointers[0], &pointers[2], &sizes[0], &sizes[2]};
+            }
+            else
+            {
+                params
+                    = {&pointers[0], &pointers[1], &pointers[2], &sizes[0], &sizes[1], &sizes[2]};
+            }
+            // Every value but num_sub_gemms, which follows the table pointer.
+            const auto plain
+                = step.abi == dgrad::Abi::IMPLICIT ? step.values.size() - 1 : step.values.size();
+            for(size_t i = 0; i < plain; ++i)
+            {
+                params.push_back(const_cast<int32_t*>(&step.values[i]));
+            }
+            if(step.abi == dgrad::Abi::IMPLICIT)
+            {
+                params.push_back(&table);
+                params.push_back(const_cast<int32_t*>(&step.values.back()));
+            }
+            code.kernelForStream(stream).launchWithParams(stream, params.data());
+        }
     }
 
 private:
