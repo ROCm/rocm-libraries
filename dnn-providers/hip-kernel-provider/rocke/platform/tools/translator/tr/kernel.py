@@ -49,6 +49,44 @@ def qualnames(tree: ast.Module) -> dict[int, str]:
     return out
 
 
+def twin_struct(env, mod, cls: str) -> str | None:
+    """The C twin struct of class cls that mod imports from another module, found
+    in the tree's header of that module (PKG.header_names): the struct its
+    Python-to-C table names (`class TileSpec    rocke_gemm_tile_spec_t`), else its
+    one struct named rocke_<snake(cls)>_t or rocke_*_<snake(cls)>_t. None when
+    the module has no header or the header no such struct (the class then has no
+    C type, and what uses it is refused)."""
+    from .package import PKG
+
+    if cls in mod.classes or cls not in mod.imports or "." in cls:
+        return None
+    src, name = mod.imports[cls]
+    src = src.split(".")[-1]
+    if name != cls or not re.fullmatch(r"[A-Z]\w*", cls) or src.startswith(PKG.modules):
+        return None  # a sibling module's class follows the sibling struct rule
+    h = env.headers
+    snake_ = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", cls).lower()
+    for hdr in PKG.header_names(src):
+        path = h.paths.get(hdr)
+        if path is None:
+            continue
+        m = re.search(
+            rf"\bclass\s+{re.escape(cls)}\b[^\n]*?\b(rocke_\w+_t)\b", open(path).read()
+        )
+        if m and m.group(1) in h.structs and h.typedef_file.get(m.group(1)) == hdr:
+            return m.group(1)
+        cands = sorted(
+            s
+            for s, f in h.typedef_file.items()
+            if f == hdr
+            and s in h.structs
+            and (s == f"rocke_{snake_}_t" or s.endswith(f"_{snake_}_t"))
+        )
+        if len(cands) == 1:
+            return cands[0]
+    return None
+
+
 class TypeMap:
     """Recorded tags -> C++ types (plan section 5.4, a fixed table)."""
 
@@ -66,6 +104,13 @@ class TypeMap:
                 if sym in env.headers.structs:
                     self.class_struct.setdefault(cname, sym)
                     break
+        # a class imported from another module whose C twin struct is in the tree
+        # (TileSpec of gemm_universal: rocke_gemm_tile_spec_t)
+        for cname in mod.imports:
+            if cname not in mod.classes and cname not in self.class_struct:
+                sym = twin_struct(env, mod, cname)
+                if sym is not None:
+                    self.class_struct[cname] = sym
         self.class_module: dict[str, str] = {}
         for key, ent in tm.items():
             if ent.get("kind") == "class":

@@ -1091,17 +1091,25 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
                         f"generated ABI of {other} not installed: {exc}",
                         file=sys.stderr,
                     )
-        install_abi(env, mod)
+        undeclared = install_abi(env, mod).undeclared
+    else:
+        undeclared = {}
     struct_lines = private_structs(env, mod, mod.facts, mod.tmap)
     mod.private_classes = {
         c for c, sname in mod.class_struct.items() if sname.startswith("py_")
     }
-    public = [n for n in mod.functions if env.sig.helpers.get(mod.qual(n))]
+    # a function whose declaration tr.abi refused stays a unit (reported as a
+    # hole below), so what it calls is still listed
+    public = [
+        n for n in mod.functions if env.sig.helpers.get(mod.qual(n)) or n in undeclared
+    ]
     order = [(n, None) for n in topo(mod, public)]
     # class methods: dataclass-only classes have none; methods come after the functions they call
     # methods: exported ones, plus private-class methods something translated calls
     exported_m = {
-        (c, m) for (c, m) in mod.methods if env.sig.helpers.get(mod.qual(f"{c}.{m}"))
+        (c, m)
+        for (c, m) in mod.methods
+        if env.sig.helpers.get(mod.qual(f"{c}.{m}")) or f"{c}.{m}" in undeclared
     }
     called = set()
     frontier = [mod.functions[n] for n, _ in order] + [
@@ -1489,6 +1497,20 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
                 shims.append([f'#error "hole: {name}: {r.reason} (line {r.line})"'])
                 rec["status"] = "hole"
         res.functions.append(rec)
+    # exported functions whose declaration tr.abi refused (it uses a struct that
+    # is defined nowhere): holes, whatever their body did
+    seen_units = {f["name"]: f for f in res.functions}
+    for qual, why in undeclared.items():
+        rec = seen_units.get(qual)
+        if rec is None:
+            cls, _, meth = qual.rpartition(".")
+            fn = mod.methods.get((cls, meth)) if cls else mod.functions.get(qual)
+            rec = {"name": qual, "line": fn.lineno if fn else 0, "public": True}
+            res.functions.append(rec)
+        elif rec["status"] in ("hole", "filled"):
+            continue  # already a hole (or filled) for its own reason
+        rec.update(status="hole", reason=f"not exported: {why}", at=rec.get("line", 0))
+        shims.append([f'#error "hole: {qual}: not exported: {why}"'])
     # header functions with no Python twin: derived (_free) or holes (count companions)
     if header:
         for fname, body in list(derived_free(env, mod, header).items()) + list(
@@ -1590,6 +1612,14 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
         f = env.headers.funcs.get(fname)
         if f is not None and f.file not in ("ir.h", "ir_internal.h", header):
             incs.add(f.file)
+    # a type of another header the source names (a twin struct held by value
+    # in a private struct, rocke_gemm_tile_spec_t) needs that header too
+    type_text = "\n".join(struct_lines) + "\n" + joined
+    for t in set(re.findall(r"\b(rocke_\w+_t)\b", type_text)):
+        f = env.headers.typedef_file.get(t)
+        if f is not None and f not in ("ir.h", "ir_internal.h", header):
+            if header is None or not _includes(env, header, f):
+                incs.add(f)
     for inc in sorted(incs):
         lines.append(f'#include "rocke/{inc}"')
     lines.append("")
@@ -1653,6 +1683,19 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
             lines.append("")
     res.code = "\n".join(lines)
     return res
+
+
+def _includes(env: Env, header: str, other: str, seen=None) -> bool:
+    """header includes rocke/<other>, directly or through the headers it includes."""
+    seen = set() if seen is None else seen
+    if header in seen or header not in env.headers.paths:
+        return False
+    seen.add(header)
+    text = open(env.headers.paths[header]).read()
+    for inc in re.findall(r'^\s*#\s*include\s+"rocke/([^"]+)"', text, re.M):
+        if inc == other or _includes(env, inc, other, seen):
+            return True
+    return False
 
 
 def set_clang_format(exe: str | None) -> None:

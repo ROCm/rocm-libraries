@@ -89,6 +89,8 @@ class Abi:
         self.decls: list[Decl] = []
         self.consts: list[str] = []
         self.refused: list[tuple[str, str]] = []
+        # functions whose declaration was refused by the guard (refuse_undeclared)
+        self.undeclared: dict[str, str] = {}
         self.flat: set[str] = set()
         self.family_owns: dict[str, bool] = {}
         self._building: set[str] = (
@@ -226,6 +228,8 @@ class Abi:
             return None
         if t in SCALARS:
             return SCALARS[t]
+        if self.str_literal(t):
+            return ("str",)  # Literal["f16", "bf16"]: a string, as a str field
         m = re.fullmatch(r"Optional\[(.+)\]", t)
         if m:
             x = self.parse_text(m.group(1))
@@ -260,6 +264,28 @@ class Abi:
         if re.fullmatch(r"_?[A-Z]\w*", t):
             return ("obj", t)
         return None
+
+    def str_literal(self, t: str) -> bool:
+        """t is a Literal of strings only, written out (`Literal["f16", "bf16"]`)
+        or through a module-level alias (`DType = Literal["f16", "bf16"]`)."""
+        m = re.fullmatch(r"Literal\[(.+)\]", t)
+        if m:
+            try:
+                xs = ast.literal_eval(f"({m.group(1)},)")
+            except (ValueError, SyntaxError):
+                return False
+            return all(isinstance(x, str) for x in xs)
+        if not re.fullmatch(r"[A-Za-z_]\w*", t):
+            return False
+        import typing
+
+        v = getattr(self.mod.pymod, t, None)
+        args = typing.get_args(v)
+        return (
+            typing.get_origin(v) is typing.Literal
+            and bool(args)
+            and all(isinstance(x, str) for x in args)
+        )
 
     def recorded(self, tags: list[str]) -> tuple | None:
         """A recorded tag set: one tag, or a known union. Test stand-ins
@@ -1105,7 +1131,86 @@ class Abi:
         self.rename()  # final names first: support must not re-add what the rename produced
         self.support()
         self.hand_deps()
+        self.refuse_undeclared()
         return self
+
+    def defined_types(self) -> set[str]:
+        """rocke_*_t names the header can use: what it defines (generated and
+        kept hand types), the typedefs of the tree's other headers, which it
+        includes, and the package's own names (rocke_<prefix>_*: its iv_t and
+        the structs of sibling modules, defined by the sibling headers generated
+        in the same command), except the structs of this module's own classes:
+        only this header can define those. The tree's copy of this module's own
+        header does not count: the generated header replaces it."""
+        own = header_name(self.env, self.mod.modname)
+        mine = {self.struct_name(c) for c in self.mod.classes}
+        used = "\n".join(
+            [d.text() for d in self.decls]
+            + self.typedefs
+            + [x for ls in self.structs.values() for x in ls]
+        )
+        out = {t for t, f in self.env.headers.typedef_file.items() if f != own}
+        out |= {
+            t
+            for t in re.findall(r"\b(rocke_\w+_t)\b", used)
+            if t.startswith(PKG.c) and t not in mine
+        }
+        out |= set(self.tuple_structs) | {x + "_t" for x in self.tuple_structs}
+        out |= {self.struct_name(c) for c in self.structs}
+        out |= set(self.hand)
+        text = "\n".join(
+            self.typedefs
+            + [x for ls in self.structs.values() for x in ls]
+            + list(self.tuple_structs.values())
+            + list(self.hand.values())
+        )
+        out |= set(re.findall(r"}\s*(\w+)\s*;", text))
+        out |= set(re.findall(r"\btypedef\s+[^;{]*?\b(\w+)\s*;", text))
+        out |= set(re.findall(r"\(\*(\w+)\)", text))
+        return out
+
+    def refuse_undeclared(self):
+        """Guard: no declaration may use a struct the header neither defines
+        nor finds in the tree (it would not compile). Such a struct, typedef or
+        function is refused, not written, until nothing changes; a refused
+        function is listed in undeclared (qualname -> reason) so tr.translate
+        reports it as a hole."""
+
+        def missing(text: str, known: set[str]) -> list[str]:
+            return sorted(
+                t for t in set(re.findall(r"\b(rocke_\w+_t)\b", text)) if t not in known
+            )
+
+        changed = True
+        while changed:
+            changed = False
+            known = self.defined_types()
+            for cls in list(self.structs):
+                lines = self.structs[cls]
+                gone = missing("\n".join(lines), known | {self.struct_name(cls)})
+                if gone:
+                    del self.structs[cls]
+                    self.refused.append(
+                        (cls, f"struct uses {', '.join(gone)}, defined nowhere")
+                    )
+                    changed = True
+            for t in list(self.typedefs):
+                gone = missing(t, known)
+                if gone:
+                    self.typedefs.remove(t)
+                    changed = True
+            keep = []
+            for d in self.decls:
+                gone = missing(d.text(), known)
+                if gone:
+                    why = f"{d.name}: uses {', '.join(gone)}, defined nowhere"
+                    self.refused.append((d.py, why))
+                    if "<" not in d.py:
+                        self.undeclared[d.py] = why
+                    changed = True
+                else:
+                    keep.append(d)
+            self.decls = keep
 
     # ------------------------------------------------------------ ABI holes
 

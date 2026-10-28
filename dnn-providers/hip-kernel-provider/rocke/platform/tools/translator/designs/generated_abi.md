@@ -37,7 +37,9 @@ so most declarations come out unchanged.
 | `IRBuilder` | `rocke_ir_builder_t* b` |
 | `Value`, `Value \| None` | `rocke_value_t*` (NULL is None) |
 | `int`, `bool`, `float`, `str` | `int`, `bool`, `double`, `const char*` (NULL is the default) |
+| `Literal["a", "b"]` (written out or a module-level alias) | `const char*`, as `str` |
 | `int \| Value` | `rocke_attn_bwd_iv_t` |
+| class of another module with a C twin struct in its header (`TileSpec` of `gemm_universal`) | that struct (`rocke_gemm_tile_spec_t`), fields by value; the header includes its header |
 | `X \| None` field of a dataclass | `bool has_x; X x;` |
 | `Sequence[T]`, `tuple[T, ...]`, `list[T]` parameter | `const T* x, int n_x` |
 | `dict[str, V]` parameter | `const char* const* x_keys, const V* x_vals, int n_x` |
@@ -54,6 +56,11 @@ so most declarations come out unchanged.
 | return a dataclass | the struct by value; tuple fields owned by it, free with `_free` |
 | `tuple` of str / int constant | `extern const T NAME[NAME_N]` + `#define NAME_N` |
 | `int` constant | `#define NAME value` |
+
+A declaration that would use a struct the header neither defines nor
+includes (a class whose struct was refused) is refused too, and its function
+is a hole in `tr.translate --analyze`; the header never names an undeclared
+type.
 
 Owned lists replace every count companion: the callee knows the length
 after running once, so nothing runs twice (running an IR-emitting function
