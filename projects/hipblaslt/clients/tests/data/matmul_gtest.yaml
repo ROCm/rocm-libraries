@@ -398,7 +398,7 @@ Tests:
   matrix_size: *medium_matrix_size_range
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_batch_medium
   category: pre_checkin
@@ -419,7 +419,7 @@ Tests:
   alpha_beta: *complex_alpha_beta_range
   batch_count: 10
   batch_mode: [0, 1]
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 # NT + size-1 complex (f32_c) cases return "NO solution found" on gfx950.
 # Those are quarantined for gfx950 in known_bugs.yaml.
@@ -432,7 +432,7 @@ Tests:
   alpha_beta: *complex_alpha_beta_range
   batch_count: 3
   batch_mode: [0, 1]
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 
 - name: matmul_medium_HMM
@@ -606,7 +606,7 @@ Tests:
   K: 16
   alpha_beta: *complex_alpha_beta_range
   transA_transB: *complex_transA_transB_range
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_24
   category: pre_checkin
@@ -648,7 +648,7 @@ Tests:
   K: 32
   alpha_beta: *complex_alpha_beta_range
   transA_transB: *complex_transA_transB_range
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_48_8_128
   category: nightly
@@ -4988,7 +4988,7 @@ Tests:
   K: 96
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_256_8_16_complex
   category: pre_checkin
@@ -4999,7 +4999,7 @@ Tests:
   K: 16
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_2001_5431_3004_complex
   category: pre_checkin
@@ -5010,7 +5010,7 @@ Tests:
   K: 3004
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_1093_141_7011_complex
   category: pre_checkin
@@ -5021,7 +5021,7 @@ Tests:
   K: 7011
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_4097_2187_2653_complex
   category: pre_checkin
@@ -5032,7 +5032,7 @@ Tests:
   K: 2653
   alpha_beta: *complex_alpha_beta_range_small
   transA_transB: *complex_transA_transB_range_small
-  gpu_arch: '9(42|50)|1250'
+  gpu_arch: '9(42|50)|120[01]|1250'
 
 - name: matmul_one_bf16_fp32dst_precision_gfx90a
   category: quick
