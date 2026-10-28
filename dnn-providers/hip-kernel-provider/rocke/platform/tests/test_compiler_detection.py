@@ -197,21 +197,14 @@ def test_override_does_not_falsify_guard_evidence(monkeypatch):
     assert info.describe() in str(error.value)
 
 
-def test_loader_skips_unloadable_candidate_before_querying(monkeypatch):
-    lib = compiler_library((23, 0, 0), "second.so")
+def test_unloadable_selected_compiler_does_not_query_a_fallback(monkeypatch):
     monkeypatch.setattr(comgr, "_lib", None)
-    monkeypatch.setattr(
-        comgr, "_candidate_lib_paths", lambda *args: ["first.so", "second.so"]
-    )
+    monkeypatch.setattr(comgr, "_mapped_lib_paths", lambda stem: [])
+    monkeypatch.setattr(comgr, "_candidate_lib_paths", lambda *args: ["selected.so"])
     monkeypatch.setattr(comgr, "_add_dll_dir", lambda path: None)
-    monkeypatch.setattr(comgr, "_library_for_symbol", lambda fn: "second.so")
-    with patch.object(
-        ctypes, "CDLL", side_effect=[OSError("cannot load"), lib]
-    ) as load:
-        info = comgr.loaded_compiler_info()
-    assert info.llvm_version == (23, 0, 0)
-    assert info.requested_comgr == "second.so"
-    assert load.call_count == 2
+    with patch.object(ctypes, "CDLL", side_effect=OSError("cannot load")) as load:
+        assert comgr.loaded_compiler_info() is None
+    load.assert_called_once_with("selected.so")
 
 
 def test_failed_preprocessing_releases_acquired_handles():

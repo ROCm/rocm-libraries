@@ -36,7 +36,9 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 ## Prerequisites
 
 - **COMGR for compilation**, supplied by `rocke[sdk-core]` through the shared
-  `rocm-sdk-core` package, or by a system ROCm install. The base wheel requires
+  `rocm-sdk-core` package, or selected explicitly with `ROCKE_COMGR_LIB`.
+  Automatic COMGR discovery uses only the installed SDK distribution; system
+  ROCm roots and torch packages are not compiler fallbacks. The base wheel requires
   only NumPy and contains no compiler binaries. Install the extra from an AMD
   wheel index; see [COMGR installation and release support](dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
   AUTO selects the IR flavor from the loaded COMGR compiler's LLVM version;

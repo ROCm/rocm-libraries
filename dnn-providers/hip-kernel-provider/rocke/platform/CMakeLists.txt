@@ -18,6 +18,20 @@ include(GNUInstallDirs)
 # at build time from the committed JSON columns (see below).
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+# Build-tree executables need the selected interpreter's SDK site even when the
+# build lives outside its virtualenv. Keep only a relative site descriptor beside
+# the build; never install it or embed a build-machine SDK library path in code.
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" -I
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_sdk_comgr_location.py"
+          --build-root "${CMAKE_CURRENT_BINARY_DIR}"
+  RESULT_VARIABLE _ROCKE_SDK_SITE_RESULT)
+if(NOT _ROCKE_SDK_SITE_RESULT EQUAL 0)
+  message(FATAL_ERROR "Could not generate the native build-tree SDK site descriptor")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_sdk_comgr_location.py")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

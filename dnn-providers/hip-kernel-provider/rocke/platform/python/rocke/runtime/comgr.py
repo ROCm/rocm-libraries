@@ -22,7 +22,7 @@ straight to `hipModuleLoadData` (see `hip_module.py`). No subprocesses,
 no `<hip/hip_runtime.h>` parsing, no clang spawn.
 
 The library is supplied by ``rocm-sdk-core`` (the ``rocke[sdk-core]`` extra),
-an explicit override, an already imported torch, or a system ROCm install.
+or a nonempty ``ROCKE_COMGR_LIB`` explicit override.
 ABI definitions mirror ROCm's `amd_comgr.h`.
 """
 
@@ -38,13 +38,12 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from ._ctypes_bind import _LazyFn
+from ._sdk_comgr import release_for_path
 from .runtime_coexistence import (
     _IS_WINDOWS,
     _add_dll_dir,
     _candidate_lib_paths,
-    _in_rocm_sdk_core,
-    _mapped_lib,
-    _rocm_sdk_core_release,
+    _mapped_lib_paths,
 )
 
 
@@ -78,44 +77,26 @@ class ComgrProcessDied(ComgrError):
 
 
 def _load_lib() -> ctypes.CDLL:
-    # Pair the loader with ``hip_module._load_lib`` so the two halves of
-    # the process always share a single HIP/comgr runtime instance. See
-    # ``_torch_bundled_lib`` in ``runtime_coexistence`` for why a
-    # torch-shipped libamd_comgr is preferred over /opt/rocm when torch is
-    # in the process.
-    # Every candidate's failure is kept rather than overwritten. Which paths were
-    # tried, in order, is the whole diagnosis when resolution lands somewhere
-    # unexpected, and the interesting failure is usually the first -- the library
-    # that was supposed to load -- not the last.
-    # A different explicit COMGR beside an already mapped one can load a
-    # second LLVM and abort the process before COMGR can return an error.
-    # Only the single-copy case identifies that conflict without choosing a
-    # policy for multiple mappings. A non-ELF override cannot load as COMGR;
-    # let the existing candidate fallback handle invalid or unreadable files.
-    override = os.environ.get("ROCKE_COMGR_LIB")
-    if override and not _IS_WINDOWS and os.path.isfile(override):
-        mapped = _mapped_lib("amd_comgr", require_unique=True)
-        if mapped is not None:
+    # Selection never adopts a foreign mapped compiler. Check every mapped copy
+    # before dlopen: two distinct COMGRs can register LLVM options and abort.
+    paths = _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
+    if paths:
+        selected = paths[0]
+        for mapped in _mapped_lib_paths("amd_comgr"):
             try:
-                same_file = os.path.samefile(override, mapped)
+                same_file = os.path.samefile(selected, mapped)
             except OSError:
-                pass
-            else:
-                if not same_file:
-                    try:
-                        with open(override, "rb") as candidate:
-                            is_elf = candidate.read(4) == b"\x7fELF"
-                    except OSError:
-                        is_elf = False
-                    if is_elf:
-                        raise ComgrError(
-                            f"ROCKE_COMGR_LIB={override!r} differs from the only "
-                            f"mapped COMGR {mapped!r}; opening a second COMGR can "
-                            "abort LLVM. Point ROCKE_COMGR_LIB at the mapped file "
-                            "or compile in a separate process before loading torch."
-                        )
+                same_file = False
+            if not same_file:
+                raise ComgrError(
+                    f"Selected COMGR {selected!r} differs from mapped COMGR "
+                    f"{mapped!r} or its file identity cannot be established; "
+                    "opening a second COMGR can abort LLVM. Use the same SDK "
+                    "file, an explicit ROCKE_COMGR_LIB pointing at the mapped "
+                    "file, or compile in a separate process."
+                )
     failures: List[Tuple[str, OSError]] = []
-    for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
+    for p in paths:
         try:
             _add_dll_dir(p)
             return ctypes.CDLL(p)
@@ -138,7 +119,7 @@ def _load_lib() -> ctypes.CDLL:
 
 
 # Lazy: import order does not matter until the first query or compilation.
-# See ``runtime_coexistence._torch_bundled_lib`` for discovery precedence.
+# Nonempty explicit override, otherwise the SDK-owned COMGR file.
 _lib: Optional[ctypes.CDLL] = None
 _lib_lock = threading.RLock()
 _llvm_version_lib: ctypes.CDLL | None = None
@@ -155,12 +136,10 @@ def _resolve_lib() -> ctypes.CDLL:
 
 
 def resolved_lib_path() -> Optional[str]:
-    """Path of the ``libamd_comgr`` this module will load (torch-bundled
-    preferred over ``/opt/rocm``; see :func:`runtime_coexistence._torch_bundled_lib`).
+    """Selected explicit or SDK path; lookup alone does not establish provenance.
 
-    Returns the already-loaded lib's path once :func:`_resolve_lib` has run,
-    else the first existing candidate. Pure lookup -- does NOT ``dlopen``, so it
-    is a discovery hint, not evidence of the loaded compiler version.
+    Once loaded, return the retained handle's path. Otherwise return the sole
+    selected candidate, including an unloadable explicit override.
     """
     if _lib is not None:
         return getattr(_lib, "_name", None)
@@ -279,11 +258,10 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
         ver = _torch_package_rocm_version(cand)
         if ver is not None:
             return ver
-    # TheRock wheel comgr -> the wheel's ROCm release. Without this the climb
-    # below finds no .info/version inside site-packages and falls back to
-    # /opt/rocm, reporting the host's release for the wheel's LLVM.
-    if _in_rocm_sdk_core(rp):
-        return _rocm_sdk_core_release()
+    # Package release is informational; ownership must match the selected file.
+    sdk_release = release_for_path(rp)
+    if sdk_release is not None:
+        return sdk_release
     # ROCm tree -> the install *root's* ``.info/version``. Climb from the lib
     # dir collecting every ``.info/version`` we pass. This is deliberately a
     # climb, not a fixed ``dirname(dirname(path))``: a packaged ROCm 7.2 keeps
@@ -316,21 +294,11 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
 
 
 def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
-    """Import torch if available so discovery can prefer its bundled COMGR.
+    """Compatibility hook: inspect the same env-or-SDK compiler selection.
 
-    Call before the first compiler query, automatic lowering, or compilation.
-    Once COMGR is loaded, later imports do not replace that retained handle.
-    Ordinary library discovery never imports torch; this entrypoint hook does
-    so explicitly and tolerates an unavailable torch installation.
-
-    Returns legacy ROCm package metadata for informational callers. Use
-    loaded_compiler_info() for compiler-version evidence and provenance.
+    Does not import torch or initialize the SDK. Returns informational package
+    release metadata; loaded_compiler_info() supplies compiler provenance.
     """
-    if "torch" not in sys.modules:
-        try:
-            import torch  # noqa: F401 -- pulls the bundled (newest) comgr into the process
-        except Exception:
-            pass
     return resolved_lib_rocm_version()
 
 
@@ -672,7 +640,7 @@ def _build_in_fresh_process(
 
     The child (:mod:`rocke.runtime._comgr_fresh_process`) loads the comgr
     library this process resolved (passed as ``ROCKE_COMGR_LIB``, so a
-    torch-bundled library is kept even though the child does not import torch),
+    selected SDK or explicit library is kept without importing torch),
     imports this rocke package (its root is put first on ``PYTHONPATH``) and
     runs with comgr's own on-disk cache off (``AMD_COMGR_CACHE=0``).
     Raises :class:`ComgrError` with the child's message for a compile error and

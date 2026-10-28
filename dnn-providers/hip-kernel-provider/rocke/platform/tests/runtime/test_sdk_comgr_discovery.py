@@ -23,12 +23,31 @@ def sdk_site(tmp_path, monkeypatch):
     core.mkdir(parents=True)
     # Finding this package must never execute its initialization code.
     (core / "__init__.py").write_text("raise AssertionError('SDK imported')\n")
+    dist = site / "rocm_sdk_core-7.9.0rc1.dist-info"
+    dist.mkdir()
+    (dist / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: rocm-sdk-core\nVersion: 7.9.0rc1\n"
+    )
+    (dist / "RECORD").write_text(
+        "".join(
+            f"_rocm_sdk_core/{relative},,\n"
+            for relative in (
+                "lib/libamd_comgr.so.3",
+                "lib/libamd_comgr.so",
+                "bin/amd_comgr0605.dll",
+                "bin/amd_comgr0701.dll",
+                "bin/amd_comgr0702.dll",
+                "bin/amd_comgr.dll",
+            )
+        )
+    )
     monkeypatch.syspath_prepend(str(site))
     for name in ("torch", "rocm_sdk", "_rocm_sdk_core"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     for name in ("ROCKE_COMGR_LIB", "ROCM_PATH", "ROCM_HOME", "HIP_PATH"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(rc, "_PROC_MAPS", str(tmp_path / "no-maps"))
+    monkeypatch.setattr(rc, "_mapped_elf_lib_paths", lambda stem: [])
     monkeypatch.setattr(rc, "_rocm_root_libdirs", lambda: [str(tmp_path / "system")])
     monkeypatch.setattr(comgr, "_lib", None)
     importlib.invalidate_caches()
@@ -68,63 +87,52 @@ def test_sdk_comgr_is_discovered_without_runtime_imports(
         assert name not in sys.modules
 
 
-def test_explicit_override_precedes_sdk_and_preserves_failure_fallback(
-    sdk_site, tmp_path, monkeypatch
-):
-    library = sdk_site / "lib" / "libamd_comgr.so.3"
+def test_explicit_override_is_only_candidate(sdk_site, tmp_path, monkeypatch):
+    library = sdk_site / "lib/libamd_comgr.so.3"
     library.parent.mkdir()
     library.touch()
     override = str(tmp_path / "unloadable.so")
     monkeypatch.setenv("ROCKE_COMGR_LIB", override)
-    monkeypatch.setattr(rc, "_IS_WINDOWS", False)
-    monkeypatch.setattr(comgr, "_IS_WINDOWS", False)
     attempts = []
 
     def load(path):
         attempts.append(path)
-        if path == override:
-            raise OSError("override unavailable")
-        return SimpleNamespace(_name=path)
+        raise OSError("override unavailable")
 
     monkeypatch.setattr(comgr.ctypes, "CDLL", load)
-    assert comgr._resolve_lib()._name == str(library)
-    assert attempts == [override, str(library)]
+    assert comgr.resolved_lib_path() == override
+    with pytest.raises(comgr.ComgrError, match="override unavailable"):
+        comgr._resolve_lib()
+    assert attempts == [override]
 
 
-def test_loaded_torch_comgr_precedes_sdk(sdk_site, tmp_path, monkeypatch):
-    library = sdk_site / "lib" / "libamd_comgr.so.3"
+@pytest.mark.parametrize("torch_loaded", [False, True])
+def test_sdk_is_only_automatic_candidate(sdk_site, tmp_path, monkeypatch, torch_loaded):
+    library = sdk_site / "lib/libamd_comgr.so.3"
     library.parent.mkdir()
     library.touch()
-    mapped = str(tmp_path / "torch" / "libamd_comgr.so")
-    monkeypatch.setattr(rc, "_IS_WINDOWS", False)
-    monkeypatch.setattr(rc, "_torch_bundled_lib", lambda stem: mapped)
-    monkeypatch.setattr(rc, "_torch_comgr_is_stale", lambda path: False)
-    assert rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])[:2] == [
-        mapped,
-        str(library),
+    if torch_loaded:
+        monkeypatch.setitem(
+            sys.modules,
+            "torch",
+            SimpleNamespace(__file__=str(tmp_path / "torch/__init__.py")),
+        )
+    monkeypatch.setattr(
+        rc, "_torch_bundled_lib", lambda stem: pytest.fail("COMGR queried torch")
+    )
+    monkeypatch.setattr(
+        rc, "_rocm_root_libdirs", lambda: pytest.fail("COMGR queried system")
+    )
+    monkeypatch.setenv("ROCKE_COMGR_LIB", "")
+    assert rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]) == [
+        str(library)
     ]
 
 
-def test_active_sdk_comgr_is_not_probed_twice(sdk_site, monkeypatch):
-    library = sdk_site / "lib" / "libamd_comgr.so.3"
-    library.parent.mkdir()
-    library.touch()
-    monkeypatch.setattr(rc, "_IS_WINDOWS", False)
-    monkeypatch.setattr(rc, "_torch_bundled_lib", lambda stem: str(library))
-    monkeypatch.setattr(rc, "_mapped_lib", lambda stem: str(library))
-    paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
-    assert paths[0] == str(library)
-    assert paths.count(str(library)) == 1
-
-
-def test_missing_sdk_comgr_keeps_system_fallback(sdk_site, monkeypatch):
-    monkeypatch.setattr(rc, "_IS_WINDOWS", False)
-    paths = rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"])
-    system = rc._rocm_root_libdirs()[0]
-    assert paths[:2] == [
-        os.path.join(system, "libamd_comgr.so"),
-        os.path.join(system, "libamd_comgr.so.3"),
-    ]
+def test_missing_sdk_has_no_system_fallback(sdk_site, monkeypatch):
+    assert rc._candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]) == []
+    with pytest.raises(comgr.ComgrError, match="no candidate path"):
+        comgr._resolve_lib()
 
 
 def test_sdk_does_not_change_linux_hip_selection(sdk_site, monkeypatch):
@@ -162,13 +170,131 @@ def test_auto_lowering_without_compiler_reports_extra(monkeypatch):
 
 
 def test_sdk_release_lookup_does_not_need_runtime_imports(sdk_site, monkeypatch):
-    from importlib import metadata
-
     library = sdk_site / "lib" / "libamd_comgr.so.3"
     library.parent.mkdir()
     library.touch()
-    monkeypatch.setattr(metadata, "version", lambda name: "7.9.0rc1")
     monkeypatch.setattr(rc, "_IS_WINDOWS", False)
     assert comgr.resolved_lib_rocm_version() == (7, 9)
     for name in ("torch", "rocm_sdk", "_rocm_sdk_core"):
         assert name not in sys.modules
+
+
+@pytest.mark.parametrize("suffix", ["", "_7_9_nonce"])
+@pytest.mark.parametrize(
+    "windows, relative",
+    [(False, "lib/libamd_comgr.so.3"), (True, "bin/amd_comgr0702.dll")],
+)
+def test_record_owned_suffixed_payload(
+    sdk_site, monkeypatch, suffix, windows, relative
+):
+    core = sdk_site.with_name(sdk_site.name + suffix)
+    if suffix:
+        sdk_site.rename(core)
+    library = core / relative
+    library.parent.mkdir()
+    library.touch()
+    dist = next(core.parent.glob("*.dist-info"))
+    (dist / "RECORD").write_text(f"{core.name}/{relative},,\n")
+    monkeypatch.setattr(rc, "_IS_WINDOWS", windows)
+    assert comgr.resolved_lib_path() == str(library)
+    assert comgr.resolved_lib_rocm_version() == (7, 9)
+    assert core.name not in sys.modules
+
+
+@pytest.mark.parametrize("alias", [False, True])
+def test_torch_free_mapped_comgr_guard(sdk_site, tmp_path, monkeypatch, alias):
+    library = sdk_site / "lib/libamd_comgr.so.3"
+    library.parent.mkdir()
+    library.write_bytes(b"\x7fELF")
+    foreign = tmp_path / "libamd_comgr.so.3"
+    if alias:
+        foreign.symlink_to(library)
+    else:
+        foreign.write_bytes(b"\x7fELF")
+    maps = tmp_path / "maps"
+    maps.write_text(f"1000-2000 r-xp 0000 00:00 1 {foreign}\n")
+    monkeypatch.setattr(rc, "_PROC_MAPS", str(maps))
+    attempts = []
+    monkeypatch.setattr(
+        comgr.ctypes,
+        "CDLL",
+        lambda path: attempts.append(path) or SimpleNamespace(_name=path),
+    )
+    if alias:
+        assert comgr._resolve_lib()._name == str(library)
+        assert attempts == [str(library)]
+    else:
+        with pytest.raises(comgr.ComgrError, match="second COMGR"):
+            comgr._resolve_lib()
+        assert attempts == []
+
+
+def test_multiple_mapped_comgrs_do_not_hide_conflict(sdk_site, tmp_path, monkeypatch):
+    library = sdk_site / "lib/libamd_comgr.so.3"
+    library.parent.mkdir()
+    library.write_bytes(b"\x7fELF")
+    foreign = tmp_path / "libamd_comgr.so.3"
+    foreign.write_bytes(b"\x7fELF")
+    maps = tmp_path / "maps"
+    maps.write_text(
+        "".join(f"1000-2000 r-xp 0000 00:00 1 {path}\n" for path in (library, foreign))
+    )
+    monkeypatch.setattr(rc, "_PROC_MAPS", str(maps))
+    monkeypatch.setattr(
+        comgr.ctypes, "CDLL", lambda path: pytest.fail("loaded competing compiler")
+    )
+    with pytest.raises(comgr.ComgrError, match="second COMGR"):
+        comgr._resolve_lib()
+
+
+def test_record_rejects_unowned_or_malformed_paths(sdk_site):
+    library = sdk_site / "lib/libamd_comgr.so.3"
+    library.parent.mkdir()
+    library.touch()
+    dist = next(sdk_site.parent.glob("*.dist-info"))
+    (dist / "RECORD").write_text(
+        "_rocm_sdk_core/../_rocm_sdk_core/lib/libamd_comgr.so.3,,\n_rocm_sdk_core/lib/libamd_comgr.so.debug,,\n"
+    )
+    assert comgr.resolved_lib_path() is None
+
+
+def test_compatibility_hook_never_imports_torch(sdk_site, monkeypatch):
+    library = sdk_site / "lib/libamd_comgr.so.3"
+    library.parent.mkdir()
+    library.touch()
+    monkeypatch.setitem(sys.modules, "torch", None)
+    assert comgr.prefer_bundled_lib() == (7, 9)
+    assert sys.modules["torch"] is None
+
+
+def test_windows_mapping_introspection_fails_closed(monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+
+    def enumerate_modules(process, modules, size, needed):
+        modules[0] = 1
+        needed._obj.value = ctypes.sizeof(wintypes.HMODULE)
+        return 1
+
+    def filename(*args):
+        return 0
+
+    def current_process():
+        return 1
+
+    psapi = SimpleNamespace(
+        EnumProcessModules=enumerate_modules, GetModuleFileNameExW=filename
+    )
+    kernel = SimpleNamespace(GetCurrentProcess=current_process)
+    with monkeypatch.context() as patch:
+        patch.setattr(rc, "_IS_WINDOWS", True)
+        patch.setattr(os, "name", "nt")
+        patch.setattr(
+            ctypes,
+            "WinDLL",
+            lambda name, **kwargs: psapi if name == "psapi" else kernel,
+            raising=False,
+        )
+        patch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+        with pytest.raises(OSError, match="cannot identify a mapped runtime library"):
+            rc._mapped_lib_paths("amd_comgr")

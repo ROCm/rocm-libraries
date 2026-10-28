@@ -150,7 +150,9 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     if(!info || !info->llvm_major)
         throw ckc::ValueError(
             "Cannot determine LLVM flavor: COMGR could not be loaded or queried. "
-            "Select a queryable COMGR library or an explicit LLVM flavor for offline IR emission.");
+            "Install rocm-sdk-core in the engine's installation prefix or set "
+            "ROCKE_COMGR_LIB to a queryable COMGR library. Use an explicit LLVM flavor "
+            "for offline IR emission.");
     for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)
     {
         if(info->llvm_major >= ROCKE_LL_FLAVOR_LADDER[i].min_llvm_major)
