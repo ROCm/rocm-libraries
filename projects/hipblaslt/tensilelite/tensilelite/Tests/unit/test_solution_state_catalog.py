@@ -19,11 +19,28 @@ from tensilelite.Common.Architectures import GFX_CHIP_IDS
 
 pytestmark = pytest.mark.unit
 
-_SOURCE = Path(__file__).resolve().parents[3] / "src" / "msgpack" / "SolutionState.cpp"
+
+def _solution_state_source():
+    """Return SolutionState.cpp from the source tree or the checkout.
+
+    TheRock copies this test to ``build/share/hipblaslt/tensilelite`` and runs
+    it there. That copy has no ``src/msgpack``. The checkout that produced it
+    is a parent of the copy.
+    """
+    here = Path(__file__).resolve()
+    beside_package = here.parents[3] / "src" / "msgpack" / "SolutionState.cpp"
+    if beside_package.is_file():
+        return beside_package
+    relative = Path("projects/hipblaslt/tensilelite/src/msgpack/SolutionState.cpp")
+    for parent in here.parents:
+        candidate = parent / relative
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(beside_package)
 
 
 def _array(name):
-    text = _SOURCE.read_text()
+    text = _solution_state_source().read_text()
     match = re.search(rf"{name}(?:\[\])?\s*=\s*\{{(.*?)\}};", text, re.S)
     assert match, name
     return match.group(1)
