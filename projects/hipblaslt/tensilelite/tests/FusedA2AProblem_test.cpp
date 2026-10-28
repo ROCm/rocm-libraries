@@ -155,6 +155,8 @@ TEST(FusedA2AClientProblemFactory, InvalidWorldOrExtentThrows)
                                           {true, {0}, {2048}},
                                           {true, {FUSED_A2A_MAX_RANKS + 1}, {2048}},
                                           {true, {2}, {0}},
+                                          {true, {2}, {3073}},
+                                          {true, {2}, {4096}},
                                           {false, {2}, {}}})
     {
         auto args = factoryArgs(c.fused, c.worlds.size());
