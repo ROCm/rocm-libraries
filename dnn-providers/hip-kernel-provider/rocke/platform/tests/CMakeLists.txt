@@ -57,6 +57,13 @@ if(BUILD_TESTING)
                               PROPERTIES LANGUAGE CXX)
   add_executable(rocke_optimization_barrier_emit
                  instances/parity/optimization_barrier_emit.c)
+  # Keep the .c/.py pair for differential discovery, but force C++ input.
+  # LANGUAGE CXX alone does not add a language flag under older CMake policies.
+  if(MSVC)
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE /TP)
+  else()
+    target_compile_options(rocke_optimization_barrier_emit PRIVATE -x c++)
+  endif()
   target_link_libraries(rocke_optimization_barrier_emit PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier_emit
            COMMAND rocke_optimization_barrier_emit)
