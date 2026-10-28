@@ -5,11 +5,16 @@
 MMA's dtypes.
 
 A TileMma names its dtypes as IR types (``FP8E4M3``, ``BF8E5M2``); these tests check that an fp8 or
-bf8 wave tile lowers to one MFMA call per atom, and that ``MmaTee.from_mma`` sizes and labels each
-operand from those dtypes.
+bf8 wave tile lowers to one MFMA call per atom, that its fragments move through global memory and
+LDS with vector accesses rather than one byte at a time, each claiming the alignment of its own
+size, and that ``MmaTee.from_mma`` sizes and labels each operand from those dtypes.
+Every kernel is lowered by both engines, which must emit the same IR
+(``rocke.tests.engines.lower_with_both_engines``).
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 
@@ -18,6 +23,7 @@ from rocke.core.ir import (
     F16,
     F32,
     FP8E4M3,
+    I8,
     IRBuilder,
     PtrType,
 )
@@ -32,6 +38,8 @@ from rocke.helpers.tiling import (
 from rocke.helpers.tiling.mma import TileMma, Tiling
 from rocke.helpers.tiling.visualization import layout_render as lr
 from rocke.tests.engines import lower_with_both_engines
+
+from .test_mma_issue import _compile_or_skip
 
 
 def _wave_tile_kernel(dtype, mma: TileMma):
@@ -78,6 +86,82 @@ def test_8bit_wave_tile_issues_one_mfma_per_atom(dtype, intrinsic) -> None:
     ir = lower_with_both_engines(_wave_tile_kernel(dtype, mma), "gfx942")
     calls = [line for line in ir.splitlines() if "call" in line and intrinsic in line]
     assert len(calls) == 8
+
+
+def _accesses(ir: str, space: int) -> list[str]:
+    """Every load and store of address space `space` in `ir`, as ``"load <type>, align <n>"`` or
+    ``"store <type>, align <n>"``."""
+    loads = re.findall(
+        rf"= load ([^,]+), ptr addrspace\({space}\) [^,]+, align (\d+)", ir
+    )
+    stores = re.findall(
+        rf"store (<[^>]+>|\S+) \S+, ptr addrspace\({space}\) [^,]+, align (\d+)", ir
+    )
+    return [f"load {t}, align {a}" for t, a in loads] + [
+        f"store {t}, align {a}" for t, a in stores
+    ]
+
+
+@pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2])
+def test_8bit_wave_tile_loads_its_operands_with_vector_loads(dtype) -> None:
+    # Each lane holds 8 consecutive K elements of A and of B per atom, so the 32x32x64 tile reads
+    # its operands as 8 loads of 8 bytes (A and B, 2 atoms along M or N, 2 along K) instead of 64
+    # one-byte loads.
+    mma = TileMma(
+        (32, 32, 64),
+        a=dtype,
+        b=dtype,
+        c=F32,
+        target="gfx942",
+        tiling=Tiling(atom_shape=(16, 16, 32)),
+    )
+    ir = lower_with_both_engines(_wave_tile_kernel(dtype, mma), "gfx942")
+    loads = [access for access in _accesses(ir, 1) if access.startswith("load")]
+    assert loads == ["load <8 x i8>, align 8"] * 8
+
+
+def _lds_round_trip_kernel(dtype):
+    """One wave loads the A operand of an fp8 32x32x64 tile from global memory as ``dtype``, stages
+    it through an LDS buffer (store_fragment, then load_fragment) and writes it back to global.
+    """
+    mma = TileMma(
+        (32, 32, 64),
+        a=FP8E4M3,
+        b=FP8E4M3,
+        c=F32,
+        target="gfx942",
+        tiling=Tiling(atom_shape=(16, 16, 32)),
+    )
+    wave_m, _, wave_k = mma.shape
+    b = IRBuilder(f"lds_stage_{dtype.name}")
+    b.kernel.attrs["max_workgroup_size"] = mma.wave_size
+    src = b.param("A", PtrType(dtype, "global"), noalias=True, readonly=True)
+    dst = b.param("Out", PtrType(dtype, "global"), noalias=True, writeonly=True)
+    lane = b.thread_id_x()
+    zero = b.const_i32(0)
+    td = make_tensor_desc((wave_m, wave_k), (wave_k, 1), dtype)
+    window = make_window(td, (zero, zero))
+    lds = b.smem_alloc(dtype, [td.element_span])
+    staged = load_fragment(b, src, window, mma.a_desc, lane)
+    store_fragment(b, lds, window, staged, lane)
+    loaded = load_fragment(b, lds, window, mma.a_desc, lane)
+    store_fragment(b, dst, window, loaded, lane)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2, I8])
+def test_8bit_fragment_moves_through_lds_with_vector_accesses(dtype) -> None:
+    # The 8 consecutive bytes a lane holds per atom are one LDS store and one LDS load each; no LDS
+    # access moves a single byte, and each claims 8-byte alignment, which an 8-byte run of the
+    # 8-element-aligned buffer has.
+    kernel = _lds_round_trip_kernel(dtype)
+    ir = lower_with_both_engines(kernel, "gfx942")
+    assert (
+        _accesses(ir, 3)
+        == ["load <8 x i8>, align 8"] * 4 + ["store <8 x i8>, align 8"] * 4
+    )
+    _compile_or_skip(kernel, "gfx942")
 
 
 def test_mma_tee_sizes_and_labels_operands_from_the_mma_dtypes() -> None:

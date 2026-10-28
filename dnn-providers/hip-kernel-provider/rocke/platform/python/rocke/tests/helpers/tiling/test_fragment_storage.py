@@ -290,6 +290,35 @@ def test_a_u8_fragment_loads_from_global_and_stores(dest) -> None:
     assert "<16 x i8> zeroinitializer" in text
 
 
+def _u8_round_trip_kernel():
+    """A u8 tile loaded from IN, staged through LDS and stored to OUT."""
+    from rocke.helpers.spec import SignatureBuilder
+
+    b = IRBuilder("u8_round_trip")
+    b.kernel.attrs["max_workgroup_size"] = _WAVE
+    src = _param(b, "IN", U8, readonly=True)
+    out = _param(b, "OUT", U8, writeonly=True)
+    tid = b.thread_id_x()
+    lds = b.smem_alloc(U8, [_U8_TENSOR.element_span], name_hint="lds")
+    window = make_window(_U8_TENSOR, (0, 0))
+    fragment = load_fragment(b, src, window, _U8_TILE, tid)
+    assert fragment.storage_type == VectorType(U8, 16)
+    store_fragment(b, lds, window, fragment, tid)
+    b.sync()
+    staged = load_fragment(b, lds, window, _U8_TILE, tid)
+    store_fragment(b, out, window, staged, tid)
+    b.ret()
+    signature = SignatureBuilder().ptr("IN", "u8").ptr("OUT", "u8").build()
+    return b.kernel, signature
+
+
+def test_a_u8_tile_lowers_identically_in_both_engines() -> None:
+    kernel, _ = _u8_round_trip_kernel()
+    text = lower_with_both_engines(kernel, "gfx90a")
+    # The registers start from a u8 zero vector, which LLVM spells as i8.
+    assert "<16 x i8> zeroinitializer" in text
+
+
 # ---- refusals: a packed access moves whole words --------------------------------------------------------
 
 
@@ -806,6 +835,17 @@ def _packed_round_trip_kernel(name, dtype, bits):
         .build()
     )
     return b.kernel, signature, a_desc, words
+
+
+@_needs_gfx90a
+def test_a_u8_tile_round_trips_through_lds() -> None:
+    # Every byte value, the high bit included, must come back unchanged through global memory and
+    # LDS: a u8 fragment is a byte vector, never sign-extended.
+    kernel, signature = _u8_round_trip_kernel()
+    data = (np.arange(64 * 16, dtype=np.uint32) * 37 % 256).astype(np.uint8)
+    out = np.zeros_like(data)
+    _run(kernel, signature, {"IN": data}, {"OUT": out})
+    np.testing.assert_array_equal(out, data)
 
 
 @_needs_gfx90a

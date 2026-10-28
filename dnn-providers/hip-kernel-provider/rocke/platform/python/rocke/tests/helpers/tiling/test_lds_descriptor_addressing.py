@@ -12,11 +12,14 @@ check:
   N-contiguous ``(N, K)`` buffer and a stage of a rank-3 buffer positioned by its origin;
 - each refusal: a buffer that is not flat, holds another element type or is smaller than the
   descriptor's span; the built-in swizzle on a buffer whose stride-1 axis is not last;
+- under the built-in swizzle, every vector access of an 8-bit buffer stays inside one 8-element
+  swizzle block, so it touches exactly the elements the per-element swizzle names;
   ``TensorDesc.element_span`` on a negative stride;
 - ``lds_tile_desc``: the convention-order ``(free, K)`` descriptor of a cooperative LDS tile puts every
   element at the same address the buffer-order ``(K, free)`` layout did;
 - the in-tree LDS-staged demos keep their vector LDS accesses;
-- on a gfx90a GPU: LDS round trips whose bytes land where the strides say, and a GEMM whose B tile is
+- on a gfx90a GPU: LDS round trips whose bytes land where the strides say (and, for i8 data stored
+  with 16-element runs, where the built-in swizzle says), and a GEMM whose B tile is
   staged ``[K][N]`` and described ``(N, K)`` with strides ``(1, N)``, bit-exact; and the interleaved
   accumulator fragment, whose innermost register bucket is an outer level of M, stored to an
   M-contiguous LDS buffer lands where its layout says and reads back equal to the input.
@@ -370,6 +373,40 @@ def test_builtin_swizzle_refuses_rows_that_would_overlap() -> None:
     )
 
 
+@pytest.mark.parametrize("dtype", [I8, FP8E4M3])
+def test_builtin_swizzle_keeps_each_8bit_access_inside_one_block(dtype) -> None:
+    # Each lane holds a 16-element row run. The swizzle keeps only 8-element blocks together, so
+    # every access is 8 bytes wide and covers the 8 elements the per-element swizzle
+    # m -> m ^ ((row & 7) << 3) puts there; a 16-byte access would reach into a block the swizzle
+    # moved elsewhere.
+    rows, cols, run = 16, 64, 16
+    td = make_tensor_desc((rows, cols), (cols, 1), dtype)
+    tile = make_tile_desc(
+        shape=[rows, cols],
+        thread_tile=[1, run],
+        thread_dist=[rows, cols // run],
+        wave_size=_WAVE,
+    )
+    kernel = _load_then_store(make_window(td, (0, 0)), tile, swizzle=True)
+    widths = {
+        op.attrs["vec"]
+        for op in kernel.body.ops
+        if op.name.startswith("tile.smem_") and "vec" in op.attrs
+    }
+    assert widths == {8}
+    for lane in range(_WAVE):
+        accesses = _lds_indices(kernel, lane)
+        assert (
+            len(accesses) == 4
+        )  # two 8-element loads and two stores per 16-element run
+        for (_, (index,)), register in zip(accesses, [0, 8, 0, 8], strict=True):
+            row, col = emit_tensor_coordinates(
+                NumBuilder(lane), tile.layout, lane, register
+            )
+            swizzled = [row * cols + ((col + i) ^ ((row & 7) << 3)) for i in range(8)]
+            assert swizzled == list(range(index, index + 8)), (lane, register)
+
+
 def test_swizzled_demo_buffers_hold_every_access() -> None:
     from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
         build_interleaved_gemm,
@@ -584,8 +621,8 @@ def _gfx90a_present() -> bool:
 
 _needs_gfx90a = pytest.mark.skipif(not _gfx90a_present(), reason="needs a gfx90a GPU")
 
-_NP = {"f16": np.float16, "f32": np.float32}
-_IR = {"f16": F16, "f32": F32}
+_NP = {"f16": np.float16, "f32": np.float32, "i8": np.int8}
+_IR = {"f16": F16, "f32": F32, "i8": I8}
 
 
 def _run(
@@ -617,11 +654,14 @@ def _run(
         rt.memcpy_d2h(as_u8_buffer(a), dev[name].ptr(), a.nbytes)
 
 
-def _round_trip_kernel(dtype, make_windows, store_tile, read_tile, dump_elements):
+def _round_trip_kernel(
+    dtype, make_windows, store_tile, read_tile, dump_elements, *, lds_swizzle=False
+):
     """For each (global window, LDS window) pair ``make_windows(b)`` returns: load the global tile
     from IN with `store_tile` and store it into LDS. After a barrier, read every LDS window back with
     `read_tile` and store it to OUT through its global window, then dump the whole flat buffer into
-    RAW."""
+    RAW. `lds_swizzle` is passed to the LDS store and the LDS read; the dump reads LDS unswizzled.
+    """
     from rocke.helpers.spec import SignatureBuilder
 
     ir = _IR[dtype]
@@ -635,10 +675,12 @@ def _round_trip_kernel(dtype, make_windows, store_tile, read_tile, dump_elements
     lds_windows = make_windows(b)
     for global_window, lds_window in lds_windows:
         fragment = load_fragment(b, src, global_window, store_tile, tid)
-        store_fragment(b, lds, lds_window, fragment, tid)
+        store_fragment(b, lds, lds_window, fragment, tid, lds_swizzle=lds_swizzle)
     b.sync()
     for global_window, lds_window in lds_windows:
-        fragment = load_fragment(b, lds, lds_window, read_tile, tid)
+        fragment = load_fragment(
+            b, lds, lds_window, read_tile, tid, lds_swizzle=lds_swizzle
+        )
         store_fragment(b, out, global_window, fragment, tid)
     flat = make_tensor_desc((dump_elements,), (1,), ir)
     dump_tile = make_tile_desc(
@@ -699,6 +741,37 @@ def test_lds_round_trip_places_elements_by_strides(dtype: str, case: str) -> Non
     np.testing.assert_array_equal(out, data)
     r, c = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
     np.testing.assert_array_equal(raw[r * lds_strides[0] + c * lds_strides[1]], data)
+
+
+@_needs_gfx90a
+def test_swizzled_i8_round_trip_with_16_element_runs() -> None:
+    # i8 rows of 64, stored with 16-element runs and read back one element per register down the
+    # columns, both through the built-in swizzle: the read side agrees with the store side only if
+    # each wide access keeps to the swizzle's 8-element blocks.
+    rows, cols = 16, 64
+    td = make_tensor_desc((rows, cols), (cols, 1), I8)
+    store_tile = make_tile_desc(
+        shape=[rows, cols], thread_tile=[1, 16], thread_dist=[16, 4], wave_size=_WAVE
+    )
+    read_tile = make_tile_desc(
+        shape=[rows, cols], thread_tile=[rows, 1], thread_dist=[1, 64], wave_size=_WAVE
+    )
+    dump = rows * cols
+    kernel, signature = _round_trip_kernel(
+        "i8",
+        lambda b: [(make_window(td, (0, 0)), make_window(td, (0, 0)))],
+        store_tile,
+        read_tile,
+        dump,
+        lds_swizzle=True,
+    )
+    data = (np.arange(rows * cols) % 127).astype(np.int8).reshape(rows, cols)
+    out = np.zeros_like(data)
+    raw = np.zeros(dump, np.int8)
+    _run(kernel, signature, {"IN": data}, {"OUT": out, "RAW": raw})
+    np.testing.assert_array_equal(out, data)
+    r, c = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
+    np.testing.assert_array_equal(raw[r * cols + (c ^ ((r & 7) << 3))], data)
 
 
 @_needs_gfx90a

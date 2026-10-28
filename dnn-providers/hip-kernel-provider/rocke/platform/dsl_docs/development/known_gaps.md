@@ -323,6 +323,24 @@ cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
 
+## 9. Tiling primitives — Python-only authoring layer
+
+**Subsystem:** `python/rocke/helpers/tiling/` (the fragment verbs, `TileMma`, the MMA catalog
+`traits/data/mma_traits.json` and the backend coverage record `traits/data/backend_coverage.json`)
+
+The tiling package builds kernels in Python only: it has no C++ twin of its verbs, its MMA plan or
+driver, and the C++ engine never reads the catalog or the coverage record.
+
+**What is gated:** the kernels it builds are lowered by both engines. Its tests lower each form the
+package emits with `rocke.tests.engines.lower_with_both_engines`, which requires identical IR: 8-bit
+vector loads and LDS accesses, packed sub-byte words, tf32 held as i32, and one single-instruction
+tile for every dense instruction the coverage record classes `issuable`, the family `TileMma`
+drives (`tests/helpers/tiling/mma/test_mma_issuable_pairs.py`). The coverage record itself is measured
+with the Python lowerer at one LLVM flavor.
+
+**What unblocks a C++ twin:** a decision to port the authoring layer; until then, a new form the
+package emits gets a both-engine lowering test.
+
 ---
 
 ## Structural debt (not per-family gaps)
