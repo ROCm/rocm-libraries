@@ -22,11 +22,18 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_olc.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_olc_eval.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_olc_library.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_nn.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_data.cpp"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_definitions(
+    origami-tests PRIVATE ORIGAMI_OLC_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data/olc"
+)
 
 target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
 
@@ -66,6 +73,13 @@ endif()
 
 string(CONFIGURE "${_ctest_content}" _ctest_content @ONLY)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install" "${_ctest_content}")
+
+# Test data the installed origami-tests reads (test_data.cpp: <bindir>/origami/test-data).
+rocm_install(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/olc/"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/origami/test-data/olc"
+    COMPONENT tests
+)
 
 rocm_install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
