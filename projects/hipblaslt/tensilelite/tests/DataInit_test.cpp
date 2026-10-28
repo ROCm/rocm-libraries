@@ -604,6 +604,132 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
                                                scale, data, 0, 0)));
 }
 
+// -----------------------------------------------------------------------------
+// 4.10 detail::naturalMXScaleFromCanonical
+//      Must undo restrideMXScaleBufferKFast, so the swizzled GPU scale can be
+//      built from the canonical copy instead of regenerating the MX data.
+// -----------------------------------------------------------------------------
+TEST(NaturalMXScaleFromCanonical, InvertsKFastRestride)
+{
+    // K = 576 with mxBlock 32: 18 K blocks, padded to 24.
+    size_t const         compactFree = 5, compactKBlocks = 18, paddedKBlocks = 24;
+    std::vector<uint8_t> natural(compactFree * compactKBlocks);
+    std::iota(natural.begin(), natural.end(), uint8_t{1});
+
+    std::vector<uint8_t> canonical(compactFree * paddedKBlocks, 0xAB);
+    std::memcpy(canonical.data(), natural.data(), natural.size());
+    restrideMXScaleBufferKFast(canonical.data(), compactFree, compactKBlocks, paddedKBlocks, 1);
+    ASSERT_NE(std::vector<uint8_t>(canonical.begin(), canonical.begin() + natural.size()), natural);
+
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(),
+                                              natural.size(),
+                                              /*kFast=*/true,
+                                              compactFree,
+                                              compactKBlocks,
+                                              paddedKBlocks,
+                                              1),
+              natural);
+}
+TEST(NaturalMXScaleFromCanonical, CopiesPrefixWhenNotRestrided)
+{
+    std::vector<uint8_t> canonical(64);
+    std::iota(canonical.begin(), canonical.end(), uint8_t{1});
+    std::vector<uint8_t> const prefix(canonical.begin(), canonical.begin() + 40);
+
+    // K-slow: the canonical copy keeps the natural order, padding at the tail.
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(), 40, false, 5, 8, 16, 1), prefix);
+    // K-fast without K-block padding: nothing was restrided.
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(), 40, true, 5, 8, 8, 1), prefix);
+}
+
+// -----------------------------------------------------------------------------
+// 4.11 detail::swizzleNaturalMXScale
+//      Swizzling the natural scales must give exactly what generateMXInput
+//      emits when asked for the layout, for every operand orientation. The
+//      client calls generateMXInput with the data tensor's sizes: {K, MN}
+//      when K is along the rows (TN A, N B), {MN, K} otherwise.
+// -----------------------------------------------------------------------------
+struct SwizzleParam
+{
+    hipDataType   dataType;
+    MXScaleLayout layout;
+    bool          isMatrixA;
+    bool          transposed;
+    size_t        K;
+    size_t        MN;
+};
+class SwizzleNaturalMXScaleTest : public ::testing::TestWithParam<SwizzleParam>
+{
+};
+TEST_P(SwizzleNaturalMXScaleTest, MatchesGenerateMXInputWithLayout)
+{
+    auto const&       p         = GetParam();
+    constexpr int     mxBlock   = 32;
+    constexpr uint8_t sentinel  = 0xAB;
+    bool const        kIsRows   = (p.isMatrixA && p.transposed) || (!p.isMatrixA && !p.transposed);
+    size_t const      rows      = kIsRows ? p.K : p.MN;
+    size_t const      cols      = kIsRows ? p.MN : p.K;
+    size_t const      dataBytes = p.dataType == static_cast<hipDataType>(HIP_R_4F_E2M1)
+                                      ? (rows * cols + 1) / 2
+                                      : rows * cols;
+    size_t const      naturalBytes = ((rows + mxBlock - 1) / mxBlock) * cols;
+
+    auto generate = [&](MXScaleLayout layout, std::vector<uint8_t>& scale) {
+        std::vector<uint8_t> data(dataBytes);
+        scale.assign(4 * naturalBytes + 4096, sentinel);
+        generateMXInput(p.dataType,
+                        HIP_R_8F_UE8M0,
+                        data.data(),
+                        scale.data(),
+                        rows,
+                        cols,
+                        rows,
+                        p.transposed,
+                        p.isMatrixA ? mxBlock : 1,
+                        p.isMatrixA ? 1 : mxBlock,
+                        p.isMatrixA,
+                        layout,
+                        "Bounded",
+                        -1.0f,
+                        1.0f);
+        return data;
+    };
+
+    std::vector<uint8_t> natural, expected;
+    auto const           dataNatural  = generate(MXScaleLayout::None, natural);
+    auto const           dataSwizzled = generate(p.layout, expected);
+    ASSERT_EQ(dataNatural, dataSwizzled);
+    natural.resize(naturalBytes);
+
+    auto const swizzled
+        = dt::swizzleNaturalMXScale(natural, p.layout, rows, cols, mxBlock, kIsRows);
+    ASSERT_LT(swizzled.size(), expected.size());
+    EXPECT_EQ(swizzled, std::vector<uint8_t>(expected.begin(), expected.begin() + swizzled.size()));
+    EXPECT_EQ(expected[swizzled.size()], sentinel)
+        << "generateMXInput wrote more swizzled bytes than swizzleNaturalMXScale returned";
+}
+INSTANTIATE_TEST_SUITE_P(
+    MXScaleLayouts,
+    SwizzleNaturalMXScaleTest,
+    ::testing::ValuesIn([] {
+        std::vector<SwizzleParam> params;
+        for(auto dataType : {HIP_R_8F_E4M3, static_cast<hipDataType>(HIP_R_4F_E2M1)})
+            for(auto layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                for(bool isMatrixA : {true, false})
+                    for(bool transposed : {true, false})
+                        for(auto [K, MN] : {std::pair<size_t, size_t>{512, 128},
+                                            std::pair<size_t, size_t>{576, 96}})
+                            params.push_back({dataType, layout, isMatrixA, transposed, K, MN});
+        return params;
+    }()),
+    [](::testing::TestParamInfo<SwizzleParam> const& info) {
+        auto const& p = info.param;
+        return std::string(p.dataType == HIP_R_8F_E4M3 ? "FP8" : "FP4")
+               + (p.layout == MXScaleLayout::GFX950 ? "_gfx950" : "_gfx1250")
+               + (p.isMatrixA ? "_A" : "_B") + (p.transposed ? "T" : "N") + "_K"
+               + std::to_string(p.K) + "_MN" + std::to_string(p.MN);
+    });
+
 
 // =============================================================================
 //   Section 5 - downsampleMXScaleFreeDim
