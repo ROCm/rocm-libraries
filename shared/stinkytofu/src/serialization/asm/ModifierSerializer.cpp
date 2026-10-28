@@ -200,11 +200,17 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers — offset plus the temporal hint / cache scope used by
-// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
-// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
+// GLOBALModifiers — cache-control bits, offset, temporal hint, and cache scope.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     os << ", mod.global = { offset = " << mod.offset;
+    if (mod.glc) os << ", glc = true";
+    if (mod.slc) os << ", slc = true";
+    if (mod.dlc) os << ", dlc = true";
+    if (mod.lds) os << ", lds = true";
+    if (mod.isStore) os << ", isStore = true";
+    if (mod.hasGLCModifier) os << ", hasGLCModifier = true";
+    if (mod.hasSC0Modifier) os << ", hasSC0Modifier = true";
+    if (mod.hasDLCModifier) os << ", hasDLCModifier = true";
     if (hasTemporalHint(mod.th)) {
         os << ", th = \"" << toString(mod.th) << "\"";
     }
@@ -534,9 +540,13 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
-                                          parseTemporalHint(getStr(fields, "th", "")),
-                                          parseMUBUFScope(getStr(fields, "scope", ""))));
+        inst->addModifier(GLOBALModifiers(
+            getInt(fields, "offset", 0), parseTemporalHint(getStr(fields, "th", "")),
+            parseMUBUFScope(getStr(fields, "scope", "")), getBool(fields, "glc", false),
+            getBool(fields, "slc", false), getBool(fields, "dlc", false),
+            getBool(fields, "lds", false), getBool(fields, "isStore", false),
+            getBool(fields, "hasGLCModifier", false), getBool(fields, "hasSC0Modifier", false),
+            getBool(fields, "hasDLCModifier", false)));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));
@@ -558,6 +568,14 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                           getBool(fields, "neg_src2", false), getBool(fields, "abs_src0", false),
                           getBool(fields, "abs_src1", false), getBool(fields, "abs_src2", false),
                           getBool(fields, "clamp", false), getInt(fields, "omod", 0)));
+    } else if (attrKey == "mod.vop3p") {
+        // op_sel carries more than encoding detail: its destination element says
+        // which half of a narrow destination the instruction writes, and so
+        // which half it keeps and reads back (see readsDestination). A .stir
+        // kernel needs this to state that.
+        inst->addModifier(VOP3PModifiers(getIntVector(fields, "op_sel"),
+                                         getIntVector(fields, "op_sel_hi"),
+                                         getIntVector(fields, "byte_sel")));
     } else if (attrKey == "mod.exec") {
         inst->addModifier(EXEC(getBool(fields, "setHi", false)));
     } else if (attrKey == "mod.vcc") {
@@ -657,7 +675,7 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.call_targets") {
         inst->addModifier(CallTargetData(getStrVector(fields, "callees")));
     }
-    // mod.sdwa, mod.vop3p, mod.true16: no deserialize support yet
+    // mod.sdwa, mod.true16: no deserialize support yet
 }
 
 }  // namespace

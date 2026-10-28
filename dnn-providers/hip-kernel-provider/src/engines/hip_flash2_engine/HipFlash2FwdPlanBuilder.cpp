@@ -69,16 +69,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(), "page_table_k not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
-    // K2: reject mask types the kernel does not implement
-    {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
-                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
-            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
-    }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
@@ -94,6 +87,29 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->dims()->size() != 4, "O must be rank-4");
+
+    // K2: reject mask types the kernel does not implement
+    {
+        auto maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+                asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+                qTensor->dims()->Get(2),
+                kTensor->dims()->Get(2));
+            maskType = asm_sdpa_engine::plan_utils::getMaskType(
+                band.leftBound, band.rightBound, band.alignment);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+            return false;
+        }
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+    }
 
     // Data type: FP16 only
     const auto qType = qTensor->data_type();
@@ -320,7 +336,7 @@ std::vector<data_objects::KnobT>
 }
 
 // ---------------------------------------------------------------------------
-// extractParams (private helper) -- Finding 1 fix: restored missing body
+// extractParams -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
 Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
                                                        const flatbuffer_utilities::IGraph& opGraph)
@@ -349,13 +365,15 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
     p.numHeadsK = static_cast<int>(k->dims()->Get(1));
     p.seqLenKv = static_cast<int>(k->dims()->Get(2));
 
-    p.attnScale = 0.0f;
-    if(attrs.attn_scale_value().has_value())
-    {
-        p.attnScale = attrs.attn_scale_value().value();
-    }
+    p.attnScale = attnScaleFor(attrs);
 
-    p.causal = attrs.causal_mask();
+    const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+        asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+        q->dims()->Get(2),
+        k->dims()->Get(2));
+    p.causal
+        = asm_sdpa_engine::plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment)
+          == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 
     p.qStrideBatch = q->strides()->Get(0);
     p.qStrideHead = q->strides()->Get(1);

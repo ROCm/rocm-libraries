@@ -21,9 +21,12 @@
 include( ../../../cmake/sqlite.cmake )
 
 add_executable( rocfft-internal-test
+  data_layout_test.cpp
   function_map_key_test.cpp
   function_pool_test.cpp
+  internal_test_main.cpp
   rtc_test.cpp
+  ../data_layout.cpp
   ../rocfft_stub.cpp
 )
 
@@ -61,7 +64,7 @@ if( NOT BUILD_GTEST )
   find_package( GTest QUIET )
 endif()
 if( GTest_FOUND )
-  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest GTest::gtest_main )
+  target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest )
 else()
   include( ${PROJECT_SOURCE_DIR}/cmake/build-gtest.cmake )
   add_dependencies( rocfft-internal-test gtest )

@@ -12,6 +12,11 @@
 
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
+
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_flash2_engine
 {
@@ -24,6 +29,32 @@ protected:
     Handle _handle;
     HipFlash2FwdPlanBuilder _builder;
 };
+
+// cuDNN's default: no attn_scale_value and no scale tensor means no scaling.
+TEST(TestHipFlash2AttnScale, AbsentAttnScaleValueIsOne)
+{
+    const std::vector<int64_t> dims{1, 32, 4096, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        /*withAttnMask=*/false,
+        /*withScale=*/false);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs = graph.getNodeWrapper(0)
+                            .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+    ASSERT_FALSE(attrs.attn_scale_value().has_value());
+    EXPECT_EQ(attnScaleFor(attrs), 1.0f);
+}
 
 // -- isApplicable: valid cases -------------------------------------------------
 
@@ -234,6 +265,100 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestHipFlash2FwdPlanBuilder, RejectsSinkToken)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // The same graph is accepted without the sink and declined with it: the flash2 kernel
+    // cannot add the sink logit to the softmax denominator.
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto base = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto withSinkBuilder = asm_sdpa_engine::addSinkToken(base);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withoutSink(
+        base.GetBufferPointer(), base.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withSink(
+        withSinkBuilder.GetBufferPointer(), withSinkBuilder.GetSize());
+    EXPECT_TRUE(_builder.isApplicable(_handle, withoutSink));
+    EXPECT_FALSE(_builder.isApplicable(_handle, withSink));
+}
+
+using asm_sdpa_engine::DeprecatedCausalMaskCase;
+using asm_sdpa_engine::plan_utils::MaskType;
+
+class TestHipFlash2ExtractParamsCausal : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
+{
+};
+
+TEST_P(TestHipFlash2ExtractParamsCausal, SetsCausalOnlyForTopLeftCausal)
+{
+    const auto& param = GetParam();
+    auto builder = asm_sdpa_engine::createSdpaFwdGraphWithMask(param.causalMask,
+                                                               param.causalMaskBottomRight,
+                                                               param.leftBound,
+                                                               param.rightBound,
+                                                               param.alignment);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const Handle handle;
+
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(HipFlash2FwdPlanBuilder::extractParams(handle, graph),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
+    const auto params = HipFlash2FwdPlanBuilder::extractParams(handle, graph);
+    EXPECT_EQ(params.causal, *param.expected == MaskType::TOP_LEFT_CAUSAL);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestHipFlash2ExtractParamsCausal,
+                         ::testing::ValuesIn(asm_sdpa_engine::deprecatedCausalMaskCases()),
+                         asm_sdpa_engine::deprecatedCausalMaskCaseName);
+
+// The mask graph is 256x256, so a top-left left bound of 255 covers the whole
+// sequence and is plain causal, while 254 is a genuine sliding window.
+bool extractCausalForTopLeftWindow(int64_t leftBound)
+{
+    auto builder = asm_sdpa_engine::createSdpaFwdGraphWithMask(
+        false,
+        false,
+        leftBound,
+        0,
+        hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const Handle handle;
+    return HipFlash2FwdPlanBuilder::extractParams(handle, graph).causal;
+}
+
+TEST(TestHipFlash2ExtractParamsWindow, CoveringLeftBoundIsCausal)
+{
+    EXPECT_TRUE(extractCausalForTopLeftWindow(255));
+    EXPECT_TRUE(extractCausalForTopLeftWindow(4294967298));
+}
+
+TEST(TestHipFlash2ExtractParamsWindow, GenuineWindowIsNotCausal)
+{
+    EXPECT_FALSE(extractCausalForTopLeftWindow(254));
 }
 
 } // namespace

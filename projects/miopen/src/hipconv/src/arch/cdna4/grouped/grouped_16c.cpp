@@ -14,12 +14,14 @@
 //      accumulator and stores it as raw uint4.
 //
 // TF32 (simulated) follows the same caller-side bf16-pair pre-split contract
-// used in grouped_4c.cpp: the input main loop calls fp32x4_to_bf16_pair once
+// used in grouped_4c.cpp: the input main loop calls fp32xN_to_bf16_pair once
 // per (Y_LOCAL, S) tap so the inner R loop can call
 // mfma_16x16x16(bf16_pair_x4, bf16_pair_x4, fp32x4_t) without re-splitting on
 // every MFMA.
 
 #include "conv_kernel_table.h"
+#include "direction_field.h"
+#include "kv_descriptor.h"
 #include "grouped_conv_kernel.h"
 #include "matrix_layout.h"
 #include "swizzle.h"
@@ -110,11 +112,11 @@ struct GroupedDataTraits<DataType::tf32>
     static constexpr bool needs_lds_pack = false;
     static __device__ __forceinline__ mfma_operand_t to_mfma_operand(operand_t raw)
     {
-        return fp32x4_to_bf16_pair(raw);
+        return fp32xN_to_bf16_pair(raw);
     }
     static __device__ __forceinline__ mfma_operand_t zero_operand()
     {
-        return fp32x4_to_bf16_pair(fp32x4_t{0.f, 0.f, 0.f, 0.f});
+        return fp32xN_to_bf16_pair(fp32x4_t{0.f, 0.f, 0.f, 0.f});
     }
 };
 
@@ -831,7 +833,7 @@ __global__ void conv2d_grouped_16c_nhwc_cdna4(const ToType<DT>* __restrict__ in,
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -882,7 +884,7 @@ public:
     {
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -913,7 +915,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         const int out_q          = (cfg_.direction == Direction::Dgrad) ? par.w : par.q;
         const int output_block_q = BLOCK_Q / cfg_.stride;
@@ -926,6 +928,20 @@ public:
         launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
+    }
+
+    KVDescriptor config_descriptor() const override
+    {
+        KVDescriptor d;
+        d.int_field("group_size", cfg_.group_size);
+        d.int_field("waves_per_wg", cfg_.waves_per_wg);
+        d.int_field("stride", cfg_.stride, /*default=*/1);
+        d.int_field("dilation", cfg_.dilation, /*default=*/1);
+        direction_field(d, cfg_.direction);
+        d.int_field("kh", cfg_.kh, /*default=*/3);
+        d.int_field("kw", cfg_.kw, /*default=*/3);
+        d.int_field("n_fold", cfg_.n_fold, /*default=*/8);
+        return d;
     }
 
 protected:

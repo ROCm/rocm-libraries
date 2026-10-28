@@ -1,5 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend_utils.h
+//     Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file Types.hpp
@@ -21,8 +27,6 @@
  *
  * This file also contains conversion utilities between frontend types and
  * the backend C API types (hipdnn_backend.h).
- *
- * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 
 #pragma once
@@ -292,11 +296,14 @@ typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mod
  * @brief Specifies the heuristic mode for engine selection
  *
  * Controls how the hipDNN backend selects execution plans and engines.
+ *
+ * A and B request the SelectionHeuristic::ModeA / ModeB prediction policies through the
+ * heuristic descriptor's policy order; the backend mode stays HIPDNN_HEUR_MODE_FALLBACK.
  */
 enum class HeuristicMode
 {
-    A = 0, ///< cuDNN heuristic mode A (mapped to fallback for now)
-    B = 1, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    A = 0, ///< Request the ModeA policy: rank calibrated no-search engine predictions
+    B = 1, ///< Request the ModeB policy: rank exact configuration predictions, engine fallback
     FALLBACK = 2, ///< Use fallback heuristics for engine selection
     OPENSOURCE = 3, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
@@ -1037,7 +1044,8 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
-    // All cuDNN heuristic modes currently fold to hipDNN fallback.
+    // Every frontend mode maps to the one backend mode; A and B select prediction policies
+    // through the policy order instead (see createEngineHeuristicDescriptorForGraph).
     case HeuristicMode::FALLBACK:
     case HeuristicMode::A:
     case HeuristicMode::B:
@@ -1759,5 +1767,46 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
                  "Unknown hipdnnPaddingMode_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
+
+/**
+ * @enum TimingQuality
+ * @brief Classifies how a device-time measurement from execute_timed_ext() was obtained
+ *
+ * Introduced in hipdnn_frontend 0.4.0.
+ *
+ * @see hipdnn_frontend::graph::Graph::execute_timed_ext
+ */
+enum class TimingQuality
+{
+    DEVICE_ONLY, ///< Stream was stalled: elapsed time excludes host submission overhead.
+    UNSTALLED, ///< Stalling was not used. This can be a requested unstalled pass or an
+    ///< unavailable gate. Host submission may or may not be included, depending on
+    ///< the runtime and engine. Do not rank against DEVICE_ONLY measurements.
+    INVALID ///< No usable measurement: the stall watchdog fired, the backend reported a
+    ///< finite negative elapsed time (an invalid reading, not itself a failure), or
+    ///< execution did not complete successfully.
+};
+
+/**
+ * @struct ExecutionTiming
+ * @brief Device-time measurement produced by execute_timed_ext()
+ *
+ * @c elapsedMs is empty whenever @c quality is TimingQuality::INVALID, and whenever the
+ * owning call returned a bad Error. A finite negative elapsed reading from the backend is
+ * one such INVALID case: the call still returns an OK Error, executes exactly once, and
+ * does not replay the measurement; only a non-finite (NaN/Inf) reading is a bad Error.
+ *
+ * Introduced in hipdnn_frontend 0.4.0.
+ *
+ * @see hipdnn_frontend::graph::Graph::execute_timed_ext
+ */
+struct ExecutionTiming
+{
+    std::optional<float> elapsedMs; ///< Elapsed device time in milliseconds, or empty if invalid.
+    TimingQuality quality = TimingQuality::INVALID; ///< How the measurement was obtained.
+    bool timedOut = false; ///< True when the stall watchdog released this measurement instead
+    ///< of the caller: @c quality is INVALID and @c elapsedMs is empty. False on every other
+    ///< outcome, including a bad Error.
+};
 
 } // namespace hipdnn_frontend

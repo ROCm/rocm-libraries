@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "hipblaslt_type_strings.hpp"
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
 #include <regex>
@@ -152,6 +153,9 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
 #pragma GCC diagnostic pop
         return "e5m3_r";
+    // Signedness comes from HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT.
+    case HIP_R_4I:
+        return "i4_r";
     default:
         return "non-supported type";
     }
@@ -190,48 +194,6 @@ constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
 
 // clang-format off
 HIPBLASLT_EXPORT
-constexpr hipDataType string_to_hip_datatype(const std::string& value)
-{
-    if (value == "f8_fnuz_r")
-    {
-        return HIP_R_8F_E4M3_FNUZ;
-    }
-    else if (value == "bf8_fnuz_r")
-    {
-        return HIP_R_8F_E5M2_FNUZ;
-    }
-
-    if (value == "f8_r")
-    {
-        return HIP_R_8F_E4M3;
-    }
-    else if (value == "bf8_r")
-    {
-        return HIP_R_8F_E5M2;
-    }
-
-    return
-        value == "f32_r" || value == "s" ? HIP_R_32F :
-        value == "f64_r" || value == "d" ? HIP_R_64F :
-        value == "f16_r" || value == "h" ? HIP_R_16F :
-        value == "bf16_r"                ? HIP_R_16BF :
-        value == "i8_r" || value == "i8" ? HIP_R_8I :
-        value == "f32_c" || value == "c" ? HIP_C_32F  :
-        value == "f64_c" || value == "z" ? HIP_C_64F  :
-        value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3) :
-        value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2) :
-        value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1) :
-        value == "i32_r" || value == "i" ? HIP_R_32I :
-        value == "f8_fnuz_r"             ? HIP_R_8F_E4M3_FNUZ :
-        value == "bf8_fnuz_r"            ? HIP_R_8F_E5M2_FNUZ :
-        value == "f8_r"                  ? HIP_R_8F_E4M3 :
-        value == "bf8_r"                 ? HIP_R_8F_E5M2 :
-        value == "e8_r"                  ? HIP_R_8F_UE8M0 :
-        value == "e5m3_r"                ? static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) :
-        HIPBLASLT_DATATYPE_INVALID;
-}
-
-HIPBLASLT_EXPORT
 constexpr hipDataType string_to_hip_datatype_assert(const std::string& value)
 {
     auto datatype = string_to_hip_datatype(value);
@@ -243,17 +205,33 @@ constexpr hipDataType string_to_hip_datatype_assert(const std::string& value)
     return datatype;
 }
 
+// Encoding names shared by hipblaslt-bench and log_bench.
 HIPBLASLT_EXPORT
-constexpr hipblasComputeType_t string_to_hipblas_computetype(const std::string& value)
+constexpr const char* hipblaslt_int4_encoding_to_string(hipblasLtInt4Encoding_t value)
 {
-    return
-        value == "f32_r" || value == "s" || value == "c" || value == "f32_c" ?  HIPBLAS_COMPUTE_32F  :
-        value == "xf32_r" || value == "x" ? HIPBLAS_COMPUTE_32F_FAST_TF32 :
-        value == "f64_r" || value == "d" || value == "z" || value == "f64_c" ? HIPBLAS_COMPUTE_64F :
-        value == "i32_r" || value == "i" ? HIPBLAS_COMPUTE_32I :
-        value == "f32_f16_r" ? HIPBLAS_COMPUTE_32F_FAST_16F :
-        value == "f32_bf16_r" ? HIPBLAS_COMPUTE_32F_FAST_16BF :
-        HIPBLASLT_COMPUTE_TYPE_INVALID;
+    switch(value)
+    {
+    case HIPBLASLT_INT4_ENCODING_SIGNED_EXT:
+        return "signed";
+    case HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT:
+        return "unsigned_bias8";
+    default:
+        return "invalid";
+    }
+}
+
+//! Accepted --int4_encoding spellings, for help text and error messages.
+constexpr const char* c_int4_encoding_names = "signed, unsigned_bias8";
+
+//! Return HIPBLASLT_INT4_ENCODING_END_EXT for unknown names; numerals 0/1 are also accepted.
+HIPBLASLT_EXPORT
+constexpr hipblasLtInt4Encoding_t string_to_int4_encoding(std::string_view value)
+{
+    if(value == "signed" || value == "0")
+        return HIPBLASLT_INT4_ENCODING_SIGNED_EXT;
+    if(value == "unsigned_bias8" || value == "1")
+        return HIPBLASLT_INT4_ENCODING_UNSIGNED_BIAS8_EXT;
+    return HIPBLASLT_INT4_ENCODING_END_EXT;
 }
 
 HIPBLASLT_EXPORT
@@ -396,14 +374,4 @@ __host__ __device__ inline bool hipblaslt_isinf(hipblasLtHalf arg)
         uint16_t      data;
     } x = {arg};
     return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) == 0;
-}
-
-/*******************************************************************************
- * \brief  returns true if arg is zero
- ********************************************************************************/
-
-template <typename T>
-__host__ __device__ inline bool hipblaslt_iszero(T arg)
-{
-    return arg == 0;
 }

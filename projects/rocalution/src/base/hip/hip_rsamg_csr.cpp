@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -605,12 +605,12 @@ namespace rocalution
         }
 
         // rocprim buffer
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
         // Exclusive sum to obtain row offset pointers of P
         // P contains only nnz per row, so far
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -619,12 +619,11 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         allocate_hip(rocprim_size, &rocprim_buffer);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -633,7 +632,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Initialize nnz of P
         PtrType tmp;
@@ -654,7 +652,7 @@ namespace rocalution
         {
             // Exclusive sum to obtain row offset pointers of ghost
             // part of P
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         cast_pg->mat_.row_offset,
@@ -663,7 +661,6 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             // Initialize nnz of P ghost
             copy_d2h(1, cast_pg->mat_.row_offset + this->nrow_, &tmp);
@@ -924,7 +921,7 @@ namespace rocalution
         }
 
         // rocprim buffer
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
         // Determine max row nnz
@@ -970,30 +967,26 @@ namespace rocalution
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Obtain maximum row nnz
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset,
-                            cast_pi->mat_.row_offset + this->nrow_,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<PtrType>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset,
+                                         cast_pi->mat_.row_offset + this->nrow_,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<PtrType>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset,
-                            cast_pi->mat_.row_offset + this->nrow_,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<PtrType>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset,
+                                         cast_pi->mat_.row_offset + this->nrow_,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<PtrType>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         free_hip(&rocprim_buffer);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
@@ -1183,36 +1176,32 @@ namespace rocalution
         }
 
         // rocprim buffer
-        size_t rocprim_size;
+        size_t rocprim_size   = 0;
         char*  rocprim_buffer = NULL;
 
         // Determine maximum hash table fill
         int* d_max_hash = NULL;
         allocate_hip(2, &d_max_hash);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(NULL,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset,
-                            d_max_hash,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(NULL,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset,
+                                         d_max_hash,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
-            rocprim::reduce(rocprim_buffer,
-                            rocprim_size,
-                            cast_pi->mat_.row_offset,
-                            d_max_hash,
-                            0,
-                            this->nrow_,
-                            rocprim::maximum<int>(),
-                            HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(rocprim::reduce(rocprim_buffer,
+                                         rocprim_size,
+                                         cast_pi->mat_.row_offset,
+                                         d_max_hash,
+                                         0,
+                                         this->nrow_,
+                                         rocprim::maximum<int>(),
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
 
         // Maximum fill
         int max_hash_fill;
@@ -1221,7 +1210,7 @@ namespace rocalution
         // Ghost part
         if(global == true)
         {
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::reduce(rocprim_buffer,
                                 rocprim_size,
                                 cast_pg->mat_.row_offset,
@@ -1230,7 +1219,6 @@ namespace rocalution
                                 this->nrow_,
                                 rocprim::maximum<int>(),
                                 HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             int max_hash_fill_gst;
 
@@ -1241,9 +1229,15 @@ namespace rocalution
         free_hip(&d_max_hash);
         free_hip(&rocprim_buffer);
 
+        // LDS capacity check
+        if(max_hash_fill >= 4096)
+        {
+            return false;
+        }
+
         // Exclusive sum to obtain row offset pointers of P
         // P contains only nnz per row, so far
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(NULL,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -1252,12 +1246,11 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         rocprim_buffer = NULL;
         allocate_hip(rocprim_size, &rocprim_buffer);
 
-        DISCARD_HIP_ERROR(
+        CHECK_HIP_STATUS(
             rocprim::exclusive_scan(rocprim_buffer,
                                     rocprim_size,
                                     cast_pi->mat_.row_offset,
@@ -1266,7 +1259,6 @@ namespace rocalution
                                     this->nrow_ + 1,
                                     rocprim::plus<PtrType>(),
                                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         // Initialize nnz of P
         PtrType tmp;
@@ -1287,7 +1279,7 @@ namespace rocalution
         {
             // Exclusive sum to obtain row offset pointers of ghost
             // part of P
-            DISCARD_HIP_ERROR(
+            CHECK_HIP_STATUS(
                 rocprim::exclusive_scan(rocprim_buffer,
                                         rocprim_size,
                                         cast_pg->mat_.row_offset,
@@ -1296,7 +1288,6 @@ namespace rocalution
                                         this->nrow_ + 1,
                                         rocprim::plus<PtrType>(),
                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
 
             // Initialize nnz of P ghost
             copy_d2h(1, cast_pg->mat_.row_offset + this->nrow_, &tmp);
@@ -1400,24 +1391,418 @@ namespace rocalution
                 DISPATCH_EXTPI_INTERP_FILL(global, 64, 64, 4096);
             }
         }
-        else
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        return true;
+    }
+
+    template <typename ValueType>
+    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                                            const BaseVector<bool>& S,
+                                                            BaseVector<int>*        f2c,
+                                                            BaseVector<int>*        f2f,
+                                                            BaseMatrix<ValueType>*  A_FF,
+                                                            BaseMatrix<ValueType>*  A_FC) const
+    {
+        const HIPAcceleratorVector<int>* cast_cf
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);
+        const HIPAcceleratorVector<bool>* cast_S
+            = dynamic_cast<const HIPAcceleratorVector<bool>*>(&S);
+        HIPAcceleratorVector<int>* cast_f2c = dynamic_cast<HIPAcceleratorVector<int>*>(f2c);
+        HIPAcceleratorVector<int>* cast_f2f = dynamic_cast<HIPAcceleratorVector<int>*>(f2f);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_ff
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FF);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_fc
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FC);
+
+        assert(cast_cf != NULL);
+        assert(cast_S != NULL);
+        assert(cast_f2c != NULL);
+        assert(cast_f2f != NULL);
+        assert(cast_ff != NULL);
+        assert(cast_fc != NULL);
+
+        // Column indices of A are used to index the row-based C-F and index maps
+        assert(this->nrow_ == this->ncol_);
+
+        hipStream_t stream = HIPSTREAM(_get_backend_descriptor()->HIP_stream_current);
+
+        // Flag coarse and fine points and turn the flags into index maps
+        set_to_zero_hip(256, this->nrow_ + 1, cast_f2c->vec_, false, stream);
+        set_to_zero_hip(256, this->nrow_ + 1, cast_f2f->vec_, false, stream);
+
+        kernel_csr_rs_mmextpi_cf_flags<256><<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(
+            this->nrow_, cast_cf->vec_, cast_f2c->vec_, cast_f2f->vec_);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        cast_f2c->ExclusiveSum(*cast_f2c);
+        cast_f2f->ExclusiveSum(*cast_f2f);
+
+        int nc;
+        int nf;
+        copy_d2h(1, cast_f2c->vec_ + this->nrow_, &nc);
+        copy_d2h(1, cast_f2f->vec_ + this->nrow_, &nf);
+
+        cast_ff->Clear();
+        cast_fc->Clear();
+
+        allocate_hip(nf + 1, &cast_ff->mat_.row_offset);
+        allocate_hip(nf + 1, &cast_fc->mat_.row_offset);
+
+        set_to_zero_hip(256, nf + 1, cast_ff->mat_.row_offset, false, stream);
+        set_to_zero_hip(256, nf + 1, cast_fc->mat_.row_offset, false, stream);
+
+        cast_ff->nrow_ = nf;
+        cast_ff->ncol_ = nf;
+        cast_fc->nrow_ = nf;
+        cast_fc->ncol_ = nc;
+
+        kernel_csr_rs_mmextpi_split_nnz<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              this->mat_.row_offset,
+                                                              this->mat_.col,
+                                                              cast_S->vec_,
+                                                              cast_cf->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_ff->mat_.row_offset,
+                                                              cast_fc->mat_.row_offset);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        // Exclusive sums to obtain the row offset pointers of both blocks
+        size_t rocprim_size   = 0;
+        char*  rocprim_buffer = NULL;
+
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(NULL,
+                                                 rocprim_size,
+                                                 cast_ff->mat_.row_offset,
+                                                 cast_ff->mat_.row_offset,
+                                                 0,
+                                                 nf + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
+
+        allocate_hip(rocprim_size, &rocprim_buffer);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                 rocprim_size,
+                                                 cast_ff->mat_.row_offset,
+                                                 cast_ff->mat_.row_offset,
+                                                 0,
+                                                 nf + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
+
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                 rocprim_size,
+                                                 cast_fc->mat_.row_offset,
+                                                 cast_fc->mat_.row_offset,
+                                                 0,
+                                                 nf + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
+
+        free_hip(&rocprim_buffer);
+
+        PtrType nnz_ff;
+        PtrType nnz_fc;
+
+        copy_d2h(1, cast_ff->mat_.row_offset + nf, &nnz_ff);
+        copy_d2h(1, cast_fc->mat_.row_offset + nf, &nnz_fc);
+
+        cast_ff->nnz_ = nnz_ff;
+        cast_fc->nnz_ = nnz_fc;
+
+        allocate_hip(cast_ff->nnz_, &cast_ff->mat_.col);
+        allocate_hip(cast_ff->nnz_, &cast_ff->mat_.val);
+        allocate_hip(cast_fc->nnz_, &cast_fc->mat_.col);
+        allocate_hip(cast_fc->nnz_, &cast_fc->mat_.val);
+
+        kernel_csr_rs_mmextpi_split_fill<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              this->mat_.row_offset,
+                                                              this->mat_.col,
+                                                              this->mat_.val,
+                                                              cast_S->vec_,
+                                                              cast_cf->vec_,
+                                                              cast_f2c->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_ff->mat_.row_offset,
+                                                              cast_ff->mat_.col,
+                                                              cast_ff->mat_.val,
+                                                              cast_fc->mat_.row_offset,
+                                                              cast_fc->mat_.col,
+                                                              cast_fc->mat_.val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        return true;
+    }
+
+    template <typename ValueType>
+    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                                            const BaseVector<int>&       f2f,
+                                                            const BaseMatrix<ValueType>& A_FC,
+                                                            BaseMatrix<ValueType>*       A_FF) const
+    {
+        const HIPAcceleratorVector<int>* cast_cf
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);
+        const HIPAcceleratorVector<int>* cast_f2f
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2f);
+        const HIPAcceleratorMatrixCSR<ValueType>* cast_fc
+            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&A_FC);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_ff
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FF);
+
+        assert(cast_cf != NULL);
+        assert(cast_f2f != NULL);
+        assert(cast_fc != NULL);
+        assert(cast_ff != NULL);
+
+        hipStream_t stream = HIPSTREAM(_get_backend_descriptor()->HIP_stream_current);
+
+        int nf = cast_ff->nrow_;
+
+        if(nf == 0)
         {
-            // More nnz per row will not fit into LDS
-            // Fall back to host
-            cast_glo->Clear();
-
-            free_hip(&cast_pi->mat_.col);
-            free_hip(&cast_pi->mat_.val);
-            free_hip(&cast_pg->mat_.col);
-            free_hip(&cast_pg->mat_.val);
-
-            cast_pi->nnz_  = 0;
-            cast_pg->nnz_  = 0;
-            cast_pi->ncol_ = 0;
-            cast_pg->ncol_ = 0;
-
-            return false;
+            return true;
         }
+
+        ValueType* D_q     = NULL;
+        ValueType* D_w     = NULL;
+        ValueType* D_theta = NULL;
+
+        allocate_hip(nf, &D_q);
+        allocate_hip(nf, &D_w);
+        allocate_hip(nf, &D_theta);
+
+        set_to_zero_hip(256, nf, D_q, false, stream);
+        set_to_zero_hip(256, nf, D_w, false, stream);
+        set_to_zero_hip(256, nf, D_theta, false, stream);
+
+        kernel_csr_rs_mmextpi_diagonals<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              this->mat_.row_offset,
+                                                              this->mat_.val,
+                                                              cast_cf->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_ff->mat_.row_offset,
+                                                              cast_ff->mat_.col,
+                                                              cast_ff->mat_.val,
+                                                              cast_fc->mat_.row_offset,
+                                                              cast_fc->mat_.val,
+                                                              D_q,
+                                                              D_w);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        // Scaling a row reads entries of neighbouring rows, which are being overwritten as
+        // we go, so the original values need to be kept around
+        ValueType* ff_val_orig = NULL;
+
+        allocate_hip(cast_ff->nnz_, &ff_val_orig);
+        copy_d2d(cast_ff->nnz_, cast_ff->mat_.val, ff_val_orig, false, stream);
+
+        kernel_csr_rs_mmextpi_scale_ff<256>
+            <<<(nf - 1) / 256 + 1, 256, 0, stream>>>(nf,
+                                                     cast_ff->mat_.row_offset,
+                                                     cast_ff->mat_.col,
+                                                     cast_ff->mat_.val,
+                                                     ff_val_orig,
+                                                     D_q,
+                                                     D_theta);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        kernel_csr_rs_mmextpi_scale_rows<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
+            nf, cast_ff->mat_.row_offset, cast_ff->mat_.val, D_theta, D_w);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        free_hip(&ff_val_orig);
+        free_hip(&D_q);
+        free_hip(&D_w);
+        free_hip(&D_theta);
+
+        return true;
+    }
+
+    template <typename ValueType>
+    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                                            const BaseVector<int>& f2f,
+                                                            BaseMatrix<ValueType>* A_FC,
+                                                            BaseMatrix<ValueType>* A_FF) const
+    {
+        const HIPAcceleratorVector<int>* cast_cf
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);
+        const HIPAcceleratorVector<int>* cast_f2f
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2f);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_fc
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FC);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_ff
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FF);
+
+        assert(cast_cf != NULL);
+        assert(cast_f2f != NULL);
+        assert(cast_fc != NULL);
+        assert(cast_ff != NULL);
+
+        hipStream_t stream = HIPSTREAM(_get_backend_descriptor()->HIP_stream_current);
+
+        int nf = cast_ff->nrow_;
+
+        if(nf == 0)
+        {
+            return true;
+        }
+
+        ValueType* D_lambda = NULL;
+        ValueType* D_beta   = NULL;
+        ValueType* D_tmp    = NULL;
+        ValueType* D_tau    = NULL;
+        ValueType* D_w      = NULL;
+
+        allocate_hip(nf, &D_lambda);
+        allocate_hip(nf, &D_beta);
+        allocate_hip(nf, &D_tmp);
+        allocate_hip(nf, &D_tau);
+        allocate_hip(nf, &D_w);
+
+        set_to_zero_hip(256, nf, D_lambda, false, stream);
+        set_to_zero_hip(256, nf, D_beta, false, stream);
+        set_to_zero_hip(256, nf, D_tmp, false, stream);
+        set_to_zero_hip(256, nf, D_tau, false, stream);
+        set_to_zero_hip(256, nf, D_w, false, stream);
+
+        kernel_csr_rs_mmextpe_diagonals<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              this->mat_.row_offset,
+                                                              this->mat_.val,
+                                                              cast_cf->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_ff->mat_.row_offset,
+                                                              cast_ff->mat_.col,
+                                                              cast_ff->mat_.val,
+                                                              cast_fc->mat_.row_offset,
+                                                              cast_fc->mat_.val,
+                                                              D_lambda,
+                                                              D_beta,
+                                                              D_tmp,
+                                                              D_w);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        kernel_csr_rs_mmextpe_tau<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
+            nf, cast_ff->mat_.row_offset, cast_ff->mat_.col, cast_ff->mat_.val, D_tmp, D_tau);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        kernel_csr_rs_mmextpe_scale<256>
+            <<<(nf - 1) / 256 + 1, 256, 0, stream>>>(nf,
+                                                     cast_ff->mat_.row_offset,
+                                                     cast_ff->mat_.col,
+                                                     cast_ff->mat_.val,
+                                                     cast_fc->mat_.row_offset,
+                                                     cast_fc->mat_.val,
+                                                     D_lambda,
+                                                     D_beta,
+                                                     D_tau,
+                                                     D_w);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        free_hip(&D_lambda);
+        free_hip(&D_beta);
+        free_hip(&D_tmp);
+        free_hip(&D_tau);
+        free_hip(&D_w);
+
+        return true;
+    }
+
+    template <typename ValueType>
+    bool
+        HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                                               const BaseVector<int>&       f2c,
+                                                               const BaseVector<int>&       f2f,
+                                                               const BaseMatrix<ValueType>& W,
+                                                               BaseMatrix<ValueType>* prolong) const
+    {
+        const HIPAcceleratorVector<int>* cast_cf
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);
+        const HIPAcceleratorVector<int>* cast_f2c
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2c);
+        const HIPAcceleratorVector<int>* cast_f2f
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2f);
+        const HIPAcceleratorMatrixCSR<ValueType>* cast_w
+            = dynamic_cast<const HIPAcceleratorMatrixCSR<ValueType>*>(&W);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_p
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(prolong);
+
+        assert(cast_cf != NULL);
+        assert(cast_f2c != NULL);
+        assert(cast_f2f != NULL);
+        assert(cast_w != NULL);
+        assert(cast_p != NULL);
+
+        hipStream_t stream = HIPSTREAM(_get_backend_descriptor()->HIP_stream_current);
+
+        cast_p->Clear();
+
+        allocate_hip(this->nrow_ + 1, &cast_p->mat_.row_offset);
+        set_to_zero_hip(256, this->nrow_ + 1, cast_p->mat_.row_offset, false, stream);
+
+        cast_p->nrow_ = this->nrow_;
+
+        kernel_csr_rs_mmextpi_prolong_nnz<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              cast_cf->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_w->mat_.row_offset,
+                                                              cast_p->mat_.row_offset);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        size_t rocprim_size   = 0;
+        char*  rocprim_buffer = NULL;
+
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(NULL,
+                                                 rocprim_size,
+                                                 cast_p->mat_.row_offset,
+                                                 cast_p->mat_.row_offset,
+                                                 0,
+                                                 this->nrow_ + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
+
+        allocate_hip(rocprim_size, &rocprim_buffer);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        CHECK_HIP_STATUS(rocprim::exclusive_scan(rocprim_buffer,
+                                                 rocprim_size,
+                                                 cast_p->mat_.row_offset,
+                                                 cast_p->mat_.row_offset,
+                                                 0,
+                                                 this->nrow_ + 1,
+                                                 rocprim::plus<PtrType>(),
+                                                 stream));
+
+        free_hip(&rocprim_buffer);
+
+        PtrType nnz;
+        copy_d2h(1, cast_p->mat_.row_offset + this->nrow_, &nnz);
+        cast_p->nnz_ = nnz;
+
+        int ncol;
+        copy_d2h(1, cast_f2c->vec_ + this->nrow_, &ncol);
+        cast_p->ncol_ = ncol;
+
+        allocate_hip(cast_p->nnz_, &cast_p->mat_.col);
+        allocate_hip(cast_p->nnz_, &cast_p->mat_.val);
+
+        kernel_csr_rs_mmextpi_prolong_fill<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              cast_cf->vec_,
+                                                              cast_f2c->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_w->mat_.row_offset,
+                                                              cast_w->mat_.col,
+                                                              cast_w->mat_.val,
+                                                              cast_p->mat_.row_offset,
+                                                              cast_p->mat_.col,
+                                                              cast_p->mat_.val);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;

@@ -22,18 +22,25 @@ version = 1
 #   atol: absolute tolerance
 #   rtol: relative tolerance
 #
+
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward). SDPA backward gradients (dQ/dK/dV) accumulate more numerical error
 # than the forward pass and need the provider-local backward tolerance instead
 # — ported verbatim from the deleted provider-local
 # asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp (bf16: 5e-1, fp16: 2.5e-1).
+# Filters key on the SdpaBackward bundle case ids' dtype token; the leading "_"
+# in "_fp16_" keeps it from also matching "bfp16_".
+# The bundles fill O and the LSE from the sweep's "inputs" ranges, so the
+# softmax the backward recomputes is not the forward's and these tolerances are
+# not calibrated for that input regime. Deriving O and the LSE from Q, K and V
+# in the bundle fill path is tracked in #14008.
 [[tolerance_overrides]]
-filters = ["*IntegrationGpuSdpaBwdBfp16*"]
-atol = 5e-1
-rtol = 5e-1
-
-[[tolerance_overrides]]
-filters = ["*IntegrationGpuSdpaBwdFp16*"]
+filters = ["*_SdpaBackward_*.*_fp16_*"]
 atol = 2.5e-1
 rtol = 2.5e-1
+
+[[tolerance_overrides]]
+filters = ["*_SdpaBackward_*.*_bfp16_*"]
+atol = 5e-1
+rtol = 5e-1
