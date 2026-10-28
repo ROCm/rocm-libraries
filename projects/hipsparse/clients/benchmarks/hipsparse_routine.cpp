@@ -22,6 +22,7 @@
 *
 * ************************************************************************ */
 #include "hipsparse_routine.hpp"
+#include "utility.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -49,10 +50,7 @@ hipsparse_routine::hipsparse_routine(const char* function)
         std::cerr << "//    - " << str << std::endl;
     }
 
-    std::ostringstream message;
-    message << "invalid function '" << function << "': hipsparse status "
-            << hipsparseGetErrorName(HIPSPARSE_STATUS_INVALID_VALUE);
-    throw std::runtime_error(message.str());
+    throw_hipsparse_error("hipsparse_routine", HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 hipsparse_routine::hipsparse_routine()
@@ -78,10 +76,7 @@ hipsparse_routine& hipsparse_routine::operator()(const char* function)
         std::cerr << "//    - " << str << std::endl;
     }
 
-    std::ostringstream message;
-    message << "invalid function '" << function << "': hipsparse status "
-            << hipsparseGetErrorName(HIPSPARSE_STATUS_INVALID_VALUE);
-    throw std::runtime_error(message.str());
+    throw_hipsparse_error("hipsparse_routine", HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 constexpr hipsparse_routine::value_type hipsparse_routine::all_routines[];

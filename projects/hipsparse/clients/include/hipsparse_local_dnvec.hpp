@@ -29,7 +29,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  Dense vector descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalDnVec
@@ -42,10 +42,7 @@ public:
         const hipsparseStatus_t status = hipsparseCreateDnVec(&descr, size, values, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::ostringstream message;
-            message << "hipsparseCreateDnVec failed: hipsparse status "
-                    << hipsparseGetErrorName(status);
-            throw std::runtime_error(message.str());
+            throw_hipsparse_error("hipsparseCreateDnVec", status);
         }
     }
 
@@ -56,7 +53,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroyDnVec(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalDnVec destructor");
+                log_hipsparse_error("hipsparseDestroyDnVec", status);
             }
         }
     }

@@ -125,35 +125,26 @@ void query_version(char* version)
     status = hipsparseCreate(&handle);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::ostringstream message;
-        message << "hipsparseCreate failed: hipsparse status " << hipsparseGetErrorName(status);
-        throw std::runtime_error(message.str());
+        throw_hipsparse_error("hipsparseCreate", status);
     }
 
     status = hipsparseGetVersion(handle, &hipsparse_ver);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::ostringstream message;
-        message << "hipsparseGetVersion failed: hipsparse status " << hipsparseGetErrorName(status);
-        throw std::runtime_error(message.str());
+        throw_hipsparse_error("hipsparseGetVersion", status);
     }
 
     status = hipsparseGetGitRevision(handle, hipsparse_rev);
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::ostringstream message;
-        message << "hipsparseGetGitRevision failed: hipsparse status "
-                << hipsparseGetErrorName(status);
-        throw std::runtime_error(message.str());
+        throw_hipsparse_error("hipsparseGetGitRevision", status);
     }
 
     status = hipsparseDestroy(handle);
 
     if(HIPSPARSE_STATUS_SUCCESS != status)
     {
-        std::ostringstream message;
-        message << "hipsparseDestroy failed: hipsparse status " << hipsparseGetErrorName(status);
-        throw std::runtime_error(message.str());
+        throw_hipsparse_error("hipsparseDestroy", status);
     }
 
     snprintf(version,
@@ -245,11 +236,7 @@ double get_time_us(void)
 
     if(status != hipSuccess)
     {
-        std::ostringstream message;
-        message << "hipDeviceSynchronize failed: " << hipGetErrorString(status) << " ("
-                << static_cast<int>(status) << "). hipsparse status "
-                << hipsparseGetErrorName(HIPSPARSE_STATUS_INTERNAL_ERROR);
-        throw std::runtime_error(message.str());
+        throw_hip_error("hipDeviceSynchronize", status);
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -265,11 +252,7 @@ double get_time_us_sync(hipStream_t stream)
 
     if(status != hipSuccess)
     {
-        std::ostringstream message;
-        message << "hipStreamSynchronize failed: " << hipGetErrorString(status) << " ("
-                << static_cast<int>(status) << "). hipsparse status "
-                << hipsparseGetErrorName(HIPSPARSE_STATUS_INTERNAL_ERROR);
-        throw std::runtime_error(message.str());
+        throw_hip_error("hipStreamSynchronize", status);
     }
 
     auto now = std::chrono::steady_clock::now();

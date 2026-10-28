@@ -29,7 +29,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "arg_check.hpp"
+#include "utility.hpp"
 
 /*! \brief  Sparse vector descriptor which is destroyed when it goes out of scope. */
 class hipsparseLocalSpVec
@@ -49,10 +49,7 @@ public:
             = hipsparseCreateSpVec(&descr, size, nnz, indices, values, idxType, idxBase, valueType);
         if(status != HIPSPARSE_STATUS_SUCCESS)
         {
-            std::ostringstream message;
-            message << "hipsparseCreateSpVec failed: hipsparse status "
-                    << hipsparseGetErrorName(status);
-            throw std::runtime_error(message.str());
+            throw_hipsparse_error("hipsparseCreateSpVec", status);
         }
     }
 
@@ -63,7 +60,7 @@ public:
             const hipsparseStatus_t status = hipsparseDestroySpVec(descr);
             if(status != HIPSPARSE_STATUS_SUCCESS)
             {
-                verify_hipsparse_status_success(status, "ERROR: hipsparseLocalSpVec destructor");
+                log_hipsparse_error("hipsparseDestroySpVec", status);
             }
         }
     }
