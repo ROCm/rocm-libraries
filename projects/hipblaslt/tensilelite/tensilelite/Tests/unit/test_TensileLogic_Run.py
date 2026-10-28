@@ -5,8 +5,11 @@
 Unit tests for tensilelite/TensileLogic/Run.py
 """
 
+import sys
+
 import pytest
 import tempfile
+import yaml
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -698,3 +701,63 @@ class TestMain:
                     main()
                 except SystemExit as e:
                     assert e.code in (None, 0)
+
+
+GENERATOR_LOGIC = (
+    Path(__file__).parent
+    / "test_data"
+    / "skinny_gemm_logic"
+    / "gfx950_Cijk_Alik_Bljk_F8BS_MXAE8B32_MXBE8B32_BH_Bias_HA_S_SAB_SAV_UserArgs_SkinnyGEMM.yaml"
+)
+
+
+@pytest.mark.unit
+class TestGeneratorKernels:
+    """TensileLogic accepts generator custom kernels without the code generation module."""
+
+    @staticmethod
+    def runChecks(logicDir, check):
+        from Tensile.TensileLogic.Run import _runChecks
+
+        return _runChecks(logicDir, {}, check, frozenset(), sorted(logicDir.glob("*.yaml")))
+
+    @staticmethod
+    def writeLogic(tmp_path, edit=None):
+        data = yaml.safe_load(GENERATOR_LOGIC.read_text())
+        if edit is not None:
+            edit(data["Solutions"])
+        (tmp_path / GENERATOR_LOGIC.name).write_text(yaml.safe_dump(data))
+        return tmp_path
+
+    @pytest.mark.parametrize("check", [Check(OnlyCustomKernels=False, All=True), Check(OnlyCustomKernels=True, All=False)])
+    def test_fixture_solutions_are_kept(self, check):
+        keep, total, *_ = self.runChecks(GENERATOR_LOGIC.parent, check)
+        assert (keep, total) == (10, 10)
+
+    def test_invalid_params_are_reported_and_not_kept(self, tmp_path, capsys):
+        def breakSecondSolution(solutions):
+            solutions[1]["CustomKernel"]["generatorParams"]["upIters"] = -1
+
+        logicDir = self.writeLogic(tmp_path, breakSecondSolution)
+        keep, total, *_ = self.runChecks(logicDir, Check(OnlyCustomKernels=False, All=True))
+        assert (keep, total) == (9, 10)
+        output = capsys.readouterr().out
+        assert "Error: Validation failed: the SkinnyGEMM generatorParams upIters must not be negative" in output
+        assert "index: 1" in output
+
+    def test_missing_param_and_unknown_generator_are_not_kept(self, tmp_path, capsys):
+        def breakSolutions(solutions):
+            del solutions[0]["CustomKernel"]["generatorParams"]["tn"]
+            solutions[2]["CustomKernel"]["generator"] = "Nope"
+
+        logicDir = self.writeLogic(tmp_path, breakSolutions)
+        keep, total, *_ = self.runChecks(logicDir, Check(OnlyCustomKernels=False, All=True))
+        assert (keep, total) == (8, 10)
+        output = capsys.readouterr().out
+        assert "missing tn" in output
+        assert "unknown kernel generator" in output
+
+    def test_validation_does_not_import_the_codegen_module(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "tensilelite_codegen", None)
+        keep, total, *_ = self.runChecks(GENERATOR_LOGIC.parent, Check(OnlyCustomKernels=False, All=True))
+        assert (keep, total) == (10, 10)

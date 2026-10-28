@@ -69,6 +69,7 @@ from ..SolutionStructs.Naming import RegisterAllocationMerges, getKernelCompileK
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
 from ..KernelWriterAssembly import KernelWriterAssembly
+from ..KernelGenerators import generatedCodeObjectName, isGeneratorKernel
 from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
@@ -709,6 +710,11 @@ def _applyCustomKernelDefToSol(sol, result):
     Contractions-level customKernel attribute."""
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
+        # The definition is shared by every placement of a kernel, its code object file is not.
+        ownDef = sol.originalSolution._state.get("CustomKernel")
+        ownFile = ownDef.get("codeObjectFile") if isinstance(ownDef, dict) else None
+        if ownFile:
+            ckDef = {**ckDef, "codeObjectFile": ownFile}
         sol.originalSolution._state["CustomKernel"] = ckDef
         from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
@@ -1286,6 +1292,27 @@ def deferCyclicGC():
         atexit.register(gc.unfreeze)
 
 
+def _assignGeneratedCodeObjectFile(sol, libraryCodeObject: str, archToken: str):
+    ck = sol.originalSolution._state.get("CustomKernel")
+    if not isGeneratorKernel(ck):
+        return
+    fileName = generatedCodeObjectName(libraryCodeObject, archToken) + ".co"
+    # The state's dict may be shared with other solutions, so replace it.
+    sol.originalSolution._state["CustomKernel"] = {**ck, "codeObjectFile": fileName}
+    sol.customKernel.codeObjectFile = fileName
+
+
+def _assignGeneratedCodeObjectFiles(masterLibraries):
+    """Routes the kernels of generator solutions into their own code object next to their library's."""
+    for archName, masterLibrary in masterLibraries.items():
+        archToken = compilerTargetOf(archName)
+        for sol in masterLibrary.solutions.values():
+            _assignGeneratedCodeObjectFile(sol, "TensileLibrary_" + archToken, archToken)
+        for name, lib in masterLibrary.lazyLibraries.items():
+            for sol in lib.solutions.values():
+                _assignGeneratedCodeObjectFile(sol, name, archToken)
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -1432,6 +1459,8 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
                 sol.originalSolution._state["codeObjectFile"] = name
                 solutions.append(sol.originalSolution)
                 solIndex.append(sol.index)
+
+    _assignGeneratedCodeObjectFiles(masterLibraries)
 
     # Get the solution index and it's codeObjectFile name
     codeObjectFilesIndex = {}

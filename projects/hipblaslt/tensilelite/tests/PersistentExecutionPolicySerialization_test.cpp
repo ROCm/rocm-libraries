@@ -871,4 +871,46 @@ namespace
         }
     }
 
+
+    TEST_F(PersistentExecutionPolicySerializationTest, LongShortGridAndCodeObjectFileRoundTrip)
+    {
+        canonical(policies[0]);
+        CustomKernel descriptor;
+        descriptor.name           = "skinny_kernel";
+        descriptor.macrotile      = {256, 4, 64};
+        descriptor.threads        = {256, 1, 1};
+        descriptor.grid           = {CustomGridSize::TilesLong,
+                                     CustomGridSize::TilesShort,
+                                     CustomGridSize::Batch};
+        descriptor.args           = {{CustomArgType::uint32, CustomArgSemantic::SizeFree0}};
+        descriptor.codeObjectFile = "x_Generated_gfx950.co";
+        custom                    = output(descriptor);
+
+        std::shared_ptr<ContractionSolution> loaded = readSolution();
+        EXPECT_EQ(loaded->customKernel.grid.x, CustomGridSize::TilesLong);
+        EXPECT_EQ(loaded->customKernel.grid.y, CustomGridSize::TilesShort);
+        EXPECT_EQ(loaded->customKernel.grid.z, CustomGridSize::Batch);
+        EXPECT_EQ(loaded->customKernel.codeObjectFile, "x_Generated_gfx950.co");
+
+        ObjectMap emittedDescriptor = output(loaded->customKernel);
+        std::vector<std::string> grid
+            = emittedDescriptor.at("grid").as<std::vector<std::string>>();
+        EXPECT_EQ(grid, (std::vector<std::string>{"TilesLong", "TilesShort", "Batch"}));
+    }
+
+    // Libraries written before the field existed carry no key and must keep loading.
+    TEST_F(PersistentExecutionPolicySerializationTest, AbsentCodeObjectFileLoadsEmpty)
+    {
+        canonical(policies[0]);
+        CustomKernel descriptor;
+        descriptor.name           = "skinny_kernel";
+        descriptor.macrotile      = {256, 4, 64};
+        descriptor.threads        = {256, 1, 1};
+        descriptor.args           = {{CustomArgType::uint32, CustomArgSemantic::SizeFree0}};
+        descriptor.codeObjectFile = "x_Generated_gfx950.co";
+        custom                    = output(descriptor);
+        ASSERT_EQ(custom.erase("codeObjectFile"), 1u);
+
+        EXPECT_TRUE(readSolution()->customKernel.codeObjectFile.empty());
+    }
 }

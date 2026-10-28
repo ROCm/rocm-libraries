@@ -92,6 +92,8 @@ from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
+from .KernelGenerators import getGeneratorKernelSource, isGeneratorKernel
+from .Common.Architectures import isaToGfx
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
@@ -244,16 +246,25 @@ class KernelWriterAssembly(KernelWriter):
     super(KernelWriterAssembly, self).__init__(assembler, debugConfig)
     self.globalread_gpr_record = GlobalReadGprRecord()
 
-  def _getCustomKernelSource(self, kernel, customKernelDirectory=None):
-    kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
-    code = getCustomKernelSource(kernelName, self.assembler.rocm_version, customKernelDirectory)
-
+  def _setCustomKernelState(self, kernel):
     self.tPA = {}
     self.tPB = {}
     self.states.kernel = kernel
     self.states.language = "ASM"
     self.states.version = kernel["ISA"]
 
+  def _getCustomKernelSource(self, kernel, customKernelDirectory=None):
+    kernelName = getKernelFileBase(self.debugConfig.splitGSU, kernel)
+    code = getCustomKernelSource(kernelName, self.assembler.rocm_version, customKernelDirectory)
+    self._setCustomKernelState(kernel)
+    return code
+
+  def _getGeneratedKernelSource(self, kernel):
+    try:
+      code = getGeneratorKernelSource(kernel["CustomKernel"], isaToGfx(tuple(kernel["ISA"])))
+    except ValueError as e:
+      raise RuntimeError(f"generator kernel {kernel['CustomKernelName']}: {e}") from e
+    self._setCustomKernelState(kernel)
     return code
 
 
@@ -263,7 +274,10 @@ class KernelWriterAssembly(KernelWriter):
     isCustom = isCustomKernelConfig(kernel)
     try:
       if isCustom:
-        code = self._getCustomKernelSource(kernel)
+        if isGeneratorKernel(kernel.get("CustomKernel")):
+          code = self._getGeneratedKernelSource(kernel)
+        else:
+          code = self._getCustomKernelSource(kernel)
         # The occupancy formula in compute_occupancy_from_resources is
         # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom
         # kernels.  Non-gfx9 (gfx10/11/12, wave32) custom kernels leave

@@ -42,8 +42,9 @@ from tensilelite.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from tensilelite.Contractions import ASSERT_DIM_MAP_PREDICATES, ProblemPredicate
-from tensilelite.Common.ValidParameters import (
+from Tensile.Common import state
+from Tensile.Contractions import ASSERT_DIM_MAP_PREDICATES, CustomKernel, ProblemPredicate
+from Tensile.Common.ValidParameters import (
     ASSERT_DIM_MAP_PARAMETERS,
     checkParametersAreValid,
     validParameters,
@@ -365,6 +366,77 @@ def test_valid_parameters_reject_assert_size_equal_bad_map():
         checkParametersAreValid(("AssertSizeEqual", [{-1: 1}]), validParameters)
     with pytest.raises(Exception, match="Size must be int"):
         checkParametersAreValid(("AssertSizeEqual", [{0: 1.5}]), validParameters)
+
+
+@pytest.mark.parametrize("tensor", ["A", "B", "C", "D"])
+def test_problem_predicate_emits_stride_multiple(tensor):
+    key = f"AssertStride{tensor}Multiple"
+    pred = ProblemPredicate.FromOriginalKeyPair((key, {1: 4}))
+
+    assert pred is not None
+    assert pred.tag == f"Stride{tensor}Multiple"
+    assert pred.index == 1
+    assert pred.value == 4
+    assert ProblemPredicate.FromOriginalKeyPair((key, {})) is None
+    assert ProblemPredicate.FromOriginalKeyPair((key, {1: -1})) is None
+
+
+def test_problem_predicate_ands_multi_index_stride_multiple():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertStrideAMultiple", {0: 1, 1: 4}))
+
+    assert pred is not None
+    assert pred.tag == "And"
+    assert {(p.index, p.value) for p in pred.value} == {(0, 1), (1, 4)}
+    assert all(p.tag == "StrideAMultiple" for p in pred.value)
+
+
+def test_problem_predicate_emits_alpha_one():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertAlphaOne", True))
+
+    assert pred is not None
+    assert pred.tag == "AlphaValue"
+    assert pred.value == "1"
+    assert pred.state() == {"type": "AlphaValue", "value": "1"}
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertAlphaOne", False)) is None
+
+
+def test_problem_predicate_emits_beta_zero():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertBetaZero", True))
+
+    assert pred is not None
+    assert pred.tag == "BetaZero"
+    assert pred.state() == {"type": "BetaZero"}
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertBetaZero", False)) is None
+
+
+def test_valid_parameters_check_stride_multiple_and_scalar_assertions():
+    with pytest.raises(Exception, match="Multiple must be >= 1"):
+        checkParametersAreValid(("AssertStrideAMultiple", [{1: 0}]), validParameters)
+    checkParametersAreValid(("AssertStrideAMultiple", [{1: -1}]), validParameters)
+    checkParametersAreValid(("AssertStrideAMultiple", [{1: 4}]), validParameters)
+    checkParametersAreValid(("AssertAlphaOne", [True]), validParameters)
+    checkParametersAreValid(("AssertBetaZero", [False]), validParameters)
+    with pytest.raises(Exception):
+        checkParametersAreValid(("AssertAlphaOne", [2]), validParameters)
+
+
+def _custom_kernel_dict(**extra):
+    return dict(name="k", args=[], macrotile=[256, 4, 64], threads=[256, 1, 1],
+                grid=["TilesLong", "TilesShort", "Batch"], **extra)
+
+
+def test_custom_kernel_state_omits_unset_code_object_file():
+    kernel = CustomKernel.FromOriginalState(_custom_kernel_dict())
+
+    assert list(state(kernel)) == CustomKernel.StateKeys
+
+
+def test_custom_kernel_state_keeps_code_object_file():
+    kernel = CustomKernel.FromOriginalState(
+        _custom_kernel_dict(codeObjectFile="x_Generated_gfx950.co"))
+
+    assert state(kernel)["codeObjectFile"] == "x_Generated_gfx950.co"
+    assert list(state(kernel))[:len(CustomKernel.StateKeys)] == CustomKernel.StateKeys
 
 
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
@@ -731,6 +803,13 @@ def test_metadata_arg_default_uint32():
 def test_metadata_arg_cucount_is_compute_units():
     assert _metadataArgToCustomArg(_meta_arg("cuCount", 4))["semantic"] == "ComputeUnits"
     assert _metadataArgToCustomArg(_meta_arg("ComputeUnits", 4))["semantic"] == "ComputeUnits"
+
+
+@pytest.mark.parametrize("dim", ["X", "Y", "Z"])
+def test_metadata_arg_num_work_groups_per_dimension(dim):
+    expected = f"NumWorkGroups{dim}"
+    assert _metadataArgToCustomArg(_meta_arg(f"numWorkGroups{dim}", 4))["semantic"] == expected
+    assert _metadataArgToCustomArg(_meta_arg(expected, 4))["semantic"] == expected
 
 
 def test_metadata_arg_activation_index():

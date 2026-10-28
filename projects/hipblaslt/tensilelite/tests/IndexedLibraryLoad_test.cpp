@@ -529,10 +529,31 @@ namespace
         return TestData::Instance().file("KernelsLite.dat");
     }
 
+    /// The solution with "codeObjectFile" set in its customKernel map, which is created
+    /// when the solution has none. The new objects live in the zone.
+    msgpack::object withCustomCodeObjectFile(msgpack::object const& solution,
+                                             std::string const&     file,
+                                             msgpack::zone&         zone)
+    {
+        std::unordered_map<std::string, msgpack::object> fields;
+        Serialization::objectToMap(solution, fields);
+
+        std::unordered_map<std::string, msgpack::object> custom;
+        auto existing = fields.find("customKernel");
+        if(existing != fields.end() && existing->second.type == msgpack::type::MAP)
+            Serialization::objectToMap(existing->second, custom);
+        custom["codeObjectFile"] = msgpack::object(file, zone);
+        fields["customKernel"]   = msgpack::object(custom, zone);
+        return msgpack::object(fields, zone);
+    }
+
     /// Rewrites a legacy {solutions, library} msgpack document into the indexed
     /// layout, re-packing each solution object into the blob. Mirrors what
-    /// LibraryIO.writeMsgPackIndexed does on the Python side.
-    std::vector<uint8_t> toIndexed(msgpack::object const& legacy)
+    /// LibraryIO.writeMsgPackIndexed does on the Python side. A non-empty
+    /// customCodeObjectFile is written into the customKernel of solution customIndex.
+    std::vector<uint8_t> toIndexed(msgpack::object const& legacy,
+                                   int64_t                customIndex          = -1,
+                                   std::string const&     customCodeObjectFile = {})
     {
         std::unordered_map<std::string, msgpack::object> top;
         Serialization::objectToMap(legacy, top);
@@ -545,13 +566,17 @@ namespace
 
         std::vector<int64_t> table;
         msgpack::sbuffer     blob;
+        msgpack::zone        zone;
         for(auto const& solution : solutions)
         {
             std::unordered_map<std::string, msgpack::object> fields;
             Serialization::objectToMap(solution, fields);
             const int64_t index  = fields.at("index").as<int64_t>();
             const size_t  offset = blob.size();
-            msgpack::pack(blob, solution);
+            const bool    patch  = !customCodeObjectFile.empty() && index == customIndex;
+            msgpack::pack(blob,
+                          patch ? withCustomCodeObjectFile(solution, customCodeObjectFile, zone)
+                                : solution);
             table.push_back(index);
             table.push_back(static_cast<int64_t>(offset));
             table.push_back(static_cast<int64_t>(blob.size() - offset));
@@ -743,6 +768,9 @@ namespace
     struct PlaceholderIndexedShardTest : public TempDirTest
     {
         std::vector<int> shardIndices;
+        // When set, the solution at customIndex names this file as its own code object.
+        std::string customCodeObjectFile;
+        int         customIndex = 0;
 
         fs::path masterPath() const
         {
@@ -765,10 +793,7 @@ namespace
             in.seekg(0);
             in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 
-            auto handle  = msgpack::unpack(bytes.data(), bytes.size());
-            auto indexed = toIndexed(handle.get());
-            if(indexed.empty())
-                return false;
+            msgpack::object_handle handle = msgpack::unpack(bytes.data(), bytes.size());
 
             // Confirm the fixture still loads before building anything on it.
             auto legacy = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(
@@ -780,6 +805,12 @@ namespace
                 return false;
             for(auto const& entry : legacyMaster->solutions)
                 shardIndices.push_back(entry.first);
+            customIndex = shardIndices.front();
+
+            std::vector<uint8_t> indexed
+                = toIndexed(handle.get(), customIndex, customCodeObjectFile);
+            if(indexed.empty())
+                return false;
 
             writeFile(tmpDir / (std::string(kShardPrefix) + ".dat.zlib"), deflateBytes(indexed));
             writeLazyMaster(masterPath(), kShardPrefix);
@@ -789,6 +820,28 @@ namespace
                                     + "_Mapping.dat"),
                              {{"0", kShardPrefix}});
             return true;
+        }
+
+        /// The custom kernel launches from its own code object while the shard's stamped
+        /// name, which the library's helper kernels resolve in, is left alone.
+        void expectCustomCodeObjectOnlyOnTheCustomKernel(Master& master)
+        {
+            const std::string shardCodeObject = std::string(kShardPrefix) + ".co";
+            ASSERT_GE(shardIndices.size(), 2u);
+
+            std::shared_ptr<ContractionSolution> custom
+                = master.resolveSolutionByIndex(customIndex);
+            ASSERT_NE(custom, nullptr);
+            EXPECT_EQ(custom->codeObjectFilename.load(), shardCodeObject);
+            EXPECT_EQ(custom->customKernel.codeObjectFile, customCodeObjectFile);
+            EXPECT_EQ(custom->customKernelCodeObjectFile(), customCodeObjectFile);
+
+            std::shared_ptr<ContractionSolution> other
+                = master.resolveSolutionByIndex(shardIndices.back());
+            ASSERT_NE(other, nullptr);
+            EXPECT_NE(other->index, custom->index);
+            EXPECT_TRUE(other->customKernel.codeObjectFile.empty());
+            EXPECT_EQ(other->customKernelCodeObjectFile(), shardCodeObject);
         }
     };
 } // namespace
@@ -853,6 +906,41 @@ TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstPublishesItsCacheToTheParent
     // selects through the tree and re-fetches by index from getting two.
     auto viaCache = master->solutionSources.begin()->second->get(index);
     EXPECT_EQ(solution, viaCache) << "index lookup and the shard's own cache disagree";
+}
+
+TEST_F(PlaceholderIndexedShardTest, MasterFirstKeepsStampingAndHonorsTheCustomCodeObject)
+{
+    customCodeObjectFile = "TensileLibrary_shard_Generated_gfx9999.co";
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>> lib
+        = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    expectCustomCodeObjectOnlyOnTheCustomKernel(*master);
+}
+
+TEST_F(PlaceholderIndexedShardTest, PlaceholderFirstKeepsStampingAndHonorsTheCustomCodeObject)
+{
+    customCodeObjectFile = "TensileLibrary_shard_Generated_gfx9999.co";
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>> lib
+        = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+
+    Holder* placeholder = placeholderOf(master);
+    ASSERT_NE(placeholder, nullptr) << "master's tree is not a placeholder";
+    ASSERT_TRUE(placeholder->loadPlaceholderLibrary());
+
+    expectCustomCodeObjectOnlyOnTheCustomKernel(*master);
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)

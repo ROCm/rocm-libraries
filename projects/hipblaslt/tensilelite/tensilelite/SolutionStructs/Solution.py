@@ -2194,7 +2194,8 @@ class Solution(collections.abc.Mapping):
     gsu = state.get("GlobalSplitU", 1)
     grid = ck.get("grid", [])
     oneSlicePerTile = all(
-      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
+      g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch",
+               "TilesLong", "TilesShort") for g in grid)
     if gsu not in (0, 1) and oneSlicePerTile:
       raise RuntimeError(
         f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "

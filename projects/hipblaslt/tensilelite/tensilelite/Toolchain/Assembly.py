@@ -35,6 +35,7 @@ from ..Common.GlobalParameters import globalParameters
 from ..Common.Architectures import compilerTargetOf, isaToGfx
 from ..Common.Types import IsaVersion
 from ..CustomKernels import validateCustomKernelMetadata
+from ..KernelGenerators import isGeneratorKernel
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler
@@ -65,7 +66,7 @@ def validateCustomKernelMetadataAtBuild(kernels, directory=None):
 
     for k in kernels:
         ck = k.get("CustomKernel", None)
-        if not ck or not ck.get("name"):
+        if not ck or not ck.get("name") or isGeneratorKernel(ck):
             continue
 
         name = ck["name"]
@@ -82,6 +83,20 @@ def validateCustomKernelMetadataAtBuild(kernels, directory=None):
         print1(f"Metadata: validated {len(validated)} custom kernel(s), {issues} issue(s)")
 
     return issues
+
+
+def _codeObjectDestination(alias, asmDir, archName, extCoRaw):
+    ck = alias.get("CustomKernel", None)
+    if isGeneratorKernel(ck):
+        # Generated kernels live in their own code object, named when the library is assembled.
+        fileName = ck.get("codeObjectFile")
+        if not fileName:
+            raise RuntimeError(f"generator kernel {ck.get('name')} has no code object file")
+        return asmDir / (fileName.removesuffix(".co") + extCoRaw)
+    if "codeObjectFile" not in alias:
+        return asmDir / ("TensileLibrary_" + compilerTargetOf(archName) + extCoRaw)
+    coName = alias.get("codeObjectFile", None)
+    return asmDir / (coName + extCoRaw) if coName else None
 
 
 def buildAssemblyCodeObjectFiles(
@@ -142,11 +157,7 @@ def buildAssemblyCodeObjectFiles(
         objectFile = str(asmDir / (baseName + extObj))
         aliases = getattr(entry, "aliases", (kernel,))
         for alias in aliases:
-          if "codeObjectFile" not in alias:
-            destination = asmDir / ("TensileLibrary_" + compilerTargetOf(name) + extCoRaw)
-          else:
-            coName = alias.get("codeObjectFile", None)
-            destination = asmDir / (coName + extCoRaw) if coName else None
+          destination = _codeObjectDestination(alias, asmDir, name, extCoRaw)
           if destination is not None:
             coFileMap[destination].add(objectFile)
 

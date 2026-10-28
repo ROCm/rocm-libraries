@@ -138,21 +138,29 @@ def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
     # tile-count grid has to be rejected here too rather than at launch.
     {"GlobalSplitU": 16, "TileProcessingStrategy": "StreamK"},
 ])
-def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over):
+@pytest.mark.parametrize("grid", [
+    ["TilesX", "TilesY", "Batch"],
+    ["TilesLong", "TilesShort", "Batch"],
+])
+def test_assign_custom_kernel_params_split_k_without_gsu_grid_raises(over, grid):
     # A split-K kernel reduces into D only once every GSU slice has arrived, so a
     # grid without a GSU term would launch one slice and leave D unwritten.
     state = _ck_state(GlobalSplitUAlgorithm="MultipleBufferSingleKernel", **over)
-    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    state["CustomKernel"]["grid"] = grid
     with pytest.raises(RuntimeError, match="launches one GSU slice per tile"):
         Solution._assignCustomKernelParameters(state)
 
 
 @pytest.mark.parametrize("gsu", [1, 0])  # 0: GSU disabled
-def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu):
+@pytest.mark.parametrize("grid", [
+    ["TilesX", "TilesY", "Batch"],
+    ["TilesLong", "TilesShort", "Batch"],
+])
+def test_assign_custom_kernel_params_grid_without_gsu_term_rejects_user_gsu(gsu, grid):
     # Such a grid launches one GSU slice per tile, so a runtime GSU override has to
     # be turned away during solution selection rather than fail at launch.
     state = _ck_state(GlobalSplitU=gsu, InternalSupportParams={"SupportUserGSU": True})
-    state["CustomKernel"]["grid"] = ["TilesX", "TilesY", "Batch"]
+    state["CustomKernel"]["grid"] = grid
     Solution._assignCustomKernelParameters(state)
     assert state["InternalSupportParams"]["SupportUserGSU"] is False
 

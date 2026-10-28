@@ -3,6 +3,18 @@
 
 include_guard(GLOBAL)
 
+function(hipblaslt_resolve_python_executable out_var explicit_executable)
+    if(explicit_executable)
+        set(_python_executable "${explicit_executable}")
+    elseif(Python3_EXECUTABLE)
+        set(_python_executable "${Python3_EXECUTABLE}")
+    else()
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        set(_python_executable "${Python3_EXECUTABLE}")
+    endif()
+    set(${out_var} "${_python_executable}" PARENT_SCOPE)
+endfunction()
+
 function(hipblaslt_make_python_command out_command)
     set(_options ASAN TSAN)
     set(_one PYTHON_EXECUTABLE)
@@ -13,14 +25,7 @@ function(hipblaslt_make_python_command out_command)
         message(FATAL_ERROR "hipblaslt_make_python_command: unexpected arguments: ${arg_UNPARSED_ARGUMENTS} (permitted options: ASAN, TSAN; single-value keyword: PYTHON_EXECUTABLE; multi-value keywords: PYTHONPATH_DIRS, RUNTIME_LIB_DIRS, TOOL_BIN_DIRS)")
     endif()
 
-    if(arg_PYTHON_EXECUTABLE)
-        set(_python_executable "${arg_PYTHON_EXECUTABLE}")
-    elseif(Python3_EXECUTABLE)
-        set(_python_executable "${Python3_EXECUTABLE}")
-    else()
-        find_package(Python3 COMPONENTS Interpreter REQUIRED)
-        set(_python_executable "${Python3_EXECUTABLE}")
-    endif()
+    hipblaslt_resolve_python_executable(_python_executable "${arg_PYTHON_EXECUTABLE}")
 
     set(_sanitizer_flag "")
     if(arg_ASAN)
@@ -134,6 +139,41 @@ endfunction()
 # (gfx1250-strict's kernels built for gfx1250). Never add gfx1250v0 to GPU_TARGETS.
 option(HIPBLASLT_BUILD_GFX1250V0 "Build library/gfx1250v0/ alongside gfx1250 for A0 parts reporting gfx1250." ON)
 
+# Without the tensilelite_codegen module TensileCreateLibrary cannot emit generator custom
+# kernels, so fail at configure time if the logic the build selects has any.
+function(hipblaslt_check_generator_logic python_executable logic_path logic_filter)
+    set(_script [=[
+import glob, os, re, sys
+logicPath, logicFilter = sys.argv[1], sys.argv[2] or "*"
+arches = {a.split(":")[0] for a in sys.argv[3:]}
+archName = re.compile(rb"^ArchitectureName:\s*['\"]?([A-Za-z0-9_-]+)", re.M)
+generator = re.compile(rb"^\s*generator:", re.M)
+for path in sorted(glob.iglob(os.path.join(logicPath, "**", logicFilter + ".yaml"), recursive=True)):
+    with open(path, "rb") as f:
+        text = f.read()
+    arch = archName.search(text)
+    if arch and arch.group(1).decode() in arches and generator.search(text):
+        print(path)
+]=])
+    execute_process(
+        COMMAND "${python_executable}" -c "${_script}" "${logic_path}" "${logic_filter}" ${ARGN}
+        OUTPUT_VARIABLE _matches
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+    if(NOT _matches)
+        return()
+    endif()
+    string(REPLACE "\n" ";" _files "${_matches}")
+    list(JOIN _files "\n  " _file_lines)
+    message(FATAL_ERROR
+        "create_device_library: these logic files have generator custom kernels "
+        "(CustomKernel.generator), which TensileCreateLibrary emits through the "
+        "tensilelite_codegen Python module:\n  ${_file_lines}\n"
+        "configure with TENSILELITE_ENABLE_CODEGEN=ON, TENSILELITE_ENABLE_JIT=ON and "
+        "TENSILELITE_ENABLE_JIT_PYTHON=ON, or leave the files out with TENSILELITE_LOGIC_FILTER")
+endfunction()
+
 function(create_device_library)
     set(_opts HOST_ASAN HOST_TSAN)
     set(_one
@@ -237,6 +277,13 @@ function(create_device_library)
     if(TARGET roc::origami)
         list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::origami>")
     endif()
+    # Generator custom kernels are emitted through the tensilelite_codegen module.
+    if(TARGET tensilelite_codegen)
+        list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:tensilelite_codegen>")
+    else()
+        hipblaslt_resolve_python_executable(_check_python "${_cdl_PYTHON_EXECUTABLE}")
+        hipblaslt_check_generator_logic("${_check_python}" "${_cdl_LOGIC_PATH}" "${_cdl_LOGIC_FILTER}" ${_cdl_ARCHES})
+    endif()
 
     set(_tool_bin_dirs "")
     if(hip_DIR)
@@ -325,6 +372,9 @@ function(create_device_library)
         list(APPEND _codegen_dependencies _rocisa)
     elseif(HIPBLASLT_PYTHON_DEPS)
         list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
+    endif()
+    if(TARGET tensilelite_codegen)
+        list(APPEND _codegen_dependencies tensilelite_codegen)
     endif()
 
     # Both codegen steps glob their inputs at run time, so without an explicit

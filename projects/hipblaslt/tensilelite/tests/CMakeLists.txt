@@ -29,6 +29,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DeviceContext_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GeneratedSkinnyGEMM_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/src/hipblaslt_bench_options.cpp"
@@ -212,6 +213,81 @@ enable_testing()
 # After enable_testing() so the JIT Python test gets a CTestTestfile.
 if(TENSILELITE_ENABLE_JIT OR TENSILELITE_ENABLE_CODEGEN)
     add_subdirectory(tensilelite)
+endif()
+
+#################################################
+#   Tests for generated custom kernels          #
+#################################################
+
+# TensileCreateLibrary expands the SkinnyGEMM generator blocks of the logic fixture
+# through the tensilelite_codegen module, then the gtest runs the generated library.
+if(TENSILELITE_ENABLE_JIT_PYTHON AND TENSILELITE_ENABLE_CODEGEN)
+    # An interpreter given on the command line wins over the one a find_package in
+    # this scope picked, as the venv is the one that has the Tensile dependencies.
+    set(GENERATED_KERNELS_PYTHON "${Python_EXECUTABLE}")
+    if(DEFINED CACHE{Python_EXECUTABLE})
+        set(GENERATED_KERNELS_PYTHON "$CACHE{Python_EXECUTABLE}")
+    endif()
+    execute_process(
+        COMMAND "${GENERATED_KERNELS_PYTHON}" -c "import rocisa, yaml, msgpack, joblib"
+        RESULT_VARIABLE GENERATED_KERNELS_PYTHON_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if(NOT GENERATED_KERNELS_PYTHON_RESULT EQUAL 0)
+        message(STATUS "Generated kernel tests: skipped, ${GENERATED_KERNELS_PYTHON} cannot import rocisa, yaml, msgpack and joblib")
+    else()
+        set(GENERATED_KERNELS_PACKAGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite")
+        set(GENERATED_KERNELS_LOGIC_DIR "${GENERATED_KERNELS_PACKAGE_DIR}/Tests/unit/test_data/skinny_gemm_logic")
+        set(GENERATED_KERNELS_LIBRARY_ROOT "${CMAKE_CURRENT_BINARY_DIR}/generated_skinny_gemm")
+        set(GENERATED_KERNELS_PYTHONPATH
+            "${CMAKE_CURRENT_SOURCE_DIR}/..:$<TARGET_FILE_DIR:tensilelite_codegen>:$<TARGET_FILE_DIR:tensilelite_jit>")
+        if(TENSILELITE_ENABLE_YAML)
+            set(GENERATED_KERNELS_LIBRARY_FORMAT yaml)
+        else()
+            set(GENERATED_KERNELS_LIBRARY_FORMAT msgpack)
+        endif()
+
+        # The code objects stay compressed, as in a hipBLASLt install.
+        add_test(NAME tensilelite-generated-skinny-gemm-library
+            COMMAND "${GENERATED_KERNELS_PYTHON}" "${GENERATED_KERNELS_PACKAGE_DIR}/bin/TensileCreateLibrary"
+                "${GENERATED_KERNELS_LOGIC_DIR}" "${GENERATED_KERNELS_LIBRARY_ROOT}" HIP
+                --architecture gfx950
+                --library-format ${GENERATED_KERNELS_LIBRARY_FORMAT}
+                --no-generate-solution-table
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        )
+        set_tests_properties(tensilelite-generated-skinny-gemm-library
+            PROPERTIES
+                FIXTURES_SETUP generated_skinny_gemm_library
+                ENVIRONMENT "PYTHONPATH=${GENERATED_KERNELS_PYTHONPATH};PYTHONDONTWRITEBYTECODE=1"
+        )
+
+        add_test(NAME tensilelite-generated-skinny-gemm
+            COMMAND $<TARGET_FILE:tensilelite-tests> --gtest_filter=GeneratedSkinnyGEMM*
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        )
+        set_tests_properties(tensilelite-generated-skinny-gemm
+            PROPERTIES
+                FIXTURES_REQUIRED generated_skinny_gemm_library
+                ENVIRONMENT "TENSILELITE_GENERATED_SKINNY_GEMM_LIBRARY=${GENERATED_KERNELS_LIBRARY_ROOT}/library/gfx950"
+        )
+
+        add_test(NAME tensilelite-generator-kernels-python
+            COMMAND "${GENERATED_KERNELS_PYTHON}" -m pytest -q -p no:cacheprovider
+                "${GENERATED_KERNELS_PACKAGE_DIR}/Tests/unit/test_KernelGenerators.py"
+                "${GENERATED_KERNELS_PACKAGE_DIR}/Tests/unit/test_KernelGenerators_tcl.py"
+        )
+        set_tests_properties(tensilelite-generator-kernels-python
+            PROPERTIES
+                ENVIRONMENT "PYTHONPATH=${GENERATED_KERNELS_PYTHONPATH};PYTHONDONTWRITEBYTECODE=1"
+        )
+        if(TARGET hip::amdhip64)
+            set_property(TEST tensilelite-generated-skinny-gemm-library tensilelite-generator-kernels-python
+                PROPERTY ENVIRONMENT_MODIFICATION
+                    "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:hip::amdhip64>")
+        endif()
+    endif()
 endif()
 
 #################################################

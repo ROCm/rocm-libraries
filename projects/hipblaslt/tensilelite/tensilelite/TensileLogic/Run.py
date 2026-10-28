@@ -41,6 +41,7 @@ from ..Common.Architectures import SUPPORTED_ISA
 from ..Common.Capabilities import makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, defaultSolution
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
+from ..KernelGenerators import isGeneratorKernel
 from ..LibraryIO import readYAML
 from ..Toolchain.Validators import validateToolchain
 
@@ -54,6 +55,7 @@ from .KnownBugs import (
 )
 from .ValidChipId import _validateChipId
 from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
+from .ValidGeneratorKernel import _validateGeneratorKernel
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
@@ -151,6 +153,11 @@ def _runChecks(
             solutions = all_solutions
 
         for list_idx, s in enumerate(solutions):
+            # Generator kernels are custom kernels that only their generator can validate.
+            if isGeneratorKernel(s.get("CustomKernel")):
+                keep += _validateGeneratorKernel(s, rel)
+                total += 1
+                continue
             s, isCustom = handleCustomKernel(s, isaInfoMap)
             if check.OnlyCustomKernels and not isCustom:
                 continue

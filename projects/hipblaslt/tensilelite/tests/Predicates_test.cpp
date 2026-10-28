@@ -27,6 +27,15 @@
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionProblemPredicates.hpp>
+#ifdef TENSILE_MSGPACK
+#include <Tensile/Serialization.hpp>
+#include <Tensile/msgpack/MessagePack.hpp>
+
+#include <map>
+#include <memory>
+#include <string>
+#include <variant>
+#endif
 
 TEST(Predicates, ArithmeticIntensity)
 {
@@ -66,6 +75,146 @@ TEST(Predicates, ArithmeticIntensity)
     EXPECT_EQ(true, (*pl1)(d));
     EXPECT_EQ(false, (*pl2)(d));
 }
+
+// ----------------------------------------------------------------------------
+// Predicates a skinny kernel declares for the layouts and scalars it hardcodes.
+// ----------------------------------------------------------------------------
+
+namespace
+{
+    using TensileLite::ContractionProblemGemm;
+
+    ContractionProblemGemm leadingDimProblem(size_t ld, double beta = 1.0)
+    {
+        return ContractionProblemGemm::GEMM(false, false, 64, 64, 64, ld, ld, ld, beta, false, 1);
+    }
+}
+
+TEST(Predicates, StrideMultiple)
+{
+    using namespace TensileLite::Predicates::Contraction;
+
+    ContractionProblemGemm const aligned   = leadingDimProblem(1024);
+    ContractionProblemGemm const unaligned = leadingDimProblem(1026);
+
+    // The unit stride is 1, so only a multiple of 1 holds there.
+    auto check = [&](auto   predicate,
+                     size_t index,
+                     size_t value,
+                     bool   alignedResult,
+                     bool   unalignedResult) {
+        predicate.index = index;
+        predicate.value = value;
+        EXPECT_EQ(predicate(aligned), alignedResult);
+        EXPECT_EQ(predicate(unaligned), unalignedResult);
+    };
+    check(StrideAMultiple{}, 1, 4, true, false);
+    check(StrideBMultiple{}, 1, 4, true, false);
+    check(StrideCMultiple{}, 1, 4, true, false);
+    check(StrideDMultiple{}, 1, 4, true, false);
+    check(StrideAMultiple{}, 0, 4, false, false);
+    check(StrideAMultiple{}, 0, 1, true, true);
+}
+
+TEST(Predicates, AlphaValueOne)
+{
+    using namespace TensileLite;
+
+    ContractionProblemGemm problem = leadingDimProblem(64);
+    auto                   one     = Predicates::Contraction::AlphaValue(ScalarValue::One);
+
+    problem.setAlphaRestriction(ScalarValue::One);
+    EXPECT_TRUE(one(problem));
+    // hipBLASLt reports any alpha other than 1, and alpha 0, as Any.
+    problem.setAlphaRestriction(ScalarValue::Any);
+    EXPECT_FALSE(one(problem));
+}
+
+TEST(Predicates, BetaZero)
+{
+    using namespace TensileLite::Predicates::Contraction;
+
+    BetaZero zero;
+    EXPECT_TRUE(zero(leadingDimProblem(64, 0.0)));
+    EXPECT_FALSE(zero(leadingDimProblem(64, 1.0)));
+    EXPECT_FALSE(zero(leadingDimProblem(64, 2.0)));
+}
+
+#ifdef TENSILE_MSGPACK
+namespace
+{
+    using TensileLite::Predicates::Predicate;
+    using PredicateField = std::variant<int, std::string>;
+    using PredicateMap   = std::map<std::string, PredicateField>;
+
+    // Reads the map the way the library loader reads a predicate, in the shape Python's
+    // Properties.Predicate.state() emits.
+    std::shared_ptr<Predicate<ContractionProblemGemm>> loadPredicate(PredicateMap const& fields)
+    {
+        msgpack::zone                          zone;
+        std::map<std::string, msgpack::object> objects;
+        for(auto const& [key, value] : fields)
+            objects[key]
+                = std::visit([&](auto const& v) { return msgpack::object(v, zone); }, value);
+        msgpack::sbuffer packed;
+        msgpack::pack(packed, objects);
+        msgpack::object_handle unpacked = msgpack::unpack(packed.data(), packed.size());
+
+        std::shared_ptr<Predicate<ContractionProblemGemm>> predicate;
+        TensileLite::Serialization::MessagePackInput       reader(unpacked.get());
+        reader.input(predicate);
+        if(!reader.error.empty())
+            throw std::runtime_error(reader.error.front());
+        return predicate;
+    }
+
+    std::shared_ptr<Predicate<ContractionProblemGemm>>
+        loadStridePredicate(std::string const& type, int index, int value)
+    {
+        return loadPredicate({{"type", type}, {"index", index}, {"value", value}});
+    }
+}
+
+TEST(Predicates, StrideMultipleLoadsFromSerializedForm)
+{
+    ContractionProblemGemm const aligned   = leadingDimProblem(1024);
+    ContractionProblemGemm const unaligned = leadingDimProblem(1026);
+
+    for(char tensor : {'A', 'B', 'C', 'D'})
+    {
+        SCOPED_TRACE(tensor);
+        std::shared_ptr<Predicate<ContractionProblemGemm>> predicate
+            = loadStridePredicate(std::string("Stride") + tensor + "Multiple", 1, 4);
+        ASSERT_TRUE(predicate);
+        EXPECT_TRUE((*predicate)(aligned));
+        EXPECT_FALSE((*predicate)(unaligned));
+    }
+}
+
+TEST(Predicates, AlphaValueOneLoadsFromSerializedForm)
+{
+    using namespace TensileLite;
+
+    std::shared_ptr<Predicate<ContractionProblemGemm>> loaded
+        = loadPredicate({{"type", std::string("AlphaValue")}, {"value", std::string("1")}});
+    ASSERT_TRUE(loaded);
+
+    ContractionProblemGemm problem = leadingDimProblem(64);
+    problem.setAlphaRestriction(ScalarValue::One);
+    EXPECT_TRUE((*loaded)(problem));
+    problem.setAlphaRestriction(ScalarValue::Any);
+    EXPECT_FALSE((*loaded)(problem));
+}
+
+TEST(Predicates, BetaZeroLoadsFromSerializedForm)
+{
+    std::shared_ptr<Predicate<ContractionProblemGemm>> loaded
+        = loadPredicate({{"type", std::string("BetaZero")}});
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE((*loaded)(leadingDimProblem(64, 0.0)));
+    EXPECT_FALSE((*loaded)(leadingDimProblem(64, 1.0)));
+}
+#endif
 
 // ----------------------------------------------------------------------------
 // WorkgroupMappingXCCCheck: CPU-only tests with injected cuCount (ROCM-2963).

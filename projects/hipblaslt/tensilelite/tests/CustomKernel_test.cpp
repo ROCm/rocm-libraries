@@ -312,3 +312,281 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
 }
+
+static ContractionProblemGemm longShortProblem(size_t m, size_t n, size_t batch)
+{
+    constexpr size_t k = 64;
+
+    ContractionProblemGemm problem
+        = ContractionProblemGemm::GEMM(false, false, m, n, k, m, k, m, 0.0, false, batch);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    return problem;
+}
+
+namespace
+{
+    KernelInvocation longShortCall(size_t  m,
+                                   size_t  n,
+                                   size_t  batch,
+                                   int16_t compiledGsu = 1,
+                                   int16_t runtimeGsu  = 0)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SizeFree0});
+        solution.customKernel.macrotile = TensileLite::dim3(256, 4, 64);
+        solution.customKernel.grid
+            = {CustomGridSize::TilesLong, CustomGridSize::TilesShort, CustomGridSize::Batch};
+        solution.sizeMapping.globalSplitU = compiledGsu;
+
+        ContractionProblemGemm problem = longShortProblem(m, n, batch);
+        problem.setParams().setGSU(runtimeGsu);
+
+        AMDGPU            device = probeDevice();
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+
+        return solution.generateCustomCall<false>(problem, inputs, device, sk);
+    }
+
+    void expectLongShortGrid(size_t m, size_t n, size_t batch, TensileLite::dim3 expected)
+    {
+        TensileLite::dim3 const grid = longShortCall(m, n, batch).numWorkGroups;
+        EXPECT_EQ(grid.x, expected.x);
+        EXPECT_EQ(grid.y, expected.y);
+        EXPECT_EQ(grid.z, expected.z);
+    }
+}
+
+// The long extent is tiled by macrotile.x and the short one by macrotile.y, whichever
+// of M and N is longer.
+TEST(CustomKernelTest, LongShortGridIsOrientationAgnostic)
+{
+    expectLongShortGrid(5000, 3, 1, TensileLite::dim3(20, 1, 1));
+    expectLongShortGrid(3, 5000, 1, TensileLite::dim3(20, 1, 1));
+}
+
+TEST(CustomKernelTest, LongShortGridRoundsTailsUp)
+{
+    expectLongShortGrid(1025, 9, 1, TensileLite::dim3(5, 3, 1));
+    expectLongShortGrid(9, 1025, 1, TensileLite::dim3(5, 3, 1));
+    expectLongShortGrid(1024, 8, 1, TensileLite::dim3(4, 2, 1));
+}
+
+TEST(CustomKernelTest, LongShortGridCarriesTheBatch)
+{
+    expectLongShortGrid(512, 4, 3, TensileLite::dim3(2, 1, 3));
+}
+
+// The long/short grids launch one slice per tile, so a split-K run would leave D unwritten.
+TEST(CustomKernelTest, LongShortGridRejectsSplitK)
+{
+    EXPECT_THROW(longShortCall(512, 4, 1, /*compiled*/ 16), std::runtime_error);
+    EXPECT_THROW(longShortCall(512, 4, 1, /*compiled*/ 1, /*runtime*/ 4), std::runtime_error);
+    EXPECT_NO_THROW(longShortCall(512, 4, 1, /*compiled*/ 1, /*runtime*/ 0));
+}
+
+// Probe kernel with one uint32 kernarg per semantic, launched on the given grid.
+static KernelInvocation launchWithSemantics(ContractionSolution&                 solution,
+                                     vector3<CustomGridSize>               grid,
+                                     TensileLite::dim3                     macrotile,
+                                     std::vector<CustomArgSemantic> const& semantics,
+                                     ContractionProblemGemm const&         problem,
+                                     AMDGPU const&                         device)
+{
+    configureProbeKernel(solution, {CustomArgType::uint32, semantics.front()});
+    solution.customKernel.grid      = grid;
+    solution.customKernel.macrotile = macrotile;
+    solution.customKernel.args.clear();
+    for(CustomArgSemantic semantic : semantics)
+        solution.customKernel.args.push_back({CustomArgType::uint32, semantic});
+
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    KernelInvocation  invocation
+        = solution.generateCustomCall<false>(problem, inputs, device, sk);
+    EXPECT_EQ(invocation.args.size(), semantics.size() * sizeof(uint32_t));
+    return invocation;
+}
+
+static uint32_t emittedUint32(KernelInvocation const& invocation, size_t index)
+{
+    uint32_t value = 0;
+    std::memcpy(&value,
+                static_cast<uint8_t const*>(invocation.args.data()) + index * sizeof(value),
+                sizeof(value));
+    return value;
+}
+
+// The three kernargs starting at first must be the launched grid.
+static void expectPerDimensionArgs(KernelInvocation const& invocation, size_t first)
+{
+    EXPECT_EQ(emittedUint32(invocation, first + 0), invocation.numWorkGroups.x);
+    EXPECT_EQ(emittedUint32(invocation, first + 1), invocation.numWorkGroups.y);
+    EXPECT_EQ(emittedUint32(invocation, first + 2), invocation.numWorkGroups.z);
+}
+
+static std::vector<CustomArgSemantic> perDimensionSemantics()
+{
+    return {CustomArgSemantic::NumWorkGroupsX,
+            CustomArgSemantic::NumWorkGroupsY,
+            CustomArgSemantic::NumWorkGroupsZ};
+}
+
+static void expectComputeUnitsPerDimension(int32_t smCountTarget, int32_t persistentMaxCUs, uint32_t cus)
+{
+    ContractionSolution solution;
+    ContractionProblemGemm problem = dummyProblem();
+    problem.setParams().setSmCountTarget(smCountTarget);
+    AMDGPU device           = probeDevice();
+    device.persistentMaxCUs = persistentMaxCUs;
+
+    KernelInvocation invocation
+        = launchWithSemantics(solution,
+                              {CustomGridSize::ComputeUnits,
+                               CustomGridSize::One,
+                               CustomGridSize::One},
+                              TensileLite::dim3(128, 128, 64),
+                              perDimensionSemantics(),
+                              problem,
+                              device);
+
+    EXPECT_EQ(invocation.numWorkGroups.x, cus);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    expectPerDimensionArgs(invocation, 0);
+}
+
+static TensileLite::dim3 longShortMacrotile()
+{
+    return TensileLite::dim3(256, 4, 64);
+}
+
+static vector3<CustomGridSize> longShortBatchGrid()
+{
+    return {CustomGridSize::TilesLong, CustomGridSize::TilesShort, CustomGridSize::Batch};
+}
+
+// NumWorkGroupsX/Y/Z carry the launched grid, including a persistent ComputeUnits
+// grid after the CU budget caps are applied.
+TEST(CustomKernelTest, NumWorkGroupsPerDimensionFollowComputeUnitsGrid)
+{
+    constexpr uint32_t cus = TensileLite::testing::_SPX_CU;
+    expectComputeUnitsPerDimension(0, 0, cus);
+    expectComputeUnitsPerDimension(64, 0, 64);
+    expectComputeUnitsPerDimension(64, 48, 48);
+    expectComputeUnitsPerDimension(4 * cus, 0, cus);
+}
+
+TEST(CustomKernelTest, NumWorkGroupsPerDimensionFollowTileGrid)
+{
+    ContractionSolution solution;
+
+    KernelInvocation invocation = launchWithSemantics(solution,
+                                                      longShortBatchGrid(),
+                                                      longShortMacrotile(),
+                                                      perDimensionSemantics(),
+                                                      longShortProblem(1025, 9, 3),
+                                                      probeDevice());
+
+    EXPECT_EQ(invocation.numWorkGroups.x, 5u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 3u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 3u);
+    expectPerDimensionArgs(invocation, 0);
+}
+
+// With internal args the flattened NumWorkGroups folds the grid into x; the per-dimension
+// kernargs must report that launched grid while NumWorkGroups keeps its meaning.
+TEST(CustomKernelTest, NumWorkGroupsPerDimensionSeeTheFlattenedGrid)
+{
+    ContractionSolution solution;
+    solution.internalArgsSupport.version = 1;
+
+    std::vector<CustomArgSemantic> semantics = {CustomArgSemantic::NumWorkGroups};
+    for(CustomArgSemantic semantic : perDimensionSemantics())
+        semantics.push_back(semantic);
+
+    KernelInvocation invocation = launchWithSemantics(solution,
+                                                      longShortBatchGrid(),
+                                                      longShortMacrotile(),
+                                                      semantics,
+                                                      longShortProblem(1025, 9, 3),
+                                                      probeDevice());
+
+    // The (5, 3, 3) tile grid is launched as 45 work groups along x.
+    EXPECT_EQ(invocation.numWorkGroups.x, 45u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    EXPECT_EQ(emittedUint32(invocation, 0), 45u);
+    expectPerDimensionArgs(invocation, 1);
+}
+
+// Without a NumWorkGroups argument the grid is not flattened, even with internal args.
+TEST(CustomKernelTest, NumWorkGroupsPerDimensionKeepTheGridUnflattened)
+{
+    ContractionSolution solution;
+    solution.internalArgsSupport.version = 1;
+
+    KernelInvocation invocation = launchWithSemantics(solution,
+                                                      longShortBatchGrid(),
+                                                      longShortMacrotile(),
+                                                      perDimensionSemantics(),
+                                                      longShortProblem(1025, 9, 3),
+                                                      probeDevice());
+
+    EXPECT_EQ(invocation.numWorkGroups.x, 5u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 3u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 3u);
+    expectPerDimensionArgs(invocation, 0);
+}
+
+TEST(CustomKernelTest, NumWorkGroupsSemanticsRoundTripThroughStrings)
+{
+    for(std::string name : {"NumWorkGroupsX", "NumWorkGroupsY", "NumWorkGroupsZ"})
+        EXPECT_EQ(toString(fromStringCustomArgSemantic(name)), name);
+}
+
+namespace
+{
+    constexpr char libraryCodeObject[] = "TensileLibrary_shard_gfx950.co";
+    constexpr char customCodeObject[]  = "TensileLibrary_shard_Generated_gfx950.co";
+
+    void configureCodeObjectProbe(ContractionSolution& solution, std::string const& customFile)
+    {
+        configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::SizeFree0});
+        solution.sizeMapping.globalSplitU = 1;
+        solution.codeObjectFilename       = std::string(libraryCodeObject);
+        solution.customKernel.codeObjectFile = customFile;
+    }
+
+    std::string launchedCodeObject(ContractionSolution const& solution)
+    {
+        ContractionProblemGemm problem = dummyProblem();
+        AMDGPU                 device  = probeDevice();
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+
+        return solution.generateCustomCall<false>(problem, inputs, device, sk).codeObjectFile;
+    }
+}
+
+TEST(CustomKernelTest, CustomKernelDefaultsToTheLibraryCodeObject)
+{
+    ContractionSolution solution;
+    configureCodeObjectProbe(solution, "");
+
+    EXPECT_EQ(launchedCodeObject(solution), libraryCodeObject);
+    EXPECT_EQ(solution.customKernelCodeObjectFile(), libraryCodeObject);
+}
+
+// Only the custom kernel's launch follows its own file; the library's helper kernels
+// keep resolving in the library's code object.
+TEST(CustomKernelTest, CustomKernelHonorsItsOwnCodeObject)
+{
+    ContractionSolution solution;
+    configureCodeObjectProbe(solution, customCodeObject);
+
+    EXPECT_EQ(launchedCodeObject(solution), customCodeObject);
+    EXPECT_EQ(solution.customKernelCodeObjectFile(), customCodeObject);
+    EXPECT_EQ(solution.codeObjectFilename.load(), libraryCodeObject);
+}

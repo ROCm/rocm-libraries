@@ -515,6 +515,10 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertStrideBEqual": "StrideBEqual",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
+    "AssertStrideCMultiple": "StrideCMultiple",
+    "AssertStrideDMultiple": "StrideDMultiple",
 }
 
 def extractDimPredicate(cls, value, predicateName):
@@ -566,6 +570,18 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertAlphaOne":
+            return cls("AlphaValue", value="1") if value else None
+        if key == "AssertBetaZero":
+            return cls("BetaZero") if value else None
+        if key == "AssertNoBias":
+            return cls("UseBias", value=0) if value else None
+        if key == "AssertNoActivation":
+            return cls("Activation", value=ActivationType('none')) if value else None
+        if key == "AssertNoScaleAB":
+            return cls("UseScaleAB", value="") if value else None
+        if key == "AssertNoScaleAlphaVec":
+            return cls("UseScaleAlphaVec", value=0) if value else None
         if key in ASSERT_DIM_MAP_PREDICATES:
             if not isinstance(value, dict):
                 raise RuntimeError(
@@ -761,6 +777,9 @@ class CustomKernel:
                  'workspaceSizePerElemBias',
                  'generated']
 
+    # Written only when set, so libraries without these keys serialize unchanged.
+    OptionalStateKeys = ['codeObjectFile']
+
     @classmethod
     def FromOriginalState(cls, d):
         return cls(name=d['name'],
@@ -771,11 +790,20 @@ class CustomKernel:
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
-                   generated=d.get('generated', False))
+                   generated=d.get('generated', False),
+                   codeObjectFile=d.get('codeObjectFile', ''))
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
             setattr(self, key, value)
+
+    def state(self):
+        rv = {key: state(getattr(self, key)) for key in self.StateKeys}
+        for key in self.OptionalStateKeys:
+            value = getattr(self, key, None)
+            if value:
+                rv[key] = state(value)
+        return rv
 
 class SizeMapping:
     StateKeys = ['waveNum',
