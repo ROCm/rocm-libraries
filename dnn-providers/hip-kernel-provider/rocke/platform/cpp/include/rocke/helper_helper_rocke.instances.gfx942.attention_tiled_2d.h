@@ -107,34 +107,25 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_register_pv; /* False */
 
     /* Deep K+V prefetch / V-double-buffer schedule controls (Python mirror).
-     * The gfx950 C emitter currently builds only the depth-2 single/early-V
-     * schedule; these fields are carried so the spec is byte-identical with the
-     * Python dataclass and the provider/dispatcher can pass them through. A
-     * builder that sees use_v_double_buffer / use_staggered_iter_wait / kv_ring
-     * _depth!=2 / use_q_reread it does not yet emit must reject in validate(),
-     * NOT silently ignore (mirrors the Python __post_init__). */
+     * The gfx950 C emitter builds the V double-buffer and the staggered
+     * iter-start wait; it rejects kv_ring_depth!=2 and use_q_reread rather than
+     * silently emit the depth-2 schedule. */
     bool use_v_double_buffer; /* False */
     int kv_ring_depth; /* 2 */
     bool use_staggered_iter_wait; /* False */
     bool use_q_reread; /* False */
-    /* VGPR-frugal BLOCK_M=128 body -- gather the per-lane Q32 MFMA operand
-     * straight from global into VGPRs (no Q_lds), freeing 32 KB LDS so
-     * BLOCK_M=128/T=64 fits the 32 KB / 2-WG/CU budget with K+V single-buffer.
-     * Carried for spec byte-identity with the Python dataclass; the gfx950 C
-     * twin does not yet emit this body and rejects it in validate() (mirrors
-     * Python __post_init__ -- reject, do not silently ignore). Default False. */
+    /* gfx950: gather the per-lane Q32 MFMA operand straight from global into
+     * VGPRs (no Q_lds), freeing the Q LDS slab. Transposed-32x32 path only. */
     bool use_q_direct_reg; /* False */
     /* Lever-3 sched_barrier fence after the QK MFMA cluster (CK-Tile-derived).
      * Emitted by the gfx950 C twin (independent of the V schedule). */
     bool use_sched_barrier; /* False */
     int sched_barrier_mask; /* 0 */
 
-    /* softmax-window MFMA interleave (Python gfx950 lever). The default
-     * (off) is byte-identical; when on it emits a single iglp_opt at the loop
-     * top (mode 0/1) or sched_group_barrier groups (mode 2) to schedule the
-     * QK/PV MFMAs into the softmax VALU window. Carried for spec parity with the
-     * Python dataclass; the gfx950 C twin rejects it (the body it rides on,
-     * use_q_direct_reg, is itself unported). */
+    /* gfx950 softmax-window MFMA interleave. When on it emits a single
+     * iglp_opt at the loop top (mode 0/1) or softmax_interleave_groups
+     * sched_group_barrier pairs after the QK cluster (mode 2) to schedule the
+     * QK/PV MFMAs into the softmax VALU window. */
     bool use_softmax_mfma_interleave; /* False */
     int softmax_interleave_mode; /* 1 */
     int softmax_interleave_groups; /* 4 */
@@ -178,6 +169,14 @@ typedef struct rocke_attention_tiled_2d_spec
     const char* kv_cache_policy; /* "stream" */
     bool use_global_load_lds_k; /* False */
     bool use_q_major_grid; /* False */
+    /* gfx950-only (gfx942 never reads them). K_lds pad of kq_lds_pad_halves
+     * halves per async-DMA slab, breaking the row-aliased bank conflict on the
+     * QK K read; wired for the K single-buffer path only. */
+    bool use_kq_lds_pad; /* False */
+    int kq_lds_pad_halves; /* 8 */
+    /* gfx950-only: split the KV loop into a mask-free full-tile phase and a
+     * masked boundary phase (transposed-32x32 mask-limit path, no SW). */
+    bool use_mask_phase_split; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

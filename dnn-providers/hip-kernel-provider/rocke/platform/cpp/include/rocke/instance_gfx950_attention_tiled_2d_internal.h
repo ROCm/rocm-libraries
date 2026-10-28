@@ -130,6 +130,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     /* K single-buffer (1 K slot) so T=64 fits the 2-WG/CU LDS budget at
      * HD=128. The next-K prefetch is deferred to after the PV-wait barrier. */
     bool K_SINGLE_BUFFER;
+    /* V double-buffer: V[i+1] is prefetched into the alternate V_lds slot
+     * during iter i. STAGGER_ITER_WAIT (V_DOUBLE_BUF only) issues K before V
+     * and partial-waits the iter-start drain so V[i] stays in flight. */
+    bool V_DOUBLE_BUF, STAGGER_ITER_WAIT;
     /* Lever-3 (CK-Tile-derived) sched_barrier fence after the QK MFMA cluster. */
     bool USE_SCHED_BARRIER;
     int SCHED_BARRIER_MASK;
@@ -137,6 +141,12 @@ typedef struct rocke_gfx950_attn2d_build_ctx
      * modes 0/1 emit iglp_opt(mode); mutually exclusive with USE_SCHED_BARRIER. */
     bool USE_SOFTMAX_INTERLEAVE;
     int SOFTMAX_INTERLEAVE_MODE;
+    int SOFTMAX_INTERLEAVE_GROUPS; /* mode 2: (MFMA, VALU) group-barrier pairs */
+    /* Q gathered straight from global into VGPRs: no Q_lds, no Q aliasing. */
+    bool Q_DIRECT_REG;
+    /* K_lds slab pad in halves (0 = off) and the rows one wave's async-DMA
+     * slab fills; K_lds is then [K_BUFS, T/KQ_SLAB_ROWS, KQ_SLAB_ROWS*HD+pad]. */
+    int KQ_LDS_PAD, KQ_SLAB_ROWS;
     /* fp8 K/V cache predicates */
     bool KV_FP8, FP8_MFMA_QK, FP8_MFMA_PV;
     bool REGISTER_PV, USE_MFMA_32X32, TRANSPOSED_QK_32X32;
@@ -254,6 +264,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* qk_scale_v; /* derived from scale_p            */
     rocke_value_t* pv_fp8_scale_v; /* fdiv(v_scale, 240) when FP8_MFMA_PV (line 1149) */
     rocke_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW)     */
+    rocke_value_t* z8_v; /* b.zero_vec(dtype, 8), the masked-Q fill */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 1163-1630) ---- */
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
@@ -264,6 +275,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE        */
     rocke_value_t* zero_soff_v; /* const_i32(0) soffset            */
     rocke_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64             */
+    rocke_value_t* wave_lds_off_K_i64_v; /* slab-padded K wave offset (KQ_LDS_PAD) */
     rocke_value_t* v_wave_lds_off_i64_v; /* v_wave_lds_offset_i64           */
     rocke_value_t* K_lds_addr_v; /* ptrtoint K_lds                  */
     rocke_value_t* V_lds_addr_v; /* ptrtoint V_lds                  */

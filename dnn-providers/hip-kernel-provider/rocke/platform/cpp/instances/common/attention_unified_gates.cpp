@@ -186,11 +186,6 @@ static bool reject_tiled_2d_not_ported(const rocke_unified_attention_problem_t* 
         gate_reason(reason, reason_cap, "tiled 2D %s masks are not ported to C++ yet", label);
         return true;
     }
-    if(rocke_unified_attn_enable_v_double_buffer(p, arch))
-    {
-        gate_reason(reason, reason_cap, "tiled 2D V double-buffer is not ported to C++ yet");
-        return true;
-    }
     return false;
 }
 

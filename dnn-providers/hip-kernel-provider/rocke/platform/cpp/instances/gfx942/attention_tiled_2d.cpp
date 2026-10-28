@@ -128,6 +128,9 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.kv_cache_policy = "stream";
     s.use_global_load_lds_k = false;
     s.use_q_major_grid = false;
+    s.use_kq_lds_pad = false;
+    s.kq_lds_pad_halves = 8;
+    s.use_mask_phase_split = false;
     return s;
 }
 

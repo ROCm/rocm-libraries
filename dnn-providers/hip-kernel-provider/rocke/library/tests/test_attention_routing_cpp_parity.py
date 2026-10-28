@@ -22,7 +22,6 @@ from kernels.common.attention_unified import (
     _canonical_arch_for_selection,
     _enable_gfx942_flash_k_sliced_ring,
     _enable_gfx942_flash_mask_limit,
-    _enable_v_double_buffer,
     _gfx942_4warp_fast,
     _mask_label,
     _reject_mask_on_arch,
@@ -263,8 +262,6 @@ def _tiled_2d_not_ported(p: UnifiedAttentionProblem, arch: str):
         return "tiled 2D additive bias is not ported to C++ yet"
     if not p.default_mask:
         return f"tiled 2D {_mask_label(p)} masks are not ported to C++ yet"
-    if _enable_v_double_buffer(p, arch):
-        return "tiled 2D V double-buffer is not ported to C++ yet"
     return None
 
 
