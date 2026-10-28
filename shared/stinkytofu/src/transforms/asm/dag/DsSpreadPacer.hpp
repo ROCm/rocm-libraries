@@ -47,8 +47,10 @@ class DsSpreadPacer {
     // in front of a barrier (not the region end) for the last load feeding it to return.
     // maxPerBatch: the most loads the hardware takes in one batch (0 = not bounded), which caps
     // what a batch that is behind its line may take.
+    // cyclesPerLoad, windowCycles: the LDS return rate and the WMMA window (0 = no rate floor). A
+    // stage's loads can not all be placed before start + total * cyclesPerLoad / windowCycles.
     void plan(const std::vector<Load>& loads, int wmmaTotal, int batch, int catchUp,
-              int drainWindows, int maxPerBatch = 0) {
+              int drainWindows, int maxPerBatch = 0, int cyclesPerLoad = 0, int windowCycles = 0) {
         reset();
         if (loads.empty() || wmmaTotal <= 0) return;
         active_ = true;
@@ -78,6 +80,11 @@ class DsSpreadPacer {
         // The stage ends at the later of its planned end and where its last load can first issue
         // (the dependencies fix that, the pacer cannot move it), so the plan is what happens.
         for (Stage& st : stages_) {
+            // Loads can not all be returned before start + total * cyclesPerLoad / windowCycles, so
+            // a stage planned to end later than that ends there, never before its last load's slot.
+            if (cyclesPerLoad > 0 && windowCycles > 0)
+                st.end = std::min(st.end, st.start + (st.total * cyclesPerLoad + windowCycles - 1) /
+                                                         windowCycles);
             if (st.lastDs > st.end) st.end = std::min(st.lastDs, wmmaTotal);
             st.batches = std::max(1, (st.end - st.start + batch_ - 1) / batch_);
         }

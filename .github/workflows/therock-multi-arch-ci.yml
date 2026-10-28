@@ -265,12 +265,20 @@ jobs:
       contents: read
       id-token: write
 
-  rocjitsu_race_check_gfx94x:
-    name: rocjitsu race check (gfx94X-dcgpu)
+  rocjitsu_race_check:
+    name: rocjitsu race check (${{ matrix.amdgpu_families }})
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
     needs: [ci-env, configure, linux_build_and_test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - amdgpu_families: gfx94X-dcgpu
+            amdgpu_targets: gfx942
+          - amdgpu_families: gfx950-dcgpu
+            amdgpu_targets: gfx950
     if: >-
       ${{
         !cancelled() &&
@@ -286,10 +294,9 @@ jobs:
     with:
       therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
       build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
-      amdgpu_families: gfx94X-dcgpu
-      amdgpu_targets: gfx942
+      amdgpu_families: ${{ matrix.amdgpu_families }}
+      amdgpu_targets: ${{ matrix.amdgpu_targets }}
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
-      # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
 
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure
