@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,11 @@
 #include "utility.hpp"
 
 #include <rocalution/rocalution.hpp>
+
+static bool check_residual(double res)
+{
+    return (res < 1e-4);
+}
 
 template <typename T>
 bool testing_mixed_precision(Arguments argus)
@@ -78,7 +83,7 @@ bool testing_mixed_precision(Arguments argus)
         }
     }
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Allocate x, b and e
     x.Allocate("x", A.GetN());
@@ -114,6 +119,9 @@ bool testing_mixed_precision(Arguments argus)
     // Build solver
     mp.Build();
 
+    // Matrix format
+    A.ConvertTo(format, format == BCSR ? argus.blockdim : 1);
+
     // Verbosity output
     mp.Verbose(1);
 
@@ -125,11 +133,13 @@ bool testing_mixed_precision(Arguments argus)
     T error = e.Norm();
     std::cout << "||e - x||_2 = " << error << std::endl;
 
+    bool success = check_residual(error);
+
     // Clear solver
     mp.Clear();
 
     // Stop rocALUTION platform
     stop_rocalution();
 
-    return true;
+    return success;
 }
