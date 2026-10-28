@@ -18,6 +18,9 @@ from rocke.runtime import runtime_coexistence as rc
 
 @pytest.fixture
 def sdk_site(tmp_path, monkeypatch):
+    # Linux fixtures are the default; Windows cases select their mode explicitly.
+    monkeypatch.setattr(rc, "_IS_WINDOWS", False)
+    monkeypatch.setattr(comgr, "_IS_WINDOWS", False)
     site = tmp_path / "site-packages"
     core = site / "_rocm_sdk_core"
     core.mkdir(parents=True)

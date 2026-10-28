@@ -488,6 +488,94 @@ def test_build_sidecar_tracks_selected_sdk_site_after_parent_relocation(
     assert info["native"]["requested_comgr"] == str(library)
 
 
+def test_cmake_build_sidecar_discovers_user_site_sdk(native_detector, tmp_path):
+    if not (PLATFORM / "CMakeLists.txt").is_file():
+        pytest.skip("source CMake project is not installed with native test artifacts")
+    cmake = shutil.which("cmake")
+    if not cmake:
+        pytest.skip("configure-time SDK discovery requires CMake")
+
+    # A normal virtualenv suppresses the user site. Enable it for this interpreter
+    # so the SDK is visible to Python, but would disappear under isolated mode.
+    interpreter_root = tmp_path / "interpreter"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "venv",
+            "--without-pip",
+            "--system-site-packages",
+            str(interpreter_root),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    python = interpreter_root / "bin" / "python"
+    env = dict(os.environ, PYTHONUSERBASE=str(tmp_path / "user-base"))
+    for name in (
+        "PYTHONPATH",
+        "PYTHONNOUSERSITE",
+        "ROCKE_COMGR_LIB",
+        "ROCKE_LLVM_FLAVOR",
+    ):
+        env.pop(name, None)
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import json, site; "
+            "print(json.dumps([site.ENABLE_USER_SITE, site.getusersitepackages()]))",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    enabled, user_site = json.loads(result.stdout)
+    assert enabled is True
+    site = Path(user_site)
+    library = sdk_fixture(site, "_7_9_nonce")
+    build = tmp_path / "build"
+    # Exercise the production CMake call site: importing write_location directly
+    # would miss a regression that reinstates isolated Python invocation there.
+    subprocess.run(
+        [
+            cmake,
+            "-S",
+            str(PLATFORM),
+            "-B",
+            str(build),
+            f"-DPython3_EXECUTABLE={python}",
+            "-DBUILD_TESTING=OFF",
+            "-DROCKE_BUILD_PYBIND=OFF",
+            "-DROCKE_INSTALL_TESTS=OFF",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    marker, relative = (build / "rocke_sdk_site.txt").read_text().splitlines()
+    assert marker == "rocke-sdk-site-v1"
+    assert not Path(relative).is_absolute()
+    assert (build / relative).resolve() == site.resolve()
+    native = build / native_detector.name
+    shutil.copyfile(native_detector, native)
+    env["PYTHONPATH"] = str(PLATFORM / "python")
+    result = subprocess.run(
+        [str(python), "-c", PROBE, str(native)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    info = json.loads(result.stdout)
+    assert info["native"] == info["python"]
+    assert info["native"]["llvm_version"] == [23, 0, 1]
+    assert info["native"]["requested_comgr"] == str(library)
+
+
 def test_relocated_static_archive_consumer_discovers_sdk_without_python(
     native_detector, tmp_path
 ):

@@ -21,8 +21,9 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # Build-tree executables need the selected interpreter's SDK site even when the
 # build lives outside its virtualenv. Keep only a relative site descriptor beside
 # the build; never install it or embed a build-machine SDK library path in code.
+# Preserve the selected interpreter's package visibility, including user-site SDKs.
 execute_process(
-  COMMAND "${Python3_EXECUTABLE}" -I
+  COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_sdk_comgr_location.py"
           --build-root "${CMAKE_CURRENT_BINARY_DIR}"
   RESULT_VARIABLE _ROCKE_SDK_SITE_RESULT)
