@@ -92,8 +92,9 @@ if( BUILD_WITH_TENSILE )
   option( Tensile_SEPARATE_ARCHITECTURES "Tensile to use GPU architecture specific files?" ON )
   option( Tensile_LAZY_LIBRARY_LOADING "Tensile to load kernels on demand?" ON )
 
+  # ROCBLAS_TENSILE_ARCH_SKIPLIST
   # GPU_TARGETS / --offload-arch still include these; TensileCreateLibrary does not.
-  # Prefix match: gfx1250 also excludes variants like gfx1250:xnack+. Set empty to disable.
+  # gfx1250 also excludes all target features like gfx1250:xnack+. Set empty to disable.
   set( ROCBLAS_TENSILE_ARCH_SKIPLIST "amdgcnspirv;gfx1250-strict" CACHE STRING
     "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS" )
 
