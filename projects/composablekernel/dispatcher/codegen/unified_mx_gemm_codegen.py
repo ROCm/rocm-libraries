@@ -123,6 +123,20 @@ def _validate(cfg: dict) -> None:
         raise ValueError(
             f"pipeline must be one of {GEMM_MX_PIPELINES_BY_ARCH[arch]} on {arch}, got {pipeline!r}"
         )
+    scale_storage = cfg.get("scale_storage", "register")
+    if scale_storage not in ("register", "lds"):
+        raise ValueError(
+            f"scale_storage must be 'register' or 'lds', got {scale_storage!r}"
+        )
+    if scale_storage == "lds" and not (
+        arch == "gfx1250"
+        and datatype == "fp4"
+        and pipeline in ("comp_tdm", "comp_tdm_v2")
+    ):
+        raise ValueError(
+            "scale_storage='lds' requires gfx1250 FP4 and "
+            "pipeline comp_tdm or comp_tdm_v2"
+        )
 
     valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
     epilogue = cfg.get("epilogue", valid_epilogue)
@@ -186,11 +200,11 @@ def _tile_config_from_cfg(cfg: dict) -> dict:
 
 
 def _trait_combo_from_cfg(cfg: dict) -> Tuple:
-    """7-tuple: (pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent)."""
+    """Legacy 7-tuple, plus an eighth field only for LDS scale storage."""
     valid_pipeline, _ = ARCH_TRAITS[normalize_gfx_arch(cfg["gpu_target"])]
     pipeline = cfg.get("pipeline", valid_pipeline)
     valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
-    return (
+    combo = (
         cfg.get("pipeline", valid_pipeline),
         cfg.get("epilogue", valid_epilogue),
         cfg.get("scheduler", VALID_SCHEDULER),
@@ -199,6 +213,7 @@ def _trait_combo_from_cfg(cfg: dict) -> Tuple:
         bool(cfg.get("pad_k", False)),
         bool(cfg.get("persistent", False)),
     )
+    return (*combo, "lds") if cfg.get("scale_storage", "register") == "lds" else combo
 
 
 # =============================================================================

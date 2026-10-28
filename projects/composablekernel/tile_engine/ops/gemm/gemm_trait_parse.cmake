@@ -4,7 +4,7 @@
 # ck_tile_gemm_split_trait(<trait> <out_pipeline> <out_epilogue> <out_scheduler>)
 #
 # Split a Tile Engine GEMM trait-combo string
-#   <pipeline>_<epilogue>_<scheduler>_<pad_m>_<pad_n>_<pad_k>[_<persistent>]
+#   <pipeline>_<epilogue>_<scheduler>_<pad_m>_<pad_n>_<pad_k>[_<persistent>][_<scale_storage>]
 # into its pipeline / epilogue / scheduler fields. Multi-token pipeline names
 # (comp_async_eight_waves, comp_tdm_v2, comp_tdm_pc, comp_async, comp_tdm,
 # weight_preshuffle, preshuffle_tdm) are matched first; every other trait falls

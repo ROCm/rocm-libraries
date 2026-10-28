@@ -52,6 +52,7 @@ CATEGORICAL_AXES = {
     "pad_n",
     "pad_k",
     "persistent",
+    "scale_storage",
     "a_preshuffle_quant",
     "b_preshuffle_quant",
 }

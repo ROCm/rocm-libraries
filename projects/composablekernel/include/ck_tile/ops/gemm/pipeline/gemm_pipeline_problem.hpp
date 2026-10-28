@@ -10,6 +10,12 @@
 
 namespace ck_tile {
 
+enum class MxScaleStorageMode
+{
+    Register,
+    Lds
+};
+
 template <typename AsDataType_,
           typename BsDataType_,
           typename EDataType_,
@@ -351,7 +357,8 @@ template <typename AsDataType_,
           index_t ScaleBlockSize_          = 32,
           bool FixedVectorSize_            = false,
           index_t VectorSizeA_             = 1,
-          index_t VectorSizeB_             = 1>
+          index_t VectorSizeB_             = 1,
+          MxScaleStorageMode ScaleStorage_ = MxScaleStorageMode::Register>
 struct MxGemmPipelineProblem : UniversalGemmPipelineProblem<AsDataType_,
                                                             BsDataType_,
                                                             EDataType_,
@@ -370,6 +377,7 @@ struct MxGemmPipelineProblem : UniversalGemmPipelineProblem<AsDataType_,
     using BScaleDataType = remove_cvref_t<BScaleDataType_>;
 
     static constexpr index_t ScaleBlockSize = ScaleBlockSize_;
+    static constexpr auto ScaleStorage      = ScaleStorage_;
 
     static_assert(std::is_same_v<AScaleDataType, e8m0_t> ||
                       std::is_same_v<AScaleDataType, e5m3_t> ||

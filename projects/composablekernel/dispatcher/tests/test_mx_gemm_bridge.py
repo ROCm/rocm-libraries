@@ -81,6 +81,28 @@ class TestConfigName(unittest.TestCase):
         cfg.persistent = True
         self.assertIn("True", cfg._fallback_name())
 
+    def test_lds_scale_has_distinct_name_and_register_is_unchanged(self):
+        cfg = MxGemmKernelConfig(
+            datatype="fp4",
+            gpu_target="gfx1250",
+            pipeline="comp_tdm_v2",
+            epilogue="tdm",
+            tile_m=256,
+            tile_n=256,
+            tile_k=512,
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=32,
+            warp_tile_n=16,
+            warp_tile_k=128,
+        )
+        register_name = codegen.kernel_name(cfg.to_codegen_config())
+        lds_name = codegen.kernel_name(replace(cfg, scale_storage="lds").to_codegen_config())
+        self.assertNotIn("lds_scale", register_name)
+        self.assertIn("lds_scale", lds_name)
+        self.assertNotEqual(register_name, lds_name)
+
 
 class TestCodegenJson(unittest.TestCase):
     def test_projection_roundtrip(self):
@@ -112,6 +134,30 @@ class TestValidity(unittest.TestCase):
     def test_default_configs_valid(self):
         self.assertTrue(default_fp8_config().is_valid())
         self.assertTrue(default_fp4_config().is_valid())
+
+    def test_lds_scale_scope_validation(self):
+        valid = MxGemmKernelConfig(
+            datatype="fp4",
+            gpu_target="gfx1250",
+            pipeline="comp_tdm",
+            epilogue="tdm",
+            scale_storage="lds",
+            tile_m=256,
+            tile_n=256,
+            tile_k=256,
+            warp_m=2,
+            warp_n=4,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=128,
+        )
+        self.assertTrue(valid.is_valid())
+        self.assertFalse(replace(valid, datatype="fp8").is_valid())
+        self.assertFalse(replace(valid, gpu_target="gfx950").is_valid())
+        self.assertFalse(
+            replace(valid, pipeline="comp_async", epilogue="cshuffle").is_valid()
+        )
 
     def test_non_rcr_rejected(self):
         cfg = default_fp8_config()

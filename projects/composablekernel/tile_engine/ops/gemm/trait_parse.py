@@ -58,6 +58,7 @@ class TraitCombo(NamedTuple):
     pad_n: bool
     pad_k: bool
     persistent: bool
+    scale_storage: str = "register"
 
 
 def parse_trait(trait: str) -> TraitCombo:
@@ -67,11 +68,22 @@ def parse_trait(trait: str) -> TraitCombo:
     Raises ValueError for a string with the wrong number of fields.
     """
     parts = split_trait(trait)
-    if len(parts) not in (6, 7):
+    if len(parts) not in (6, 7, 8):
         raise ValueError(
-            f"Invalid trait combo {trait!r}: expected 6 or 7 fields, got {len(parts)}"
+            f"Invalid trait combo {trait!r}: expected 6, 7, or 8 fields, got {len(parts)}"
         )
-    persistent = parts[6] == "True" if len(parts) == 7 else False
+    persistent = False
+    scale_storage = "register"
+    if len(parts) == 7:
+        if parts[6] in ("register", "lds"):
+            scale_storage = parts[6]
+        else:
+            persistent = parts[6] == "True"
+    elif len(parts) == 8:
+        persistent = parts[6] == "True"
+        scale_storage = parts[7]
+    if scale_storage not in ("register", "lds"):
+        raise ValueError(f"Invalid scale storage mode {scale_storage!r}")
     return TraitCombo(
         parts[0],
         parts[1],
@@ -80,6 +92,7 @@ def parse_trait(trait: str) -> TraitCombo:
         parts[4] == "True",
         parts[5] == "True",
         persistent,
+        scale_storage,
     )
 
 
@@ -95,4 +108,6 @@ def join_trait(combo: TraitCombo, with_persistent: bool = True) -> str:
     ]
     if with_persistent:
         fields.append(str(combo.persistent))
+    if combo.scale_storage != "register":
+        fields.append(combo.scale_storage)
     return "_".join(fields)

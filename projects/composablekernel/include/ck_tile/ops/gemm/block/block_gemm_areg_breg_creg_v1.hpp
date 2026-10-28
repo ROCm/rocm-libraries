@@ -344,6 +344,7 @@ struct BlockGemmARegBRegCRegV1
     // used for sub tile based pipelining, where K dimension of block-gemm is divided into
     // KSubTileNum sub-tiles
     template <index_t SubTileIdx,
+              bool ScaleIsLocalFragment = false,
               typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
@@ -405,7 +406,8 @@ struct BlockGemmARegBRegCRegV1
         static_ford<sequence<KPerSubTile, MIterPerWarp>>{}([&](auto km) {
             constexpr auto kIter          = number<km[number<0>{}]>{};
             constexpr auto mIter          = number<km[number<1>{}]>{};
-            constexpr index_t scale_k_idx = SubTileIdx * KPerSubTile + decltype(kIter)::value;
+            constexpr index_t scale_k_idx =
+                (ScaleIsLocalFragment ? 0 : SubTileIdx * KPerSubTile) + decltype(kIter)::value;
             // read A warp tensor from A block tensor
             AWarpTensor a_warp_tensor;
             a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
@@ -417,8 +419,10 @@ struct BlockGemmARegBRegCRegV1
             // For scale16: 2 int32_t elements packed into int64_t (8 packed e8m0 bytes).
             // The scale thread buffer spans the whole block-K (scale_k_idx ranges over
             // [0, KIterPerWarp)), so divide by KIterPerWarp, not one sub-tile's KPerSubTile.
-            constexpr index_t scale_k_len =
-                AScaleBlockTensor::get_thread_buffer_size() / (MIterPerWarp * KIterPerWarp);
+            constexpr index_t scale_k_iterations =
+                ScaleIsLocalFragment ? KPerSubTile : KIterPerWarp;
+            constexpr index_t scale_k_len = AScaleBlockTensor::get_thread_buffer_size() /
+                                            (MIterPerWarp * scale_k_iterations);
             static_assert(scale_k_len == 1 || scale_k_len == 2,
                           "scale_k_len must be 1 (scale32, int32_t) or 2 (scale16, int64_t)");
             auto scale_a_slice = a_scale_tensor.get_y_sliced_thread_data(

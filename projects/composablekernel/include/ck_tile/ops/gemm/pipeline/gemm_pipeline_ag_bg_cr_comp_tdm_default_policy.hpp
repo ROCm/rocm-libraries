@@ -7,6 +7,7 @@
 #include "ck_tile/core/utility/data_cache_prefetch.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
 
 namespace ck_tile {
@@ -24,6 +25,17 @@ template <typename T>
 struct scale_block_size_or_default<T, std::void_t<decltype(T::ScaleBlockSize)>>
 {
     static constexpr index_t value = T::ScaleBlockSize;
+};
+
+template <typename T, typename = void>
+struct scale_storage_or_default
+{
+    static constexpr auto value = MxScaleStorageMode::Register;
+};
+template <typename T>
+struct scale_storage_or_default<T, std::void_t<decltype(T::ScaleStorage)>>
+{
+    static constexpr auto value = T::ScaleStorage;
 };
 } // namespace detail
 
@@ -63,6 +75,65 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
     // (group1 in amd_tdm_descriptor.hpp); keep in sync
     static constexpr index_t TDMPadAmountMax   = 127;
     static constexpr index_t TDMPadIntervalMax = 7;
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseLdsScaleStorage()
+    {
+        return detail::scale_storage_or_default<Problem>::value == MxScaleStorageMode::Lds;
+    }
+
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeScaleLdsBlockDescriptor()
+    {
+        constexpr index_t MNPerBlock =
+            IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
+        constexpr index_t ScalePacksPerK =
+            Problem::BlockGemmShape::kK / detail::scale_block_size_or_default<Problem>::value / 4;
+        return make_naive_tensor_descriptor_packed(
+            make_tuple(number<MNPerBlock>{}, number<ScalePacksPerK>{}));
+    }
+
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeScale()
+    {
+        if constexpr(UseLdsScaleStorage<Problem>())
+        {
+            constexpr auto desc = MakeScaleLdsBlockDescriptor<Problem, IsA>();
+            return integer_least_multiple(
+                desc.get_element_space_size() * static_cast<index_t>(sizeof(int32_t)), 16);
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        return Base::template GetSmemSize<Problem>() + GetSmemSizeScale<Problem, true>() +
+               GetSmemSizeScale<Problem, false>();
+    }
+
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeScaleTdmTileDistribution()
+    {
+        constexpr index_t warp_num = GetTDMLoadWarpNum<Problem>();
+        constexpr index_t MNPerBlock =
+            IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
+        constexpr index_t ScalePacksPerK =
+            Problem::BlockGemmShape::kK / detail::scale_block_size_or_default<Problem>::value / 4;
+        static_assert(MNPerBlock % warp_num == 0);
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<warp_num, MNPerBlock / warp_num>, sequence<ScalePacksPerK>>,
+                tuple<sequence<1>>,
+                tuple<sequence<0>>,
+                sequence<1, 2>,
+                sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
 
     /// Number of waves that load an A / B tile from DRAM to LDS, one TDM load each.
     template <typename Problem>
@@ -637,6 +708,46 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             tile_distribution_encoding<sequence<MWarps, MWithinWarp>,
                                        tuple<sequence<NIterPerWarp, NWarps, WarpN>,
                                              sequence<kKPerBlock / ScaleSize / PackSize, 1>>,
+                                       tuple<sequence<0, 1>, sequence<0, 1>>,
+                                       tuple<sequence<0, 1>, sequence<1, 2>>,
+                                       sequence<1, 2, 2>,
+                                       sequence<0, 0, 1>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeScaleAFragmentDistribution()
+    {
+        using TileShape  = typename Problem::BlockGemmShape;
+        using BlockWarps = typename TileShape::BlockWarps;
+        constexpr index_t MWarps        = BlockWarps::at(Base::I0);
+        constexpr index_t NWarps        = BlockWarps::at(Base::I1);
+        constexpr index_t WarpM         = TileShape::WarpTile::at(Base::I0);
+        constexpr index_t NWithinWarp   = get_warp_size() / WarpM;
+        constexpr index_t MIterPerWarp  = TileShape::kM / MWarps / WarpM;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<NWarps, NWithinWarp>,
+                                       tuple<sequence<MIterPerWarp, MWarps, WarpM>,
+                                             sequence<1, 1>>,
+                                       tuple<sequence<1, 0>, sequence<0, 1>>,
+                                       tuple<sequence<1, 0>, sequence<1, 2>>,
+                                       sequence<1, 2, 2>,
+                                       sequence<0, 0, 1>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeScaleBFragmentDistribution()
+    {
+        using TileShape  = typename Problem::BlockGemmShape;
+        using BlockWarps = typename TileShape::BlockWarps;
+        constexpr index_t MWarps        = BlockWarps::at(Base::I0);
+        constexpr index_t NWarps        = BlockWarps::at(Base::I1);
+        constexpr index_t WarpN         = TileShape::WarpTile::at(Base::I1);
+        constexpr index_t MWithinWarp   = get_warp_size() / WarpN;
+        constexpr index_t NIterPerWarp  = TileShape::kN / NWarps / WarpN;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<MWarps, MWithinWarp>,
+                                       tuple<sequence<NIterPerWarp, NWarps, WarpN>,
+                                             sequence<1, 1>>,
                                        tuple<sequence<0, 1>, sequence<0, 1>>,
                                        tuple<sequence<0, 1>, sequence<1, 2>>,
                                        sequence<1, 2, 2>,

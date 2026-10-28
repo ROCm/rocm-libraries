@@ -97,6 +97,27 @@ class TestTraitParse(unittest.TestCase):
                 parse_trait(join_trait(combo6, with_persistent=False)), combo6
             )
 
+        lds_combo = TraitCombo(
+            "comp_tdm_v2",
+            "tdm",
+            "intrawave",
+            False,
+            False,
+            False,
+            False,
+            "lds",
+        )
+        self.assertEqual(parse_trait(join_trait(lds_combo)), lds_combo)
+        self.assertEqual(
+            parse_trait(join_trait(lds_combo, with_persistent=False)), lds_combo
+        )
+        self.assertEqual(
+            parse_trait(
+                "comp_tdm_v2_tdm_intrawave_False_False_False_False"
+            ).scale_storage,
+            "register",
+        )
+
     def test_bad_field_count(self):
         with self.assertRaises(ValueError):
             parse_trait("comp_tdm_tdm_intrawave")
@@ -109,6 +130,7 @@ class TestTraitParse(unittest.TestCase):
             "comp_async_cshuffle_intrawave_False_False_False_True",
             "comp_tdm_tdm_intrawave_False_False_False",
             "comp_tdm_v2_tdm_intrawave_True_False_False_False",
+            "comp_tdm_v2_tdm_intrawave_False_False_False_False_lds",
             "comp_tdm_pc_tdm_intrawave_False_False_False_False",
             "comp_async_eight_waves_cshuffle_intrawave_False_False_False",
             "weight_preshuffle_default_intrawave_False_False_False",

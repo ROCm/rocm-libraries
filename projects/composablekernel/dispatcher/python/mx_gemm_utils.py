@@ -261,6 +261,7 @@ class MxGemmKernelConfig:
     pad_n: bool = False
     pad_k: bool = False
     persistent: bool = False
+    scale_storage: str = "register"
 
     tile_m: int = 128
     tile_n: int = 128
@@ -294,6 +295,7 @@ class MxGemmKernelConfig:
             "pad_n": self.pad_n,
             "pad_k": self.pad_k,
             "persistent": self.persistent,
+            "scale_storage": self.scale_storage,
             "tile_config": {
                 "tile_m": self.tile_m,
                 "tile_n": self.tile_n,
@@ -381,6 +383,8 @@ class MxGemmKernelConfig:
         ]
         if self.persistent:
             parts.append(str(self.persistent))
+        if self.scale_storage == "lds":
+            parts.append("lds_scale")
         parts.append(f"{self.tile_m}x{self.tile_n}x{self.tile_k}")
         parts.append(f"{self.warp_m}x{self.warp_n}x{self.warp_k}")
         parts.append(f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}")
@@ -973,8 +977,10 @@ def expand_mx_sweep(
 
     configs = []
     for kernel in kernels:
+        trait_combo = kernel["trait_combo"]
+        scale_storage = trait_combo[7] if len(trait_combo) == 8 else "register"
         pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
-            builder._normalize_trait_combo(kernel["trait_combo"])
+            builder._normalize_trait_combo(trait_combo)
         )
         cfg = MxGemmKernelConfig(
             datatype=dtype,
@@ -987,6 +993,7 @@ def expand_mx_sweep(
             pad_n=pad_n,
             pad_k=pad_k,
             persistent=persistent,
+            scale_storage=scale_storage,
             k_block_per_cu=k_block_per_cu,
             **kernel["tile_config"],
         )

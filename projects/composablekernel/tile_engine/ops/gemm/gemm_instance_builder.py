@@ -124,6 +124,11 @@ class GemmKernelBuilder:
         flat_items = []
         for k in kernel_list:
             flat = dict(k["tile_config"])
+            scale_storage = (
+                k["trait_combo"][7]
+                if self.kernel_name_prefix == "mx_gemm" and len(k["trait_combo"]) == 8
+                else "register"
+            )
             pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
                 self._normalize_trait_combo(k["trait_combo"])
             )
@@ -139,13 +144,20 @@ class GemmKernelBuilder:
             )
             if self._uses_persistent_trait():
                 flat["persistent"] = persistent
+            if self.kernel_name_prefix == "mx_gemm":
+                flat["scale_storage"] = scale_storage
             flat_items.append(flat)
 
+        sampling_axes = (
+            GEMM_AXES + ["scale_storage"]
+            if self.kernel_name_prefix == "mx_gemm"
+            else GEMM_AXES
+        )
         selected, method, selected_indices = sample_feasible_set(
             flat_items,
             self.max_instances,
             effective_seed,
-            GEMM_AXES,
+            sampling_axes,
         )
 
         kernel_list = [kernel_list[i] for i in selected_indices]
@@ -192,7 +204,7 @@ class GemmKernelBuilder:
                     pad_n,
                     pad_k,
                     persistent,
-                ) = trait_combo
+                ) = self._normalize_trait_combo(trait_combo)
 
                 # Skip if this tile config is not valid for this specific pipeline
                 if not self._validate_tile_config(
@@ -309,6 +321,8 @@ class GemmKernelBuilder:
             )
 
     def _normalize_trait_combo(self, trait_combo):
+        if len(trait_combo) == 8 and self.kernel_name_prefix == "mx_gemm":
+            return trait_combo[:7]
         if len(trait_combo) == 7:
             return trait_combo
         if len(trait_combo) == 6:
@@ -340,6 +354,12 @@ class GemmKernelBuilder:
         ]
         if self._uses_persistent_trait():
             trait_parts.append(str(persistent))
+        if (
+            self.kernel_name_prefix == "mx_gemm"
+            and len(trait_combo) == 8
+            and trait_combo[7] != "register"
+        ):
+            trait_parts.append(str(trait_combo[7]))
 
         return "_".join(trait_parts)
 
@@ -355,6 +375,12 @@ class GemmKernelBuilder:
         )
         if self._uses_persistent_trait():
             kernel_name += f"_{str(persistent).capitalize()}"
+        if (
+            self.kernel_name_prefix == "mx_gemm"
+            and len(trait_combo) == 8
+            and trait_combo[7] == "lds"
+        ):
+            kernel_name += "_lds_scale"
 
         if tile_config is not None:
             kernel_name += f"_{self._format_tile_config_string(tile_config)}"
@@ -903,6 +929,11 @@ struct SelectedKernel {{
         return instance_code
 
     def populate_trait_config(self, trait_combo):
+        scale_storage = (
+            trait_combo[7]
+            if self.kernel_name_prefix == "mx_gemm" and len(trait_combo) == 8
+            else "register"
+        )
         (
             pipeline,
             epilogue,
@@ -977,6 +1008,9 @@ struct SelectedKernel {{
             elif self.kernel_name_prefix == "mx_gemm":
                 instance_code += f"""
     static constexpr bool Preshuffle = {"true" if pipeline == "weight_preshuffle" else "false"};
+    static constexpr auto ScaleStorage = ck_tile::MxScaleStorageMode::{
+        "Lds" if scale_storage == "lds" else "Register"
+    };
     // Host B reshuffling uses the native MX configuration interface.
     static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
     static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
@@ -1256,6 +1290,20 @@ struct SelectedKernel {{
                 if self.kernel_name_prefix == "mx_gemm"
                 else "UniversalGemmPipelineProblem"
             )
+            mx_problem_tail = ""
+            if self.kernel_name_prefix == "mx_gemm":
+                mx_problem_tail = """,
+            ck_tile::element_wise::PassThrough,
+            ck_tile::element_wise::PassThrough,
+            ADataType,
+            BDataType,
+            ck_tile::e8m0_t,
+            ck_tile::e8m0_t,
+            32,
+            false,
+            1,
+            1,
+            ScaleStorage"""
             instance_code += f"""
 
         using UniversalGemmProblem = ck_tile::{problem_type}<
@@ -1267,7 +1315,7 @@ struct SelectedKernel {{
                                             ALayout, BLayout, CLayout, TransposeC,
                                             UseStructuredSparsity, UsePersistentKernel,
                                             NumWaveGroups, Preshuffle>,
-            scheduler>;"""
+            scheduler{mx_problem_tail}>;"""
 
         # GemmPipeline
         if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:

@@ -60,12 +60,38 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
     def _generate_trait_combinations(self):
         arch = self.gpu_target.split(":", 1)[0]
         expected = GEMM_MX_PIPELINES_BY_ARCH.get(arch, ())
-        return [
+        base_combos = [
             combo
             for combo in super()._generate_trait_combinations()
             if combo[0] in expected
             and not (arch == "gfx1250" and (combo[5] or combo[6]))  # pad_k, persistent
         ]
+        modes = (
+            self.config.get("trait_config", {})
+            .get("scale_storage", {})
+            .get("values", ["register"])
+        )
+        invalid_modes = set(modes) - {"register", "lds"}
+        if invalid_modes:
+            raise ValueError(f"unsupported MX scale_storage values: {sorted(invalid_modes)}")
+
+        combinations = []
+        for combo in base_combos:
+            for mode in modes:
+                if mode == "register":
+                    combinations.append(combo)
+                elif (
+                    arch == "gfx1250"
+                    and self.datatype == "fp4"
+                    and combo[0] in ("comp_tdm", "comp_tdm_v2")
+                ):
+                    combinations.append((*combo, mode))
+                else:
+                    raise ValueError(
+                        "scale_storage=lds requires gfx1250 FP4 and "
+                        "pipeline comp_tdm or comp_tdm_v2"
+                    )
+        return combinations
 
     def _generate_all_individual(self, num_workers=None):
         """Generate individual kernel files for separate compilation with parallel processing"""
@@ -327,6 +353,9 @@ def main():
 
         # Parse trait combo from the right so pipeline names may contain underscores.
         trait_parts = args.trait_combo.split("_")
+        scale_storage = (
+            trait_parts.pop() if trait_parts[-1] in ("register", "lds") else "register"
+        )
         trait_combo = (
             "_".join(trait_parts[:-6]),  # pipeline
             trait_parts[-6],  # epilogue
@@ -336,6 +365,8 @@ def main():
             trait_parts[-2] == "True",  # pad_k
             trait_parts[-1] == "True",  # persistent
         )
+        if scale_storage != "register":
+            trait_combo = (*trait_combo, scale_storage)
 
         # Generate the kernel
         builder._generate_kernel_instance(

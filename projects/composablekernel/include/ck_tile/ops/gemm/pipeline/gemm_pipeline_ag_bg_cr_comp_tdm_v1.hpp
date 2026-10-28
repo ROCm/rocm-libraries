@@ -233,6 +233,17 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
     static constexpr auto pipeline_tune_params = Policy::template GetPipelineSubTileNum<Problem>();
     static constexpr index_t sub_tile_num      = pipeline_tune_params.value;
     static constexpr index_t num_lds_buffers   = 2;
+    static constexpr bool UseLdsScaleStorage = Policy::template UseLdsScaleStorage<Problem>();
+
+    static_assert(!UseLdsScaleStorage ||
+                      (std::is_same_v<ADataType, pk_fp4_t> &&
+                       std::is_same_v<BDataType, pk_fp4_t> && Problem::ScaleBlockSize == 32 &&
+                       BlockGemmShape::WarpTile::at(I2{}) == 128),
+                  "LDS MX scale storage requires FP4 scale32 with a K=128 warp tile");
+    static_assert(!UseLdsScaleStorage ||
+                      sub_tile_num ==
+                          BlockGemmShape::kK / BlockGemmShape::WarpTile::at(I2{}),
+                  "LDS MX scale storage requires one K=128 scale fragment per sub-tile");
 
     static constexpr bool UseDataCachePrefetch =
         (Policy::DataCachePrefetchA != DataCachePrefetchKind::None ||
@@ -258,6 +269,37 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
     struct PipelineImpl<GemmPipelineScheduler::Intrawave> : public PipelineImplBase
     {
         using Base = PipelineImplBase;
+
+        CK_TILE_DEVICE auto GetScaleLdsTensorViews(void* p_smem) const
+        {
+            constexpr index_t a_bytes = Policy::template GetSmemSizeA<Problem>();
+            constexpr index_t b_bytes = Policy::template GetSmemSizeB<Problem>();
+            constexpr index_t scale_a_bytes =
+                Policy::template GetSmemSizeScale<Problem, true>();
+            constexpr index_t scale_offset = num_lds_buffers * (a_bytes + b_bytes);
+            constexpr auto scale_a_desc =
+                Policy::template MakeScaleLdsBlockDescriptor<Problem, true>();
+            constexpr auto scale_b_desc =
+                Policy::template MakeScaleLdsBlockDescriptor<Problem, false>();
+
+            auto scale_a_views = generate_tuple(
+                [&](auto i) {
+                    auto* ptr = reinterpret_cast<int32_t*>(
+                        static_cast<char*>(p_smem) + scale_offset + i.value * scale_a_bytes);
+                    return make_tensor_view<address_space_enum::lds>(ptr, scale_a_desc);
+                },
+                number<num_lds_buffers>{});
+            auto scale_b_views = generate_tuple(
+                [&](auto i) {
+                    auto* ptr = reinterpret_cast<int32_t*>(
+                        static_cast<char*>(p_smem) + scale_offset +
+                        num_lds_buffers * scale_a_bytes +
+                        i.value * Policy::template GetSmemSizeScale<Problem, false>());
+                    return make_tensor_view<address_space_enum::lds>(ptr, scale_b_desc);
+                },
+                number<num_lds_buffers>{});
+            return make_tuple(std::move(scale_a_views), std::move(scale_b_views));
+        }
         // TODO : need to update
         CK_TILE_DEVICE static constexpr auto HotLoopScheduler()
         {
@@ -710,6 +752,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                   typename BLdsGemmWindows,
                   typename AScaleDramWindow,
                   typename BScaleDramWindow,
+                  typename AScaleLdsViews,
+                  typename BScaleLdsViews,
                   typename TDMConfigA,
                   typename TDMConfigB,
                   typename std::enable_if_t<NumLdsBuffers == 2, bool> = true>
@@ -721,6 +765,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                             BLdsGemmWindows& b_lds_gemm_windows,
                                             AScaleDramWindow& a_scale_dram_window,
                                             BScaleDramWindow& b_scale_dram_window,
+                                            AScaleLdsViews& a_scale_lds_views,
+                                            BScaleLdsViews& b_scale_lds_views,
                                             TDMConfigA& tdm_config_a,
                                             TDMConfigB& tdm_config_b,
                                             index_t num_loop,
@@ -755,18 +801,97 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
             using ALdsTile = decltype(make_static_distributed_tensor<ADataType>(ALdsTileDistr));
             using BLdsTile = decltype(make_static_distributed_tensor<BDataType>(BLdsTileDistr));
 
-            using AScaleBlockTile =
+            using AScaleRegisterTile =
                 decltype(make_static_distributed_tensor<typename AScaleDramWindow::DataType>(
                     Policy::template MakeScaleADramTileDistribution<Problem>()));
-            using BScaleBlockTile =
+            using BScaleRegisterTile =
                 decltype(make_static_distributed_tensor<typename BScaleDramWindow::DataType>(
                     Policy::template MakeScaleBDramTileDistribution<Problem>()));
+            using AScaleBlockTile =
+                std::conditional_t<UseLdsScaleStorage, null_tensor, AScaleRegisterTile>;
+            using BScaleBlockTile =
+                std::conditional_t<UseLdsScaleStorage, null_tensor, BScaleRegisterTile>;
             // register tiles; double buffering -> a register tile corresponds to a LDS tile window
             ALdsTile a_block_tile[2];
             BLdsTile b_block_tile[2];
 
             AScaleBlockTile a_scale_tile[2];
             BScaleBlockTile b_scale_tile[2];
+
+            auto block_gemm = BlockGemm();
+            TDMConfig scale_tdm_config_a;
+            TDMConfig scale_tdm_config_b;
+            auto prefetch_scales = [&](auto buffer_idx) {
+                if constexpr(UseLdsScaleStorage)
+                {
+                    constexpr auto a_tdm_distribution =
+                        Policy::template MakeScaleTdmTileDistribution<Problem, true>();
+                    constexpr auto b_tdm_distribution =
+                        Policy::template MakeScaleTdmTileDistribution<Problem, false>();
+                    auto a_scale_lds_window = make_tile_window(
+                        a_scale_lds_views[buffer_idx],
+                        make_tuple(number<MPerBlock>{},
+                                   number<KPerBlock / Problem::ScaleBlockSize / 4>{}),
+                        {0, 0},
+                        a_tdm_distribution);
+                    auto b_scale_lds_window = make_tile_window(
+                        b_scale_lds_views[buffer_idx],
+                        make_tuple(number<NPerBlock>{},
+                                   number<KPerBlock / Problem::ScaleBlockSize / 4>{}),
+                        {0, 0},
+                        b_tdm_distribution);
+                    Base::GlobalPrefetchTDM(scale_tdm_config_a,
+                                            a_scale_lds_window,
+                                            a_scale_dram_window,
+                                            a_scale_dram_tile_window_step);
+                    Base::GlobalPrefetchTDM(scale_tdm_config_b,
+                                            b_scale_lds_window,
+                                            b_scale_dram_window,
+                                            b_scale_dram_tile_window_step);
+                }
+                else
+                {
+                    Base::GlobalPrefetch(a_scale_tile[buffer_idx],
+                                         a_scale_dram_window,
+                                         a_scale_dram_tile_window_step);
+                    Base::GlobalPrefetch(b_scale_tile[buffer_idx],
+                                         b_scale_dram_window,
+                                         b_scale_dram_tile_window_step);
+                }
+            };
+
+            auto run_scaled_gemm = [&](auto sub_tile_idx,
+                                       auto buffer_idx,
+                                       auto& c_tile,
+                                       const auto& a_tile,
+                                       const auto& b_tile) {
+                    if constexpr(UseLdsScaleStorage)
+                    {
+                        auto a_fragment_window = make_tile_window(
+                            a_scale_lds_views[buffer_idx],
+                            make_tuple(number<MPerBlock>{}, number<1>{}),
+                            {0, sub_tile_idx.value},
+                            Policy::template MakeScaleAFragmentDistribution<Problem>());
+                        auto b_fragment_window = make_tile_window(
+                            b_scale_lds_views[buffer_idx],
+                            make_tuple(number<NPerBlock>{}, number<1>{}),
+                            {0, sub_tile_idx.value},
+                            Policy::template MakeScaleBFragmentDistribution<Problem>());
+                        auto a_fragment = load_tile(a_fragment_window);
+                        auto b_fragment = load_tile(b_fragment_window);
+                        block_gemm.template operator()<sub_tile_idx.value, true>(
+                            c_tile, a_tile, b_tile, a_fragment, b_fragment);
+                    }
+                    else
+                    {
+                        block_gemm.template operator()<sub_tile_idx.value>(
+                            c_tile,
+                            a_tile,
+                            b_tile,
+                            a_scale_tile[buffer_idx],
+                            b_scale_tile[buffer_idx]);
+                    }
+                };
 
             // read A(0), B(0) from DRAM to LDS window(0)
             // and advance the DRAM windows
@@ -779,13 +904,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                     b_copy_dram_window,
                                     b_dram_tile_window_step);
 
-            Base::GlobalPrefetch(
-                a_scale_tile[0], a_scale_dram_window, a_scale_dram_tile_window_step);
-            Base::GlobalPrefetch(
-                b_scale_tile[0], b_scale_dram_window, b_scale_dram_tile_window_step);
-
-            // initialize block gemm
-            auto block_gemm = BlockGemm();
+            prefetch_scales(I0{});
 
             // initialize C block tile
             auto c_block_tile = block_gemm.MakeCBlockTile();
@@ -801,10 +920,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                     b_copy_lds_windows[I1{}],
                                     b_copy_dram_window,
                                     b_dram_tile_window_step);
-            Base::GlobalPrefetch(
-                a_scale_tile[1], a_scale_dram_window, a_scale_dram_tile_window_step);
-            Base::GlobalPrefetch(
-                b_scale_tile[1], b_scale_dram_window, b_scale_dram_tile_window_step);
+            prefetch_scales(I1{});
 
             if constexpr(UseDataCachePrefetch && HasHotLoop)
             {
@@ -817,7 +933,7 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                         b_copy_dram_window, b_dram_tile_window_step, tdm_config_b);
             }
 
-            s_wait_tensorcnt_barrier<2>();
+            s_wait_tensorcnt_barrier<UseLdsScaleStorage ? 4 : 2>();
             // read A(0), B(0) from LDS window(0) to pipeline registers(0)
             block_gemm.template LocalPrefetch<sub_tile_num == 1 ? WindowSlideMode::Stay
                                                                 : WindowSlideMode::Move>(
@@ -849,11 +965,11 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                 b_lds_gemm_windows[I0{}],
                                 is_a_load_tr_v,
                                 is_b_load_tr_v);
-                            block_gemm.template operator()<i.value>(c_block_tile,
-                                                                    a_block_tile[compute_idx],
-                                                                    b_block_tile[compute_idx],
-                                                                    a_scale_tile[0],
-                                                                    b_scale_tile[0]);
+                            run_scaled_gemm(i,
+                                            I0{},
+                                            c_block_tile,
+                                            a_block_tile[compute_idx],
+                                            b_block_tile[compute_idx]);
                             HotLoopScheduler();
                         });
 
@@ -894,7 +1010,6 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                                 b_copy_lds_windows[I0{}],
                                                 b_copy_dram_window,
                                                 b_dram_tile_window_step);
-
                         s_wait_tensorcnt_barrier<2>();
                         constexpr index_t final_prefetch_idx = sub_tile_num % 2;
                         constexpr index_t final_compute_idx  = (sub_tile_num - 1) % 2;
@@ -908,17 +1023,14 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                             is_a_load_tr_v,
                             is_b_load_tr_v);
 
-                        block_gemm.template operator()<sub_tile_num - 1>(
-                            c_block_tile,
-                            a_block_tile[final_compute_idx],
-                            b_block_tile[final_compute_idx],
-                            a_scale_tile[0],
-                            b_scale_tile[0]);
-
-                        Base::GlobalPrefetch(
-                            a_scale_tile[0], a_scale_dram_window, a_scale_dram_tile_window_step);
-                        Base::GlobalPrefetch(
-                            b_scale_tile[0], b_scale_dram_window, b_scale_dram_tile_window_step);
+                        run_scaled_gemm(number<sub_tile_num - 1>{},
+                                        I0{},
+                                        c_block_tile,
+                                        a_block_tile[final_compute_idx],
+                                        b_block_tile[final_compute_idx]);
+                        if constexpr(UseLdsScaleStorage)
+                            block_sync_lds();
+                        prefetch_scales(I0{});
                         HotLoopScheduler();
                     }
 
@@ -939,12 +1051,11 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                 is_a_load_tr_v,
                                 is_b_load_tr_v);
 
-                            block_gemm.template operator()<sub_tile_num - i.value>(
-                                c_block_tile,
-                                a_block_tile[compute_idx],
-                                b_block_tile[compute_idx],
-                                a_scale_tile[1],
-                                b_scale_tile[1]);
+                            run_scaled_gemm(number<sub_tile_num - i.value>{},
+                                            I1{},
+                                            c_block_tile,
+                                            a_block_tile[compute_idx],
+                                            b_block_tile[compute_idx]);
                             HotLoopScheduler();
                         });
 
@@ -989,17 +1100,14 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                             is_a_load_tr_v,
                             is_b_load_tr_v);
 
-                        block_gemm.template operator()<sub_tile_num - 1>(
-                            c_block_tile,
-                            a_block_tile[final_compute_idx],
-                            b_block_tile[final_compute_idx],
-                            a_scale_tile[1],
-                            b_scale_tile[1]);
-
-                        Base::GlobalPrefetch(
-                            a_scale_tile[1], a_scale_dram_window, a_scale_dram_tile_window_step);
-                        Base::GlobalPrefetch(
-                            b_scale_tile[1], b_scale_dram_window, b_scale_dram_tile_window_step);
+                        run_scaled_gemm(number<sub_tile_num - 1>{},
+                                        I1{},
+                                        c_block_tile,
+                                        a_block_tile[final_compute_idx],
+                                        b_block_tile[final_compute_idx]);
+                        if constexpr(UseLdsScaleStorage)
+                            block_sync_lds();
+                        prefetch_scales(I1{});
                         HotLoopScheduler();
                     }
 
@@ -1024,11 +1132,11 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                             is_a_load_tr_v,
                             is_b_load_tr_v);
 
-                        block_gemm.template operator()<i.value>(c_block_tile,
-                                                                a_block_tile[compute_idx],
-                                                                b_block_tile[compute_idx],
-                                                                a_scale_tile[0],
-                                                                b_scale_tile[0]);
+                        run_scaled_gemm(i,
+                                        I0{},
+                                        c_block_tile,
+                                        a_block_tile[compute_idx],
+                                        b_block_tile[compute_idx]);
                         HotLoopScheduler();
                     });
 
@@ -1044,12 +1152,11 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                         b_lds_gemm_windows[I1{}],
                         is_a_load_tr_v,
                         is_b_load_tr_v);
-                    block_gemm.template operator()<sub_tile_num - 1>(
-                        c_block_tile,
-                        a_block_tile[final_compute_idx],
-                        b_block_tile[final_compute_idx],
-                        a_scale_tile[0],
-                        b_scale_tile[0]);
+                    run_scaled_gemm(number<sub_tile_num - 1>{},
+                                    I0{},
+                                    c_block_tile,
+                                    a_block_tile[final_compute_idx],
+                                    b_block_tile[final_compute_idx]);
                     HotLoopScheduler();
                 }
                 // Process window I1
@@ -1066,22 +1173,20 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                             is_a_load_tr_v,
                             is_b_load_tr_v);
 
-                        block_gemm.template operator()<sub_tile_num - i.value>(
-                            c_block_tile,
-                            a_block_tile[compute_idx],
-                            b_block_tile[compute_idx],
-                            a_scale_tile[1],
-                            b_scale_tile[1]);
+                        run_scaled_gemm(number<sub_tile_num - i.value>{},
+                                        I1{},
+                                        c_block_tile,
+                                        a_block_tile[compute_idx],
+                                        b_block_tile[compute_idx]);
                         HotLoopScheduler();
                     });
 
                     constexpr index_t final_compute_idx = 1;
-                    block_gemm.template operator()<sub_tile_num - 1>(
-                        c_block_tile,
-                        a_block_tile[final_compute_idx],
-                        b_block_tile[final_compute_idx],
-                        a_scale_tile[1],
-                        b_scale_tile[1]);
+                    run_scaled_gemm(number<sub_tile_num - 1>{},
+                                    I1{},
+                                    c_block_tile,
+                                    a_block_tile[final_compute_idx],
+                                    b_block_tile[final_compute_idx]);
                 }
             }
             else if constexpr(TailNum == TailNumber::One)
@@ -1099,20 +1204,20 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                         is_a_load_tr_v,
                         is_b_load_tr_v);
 
-                    block_gemm.template operator()<i.value>(c_block_tile,
-                                                            a_block_tile[compute_idx],
-                                                            b_block_tile[compute_idx],
-                                                            a_scale_tile[0],
-                                                            b_scale_tile[0]);
+                    run_scaled_gemm(i,
+                                    I0{},
+                                    c_block_tile,
+                                    a_block_tile[compute_idx],
+                                    b_block_tile[compute_idx]);
                     HotLoopScheduler();
                 });
 
                 constexpr index_t final_compute_idx = (sub_tile_num - 1) % 2;
-                block_gemm.template operator()<sub_tile_num - 1>(c_block_tile,
-                                                                 a_block_tile[final_compute_idx],
-                                                                 b_block_tile[final_compute_idx],
-                                                                 a_scale_tile[0],
-                                                                 b_scale_tile[0]);
+                run_scaled_gemm(number<sub_tile_num - 1>{},
+                                I0{},
+                                c_block_tile,
+                                a_block_tile[final_compute_idx],
+                                b_block_tile[final_compute_idx]);
             }
             return c_block_tile;
         }
@@ -1405,21 +1510,42 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
             const auto& scale_a_window_tmp = scale_a_dram_block_window_tmp[number<0>{}];
             const auto& scale_b_window_tmp = scale_b_dram_block_window_tmp[number<0>{}];
 
-            constexpr auto scale_a_distribution =
-                Policy::template MakeScaleADramTileDistribution<Problem>();
-            auto scale_a_dram_window = make_tile_window(
-                scale_a_window_tmp.get_bottom_tensor_view(),
-                make_tuple(number<MPerBlock>{}, number<KPerBlock / ScaleSize / ScalePackSize>{}),
-                scale_a_window_tmp.get_window_origin(),
-                scale_a_distribution);
+            auto scale_a_dram_window = [&]() {
+                if constexpr(UseLdsScaleStorage)
+                    return make_tile_window(
+                        scale_a_window_tmp.get_bottom_tensor_view(),
+                        make_tuple(number<MPerBlock>{},
+                                   number<KPerBlock / ScaleSize / ScalePackSize>{}),
+                        scale_a_window_tmp.get_window_origin(),
+                        Policy::template MakeScaleTdmTileDistribution<Problem, true>());
+                else
+                    return make_tile_window(
+                        scale_a_window_tmp.get_bottom_tensor_view(),
+                        make_tuple(number<MPerBlock>{},
+                                   number<KPerBlock / ScaleSize / ScalePackSize>{}),
+                        scale_a_window_tmp.get_window_origin(),
+                        Policy::template MakeScaleADramTileDistribution<Problem>());
+            }();
 
-            constexpr auto scale_b_distribution =
-                Policy::template MakeScaleBDramTileDistribution<Problem>();
-            auto scale_b_dram_window = make_tile_window(
-                scale_b_window_tmp.get_bottom_tensor_view(),
-                make_tuple(number<NPerBlock>{}, number<KPerBlock / ScaleSize / ScalePackSize>{}),
-                scale_b_window_tmp.get_window_origin(),
-                scale_b_distribution);
+            auto scale_b_dram_window = [&]() {
+                if constexpr(UseLdsScaleStorage)
+                    return make_tile_window(
+                        scale_b_window_tmp.get_bottom_tensor_view(),
+                        make_tuple(number<NPerBlock>{},
+                                   number<KPerBlock / ScaleSize / ScalePackSize>{}),
+                        scale_b_window_tmp.get_window_origin(),
+                        Policy::template MakeScaleTdmTileDistribution<Problem, false>());
+                else
+                    return make_tile_window(
+                        scale_b_window_tmp.get_bottom_tensor_view(),
+                        make_tuple(number<NPerBlock>{},
+                                   number<KPerBlock / ScaleSize / ScalePackSize>{}),
+                        scale_b_window_tmp.get_window_origin(),
+                        Policy::template MakeScaleBDramTileDistribution<Problem>());
+            }();
+
+            auto&& [scale_a_lds_views, scale_b_lds_views] =
+                GetScaleLdsTensorViews(static_cast<char*>(p_smem));
 
             return RunPipelineLoop<HasHotLoop,
                                    TailNum,
@@ -1433,6 +1559,8 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                                     b_lds_gemm_windows,
                                                     scale_a_dram_window,
                                                     scale_b_dram_window,
+                                                    scale_a_lds_views,
+                                                    scale_b_lds_views,
                                                     tdm_config_a,
                                                     tdm_config_b,
                                                     num_loop,

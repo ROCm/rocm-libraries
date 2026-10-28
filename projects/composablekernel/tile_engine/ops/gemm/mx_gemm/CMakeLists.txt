@@ -47,7 +47,11 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
     set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
 
     # Generate the single instance header for this kernel
-    set(instance_header "${working_path}/mx_gemm_single_${datatype}_${layout}_${trait}_${tile_config}.hpp")
+    set(kernel_identity_trait "${trait}")
+    if("${trait}" MATCHES "_lds$")
+        string(REGEX REPLACE "_lds$" "_lds_scale" kernel_identity_trait "${trait}")
+    endif()
+    set(instance_header "${working_path}/mx_gemm_single_${datatype}_${layout}_${kernel_identity_trait}_${tile_config}.hpp")
 
     # Add custom command to generate the header file at build time
     add_custom_command(
@@ -58,7 +62,7 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
                 --layout ${layout}
                 --config_json ${config_json}
                 --gen_single
-                --kernel_name "mx_gemm_${datatype}_${layout}_${trait}_${tile_config}"
+                --kernel_name "mx_gemm_${datatype}_${layout}_${kernel_identity_trait}_${tile_config}"
                 --tile_config "${tile_config}"
                 --trait_combo "${trait}"
                 --gpu_target "${MX_GEMM_GPU_TARGETS_INDIVIDUAL}"
