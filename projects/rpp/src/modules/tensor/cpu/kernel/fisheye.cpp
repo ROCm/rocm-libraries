@@ -85,238 +85,477 @@ inline void compute_fisheye_src_loc(Rpp32f dstY, Rpp32f dstX, Rpp32f& srcY, Rpp3
     }
 }
 
+inline void fisheye_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8u* dstPtrImage,
+                                    RpptDescPtr dstDescPtr, RpptROI roi,
+                                    RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    RpptROI roiLTRB;
+    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    Rpp32u bufferLength = roi.xywhROI.roiWidth;
+
+    Rpp8u *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32s vectorIncrementPerChannel = 8;
+    Rpp32s vectorIncrementPkd = 24;
+    Rpp32u alignedLength =
+        bufferLength & ~7;  // Align dst width to process 8 dst pixels per iteration
+
+#if __AVX2__
+    __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
+    __m256 pRoiLTRB[4], pWidth, pHeight;
+    pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
+    pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
+    pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
+    pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
+    pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
+    pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
+#endif
+
+    // fisheye with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
+
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256i pRow;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_u8pkd3_avx, srcPtrChannel, srcLocArray,
+                              invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_u8pkd3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, pRow);
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pln3(srcY, srcX, &roiLTRB, dstPtrTempR++,
+                                                              dstPtrTempG++, dstPtrTempB++,
+                                                              srcPtrChannel, srcDescPtr);
+            }
+        }
+    }
+
+    // fisheye with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp8u *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
+        srcPtrChannelR = srcPtrChannel;
+        srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
+        srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256i pRow[4];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrChannelR, srcLocArray,
+                              invalidLoad, pRow[0]);
+                rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrChannelG, srcLocArray,
+                              invalidLoad, pRow[1]);
+                rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrChannelB, srcLocArray,
+                              invalidLoad, pRow[2]);
+                rpp_simd_store(rpp_store24_u8pln3_to_u8pkd3_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8u* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256i pRow;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_u8pkd3_avx, srcPtrChannel, srcLocArray,
+                              invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_u8_to_u8_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8u* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                Rpp8u *dstPtrTempChn, *srcPtrTempChn;
+                srcPtrTempChn = srcPtrChannel;
+                dstPtrTempChn = dstPtrTemp;
+                for (int c = 0; c < srcDescPtr->c; c++) {
+                    __m256i pRow;
+                    rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrTempChn, srcLocArray,
+                                  invalidLoad, pRow);
+                    rpp_storeu_si64(reinterpret_cast<__m128i*>(dstPtrTempChn),
+                                    _mm256_castsi256_si128(pRow));
+                    srcPtrTempChn += srcDescPtr->strides.cStride;
+                    dstPtrTempChn += dstDescPtr->strides.cStride;
+                }
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln_to_pln(srcY, srcX, &roiLTRB, dstPtrTemp++,
+                                                            srcPtrChannel, srcDescPtr, dstDescPtr);
+            }
+        }
+    }
+}
+
 RppStatus fisheye_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                     RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                                     RpptRoiType roiType, RppLayoutParams layoutParams,
                                     rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
-        RpptROI roi, roiLTRB;
+        RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
-        Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
-        Rpp8u *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+        Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32s vectorIncrementPerChannel = 8;
-        Rpp32s vectorIncrementPkd = 24;
-        Rpp32u alignedLength =
-            bufferLength & ~7;        // Align dst width to process 8 dst pixels per iteration
-        Rpp32s srcLocArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-        Rpp32s invalidLoad[8] = {0};  // Since 8 dst pixels are processed per iteration
+        fisheye_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi, layoutParams,
+                                intraThreads);
+    }
+
+    return RPP_SUCCESS;
+}
+
+inline void fisheye_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                      Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr, RpptROI roi,
+                                      RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    RpptROI roiLTRB;
+    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    Rpp32u bufferLength = roi.xywhROI.roiWidth;
+
+    Rpp16f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32s vectorIncrementPerChannel = 8;
+    Rpp32s vectorIncrementPkd = 24;
+    Rpp32u alignedLength =
+        bufferLength & ~7;  // Align dst width to process 8 dst pixels per iteration
 
 #if __AVX2__
-        __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
-        __m256 pRoiLTRB[4], pWidth, pHeight;
-        pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
-        pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
-        pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
-        pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
-        pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
-        pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
+    __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
+    __m256 pRoiLTRB[4], pWidth, pHeight;
+    pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
+    pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
+    pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
+    pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
+    pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
+    pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
 #endif
 
-        // fisheye with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8u *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // fisheye with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
 #if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256i pRow;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_u8pkd3_avx, srcPtrChannel, srcLocArray,
-                                  invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_u8pkd3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, pRow);
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pln3(
-                        srcY, srcX, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++,
-                        srcPtrChannel, srcDescPtr);
-                }
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256 pRow[3];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_f16pkd3_to_f32pln3_avx, srcPtrChannel,
+                              srcLocArray, invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, pRow);
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
-
-        // fisheye with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8u* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            Rpp8u *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
-            srcPtrChannelR = srcPtrChannel;
-            srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
-            srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256i pRow[4];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrChannelR, srcLocArray,
-                                  invalidLoad, pRow[0]);
-                    rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrChannelG, srcLocArray,
-                                  invalidLoad, pRow[1]);
-                    rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrChannelB, srcLocArray,
-                                  invalidLoad, pRow[2]);
-                    rpp_simd_store(rpp_store24_u8pln3_to_u8pkd3_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8u* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256i pRow;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_u8pkd3_avx, srcPtrChannel, srcLocArray,
-                                  invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_u8_to_u8_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8u* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8u* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    Rpp8u *dstPtrTempChn, *srcPtrTempChn;
-                    srcPtrTempChn = srcPtrChannel;
-                    dstPtrTempChn = dstPtrTemp;
-                    for (int c = 0; c < srcDescPtr->c; c++) {
-                        __m256i pRow;
-                        rpp_simd_load(rpp_generic_nn_load_u8pln1_avx, srcPtrTempChn, srcLocArray,
-                                      invalidLoad, pRow);
-                        rpp_storeu_si64(reinterpret_cast<__m128i*>(dstPtrTempChn),
-                                        _mm256_castsi256_si128(pRow));
-                        srcPtrTempChn += srcDescPtr->strides.cStride;
-                        dstPtrTempChn += dstDescPtr->strides.cStride;
-                    }
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln_to_pln(
-                        srcY, srcX, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pln3(srcY, srcX, &roiLTRB, dstPtrTempR++,
+                                                              dstPtrTempG++, dstPtrTempB++,
+                                                              srcPtrChannel, srcDescPtr);
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // fisheye with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp16f *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
+        srcPtrChannelR = srcPtrChannel;
+        srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
+        srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256 pRow[3];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrChannelR, srcLocArray,
+                              invalidLoad, pRow[0]);
+                rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrChannelG, srcLocArray,
+                              invalidLoad, pRow[1]);
+                rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrChannelB, srcLocArray,
+                              invalidLoad, pRow[2]);
+                rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp16f* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256 pRow[3];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_f16pkd3_to_f32pkd3_avx, srcPtrChannel,
+                              srcLocArray, invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_f32pkd3_to_f16pkd3_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp16f* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                Rpp16f *dstPtrTempChn, *srcPtrTempChn;
+                srcPtrTempChn = srcPtrChannel;
+                dstPtrTempChn = dstPtrTemp;
+                for (int c = 0; c < srcDescPtr->c; c++) {
+                    __m256 pRow;
+                    rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrTempChn, srcLocArray,
+                                  invalidLoad, pRow);
+                    rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTempChn, &pRow);
+                    srcPtrTempChn += srcDescPtr->strides.cStride;
+                    dstPtrTempChn += dstDescPtr->strides.cStride;
+                }
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln_to_pln(srcY, srcX, &roiLTRB, dstPtrTemp++,
+                                                            srcPtrChannel, srcDescPtr, dstDescPtr);
+            }
+        }
+    }
 }
 
 RppStatus fisheye_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr,
@@ -324,233 +563,246 @@ RppStatus fisheye_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                       RpptRoiType roiType, RppLayoutParams layoutParams,
                                       rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
-        RpptROI roi, roiLTRB;
+        RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
-        Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
-        Rpp16f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+        Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32s vectorIncrementPerChannel = 8;
-        Rpp32s vectorIncrementPkd = 24;
-        Rpp32u alignedLength =
-            bufferLength & ~7;        // Align dst width to process 8 dst pixels per iteration
-        Rpp32s srcLocArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-        Rpp32s invalidLoad[8] = {0};  // Since 8 dst pixels are processed per iteration
+        fisheye_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
+                                  layoutParams, intraThreads);
+    }
+
+    return RPP_SUCCESS;
+}
+
+inline void fisheye_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                      Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr, RpptROI roi,
+                                      RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    RpptROI roiLTRB;
+    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    Rpp32u bufferLength = roi.xywhROI.roiWidth;
+
+    Rpp32f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32s vectorIncrementPerChannel = 8;
+    Rpp32s vectorIncrementPkd = 24;
+    Rpp32u alignedLength =
+        bufferLength & ~7;  // Align dst width to process 8 dst pixels per iteration
 
 #if __AVX2__
-        __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
-        __m256 pRoiLTRB[4], pWidth, pHeight;
-        pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
-        pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
-        pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
-        pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
-        pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
-        pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
+    __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
+    __m256 pRoiLTRB[4], pWidth, pHeight;
+    pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
+    pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
+    pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
+    pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
+    pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
+    pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
 #endif
 
-        // fisheye with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // fisheye with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
 #if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256 pRow[3];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_f16pkd3_to_f32pln3_avx, srcPtrChannel,
-                                  srcLocArray, invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, pRow);
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pln3(
-                        srcY, srcX, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++,
-                        srcPtrChannel, srcDescPtr);
-                }
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256 pRow[3];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_f32pkd3_to_f32pln3_avx, srcPtrChannel,
+                              srcLocArray, invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, pRow);
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
-
-        // fisheye with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            Rpp16f *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
-            srcPtrChannelR = srcPtrChannel;
-            srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
-            srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256 pRow[3];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrChannelR, srcLocArray,
-                                  invalidLoad, pRow[0]);
-                    rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrChannelG, srcLocArray,
-                                  invalidLoad, pRow[1]);
-                    rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrChannelB, srcLocArray,
-                                  invalidLoad, pRow[2]);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp16f* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256 pRow[3];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_f16pkd3_to_f32pkd3_avx, srcPtrChannel,
-                                  srcLocArray, invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_f32pkd3_to_f16pkd3_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp16f* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp16f* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    Rpp16f *dstPtrTempChn, *srcPtrTempChn;
-                    srcPtrTempChn = srcPtrChannel;
-                    dstPtrTempChn = dstPtrTemp;
-                    for (int c = 0; c < srcDescPtr->c; c++) {
-                        __m256 pRow;
-                        rpp_simd_load(rpp_generic_nn_load_f16pln1_avx, srcPtrTempChn, srcLocArray,
-                                      invalidLoad, pRow);
-                        rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTempChn, &pRow);
-                        srcPtrTempChn += srcDescPtr->strides.cStride;
-                        dstPtrTempChn += dstDescPtr->strides.cStride;
-                    }
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln_to_pln(
-                        srcY, srcX, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pln3(srcY, srcX, &roiLTRB, dstPtrTempR++,
+                                                              dstPtrTempG++, dstPtrTempB++,
+                                                              srcPtrChannel, srcDescPtr);
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // fisheye with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp32f *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
+        srcPtrChannelR = srcPtrChannel;
+        srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
+        srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256 pRow[3];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrChannelR, srcLocArray,
+                              invalidLoad, pRow[0]);
+                rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrChannelG, srcLocArray,
+                              invalidLoad, pRow[1]);
+                rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrChannelB, srcLocArray,
+                              invalidLoad, pRow[2]);
+                rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp32f* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256 pRow[3];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_f32pkd3_to_f32pkd3_avx, srcPtrChannel,
+                              srcLocArray, invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_f32pkd3_to_f32pkd3_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp32f* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                Rpp32f *dstPtrTempChn, *srcPtrTempChn;
+                srcPtrTempChn = srcPtrChannel;
+                dstPtrTempChn = dstPtrTemp;
+                for (int c = 0; c < srcDescPtr->c; c++) {
+                    __m256 pRow;
+                    rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrTempChn, srcLocArray,
+                                  invalidLoad, pRow);
+                    rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTempChn, &pRow);
+                    srcPtrTempChn += srcDescPtr->strides.cStride;
+                    dstPtrTempChn += dstDescPtr->strides.cStride;
+                }
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln_to_pln(srcY, srcX, &roiLTRB, dstPtrTemp++,
+                                                            srcPtrChannel, srcDescPtr, dstDescPtr);
+            }
+        }
+    }
 }
 
 RppStatus fisheye_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -558,233 +810,246 @@ RppStatus fisheye_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                       RpptRoiType roiType, RppLayoutParams layoutParams,
                                       rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
-        RpptROI roi, roiLTRB;
+        RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
-        Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
-        Rpp32f *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+        Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32s vectorIncrementPerChannel = 8;
-        Rpp32s vectorIncrementPkd = 24;
-        Rpp32u alignedLength =
-            bufferLength & ~7;        // Align dst width to process 8 dst pixels per iteration
-        Rpp32s srcLocArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-        Rpp32s invalidLoad[8] = {0};  // Since 8 dst pixels are processed per iteration
+        fisheye_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi,
+                                  layoutParams, intraThreads);
+    }
+
+    return RPP_SUCCESS;
+}
+
+inline void fisheye_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8s* dstPtrImage,
+                                    RpptDescPtr dstDescPtr, RpptROI roi,
+                                    RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    RpptROI roiLTRB;
+    compute_ltrb_from_xywh_host(&roi, &roiLTRB);
+    Rpp32u bufferLength = roi.xywhROI.roiWidth;
+
+    Rpp8s *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    Rpp32s vectorIncrementPerChannel = 8;
+    Rpp32s vectorIncrementPkd = 24;
+    Rpp32u alignedLength =
+        bufferLength & ~7;  // Align dst width to process 8 dst pixels per iteration
 
 #if __AVX2__
-        __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
-        __m256 pRoiLTRB[4], pWidth, pHeight;
-        pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
-        pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
-        pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
-        pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
-        pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
-        pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
+    __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
+    __m256 pRoiLTRB[4], pWidth, pHeight;
+    pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
+    pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
+    pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
+    pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
+    pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
+    pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
 #endif
 
-        // fisheye with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32f *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
+    // fisheye with fused output-layout toggle (NHWC -> NCHW)
+    if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+        (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
+        dstPtrRowR = dstPtrChannel;
+        dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
+        dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
+            dstPtrTempR = dstPtrRowR + i * dstDescPtr->strides.hStride;
+            dstPtrTempG = dstPtrRowG + i * dstDescPtr->strides.hStride;
+            dstPtrTempB = dstPtrRowB + i * dstDescPtr->strides.hStride;
 
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
 #if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256 pRow[3];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_f32pkd3_to_f32pln3_avx, srcPtrChannel,
-                                  srcLocArray, invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, pRow);
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pln3(
-                        srcY, srcX, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++,
-                        srcPtrChannel, srcDescPtr);
-                }
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256i pRow;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_i8pkd3_avx, srcPtrChannel, srcLocArray,
+                              invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_i8pkd3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, pRow);
+                dstPtrTempR += vectorIncrementPerChannel;
+                dstPtrTempG += vectorIncrementPerChannel;
+                dstPtrTempB += vectorIncrementPerChannel;
             }
-        }
-
-        // fisheye with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32f* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            Rpp32f *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
-            srcPtrChannelR = srcPtrChannel;
-            srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
-            srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256 pRow[3];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrChannelR, srcLocArray,
-                                  invalidLoad, pRow[0]);
-                    rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrChannelG, srcLocArray,
-                                  invalidLoad, pRow[1]);
-                    rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrChannelB, srcLocArray,
-                                  invalidLoad, pRow[2]);
-                    rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
 #endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp32f* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256 pRow[3];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_f32pkd3_to_f32pkd3_avx, srcPtrChannel,
-                                  srcLocArray, invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_f32pkd3_to_f32pkd3_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp32f* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp32f* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    Rpp32f *dstPtrTempChn, *srcPtrTempChn;
-                    srcPtrTempChn = srcPtrChannel;
-                    dstPtrTempChn = dstPtrTemp;
-                    for (int c = 0; c < srcDescPtr->c; c++) {
-                        __m256 pRow;
-                        rpp_simd_load(rpp_generic_nn_load_f32pln1_avx, srcPtrTempChn, srcLocArray,
-                                      invalidLoad, pRow);
-                        rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTempChn, &pRow);
-                        srcPtrTempChn += srcDescPtr->strides.cStride;
-                        dstPtrTempChn += dstDescPtr->strides.cStride;
-                    }
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln_to_pln(
-                        srcY, srcX, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pln3(srcY, srcX, &roiLTRB, dstPtrTempR++,
+                                                              dstPtrTempG++, dstPtrTempB++,
+                                                              srcPtrChannel, srcDescPtr);
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // fisheye with fused output-layout toggle (NCHW -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp8s *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
+        srcPtrChannelR = srcPtrChannel;
+        srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
+        srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256i pRow[4];
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrChannelR, srcLocArray,
+                              invalidLoad, pRow[0]);
+                rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrChannelG, srcLocArray,
+                              invalidLoad, pRow[1]);
+                rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrChannelB, srcLocArray,
+                              invalidLoad, pRow[2]);
+                rpp_simd_store(rpp_store24_i8pln3_to_i8pkd3_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NHWC -> NHWC)
+    else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+             (dstDescPtr->layout == RpptLayout::NHWC)) {
+        Rpp8s* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+        Rpp32u alignedLengthPkd = (alignedLength >= 8) ? (alignedLength - 8) : 0;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLengthPkd;
+                 vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                __m256i pRow;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad, true);
+                rpp_simd_load(rpp_generic_nn_load_i8pkd3_avx, srcPtrChannel, srcLocArray,
+                              invalidLoad, pRow);
+                rpp_simd_store(rpp_store24_i8_to_i8_avx, dstPtrTemp, pRow);
+                dstPtrTemp += vectorIncrementPkd;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
+                                                              srcPtrChannel, srcDescPtr);
+                dstPtrTemp += 3;
+            }
+        }
+    }
+
+    // fisheye without fused output-layout toggle (NCHW -> NCHW)
+    else if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
+        Rpp8s* dstPtrRow;
+        dstPtrRow = dstPtrChannel;
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s* dstPtrTemp;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            Rpp32s srcLocArray[8] = {0};
+            Rpp32s invalidLoad[8] = {0};
+            Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
+            Rpp32s vectorLoopCount = 0;
+#if __AVX2__
+            __m256 pDstX, pDstY;
+            pDstX = avx_pDstLocInit;
+            pDstY = _mm256_set1_ps(dstY);
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+                __m256 pSrcX, pSrcY;
+                compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
+                compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
+                                                            srcLocArray, invalidLoad);
+                Rpp8s *dstPtrTempChn, *srcPtrTempChn;
+                srcPtrTempChn = srcPtrChannel;
+                dstPtrTempChn = dstPtrTemp;
+                for (int c = 0; c < srcDescPtr->c; c++) {
+                    __m256i pRow;
+                    rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrTempChn, srcLocArray,
+                                  invalidLoad, pRow);
+                    rpp_storeu_si64(reinterpret_cast<__m128i*>(dstPtrTempChn),
+                                    _mm256_castsi256_si128(pRow));
+                    srcPtrTempChn += srcDescPtr->strides.cStride;
+                    dstPtrTempChn += dstDescPtr->strides.cStride;
+                }
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+#endif
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                Rpp32f srcX, srcY;
+                dstX = static_cast<Rpp32f>(vectorLoopCount);
+                compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
+                                        roi.xywhROI.roiWidth);
+                compute_generic_nn_interpolation_pln_to_pln(srcY, srcX, &roiLTRB, dstPtrTemp++,
+                                                            srcPtrChannel, srcDescPtr, dstDescPtr);
+            }
+        }
+    }
 }
 
 RppStatus fisheye_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
@@ -792,230 +1057,21 @@ RppStatus fisheye_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
                                     RpptRoiType roiType, RppLayoutParams layoutParams,
                                     rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
-        RpptROI roi, roiLTRB;
+        RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
-        compute_ltrb_from_xywh_host(&roi, &roiLTRB);
-        Rpp32u bufferLength = roi.xywhROI.roiWidth;
 
-        Rpp8s *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
-        Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
-                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
-        dstPtrChannel = dstPtrImage;
+        Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32s vectorIncrementPerChannel = 8;
-        Rpp32s vectorIncrementPkd = 24;
-        Rpp32u alignedLength =
-            bufferLength & ~7;        // Align dst width to process 8 dst pixels per iteration
-        Rpp32s srcLocArray[8] = {0};  // Since 8 dst pixels are processed per iteration
-        Rpp32s invalidLoad[8] = {0};  // Since 8 dst pixels are processed per iteration
-
-#if __AVX2__
-        __m256 pSrcStrideH = _mm256_set1_ps(srcDescPtr->strides.hStride);
-        __m256 pRoiLTRB[4], pWidth, pHeight;
-        pRoiLTRB[0] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.x);
-        pRoiLTRB[1] = _mm256_set1_ps(roiLTRB.ltrbROI.lt.y);
-        pRoiLTRB[2] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.x);
-        pRoiLTRB[3] = _mm256_set1_ps(roiLTRB.ltrbROI.rb.y);
-        pWidth = _mm256_set1_ps(roi.xywhROI.roiWidth);
-        pHeight = _mm256_set1_ps(roi.xywhROI.roiHeight);
-#endif
-
-        // fisheye with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-            (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8s *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
-            dstPtrRowR = dstPtrChannel;
-            dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
-            dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
-                dstPtrTempR = dstPtrRowR;
-                dstPtrTempG = dstPtrRowG;
-                dstPtrTempB = dstPtrRowB;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256i pRow;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_i8pkd3_avx, srcPtrChannel, srcLocArray,
-                                  invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_i8pkd3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
-                                   dstPtrTempB, pRow);
-                    dstPtrTempR += vectorIncrementPerChannel;
-                    dstPtrTempG += vectorIncrementPerChannel;
-                    dstPtrTempB += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pln3(
-                        srcY, srcX, &roiLTRB, dstPtrTempR++, dstPtrTempG++, dstPtrTempB++,
-                        srcPtrChannel, srcDescPtr);
-                }
-                dstPtrRowR += dstDescPtr->strides.hStride;
-                dstPtrRowG += dstDescPtr->strides.hStride;
-                dstPtrRowB += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8s* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            Rpp8s *srcPtrChannelR, *srcPtrChannelG, *srcPtrChannelB;
-            srcPtrChannelR = srcPtrChannel;
-            srcPtrChannelG = srcPtrChannelR + srcDescPtr->strides.cStride;
-            srcPtrChannelB = srcPtrChannelG + srcDescPtr->strides.cStride;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256i pRow[4];
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrChannelR, srcLocArray,
-                                  invalidLoad, pRow[0]);
-                    rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrChannelG, srcLocArray,
-                                  invalidLoad, pRow[1]);
-                    rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrChannelB, srcLocArray,
-                                  invalidLoad, pRow[2]);
-                    rpp_simd_store(rpp_store24_i8pln3_to_i8pkd3_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NHWC -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
-                 (dstDescPtr->layout == RpptLayout::NHWC)) {
-            Rpp8s* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    __m256i pRow;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad, true);
-                    rpp_simd_load(rpp_generic_nn_load_i8pkd3_avx, srcPtrChannel, srcLocArray,
-                                  invalidLoad, pRow);
-                    rpp_simd_store(rpp_store24_i8_to_i8_avx, dstPtrTemp, pRow);
-                    dstPtrTemp += vectorIncrementPkd;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pkd3_to_pkd3(srcY, srcX, &roiLTRB, dstPtrTemp,
-                                                                  srcPtrChannel, srcDescPtr);
-                    dstPtrTemp += 3;
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // fisheye without fused output-layout toggle (NCHW -> NCHW)
-        else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
-                 (dstDescPtr->layout == RpptLayout::NCHW)) {
-            Rpp8s* dstPtrRow;
-            dstPtrRow = dstPtrChannel;
-            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
-                Rpp8s* dstPtrTemp;
-                dstPtrTemp = dstPtrRow;
-
-                Rpp32f dstX, dstY = static_cast<Rpp32f>(i);
-                Rpp32s vectorLoopCount = 0;
-#if __AVX2__
-                __m256 pDstX, pDstY;
-                pDstX = avx_pDstLocInit;
-                pDstY = _mm256_set1_ps(dstY);
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-                    __m256 pSrcX, pSrcY;
-                    compute_fisheye_src_loc_avx(pDstY, pDstX, pSrcY, pSrcX, pHeight, pWidth);
-                    compute_generic_nn_srclocs_and_validate_avx(pSrcY, pSrcX, pRoiLTRB, pSrcStrideH,
-                                                                srcLocArray, invalidLoad);
-                    Rpp8s *dstPtrTempChn, *srcPtrTempChn;
-                    srcPtrTempChn = srcPtrChannel;
-                    dstPtrTempChn = dstPtrTemp;
-                    for (int c = 0; c < srcDescPtr->c; c++) {
-                        __m256i pRow;
-                        rpp_simd_load(rpp_generic_nn_load_i8pln1_avx, srcPtrTempChn, srcLocArray,
-                                      invalidLoad, pRow);
-                        rpp_storeu_si64(reinterpret_cast<__m128i*>(dstPtrTempChn),
-                                        _mm256_castsi256_si128(pRow));
-                        srcPtrTempChn += srcDescPtr->strides.cStride;
-                        dstPtrTempChn += dstDescPtr->strides.cStride;
-                    }
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-#endif
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    Rpp32f srcX, srcY;
-                    dstX = static_cast<Rpp32f>(vectorLoopCount);
-                    compute_fisheye_src_loc(dstY, dstX, srcY, srcX, roi.xywhROI.roiHeight,
-                                            roi.xywhROI.roiWidth);
-                    compute_generic_nn_interpolation_pln_to_pln(
-                        srcY, srcX, &roiLTRB, dstPtrTemp++, srcPtrChannel, srcDescPtr, dstDescPtr);
-                }
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
+        fisheye_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, roi, layoutParams,
+                                intraThreads);
     }
 
     return RPP_SUCCESS;
