@@ -18,7 +18,6 @@ such -- ``a_layout`` / ``b_layout`` / ``c_layout`` return :class:`WarpDistributi
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from ....core.dtypes import normalize_dtype
 from ....core.ir import Type, dtype_to_ir_type
@@ -75,13 +74,11 @@ def _require_scalar_ir_type(role: str, value: object) -> Type:
 class Tiling:
     """The wave-tile iteration policy -- the MMA object's knobs.
 
-    * ``atom_shape`` -- how to pick the hardware MMA atom. Two flavours (plus a default):
-        - a shape ``(M, N, K)`` tuple -> TARGET-AGNOSTIC: resolved to the atom for the bound
-          target + dtypes (MFMA on CDNA, WMMA on RDNA -- authorship carries no gfx branch);
-        - an explicit intrinsic name ``str`` (e.g. ``"mfma_f32_16x16x16f16"``) -> the escape
-          hatch: that exact backend op is used (target-specific by construction);
-        - ``None`` -> the wave shape itself (a single MMA).
-      The inner-K count the object runs is ``wave_K / atom_K``.
+    * ``atom_shape`` -- the hardware MMA atom's ``(M, N, K)``, a shape hint only: it is resolved
+      to the instruction for the bound target + dtypes (MFMA on CDNA, WMMA on RDNA -- authorship
+      carries no gfx branch). ``None`` (the default) means the wave shape itself (a single MMA).
+      The inner-K count the object runs is ``wave_K / atom_K``. To pin one exact instruction, name
+      it with ``TileMma(atom_override=...)`` instead.
     * ``order`` -- the M/N/K subtile loop-nest order (a permutation of ``"MNK"``). Stride
       convention: the RIGHT-MOST axis varies fastest (innermost); ``"MNK"`` runs K innermost.
       Iterated inside one ``TileMmaDriver`` call.
@@ -94,18 +91,23 @@ class Tiling:
       regardless -- there is no dense body to protect.
     """
 
-    atom_shape: Optional[tuple[int, int, int] | str] = None
+    atom_shape: tuple[int, int, int] | None = None
     order: str = "MNK"
     mac_prio: int = 0
 
     def __post_init__(self) -> None:
         atom = self.atom_shape
-        if atom is not None and not isinstance(atom, str):
-            if len(atom) != 3 or any(not isinstance(d, int) or d <= 0 for d in atom):
-                raise ValueError(
-                    f"atom_shape must be 3 positive ints or an intrinsic name -- "
-                    f"atom_shape={atom!r}"
-                )
+        if isinstance(atom, str):
+            raise ValueError(  # noqa: TRY004 -- an atom_shape the author mistyped is a ValueError
+                f"atom_shape is the instruction's (M, N, K) -- got the string {atom!r}; pin an "
+                f"instruction with TileMma(atom_override={atom!r})"
+            )
+        if atom is not None and (
+            len(atom) != 3 or any(not isinstance(d, int) or d <= 0 for d in atom)
+        ):
+            raise ValueError(
+                f"atom_shape must be 3 positive ints -- atom_shape={atom!r}"
+            )
         if self.order not in _SUBTILE_ORDERS:
             raise ValueError(
                 f"unknown subtile order -- order={self.order!r}, "
@@ -132,7 +134,11 @@ class TileMmaPlan:
     ``FP8E4M3``, ...): A and B are the operand dtypes, ``c`` the accumulator taken in and ``d`` the
     result returned. ``d`` omitted means the result has the accumulator's dtype (``d = c``), which
     is what every accumulate-in-place instruction does. A dtype string is refused with the constant
-    to pass instead.
+    to pass instead. A and B may differ (``a=FP8E4M3, b=BF8E5M2``) wherever the target has such an
+    instruction.
+
+    ``atom_override="<op_id>"`` pins one exact instruction by name; ``a``/``b``/``c``/``d`` are then
+    optional: each one given must be one the instruction takes, and the rest are taken from it.
     """
 
     def __init__(
@@ -158,16 +164,17 @@ class TileMmaPlan:
 
         self._traits: MmaTraits
         if atom_override is not None:
-            # Name a specific intrinsic and DERIVE its M/N/K + dtypes from the catalog row (target
-            # still required, to validate/resolve). `shape`, if given, is the wave tile (a multiple of
-            # the atom); otherwise it IS the atom -- a single MMA. Any a/b/c/d passed are overridden.
+            # Pin one instruction by name. Its M/N/K come from the row; so do any of a/b/c/d the
+            # author leaves out, and each one given must be one the row takes. `shape`, if given, is
+            # the wave tile (a multiple of the atom); otherwise it IS the atom -- a single MMA.
             if tiling.atom_shape is not None:
                 raise ValueError(
                     "specify the atom via atom_override OR tiling.atom_shape, not both"
                 )
-            self._traits = self._resolve_atom(catalog, atom_override, target)
+            self._traits, (a, b, c, d) = self._resolve_named(
+                catalog, atom_override, target, a, b, c, d
+            )
             atom_shape = (self._traits.m, self._traits.n, self._traits.k)
-            a, b, c, d = self._traits.ir_dtypes()
             shape = tuple(shape) if shape is not None else atom_shape
         else:
             if shape is None:
@@ -176,37 +183,25 @@ class TileMmaPlan:
                 )
             if a is None or b is None or c is None:
                 raise ValueError(
-                    "a/b/c dtypes are required unless atom_override is given"
+                    "a/b/c dtypes are required unless the instruction is pinned with "
+                    "atom_override=..."
                 )
             shape = tuple(shape)
-            if a != b:
-                raise ValueError(
-                    f"MFMA requires matching A/B dtypes -- a={a!r}, b={b!r}"
-                )
-            # Resolve the atom + its traits from the knob: explicit intrinsic NAME, atom SHAPE,
-            # or (None) the wave shape itself. Both paths end with a resolved traits row.
-            atom_knob = tiling.atom_shape
-            if isinstance(atom_knob, str):
-                self._traits = self._resolve_by_name(
-                    catalog, atom_knob, target, a, b, c, d
-                )
-                atom_shape = (self._traits.m, self._traits.n, self._traits.k)
-                d = d if d is not None else self._traits.ir_dtypes()[3]
-            else:
-                atom_shape = atom_knob if atom_knob is not None else shape
-                m, n, k = atom_shape
-                self._traits = catalog.select(
-                    target=target,
-                    a=a,
-                    b=b,
-                    c=c,
-                    d=d,
-                    m=m,
-                    n=n,
-                    k=k,
-                    family="dense",
-                )
-                d = d if d is not None else c
+            # The atom is the tiling knob's (M, N, K), or (None) the wave shape itself.
+            atom_shape = tiling.atom_shape if tiling.atom_shape is not None else shape
+            m, n, k = atom_shape
+            self._traits = catalog.select(
+                target=target,
+                a=a,
+                b=b,
+                c=c,
+                d=d,
+                m=m,
+                n=n,
+                k=k,
+                family="dense",
+            )
+            d = d if d is not None else c
         self._refuse_result_dtype_change(self._traits)
 
         if len(shape) != 3:
@@ -254,8 +249,8 @@ class TileMmaPlan:
 
         The plan and the driver give the backend only the accumulator dtype, and each
         instruction's result feeds the next one as its accumulator, so an instruction that returns
-        a different dtype cannot be driven here. Every path that resolves a row (selection by
-        intent, an explicit name, ``atom_override``) ends in this check.
+        a different dtype cannot be driven here. Both paths that resolve a row (selection by
+        intent and ``atom_override``) end in this check.
         """
         if traits.d_dtype != traits.c_dtype:
             raise ValueError(
@@ -266,50 +261,59 @@ class TileMmaPlan:
             )
 
     @staticmethod
-    def _resolve_by_name(
+    def _resolve_named(
         catalog: MmaTraitsCatalog,
         op_id: str,
         target: str,
-        a: Type,
-        b: Type,
-        c: Type,
+        a: Type | None,
+        b: Type | None,
+        c: Type | None,
         d: Type | None,
-    ) -> MmaTraits:
-        """Resolve an EXPLICIT intrinsic name (escape hatch) to its traits, validating that it
-        exists, runs on ``target``, and takes the requested A/B/C dtypes (and returns ``d`` when
-        given). ``catalog.get`` already fails fast for an unknown op_id."""
-        traits = catalog.get(op_id)
-        if not traits.supports(target):
-            raise ValueError(
-                f"MMA intrinsic not available on target -- op_id={op_id!r}, "
-                f"target={target!r}, supported={list(traits.supported_targets)}"
-            )
-        # The catalog spells dtypes by their canonical core.dtypes names.
-        asked = {
-            role: normalize_dtype(dtype.name)
-            for role, dtype in (("a", a), ("b", b), ("c", c))
-        }
-        asked["d"] = traits.d_dtype if d is None else normalize_dtype(d.name)
-        if not traits.accepts(**asked):
-            raise ValueError(
-                f"MMA intrinsic dtype mismatch -- op_id={op_id!r}, intrinsic "
-                f"a/b/c=({traits.a_dtype},{traits.b_dtype},{traits.c_dtype}), "
-                f"requested ({asked['a']},{asked['b']},{asked['c']})"
-            )
-        return traits
+    ) -> tuple[MmaTraits, tuple[Type, Type, Type, Type]]:
+        """Resolve an ``atom_override`` instruction name to its row and the plan's (A, B, C, D).
 
-    @staticmethod
-    def _resolve_atom(catalog: MmaTraitsCatalog, op_id: str, target: str) -> MmaTraits:
-        """Resolve an ``atom_override`` intrinsic NAME to its traits: validate it exists and runs
-        on ``target``. M/N/K + dtypes are DERIVED from it, so there is no dtype-match check (unlike
-        ``_resolve_by_name``, which validates against author-supplied dtypes)."""
+        The row must exist (``catalog.get`` fails fast listing the valid names) and run on
+        ``target``. Each dtype the author gives must be one the row takes -- for an integer row
+        whose signedness is selectable, that includes the unsigned twin, which is kept as given --
+        and every dtype left out is taken from the row. An omitted ``d`` is the row's result
+        dtype, never defaulted to ``c``.
+        """
         traits = catalog.get(op_id)
         if not traits.supports(target):
             raise ValueError(
-                f"MMA intrinsic not available on target -- op_id={op_id!r}, "
+                f"MMA instruction not available on target -- op_id={op_id!r}, "
                 f"target={target!r}, supported={list(traits.supported_targets)}"
             )
-        return traits
+        row = dict(zip("abcd", traits.ir_dtypes()))
+        row_names = {
+            "a": traits.a_dtype,
+            "b": traits.b_dtype,
+            "c": traits.c_dtype,
+            "d": traits.d_dtype,
+        }
+        given = {"a": a, "b": b, "c": c, "d": d}
+        clauses, fixes = [], []
+        for role, dtype in given.items():
+            if dtype is None:
+                continue
+            # The catalog spells dtypes by their canonical core.dtypes names: that is the match key.
+            asked = {**row_names, role: normalize_dtype(dtype.name)}
+            if not traits.accepts(**asked):
+                verb = "returns" if role == "d" else "takes"
+                clauses.append(
+                    f"{role}={dtype.name} but it {verb} {role.upper()}={row[role].name}"
+                )
+                fixes.append(f"{role}={_ir_constant_name(row[role])}")
+        if clauses:
+            omit = "a/b/c/d" if given["d"] is not None else "a/b/c"
+            raise ValueError(
+                f"MMA instruction dtype mismatch for {op_id!r} -- {'; '.join(clauses)} -- "
+                f"pass {', '.join(fixes)}, or omit {omit} to take them from the instruction"
+            )
+        resolved = tuple(
+            given[role] if given[role] is not None else row[role] for role in "abcd"
+        )
+        return traits, resolved  # type: ignore[return-value]
 
     @property
     def shape(self) -> tuple[int, int, int]:

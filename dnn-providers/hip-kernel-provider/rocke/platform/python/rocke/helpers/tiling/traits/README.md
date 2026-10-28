@@ -198,8 +198,8 @@ variant beside the dedicated fp8 instruction), keep the dedicated one selectable
 Multi-block rows are never selected; they are reachable by name.
 
 `TileMma` drives only rows whose result dtype is the accumulator dtype (`d_dtype == c_dtype`): its
-driver keeps the result in the accumulator. It refuses any other row on every path, by intent, by
-name and by `atom_override` (today only `wmma_bf16f32_16x16x32_bf16`). `select(d=...)` still returns
+driver keeps the result in the accumulator. It refuses any other row on both paths, by intent and
+by `atom_override` (today only `wmma_bf16f32_16x16x32_bf16`). `select(d=...)` still returns
 such a row to a caller that asks for it.
 
 A pin-only row lays out A, B and C exactly as its selectable twin does, with one exception: the
