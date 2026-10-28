@@ -15,6 +15,27 @@ TEST(ScalarCodecs, IntegerConversionPrimitives) {
     scalar_codec_test::testIntegerConversionPrimitives();
 }
 
+TEST(ScalarCodecsDeathTest, IntegerConversionAssertsInputRequirements) {
+#ifndef NDEBUG
+    using namespace roc::hostnumerics;
+    using enum IntegerRounding;
+    using enum IntegerOverflow;
+    const double infinity = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    // Identity requires the rounded value to fit.
+    EXPECT_DEATH(convertToInteger<int8_t>(int32_t{300}, TowardZero, Identity), "");
+    EXPECT_DEATH(convertToInteger<int8_t>(127.5, NearestEven, Identity), "");
+    // ModuloWrap requires a finite input.
+    EXPECT_DEATH(convertToInteger<int8_t>(infinity, TowardZero, ModuloWrap), "");
+    // NaN is outside the domain of every policy.
+    for (const auto overflow : {Identity, Saturate, ModuloWrap})
+        EXPECT_DEATH(convertToInteger<int8_t>(nan, NearestEven, overflow), "");
+#else
+    GTEST_SKIP() << "Input requirements are checked only when assertions are enabled.";
+#endif
+}
+
 TEST(ScalarCodecs, NearestEvenIgnoresHostRoundingMode) {
     scalar_codec_test::testNearestEvenIgnoresHostRoundingMode();
 }

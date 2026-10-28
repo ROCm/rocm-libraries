@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cmath>
 #include <concepts>
 #include <cstdint>
@@ -66,27 +67,32 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
         // signedness preserved.
         using Wide = std::conditional_t<std::is_signed_v<Source>, int64_t, uint64_t>;
         const Wide wide{value};
+        const int64_t minimum = isSigned ? -static_cast<int64_t>(maximumBits) - 1 : 0;
+        const bool belowRange = std::cmp_less(wide, minimum);
+        const bool aboveRange = std::cmp_greater(wide, maximumBits);
+        assert(overflow != IntegerOverflow::Identity || !(belowRange || aboveRange));
         if (overflow == IntegerOverflow::Saturate) {
-            const int64_t minimum = isSigned ? -static_cast<int64_t>(maximumBits) - 1 : 0;
-            if (std::cmp_less(wide, minimum)) return minimumBits;
-            if (std::cmp_greater(wide, maximumBits)) return maximumBits;
+            if (belowRange) return minimumBits;
+            if (aboveRange) return maximumBits;
         }
         return static_cast<uint64_t>(wide) & mask;
     } else {
+        assert(!std::isnan(value));
+        assert(overflow == IntegerOverflow::Saturate || std::isfinite(value));
         const Source rounded = roundToIntegral(value, rounding);
-        if (overflow != IntegerOverflow::Identity) {
-            const int rangeExponent = static_cast<int>(isSigned ? bits - 1 : bits);
-            const Source upperExclusive = std::ldexp(Source{1}, rangeExponent);
-            const Source lowerInclusive = isSigned ? -upperExclusive : Source{0};
-            if (overflow == IntegerOverflow::Saturate) {
-                if (rounded < lowerInclusive) return minimumBits;
-                if (rounded >= upperExclusive) return maximumBits;
-            } else if (!(rounded >= lowerInclusive && rounded < upperExclusive)) {
-                const Source modulus = std::ldexp(Source{1}, static_cast<int>(bits));
-                uint64_t remainder = static_cast<uint64_t>(std::fmod(std::fabs(rounded), modulus));
-                if (std::signbit(rounded)) remainder = uint64_t{0} - remainder;
-                return remainder & mask;
-            }
+        const int rangeExponent = static_cast<int>(isSigned ? bits - 1 : bits);
+        const Source upperExclusive = std::ldexp(Source{1}, rangeExponent);
+        const Source lowerInclusive = isSigned ? -upperExclusive : Source{0};
+        const bool inRange = rounded >= lowerInclusive && rounded < upperExclusive;
+        assert(overflow != IntegerOverflow::Identity || inRange);
+        if (overflow == IntegerOverflow::Saturate) {
+            if (rounded < lowerInclusive) return minimumBits;
+            if (rounded >= upperExclusive) return maximumBits;
+        } else if (overflow == IntegerOverflow::ModuloWrap && !inRange) {
+            const Source modulus = std::ldexp(Source{1}, static_cast<int>(bits));
+            uint64_t remainder = static_cast<uint64_t>(std::fmod(std::fabs(rounded), modulus));
+            if (std::signbit(rounded)) remainder = uint64_t{0} - remainder;
+            return remainder & mask;
         }
         if (isSigned) return static_cast<uint64_t>(static_cast<int64_t>(rounded)) & mask;
         return static_cast<uint64_t>(rounded) & mask;
@@ -96,8 +102,8 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
 
 // Converts an integer or floating value to the integer type Target: rounds it,
 // then handles values outside Target's range. Integer types are limited to 64
-// bits. Conversion does not validate its input; the caller must meet the
-// requirements of the chosen IntegerOverflow.
+// bits. The caller must meet the requirements of the chosen IntegerOverflow;
+// builds without NDEBUG assert them.
 //
 // Examples, after `using enum IntegerRounding; using enum IntegerOverflow;`:
 //   convertToInteger<int8_t>(double{2.5}, NearestEven, Identity) == 2
@@ -118,7 +124,7 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
 //   convertToInteger<char>(std::complex<double>{65, 0}, ...)  Source must be a real number.
 //   convertToInteger<__int128>(int64_t{1}, ...)               Integers wider than 64 bits.
 //
-// Outside the domain, with an undefined result:
+// Outside the domain, failing an assertion or giving an undefined result:
 //   convertToInteger<int8_t>(int32_t{300}, TowardZero, Identity)  Result does not fit.
 //   convertToInteger<int8_t>(infinity, TowardZero, ModuloWrap)    Input is not finite.
 //   convertToInteger<int8_t>(NaN, rounding, overflow)             NaN is never valid.
