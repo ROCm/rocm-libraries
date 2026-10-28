@@ -228,3 +228,24 @@ TYPED_TEST(ResultComparisonTest, PrintMaxZero_SameOutput)
     EXPECT_EQ(oldOutput, newOutput);
     EXPECT_EQ(oldOutput, "");
 }
+
+// Test: mismatches present but printMax=0 — both comparators should still fail.
+TYPED_TEST(ResultComparisonTest, PrintMaxZero_MismatchStillFails)
+{
+    using T = typename TestFixture::TypeParam;
+    auto ref = makeVec<T>({1, 2, 3});
+    auto res = makeVec<T>({1, 9, 3});
+
+    PointwiseComparison<T>     slow(false, 0, false, -1.0);
+    FastPointwiseComparison<T> fast(false, -1.0);
+    for(size_t i = 0; i < ref.size(); i++)
+    {
+        slow(ref[i], res[i], i, i);
+        fast(ref[i], res[i], i, i);
+    }
+    slow.report();
+    fast.report();
+
+    EXPECT_TRUE(slow.error());
+    EXPECT_TRUE(fast.error());
+}
