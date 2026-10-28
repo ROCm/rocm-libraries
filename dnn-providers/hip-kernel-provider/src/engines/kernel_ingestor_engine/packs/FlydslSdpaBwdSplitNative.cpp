@@ -444,10 +444,11 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
                               && !native::stagesBias(problem);
     if(biasUnstaged)
     {
-        logDecline("BI-8",
-                   "the bias layout is outside the LDS staging contract (16-byte base, strides "
-                   "multiples of 16 bytes, last row padded to a whole 16-byte chunk): dq rows "
-                   "that stage the bias are declined");
+        HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME
+                               << " [BI-8]: the bias layout is outside the LDS staging contract "
+                                  "(16-byte base, strides multiples of 16 bytes, last row padded "
+                                  "to a whole 16-byte chunk); only dq rows that load the bias "
+                                  "directly can serve it");
     }
 
     // SP-WS: every region of the shared workspace and the dBias scratch is sized by checked
@@ -1579,11 +1580,11 @@ public:
         // checked, before any code object loads, so a row that lacks a launch or disagrees on
         // the reduce ABI fails on the host whatever the state of the archive.
         const bool reduces = !plan.reduceSymbol.empty();
-        KernelDefinition slotKernel = kernel;
+        std::optional<KernelDefinition> dqLaunch;
         std::optional<KernelDefinition> reduceKernel;
         if constexpr(SOURCES)
         {
-            slotKernel = launchKernelDefinition(kernel, std::string(DQ_LAUNCH));
+            dqLaunch = launchKernelDefinition(kernel, std::string(DQ_LAUNCH));
             if(reduces)
             {
                 reduceKernel = launchKernelDefinition(kernel, std::string(REDUCE_LAUNCH));
@@ -1601,6 +1602,7 @@ public:
             reduceKernel->source.symbol = plan.reduceSymbol;
             reduceKernel->source.signature = native::reduceSignature();
         }
+        const KernelDefinition& slotKernel = dqLaunch.has_value() ? *dqLaunch : kernel;
 
         // Built from the arch alone; see FlydslRmsNormNative.cpp's prepare().
         const compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
