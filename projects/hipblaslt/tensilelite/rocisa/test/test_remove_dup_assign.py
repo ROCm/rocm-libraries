@@ -5,7 +5,7 @@ import pytest
 
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from rocisa.code import KernelBody, Label, Module, TextBlock
-from rocisa.container import sgpr, vgpr
+from rocisa.container import mgpr, sgpr, vgpr
 from rocisa.instruction import (
     SAddU32,
     SBranch,
@@ -14,6 +14,7 @@ from rocisa.instruction import (
     SNop,
     VMovB32,
     _SWaitCnt,
+    _SWaitCntVscnt,
 )
 
 # Only already-lowered instructions here: the pass lowers composites such as
@@ -57,8 +58,13 @@ def test_move_of_a_different_value_is_kept():
 
 @pytest.mark.parametrize(
     "barrier",
-    [lambda: Label("L", ""), lambda: _SWaitCnt(lgkmcnt=0), lambda: SBranch("L")],
-    ids=["label", "waitcnt", "branch"],
+    [
+        lambda: Label("L", ""),
+        lambda: _SWaitCnt(lgkmcnt=0),
+        lambda: _SWaitCntVscnt(vscnt=0),
+        lambda: SBranch("L"),
+    ],
+    ids=["label", "waitcnt", "waitcnt-vscnt", "branch"],
 )
 def test_resetting_barrier_keeps_the_repeated_move(barrier):
     body, _ = _run(SMovB32(sgpr(4), 7), barrier(), SMovB32(sgpr(4), 7))
@@ -71,9 +77,7 @@ def test_non_resetting_barrier_still_removes_the_repeated_move():
 
 
 def test_one_resetting_barrier_among_several_keeps_the_repeated_move():
-    body, _ = _run(
-        SMovB32(sgpr(4), 7), SNop(0), _SWaitCnt(lgkmcnt=0), SNop(0), SMovB32(sgpr(4), 7)
-    )
+    body, _ = _run(SMovB32(sgpr(4), 7), SNop(0), _SWaitCnt(lgkmcnt=0), SNop(0), SMovB32(sgpr(4), 7))
     assert len(body.items()) == 5
 
 
@@ -94,16 +98,12 @@ def test_reset_applies_to_every_tracked_sgpr():
 
 
 def test_write_to_the_sgpr_keeps_the_repeated_move():
-    body, _ = _run(
-        SMovB32(sgpr(4), 7), SAddU32(sgpr(4), sgpr(4), 1), SMovB32(sgpr(4), 7)
-    )
+    body, _ = _run(SMovB32(sgpr(4), 7), SAddU32(sgpr(4), sgpr(4), 1), SMovB32(sgpr(4), 7))
     assert len(body.items()) == 3
 
 
 def test_write_to_another_sgpr_still_removes_the_repeated_move():
-    body, _ = _run(
-        SMovB32(sgpr(4), 7), SAddU32(sgpr(5), sgpr(5), 1), SMovB32(sgpr(4), 7)
-    )
+    body, _ = _run(SMovB32(sgpr(4), 7), SAddU32(sgpr(5), sgpr(5), 1), SMovB32(sgpr(4), 7))
     assert _names(body) == ["SMovB32", "SAddU32"]
 
 
@@ -138,15 +138,23 @@ def test_no_opt_module_is_left_alone():
 def test_no_opt_module_resets_tracking():
     noOpt = Module("noOpt")
     noOpt.setNoOpt(True)
-    noOpt.add(SMovB32(sgpr(4), 7))
-    body, _ = _run(noOpt, SMovB32(sgpr(4), 7))
-    assert _names(body) == ["Module", "SMovB32"]
+    noOpt.add(SMovB32(sgpr(4), 8))
+    body, _ = _run(SMovB32(sgpr(4), 7), noOpt, SMovB32(sgpr(4), 7))
+    assert _names(body) == ["SMovB32", "Module", "SMovB32"]
 
 
 @pytest.mark.parametrize(
     "item",
-    [lambda: SMovB32(sgpr(16), 0), lambda: VMovB32(vgpr(8), 0)],
-    ids=["sgpr", "vgpr"],
+    [
+        lambda: SMovB32(sgpr(16), 0),
+        lambda: VMovB32(vgpr(8), 0),
+        lambda: SMovB64(sgpr(15, 2), 0),
+        lambda: VMovB32(vgpr(7, 2), 0),
+        lambda: SMovB32(mgpr(1), 0),
+        lambda: SMovB32(sgpr(-2), 0),
+        lambda: VMovB32(vgpr(-2), 0),
+    ],
+    ids=["sgpr", "vgpr", "sgpr-range", "vgpr-range", "mgpr", "negative-sgpr", "negative-vgpr"],
 )
 def test_out_of_range_register_is_rejected(item):
     with pytest.raises(RuntimeError, match="GPR index out of range"):
@@ -156,3 +164,9 @@ def test_out_of_range_register_is_rejected(item):
 def test_max_vgpr_is_one_past_the_highest_vgpr_used():
     _, result = _run(VMovB32(vgpr(5), 0), VMovB32(vgpr(2, 2), 0))
     assert result.maxVgpr == 6
+
+
+@pytest.mark.parametrize("totalVgprs", [0, 8])
+def test_no_vgpr_reference_keeps_the_pool_estimate(totalVgprs):
+    _, result = _run(SMovB32(sgpr(4), 7), totalVgprs=totalVgprs)
+    assert result.maxVgpr == totalVgprs
