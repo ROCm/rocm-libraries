@@ -137,15 +137,15 @@ namespace rocRoller::hostnumerics
 
         MatmulOptions options(ScalarType::Float32);
         if(scaleA)
-            options.blockScaleA = normalizeBlockScale(
-                std::move(*scaleA), a.shape()[0], a.shape()[1], scaleBlockSize, "A");
+            options.blockScaleA = roc::hostnumerics::MatmulBlockScale{
+                normalizeBlockScale(
+                    std::move(*scaleA), a.shape()[0], a.shape()[1], scaleBlockSize, "A"),
+                scaleBlockSize};
         if(scaleB)
-            options.blockScaleB = normalizeBlockScale(
-                std::move(*scaleB), b.shape()[1], b.shape()[0], scaleBlockSize, "B");
-        if(options.blockScaleA)
-            options.blockSizeA = scaleBlockSize;
-        if(options.blockScaleB)
-            options.blockSizeB = scaleBlockSize;
+            options.blockScaleB = roc::hostnumerics::MatmulBlockScale{
+                normalizeBlockScale(
+                    std::move(*scaleB), b.shape()[1], b.shape()[0], scaleBlockSize, "B"),
+                scaleBlockSize};
 
         const size_t rows = a.shape()[0];
         if(rows > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))

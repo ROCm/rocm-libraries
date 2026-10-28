@@ -165,14 +165,21 @@ void testRuntimeMixedAndBlockScaledGemm() {
                                                       std::span<const float>(scaleBValues));
 
     MatmulOptions blockOptions(ScalarType::Float32);
-    blockOptions.blockScaleA = scalesA;
-    blockOptions.blockSizeA = 2;
-    blockOptions.blockScaleB = scalesB;
-    blockOptions.blockSizeB = 2;
+    blockOptions.blockScaleA = MatmulBlockScale{scalesA, 2};
+    blockOptions.blockScaleB = MatmulBlockScale{scalesB, 2};
     const Tensor blockResult = matmul(blockA, blockB, ScalarType::Float32, blockOptions,
                                       std::nullopt, GemmBackend::Blocked);
     require(blockResult.loadAs<float>({0, 0}) == 2 * 2 * 8 + 2 * 4 * 16,
             "Runtime block-scaled GEMM result mismatch.");
+
+    MatmulOptions zeroBlockOptions(ScalarType::Float32);
+    zeroBlockOptions.blockScaleA = MatmulBlockScale{scalesA, 0};
+    requireError(
+        [&] {
+            (void)matmul(blockA, blockB, ScalarType::Float32, zeroBlockOptions, std::nullopt,
+                         GemmBackend::Blocked);
+        },
+        "Block-scaled GEMM accepted a zero block size.");
 }
 
 void testBlockedUnalignedScaleSegments() {
@@ -188,12 +195,14 @@ void testBlockedUnalignedScaleSegments() {
     const Tensor operandB = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{7, 2}), std::span<const float>(b));
     MatmulOptions options(ScalarType::Float32);
-    options.blockScaleA = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1, 3}), std::span<const float>(scaleA));
-    options.blockSizeA = 3;
-    options.blockScaleB = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{2, 2}), std::span<const float>(scaleB));
-    options.blockSizeB = 4;
+    options.blockScaleA = MatmulBlockScale{
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 3}),
+                                         std::span<const float>(scaleA)),
+        3};
+    options.blockScaleB = MatmulBlockScale{
+        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2, 2}),
+                                         std::span<const float>(scaleB)),
+        4};
 
     Tensor automaticOutput =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});

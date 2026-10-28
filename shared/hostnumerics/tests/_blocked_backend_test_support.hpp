@@ -92,12 +92,14 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
         const size_t column = coordinates[1];
         float accumulation = 0.0f;
         for (size_t blockBase = 0; blockBase < reductions;) {
-            const size_t remainingA = problem.blockScaleA
-                                          ? problem.blockSizeA - blockBase % problem.blockSizeA
-                                          : reductions - blockBase;
-            const size_t remainingB = problem.blockScaleB
-                                          ? problem.blockSizeB - blockBase % problem.blockSizeB
-                                          : reductions - blockBase;
+            const size_t remainingA =
+                problem.blockScaleA
+                    ? problem.blockScaleA->blockSize - blockBase % problem.blockScaleA->blockSize
+                    : reductions - blockBase;
+            const size_t remainingB =
+                problem.blockScaleB
+                    ? problem.blockScaleB->blockSize - blockBase % problem.blockScaleB->blockSize
+                    : reductions - blockBase;
             const size_t blockEnd =
                 blockBase + std::min({reductions - blockBase, remainingA, remainingB});
             float partial = 0.0f;
@@ -112,11 +114,11 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
                 partial += aValue * bValue;
             }
             if (problem.blockScaleA)
-                partial *=
-                    problem.blockScaleA->loadAs<float>({row, blockBase / problem.blockSizeA});
+                partial *= problem.blockScaleA->scales.loadAs<float>(
+                    {row, blockBase / problem.blockScaleA->blockSize});
             if (problem.blockScaleB)
-                partial *=
-                    problem.blockScaleB->loadAs<float>({column, blockBase / problem.blockSizeB});
+                partial *= problem.blockScaleB->scales.loadAs<float>(
+                    {column, blockBase / problem.blockScaleB->blockSize});
             accumulation += partial;
             blockBase = blockEnd;
         }

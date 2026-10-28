@@ -43,6 +43,11 @@ void matmulIntoBound(Tensor a, Tensor b, Tensor output, MatmulOptions options,
 }  // namespace
 
 void registerGemmBindings(nb::module_& module) {
+    nb::class_<MatmulBlockScale>(module, "MatmulBlockScale")
+        .def(nb::init<Tensor, size_t>(), "scales"_a, "block_size"_a)
+        .def_rw("scales", &MatmulBlockScale::scales)
+        .def_rw("block_size", &MatmulBlockScale::blockSize);
+
     nb::class_<MatmulOptions>(module, "_MatmulOptions")
         .def(nb::init<ScalarType>(), "accumulator_type"_a)
         .def_rw("accumulator_type", &MatmulOptions::accumulatorType)
@@ -54,8 +59,6 @@ void registerGemmBindings(nb::module_& module) {
         .def_rw("pre_quantization_scales_b", &MatmulOptions::preQuantizationScalesB)
         .def_rw("block_scale_a", &MatmulOptions::blockScaleA)
         .def_rw("block_scale_b", &MatmulOptions::blockScaleB)
-        .def_rw("block_size_a", &MatmulOptions::blockSizeA)
-        .def_rw("block_size_b", &MatmulOptions::blockSizeB)
         .def_rw("conjugate_a", &MatmulOptions::conjugateA)
         .def_rw("conjugate_b", &MatmulOptions::conjugateB);
 

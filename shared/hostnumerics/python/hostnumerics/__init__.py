@@ -135,23 +135,12 @@ def _matmul_options(
     math_mode,
     block_scale_a,
     block_scale_b,
-    block_size_a,
-    block_size_b,
     pre_quantization_scales_a,
     pre_quantization_scales_b,
     accumulation_rounding,
     conjugate_a,
     conjugate_b,
 ):
-    if block_scale_a is not None and block_size_a == 0:
-        raise RuntimeError("Python matmul A block scale requires a nonzero size.")
-    if block_scale_a is None and block_size_a != 0:
-        raise RuntimeError("Python matmul A block size requires a scale tensor.")
-    if block_scale_b is not None and block_size_b == 0:
-        raise RuntimeError("Python matmul B block scale requires a nonzero size.")
-    if block_scale_b is None and block_size_b != 0:
-        raise RuntimeError("Python matmul B block size requires a scale tensor.")
-
     options = _native._MatmulOptions(accumulator_type)
     options.accumulation_rounding = accumulation_rounding
     options.math_mode = math_mode
@@ -165,8 +154,6 @@ def _matmul_options(
     )
     options.block_scale_a = block_scale_a
     options.block_scale_b = block_scale_b
-    options.block_size_a = block_size_a
-    options.block_size_b = block_size_b
     options.conjugate_a = conjugate_a
     options.conjugate_b = conjugate_b
     return options
@@ -183,8 +170,6 @@ def matmul(
     math_mode,
     block_scale_a=None,
     block_scale_b=None,
-    block_size_a=0,
-    block_size_b=0,
     pre_quantization_scales_a=None,
     pre_quantization_scales_b=None,
     accumulation_rounding,
@@ -193,7 +178,10 @@ def matmul(
     output_layout,
     backend,
 ):
-    """Return the matrix product of two rank-two tensors."""
+    """Return the matrix product of two rank-two tensors.
+
+    ``block_scale_a`` and ``block_scale_b`` are ``MatmulBlockScale`` values or ``None``.
+    """
 
     options = _matmul_options(
         accumulator_type,
@@ -202,8 +190,6 @@ def matmul(
         math_mode,
         block_scale_a,
         block_scale_b,
-        block_size_a,
-        block_size_b,
         pre_quantization_scales_a,
         pre_quantization_scales_b,
         accumulation_rounding,
@@ -227,15 +213,16 @@ def matmul_into(
     backend,
     block_scale_a=None,
     block_scale_b=None,
-    block_size_a=0,
-    block_size_b=0,
     pre_quantization_scales_a=None,
     pre_quantization_scales_b=None,
     accumulation_rounding,
     conjugate_a,
     conjugate_b,
 ):
-    """Write the matrix product of two rank-two tensors into output."""
+    """Write the matrix product of two rank-two tensors into output.
+
+    ``block_scale_a`` and ``block_scale_b`` are ``MatmulBlockScale`` values or ``None``.
+    """
 
     options = _matmul_options(
         accumulator_type,
@@ -244,8 +231,6 @@ def matmul_into(
         math_mode,
         block_scale_a,
         block_scale_b,
-        block_size_a,
-        block_size_b,
         pre_quantization_scales_a,
         pre_quantization_scales_b,
         accumulation_rounding,

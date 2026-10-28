@@ -170,12 +170,14 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
         Accumulator accumulation = Accumulator(0);
 
         for (size_t blockBase = 0; blockBase < reductions;) {
-            const size_t remainingA = problem.blockScaleA
-                                          ? problem.blockSizeA - blockBase % problem.blockSizeA
-                                          : reductions - blockBase;
-            const size_t remainingB = problem.blockScaleB
-                                          ? problem.blockSizeB - blockBase % problem.blockSizeB
-                                          : reductions - blockBase;
+            const size_t remainingA =
+                problem.blockScaleA
+                    ? problem.blockScaleA->blockSize - blockBase % problem.blockScaleA->blockSize
+                    : reductions - blockBase;
+            const size_t remainingB =
+                problem.blockScaleB
+                    ? problem.blockScaleB->blockSize - blockBase % problem.blockScaleB->blockSize
+                    : reductions - blockBase;
             const size_t blockEnd =
                 blockBase + std::min({reductions - blockBase, remainingA, remainingB});
             Accumulator partial = Accumulator(0);
@@ -183,11 +185,11 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
                 partial += problem.a.loadAs<Accumulator>({row, reduction}) *
                            problem.b.loadAs<Accumulator>({reduction, column});
             if (problem.blockScaleA)
-                partial *=
-                    problem.blockScaleA->loadAs<Accumulator>({row, blockBase / problem.blockSizeA});
+                partial *= problem.blockScaleA->scales.loadAs<Accumulator>(
+                    {row, blockBase / problem.blockScaleA->blockSize});
             if (problem.blockScaleB)
-                partial *= problem.blockScaleB->loadAs<Accumulator>(
-                    {column, blockBase / problem.blockSizeB});
+                partial *= problem.blockScaleB->scales.loadAs<Accumulator>(
+                    {column, blockBase / problem.blockScaleB->blockSize});
             accumulation += partial;
             blockBase = blockEnd;
         }
@@ -266,10 +268,10 @@ int main(int argc, char** argv) {
             if (options.reductions % blockSize != 0)
                 throw std::runtime_error("MX profiles require K divisible by 32.");
             const size_t reductionBlocks = options.reductions / blockSize;
-            requestOptions.blockScaleA = makeBlockScales(options.rows, reductionBlocks, 3);
-            requestOptions.blockSizeA = blockSize;
-            requestOptions.blockScaleB = makeBlockScales(options.columns, reductionBlocks, 4);
-            requestOptions.blockSizeB = blockSize;
+            requestOptions.blockScaleA =
+                MatmulBlockScale{makeBlockScales(options.rows, reductionBlocks, 3), blockSize};
+            requestOptions.blockScaleB =
+                MatmulBlockScale{makeBlockScales(options.columns, reductionBlocks, 4), blockSize};
         }
         GemmTestCase request(a, b, output, requestOptions);
         roc::hostnumerics::detail::bindIndices(request, output.shape(), selection,
