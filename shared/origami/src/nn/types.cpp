@@ -15,6 +15,8 @@ model_handle_t library_models_t::get(backend_id_t backend) const {
       return tilewright;
     case backend_id_t::embedding_similarity_v1:
       return embedding_similarity;
+    case backend_id_t::olc_v1:
+      return olc;
   }
   return invalid_handle;
 }

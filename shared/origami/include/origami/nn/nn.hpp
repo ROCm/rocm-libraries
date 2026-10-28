@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "origami/nn/olc/types.hpp"
 #include "origami/nn/types.hpp"
 #include "origami/origami_export.h"
 
@@ -39,6 +40,30 @@ ORIGAMI_EXPORT model_handle_t load_model_by_index(const std::string& logic_stem,
 
 ORIGAMI_EXPORT library_models_t load_models_for_logic(const std::string& logic_stem,
                                                       const std::string& hint_dir = "");
+
+/// Path of the weights origami_nn_index maps (logic_stem, backend) to, or "" if none.
+ORIGAMI_EXPORT std::string index_weights_path(const std::string& logic_stem,
+                                              backend_id_t backend,
+                                              const std::string& hint_dir = "");
+
+/**
+ * @brief Load an OLC model (ORIOLC .orr) for the library it serves.
+ *
+ * An OLC model is checked against this build and against @p target (arch, dtype class, the
+ * kernel library's manifest; nn/olc/load_validate.hpp), so load_model_by_index cannot load
+ * one. Cached by path; a cached path skips the checks. @p status and @p detail report a load.
+ */
+ORIGAMI_EXPORT model_handle_t load_olc_model(const std::string&         path,
+                                               const olc::deployment_t& target,
+                                               olc::status_t*           status = nullptr,
+                                               std::string*               detail = nullptr);
+
+/// Same, against @p identity instead of this build's (tests, tools).
+ORIGAMI_EXPORT model_handle_t load_olc_model(const std::string&             path,
+                                               const olc::deployment_t&     target,
+                                               const olc::build_identity_t& identity,
+                                               olc::status_t*               status = nullptr,
+                                               std::string*                   detail = nullptr);
 
 ORIGAMI_EXPORT void unload_model(model_handle_t handle);
 
