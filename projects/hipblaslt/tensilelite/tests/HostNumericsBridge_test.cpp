@@ -342,3 +342,13 @@ TEST(HostNumericsBridge, SamplingAndLayoutAcceptOversizedEmptyShapes)
         EXPECT_NO_THROW(TensileLite::Client::referenceIndexRange(descriptor, 1));
     }
 }
+
+TEST(HostNumericsBridge, ZeroElementsToValidateSelectsEveryElement)
+{
+    const std::vector<size_t>           sizes{3, 4};
+    const std::vector<size_t>           strides{1, 3};
+    const TensileLite::TensorDescriptor descriptor(
+        "d", rocisa::DataType::Float, sizes.begin(), sizes.end(), strides.begin(), strides.end());
+    EXPECT_EQ(TensileLite::Client::referenceIndexRange(descriptor, 0).count(), 12);
+    EXPECT_EQ(TensileLite::Client::referenceIndexRange(descriptor, 1).count(), 1);
+}

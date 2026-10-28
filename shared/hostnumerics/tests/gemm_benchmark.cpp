@@ -40,7 +40,7 @@ struct Options {
     size_t rows = 512;
     size_t columns = 512;
     size_t reductions = 512;
-    size_t selectedOutputs = 0;
+    std::optional<size_t> selectedOutputs;  // Without a value, every output is selected.
     size_t warmups = 1;
     size_t iterations = 5;
 };
@@ -99,7 +99,7 @@ size_t parseSize(const char* text, const char* name) {
 Options parseOptions(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
         std::cout << "Usage: hostnumerics-gemm-benchmark "
-                     "<automatic|blocked> <M> <N> <K> <selected-or-0-for-all> "
+                     "<automatic|blocked> <M> <N> <K> <selected-count|all> "
                      "<warmups> <iterations> [profile]\n";
         std::exit(0);
     }
@@ -117,7 +117,8 @@ Options parseOptions(int argc, char** argv) {
     options.rows = parseSize(argv[2], "M");
     options.columns = parseSize(argv[3], "N");
     options.reductions = parseSize(argv[4], "K");
-    options.selectedOutputs = parseSize(argv[5], "selected output count");
+    if (std::string_view(argv[5]) != "all")
+        options.selectedOutputs = parseSize(argv[5], "selected output count");
     options.warmups = parseSize(argv[6], "warmup count");
     options.iterations = parseSize(argv[7], "iteration count");
     if (argc == 9) options.profile = argv[8];
@@ -240,9 +241,9 @@ int main(int argc, char** argv) {
         const NumericProfile profile = numericProfile(options.profile);
         const size_t outputElements = options.rows * options.columns;
         const IndexRange selection =
-            options.selectedOutputs == 0 || options.selectedOutputs >= outputElements
-                ? IndexRange::all(outputElements)
-                : primeIndexRange(outputElements, outputElements, options.selectedOutputs);
+            options.selectedOutputs
+                ? primeIndexRange(outputElements, outputElements, *options.selectedOutputs)
+                : IndexRange::all(outputElements);
 
         const ptrdiff_t aLeadingDimension =
             static_cast<ptrdiff_t>(options.rows + (profile.affineLayouts ? 3 : 0));

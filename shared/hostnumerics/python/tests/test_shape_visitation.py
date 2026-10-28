@@ -127,7 +127,8 @@ class ShapeVisitationTests(unittest.TestCase):
                 (interval.start, interval.end, interval.stride), (0, logical, stride)
             )
             self.assertEqual(interval.indices(), list(range(0, logical, stride)))
-        for requested in (0, 10, 11):
+        self.assertEqual(hn.prime_index_range(10, SIZE_MAX, 0).count(), 0)
+        for requested in (10, 11):
             self.assertEqual(hn.prime_index_range(10, SIZE_MAX, requested).count(), 10)
         with self.assertRaisesRegex(RuntimeError, "Prime-stride"):
             hn.prime_index_range(2, SIZE_MAX, 1)
