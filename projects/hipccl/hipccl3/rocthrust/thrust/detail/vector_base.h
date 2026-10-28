@@ -44,9 +44,6 @@
 #include _THRUST_STD_INCLUDE(utility)
 
 #include <vector>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
 
 #include _THRUST_STD_INCLUDE(initializer_list)
 

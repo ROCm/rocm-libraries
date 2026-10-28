@@ -33,12 +33,8 @@
 
 #include _THRUST_STD_INCLUDE(__utility/pair.h)
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(tuple)
-#  include _THRUST_STD_INCLUDE(type_traits)
-#else
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(tuple)
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -56,7 +52,6 @@ struct maybe_unwrap_nested
   }
 };
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Us, class... Ts>
 struct maybe_unwrap_nested<tuple<Us...>, tuple_of_iterator_references<Ts...>>
 {
@@ -65,7 +60,6 @@ struct maybe_unwrap_nested<tuple<Us...>, tuple_of_iterator_references<Ts...>>
     return t.template __to_tuple<Us...>(typename _THRUST_STD::__make_tuple_indices<sizeof...(Ts)>::type{});
   }
 };
-#endif
 
 template <typename... Ts>
 class tuple_of_iterator_references : public tuple<Ts...>
@@ -118,13 +112,11 @@ public:
     return *this;
   }
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   template <class... Us, _THRUST_STD::enable_if_t<sizeof...(Us) == sizeof...(Ts), int> = 0>
   THRUST_HOST_DEVICE constexpr operator tuple<Us...>() const
   {
     return __to_tuple<Us...>(typename _THRUST_STD::__make_tuple_indices<sizeof...(Ts)>::type{});
   }
-#endif
 
   // this overload of swap() permits swapping tuple_of_iterator_references returned as temporaries from
   // iterator dereferences
@@ -134,29 +126,21 @@ public:
     x.swap(y);
   }
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
   template <class... Us, size_t... Id>
   THRUST_HOST_DEVICE constexpr tuple<Us...> __to_tuple(_THRUST_STD::__tuple_indices<Id...>) const
   {
     return {maybe_unwrap_nested<Us, Ts>{}(get<Id>(*this))...};
   }
-#endif
 };
 } // namespace detail
 
 THRUST_NAMESPACE_END
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_STD_NAMESPACE_BEGIN
-#else
-THRUST_NAMESPACE_BEGIN
-#endif
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Ts>
 inline constexpr bool
   __is_tuple_of_iterator_references_v<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> = true;
-#endif
 
 // define tuple_size, tuple_element, etc.
 template <class... Ts>
@@ -166,18 +150,10 @@ struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts..
 
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     : _THRUST_STD::tuple_element<Id, _THRUST_STD::tuple<Ts...>>
-#else
-    : THRUST_NS_QUALIFIER::tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>>
-#endif
 {};
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
 _THRUST_STD_NAMESPACE_END
-#else
-THRUST_NAMESPACE_END
-#endif
 
 // structured bindings support
 #if !THRUST_COMPILER(NVRTC)
@@ -190,11 +166,7 @@ struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts..
 
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
     : _THRUST_STD::tuple_element<Id, _THRUST_STD::tuple<Ts...>>
-#  else
-    : THRUST_NS_QUALIFIER::tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>>
-#  endif
 {};
 } // namespace std
 #endif // !THRUST_COMPILER(NVRTC)
