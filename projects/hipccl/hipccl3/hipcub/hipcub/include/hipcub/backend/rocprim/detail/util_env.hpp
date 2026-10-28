@@ -26,6 +26,7 @@
 #ifndef HIPCUB_ROCPRIM_DETAIL_ENV_BASED_HPP_
 #define HIPCUB_ROCPRIM_DETAIL_ENV_BASED_HPP_
 
+#include "../util_allocator.hpp"
 #include "temporary_storage.hpp"
 
 // Only __query_or is needed; the umbrella <execution> pulls in every PSTL backend
@@ -43,18 +44,46 @@ namespace detail
 // TODO: this should be moved to libhipcxx's `hip::__device_memory_resource` when that's added
 struct device_memory_resource
 {
+    HIPCUB_HOST
     void* allocate(size_t bytes, size_t /* alignment */)
     {
         void* ptr{nullptr};
         HIPCUB_TRY_CUDA_API(::hipMalloc, "allocate failed to allocate with hipMalloc", &ptr, bytes);
+        _CCCL_ASSERT(ptr != nullptr, "allocate failed to allocate with hipMallocAsync");
         return ptr;
     }
 
+    HIPCUB_DEVICE
+    void* allocate(size_t /*bytes*/, size_t /* alignment */)
+    {
+        _HipcubLog(
+            "%s\n",
+            "hipcub::detail::device_memory_resource::allocate not supported from device code.");
+        _HIPCUB_STD::terminate();
+    }
+
+    HIPCUB_HOST
     void deallocate(void* ptr, size_t /* bytes */)
     {
         HIPCUB_ASSERT_CUDA_API(::hipFree, "deallocate failed with hipFree", ptr);
     }
 
+    HIPCUB_DEVICE
+    void deallocate(void* /*ptr*/, size_t /* bytes */)
+    {
+        _HipcubLog(
+            "%s\n",
+            "hipcub::detail::device_memory_resource::deallocate not supported from device code.");
+        _HIPCUB_STD::terminate();
+    }
+
+    HIPCUB_RUNTIME_FUNCTION
+    void* allocate(_HIPCUB_LIBCXX::stream_ref stream, size_t bytes, size_t /* alignment */)
+    {
+        return allocate(stream, bytes);
+    }
+
+    HIPCUB_HOST
     void* allocate(_HIPCUB_LIBCXX::stream_ref stream, size_t bytes)
     {
         void* ptr{nullptr};
@@ -66,12 +95,31 @@ struct device_memory_resource
         return ptr;
     }
 
+    HIPCUB_DEVICE
+    void* allocate(_HIPCUB_LIBCXX::stream_ref /*stream*/, size_t /*bytes*/)
+    {
+        _HipcubLog(
+            "%s\n",
+            "hipcub::detail::device_memory_resource::allocate not supported from device code.");
+        _HIPCUB_STD::terminate();
+    }
+
+    HIPCUB_HOST
     void deallocate(_HIPCUB_LIBCXX::stream_ref stream, void* ptr, size_t /* bytes */)
     {
         HIPCUB_ASSERT_CUDA_API(::hipFreeAsync,
                                "deallocate failed with hipFreeAsync",
                                ptr,
                                stream.get());
+    }
+
+    HIPCUB_DEVICE
+    void deallocate(_HIPCUB_LIBCXX::stream_ref /*stream*/, void* /*ptr*/, size_t /* bytes */)
+    {
+        _HipcubLog(
+            "%s\n",
+            "hipcub::detail::device_memory_resource::deallocate not supported from device code.");
+        _HIPCUB_STD::terminate();
     }
 };
 
