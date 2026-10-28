@@ -251,14 +251,19 @@ function(_hkp_pack_producer)
     # ROCKE_CPP_QUIET_FALLBACK is deliberately unset: silencing that warning
     # hides the degradation these pins exist to catch.
     #
-    # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
-    # it when set (runtime resolution, no find_library).
+    # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows, or names the
+    # COMGR whose LLVM a catalog was measured with; forward it when set (runtime
+    # resolution, no find_library). ROCKE_LLVM_FLAVOR pins the IR flavor rocke lowers
+    # to instead of the one it derives from that COMGR's LLVM.
     set(_tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
     if(ARG_PACK_JOBS)
         list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
     endif()
     if(ARG_ROCKE_COMGR_LIB)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
+    endif()
+    if(ARG_ROCKE_LLVM_FLAVOR)
+        list(APPEND _tool_env "ROCKE_LLVM_FLAVOR=${ARG_ROCKE_LLVM_FLAVOR}")
     endif()
 
     set(_interp "${ARG_ROCKE_INTERP}" PARENT_SCOPE)
@@ -308,7 +313,8 @@ endfunction()
 #               ARCHES <list> HIPCC <path>
 #               ROCM_KPACK_DIR <dir> OUT_ROOT <dir> ENABLE_ROCKE <bool>
 #               [ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
-#                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]]
+#                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
+#                [ROCKE_LLVM_FLAVOR <flavor>]]
 #               [EXCLUDE_FOLDERS <name>...] [PACK_JOBS <n>])
 #   Wire the compile -> prune -> pack DAG for ONE authored source root.
 #
@@ -345,8 +351,9 @@ endfunction()
 #   depends on it rather than only the interpreter, so changing a kernel under
 #   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
 #   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
-#   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
-#   tool environment.
+#   the wheel that produced it. ROCKE_COMGR_LIB and ROCKE_LLVM_FLAVOR, if set, are
+#   forwarded to the tool environment; both decide the code a rocKE kernel compiles to,
+#   so they are part of the pack's input set and changing either repacks.
 #
 #   OFF: every ROCKE_* keyword is a configure error, since each would name a
 #   toolchain the build does not have. The root runs under the base
@@ -373,7 +380,7 @@ endfunction()
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
         OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
-        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
+        ROCKE_COMGR_LIB ROCKE_LLVM_FLAVOR ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "EXCLUDE_FOLDERS")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
@@ -454,6 +461,12 @@ function(hkp_wire_pack_target)
     set(_manifest_paths ${_source_inputs} ${_tool_sources})
     list(SORT _manifest_paths)
     string(REPLACE ";" "\n" _manifest_body "${_manifest_paths}")
+    # The COMGR and the IR flavor decide the code every rocKE kernel compiles to, so a
+    # change of either has to repack like a changed source.
+    if(ARG_ENABLE_ROCKE)
+        string(APPEND _manifest_body
+               "\n# rocke comgr: ${ARG_ROCKE_COMGR_LIB}\n# rocke llvm flavor: ${ARG_ROCKE_LLVM_FLAVOR}")
+    endif()
     # cmake-lint: disable=E1126
     #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
     #   invalid discriminator. It is valid CMake from 3.18; the floor here is 3.25.
@@ -1535,6 +1548,12 @@ the ROCm one. rocke treats the value as the first CANDIDATE and falls through \
 when it does not load, so configure asserts that the library which loaded is \
 the one named here.")
 
+    set(HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR "" CACHE STRING
+        "LLVM IR flavor the rocKE producer lowers to (llvm20, llvm22, llvm23), forwarded \
+into ROCKE_LLVM_FLAVOR for the pack step. Leave it empty to let rocke derive it from \
+the LLVM of the COMGR it loads. Set it to lower exactly as a catalog was swept: the \
+gfx950 conv AOT catalogs were measured as llvm22 on a COMGR of LLVM 22 or newer.")
+
     # Runs before the copy below and before the probe, so the derived value is
     # what both of them see. An explicitly-set value is left alone.
     hkp_default_rocke_comgr_lib()
@@ -1570,6 +1589,9 @@ the one named here.")
         ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
     if(_rocke_comgr_lib)
         list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
+    endif()
+    if(HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR)
+        list(APPEND _rocke_args ROCKE_LLVM_FLAVOR "${HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR}")
     endif()
 
     set(${out_args} "${_rocke_args}" PARENT_SCOPE)
