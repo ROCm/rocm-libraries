@@ -4,11 +4,16 @@
 #pragma once
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/BinaryOperationFunctors.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseOperationFunctors.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/TernaryOperationFunctors.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/UnaryOperationFunctors.hpp>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 
 namespace hipdnn_test_sdk::utilities

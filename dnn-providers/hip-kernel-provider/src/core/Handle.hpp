@@ -6,7 +6,6 @@
 #include <flatbuffers/flatbuffers.h>
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>

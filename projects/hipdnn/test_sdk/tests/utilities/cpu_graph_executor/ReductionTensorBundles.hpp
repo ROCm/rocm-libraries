@@ -3,9 +3,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <unordered_map>
+#include <vector>
 
 namespace hipdnn_sdk_test_utils
 {

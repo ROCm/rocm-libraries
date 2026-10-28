@@ -10,7 +10,6 @@
 #include "harness/bundle/IGraphEngineRunner.hpp"
 #include "harness/bundle/ISupportClaimObserver.hpp"
 #include "harness/bundle/IVerificationReporter.hpp"
-#include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/input-init/FillInputs.hpp"
 
 namespace hipdnn_integration_tests::bundle

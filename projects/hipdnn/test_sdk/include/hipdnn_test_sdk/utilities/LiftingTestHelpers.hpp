@@ -9,7 +9,12 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <cstdint>
+#include <hipdnn_backend.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>

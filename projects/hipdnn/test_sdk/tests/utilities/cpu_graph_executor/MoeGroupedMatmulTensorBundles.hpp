@@ -7,13 +7,15 @@
 #include <optional>
 #include <vector>
 
+#include <cstdint>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
+#include <unordered_map>
 
 namespace hipdnn_sdk_test_utils
 {

@@ -3,11 +3,20 @@
 
 #pragma once
 
-#include "RMSNormTensorBundles.hpp"
+#include <cstdint>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace hipdnn_sdk_test_utils
 {

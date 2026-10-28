@@ -17,9 +17,11 @@
 #include "harness/IReferenceExecutors.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/ValidationSite.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/OutputComparison.hpp"
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
+#include <cstdint>
 
 namespace hipdnn_integration_tests::bundle
 {

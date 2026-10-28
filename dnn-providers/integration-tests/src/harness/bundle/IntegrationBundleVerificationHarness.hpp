@@ -26,18 +26,24 @@
 
 #include "harness/BenchmarkReport.hpp"
 #include "harness/BundleMetadata.hpp"
+#include "harness/CurrentTestName.hpp"
+#include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/ValidationSite.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/OutputComparison.hpp"
-#include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
+#include <hip/hip_runtime.h>
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {
