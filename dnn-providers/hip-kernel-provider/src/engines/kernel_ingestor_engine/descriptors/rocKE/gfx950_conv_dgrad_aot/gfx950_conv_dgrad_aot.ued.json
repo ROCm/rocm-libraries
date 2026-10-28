@@ -1,5 +1,5 @@
 {
-  "version": "1.1",
+  "version": "1.0",
   "id": "bcca4782-ddf5-4457-b12c-4eb09bc9e842",
   "name": "hipkernel:Gfx950ConvDgradAot",
   "sdk_version": "1.0.0",
