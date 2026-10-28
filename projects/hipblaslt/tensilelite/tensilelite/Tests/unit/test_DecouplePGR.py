@@ -43,6 +43,7 @@ from tensilelite.Components.DecouplePGR import (
     tdmWaveIssueOrder,
 )
 from tensilelite.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
+from toolchain_test_helpers import shared_isa_info_map_or_skip
 
 pytestmark = pytest.mark.unit
 
@@ -557,30 +558,6 @@ def test_convert_after_ds_uses_data_type_not_mac():
 # Solution wiring (gfx1250). PAP coverage is in test_PrefetchAcrossPersistent.py.
 # ---------------------------------------------------------------------------
 _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
-
-
-@pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
 
 
 @pytest.fixture(scope="module")
@@ -1325,17 +1302,12 @@ def test_no_candidate_can_strand_a_legal_pair():
 # ---------------------------------------------------------------------------
 def test_fixture_matches_the_real_conversion():
     from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
-    cxx = validateToolchain("amdclang++")
+    iim = shared_isa_info_map_or_skip("gfx1250")
     isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
     problemType = {"DataType": DataType("F8"), "MXBlockA": 32, "MXBlockB": 32}
     produced = matrixInstructionToMIParameters(
         [16, 16, 128, 1, 1, 2, 8, 2, 2], isa, 32, problemType, [32, 4, 1], iim)
