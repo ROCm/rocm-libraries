@@ -479,7 +479,8 @@ const auto& CachedCKInstances()
 template <typename DeviceOpType>
 const std::unordered_map<std::string, std::size_t>& CachedCKInstanceIndex()
 {
-    static const auto index = [] {
+    // An explicit return type: with a deduced one clang does not elide the copy (-Wnrvo).
+    static const auto index = []() -> std::unordered_map<std::string, std::size_t> {
         const auto& instances = CachedCKInstances<DeviceOpType>();
         std::unordered_map<std::string, std::size_t> by_type;
         by_type.reserve(instances.size());
