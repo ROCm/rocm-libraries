@@ -77,7 +77,7 @@ static inline constexpr auto in_range(const SizeIn& size)
 {
     using common_t = std::common_type_t<SizeIn, SizeType>;
     return static_cast<common_t>(size)
-            < static_cast<common_t>(std::numeric_limits<SizeType>::max());
+           < static_cast<common_t>(std::numeric_limits<SizeType>::max());
 }
 } // namespace device_topk_air_helper
 
@@ -338,7 +338,7 @@ struct device_topk_air_impl
 
     // In the implementaion of function `extract_digit`, we are confident that unrelated bits are zeros
     // So we can directly use the native operator
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     static constexpr bool equal_last_n_bits(digit_t const& a, digit_t const& b, decltype(bits_per_iteration) n)
     {
         if constexpr(UseNativeOperator)
@@ -365,7 +365,7 @@ struct device_topk_air_impl
 
     // In the implementaion of function `extract_digit`, we are confident that unrelated bits are zeros
     // So we can directly use the native operator
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE 
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     static constexpr bool less_last_n_bits(digit_t const&a, digit_t const&b, decltype(bits_per_iteration) n)
     {
         if constexpr(UseNativeOperator)
@@ -682,7 +682,7 @@ struct device_topk_air_impl
     /// to store the results into the histogram.
     /// It also writes data to keys_output (or values_output when using pairs).
     template<unsigned int Iteration, class OffsetT, class F>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     thread_histogram_and_filter_prev(
         storage_type* __restrict__ p_global_storage,
         SizeIn* __restrict__ in_idx_buf,
@@ -784,7 +784,7 @@ struct device_topk_air_impl
     }
 
     template<unsigned int Iteration, class OffsetT, class StorageT>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     launch_thread_histogram_and_filter_prev(
         storage_type* __restrict__ p_global_storage,
         SizeIn* __restrict__ in_idx_buf,
@@ -793,7 +793,7 @@ struct device_topk_air_impl
         KeysOutputIterator keys_output,
         ValuesInputIterator values_input,
         ValuesOutputIterator values_output,
-        SizeIn size, 
+        SizeIn size,
         Decomposer decomposer,
         OffsetT global_offset,
         StorageT& storage
@@ -892,8 +892,8 @@ struct device_topk_air_impl
     /// - p_global_storage->N
     /// - p_global_storage->chosen_bins
     /// - p_global_storage->stopped_at
-    template<unsigned int Iteration, unsigned int HistogramSize>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
+    template<unsigned int Iteration, unsigned int HistogramSize, unsigned int ActualSize, class SharedStorageType>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     chose_pivot_bin(
         storage_type* __restrict__ p_global_storage,
         histogram_t<bins_per_thread> const& thread_bins,
@@ -948,8 +948,8 @@ struct device_topk_air_impl
     /// - Because the histogram result is not available until the end of this function.
     template<unsigned int Iteration>
     ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE
-    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
-    static void 
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
+    static void
     histogram_and_filter(
         storage_type* __restrict__                p_global_storage,
         SizeIn* __restrict__                             in_idx_buf,
@@ -1129,8 +1129,8 @@ struct device_topk_air_impl
     /// Because `histogram_and_filter` only performs filtering for earlier
     /// iterations, this function is needed to run the final round of filtering.
     ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE
-    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
-    static void 
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
+    static void
     last_filter(
         storage_type* __restrict__                p_global_storage,
         SizeIn* __restrict__                             in_idx_buf,

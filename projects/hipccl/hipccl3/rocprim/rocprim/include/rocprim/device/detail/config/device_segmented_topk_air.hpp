@@ -109,8 +109,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 128, 'ipt': 5, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {128, 5},
@@ -181,8 +180,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 128, 'ipt': 6, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {128, 6},
@@ -253,8 +251,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 10},
@@ -325,8 +322,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 128, 'ipt': 4, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {128, 4},
@@ -392,7 +388,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 6, 'radix_bits': 7, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 6},
@@ -463,8 +459,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 2, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 2},
@@ -535,8 +530,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 64, 'ipt': 2, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {64, 2},
@@ -602,7 +596,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 6, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 6},
@@ -685,8 +679,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::int128_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 128, 'ipt': 5, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 8)
-                 && (sizeof(key_type) <= 16) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 16) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {128, 5},
@@ -757,8 +750,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'int64_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 128, 'ipt': 6, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {128, 6},
@@ -829,8 +821,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'int', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 10, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 10},
@@ -901,8 +892,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'short', 'value_type': 'rocprim::empty_type', 'block_size_x': 128, 'ipt': 4, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 1)
-                 && (sizeof(key_type) <= 2) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 2) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {128, 4},
@@ -968,7 +958,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'int8_t', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 6, 'radix_bits': 7, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((!rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 6},
@@ -1039,8 +1029,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'double', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 2, 'radix_bits': 8, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 4)
-                 && (sizeof(key_type) <= 8) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 8) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 2},
@@ -1111,8 +1100,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'float', 'value_type': 'rocprim::empty_type', 'block_size_x': 64, 'ipt': 2, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) > 2)
-                 && (sizeof(key_type) <= 4) && (sizeof(value_type) <= 0)
-                 && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (sizeof(key_type) <= 4) && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {64, 2},
@@ -1178,7 +1166,7 @@ constexpr auto segmented_topk_air_config_picker()
     }
     // CONFIG: {'key_type': 'rocprim::half', 'value_type': 'rocprim::empty_type', 'block_size_x': 256, 'ipt': 6, 'radix_bits': 6, 'adapt_coeff': 256, 'limit': 32}
     if constexpr((rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
-                 && (sizeof(value_type) <= 0) && (!std::is_same_v<value_type, rocprim::empty_type>))
+                 && (std::is_same_v<value_type, rocprim::empty_type>))
     {
         return segmented_topk_air_config_params{
             {256, 6},
