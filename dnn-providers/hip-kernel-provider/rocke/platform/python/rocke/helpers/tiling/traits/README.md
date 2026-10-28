@@ -89,6 +89,8 @@ even-half placement of gfx11 16-bit results) is core's business.
 
 `AMB` is 1 except on the three `32x16x128_f4` rows, whose A operand holds its 32 rows as two
 blocks of 16: the lanes span 16 rows and the second block sits in the most significant registers.
+No hardware run has confirmed that reading yet, so the three rows are pin-only (`auto_select:
+false`, see Selection).
 The encoder lays out every row with one block (`B == 1`); for a multi-block row it raises
 `NotImplementedError` naming the missing feature (`mma/warp_encoding.encoder_supports_layout`).
 `InterleavedStyle` does not model `AMB > 1` and refuses such a row by name; the canonical style
@@ -156,7 +158,9 @@ Mechanically checked (`tests/helpers/tiling/traits/test_mma_catalog_layouts.py` 
 - every (row, target) pair with a backend op whose lane maps core describes: compared with core's
   lane maps, and classed `lane_map_differs` (never issued) unless they agree up to one K order
   shared by A and B (Backend coverage);
-- two point facts read from the calculator (the gfx12 16-bit A operand, the gfx11 16-bit result).
+- two point facts read from the calculator (the gfx12 16-bit A operand, the gfx11 16-bit result);
+- one fp8 x fp4 `16x16x128` tile, run on gfx950 hardware, computes C exactly
+  (`tests/helpers/tiling/mma/test_mma_k_coupling.py`; it runs where the current GPU is a gfx950).
 
 Nothing else ties a transcribed value to its source: an ISA-table or calculator row outside these
 checks is as right as its transcription.
@@ -202,7 +206,9 @@ hardware lane-map run confirms them.
   `swmmac_f16_16x16x128_bf8_bf8`, `swmmac_i32_16x16x128_iu8`, `swmmac_f32_16x16x64_f16`,
   `swmmac_f16_16x16x64_f16`.
 - The earlier table's strings, two M blocks of A per lane: `wmma_f32_32x16x128_f4`,
-  `wmma_scale_f32_32x16x128_f4`, `wmma_scale16_f32_32x16x128_f4`.
+  `wmma_scale_f32_32x16x128_f4`, `wmma_scale16_f32_32x16x128_f4`. They are pin-only until the
+  driven-tile test of `wmma_f32_32x16x128_f4` (`test_mma_k_coupling.py`) has run on gfx1250
+  hardware.
 - The sparsity index operand of every sparse WMMA row (`swmmac_*`): no source the catalog follows
   describes it, so `index_layout` is `null` there. Nothing reads it today; the driver does not issue
   sparse rows.
@@ -222,7 +228,9 @@ N, K, and the scale block size for `scaled`). The loader refuses two selectable 
 key. When two instructions really answer the same key (a `_tied` variant, an `f8f6f4` 8-bit x 8-bit
 variant beside the dedicated fp8 instruction), keep the dedicated one selectable and set
 `auto_select: false` on the other: it stays reachable by name (`atom_override`), never by selection.
-Multi-block rows are never selected; they are reachable by name.
+Multi-block rows are never selected; they are reachable by name. A row whose layout no hardware run
+has confirmed may also be pin-only, with no twin: the three rows with two M blocks of A per lane
+(Layout parameters).
 
 A row whose result dtype differs from its accumulator dtype (`d_dtype != c_dtype`; today only
 `wmma_bf16f32_16x16x32_bf16`) is selected by naming its result, `select(d=...)` or

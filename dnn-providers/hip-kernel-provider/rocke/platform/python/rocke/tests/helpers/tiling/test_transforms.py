@@ -16,7 +16,11 @@ import pytest
 
 from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.encoding import WarpDistributionEncoding
-from rocke.helpers.tiling.mma.warp_encoding import a_warp_encoding, b_warp_encoding
+from rocke.helpers.tiling.mma.warp_encoding import (
+    a_warp_encoding,
+    b_warp_encoding,
+    canonical_layouts,
+)
 from rocke.helpers.tiling.register_mapper import RegisterMapper
 from rocke.helpers.tiling.traits import load_mma_traits
 from rocke.helpers.tiling.transforms import (
@@ -158,7 +162,7 @@ def test_describe_edge_declared_relabel_must_be_consistent() -> None:
 def test_mma_pair_k_aligned_accepts_canonical() -> None:
     tr = _traits()
     a, b = a_warp_encoding(tr), b_warp_encoding(tr)
-    d = mma_pair_k_aligned(a, b)
+    d = mma_pair_k_aligned(a, b, a_canon=a, b_canon=b)
     assert d.severity == "ok", d.message
 
 
@@ -172,7 +176,7 @@ def test_mma_pair_k_aligned_rejects_k_misaligned() -> None:
     )  # reorders which K sits in which register slot
     if k_distribution(a_k_scrambled) == k_distribution(a):
         pytest.skip("swap did not perturb the K projection for this atom")
-    d = mma_pair_k_aligned(a_k_scrambled, b)
+    d = mma_pair_k_aligned(a_k_scrambled, b, a_canon=a, b_canon=b)
     assert d.severity in ("warning", "error")  # the driver rejects either
     # a register-axis swap keeps the K SET per lane but changes its order -> reorder-fixable warning
     # (names transform_fragment); if it also changed the set it would be a hard "different K sets" error.
@@ -193,10 +197,18 @@ def test_mma_pair_k_aligned_accepts_rectangular_per_atom() -> None:
     )
 
     a, b, _ = _wave_descs_interleaved(4, 2, 2)
-    d_atom = mma_pair_k_aligned(a.layout, b.layout, a_free_atoms=4, b_free_atoms=2)
+    a_canon, b_canon, _ = canonical_layouts(_traits(), (4, 2, 2))
+    d_atom = mma_pair_k_aligned(
+        a.layout,
+        b.layout,
+        a_canon=a_canon,
+        b_canon=b_canon,
+        a_free_atoms=4,
+        b_free_atoms=2,
+    )
     assert d_atom.severity == "ok", d_atom.message
     d_whole = mma_pair_k_aligned(
-        a.layout, b.layout
+        a.layout, b.layout, a_canon=a_canon, b_canon=b_canon
     )  # default 1,1 -> whole-fragment, rejects rectangular
     assert d_whole.severity != "ok"
 
@@ -210,7 +222,15 @@ def test_mma_pair_k_aligned_per_atom_still_rejects_k_mismatch() -> None:
     )
 
     a, b, _ = _wave_descs_interleaved(4, 2, 2)
-    d = mma_pair_k_aligned(a.layout, b.layout, a_free_atoms=4, b_free_atoms=1)
+    a_canon, b_canon, _ = canonical_layouts(_traits(), (4, 2, 2))
+    d = mma_pair_k_aligned(
+        a.layout,
+        b.layout,
+        a_canon=a_canon,
+        b_canon=b_canon,
+        a_free_atoms=4,
+        b_free_atoms=1,
+    )
     assert d.severity != "ok"
 
 

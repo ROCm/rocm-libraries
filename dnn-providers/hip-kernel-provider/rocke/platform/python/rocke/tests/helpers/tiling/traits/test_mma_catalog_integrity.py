@@ -137,9 +137,18 @@ def test_a_row_whose_replication_counts_disagree_fails(tmp_path) -> None:
 
 
 def test_every_selection_has_one_answer_and_every_pin_only_row_one_twin() -> None:
-    # Selection keys are unique among selectable rows (the loader enforces it); a pin-only row exists
-    # only because it answers the same selection as exactly one selectable row on each target.
+    # Selection keys are unique among selectable rows (the loader enforces it). A pin-only row exists
+    # because it answers the same selection as exactly one selectable row on each target, or because
+    # it holds two M blocks of A per lane, a layout no hardware run has confirmed yet (README:
+    # Selection).
     rows = list(load_mma_traits().by_op_id.values())
+    two_m_blocks = {t.op_id for t in rows if t.layout_params.a_m_register_blocks > 1}
+    assert two_m_blocks == {
+        "wmma_f32_32x16x128_f4",
+        "wmma_scale_f32_32x16x128_f4",
+        "wmma_scale16_f32_32x16x128_f4",
+    }
+    assert all(not load_mma_traits().get(op_id).auto_select for op_id in two_m_blocks)
     answers = Counter(
         _selection_key(t, target)
         for t in rows
@@ -147,7 +156,7 @@ def test_every_selection_has_one_answer_and_every_pin_only_row_one_twin() -> Non
         for target in t.supported_targets
     )
     assert [key for key, n in answers.items() if n > 1] == []
-    pin_only = [t for t in rows if not t.auto_select]
+    pin_only = [t for t in rows if not t.auto_select and t.op_id not in two_m_blocks]
     assert pin_only, "the catalog has pin-only rows"
     for traits in pin_only:
         for target in traits.supported_targets:

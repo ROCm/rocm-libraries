@@ -218,7 +218,9 @@ def test_gfx1250_scaled_operands_equal_core_scaled_layout(traits: MmaTraits) -> 
 
 
 def _selection_twins() -> list[tuple[MmaTraits, MmaTraits]]:
-    """Each pin-only row with the selectable row that answers its selection on a shared target."""
+    """Each pin-only row with the selectable row that answers its selection on a shared target. A
+    pin-only row with no such twin (two M blocks per lane, test_mma_catalog_integrity) is left out.
+    """
 
     def key(traits: MmaTraits, target: str) -> tuple:
         block_k = traits.scale.block_k if traits.scale is not None else None
@@ -246,6 +248,7 @@ def _selection_twins() -> list[tuple[MmaTraits, MmaTraits]]:
         for pinned in _ROWS
         if not pinned.auto_select
         for target in pinned.supported_targets
+        if key(pinned, target) in selectable
     }
     return [
         (_CATALOG.get(pinned), _CATALOG.get(twin)) for pinned, twin in sorted(twins)
