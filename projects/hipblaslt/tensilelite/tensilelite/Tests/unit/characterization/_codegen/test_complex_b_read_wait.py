@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+from codegen_harness import run_where_backend_matches_isa
 from config_harness import derive_states, emit_kernels_from_config
 from rocisa import getMFMAs
 from rocisa.instruction import SNop
+from tensilelite.Common.Architectures import gfxToIsa
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = pytest.mark.unit
@@ -24,6 +26,18 @@ _CONFIG = Path(__file__).parent / "data/test_data/_designed/gfx942/complex_b_rea
 @pytest.mark.parametrize("dtype", ["C", "Z"])
 @pytest.mark.parametrize("delay_product", [False, True])
 def test_complex_b_reads_complete_before_use(
+    arch, dtype, conjugate_a, conjugate_b, delay_product, tmp_path
+):
+    def check():
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            _check_complex_b_reads_complete_before_use(
+                arch, dtype, conjugate_a, conjugate_b, delay_product, monkeypatch, tmp_path
+            )
+
+    run_where_backend_matches_isa(gfxToIsa(arch), check)
+
+
+def _check_complex_b_reads_complete_before_use(
     arch, dtype, conjugate_a, conjugate_b, delay_product, monkeypatch, tmp_path
 ):
     if delay_product:
