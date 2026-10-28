@@ -115,10 +115,15 @@ AUTO reads distribution metadata under installation locations adjacent to the
 loaded engine or executable, including `site-packages`, Linux
 `lib/python*/site-packages` and `lib64/python*/site-packages`, and Windows
 `Lib/site-packages`. An installed shared engine or executable and its SDK can
-move together without a build-machine SDK path. CMake also writes a relative
-`rocke_sdk_site.txt` descriptor for its selected Python interpreter, allowing
-build-tree binaries to locate that interpreter's SDK. This descriptor stays in
-the build tree and is never installed; reconfigure when changing interpreters.
+move together without a build-machine SDK path. CMake also writes
+`rocke_sdk_site.txt` at the top-level build root for its selected Python
+interpreter, allowing build-tree binaries to locate that interpreter's SDK.
+The site path is relative when possible. Cross-drive Windows builds use the
+`rocke-sdk-site-absolute-v1` marker with an absolute site directory, still
+resolving the compiler through distribution metadata. This descriptor stays in
+the build tree and is never installed. Reconfigure when changing interpreters
+or moving an SDK referenced by an absolute descriptor; relative descriptors
+support moving the build and environment together.
 Standalone consumers outside those installation locations and the configured
 build tree must select COMGR with `ROCKE_COMGR_LIB`. Python bindings continue
 delegating AUTO to Python's resolver. The native adapter queries compiler version; it does not implement

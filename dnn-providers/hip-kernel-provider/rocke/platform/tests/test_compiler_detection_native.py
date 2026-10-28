@@ -5,6 +5,7 @@
 
 import importlib.util
 import json
+import ntpath
 import os
 import shutil
 import subprocess
@@ -488,7 +489,12 @@ def test_build_sidecar_tracks_selected_sdk_site_after_parent_relocation(
     assert info["native"]["requested_comgr"] == str(library)
 
 
-def test_cmake_build_sidecar_discovers_user_site_sdk(native_detector, tmp_path):
+@pytest.mark.parametrize(
+    "provider_layout", [False, True], ids=["standalone", "provider"]
+)
+def test_cmake_build_sidecar_discovers_user_site_sdk(
+    native_detector, tmp_path, provider_layout
+):
     if not (PLATFORM / "CMakeLists.txt").is_file():
         pytest.skip("source CMake project is not installed with native test artifacts")
     cmake = shutil.which("cmake")
@@ -537,13 +543,25 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(native_detector, tmp_path):
     site = Path(user_site)
     library = sdk_fixture(site, "_7_9_nonce")
     build = tmp_path / "build"
+    project = PLATFORM
+    if provider_layout:
+        project = tmp_path / "umbrella"
+        project.mkdir()
+        (project / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.16)\n"
+            "project(provider_layout LANGUAGES CXX)\n"
+            'set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")\n'
+            'set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")\n'
+            'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")\n'
+            f'add_subdirectory("{PLATFORM.as_posix()}" provider/rocke/platform)\n'
+        )
     # Exercise the production CMake call site: importing write_location directly
     # would miss a regression that reinstates isolated Python invocation there.
     subprocess.run(
         [
             cmake,
             "-S",
-            str(PLATFORM),
+            str(project),
             "-B",
             str(build),
             f"-DPython3_EXECUTABLE={python}",
@@ -560,7 +578,12 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(native_detector, tmp_path):
     assert marker == "rocke-sdk-site-v1"
     assert not Path(relative).is_absolute()
     assert (build / relative).resolve() == site.resolve()
-    native = build / native_detector.name
+    native = (
+        build / "lib" / native_detector.name
+        if provider_layout
+        else build / native_detector.name
+    )
+    native.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(native_detector, native)
     env["PYTHONPATH"] = str(PLATFORM / "python")
     result = subprocess.run(
@@ -574,6 +597,42 @@ def test_cmake_build_sidecar_discovers_user_site_sdk(native_detector, tmp_path):
     assert info["native"] == info["python"]
     assert info["native"]["llvm_version"] == [23, 0, 1]
     assert info["native"]["requested_comgr"] == str(library)
+
+    if provider_layout:
+        binary = build / "bin" / "native-detector"
+        binary.parent.mkdir(exist_ok=True)
+        subprocess.run(
+            [
+                "c++",
+                "-std=c++20",
+                "-x",
+                "c++",
+                "-",
+                "-x",
+                "none",
+                str(native_detector.parent / "librocke_core.a"),
+                "-ldl",
+                "-pthread",
+                "-o",
+                str(binary),
+            ],
+            input=(
+                "#include <cstdio>\n"
+                "namespace ckc { struct CompilerInfo { unsigned major,minor,patch;"
+                "const char *source,*requested,*comgr,*query; };"
+                "const CompilerInfo* candidate_compiler_info(); }\n"
+                "int main(){auto p=ckc::candidate_compiler_info();if(!p)return 1;"
+                'std::printf("%u\\n%s\\n",p->major,p->requested);return 0;}\n'
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        env.pop("PYTHONPATH", None)
+        result = subprocess.run(
+            [str(binary)], env=env, check=True, capture_output=True, text=True
+        )
+        assert result.stdout.splitlines() == ["23", str(library)]
 
 
 def test_relocated_static_archive_consumer_discovers_sdk_without_python(
@@ -772,6 +831,137 @@ def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path
     result = subprocess.run(
         [sys.executable, "-c", REJECTION_PROBE],
         env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "site, build, marker, location",
+    [
+        (
+            r"C:\env\Lib\site-packages",
+            r"C:\work\build",
+            "rocke-sdk-site-v1",
+            r"..\..\env\Lib\site-packages",
+        ),
+        (
+            r"B:\env\Lib\site-packages",
+            r"C:\work\build",
+            "rocke-sdk-site-absolute-v1",
+            r"B:\env\Lib\site-packages",
+        ),
+    ],
+    ids=["same-drive", "cross-drive"],
+)
+def test_windows_build_sidecar_format(
+    tmp_path, monkeypatch, site, build, marker, location
+):
+    generator = PLATFORM / "tools" / "gen_sdk_comgr_location.py"
+    if not generator.is_file():
+        pytest.skip(
+            "configure-time generator is not installed with native test artifacts"
+        )
+    spec = importlib.util.spec_from_file_location("sdk_location_generator", generator)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module.metadata,
+        "distribution",
+        lambda name: SimpleNamespace(locate_file=lambda relative: site),
+    )
+    # Use Windows path semantics while storing the descriptor in host scratch.
+    monkeypatch.setattr(
+        module,
+        "os",
+        SimpleNamespace(
+            path=SimpleNamespace(
+                relpath=lambda site, root: ntpath.relpath(str(site), build)
+            )
+        ),
+    )
+    module.write_location(tmp_path)
+    assert (tmp_path / "rocke_sdk_site.txt").read_text().splitlines() == [
+        marker,
+        location,
+    ]
+
+
+@pytest.mark.parametrize("explicit_override", [False, True])
+def test_absolute_build_sidecar_discovers_sdk(
+    native_detector, tmp_path, explicit_override
+):
+    site = tmp_path / "env" / "site-packages"
+    library = sdk_fixture(site, "_7_9_nonce")
+    build = tmp_path / "build"
+    build.mkdir()
+    native = build / native_detector.name
+    shutil.copyfile(native_detector, native)
+    (build / "rocke_sdk_site.txt").write_text(f"rocke-sdk-site-absolute-v1\n{site}\n")
+    env = automatic_env(site)
+    if explicit_override:
+        library = build_library(
+            tmp_path / "override",
+            "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=20;*b=0;*c=0;}\n",
+        )
+        env["ROCKE_COMGR_LIB"] = str(library)
+    result = subprocess.run(
+        [sys.executable, "-c", PROBE, str(native)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    info = json.loads(result.stdout)
+    assert info["native"] == info["python"]
+    assert info["native"]["requested_comgr"] == str(library)
+    assert info["native"]["llvm_version"] == (
+        [20, 0, 0] if explicit_override else [23, 0, 1]
+    )
+
+
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        "rocke-sdk-site-v1\n\n",
+        "rocke-sdk-site-v1\n{site}\n",
+        "rocke-sdk-site-absolute-v1\n\n",
+        "rocke-sdk-site-absolute-v1\nrelative/site\n",
+        "rocke-sdk-site-absolute-v1\n",
+        "unknown-marker\n{site}\n",
+    ],
+    ids=[
+        "empty-relative",
+        "absolute-in-relative",
+        "empty-absolute",
+        "relative-in-absolute",
+        "missing-site",
+        "unknown-marker",
+    ],
+)
+def test_invalid_build_sidecar_does_not_load_compiler(
+    native_detector, tmp_path, descriptor
+):
+    site = tmp_path / "env" / "site-packages"
+    sdk_fixture(site, "_7_9_nonce")
+    build = tmp_path / "build"
+    build.mkdir()
+    native = build / native_detector.name
+    shutil.copyfile(native_detector, native)
+    (build / "rocke_sdk_site.txt").write_text(descriptor.format(site=site))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import ctypes, sys; "
+            "native = ctypes.CDLL(sys.argv[1]); "
+            "native.rocke_loaded_compiler_info.restype = ctypes.c_void_p; "
+            "assert not native.rocke_loaded_compiler_info(); "
+            "assert native.fixture_load_calls() == 0",
+            str(native),
+        ],
+        env=automatic_env(site),
         capture_output=True,
         text=True,
     )

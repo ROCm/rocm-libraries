@@ -233,15 +233,19 @@ std::string discover_sdk_comgr()
                             if(auto selected = sdk_comgr_in(python / "site-packages"); selected)
                                 return *selected;
                 // Configure-time selected Python site, for build-tree consumers
-                // only. The relative sidecar is deliberately not installed.
+                // only. The site sidecar is deliberately not installed.
                 std::ifstream descriptor(root / "rocke_sdk_site.txt");
-                std::string marker, relative;
-                if(std::getline(descriptor, marker) && marker == "rocke-sdk-site-v1"
-                   && std::getline(descriptor, relative))
+                std::string marker, location;
+                if(std::getline(descriptor, marker))
                 {
-                    if(relative.empty() || fs::path(relative).is_absolute())
+                    const bool absolute = marker == "rocke-sdk-site-absolute-v1";
+                    if((!absolute && marker != "rocke-sdk-site-v1")
+                       || !std::getline(descriptor, location) || location.empty())
                         return {};
-                    auto selected = sdk_comgr_in(root / relative);
+                    const fs::path site(location);
+                    if(site.is_absolute() != absolute || (!absolute && site.has_root_path()))
+                        return {};
+                    auto selected = sdk_comgr_in(absolute ? site : root / site);
                     return selected ? *selected : std::string();
                 }
             }

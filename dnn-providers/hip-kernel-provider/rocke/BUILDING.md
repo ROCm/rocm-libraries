@@ -25,27 +25,42 @@ per-file `parents[N]` math.
 
 ## Quick start (CMake-managed environment)
 
-When the rocke features are enabled, the build creates and maintains the
-editable environment for you. First install the platform with `[sdk-core]`
-into the interpreter environment passed as `Python3_EXECUTABLE`, using the
-same AMD SDK release/index as other ROCm frameworks in that environment.
+When the rocke features are enabled, the build creates and maintains a
+separate editable environment at `build/rocke-pyenv/`. Provision the SDK in the
+interpreter environment passed as `Python3_EXECUTABLE` **before configuration**,
+using the same AMD SDK release/index as other ROCm frameworks in that environment.
 See [compiler installation](platform/dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
-The build-local environment inherits that SDK through `--system-site-packages`;
-its base editable installs do not acquire the SDK themselves:
+For example, from the repository root, with the stable SDK index:
 
 ```sh
+python3 -m pip install -e 'dnn-providers/hip-kernel-provider/rocke/platform[sdk-core]' \
+      --extra-index-url https://stable.repo.amd.com/rocm/whl-next/
 cmake -S dnn-providers/hip-kernel-provider -B build \
+      -DPython3_EXECUTABLE="$(python3 -c 'import sys; print(sys.executable)')" \
       -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON
-cmake --build build            # also builds the `rocke-pyenv` target
+cmake --build build --target rocke-pyenv
 ```
 
-This produces `build/rocke-pyenv/`, a virtualenv with `platform` and `library`
-editable-installed. Use it directly:
+`--system-site-packages` exposes the base interpreter's system packages; it
+does not inherit packages installed only in an outer virtualenv. If the selected
+interpreter is a venv, explicitly install the same SDK release into the build-local
+venv before using it for compiler-dependent commands. The base editable installs
+do not acquire the SDK themselves. For the stable-index example above:
 
 ```sh
+build/rocke-pyenv/bin/python -m pip install -e \
+      'dnn-providers/hip-kernel-provider/rocke/platform[sdk-core]' \
+      --extra-index-url https://stable.repo.amd.com/rocm/whl-next/
+cmake --build build
 build/rocke-pyenv/bin/python -m builders.gfx950.attention.benchmark_prefill2d_live --help
-build/rocke-pyenv/bin/python -m pytest rocke/library/tests
+build/rocke-pyenv/bin/python -m pytest dnn-providers/hip-kernel-provider/rocke/library/tests
 ```
+
+Use the release constraint and index matching the selected interpreter's SDK in
+both installs; include `--pre` for a nightly release. On Windows, use
+`build/rocke-pyenv/Scripts/python.exe` (or the filename of the selected interpreter)
+in place of `build/rocke-pyenv/bin/python`. The environment has both `platform` and
+`library` editable-installed.
 
 Properties:
 
@@ -57,7 +72,8 @@ Properties:
   user site-packages — so the generic names `kernels` / `builders` / `dispatch`
   are confined to this venv.
 - **Inherits system torch.** The venv is created with `--system-site-packages`,
-  so the ROCm PyTorch you already have is reused, not reinstalled.
+  so ROCm PyTorch installed in the base interpreter's system site is reused.
+  Packages installed only in an outer venv need explicit provisioning here.
 
 Toggle off with `-DROCKE_BUILD_PYENV=OFF` if you manage the environment yourself.
 

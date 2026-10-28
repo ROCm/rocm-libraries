@@ -23,13 +23,15 @@ def write_location(build_root: Path) -> None:
         # A subsequent SDK installation can recover without rebuilding native code.
         site = Path(sysconfig.get_paths()["purelib"])
     try:
-        relative = os.path.relpath(site, build_root)
+        location = os.path.relpath(site, build_root)
+        marker = "rocke-sdk-site-v1"
     except ValueError:
-        # Different Windows drives cannot be described by a relocatable path.
-        relative = ""
+        # Cross-drive Windows sites require regeneration after the SDK moves.
+        location = str(site)
+        marker = "rocke-sdk-site-absolute-v1"
     build_root.mkdir(parents=True, exist_ok=True)
     (build_root / "rocke_sdk_site.txt").write_text(
-        "rocke-sdk-site-v1\n" + relative + "\n", encoding="utf-8"
+        marker + "\n" + location + "\n", encoding="utf-8"
     )
 
 

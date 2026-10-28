@@ -307,6 +307,7 @@ jobs:
           for wheel in build/dnn-providers/hip-kernel-provider/rocke/wheels/rocke-*.whl; do
             test -f "$wheel" || { echo "no rocKE platform wheel produced" >&2; exit 1; }
             "$VENV_PYTHON" -m pip install --extra-index-url "https://nightly.repo.amd.com/rocm/whl-next/" "${wheel}[sdk-core]"
+            "$VENV_PYTHON" -m pip install --no-deps --force-reinstall "$wheel"
           done
 
       - name: Run tests
@@ -563,6 +564,7 @@ jobs:
           for wheel in build/dnn-providers/hip-kernel-provider/rocke/wheels/rocke-*.whl; do
             test -f "$wheel" || { echo "no rocKE platform wheel produced" >&2; exit 1; }
             "$VENV_PYTHON" -m pip install --extra-index-url "https://nightly.repo.amd.com/rocm/whl-next/" "${wheel}[sdk-core]"
+            "$VENV_PYTHON" -m pip install --no-deps --force-reinstall "$wheel"
           done
 
       - name: Run tests
