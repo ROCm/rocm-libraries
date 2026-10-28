@@ -8393,6 +8393,16 @@ namespace
                 TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>(
                 TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm,
                                              TensileLite::ContractionSolution>(path));
+            // Indexed parsing returns null for a bad record. Enumeration skips
+            // those records, but registration must reject the entire payload.
+            if(shard && shard->blobCache)
+                for(int index : shard->blobCache->indices())
+                    if(!shard->blobCache->get(index))
+                    {
+                        log_error(__func__, "cannot parse payload solution", path, index);
+                        return nullptr;
+                    }
+
             // An indexed shard parses solutions on demand; parse them all first.
             if(shard)
                 shard->materializeAllSolutions();

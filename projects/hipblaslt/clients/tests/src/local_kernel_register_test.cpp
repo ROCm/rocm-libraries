@@ -13,11 +13,17 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
+#ifdef TENSILE_MSGPACK
+#include <Tensile/msgpack/Loading.hpp>
+#include <Tensile/msgpack/MessagePack.hpp>
+#endif
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <thread>
 #include <tuple>
+#include <unordered_map>
 
 namespace
 {
@@ -54,6 +60,86 @@ namespace
                 names.push_back(kernel.name);
         return names;
     }
+
+#ifdef TENSILE_MSGPACK
+    enum class IndexedPayloadRecord
+    {
+        None,
+        Malformed,
+        IndexMismatch
+    };
+
+    // Use one real solution so a malformed second record cannot pass merely
+    // because the entire payload was empty or incompatible with this device.
+    bool writeIndexedPayload(std::string const&   source,
+                             std::string const&   output,
+                             IndexedPayloadRecord badRecord)
+    {
+        msgpack::object_handle document;
+        if(!TensileLite::fileToMsgObject(source, document))
+            return false;
+
+        std::unordered_map<std::string, msgpack::object> top;
+        TensileLite::Serialization::objectToMap(document.get(), top);
+        msgpack::sbuffer solution;
+        int64_t          index;
+        if(top.count("solutions_blob"))
+        {
+            auto const table = top.at("solutions_index").as<std::vector<int64_t>>();
+            if(table.empty())
+                return false;
+            index            = table[0];
+            auto const& blob = top.at("solutions_blob").via.bin;
+            solution.write(blob.ptr + table[1], table[2]);
+        }
+        else
+        {
+            auto const solutions = top.at("solutions").as<std::vector<msgpack::object>>();
+            if(solutions.empty())
+                return false;
+            std::unordered_map<std::string, msgpack::object> fields;
+            TensileLite::Serialization::objectToMap(solutions[0], fields);
+            index = fields.at("index").as<int64_t>();
+            msgpack::pack(solution, solutions[0]);
+        }
+
+        msgpack::sbuffer blob;
+        blob.write(solution.data(), solution.size());
+        std::vector<int64_t> table{index, 0, static_cast<int64_t>(solution.size())};
+        if(badRecord != IndexedPayloadRecord::None)
+        {
+            auto const offset = blob.size();
+            if(badRecord == IndexedPayloadRecord::Malformed)
+                msgpack::pack(blob, 1); // A solution must be a map.
+            else
+                blob.write(solution.data(), solution.size()); // Retains the original index.
+            table.insert(table.end(),
+                         {index + 1,
+                          static_cast<int64_t>(offset),
+                          static_cast<int64_t>(blob.size() - offset)});
+        }
+
+        msgpack::sbuffer                  buffer;
+        msgpack::packer<msgpack::sbuffer> packer(buffer);
+        packer.pack_map(4);
+        packer.pack(std::string("format_version"));
+        packer.pack(2);
+        packer.pack(std::string("solutions_index"));
+        packer.pack(table);
+        packer.pack(std::string("solutions_blob"));
+        packer.pack_bin(static_cast<uint32_t>(blob.size()));
+        packer.pack_bin_body(blob.data(), static_cast<uint32_t>(blob.size()));
+        packer.pack(std::string("library"));
+        packer.pack_map(2);
+        packer.pack(std::string("type"));
+        packer.pack(std::string("Single"));
+        packer.pack(std::string("index"));
+        packer.pack(index);
+        std::ofstream file(output, std::ios::binary);
+        file.write(buffer.data(), buffer.size());
+        return static_cast<bool>(file);
+    }
+#endif
 
     std::vector<int>
         registerPayload(hipblasLtHandle_t handle, std::string const& dat, std::string const& co)
@@ -446,6 +532,51 @@ TEST(LocalKernelRegister, RejectsBadPayloads)
     EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_BadPayloadsWorker"), 0)
         << "the worker failed; its output is above";
 }
+
+#ifdef TENSILE_MSGPACK
+TEST(LocalKernelRegister, DISABLED_IndexedPayloadWorker)
+{
+    auto const candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty()) << "no payload shard in this build's library";
+    auto const dat = candidates[0] + ".dat";
+    auto const co  = candidates[0] + ".co";
+    ScratchDir scratch;
+
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    expectNothingRegistered(handle);
+    for(auto record : {IndexedPayloadRecord::Malformed, IndexedPayloadRecord::IndexMismatch})
+    {
+        SCOPED_TRACE(static_cast<int>(record));
+        auto const path = scratch.file("bad_indexed.dat");
+        ASSERT_TRUE(writeIndexedPayload(dat, path, record));
+        int numIndices = -1;
+        EXPECT_EQ(
+            hipblasLtLocalKernelRegister(handle, path.c_str(), co.c_str(), nullptr, 0, &numIndices),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(numIndices, 0);
+        expectNothingRegistered(handle);
+    }
+
+    auto const valid = scratch.file("valid_indexed.dat");
+    ASSERT_TRUE(writeIndexedPayload(dat, valid, IndexedPayloadRecord::None));
+    int numIndices = 0;
+    EXPECT_EQ(
+        hipblasLtLocalKernelRegister(handle, valid.c_str(), co.c_str(), nullptr, 0, &numIndices),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(numIndices, 1);
+    size_t registered = 0;
+    ASSERT_EQ(hipblasLtLocalKernelGetCounts(handle, &registered, nullptr), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(registered, 1u);
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelRegister, RejectsIncompleteIndexedPayloads)
+{
+    EXPECT_EQ(runWorker("LocalKernelRegister.DISABLED_IndexedPayloadWorker"), 0)
+        << "the worker failed; its output is above";
+}
+#endif
 
 // A kernel runs from the code object it was registered with, even when a
 // shipped kernel and an earlier registered kernel have the same name. The

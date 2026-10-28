@@ -69,6 +69,9 @@ if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
     )
     find_package(hiprtc CONFIG REQUIRED)
     target_link_libraries(hipblaslt-test PRIVATE hiprtc::hiprtc)
+    if(NOT HIPBLASLT_ENABLE_YAML)
+        target_link_libraries(hipblaslt-test PRIVATE ${hipblaslt_msgpack_target})
+    endif()
 endif()
 
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only
