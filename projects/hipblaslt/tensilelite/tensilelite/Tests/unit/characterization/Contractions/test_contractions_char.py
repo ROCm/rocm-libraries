@@ -35,19 +35,12 @@ def problem_type(raw):
 
 
 @pytest.fixture(scope="module")
-def solution_state():
+def solution_state(assembler, isa_info_map):
     # The fully-derived solution state (all keys MasterSolutionLibrary needs),
     # obtained by parsing the fixture into a real Solution.
-    from tensilelite.Common.Architectures import SUPPORTED_ISA
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    asm = makeAssemblyToolchain(cxx, bundler, "default").assembler
-    sol = L.parseLibraryLogicFile(str(_FIXTURE), asm, False, False, False, iim, False).solutions[0]
+    sol = L.parseLibraryLogicFile(
+        str(_FIXTURE), assembler, False, False, False, isa_info_map, False
+    ).solutions[0]
     return dict(sol._state)
 
 
