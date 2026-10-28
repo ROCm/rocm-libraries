@@ -196,7 +196,12 @@ namespace TensileLite
                                         lhs.scaleZeroPointA(),
                                         rhs.scaleZeroPointA(),
                                         lhs.int4EncodingA(),
-                                        rhs.int4EncodingA());
+                                        rhs.int4EncodingA(),
+                                        // SynchronizerSizeCheck reads this. Ranking drops empty
+                                        // members, so two groups can share a ranked list and still
+                                        // differ here (ROCM-33326).
+                                        lhs.groupedGemmCount(),
+                                        rhs.groupedGemmCount());
         }
     };
 } // namespace TensileLite
@@ -258,7 +263,8 @@ namespace std
                                           problem.getParams().fallbackStatus(),
                                           problem.scaleBlockSizeA(),
                                           problem.scaleZeroPointA(),
-                                          problem.int4EncodingA()));
+                                          problem.int4EncodingA(),
+                                          problem.groupedGemmCount()));
         }
     };
 
