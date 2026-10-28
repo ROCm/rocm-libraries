@@ -1068,6 +1068,34 @@ namespace rocisa
         }
     };
 
+    struct SAShiftRightI64 : public CommonInstruction
+    {
+        SAShiftRightI64(const std::shared_ptr<Container>& dst,
+                        const InstructionInput&           shiftHex,
+                        const InstructionInput&           src,
+                        const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {src, shiftHex},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_ashr_i64");
+        }
+
+        SAShiftRightI64(const SAShiftRightI64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAShiftRightI64>(*this);
+        }
+    };
+
     struct SLShiftLeft1AddU32 : public CommonInstruction
     {
         SLShiftLeft1AddU32(const std::shared_ptr<Container>& dst,
@@ -4327,6 +4355,70 @@ namespace rocisa
         }
     };
 
+    struct VSubBCoU32 : public CommonInstruction
+    {
+        VSubBCoU32(const std::shared_ptr<Container>& dst,
+                   const std::shared_ptr<Container>& dst1,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const InstructionInput&           src2,
+                   const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            this->dst1 = dst1;
+            if(getAsmBugs()["ExplicitNC"])
+            {
+                setInst("v_sub_co_ci_u32");
+            }
+            else if(getAsmBugs()["ExplicitCO"])
+            {
+                setInst("v_subb_co_u32");
+            }
+            else
+            {
+                setInst("v_subb_u32");
+            }
+        }
+
+        VSubBCoU32(const std::shared_ptr<Container>&    dst,
+                   const std::shared_ptr<Container>&    dst1,
+                   const std::vector<InstructionInput>& srcs,
+                   const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            this->dst1 = dst1;
+            if(getAsmBugs()["ExplicitNC"])
+            {
+                setInst("v_sub_co_ci_u32");
+            }
+            else if(getAsmBugs()["ExplicitCO"])
+            {
+                setInst("v_subb_co_u32");
+            }
+            else
+            {
+                setInst("v_subb_u32");
+            }
+        }
+
+        VSubBCoU32(const VSubBCoU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VSubBCoU32>(*this);
+        }
+    };
+
     struct VMacF32 : public CommonInstruction
     {
         VMacF32(const std::shared_ptr<Container>& dst,
@@ -5828,6 +5920,34 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VAShiftRightI32>(*this);
+        }
+    };
+
+    struct VAShiftRightI64 : public CommonInstruction
+    {
+        VAShiftRightI64(const std::shared_ptr<Container>& dst,
+                        const InstructionInput&           shiftHex,
+                        const InstructionInput&           src,
+                        const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {shiftHex, src},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_ashrrev_i64");
+        }
+
+        VAShiftRightI64(const VAShiftRightI64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VAShiftRightI64>(*this);
         }
     };
 
