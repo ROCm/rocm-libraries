@@ -113,8 +113,8 @@ namespace rocsparse
             for(rocsparse_int i = 1; i + 1 <= num_spikes - 2; i += 2)
             {
                 const rocsparse_int j = i + 1;
-                if(dl[i] == zero && du[j] == zero && (d[i] == zero || d[j] == zero)
-                   && dl[j] != zero && du[i] != zero)
+                if(dl[i] == zero && du[j] == zero && (d[i] == zero || d[j] == zero) && dl[j] != zero
+                   && du[i] != zero)
                 {
                     gtsv_nopivot_swap_spike_rows<T>(i, j, dl, d, du, B, nrhs, rhs_stride);
                     progress = true;
@@ -140,8 +140,7 @@ namespace rocsparse
             for(rocsparse_int i = 1; i < num_spikes - 1;)
             {
                 const rocsparse_int j = i + 1;
-                if(d[i] == zero && dl[i] == zero && du[i] != zero && du[j] == zero
-                   && dl[j] != zero)
+                if(d[i] == zero && dl[i] == zero && du[i] != zero && du[j] == zero && dl[j] != zero)
                 {
                     gtsv_nopivot_swap_spike_rows<T>(i, j, dl, d, du, B, nrhs, rhs_stride);
                     progress = true;

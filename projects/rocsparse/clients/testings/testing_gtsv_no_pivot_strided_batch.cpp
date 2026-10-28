@@ -132,8 +132,8 @@ static void gtsv_no_pivot_strided_batch_init_system(int             mode,
     const bool unit_coupling = mode >= 4;
     const bool upper         = (mode == 2 || mode == 6 || mode == 7);
     const bool lower         = (mode == 3 || mode == 4 || mode == 5);
-    const T    diag          = unit_coupling ? one : (mode == 1 ? static_cast<T>(2) : static_cast<T>(4));
-    const T    off = (mode == 5 || mode == 7) ? static_cast<T>(-1) : one;
+    const T    diag = unit_coupling ? one : (mode == 1 ? static_cast<T>(2) : static_cast<T>(4));
+    const T    off  = (mode == 5 || mode == 7) ? static_cast<T>(-1) : one;
 
     for(rocsparse_int j = 0; j < batch_count; ++j)
     {
@@ -146,8 +146,8 @@ static void gtsv_no_pivot_strided_batch_init_system(int             mode,
         }
 
         // The first subdiagonal and the last superdiagonal are outside the system.
-        hdl[offset]             = std::numeric_limits<T>::infinity();
-        hdu[offset + m - 1]     = std::numeric_limits<T>::infinity();
+        hdl[offset]         = std::numeric_limits<T>::infinity();
+        hdu[offset + m - 1] = std::numeric_limits<T>::infinity();
 
         for(rocsparse_int i = 0; i < m; ++i)
         {
