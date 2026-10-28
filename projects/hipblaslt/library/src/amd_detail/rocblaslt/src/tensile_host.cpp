@@ -3736,7 +3736,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 // enable.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value)
+                                int32_t                value)
 {
     if(!gemmData)
         return;
@@ -3745,11 +3745,10 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
         {
-            const int existing = data->problem.getParams().uniformSummationOrder();
-            data->problem.setParams().setUniformSummationOrder(existing == -1 ? value : existing);
+            data->problem.setParams().setUniformSummationOrder(value);
 
             // Kept in step for the same reason as the stream-K mode above.
-            data->tuningKey.uniformSummationOrder = existing == -1 ? value : existing;
+            data->tuningKey.uniformSummationOrder = value;
         }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -3759,8 +3758,7 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         {
             for(auto& g : data->problem.gemms)
             {
-                const int existing = g.getParams().uniformSummationOrder();
-                g.setParams().setUniformSummationOrder(existing == -1 ? value : existing);
+                g.setParams().setUniformSummationOrder(value);
             }
         }
     }

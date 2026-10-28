@@ -462,7 +462,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
-                                bool                   value);
+                                int32_t                value);
 
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
