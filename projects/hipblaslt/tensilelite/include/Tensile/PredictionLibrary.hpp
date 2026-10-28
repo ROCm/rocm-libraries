@@ -28,11 +28,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <iostream>
 #include <set>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/OrigamiBoost.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -60,6 +62,11 @@ namespace TensileLite
         origami::nn::library_models_t nn_models;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
+
+        /// When set, called with each prediction row as it is deserialized on this thread
+        /// (OrigamiBoost builds the library manifest of a model from it).
+        static inline thread_local std::function<void(ProblemPredictionLibrary const&)> const*
+            deserializeObserver = nullptr;
 
         static std::string Type()
         {
@@ -174,7 +181,7 @@ namespace TensileLite
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
-            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+            auto matches = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
@@ -202,7 +209,23 @@ namespace TensileLite
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 
-                if(predicateMatch)
+                return predicateMatch;
+            };
+
+            // The row applies no adjustment of Origami's order of its own.
+            auto keepOrder = [](std::vector<origami::prediction_result_t>&) {};
+
+            // Origami Boost's re-rank: it re-orders Origami's order and takes the predicate
+            // verdicts of the configs it offers.
+            OrigamiBoost::RerankSource<MyProblem,
+                                       MySolution,
+                                       decltype(matches),
+                                       decltype(keepOrder)>
+                rerankSource(problem, hardware, solution_list, matches, keepOrder);
+
+            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+                const int known = rerankSource.verdict(solution.get());
+                if(known < 0 ? matches(solution) : known == 1)
                 {
                     rv.emplace_back(solution);
                 }
@@ -232,7 +255,15 @@ namespace TensileLite
 
                 origami::rank_options_t rank_options;
                 rank_options.library_models = &nn_models;
-                auto prediction_result      = origami::rank_configs(
+                // nn_models.boost is set only with HIPBLASLT_ORIGAMI_BOOST=1 (deserialization).
+                if(nn_models.boost >= 0 && OrigamiBoost::problemClass(problem) != nullptr)
+                {
+                    rerankSource.activate(origami_problem);
+                    rank_options.inference        = origami::inference_mode_t::analytical_rerank;
+                    rank_options.nn_backend       = origami::nn_backend_t::boost;
+                    rank_options.nn.rerank_source = &rerankSource;
+                }
+                auto prediction_result = origami::rank_configs(
                     origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
 
                 for(const auto& r : prediction_result)

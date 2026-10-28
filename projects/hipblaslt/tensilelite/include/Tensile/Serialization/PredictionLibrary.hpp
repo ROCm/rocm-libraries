@@ -192,6 +192,14 @@ namespace TensileLite
                     }
                     // Once per library load. rank_configs reads the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
+                    if(auto const* observe = Library::deserializeObserver)
+                        (*observe)(lib);
+
+                    // Not while a library manifest is collected (OrigamiBoost::libraryManifest).
+                    if(OrigamiBoost::enabled() && !Library::deserializeObserver)
+                        lib.nn_models.boost
+                            = OrigamiBoost::loadForLogic(logic_stem_from_path(ctx->filename),
+                                                         directory_from_path(ctx->filename));
                 }
             }
             const static bool flow = false;
