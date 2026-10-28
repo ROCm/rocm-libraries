@@ -20,6 +20,10 @@ from typing import Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cscan  # noqa: E402
 
+# the package (tr/package.py, picked by $TR_PACKAGE) says which files are read
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tr.package import PKG  # noqa: E402
+
 
 def _default_rocke() -> Optional[str]:
     """$ROCKE_ROOT, else the rocKE tree this file sits in (a copy under
@@ -39,14 +43,12 @@ def _default_rocke() -> Optional[str]:
 
 DEFAULT_ROCKE = _default_rocke()
 
-# Python builder modules the backward path uses (under library/kernels/common).
-BWD_PY_GLOBS = ["*attention*bwd*.py"]
-# C++ files of the backward path (include/rocke and instances/common).
-BWD_H_GLOBS = [
-    "helper_rocke.instances.common.*attention*bwd*.h",
-    "instance_*attention*bwd*.h",
-]
-BWD_CPP_GLOBS = ["*attention*bwd*.cpp"]
+# The package's Python builder modules (in its module directory) and its C++
+# files (include/rocke and its C++ directory); for attention backward the
+# *attention*bwd* files of library/kernels/common and instances/common.
+BWD_PY_GLOBS = list(PKG.py_globs)
+BWD_H_GLOBS = list(PKG.h_globs)
+BWD_CPP_GLOBS = list(PKG.cpp_globs)
 
 
 # ------------------------------------------------------------------ paths
@@ -58,12 +60,12 @@ class Tree:
     def __init__(self, root: Optional[str] = DEFAULT_ROCKE):
         self.given = bool(root)
         self.root = os.path.abspath(root or ".")
-        self.kernels = os.path.join(self.root, "library", "kernels", "common")
-        self.include = os.path.join(self.root, "platform", "cpp", "include", "rocke")
-        self.instances = os.path.join(
-            self.root, "platform", "cpp", "instances", "common"
+        self.kernels = os.path.join(
+            self.root, *PKG.py_root.split("/"), *PKG.py_dir.split("/")
         )
-        self.parity = os.path.join(self.root, "library", "tests", "parity")
+        self.include = os.path.join(self.root, "platform", "cpp", "include", "rocke")
+        self.instances = os.path.join(self.root, *PKG.cpp_dir.split("/"))
+        self.parity = os.path.join(self.root, *PKG.parity_dir.split("/"))
         self.ir_py = os.path.join(
             self.root, "platform", "python", "rocke", "core", "ir.py"
         )
@@ -76,7 +78,8 @@ class Tree:
     def check(self) -> Optional[str]:
         if not self.given:
             return "no rocKE tree: pass --rocke <root> or set ROCKE_ROOT"
-        for p in (self.kernels, self.include, self.instances):
+        # the C++ directory may not exist yet: a first port creates it
+        for p in (self.kernels, self.include):
             if not os.path.isdir(p):
                 return f"not a rocKE root (missing {p})"
         return None
@@ -94,7 +97,8 @@ class Tree:
         for g in BWD_CPP_GLOBS:
             out.update(glob.glob(os.path.join(self.instances, g)))
         if parity:
-            out.update(glob.glob(os.path.join(self.parity, "*attention*bwd*_emit.c")))
+            for g in PKG.parity_globs:
+                out.update(glob.glob(os.path.join(self.parity, g)))
         return sorted(out)
 
 

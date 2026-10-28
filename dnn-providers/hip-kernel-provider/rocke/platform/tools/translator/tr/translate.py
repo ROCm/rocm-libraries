@@ -24,7 +24,7 @@ import subprocess
 import sys
 
 from . import ctypes as T
-from .env import ROCKE_HELP, Env, holes_dir, library_dir, maps_dir, rocke_root
+from .env import ROCKE_HELP, Env, holes_dir, library_dir, maps_dir, module_path, rocke_root
 from .family import kind_const
 from .host import HOST_VALUE, IR_KIND, host_builders, kind_tags
 from .lower import (
@@ -53,12 +53,8 @@ class Result:
         self.code = ""
 
 
-def module_path(rocke: str, modname: str) -> str:
-    return os.path.join(library_dir(rocke), "kernels", "common", modname + ".py")
-
-
 def own_header(env: Env, modname: str) -> str | None:
-    for cand in (f"helper_rocke.instances.common.{modname}.h", f"instance_{modname}.h"):
+    for cand in PKG.header_names(modname):
         if cand in env.headers.paths:
             return cand
     return None
@@ -68,11 +64,9 @@ def generated_modules(abi_dir: str) -> list[str]:
     """Modules whose generated header is in abi_dir."""
     out = []
     for fn in sorted(os.listdir(abi_dir)):
-        m = re.fullmatch(
-            r"helper_rocke\.instances\.common\.(\w+)\.h|instance_(\w+)\.h", fn
-        )
+        m = PKG.header_module(fn)
         if m:
-            out.append(m.group(1) or m.group(2))
+            out.append(m)
     return out
 
 
@@ -1546,7 +1540,9 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
         if re.search(rf"\b{dname}\(", used_text):
             internals.append(dlines)
     sha = hashlib.sha256(mod.src.encode()).hexdigest()[:12]
-    rel = os.path.join("library", os.path.relpath(path, library_dir(rocke)))
+    rel = "/".join(
+        (PKG.py_root, os.path.relpath(path, library_dir(rocke)).replace(os.sep, "/"))
+    )
     lines = [
         "// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.",
         "// SPDX-License-Identifier: MIT",

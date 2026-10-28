@@ -987,7 +987,7 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--parity",
         action="store_true",
-        help="include library/tests/parity/*bwd*_emit.c drivers",
+        help="include the package's parity drivers (library/tests/parity/*bwd*_emit.c for attention backward)",
     )
     a = ap.parse_args(argv)
     tree = rsrc.Tree(a.rocke)

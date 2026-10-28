@@ -42,7 +42,7 @@ def rekey(facts: dict, src: str) -> tuple[dict, list[str]]:
 
 
 def main(argv=None) -> int:
-    from .translate import module_path
+    from .env import module_path
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("module")

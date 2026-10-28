@@ -7,6 +7,9 @@ boundaries; no source rewriting).
 
 usage: python -m tr.record <emit_module> <module> [<module> ...] [--rocke DIR] [--out FILE]
 
+The driver <emit_module>.py is read from the package's parity directory
+(tr/package.py; library/tests/parity for attention backward).
+
 Writes data/facts/<first module>.json:
   funcs: "<qualname>" -> {params: {name: [tags]}, return: [tags], calls: n, src: hash}
          (a closure also has cells: {free variable: [tags]}, the values it captured;
@@ -33,8 +36,9 @@ import os
 import sys
 import time
 
-from .env import ROCKE_HELP, data_dir, library_dir, rocke_root
+from .env import ROCKE_HELP, data_dir, library_dir, parity_dir, rocke_root
 from .factkeys import code_keys, first_line, src_hash
+from .package import PKG
 
 
 def tag(v, depth=0) -> str:
@@ -166,13 +170,20 @@ def main(argv=None) -> int:
     )
     a = ap.parse_args(argv)
     a.rocke = rocke_root(a.rocke)
-    for p in ("platform/python", library_dir(a.rocke), "library/tests/parity"):
+    # the package's parity drivers come first: both driver directories have
+    # an _emit_common.py
+    for p in ("platform/python", library_dir(a.rocke), parity_dir(a.rocke)):
         full = os.path.join(a.rocke, p)
         if full not in sys.path:
             sys.path.insert(0, full)
+    if not os.path.isfile(os.path.join(parity_dir(a.rocke), a.emit + ".py")):
+        sys.exit(
+            f"error: no parity driver {a.emit}.py in {parity_dir(a.rocke)}"
+            f" (package {PKG.name}); write one first (HOWTO.md, Steps in a port)"
+        )
     targets = {}
     for m in a.modules:
-        mod = importlib.import_module(m if "." in m else f"kernels.common.{m}")
+        mod = importlib.import_module(PKG.module_name(m))
         targets[mod.__file__] = m
 
     params = collections.defaultdict(lambda: collections.defaultdict(set))

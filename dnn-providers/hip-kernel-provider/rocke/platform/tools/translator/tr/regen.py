@@ -15,20 +15,22 @@ Steps:
    copy of the translator without them mines them from the --rocke tree
    (tools/mine_maps.py) into a temporary directory.
 1. The ABI. When every module named already has its header in the --rocke
-   tree (helper_rocke.instances.common.<m>.h), the sources are translated
+   tree (the package's header name, e.g. helper_rocke.instances.common.<m>.h,
+   or the other rocKE convention), the sources are translated
    against those headers (--hand-abi) and no header is generated;
    --generated-abi overrides that. Otherwise tr.abi writes the generated
    header of every module into a staging directory (--abi-dir, else a
    temporary one).
 2. tr.translate: each module's .cpp against those headers, clang-formatted.
 3. If any function is still a hole (no rule and no hand fill), list them and
-   write nothing. Otherwise write <m>.cpp into
-   platform/cpp/instances/common/ and the generated headers into
+   write nothing. Otherwise write <m>.cpp into the package's C++ directory
+   (platform/cpp/instances/common/ for attention backward, tr/package.py)
+   and the generated headers into
    platform/cpp/include/rocke/ of --into (default: the --rocke tree itself).
 4. Support headers: every quoted same-directory include of a written source
    (#include "rocke_py.hpp", "rocke_py_adapters.hpp") is copied from its
-   master copy (tr/prelude/, else tr/packages/<package>/) into
-   platform/cpp/instances/common/. It is not installed.
+   master copy (tr/prelude/, else tr/packages/<package>/) into the same
+   C++ directory. It is not installed.
 
 Every target that already exists in --into (source, header or support
 header) is left as it is: "skip <path> (exists)", exit 0. When every
@@ -63,7 +65,7 @@ def main(argv=None) -> int:
         "modules",
         nargs="+",
         metavar="module",
-        help="Python module under library/kernels/common (e.g. _attention_bwd_addr)",
+        help="Python module of the package (e.g. _attention_bwd_addr under library/kernels/common)",
     )
     ap.add_argument(
         "--rocke",
@@ -194,7 +196,7 @@ def regen(a, scratch: list) -> int:
                 )
             support[name] = path
 
-    SRC = os.path.join("platform", "cpp", "instances", "common")
+    SRC = os.path.join(*PKG.cpp_dir.split("/"))
     INC = os.path.join("platform", "cpp", "include", "rocke")
     targets = [(os.path.join(SRC, f"{m}.cpp"), code, None) for m, code in out.items()]
     targets += [
@@ -219,9 +221,11 @@ def regen(a, scratch: list) -> int:
 
 
 def tree_header(root: str, m: str) -> str | None:
-    """Module m's header in the tree at root (either name), or None."""
+    """Module m's header in the tree at root (any of its names), or None."""
+    from .package import PKG
+
     inc = os.path.join(root, "platform", "cpp", "include", "rocke")
-    for cand in (f"helper_rocke.instances.common.{m}.h", f"instance_{m}.h"):
+    for cand in PKG.header_names(m):
         if os.path.exists(os.path.join(inc, cand)):
             return os.path.join(inc, cand)
     return None
@@ -232,7 +236,9 @@ def existing_targets(into: str, modules: list, support_file) -> list | None:
     exist: each module's .cpp and header, and every support header those
     sources include. None if any of them is missing (then the normal path
     runs and writes only what is missing)."""
-    src = os.path.join(into, "platform", "cpp", "instances", "common")
+    from .package import PKG
+
+    src = os.path.join(into, *PKG.cpp_dir.split("/"))
     sources, headers, support = [], [], set()
     for m in modules:
         cpp = os.path.join(src, f"{m}.cpp")

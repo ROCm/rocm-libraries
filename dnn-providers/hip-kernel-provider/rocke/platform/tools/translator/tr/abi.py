@@ -1640,7 +1640,7 @@ def own_decls(env: Env, header: str) -> dict:
 
 def build(modname: str, rocke: str) -> tuple[Abi, Env, Module]:
     from .kernel import TypeMap
-    from .translate import module_path
+    from .env import module_path
 
     env = Env(rocke)
     mod = Module(env, modname, module_path(rocke, modname))
@@ -1689,7 +1689,7 @@ def diff(abi: Abi, env: Env, modname: str) -> list[str]:
 def header_name(env: Env, modname: str) -> str:
     from .translate import own_header
 
-    return own_header(env, modname) or f"helper_rocke.instances.common.{modname}.h"
+    return own_header(env, modname) or PKG.header_name(modname)
 
 
 def header_text(abi: Abi, env: Env, modname: str) -> str:
@@ -1790,9 +1790,8 @@ def header_text(abi: Abi, env: Env, modname: str) -> str:
         if (
             not by_value
             and m
-            and f.startswith("helper_rocke.instances.common.")
-            and f.replace("helper_rocke.instances.common.", "").replace(".h", "")
-            not in PKG.included
+            and PKG.header_module(f) is not None
+            and PKG.header_module(f) not in PKG.included
         ):
             # only pointed to: a forward declaration (headers of the backward
             # modules include each other; an include could cycle)
@@ -1813,7 +1812,7 @@ def header_text(abi: Abi, env: Env, modname: str) -> str:
             " * SPDX-License-Identifier: MIT",
             " *",
             f" * rocke/{name} -- first draft by tr/abi.py from",
-            f" * library/kernels/common/{modname}.py (sha256 {sha});",
+            f" * {PKG.py_root}/{PKG.py_dir}/{modname}.py (sha256 {sha});",
             " * hand-maintained from here.",
             " *",
             " * Rules: designs/generated_abi.md of the translator. Lists a function",

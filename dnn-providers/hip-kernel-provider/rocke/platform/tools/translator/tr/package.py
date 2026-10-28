@@ -1,12 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The rocKE package a translation belongs to: its C naming and its Python modules.
+"""The rocKE package a translation belongs to: its C naming, its Python modules
+and where its files live.
 
 Every name the translator invents or looks up for a package (rocke_attn_bwd_*,
 ROCKE_ATTN_BWD_*, the int | Value union rocke_attn_bwd_iv_t, ...) comes from the
-package selected here, so another package is one more PACKAGES entry, not an
-edit of the translator. Select one with $TR_PACKAGE (read once, at import;
+package selected here, and so does every path: the directory the Python modules
+are read and imported from, the C++ directory a source is written to, the
+generated header's name, the parity drivers' directory, and the files the code
+maps are mined from. Another package is one more PACKAGES entry, not an edit of
+the translator. Select one with $TR_PACKAGE (read once, at import;
 tr.regen --package sets it). The default is attention backward.
 
 Per-function adapters stay data keyed by module name (tr/adapters.py); they
@@ -34,6 +38,22 @@ class Package:
     included: tuple[
         str, ...
     ]  # modules whose generated header is included, not forward-declared
+    # Where the files live (paths relative to the rocKE root, "/" separated).
+    py_root: str = "library"  # import root of the modules ($TR_LIBRARY replaces it)
+    py_package: str = "kernels.common"  # dotted package the modules import as
+    cpp_dir: str = "platform/cpp/instances/common"  # where a source is written
+    header: str = "helper_rocke.instances.common.{m}.h"  # generated header name
+    parity_dir: str = "library/tests/parity"  # the <module>_emit drivers
+    # Files the code maps (tools/mine_maps.py) are mined from: the package's
+    # Python modules (in the module directory), its C++ headers (include/rocke)
+    # and sources (cpp_dir), and its parity drivers (parity_dir).
+    py_globs: tuple[str, ...] = ("*attention*bwd*.py",)
+    h_globs: tuple[str, ...] = (
+        "helper_rocke.instances.common.*attention*bwd*.h",
+        "instance_*attention*bwd*.h",
+    )
+    cpp_globs: tuple[str, ...] = ("*attention*bwd*.cpp",)
+    parity_globs: tuple[str, ...] = ("*attention*bwd*_emit.c",)
 
     @property
     def c(self) -> str:
@@ -51,6 +71,41 @@ class Package:
         return os.path.join(HERE, "packages", self.name)
 
     @property
+    def py_dir(self) -> str:
+        """The modules' directory relative to the import root ('kernels/common')."""
+        return self.py_package.replace(".", "/")
+
+    def module_name(self, m: str) -> str:
+        """The import name of module m ('kernels.common._attention_bwd_addr');
+        a dotted name is already one."""
+        return m if "." in m else f"{self.py_package}.{m}"
+
+    def header_name(self, m: str) -> str:
+        """The generated header of module m."""
+        return self.header.format(m=m)
+
+    def header_names(self, m: str) -> tuple[str, ...]:
+        """Every name a header of module m can have in the tree: the package's
+        own, then the two rocKE conventions (a hand header may use either)."""
+        out = [self.header_name(m)]
+        for c in (f"helper_rocke.instances.common.{m}.h", f"instance_{m}.h"):
+            if c not in out:
+                out.append(c)
+        return tuple(out)
+
+    def header_module(self, filename: str) -> str | None:
+        """The module a header file name belongs to under the names above, or None."""
+        for pat in dict.fromkeys(
+            (self.header, "helper_rocke.instances.common.{m}.h", "instance_{m}.h")
+        ):
+            pre, post = pat.split("{m}")
+            if filename.startswith(pre) and filename.endswith(post):
+                m = filename[len(pre) : len(filename) - len(post)]
+                if m and "." not in m:
+                    return m
+        return None
+
+    @property
     def iv_t(self) -> str:
         """The C union of a Python `int | Value`."""
         return f"{self.c}iv_t"
@@ -64,6 +119,33 @@ class Package:
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def platform_instance(
+    module: str, prefix: str, class_prefix: str = "", arch: str = "common"
+) -> Package:
+    """A kernel instance of the platform (platform/python/rocke/instances/<arch>/
+    <module>.py, imported as rocke.instances.<arch>.<module>): its C++ twin goes
+    to platform/cpp/instances/<arch>/, its header is instance_<module>.h (the
+    platform convention), and its parity driver is platform/tests/instances/
+    parity/<module>_emit.py. One module per package: each instance has its own
+    C prefix (rocke_<prefix>_*)."""
+    return Package(
+        name=module,
+        prefix=prefix,
+        class_prefix=class_prefix,
+        modules=(module,),
+        included=(),
+        py_root="platform/python",
+        py_package=f"rocke.instances.{arch}",
+        cpp_dir=f"platform/cpp/instances/{arch}",
+        header="instance_{m}.h",
+        parity_dir="platform/tests/instances/parity",
+        py_globs=(f"{module}.py",),
+        h_globs=(f"instance_{module}.h", f"instance_{module}_*.h"),
+        cpp_globs=(f"{module}.cpp", f"{module}_*.cpp"),
+        parity_globs=(f"{module}_emit.c",),
+    )
+
+
 PACKAGES = {
     "attention_bwd": Package(
         name="attention_bwd",
@@ -73,6 +155,16 @@ PACKAGES = {
         included=("_attention_bwd_addr", "_attention_bwd_caps"),
     ),
 }
+for _p in (
+    platform_instance("batched_transpose", "batched_transpose", "BatchedTranspose2D"),
+    platform_instance("transpose_bc", "transpose_bc", "TransposeBc"),
+    platform_instance("batched_contraction", "batched_contraction", "BatchedContraction"),
+    platform_instance("qwen3_kv_cache", "qwen3_kv_cache", "Qwen3Kv", "gfx1250"),
+    platform_instance("qwen3_qk_norm_rope", "qwen3_qk_norm_rope", "Qwen3QkNormRope", "gfx1250"),
+    platform_instance("qwen3_sampler", "qwen3_sampler", "Qwen3GreedySampler", "gfx1250"),
+    platform_instance("qwen3_token_embedding", "qwen3_token_embedding", "Qwen3TokenEmbedding", "gfx1250"),
+):
+    PACKAGES[_p.name] = _p
 
 DEFAULT = "attention_bwd"
 

@@ -38,10 +38,33 @@ def holes_dir() -> str:
 
 
 def library_dir(rocke: str) -> str:
-    """The Python library the modules are read and imported from (it holds
-    kernels/common/): $TR_LIBRARY, else <rocke>/library. The self-test points
-    it at pinned fixture modules."""
-    return os.environ.get("TR_LIBRARY") or os.path.join(rocke, "library")
+    """The import root the package's modules are read and imported from (for
+    attention backward <rocke>/library, which holds kernels/common/):
+    $TR_LIBRARY, else <rocke>/<package py_root>. The self-test points it at
+    pinned fixture modules."""
+    return os.environ.get("TR_LIBRARY") or os.path.join(rocke, *PKG.py_root.split("/"))
+
+
+def module_dir(rocke: str) -> str:
+    """The directory of the package's Python modules."""
+    return os.path.join(library_dir(rocke), *PKG.py_dir.split("/"))
+
+
+def module_path(rocke: str, modname: str) -> str:
+    """The source file of module modname; exits with a message if the package
+    has no such module."""
+    path = os.path.join(module_dir(rocke), modname + ".py")
+    if not os.path.isfile(path):
+        sys.exit(
+            f"error: no module {modname} in package {PKG.name} ({path});"
+            " pick the package with --package or $TR_PACKAGE"
+        )
+    return path
+
+
+def parity_dir(rocke: str) -> str:
+    """The directory of the package's parity drivers (<module>_emit.py)."""
+    return os.path.join(rocke, *PKG.parity_dir.split("/"))
 
 
 def maps_dir() -> str:
@@ -288,7 +311,7 @@ class SigMap:
 
 
 class PyModules:
-    """Imports the real kernels package (S1: import snapshot)."""
+    """Imports the real modules of the package (S1: import snapshot)."""
 
     def __init__(self, rocke: str):
         for p in (
@@ -301,7 +324,7 @@ class PyModules:
 
     def module(self, name: str):
         if name not in self.cache:
-            full = name if "." in name else f"kernels.common.{name}"
+            full = PKG.module_name(name)
             self.cache[name] = importlib.import_module(full)
         return self.cache[name]
 
