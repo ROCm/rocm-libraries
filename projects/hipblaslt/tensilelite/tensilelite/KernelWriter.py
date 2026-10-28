@@ -388,6 +388,9 @@ class StateValues:
   batchOffsetAKernArgOffset: int         = 0
   batchOffsetBKernArgOffset: int         = 0
   rndSeedKernArgOffset: int              = -1
+  # Kernarg byte offset of ProbeAddr (ProbeEpoch, ProbeGrid follow at +8, +12),
+  # relative to the shifted KernArgAddress; -1 when the kernel has no probe
+  probeKernArgOffset: int                = -1
   numSgprAlpha: int                      = 0 # For user arguments
   numSgprBeta: int                       = 0 # For user arguments
   numStoreSgprNames: List[str]           = field(init=False) # For post-loop kernel args
@@ -2294,7 +2297,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               iterCode.add(waitDsRead)
         else:
           if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
-            if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
+            # Complex products use four MFMAs before advancing B. Negations add
+            # scheduler slots, so waiting at index 4 also covers every conjugation.
+            secondWaitIndex = 4 if kernel["ProblemType"]["DataType"].isComplex() else kernel["MIWaveTileA"] // kernel["numSubTiles"]
+            if iteration == 0 and i == secondWaitIndex:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
               waitCode2.dscnt = localReadsIssuedInThisIter
@@ -12191,9 +12197,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       _reg("address", "Synchronizer")
       _reg("uint32", "GSUSync")
 
-    if isPersistentDataParallel(kernel) and not kernel["ProblemType"]["GroupedGemm"]:
+    if not kernel["ProblemType"]["GroupedGemm"]:
       for tensor in ("D", "C", "A", "B"):
         _reg("uint64", "BatchOffset" + tensor)
+
+    # One entry for the whole fixed-size fusegemmm a2a segment
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      _reg("uint32", "FusedA2ASegment")
 
   def _getKernelSource(self, kernel: Solution):
     """
