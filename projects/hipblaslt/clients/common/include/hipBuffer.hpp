@@ -236,15 +236,23 @@ inline hipError_t synchronize(HipDeviceBuffer&     dBuf,
     if(block_count == 0)
         return hipErrorInvalidValue;
 
-    hipError_t hip_err;
+    const size_t blockBytes = dBuf.getNumBytes() / block_count;
+    auto*        firstBlock = dBuf.as<char>();
+    hipError_t   hip_err    = hipMemcpyAsync(firstBlock,
+                                        hBuf.as<char>(),
+                                        blockBytes,
+                                        dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+                                        stream);
+    if(hip_err != hipSuccess)
+        return hip_err;
 
-    // Perform async copy for all blocks
-    for(size_t i_block = 0; i_block < block_count; i_block++)
+    // Identical rotating blocks share one host upload. The stream orders device copies after it.
+    for(size_t i_block = 1; i_block < block_count; i_block++)
     {
-        hip_err = hipMemcpyAsync(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
-                                 hBuf.as<char>(),
-                                 dBuf.getNumBytes() / block_count,
-                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+        hip_err = hipMemcpyAsync(firstBlock + i_block * blockBytes,
+                                 firstBlock,
+                                 blockBytes,
+                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyDeviceToDevice,
                                  stream);
 
         if(hip_err != hipSuccess)
