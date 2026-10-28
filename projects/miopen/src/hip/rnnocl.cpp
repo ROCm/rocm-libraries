@@ -3147,7 +3147,8 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
                              drop_in_offset,
                              drop_out_offset,
                              drop_rsv_offset,
-                             false /* is_backward */);
+                             false /* is_backward */,
+                             true /* evolve_state: each layer must draw an independent mask */);
                 // Update time
                 profileRNNkernels(handle, 1, ctime);
                 prelayer_shift = drop_out_offset;

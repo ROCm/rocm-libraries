@@ -51,6 +51,10 @@
 #define RUN_INIT_PRNG 0
 #endif
 
+#ifndef STATE_EVO
+#define STATE_EVO 0
+#endif
+
 #if RUN_INIT_PRNG // Initialize PRNG
 /**
  * @brief Initializes the kernel state.
@@ -81,8 +85,14 @@ InitKernelStateHIP(rocrand_state_xorwow* state, uint64_t prng_seed, uint64_t sta
 
 #if !RUN_INIT_PRNG
 
-template <typename F, typename T, typename B, typename D, bool MASK = false, bool RSVSP = false>
-__forceinline__ __device__ void dropout_kernel(const rocrand_state_xorwow* state,
+template <typename F,
+          typename T,
+          typename B,
+          typename D,
+          bool MASK  = false,
+          bool RSVSP = false,
+          bool EVO   = false>
+__forceinline__ __device__ void dropout_kernel(rocrand_state_xorwow* state,
                                                float dropout,
                                                float scale,
                                                D dim1,
@@ -110,7 +120,8 @@ __forceinline__ __device__ void dropout_kernel(const rocrand_state_xorwow* state
 
     auto sid = threadIdx.x + blockIdx.x * blockDim.x;
     rocrand_state_xorwow cur_state; // Read the state of the current thread
-    cur_state = state[sid];
+    if constexpr(!MASK)
+        cur_state = state[sid];
 
     for(auto gid = threadIdx.x + blockIdx.x * blockDim.x; gid < total_work;
         gid += blockDim.x * gridDim.x)
@@ -163,9 +174,15 @@ __forceinline__ __device__ void dropout_kernel(const rocrand_state_xorwow* state
         // Write RD_BLCK number of FP_TYPE data to the output tensor
         *(reinterpret_cast<T*>(y + out_offset + y_idx)) = *(reinterpret_cast<T*>(dat_blk));
     }
+
+    // State evolution: persist the advanced PRNG state so that the next launch that uses the
+    // same states buffer draws a new, independent mask. Each thread owns state[sid] exclusively
+    // (the host checks states_num >= number of launched threads when !MASK).
+    if constexpr(EVO && !MASK)
+        state[sid] = cur_state;
 }
 
-extern "C" __global__ void DropoutKernel(const rocrand_state_xorwow* state,
+extern "C" __global__ void DropoutKernel(rocrand_state_xorwow* state,
                                          float dropout,
                                          float scale,
                                          DIM_TYPE dim1,
@@ -188,29 +205,34 @@ extern "C" __global__ void DropoutKernel(const rocrand_state_xorwow* state,
                                          uint64_t out_offset,
                                          uint64_t rsvsp_offset)
 {
-    dropout_kernel<FP_TYPE, READ_DAT_TYPE, READ_BOOL_TYPE, DIM_TYPE, USE_MASK, USE_RSVSP>(
-        state,
-        dropout,
-        scale,
-        dim1,
-        dim2,
-        dim3,
-        dim4,
-        y,
-        out_str0,
-        out_str1,
-        out_str2,
-        out_str3,
-        x,
-        in_str0,
-        in_str1,
-        in_str2,
-        in_str3,
-        reserveSpace,
-        total_work,
-        in_offset,
-        out_offset,
-        rsvsp_offset);
+    dropout_kernel<FP_TYPE,
+                   READ_DAT_TYPE,
+                   READ_BOOL_TYPE,
+                   DIM_TYPE,
+                   USE_MASK,
+                   USE_RSVSP,
+                   STATE_EVO>(state,
+                              dropout,
+                              scale,
+                              dim1,
+                              dim2,
+                              dim3,
+                              dim4,
+                              y,
+                              out_str0,
+                              out_str1,
+                              out_str2,
+                              out_str3,
+                              x,
+                              in_str0,
+                              in_str1,
+                              in_str2,
+                              in_str3,
+                              reserveSpace,
+                              total_work,
+                              in_offset,
+                              out_offset,
+                              rsvsp_offset);
 }
 
 #endif
