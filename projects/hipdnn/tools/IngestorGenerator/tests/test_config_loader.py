@@ -507,6 +507,13 @@ class TestEmittedIdentifierShape:
         )
         _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
 
+    def test_census_name_symbol_rejects_cpp_expressions(self):
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(census_name_symbol="NAME();"))
+        with pytest.raises(ConfigError, match="census_name_symbol"):
+            _check_emitted_identifiers(config)
+
     def test_a_local_name_leading_with_a_hyphen_is_rejected(self):
         """`_to_pascal_case` drops the empty leading part, so `-foo` derives a good
         `Foo` while the slug keeps the hyphen and names a directory that reads as a
@@ -2231,9 +2238,8 @@ class TestSpecializationDeclaration:
         _check_specialization_declaration(config)  # does not raise
 
     def test_an_authored_consumer_identity_is_rejected(self):
-        """Ids are minted, never authored. One config declares one engine and one KMD,
-        so an authored id would be a second source of truth pointing at whatever engine
-        shared a name."""
+        """Ids are assigned at generation, never authored. A config declares exactly one
+        engine and one KMD, and a 'consumers' list belongs to the emitted contract."""
         from codegen.config_loader import _check_specialization_declaration
 
         config = make_minimal_config(
@@ -2245,7 +2251,7 @@ class TestSpecializationDeclaration:
                 "engine_id": "00000000-0000-0000-0000-000000000000",
             }
         )
-        with pytest.raises(ConfigError, match="minted"):
+        with pytest.raises(ConfigError, match="assigned at generation"):
             _check_specialization_declaration(config)
 
     def test_a_vocabulary_entry_for_an_unchecked_field_is_rejected(self):

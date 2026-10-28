@@ -34,7 +34,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void hyb2csr_nnz_kernel(rocsparse_int        m,
                             rocsparse_int        n,
-                            rocsparse_int        ell_nnz,
+                            int64_t              ell_nnz,
                             rocsparse_int        ell_width,
                             const rocsparse_int* ell_col_ind,
                             rocsparse_int        coo_nnz,
@@ -59,7 +59,7 @@ namespace rocsparse
         {
             for(rocsparse_int p = 0; p < ell_width; ++p)
             {
-                rocsparse_int idx = ELL_IND(row, p, m, ell_width);
+                int64_t       idx = ELL_IND(row, p, static_cast<int64_t>(m), ell_width);
                 rocsparse_int col = ell_col_ind[idx] - idx_base;
 
                 if(col >= 0 && col < n)
@@ -81,7 +81,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void hyb2csr_fill_kernel(rocsparse_int        m,
                              rocsparse_int        n,
-                             rocsparse_int        ell_nnz,
+                             int64_t              ell_nnz,
                              rocsparse_int        ell_width,
                              const rocsparse_int* ell_col_ind,
                              const T*             ell_val,
@@ -114,7 +114,7 @@ namespace rocsparse
         {
             for(rocsparse_int p = 0; p < ell_width; ++p)
             {
-                rocsparse_int ell_idx = ELL_IND(row, p, m, ell_width);
+                int64_t       ell_idx = ELL_IND(row, p, static_cast<int64_t>(m), ell_width);
                 rocsparse_int col     = ell_col_ind[ell_idx];
 
                 // Fill CSR matrix with ELL entries

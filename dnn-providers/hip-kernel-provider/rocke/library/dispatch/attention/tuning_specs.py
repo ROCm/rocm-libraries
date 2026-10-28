@@ -14,10 +14,13 @@ from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _kv_block_bytes,
     _kv_cache_policy_3d,
     _num_segments,
     _tiled_2d_impl,
     _tiled_3d_impl,
+    gfx942_3d_kv_needs_i64_addr,
+    kv_addr_width_for_builder,
 )
 
 TILE_POLICIES: Tuple[str, ...] = (
@@ -129,18 +132,13 @@ def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
     return fields
 
 
-def _semantic_fields(problem: UnifiedAttentionProblem) -> dict:
+def _semantic_fields(
+    problem: UnifiedAttentionProblem, builder_kind: str = "tiled"
+) -> dict:
     kv_storage_dtype = "fp8e4m3" if problem.use_fp8 else None
     elem_bytes = 1 if problem.use_fp8 else 2
-    block_stride = (
-        int(problem.block_size)
-        * int(problem.num_kv_heads)
-        * int(problem.head_size)
-        * elem_bytes
-    )
-    use_i64 = (
-        int(problem.num_kv_blocks) > 0
-        and int(problem.num_kv_blocks) * block_stride > 0x8000_0000
+    use_i64 = kv_addr_width_for_builder(
+        builder_kind, int(problem.num_kv_blocks), _kv_block_bytes(problem), elem_bytes
     )
     return {
         "head_size": int(problem.head_size),
@@ -171,6 +169,7 @@ _SEMANTIC_FIELDS = frozenset(
         "has_softcap",
         "use_alibi",
         "use_qq_bias",
+        "use_additive_bias",
         "num_seqs",
         "kv_storage_dtype",
         "kv_layout",
@@ -178,6 +177,7 @@ _SEMANTIC_FIELDS = frozenset(
         "use_decode_grid",
         "causal_top_left",
         "right_bound",
+        "emit_lse",
     }
 )
 
@@ -203,6 +203,8 @@ def make_explicit_attention_2d_spec(
         raise ValueError(
             f"explicit 2D attention tuning requires gfx942/gfx950, got {arch}"
         )
+    if problem.use_additive_bias:
+        raise ValueError("explicit 2D attention tuning does not support additive bias")
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
@@ -223,7 +225,7 @@ def make_explicit_attention_2d_spec(
     tile_size = resolve_tile_policy(problem.block_size, config.tile_policy)
     knobs = _checked_knobs(config.knob_dict())
     spec = spec_type(
-        **_semantic_fields(problem),
+        **_semantic_fields(problem, config.builder_kind),
         **_mask_fields(problem, arch),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
@@ -278,6 +280,8 @@ def make_explicit_attention_3d_specs(
         raise ValueError(
             f"explicit 3D attention tuning requires gfx942/gfx950, got {arch}"
         )
+    if problem.use_additive_bias:
+        raise ValueError("explicit 3D attention tuning does not support additive bias")
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )
@@ -305,8 +309,18 @@ def make_explicit_attention_3d_specs(
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
     # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
     knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
+    semantic = _semantic_fields(problem)
+    if arch == "gfx942":
+        semantic["use_i64_kv_addr"] = gfx942_3d_kv_needs_i64_addr(
+            int(problem.num_kv_blocks),
+            _kv_block_bytes(problem),
+            kv_fp8=semantic["kv_storage_dtype"] is not None,
+            use_wide_kv_load=bool(knobs.get("use_wide_kv_load", False)),
+            tile_size=int(tile),
+            head_size=int(problem.head_size),
+        )
     segment = spec_type(
-        **_semantic_fields(problem),
+        **semantic,
         **_mask_fields(problem, arch),
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
@@ -337,6 +351,9 @@ def make_explicit_attention_3d_specs(
         dtype=problem.dtype,
         num_segments=num_segments,
         waves_per_eu=config.waves_per_eu,
+        # The output the caller asked for, never a tuning knob (see
+        # _SEMANTIC_FIELDS): every swept geometry keeps it.
+        emit_lse=problem.emit_lse,
     )
     return segment, reduce
 

@@ -53,7 +53,8 @@ _ACTIVE = ContextVar("gpu_reference_worker_session", default=None)
 
 
 class _Worker:
-    def __init__(self, env: dict[str, str], module: str) -> None:
+    def __init__(self, env: dict[str, str], module: str, mode: str) -> None:
+        self.mode = mode
         self.directory = tempfile.TemporaryDirectory(prefix="rocke-reference-worker-")
         self.log_path = Path(self.directory.name) / "worker.log"
         self.log = self.log_path.open("w")
@@ -77,20 +78,25 @@ class _Worker:
             self.process.stdin.write(json.dumps(str(request.resolve())) + "\n")
             self.process.stdin.flush()
         except (BrokenPipeError, OSError) as error:
-            raise RuntimeError(self.error()) from error
+            raise RuntimeError(self.error("failed")) from error
         deadline = time.monotonic() + timeout
         while not request.with_name("complete").exists():
             if self.process.poll() is not None:
-                raise RuntimeError(self.error())
+                raise RuntimeError(
+                    self.error(f"failed with exit code {self.process.returncode}")
+                )
             if time.monotonic() >= deadline:
                 self.process.kill()
                 self.process.wait()
-                raise TimeoutError("GPU reference worker exceeded its request timeout")
+                raise TimeoutError(
+                    self.error(f"exceeded its {timeout:g} s request timeout")
+                )
             time.sleep(0.01)
 
-    def error(self) -> str:
+    def error(self, problem: str) -> str:
+        """Name the worker's role and keep its log tail, which holds the cause."""
         return (
-            "GPU reference worker failed:\n"
+            f"GPU reference {self.mode} worker {problem}:\n"
             + self.log_path.read_text(errors="replace")[-16000:]
         )
 
@@ -130,7 +136,7 @@ class WorkerSession:
         module = module or self.module
         key = (mode, env["PYTHONPATH"], module)
         if key not in self.workers:
-            self.workers[key] = _Worker(env, module)
+            self.workers[key] = _Worker(env, module, mode)
         try:
             self.workers[key].execute(request, timeout=self.timeout)
         except BaseException:
