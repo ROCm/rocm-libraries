@@ -298,62 +298,83 @@ def commSkipMark(config):
             reason=f"comm tests need 2+ visible HIP devices, found {count}")
     return None
 
-def _stinkytofu_extension_missing():
-    """True when this install has no ``stinkytofu._stinkytofu``.
+def _host_sees_gfx1250():
+    """True when ``rocm_agent_enumerator`` reports a gfx1250 GPU.
 
-    gfx94X TheRock packages do not build that extension (it is gfx1250-only).
-    Cached: the answer cannot change during a session.
+    Same probe ``rocisa`` uses to auto-select the stinkytofu backend. A missing
+    enumerator or a failed probe does not count as seeing gfx1250. Cached: the
+    answer cannot change during a session.
     """
-    cached = getattr(_stinkytofu_extension_missing, "_cached", None)
-    if cached is None:
+    cached = getattr(_host_sees_gfx1250, "_cached", None)
+    if cached is not None:
+        return cached
+    import subprocess
+    rocmpath = os.environ.get(
+        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
+    )
+    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
+    seen = False
+    if os.path.exists(enumerator):
         try:
-            import stinkytofu._stinkytofu  # noqa: F401
-            cached = False
-        except ImportError:
-            cached = True
-        _stinkytofu_extension_missing._cached = cached
-    return cached
+            output = subprocess.check_output(
+                [enumerator, "-t", "GPU"], timeout=5, stderr=subprocess.DEVNULL,
+            )
+            seen = "gfx1250" in output.decode()
+        except (OSError, subprocess.SubprocessError):
+            seen = False
+    _host_sees_gfx1250._cached = seen
+    return seen
 
 
-def _gfx1250_guard_without_stinkytofu(exc):
-    """The auto-backend guard refusing a gfx1250 kernel on native rocisa.
+def _gfx1250_native_guard(exc):
+    """The unset-env guard refusing to emit a gfx1250 kernel on native rocisa.
 
-    Only that message. An explicit ``ROCISA_BACKEND=stinkytofu`` with the
-    extension missing is a different failure and must stay a failure. So is
-    the same guard when the extension *is* installed: that is a real backend
-    mismatch, not a missing package.
+    Matches both ``loaded=True`` and ``loaded=False``. An explicit
+    ``ROCISA_BACKEND`` mismatch uses a different message and stays a failure.
     """
     if not isinstance(exc, RuntimeError):
         return False
     text = str(exc)
-    return "gfx1250 kernel" in text and "stinkytofu._stinkytofu loaded=False" in text
+    return "gfx1250 kernel" in text and "expected the stinkytofu backend" in text
+
+
+def _skip_gfx1250_codegen_on_this_host(exc):
+    """Skip gfx1250 codegen when this process auto-selected native rocisa.
+
+    ``ROCISA_BACKEND`` left unset means the backend followed hardware detection.
+    Coverage and ``tox -e unit`` set it to ``stinkytofu``, so those lanes still
+    emit. A host that reports gfx1250 keeps the guard as a failure.
+    """
+    if os.environ.get("ROCISA_BACKEND", "").strip():
+        return False
+    if _host_sees_gfx1250():
+        return False
+    return _gfx1250_native_guard(exc)
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Skip gfx1250 codegen when this install did not ship stinkytofu.
+    """Skip gfx1250 codegen on a non-gfx1250 host using native rocisa.
 
-    TheRock's tensilelite job runs ``rocisa_tests`` and ``Tests/unit`` in one
-    native process on gfx94X. gfx1250 characterization still emits, and the
-    guard in ``TensileCreateLibrary/Run.py`` raises because ``_stinkytofu.so``
-    is not in that package. Skipping here leaves the guard itself a hard
-    error wherever the extension is installed (tox, gfx1250 runners).
+    TheRock's gfx94X tensilelite job runs ``Tests/unit`` in one native process.
+    Characterization tests still ask for gfx1250 assembly. The guard in
+    ``TensileCreateLibrary/Run.py`` raises because that host did not select the
+    stinkytofu backend. Skipping here leaves the guard a hard error when
+    ``ROCISA_BACKEND`` is set and on hosts that report gfx1250.
     """
     outcome = yield
     report = outcome.get_result()
     if report.when == "teardown" or not report.failed:
         return
-    if not _stinkytofu_extension_missing():
-        return
     excinfo = getattr(call, "excinfo", None)
-    if excinfo is None or not _gfx1250_guard_without_stinkytofu(excinfo.value):
+    if excinfo is None or not _skip_gfx1250_codegen_on_this_host(excinfo.value):
         return
     filename, lineno, _name = item.location
     report.outcome = "skipped"
     report.longrepr = (
         filename,
         lineno,
-        "Skipped: gfx1250 codegen needs stinkytofu._stinkytofu, which this install does not ship",
+        "Skipped: gfx1250 codegen uses the stinkytofu backend; this host is not gfx1250 and ROCISA_BACKEND is unset",
     )
 
 
