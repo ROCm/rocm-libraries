@@ -66,12 +66,14 @@ IDs index the physical pools. Inactive table entries need not be initialized.
 Legacy C builders share this caller contract; metadata cannot be validated during
 source generation. `allow_unsupported` does not bypass runtime safety checks.
 
-The token-to-page mapping lives in shared architecture-independent helpers,
-mirrored by the native builders. The current descriptor `indirect` transform
-guards the lookup index but does not validate the returned physical page ID or
-publish a segment failure status. Integrating these checks with a descriptor
-transform is a separate authoring refactor; substituting the existing transform
-alone would not establish metadata containment.
+The token-to-page mapping uses shared architecture-independent descriptor
+helpers, mirrored by the native builders. Unmerge transforms decompose compute
+coordinates and sanitized logical tokens; a descriptor with explicit byte
+strides flattens the physical page, page token, KV head and dimension. The bounded
+page lookup remains a checked stage between these descriptor operations: it
+validates consumed physical IDs and publishes failure status before forming
+their byte offsets. The descriptor `indirect` transform alone does not provide
+those physical-ID checks or failure reporting.
 
 Explicit gfx942/gfx950 paged 3D specs must expose valid page/tile geometry and
 a boolean `uses_paged_gather` that agrees with it: `T > P` on gfx942, `T != P`

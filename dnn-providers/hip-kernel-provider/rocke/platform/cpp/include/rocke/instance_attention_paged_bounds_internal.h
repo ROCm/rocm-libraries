@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #ifndef ROCKE_INSTANCE_ATTENTION_PAGED_BOUNDS_INTERNAL_H
 #define ROCKE_INSTANCE_ATTENTION_PAGED_BOUNDS_INTERNAL_H
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include "rocke/ir.h"
 #include <math.h>
 #include <stdint.h>
@@ -228,12 +229,10 @@ static inline rocke_value_t* rocke_bounds_offset(rocke_ir_builder_t* B,
                                                  int tile_size,
                                                  int heads)
 {
-    rocke_value_t* t1 = rocke_b_const_i32(B, tile_size);
-    rocke_value_t* t2 = rocke_b_mul(B, tile, t1);
-    rocke_value_t* t3 = rocke_b_const_i32(B, hd);
-    rocke_value_t* t4 = rocke_b_div(B, linear, t3);
-    rocke_value_t* t5 = rocke_b_add(B, t2, t4);
-    rocke_value_t* token = t5;
+    rocke_value_t* dim;
+    rocke_value_t* token = rocke_paged_kv_token(B, tile, linear, hd, tile_size, &dim);
+    if(token == NULL)
+        return NULL;
     rocke_value_t* t6 = rocke_b_const_i32(B, 0);
     rocke_value_t* t7 = rocke_b_cmp_ge(B, token, t6);
     rocke_value_t* t8 = rocke_b_cmp_lt(B, token, length);
@@ -251,30 +250,24 @@ static inline rocke_value_t* rocke_bounds_offset(rocke_ir_builder_t* B,
     rocke_value_t* t10 = rocke_b_const_i32(B, 0);
     rocke_value_t* t11 = rocke_b_select(B, live, token, t10);
     rocke_value_t* safe_token = t11;
-    rocke_value_t* t12 = rocke_b_const_i32(B, page);
-    rocke_value_t* t13 = rocke_b_div(B, safe_token, t12);
-    rocke_value_t* t14 = rocke_bounds_physical(B, state, table, base, t13, live);
+    rocke_value_t *page_index, *row;
+    if(!rocke_paged_kv_split(B,
+                             "paged_page",
+                             "safe_token",
+                             safe_token,
+                             "logical_page",
+                             "page_token",
+                             1,
+                             page,
+                             &page_index,
+                             &row))
+        return NULL;
+    rocke_value_t* t14 = rocke_bounds_physical(B, state, table, base, page_index, live);
     rocke_value_t* physical = t14;
-    rocke_value_t* t15 = rocke_b_const_i32(B, (((page * heads) * hd) * 2));
-    rocke_value_t* t16 = rocke_b_mul(B, physical, t15);
-    rocke_value_t* page_off = t16;
-    rocke_value_t* t17 = rocke_b_const_i32(B, page);
-    rocke_value_t* t18 = rocke_b_mod(B, safe_token, t17);
-    rocke_value_t* t19 = rocke_b_const_i32(B, ((heads * hd) * 2));
-    rocke_value_t* t20 = rocke_b_mul(B, t18, t19);
-    rocke_value_t* row_off = t20;
-    rocke_value_t* t21 = rocke_b_const_i32(B, (hd * 2));
-    rocke_value_t* t22 = rocke_b_mul(B, head, t21);
-    rocke_value_t* head_off = t22;
-    rocke_value_t* t23 = rocke_b_const_i32(B, hd);
-    rocke_value_t* t24 = rocke_b_mod(B, linear, t23);
-    rocke_value_t* t25 = rocke_b_const_i32(B, 2);
-    rocke_value_t* t26 = rocke_b_mul(B, t24, t25);
-    rocke_value_t* dim_off = t26;
-    rocke_value_t* t27 = rocke_b_add(B, page_off, row_off);
-    rocke_value_t* t28 = rocke_b_add(B, head_off, dim_off);
-    rocke_value_t* t29 = rocke_b_add(B, t27, t28);
-    rocke_value_t* offset = t29;
+    rocke_value_t* offset
+        = rocke_paged_kv_byte_offset(B, physical, row, head, dim, hd, page, heads);
+    if(offset == NULL)
+        return NULL;
     rocke_value_t* t30 = rocke_b_const_i32(B, 2147483647);
     rocke_value_t* t31 = rocke_b_select(B, live, offset, t30);
     return t31;

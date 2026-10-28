@@ -45,6 +45,14 @@ class Bounds(PagedBounds):
         self.failed |= invalid
 
 
+def test_offset_rejects_another_builder_before_emission():
+    owner = Interpreter()
+    bounds = Bounds(owner, 2, 1)
+    with pytest.raises(ValueError, match="owning builder"):
+        bounds.offset(object(), [0], 0, 0, 0, 0, 1, 64, 1, 32, 1)
+    assert not owner.reads and not bounds.failed
+
+
 @pytest.mark.parametrize("page", [1, 16, 32, 64])
 @pytest.mark.parametrize("physical", [-2147483648, -1, 2, 2147483647])
 def test_physical_is_sanitized_before_multiplication(page, physical):

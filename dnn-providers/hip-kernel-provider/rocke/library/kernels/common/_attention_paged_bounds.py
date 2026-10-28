@@ -4,6 +4,8 @@
 
 from rocke.core.ir import I32, PtrType
 
+from ._attention_paged_kv import paged_kv_byte_offset, paged_kv_page, paged_kv_token
+
 
 class PagedBounds:
     """Private per-CTA state; each lane owns its sticky LDS failure slot."""
@@ -150,10 +152,9 @@ class PagedBounds:
     def offset(
         self, b, table, base, head, tile, linear, length, hd, page, tile_size, heads
     ):
-        b = self.b
-        token = b.add(
-            b.mul(tile, b.const_i32(tile_size)), b.div(linear, b.const_i32(hd))
-        )
+        if b is not self.b:
+            raise ValueError("paged bounds require their owning builder")
+        token, dim = paged_kv_token(b, tile, linear, hd, tile_size)
         live = b.land(b.cmp_ge(token, b.const_i32(0)), b.cmp_lt(token, length))
         if self.sliding_window > 0:
             window_start = b.smax(
@@ -161,16 +162,9 @@ class PagedBounds:
             )
             live = b.land(live, b.cmp_ge(token, window_start))
         safe_token = b.select(live, token, b.const_i32(0))
-        physical = self.physical(
-            table, base, b.div(safe_token, b.const_i32(page)), live
-        )
-        page_off = b.mul(physical, b.const_i32(page * heads * hd * 2))
-        row_off = b.mul(
-            b.mod(safe_token, b.const_i32(page)), b.const_i32(heads * hd * 2)
-        )
-        head_off = b.mul(head, b.const_i32(hd * 2))
-        dim_off = b.mul(b.mod(linear, b.const_i32(hd)), b.const_i32(2))
-        offset = b.add(b.add(page_off, row_off), b.add(head_off, dim_off))
+        page_index, row = paged_kv_page(b, safe_token, page)
+        physical = self.physical(table, base, page_index, live)
+        offset = paged_kv_byte_offset(b, physical, row, head, dim, hd, page, heads)
         return b.select(live, offset, b.const_i32(0x7FFFFFFF))
 
 

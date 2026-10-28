@@ -3927,7 +3927,7 @@ def _tiled_3d_spec_from_problem(
     return _impl(problem, arch)
 
 
-def _tiled_3d_segment_lds_bytes(spec, *, arch: str) -> int:
+def _tiled_3d_segment_lds_bytes(spec) -> int:
     """Q[M,D], K[2,T,D] and V[T,D] in the gfx942/gfx950 3D schedule (P stays in
     registers).
 
@@ -3960,7 +3960,7 @@ def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
 
     target = ArchTarget.from_gfx(arch)
     for kind, used in (
-        ("segment", _tiled_3d_segment_lds_bytes(segment, arch=arch)),
+        ("segment", _tiled_3d_segment_lds_bytes(segment)),
         ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
     ):
         if not target.fits_lds(used):

@@ -72,7 +72,7 @@ def test_gfx942_d256_t32_fits_at_every_strided_entry(dtype, monkeypatch):
     assert make_candidate().admits(req)[0]
     spec = dispatch_attention(req).spec
     assert spec.kernel_spec.tile_size == 32
-    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec, arch=req.arch) == 57344
+    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec) == 57344
     assert (
         au._strided_3d_specs_from_problem(problem, arch=req.arch)[0] == spec.kernel_spec
     )
@@ -102,7 +102,7 @@ def test_explicit_smaller_tile_uses_actual_footprint(dtype, monkeypatch):
     spec = _explicit(req, 16)
     problem = _problem(req)
     au._validate_strided_3d_spec(problem, spec)
-    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec, arch=req.arch) == 32768
+    assert au._tiled_3d_segment_lds_bytes(spec.kernel_spec) == 32768
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
 
     def stop_at_tensor_validation(*args):
@@ -126,7 +126,7 @@ def test_lds_estimate_matches_lowered_pools(arch, dtype, head, block, monkeypatc
     for kernel, estimated in (
         (
             module.build_unified_attention_3d_tiled(spec.kernel_spec, arch=arch),
-            au._tiled_3d_segment_lds_bytes(spec.kernel_spec, arch=req.arch),
+            au._tiled_3d_segment_lds_bytes(spec.kernel_spec),
         ),
         (
             module.build_unified_attention_reduce_tiled(spec.reduce_spec, arch=arch),
@@ -140,10 +140,10 @@ def test_lds_estimate_matches_lowered_pools(arch, dtype, head, block, monkeypatc
 
 def test_lds_width_comes_from_allocation_dtype():
     spec = SimpleNamespace(block_m=16, head_size=256, tile_size=32, dtype_ir=F32)
-    assert au._tiled_3d_segment_lds_bytes(spec, arch="gfx950") == 114688
+    assert au._tiled_3d_segment_lds_bytes(spec) == 114688
     spec.dtype_ir = FP4E2M1
     with pytest.raises(ValueError, match="byte-addressable"):
-        au._tiled_3d_segment_lds_bytes(spec, arch="gfx950")
+        au._tiled_3d_segment_lds_bytes(spec)
 
 
 def test_reducer_budget_is_independent_and_allows_exact_capacity():
