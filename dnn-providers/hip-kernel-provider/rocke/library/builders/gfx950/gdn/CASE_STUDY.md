@@ -214,7 +214,7 @@ def specs():
         for nw, wtk, bpv in CONFIGURED_TILES:
             yield dict(gate_kind="gdn", num_k_heads=16, num_v_heads=32, state_dtype=st,
                        num_warps=nw, warp_threads_k=wtk, blocks_per_v_dim=bpv)
-        for _, (nw, wtk, bpv), _ in _TUNED_TILES_KDA:
+        for _, (nw, wtk, bpv) in _TUNED_TILES_KDA:
             yield dict(gate_kind="kda", num_k_heads=32, num_v_heads=32, state_dtype=st,
                        num_warps=nw, warp_threads_k=wtk, blocks_per_v_dim=bpv)
         for d in (64, 192):  # (2,16,8) is illegal here, so auto takes (1,1,1)

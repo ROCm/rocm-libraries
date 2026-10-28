@@ -107,7 +107,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -357,6 +357,8 @@ class ProblemType:
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
             rv.metadataLayout = d['MetadataLayout']
+
+        rv.stochasticRounding = bool(d.get('StochasticRounding', False))
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -990,8 +992,16 @@ class InternalArgsSupport:
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
+
+    def state(self):
+        rv = {key: getattr(self, key) for key in self.StateKeys}
+        # Emitted only when set so libraries built without the probe are unchanged.
+        if getattr(self, 'occupancyProbe', False):
+            rv['occupancyProbe'] = True
+        return rv
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

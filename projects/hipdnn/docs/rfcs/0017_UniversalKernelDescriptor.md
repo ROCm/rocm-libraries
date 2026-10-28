@@ -130,6 +130,7 @@ adapter yet.
 | Heuristic sources | `NATIVE` (a registered C++ score symbol). Not yet built: LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke` entries and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; `hip` and `hsaco` entries; composition |
+| Independently selected kernels per engine (e.g. split SDPA backward) | None | kernel slots, [RFC 0021](0021_KernelSlots.md) (draft); orthogonal to `sources` ([§15.4](#154-execution-and-selection)) |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -1543,7 +1544,9 @@ arrives with no execution context, so in general no kernel has been chosen yet. 
 filter the config carries, load the dispatch descriptor of each surviving kernel's pack, and
 evaluate its workspace requirement over the cached bound token state: `workspace_bytes`, or for a
 multi-launch program the sum of its intermediates and each Launch's own scratch
-([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors.
+([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors. (For an engine
+with kernel slots, the shared region plus the largest slot scratch;
+[RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments).)
 *Why the dispatch descriptor loads here:* workspace is the first question whose answer is a
 dispatch property.
 *Stored:* the parsed dispatch descriptors, in the descriptor cache; the plan build reuses them.
@@ -2107,7 +2110,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
 | Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules. Five open questions land here: the enablement and location mechanism; the minimum trust requirement for drop-in source, including whether JIT source is allowed at all; whether a pack may carry its own engine/heuristic pair or must bind an installed one; how an extension provider (a DSL wheel) is bundled and released; and the three removal/deprecation cases |
 | Adapters | Registering kernel-source and heuristic adapters |
-| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition |
+| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition. Independently selected kernels per engine are kernel slots ([RFC 0021](0021_KernelSlots.md), draft) |
 | JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system |
 
 ---
