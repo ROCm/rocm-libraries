@@ -57,6 +57,15 @@ auto GetDeterministicConvCase()
     return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNHWC, std::move(test_case));
 }
 
+// Chain-length test case: 1x1 filter, so the split-K = 1 chain length is L = N*H*W.
+template <miopenDataType_t datatype>
+auto GetChainLengthConvCase(size_t n, size_t h, size_t w, bool deterministic)
+{
+    return GetConvTestForGroupXdlops<datatype>(
+        miopenTensorNHWC,
+        TestCase{{n, 64, h, w}, {96, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, deterministic});
+}
+
 template <TestDataType type>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
@@ -86,6 +95,14 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     return p;
 }
 
+// The solver must not be applicable on any device.
+miopen::unit_tests::UnitTestConvSolverParams GetNotApplicableParams()
+{
+    miopen::unit_tests::UnitTestConvSolverParams p(Gpu::None);
+    p.UsesCKDynamicLib();
+    return p;
+}
+
 } // namespace
 
 // Solver itself supports I8 in isApplicable, but CK returns 0 compatible kernels
@@ -109,6 +126,8 @@ using GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_TF32 =
 using CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16 =
     CPU_UnitTestConvSolverDevApplicabilityWrw_NONE;
 using CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicability_NONE =
+    CPU_UnitTestConvSolverDevApplicabilityWrw_NONE;
+using CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicChainLength_NONE =
     CPU_UnitTestConvSolverDevApplicabilityWrw_NONE;
 
 TEST_P(GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16, ConvHipImplicitGemmGroupWrwXdlops)
@@ -138,6 +157,12 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16,
 };
 
 TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicability_NONE,
+       ConvHipImplicitGemmGroupWrwXdlops)
+{
+    this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops{});
+};
+
+TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicChainLength_NONE,
        ConvHipImplicitGemmGroupWrwXdlops)
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops{});
@@ -212,3 +237,26 @@ INSTANTIATE_TEST_SUITE_P(
     CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicability_NONE,
     testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
                      testing::Values(GetDeterministicConvCase())));
+
+// Deterministic mode forces split-K = 1. The chain length limit is 16384 for FP32 output and
+// 2^21 for FP16 output. Non-deterministic mode has no limit.
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicChainLength_NONE,
+    testing::Values(
+        // FP32, L = 16384: at the limit
+        std::make_tuple(GetTestParams<TestDataType::FP32>(),
+                        GetChainLengthConvCase<miopenFloat>(1, 128, 128, true)),
+        // FP32, L = 16640: over the limit
+        std::make_tuple(GetNotApplicableParams(),
+                        GetChainLengthConvCase<miopenFloat>(1, 128, 130, true)),
+        std::make_tuple(GetTestParams<TestDataType::FP32>(),
+                        GetChainLengthConvCase<miopenFloat>(1, 128, 130, false)),
+        // FP16, L = 2^21: at the limit
+        std::make_tuple(GetTestParams<TestDataType::FP16>(),
+                        GetChainLengthConvCase<miopenHalf>(128, 128, 128, true)),
+        // FP16, L = 2^21 + 32768: over the limit
+        std::make_tuple(GetNotApplicableParams(),
+                        GetChainLengthConvCase<miopenHalf>(128, 128, 130, true)),
+        std::make_tuple(GetTestParams<TestDataType::FP16>(),
+                        GetChainLengthConvCase<miopenHalf>(128, 128, 130, false))));
