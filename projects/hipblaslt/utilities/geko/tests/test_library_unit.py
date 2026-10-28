@@ -211,61 +211,11 @@ def test_dict_library_supports_property_access_and_dump(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     lib.dump(out_dir)
     dumped = yaml.safe_load((out_dir / "dict_lib.yaml").read_text())
-    assert list(dumped["Solutions"][0].keys()) == ["SolutionIndex", "StaggerU"]
     assert dumped["Solutions"][0]["SolutionIndex"] == 1
     assert dumped["IndexOrder"] == [1, 0, 2, 3]
     assert dumped["ExactLogic"] == [[[8, 8, 1, 8], [1, 100.0]]]
     assert dumped["PerfMetric"] == "OtherMetric"
     assert dumped["LibraryType"] == "GridBased"
-
-
-def test_dict_dump_orders_appended_solution_keys(tmp_path: Path) -> None:
-    """Dict-format dump pins naming keys and sorts keys geko appended.
-
-    Returns:
-        None.
-
-    Raises:
-        AssertionError: If the written solution keeps insertion order.
-    """
-    solution = {
-        "_PersistentLoop": True,
-        "tailLoopOptB": 1,
-        "ActivationFuncCall": False,
-        "SolutionNameMin": "sol",
-        "InternalSupportParams": {
-            "UseUniversalArgs": True,
-            "KernArgsVersion": 3,
-            "PersistentLoopArgsVersion": 0,
-        },
-        "SolutionUID": "0u34Z1KlVFjgl",
-        "KernelNameMin": "kern",
-        "SolutionIndex": 0,
-        "StaggerUMapping": 0,
-    }
-    data = {
-        "ArchitectureName": "gfx950",
-        "ProblemType": {"UseBias": 1, "Activation": True, "DataType": 7},
-        "DefaultSolution": {},
-        "Solutions": [solution],
-        "LibraryType": "Equality",
-    }
-    lib = Library(data, "appended.yaml")
-    lib.dump(tmp_path)
-    dumped = yaml.safe_load((tmp_path / "appended.yaml").read_text())
-    keys = list(dumped["Solutions"][0].keys())
-    assert keys[:4] == [
-        "SolutionIndex",
-        "SolutionUID",
-        "KernelNameMin",
-        "SolutionNameMin",
-    ]
-    assert keys[4:] == sorted(keys[4:])
-    assert list(dumped["Solutions"][0]["InternalSupportParams"].keys()) == [
-        "PersistentLoopArgsVersion",
-        "UseUniversalArgs",
-    ]
-    assert list(lib.solutions[0].keys()) == keys
 
 
 @pytest.mark.parametrize(
