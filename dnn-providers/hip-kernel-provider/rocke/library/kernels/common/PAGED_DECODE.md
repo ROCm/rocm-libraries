@@ -7,7 +7,7 @@ separate target and scheduling choices. Staging is one compute tile per buffer;
 MFMA and online softmax retain their existing schedules. Bounded mode adds
 metadata guards and a reducer failure gate.
 An internal loader-kind resolver selects strided addressing, the existing paged
-descriptor, or per-token paged gather. Both engines use that decision for
+descriptor, whole-page DMA, or per-token paged gather. Both engines use that decision for
 validation and architecture-local K/V tile issuing. Storage conversion, transfer
 width and address width remain separate choices; `uses_paged_gather` remains the
 compatibility view for structural specs. No public strategy field is introduced.
@@ -22,6 +22,10 @@ emission for a configuration that previously exceeded the target LDS limit.
 - The token-mapped loader supports `T=32` with `P=1,16` on both targets, and
   `P=64` on gfx950. It resolves each logical token through the shared K/V page
   table. Different lanes can reference nonadjacent physical pages.
+- gfx950 retains whole-page DMA for larger tiles that are multiples of the
+  physical page size, including `T=48,80,96,112` for `P=16` and `T=96` for
+  `P=32`. These legacy paths retain their caller-validity contract and require
+  finite physical-page padding. The existing async-call and LDS limits apply.
 
 `tile_size_override` now applies to both targets. With no override, existing
 page sizes keep their previous behavior; page size 1 defaults to tile size 32.

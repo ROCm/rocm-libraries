@@ -1061,12 +1061,12 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         }
         if((spec->block_size != 1 && spec->block_size != 16 && spec->block_size != 32
             && spec->block_size != 64)
-           || (tile != 16 && tile != 32 && tile != 64 && tile != 128))
+           || tile < 16 || tile > 128 || tile % 16 != 0)
         {
-            rocke_i_set_err(
-                b,
-                ROCKE_ERR_VALUE,
-                "tiled decode requires page size 1/16/32/64 and tile size 16/32/64/128");
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "tiled decode requires page size 1/16/32/64 and tile size "
+                            "a multiple of 16 in [16, 128]");
             return NULL;
         }
         const rocke_attention_kv_loader_kind_t loader_kind

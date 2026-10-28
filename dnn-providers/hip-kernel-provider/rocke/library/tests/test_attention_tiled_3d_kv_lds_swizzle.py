@@ -243,6 +243,7 @@ def test_swizzled_decode_matches_reference(dtype, head_size, tile):
         num_segments=num_segments,
         tile_size_override=None if tile == block_size else tile,
         use_kv_lds_swizzle=True,
+        metadata_containment=tile == 32,
     )
     reduce = UnifiedAttentionReduceTiledSpec(
         head_size=head_size,
@@ -250,6 +251,7 @@ def test_swizzled_decode_matches_reference(dtype, head_size, tile):
         num_kv_heads=kv_heads,
         dtype=dtype,
         num_segments=num_segments,
+        metadata_containment=segment.metadata_containment,
     )
     spec = AttentionTuningSpec(
         path="3d",

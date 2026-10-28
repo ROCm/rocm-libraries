@@ -245,7 +245,7 @@ def validate_paged_loader_geometry(
             raise ValueError("3D kernel_spec.uses_paged_gather must be a bool")
     if values["kv_layout"] != "paged":
         raise ValueError("paged loader requires kernel_spec.kv_layout='paged'")
-    tiles = (16, 32, 64, 128) if tuning_spec.arch == "gfx950" else (16, 32, 64)
+    tiles = tuple(range(16, 129, 16)) if tuning_spec.arch == "gfx950" else (16, 32, 64)
     for name, allowed in (
         ("block_size", (1, 16, 32, 64)),
         ("tile_size", tiles),

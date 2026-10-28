@@ -27,7 +27,7 @@ static inline rocke_attention_kv_loader_kind_t
 {
     if(strided_kv)
         return ROCKE_ATTN_KV_STRIDED;
-    if(page >= 16 && tile > page && (tile == 64 || tile == 128 || i64_addr))
+    if(page >= 16 && tile > page && (tile != 32 || i64_addr))
         return ROCKE_ATTN_KV_PAGED_MULTI_PAGE;
     return tile != page ? ROCKE_ATTN_KV_PAGED_TOKEN_GATHER : ROCKE_ATTN_KV_PAGED_DESCRIPTOR;
 }

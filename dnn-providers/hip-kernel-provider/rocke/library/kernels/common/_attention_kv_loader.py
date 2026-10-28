@@ -41,7 +41,7 @@ def resolve_attention_kv_loader(
         arch == "gfx950"
         and page_size >= 16
         and tile_size > page_size
-        and (tile_size in (64, 128) or use_i64_kv_addr)
+        and (tile_size != 32 or use_i64_kv_addr)
     ):
         return AttentionKVLoaderKind.PAGED_MULTI_PAGE
     gather = tile_size > page_size if arch == "gfx942" else tile_size != page_size

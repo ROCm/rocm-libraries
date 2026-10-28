@@ -194,6 +194,11 @@ def test_descriptor_transport_native_parity(arch, transport, flavor, monkeypatch
         (page, tile, transport)
         for page, tile in [(16, 64), (32, 64), (16, 128), (64, 128)]
         for transport in ["plain", "i64", "swizzle_page_ids"]
+    ]
+    + [
+        (page, tile, transport)
+        for page, tile in [(16, 48), (16, 80), (16, 96), (32, 96), (16, 112)]
+        for transport in ["plain", "i64", "swizzle"]
     ],
 )
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
@@ -220,7 +225,7 @@ def test_gfx950_whole_page_loader_native_parity(
         sliding_window=33,
         has_softcap=True,
         use_i64_kv_addr=transport == "i64",
-        use_kv_lds_swizzle=transport == "swizzle_page_ids",
+        use_kv_lds_swizzle=transport in ("swizzle", "swizzle_page_ids"),
         use_wave_page_id_load=transport == "swizzle_page_ids",
     )
     assert not segment.uses_paged_gather

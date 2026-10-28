@@ -110,7 +110,7 @@ def test_paged_tile_decode(
                 result.spec.kernel_spec,
                 metadata_containment=False,
                 tile_size_override=tile,
-                use_kv_lds_swizzle=transport == "swizzle_page_ids",
+                use_kv_lds_swizzle=transport in ("swizzle", "swizzle_page_ids"),
                 use_wave_page_id_load=transport == "swizzle_page_ids",
             ),
         )
@@ -406,8 +406,19 @@ def test_paged_features_numeric(gpu, page, dtype, feature):
             execution.close()
 
 
-@pytest.mark.parametrize("page,tile", [(16, 64), (32, 64), (16, 128), (64, 128)])
-@pytest.mark.parametrize("transport", ["plain", "swizzle_page_ids"])
+@pytest.mark.parametrize(
+    "page,tile,transport",
+    [
+        (page, tile, transport)
+        for page, tile in [(16, 64), (32, 64), (16, 128), (64, 128)]
+        for transport in ["plain", "swizzle_page_ids"]
+    ]
+    + [
+        (page, tile, transport)
+        for page, tile in [(16, 48), (16, 80), (16, 96), (32, 96), (16, 112)]
+        for transport in ["plain", "swizzle"]
+    ],
+)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_gfx950_whole_page_tiles_numeric(
     gpu, monkeypatch, page, tile, transport, dtype

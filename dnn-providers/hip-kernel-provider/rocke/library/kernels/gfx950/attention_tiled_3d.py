@@ -230,14 +230,12 @@ class UnifiedAttention3DTiledSpec:
                 "use_additive_bias must be a bool, got "
                 f"{type(self.use_additive_bias).__name__}"
             )
-        if self.block_size not in (1, 16, 32, 64) or self.tile_size not in (
-            16,
-            32,
-            64,
-            128,
+        if self.block_size not in (1, 16, 32, 64) or (
+            self.tile_size < 16 or self.tile_size > 128 or self.tile_size % 16
         ):
             raise ValueError(
-                "tiled decode requires page size 1/16/32/64 and tile size 16/32/64/128"
+                "tiled decode requires page size 1/16/32/64 and tile size "
+                "a multiple of 16 in [16, 128]"
             )
         if self.uses_paged_gather and (
             self.tile_size != 32
