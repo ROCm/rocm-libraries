@@ -182,6 +182,15 @@ TEST(PreSwizzleTest, PreSwizzleEmptyConfigurationIsIdentity) {
     EXPECT_EQ(preSwizzle(input, {2, 3}, {}, {}), input);
 }
 
+TEST(PreSwizzleTest, PreSwizzleEmptyTensorRequiresDivisibleDimensions) {
+    const std::vector<float> empty;
+    EXPECT_TRUE(preSwizzle(empty, {0, 64}, {32, 128, 4}, {}).empty());
+    EXPECT_TRUE(preSwizzle(empty, {128, 0}, {}, {16, 16}).empty());
+    // Each dimension must divide by its tile even when there are no elements.
+    EXPECT_THROW(preSwizzle(empty, {4, 0}, {32, 128, 4}, {}), std::runtime_error);
+    EXPECT_THROW(preSwizzle(empty, {0, 4}, {}, {16, 16}), std::runtime_error);
+}
+
 TEST(PreSwizzleTest, PreSwizzleRejectsInvalidPreTileConfiguration) {
     const std::vector<float> input(size_t{128} * 64);
     EXPECT_THROW(preSwizzle(input, {128, 64}, {}, {16}), std::runtime_error);
