@@ -473,6 +473,29 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     return data;
 }
 
+template<class T>
+auto generate_key_input(size_t size, unsigned int seed_value)
+    -> std::enable_if_t<_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
+{
+    auto result = test_utils::get_random_data<T>(size,
+                                                 test_utils::numeric_limits<T>::min(),
+                                                 test_utils::numeric_limits<T>::max(),
+                                                 seed_value);
+    test_utils::add_special_values(result, seed_value);
+    return result;
+}
+
+template<class T>
+auto generate_key_input(size_t size, unsigned int seed_value)
+    -> std::enable_if_t<!_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
+{
+    using inner_t = typename test_utils::inner_type<T>::type;
+    return test_utils::get_random_data<T>(size,
+                                          test_utils::numeric_limits<inner_t>::min(),
+                                          test_utils::numeric_limits<inner_t>::max(),
+                                          seed_value);
+}
+
 // Windows HIP cannot support allocations >= 4 GiB.
 #ifdef _WIN32
 template<unsigned int MaxPow2 = 27>
