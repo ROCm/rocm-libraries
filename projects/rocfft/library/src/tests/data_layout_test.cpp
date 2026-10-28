@@ -484,13 +484,46 @@ TEST_F(data_layout_test, intersection)
     EXPECT_EQ(middle_overlap.corresponding_axes_in_embedding(), (std::vector<size_t>{1}));
 }
 
+// Complex in-place transforms use the same layout on both sides: the counterpart must
+// be an exact copy, whatever the layout.
 TEST_F(data_layout_test, inplace_complex_is_unchanged)
 {
-    auto in  = data_layout_t::default_full_layout({16}, 4);
-    auto out = in.get_other_inplace_layout_for(io_data_label::OUTPUT,
-                                               rocfft_transform_type_complex_forward);
-    ASSERT_TRUE(out.has_value());
-    EXPECT_TRUE(*out == in);
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        // Batch axes may be partial ranges (unlike length axes), so cut a random
+        // sub-range along them. Then keep a random subset of the length axes, which
+        // gives an embedded layout unless every length axis is kept: the embedding map
+        // must survive the copy too.
+        const auto full = random_full_layout();
+        auto       lo   = full.lower();
+        auto       hi   = full.upper();
+        for(size_t d = full.get_len_rank(); d < full.get_full_rank(); d++)
+        {
+            lo[d] = uniform(0, hi[d] - 1);
+            hi[d] = uniform(lo[d] + 1, hi[d]);
+        }
+        const data_layout_t batch_range(
+            lo, hi, full.strides_and_distances(), full.get_batch_rank());
+        auto len_axes = random_permutation(full.get_len_rank());
+        len_axes.resize(uniform(1, len_axes.size()));
+        const auto layout = batch_range.get_layout_for_len_axes({len_axes.begin(), len_axes.end()});
+
+        // the same copy is expected for either direction and either side: draw one
+        // combination per case rather than checking all four every time
+        const auto fft_type = uniform(0, 1) ? rocfft_transform_type_complex_forward
+                                            : rocfft_transform_type_complex_inverse;
+        const auto io       = uniform(0, 1) ? io_data_label::INPUT : io_data_label::OUTPUT;
+        SCOPED_TRACE("layout " + layout.str() + " / fft_type " + std::to_string(fft_type) + " / io "
+                     + (io == io_data_label::INPUT ? "INPUT" : "OUTPUT"));
+
+        const auto other = layout.get_other_inplace_layout_for(io, fft_type);
+        ASSERT_TRUE(other.has_value());
+        EXPECT_TRUE(*other == layout) << other->str();
+        // operator== ignores the embedding map, so compare it separately
+        EXPECT_TRUE(other->get_embedding_layout() == layout.get_embedding_layout());
+        EXPECT_EQ(other->corresponding_axes_in_embedding(),
+                  layout.corresponding_axes_in_embedding());
+    }
 }
 
 // real -> Hermitian -> real gives back the original layout, for both real
@@ -503,8 +536,17 @@ TEST_F(data_layout_test, inplace_real_round_trip)
         const auto L    = random_vec(uniform(1, 4), 1, 33);
         const auto B    = random_vec(uniform(1, 3), 1, 5);
         const bool odd  = L[0] % 2 == 1;
-        const auto real = data_layout_t::default_full_layout(L, B, true);
-        SCOPED_TRACE("real " + real.str());
+        const auto full = data_layout_t::default_full_layout(L, B, true);
+        // Multi-device plans also derive in-place layouts for embedded (lower-dimensional)
+        // views, which must keep the embedding's innermost axis for real transforms (see
+        // plan.cpp). Keep axis 0 and a random subset of the other length axes; keeping all
+        // of them gives the plain, non-embedded layout.
+        std::set<size_t> kept{0};
+        for(size_t d = 1; d < L.size(); d++)
+            if(uniform(0, 1))
+                kept.insert(d);
+        const auto real = full.get_layout_for_len_axes(kept);
+        SCOPED_TRACE("full " + full.str() + " / kept " + to_str({kept.begin(), kept.end()}));
 
         for(auto [fft_type, herm_io] :
             {std::pair{rocfft_transform_type_real_forward, io_data_label::OUTPUT},
@@ -515,9 +557,18 @@ TEST_F(data_layout_test, inplace_real_round_trip)
             ASSERT_TRUE(herm.has_value());
             EXPECT_EQ(herm->lengths()[0], L[0] / 2 + 1);
 
+            // the Hermitian side of the view is the view of the Hermitian side of the whole
+            const auto herm_full = full.get_other_inplace_layout_for(herm_io, fft_type);
+            ASSERT_TRUE(herm_full.has_value());
+            EXPECT_TRUE(*herm == herm_full->get_layout_for_len_axes(kept)) << herm->str();
+            EXPECT_EQ(herm->corresponding_axes_in_embedding(),
+                      real.corresponding_axes_in_embedding());
+
             const auto back = herm->get_other_inplace_layout_for(real_io, fft_type, odd);
             ASSERT_TRUE(back.has_value());
             EXPECT_TRUE(*back == real) << back->str();
+            // operator== ignores the embedding map, so compare it separately
+            EXPECT_TRUE(back->get_embedding_layout() == full) << back->str();
 
             const auto wrong = herm->get_other_inplace_layout_for(real_io, fft_type, !odd);
             ASSERT_TRUE(wrong.has_value());
@@ -526,33 +577,89 @@ TEST_F(data_layout_test, inplace_real_round_trip)
     }
 }
 
-TEST_F(data_layout_test, inplace_real_refuses_impossible_layouts)
+// A Hermitian layout has an in-place real counterpart iff it is packed along its
+// innermost axis (and is not self-aliased). A real layout has an in-place Hermitian
+// counterpart iff:
+// - it is packed along its innermost axis;
+// - every other non-unit-span axis has an even stride (a whole number of complex
+//   interleaved values);
+// - neither it nor its Hermitian interleaved counterpart is self-aliased.
+// The layouts below are built so that they are never self-aliased, and neither are
+// their counterparts if the first two conditions hold and every other non-unit-span
+// axis is strided by no less than an innermost row padded to 2 * (n / 2 + 1) reals.
+// That per-axis rule is what the library currently checks instead of robust
+// self-aliasing verification. The expected acceptance below restates it which
+// weakens the test: That weakness is a temporary artifact which will be resolved
+// once self-aliasing detection is implemented in the library.
+TEST_F(data_layout_test, inplace_real_counterpart_rules)
 {
-    // batch distance is odd, so it cannot also be a whole number of complex
-    // values.  9 is too small to hold the half spectrum as well, so use 11 to
-    // check the odd-ness rule on its own.
-    for(size_t odd_distance : {size_t{9}, size_t{11}})
+    for(size_t i = 0; i < num_random_cases; i++)
     {
-        auto odd = data_layout_t::full_layout({8}, {1}, 3, odd_distance);
-        EXPECT_FALSE(odd.get_other_inplace_layout_for(io_data_label::OUTPUT,
-                                                      rocfft_transform_type_real_forward)
-                         .has_value())
-            << "distance " << odd_distance;
+        const auto len_rank   = uniform(1, 3);
+        const auto batch_rank = uniform(1, 2);
+        const auto rank       = len_rank + batch_rank;
+        const auto spans      = random_vec(rank, 1, 6);
+        const auto n          = spans[0];
+        const auto P          = 2 * (n / 2 + 1);
+
+        // Axes are nested so that the layout is not self-aliased: axis 0 first (mostly
+        // packed), then the other non-unit-span axes in random order, each strided by the
+        // extent of the axes before it plus up to 3 elements. Rows count as P elements in
+        // that extent, so that the counterpart of a real layout is not self-aliased
+        // either if the stride rules hold. Only the first of those axes can thus be
+        // strided below P, while any of them can have an odd stride. Unit-span axes span
+        // nothing and get any stride.
+        std::vector<size_t> strides(rank);
+        strides[0]    = uniform(0, 3) ? 1 : uniform(2, 4);
+        size_t extent = (n - 1) * strides[0] + 1;
+        auto   order  = random_permutation(rank);
+        order.erase(std::find(order.begin(), order.end(), 0));
+        for(auto d : order)
+        {
+            if(spans[d] == 1)
+            {
+                strides[d] = uniform(1, 3 * P);
+                continue;
+            }
+            strides[d] = extent + uniform(0, 3);
+            extent     = std::max(extent, P) + (spans[d] - 1) * strides[d];
+        }
+        const data_layout_t layout(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
+
+        // query the counterpart of either side, for either real transform
+        const auto fft_type = uniform(0, 1) ? rocfft_transform_type_real_forward
+                                            : rocfft_transform_type_real_inverse;
+        const auto herm_io  = fft_type == rocfft_transform_type_real_forward ? io_data_label::OUTPUT
+                                                                             : io_data_label::INPUT;
+        const bool from_real = uniform(0, 1);
+        const auto other_io  = from_real ? herm_io : other(herm_io);
+        const bool odd       = uniform(0, 1);
+        SCOPED_TRACE("layout " + layout.str() + " / fft_type " + std::to_string(fft_type)
+                     + (from_real ? " / real side" : " / Hermitian side"));
+
+        bool follows_rules = spans[0] == 1 || strides[0] == 1;
+        if(from_real)
+            for(size_t d = 1; d < rank; d++)
+                if(spans[d] > 1)
+                    follows_rules &= strides[d] % 2 == 0 && strides[d] >= P;
+
+        // expected counterpart: innermost length and strides in units of its own elements
+        auto other_spans   = spans;
+        auto other_strides = strides;
+        other_spans[0]     = from_real ? n / 2 + 1 : 2 * (n - 1) + (odd ? 1 : 0);
+        for(size_t d = 1; d < rank; d++)
+            other_strides[d] = from_real ? strides[d] / 2 : 2 * strides[d];
+        const data_layout_t expected(
+            std::vector<size_t>(rank, 0), other_spans, other_strides, batch_rank);
+
+        const auto counterpart = layout.get_other_inplace_layout_for(other_io, fft_type, odd);
+        ASSERT_EQ(counterpart.has_value(), follows_rules);
+        if(counterpart)
+        {
+            EXPECT_TRUE(*counterpart == expected)
+                << counterpart->str() << " instead of " << expected.str();
+        }
     }
-
-    // batch distance is even but too small to hold the half spectrum
-    auto too_short = data_layout_t::full_layout({8}, {1}, 3, 8);
-    EXPECT_FALSE(
-        too_short
-            .get_other_inplace_layout_for(io_data_label::OUTPUT, rocfft_transform_type_real_forward)
-            .has_value());
-
-    // the real side must be packed along its innermost axis
-    auto strided = data_layout_t::full_layout({8}, {2}, 3, 20);
-    EXPECT_FALSE(
-        strided
-            .get_other_inplace_layout_for(io_data_label::OUTPUT, rocfft_transform_type_real_forward)
-            .has_value());
 }
 
 TEST_F(data_layout_test, inplace_query_rejects_bad_arguments)
