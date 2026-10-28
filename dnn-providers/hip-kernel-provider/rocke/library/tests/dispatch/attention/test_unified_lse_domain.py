@@ -6,7 +6,7 @@
 LSE off: every outcome and identity equals the golden captured on develop
 ``5472e435cef``, before tiled 2D LSE existed. LSE on: a served request runs a
 variant that writes LSE, and every unified path that refuses it says why in
-its own words. Host only (AICK-2685).
+its own words. Host only.
 """
 
 import ast

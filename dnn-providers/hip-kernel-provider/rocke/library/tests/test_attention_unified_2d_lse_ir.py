@@ -52,9 +52,8 @@ _EXPECTED_LSE_STORES = {
 
 # sha256 of lower_kernel_to_llvm(...) text for the LSE-off build, keyed by the
 # resolved LLVM flavor (the text differs per flavor, like the flavor-keyed IR
-# golden). A flavor with no recorded hashes skips only the hash pin; the IR
-# harness --check still gates it. Recorded after the running-max carry fix
-# (#14542) was merged into this branch, before any LSE store existed.
+# golden), one entry per committed flavor. Recorded after the running-max carry
+# fix was merged into this branch, before any LSE store existed.
 _OFF_SHA256 = {
     "llvm20": {
         "gfx950": {
@@ -66,6 +65,30 @@ _OFF_SHA256 = {
             "transposed32": "f529f39c3eaceaa06689456bdc96d340652d0a09b74811379e98ef9b71eb967f",
             "mfma32": "022a6b762edbc729f480577c9a123b15d79fb7226de95cfed20034c2f88d4f0e",
             "striped16": "9f3b0e780b9ed4044bc42980fcc9577002b43bc3c278bbfdf3fa481bd771ea9a",
+        },
+    },
+    "llvm22": {
+        "gfx950": {
+            "transposed32": "74b11c4a3665fd25c04c27b2519f109011cd195750a30c96e5e142e47e3f474f",
+            "mfma32": "240eae5f3ece173ba83de9008663f5e3be12691964ad6935acca5b4ead0947c9",
+            "striped16": "2e22eae5e44a748168efb850ff7992a74c3e846855828dbd3e2f2cef94ec2293",
+        },
+        "gfx942": {
+            "transposed32": "a7951ee9ac5147a517372396ef04bc1a31ada7b2c32e62ffbcf613fb74f96403",
+            "mfma32": "e0fc1492d9ae4ba48e4eaa92b4939c41224c8f0805983135a5519471dccbcce7",
+            "striped16": "af4015ea1955e1b12866ddc55b49ffe43738c34d2a942ca208e4d8deafea9a35",
+        },
+    },
+    "llvm23": {
+        "gfx950": {
+            "transposed32": "d69c31d423d534ee46350166125420153c60d7aaf547fa82e3b6f684b2acafc8",
+            "mfma32": "8181cc42d6d9f5db85fe7af8749aed653920e4f4c956ae2d80d85f746d0ca9f5",
+            "striped16": "ceff7404264975479bd8b1a68177914a40325010fcb6fb3b4ce34ef7290ab77b",
+        },
+        "gfx942": {
+            "transposed32": "218efdce76d55d559851aaea80e3bc1adf03d5ddbb52c83e854665ea15b4fb83",
+            "mfma32": "f54c66a9ab69e0b5b54a34d3b9cd4ca305e8af9fa29e7a1ecd8f63760f30ac91",
+            "striped16": "9184314ed9b3719f999427b24fe12f0214a9db058f6160ded11d091f820240a0",
         },
     },
 }
@@ -152,9 +175,10 @@ def test_2d_lse_off_ir_is_byte_identical_to_pre_change(arch, branch):
     assert off_ir == default_ir
     assert "lse_ptr" not in off_ir
     assert _lse_store_count(off_ir) == 0
-    pinned = _OFF_SHA256.get(_resolve_llvm_flavor(), {}).get(arch, {}).get(branch)
-    if pinned is not None:
-        assert hashlib.sha256(off_ir.encode()).hexdigest() == pinned
+    flavor = _resolve_llvm_flavor()
+    assert flavor in _OFF_SHA256, f"record the LSE-off hashes for LLVM flavor {flavor}"
+    pinned = _OFF_SHA256[flavor][arch][branch]
+    assert hashlib.sha256(off_ir.encode()).hexdigest() == pinned
 
 
 @pytest.mark.parametrize("arch,branch", _CASES)
@@ -170,7 +194,7 @@ def test_2d_lse_on_appends_lse_ptr_last_and_stores_once_per_slot(arch, branch):
     assert "@llvm.log2.f32" in on_ir
 
 
-# #13120: bias params are appended after qq_bias_stride_0; branch B rejects bias.
+# Additive-bias params are appended after qq_bias_stride_0; branch B rejects bias.
 @pytest.mark.parametrize(
     "arch,branch", [("gfx950", "transposed32"), ("gfx950", "striped16")]
 )

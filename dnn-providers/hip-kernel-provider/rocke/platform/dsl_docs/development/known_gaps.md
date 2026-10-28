@@ -262,7 +262,7 @@ What is still Python-only is *asking* for LSE: the request side.
 
 | What's missing | Where |
 |---|---|
-| `emit_lse` on the unified problem and the `_reject_lse` support gate (`library/kernels/common/attention_unified.py`) | `rocke_unified_attn_problem_t`; the C selectors carry no support gates to mirror it into. No C selector sets `emit_lse`, so a C-selected spec is always LSE-off. The selected spec differs only in `emit_lse` between LSE on and off, so C selector output for LSE-off requests is unaffected |
+| `emit_lse` on the unified problem, the `_reject_lse` support gate, and the gfx942 4-warp cohort exclusion (`library/kernels/common/attention_unified.py`: `_gfx942_4warp_eligible` is false under LSE, so the D256 bf16 and D128 sliding-window cohorts take the default 2D builder) | `rocke_unified_attn_problem_t`; the C selectors carry no support gates to mirror it into, and `d256_gfx942_fast` (`attention_unified_selectors.cpp`) has no LSE clause. No C selector sets `emit_lse`, so a C-selected spec is always LSE-off and C output is unaffected |
 
 Out of scope here: the gfx950 tiled 2D C twin has no additive-bias params at
 all (#13120 is Python-only; open #14440 mirrors it), so additive bias + LSE is
@@ -272,8 +272,10 @@ built by Python only. That belongs to the additive-bias gap (5).
 requests LSE today; the Python host and dispatcher are the only request path.
 
 **What closes it:** an `emit_lse` field on `rocke_unified_attn_problem_t`, the
-support-gate refusals mirrored into the C selectors, and selector parity cases
-with LSE on.
+support-gate refusals mirrored into the C selectors, `!emit_lse` mirrored into
+`d256_gfx942_fast` (without it an LSE request would select the 4-warp builder,
+which has no LSE store and refuses the spec), and selector parity cases with
+LSE on.
 
 **Sign-off:** avirgoel (owner), 2026-10-20 (reduce, Python-only); 2026-10-28
 (reduce and tiled 2D kernels mirrored in C; request side remains).

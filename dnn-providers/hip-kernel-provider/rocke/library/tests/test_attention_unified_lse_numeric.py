@@ -343,8 +343,8 @@ def _run2d_lse_off(
     problem, q, k_cache, v_cache, cu, seqused, block_table, *, softcap, backend
 ):
     """The LSE-off launch of the kernel the LSE-on request runs. With LSE on,
-    the gfx942 4-warp cohorts fall back to the default builder (D6) and the
-    gfx942 2D graph is bypassed (D9); force both here so ``torch.equal`` compares
+    the gfx942 4-warp cohorts fall back to the default builder and the gfx942
+    2D graph is bypassed; force both here so ``torch.equal`` compares
     one kernel with and without its LSE store. Both are no-ops on gfx950."""
     off = dataclasses.replace(problem, emit_lse=False)
     with mock.patch.object(
@@ -381,8 +381,8 @@ def _assert_2d_result(out, off, lse, o_ref, lse_ref, dtype):
     )
 
 
-# One explicit dispatcher geometry per tiled 2D epilogue branch (see the table
-# in the plan, Task 13; flags = dispatch/attention/axes.py _CODEPATH_KNOBS).
+# One explicit dispatcher geometry per tiled 2D epilogue branch (flags =
+# dispatch/attention/axes.py _CODEPATH_KNOBS).
 _BRANCH_VARIANT = {
     "gfx942": {
         "transposed32": "transposed_x8_nw1_mw32_t2xb_llvm",
@@ -556,8 +556,8 @@ def test_masked_segment_does_not_underflow_the_merge(q_len, kv_len, emit_lse):
 @requires_cdna3_or_4
 @pytest.mark.gpu
 def test_auto_backend_writes_lse_on_a_2d_routed_shape():
-    """The shape #13955 refused: backend='auto' routes it to tiled 2D, which now
-    writes LSE itself (the split-KV runner is patched to fail)."""
+    """A shape the runner used to refuse: backend='auto' routes it to tiled
+    2D, which now writes LSE itself (the split-KV runner is patched to fail)."""
     problem, q, kc, vc, cu, su, bt = _case2d([256], [256])
     assert problem.select_path() == "2d"
     lse = _nan_lse(problem)
@@ -713,7 +713,7 @@ def test_malformed_lse_buffer_is_refused_before_launch(case, backend):
 @pytest.mark.parametrize("backend", ["auto", "tiled"])
 def test_tiled_2d_output_and_lse(backend, dtype, d, q_lens, kv_lens):
     """Arch-native routing. On gfx942 bf16 D256 this is the shape the 4-warp
-    lean body serves with LSE off (D6 reroutes it)."""
+    lean body serves with LSE off (with LSE on it takes the default builder)."""
     problem, q, kc, vc, cu, su, bt = _case2d(q_lens, kv_lens, d=d, dtype=dtype)
     if backend == "auto":
         assert problem.select_path() == "2d", "auto would not route this to 2D"
@@ -1102,7 +1102,7 @@ def test_row_mapping_variant_writes_lse(
     ],
 )
 def test_tiled_2d_lse_with_additive_bias(q_lens, kv_lens, branch):
-    """#13120 bias is added to the log2 score before the running max, so LSE
+    """Additive bias is added to the log2 score before the running max, so LSE
     must include it. gfx950 default routing: the ragged shape takes branch A
     (16 slots: bias turns scalar state off), 5/3 takes C and keeps two keyless
     rows. gfx942 has no bias kernel: the tiled 2D gate must refuse it."""

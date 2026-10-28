@@ -9,9 +9,10 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
   masking, and ``validate_dense_lse`` is the host-side contract for the
   caller-owned LSE buffer;
-* the unified split-KV reduce: the same IR helpers emit its LSE store, and
-  ``validate_unified_lse`` is its host-side buffer contract.  Both validators
-  sit on the common ``_check_lse_buffer``;
+* the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
+  gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
+  ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
+  contract.  Both validators sit on the common ``_check_lse_buffer``;
 * the MFMA / WMMA attention forward inner bodies: ``make_*_lse_epilogue``
   produce *epilogue callables* for
   :class:`rocke.helpers.attention_fwd_ext.AttnFwdExt.epilogue_hook`.
