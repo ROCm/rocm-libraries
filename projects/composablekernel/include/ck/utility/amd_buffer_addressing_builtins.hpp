@@ -177,6 +177,13 @@ __device__ half2_t llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
     index_t soffset,
     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.v2f16");
 
+__device__ bhalf2_t llvm_amdgcn_raw_buffer_atomic_add_bf16x2(
+    bhalf2_t vdata,
+    int32x4_t rsrc,
+    index_t voffset,
+    index_t soffset,
+    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.v2bf16");
+
 // buffer atomic-add i32
 __device__ int32_t llvm_amdgcn_raw_buffer_atomic_add_i32(
     int32_t vdata,
@@ -519,6 +526,7 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
 {
     static_assert((is_same<T, float>::value && (N == 1 || N == 2 || N == 4 || N == 8)) ||
                       (is_same<T, half_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, bhalf_t>::value && (N == 2 || N == 4 || N == 8)) ||
                       (is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4 || N == 8))
 #if defined(__gfx125__)
                       || (is_same<T, double>::value && (N == 1 || N == 2 || N == 4 || N == 8))
@@ -586,6 +594,43 @@ __device__ void amd_buffer_atomic_add_impl(const typename vector_type<T, N>::typ
                                                          dst_wave_buffer_resource,
                                                          dst_thread_addr_offset,
                                                          dst_wave_addr_offset + i * sizeof(half2_t),
+                                                         coherence_flag);
+            });
+        }
+    }
+    else if constexpr(is_same<T, bhalf_t>::value)
+    {
+        if constexpr(N == 2)
+        {
+            llvm_amdgcn_raw_buffer_atomic_add_bf16x2(src_thread_data,
+                                                     dst_wave_buffer_resource,
+                                                     dst_thread_addr_offset,
+                                                     dst_wave_addr_offset,
+                                                     coherence_flag);
+        }
+        else if constexpr(N == 4)
+        {
+            vector_type<bhalf_t, 4> tmp{src_thread_data};
+
+            static_for<0, 2, 1>{}([&](auto i) {
+                llvm_amdgcn_raw_buffer_atomic_add_bf16x2(tmp.AsType<bhalf2_t>()[i],
+                                                         dst_wave_buffer_resource,
+                                                         dst_thread_addr_offset,
+                                                         dst_wave_addr_offset +
+                                                             i * sizeof(bhalf2_t),
+                                                         coherence_flag);
+            });
+        }
+        else if constexpr(N == 8)
+        {
+            vector_type<bhalf_t, 8> tmp{src_thread_data};
+
+            static_for<0, 4, 1>{}([&](auto i) {
+                llvm_amdgcn_raw_buffer_atomic_add_bf16x2(tmp.AsType<bhalf2_t>()[i],
+                                                         dst_wave_buffer_resource,
+                                                         dst_thread_addr_offset,
+                                                         dst_wave_addr_offset +
+                                                             i * sizeof(bhalf2_t),
                                                          coherence_flag);
             });
         }
@@ -814,20 +859,20 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
     using scalar_t                = typename scalar_type<vector_t>::type;
     constexpr index_t vector_size = scalar_type<vector_t>::vector_size;
 
-#ifdef __gfx125__
-    if constexpr(is_same<T, bhalf_t>::value || is_same<T, half_t>::value ||
-                 is_same<T, float>::value)
-#else
-    if constexpr(is_same<T, bhalf_t>::value)
-#endif
-    {
-        if(dst_thread_element_valid)
-        {
-            amd_global_atomic_add_impl<scalar_t, vector_size>(
-                src_thread_data, p_dst_wave + dst_thread_element_offset);
-        }
-    }
-    else
+    // #ifdef __gfx125__
+    //     if constexpr(is_same<T, bhalf_t>::value || is_same<T, half_t>::value ||
+    //                  is_same<T, float>::value)
+    // #else
+    //     if constexpr(is_same<T, bhalf_t>::value)
+    // #endif
+    //     {
+    //         if(dst_thread_element_valid)
+    //         {
+    //             amd_global_atomic_add_impl<scalar_t, vector_size>(
+    //                 src_thread_data, p_dst_wave + dst_thread_element_offset);
+    //         }
+    //     }
+    //     else
     {
 #if CK_EXPERIMENTAL_USE_BUFFER_ATOMIC_ADD_OOB_CHECK_OFFSET_TRICK
         uint32_t dst_addr_shift = dst_thread_element_valid ? 0 : 0x80000000;
