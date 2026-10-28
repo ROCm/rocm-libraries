@@ -27,6 +27,143 @@
 namespace hipdnn_plugin_sdk::uhd
 {
 
+namespace detail
+{
+
+namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
+
+/// The values of one typed array, widened to @p T. False when the table or its values are
+/// absent.
+template <typename Table, typename T>
+inline bool copyValues(const void* table, std::vector<T>& out)
+{
+    const auto* typed = static_cast<const Table*>(table);
+    if(typed == nullptr || typed->values() == nullptr)
+    {
+        return false;
+    }
+    out.assign(typed->values()->begin(), typed->values()->end());
+    return true;
+}
+
+/// An IntegerArray, in whichever type its tag names, as int32 values. False, with @p why
+/// set, for an absent array or a tag this runtime does not know.
+inline bool decodeIntegers(fbs::IntegerArray type,
+                           const void* table,
+                           std::vector<int32_t>& out,
+                           std::string& why)
+{
+    bool ok = false;
+    switch(type)
+    {
+    case fbs::IntegerArray::Int8Array:
+        ok = copyValues<fbs::Int8Array>(table, out);
+        break;
+    case fbs::IntegerArray::UInt8Array:
+        ok = copyValues<fbs::UInt8Array>(table, out);
+        break;
+    case fbs::IntegerArray::Int16Array:
+        ok = copyValues<fbs::Int16Array>(table, out);
+        break;
+    case fbs::IntegerArray::UInt16Array:
+        ok = copyValues<fbs::UInt16Array>(table, out);
+        break;
+    case fbs::IntegerArray::Int32Array:
+        ok = copyValues<fbs::Int32Array>(table, out);
+        break;
+    case fbs::IntegerArray::NONE:
+        why = "is absent";
+        return false;
+    default:
+        why = "is stored as integer array type " + std::to_string(static_cast<int>(type))
+              + ", which this runtime cannot read";
+        return false;
+    }
+    if(!ok)
+    {
+        why = "has no values";
+    }
+    return ok;
+}
+
+/// A RealArray, in whichever type its tag names, as double values; as decodeIntegers.
+inline bool
+    decodeReals(fbs::RealArray type, const void* table, std::vector<double>& out, std::string& why)
+{
+    bool ok = false;
+    switch(type)
+    {
+    case fbs::RealArray::Float32Array:
+        ok = copyValues<fbs::Float32Array>(table, out);
+        break;
+    case fbs::RealArray::Float64Array:
+        ok = copyValues<fbs::Float64Array>(table, out);
+        break;
+    case fbs::RealArray::NONE:
+        why = "is absent";
+        return false;
+    default:
+        why = "is stored as real array type " + std::to_string(static_cast<int>(type))
+              + ", which this runtime cannot read";
+        return false;
+    }
+    if(!ok)
+    {
+        why = "has no values";
+    }
+    return ok;
+}
+
+/// How many values a RealArray holds, in whichever type its tag names; 0 when unknown.
+inline size_t length(fbs::RealArray type, const void* table)
+{
+    const auto count = [](const auto* typed) -> size_t {
+        return typed == nullptr || typed->values() == nullptr ? 0 : typed->values()->size();
+    };
+    switch(type)
+    {
+    case fbs::RealArray::Float32Array:
+        return count(static_cast<const fbs::Float32Array*>(table));
+    case fbs::RealArray::Float64Array:
+        return count(static_cast<const fbs::Float64Array*>(table));
+    default:
+        return 0;
+    }
+}
+
+/// Bytes one element of an IntegerArray / RealArray of this tag occupies; 0 when unknown.
+inline size_t elementBytes(fbs::IntegerArray type)
+{
+    switch(type)
+    {
+    case fbs::IntegerArray::Int8Array:
+    case fbs::IntegerArray::UInt8Array:
+        return 1;
+    case fbs::IntegerArray::Int16Array:
+    case fbs::IntegerArray::UInt16Array:
+        return 2;
+    case fbs::IntegerArray::Int32Array:
+        return 4;
+    default:
+        return 0;
+    }
+}
+
+inline size_t elementBytes(fbs::RealArray type)
+{
+    switch(type)
+    {
+    case fbs::RealArray::Float32Array:
+        return 4;
+    case fbs::RealArray::Float64Array:
+        return 8;
+    default:
+        return 0;
+    }
+}
+
+} // namespace detail
+
 /// @brief GBDT tree walker adapter; validates and flattens the FlatBuffer model at load.
 class TreeDataAdapter : public IUhdAdapter
 {
@@ -123,13 +260,17 @@ private:
                     bool positiveRequired);
 
     /// Prepare one ensemble. Shared by layer 1 and every group so all trees get the same
-    /// bounds validation before the walker indexes rows with them. @p maxNodes caps the
-    /// shared store across all calls.
+    /// bounds validation before the walker indexes rows with them. @p maxBytes caps, across
+    /// all calls, the bytes the nodes' arrays claim (`budget`): trees may share arrays, so
+    /// the node count is bounded by the buffer, not by the offsets. Both encodings decode
+    /// into the one node store the walker reads; @p thresholdTable serves split/leaf trees.
     static bool prepareTrees(
         const flatbuffers::Vector<
             flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
         int32_t numFeatures,
-        size_t maxNodes,
+        size_t maxBytes,
+        const std::vector<double>& thresholdTable,
+        size_t& budget,
         std::vector<Node>& nodes,
         std::vector<uint32_t>& roots);
 
@@ -277,14 +418,32 @@ inline std::unique_ptr<TreeDataAdapter>
         return nullptr;
     }
 
-    // Many `trees` entries may share one table, so the node count the offsets claim is not
-    // bounded by the buffer. Each distinct node needs an int32 in left_children; more nodes
-    // than that are repeats, and reserving for them could exhaust memory before validation.
-    const size_t maxNodes
-        = std::min<size_t>(size / sizeof(int32_t), std::numeric_limits<uint32_t>::max());
+    // Split/leaf-encoded trees index one table of distinct thresholds, stored in whichever
+    // real type the model declares for it.
+    std::vector<double> thresholdTable;
+    if(model->threshold_table_type() != fb::RealArray::NONE)
+    {
+        std::string why;
+        if(!detail::decodeReals(
+               model->threshold_table_type(), model->threshold_table(), thresholdTable, why))
+        {
+            HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: threshold_table " << why);
+            return nullptr;
+        }
+    }
+
+    // Many `trees` entries may share one array, so the node count the offsets claim is not
+    // bounded by the buffer. Each distinct node needs its child entry (an int32 per node
+    // array node; a split's child width or a leaf's value width otherwise); claiming more
+    // bytes than the buffer holds means repeats, and reserving for them could exhaust memory
+    // before validation.
+    const size_t maxBytes
+        = std::min<size_t>(size, size_t{std::numeric_limits<uint32_t>::max()} * sizeof(int32_t));
+    size_t budget = 0;
     std::vector<Node> nodes;
     std::vector<uint32_t> roots;
-    if(!prepareTrees(model->trees(), model->num_features(), maxNodes, nodes, roots))
+    if(!prepareTrees(
+           model->trees(), model->num_features(), maxBytes, thresholdTable, budget, nodes, roots))
     {
         return nullptr;
     }
@@ -315,7 +474,13 @@ inline std::unique_ptr<TreeDataAdapter>
                 return nullptr;
             }
             std::vector<uint32_t> groupRoots;
-            if(!prepareTrees(group->trees(), model->num_features(), maxNodes, nodes, groupRoots))
+            if(!prepareTrees(group->trees(),
+                             model->num_features(),
+                             maxBytes,
+                             thresholdTable,
+                             budget,
+                             nodes,
+                             groupRoots))
             {
                 return nullptr;
             }
@@ -380,7 +545,9 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
 inline bool TreeDataAdapter::prepareTrees(
     const flatbuffers::Vector<flatbuffers::Offset<fb::GbdtTree>>* trees,
     int32_t numFeatures,
-    size_t maxNodes,
+    size_t maxBytes,
+    const std::vector<double>& thresholdTable,
+    size_t& budget,
     std::vector<Node>& nodes,
     std::vector<uint32_t>& roots)
 {
@@ -389,34 +556,62 @@ inline bool TreeDataAdapter::prepareTrees(
         return true;
     }
 
-    const auto reject = [](size_t treeIndex, const char* reason) {
+    const auto reject = [](size_t treeIndex, const std::string& reason) {
         HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: malformed tree " << treeIndex << ": " << reason);
         return false;
     };
 
     // FlatBuffers verifies each vector, not the relationships between vectors, so check sizes
     // before reserving or indexing. Count from nodes.size(): all layers share one store and
-    // children are absolute indices into it. maxNodes fits uint32_t, so offsets stay exact.
+    // children are absolute indices into it.
     size_t totalNodes = nodes.size();
     for(flatbuffers::uoffset_t t = 0; t < trees->size(); ++t)
     {
         const auto* tree = trees->Get(t);
-        if(tree == nullptr || tree->left_children() == nullptr || tree->left_children()->empty()
-           || tree->right_children() == nullptr || tree->feature_indices() == nullptr
-           || tree->thresholds() == nullptr || tree->leaf_values() == nullptr)
+        if(tree == nullptr)
         {
             return reject(t, "missing nodes or a required node array");
         }
-        const auto count = tree->left_children()->size();
-        if(tree->right_children()->size() != count || tree->feature_indices()->size() != count
-           || tree->thresholds()->size() != count)
+        size_t count = 0;
+        size_t bytes = 0;
+        if(tree->leaves_type() != fb::RealArray::NONE)
         {
-            return reject(t, "node-parallel arrays have different lengths");
+            const size_t leafBytes = detail::elementBytes(tree->leaves_type());
+            const size_t childBytes = detail::elementBytes(tree->split_left_type());
+            if(leafBytes == 0)
+            {
+                return reject(t, "leaves are stored in a type this runtime cannot read");
+            }
+            const size_t leafCount = detail::length(tree->leaves_type(), tree->leaves());
+            // A tree has one leaf more than it has splits; the split arrays are checked
+            // against this when the tree is decoded below.
+            const size_t splitCount = leafCount == 0 ? 0 : leafCount - 1;
+            if(splitCount > 0 && childBytes == 0)
+            {
+                return reject(t, "split children are stored in a type this runtime cannot read");
+            }
+            count = leafCount;
+            count += splitCount;
+            bytes = leafCount * leafBytes + splitCount * childBytes;
         }
-        if(count > maxNodes - totalNodes)
+        else
+        {
+            if(tree->left_children() == nullptr || tree->left_children()->empty())
+            {
+                return reject(t, "missing nodes or a required node array");
+            }
+            count = tree->left_children()->size();
+            bytes = count * sizeof(int32_t);
+        }
+        if(count == 0)
+        {
+            return reject(t, "missing nodes or a required node array");
+        }
+        if(bytes > maxBytes - budget)
         {
             return reject(t, "ensemble has more nodes than the model buffer can hold");
         }
+        budget += bytes;
         totalNodes += count;
     }
     nodes.reserve(totalNodes);
@@ -426,63 +621,190 @@ inline bool TreeDataAdapter::prepareTrees(
     // iterative so very deep trees are fine.
     std::vector<uint32_t> incoming;
     std::vector<uint32_t> ready;
+    std::vector<int32_t> features;
+    std::vector<int32_t> thresholdIds;
+    std::vector<int32_t> lefts;
+    std::vector<int32_t> rights;
+    std::vector<double> leaves;
     for(flatbuffers::uoffset_t t = 0; t < trees->size(); ++t)
     {
         const auto* tree = trees->Get(t);
-        const auto count = tree->left_children()->size();
         const auto offset = static_cast<uint32_t>(nodes.size());
-        const auto* defaultLeft = tree->default_left();
-        const auto* decisionLte = tree->decision_lte();
-        const bool hasDecisionLte = decisionLte != nullptr && !decisionLte->empty();
-        incoming.assign(count, 0);
-        ready.clear();
-        ready.reserve(count);
         roots.push_back(offset);
+        uint32_t count = 0;
 
-        for(flatbuffers::uoffset_t i = 0; i < count; ++i)
+        if(tree->leaves_type() != fb::RealArray::NONE)
         {
-            const int32_t left = tree->left_children()->Get(i);
-            if(left == -1)
+            // Split/leaf encoding: splits at offset + i, then leaves at offset + splits + j.
+            std::string why;
+            if(!detail::decodeReals(tree->leaves_type(), tree->leaves(), leaves, why)
+               || leaves.empty())
             {
-                if(i >= tree->leaf_values()->size())
+                return reject(t, "leaves " + (why.empty() ? std::string("are empty") : why));
+            }
+            const auto splits = static_cast<uint32_t>(leaves.size() - 1);
+            const auto leafCount = static_cast<uint32_t>(leaves.size());
+            count = splits + leafCount;
+            const auto integers = [&](const char* name,
+                                      fb::IntegerArray type,
+                                      const void* table,
+                                      std::vector<int32_t>& out) {
+                std::string reason;
+                return detail::decodeIntegers(type, table, out, reason)
+                       || reject(t, std::string(name) + " " + reason);
+            };
+            if(splits > 0)
+            {
+                if(!integers("split_features",
+                             tree->split_features_type(),
+                             tree->split_features(),
+                             features)
+                   || !integers("split_thresholds",
+                                tree->split_thresholds_type(),
+                                tree->split_thresholds(),
+                                thresholdIds)
+                   || !integers("split_left", tree->split_left_type(), tree->split_left(), lefts)
+                   || !integers(
+                       "split_right", tree->split_right_type(), tree->split_right(), rights))
                 {
-                    return reject(t, "leaf has no prediction");
+                    return false;
                 }
-                if(!std::isfinite(tree->leaf_values()->Get(i)))
+            }
+            else if(tree->split_features_type() != fb::IntegerArray::NONE
+                    || tree->split_thresholds_type() != fb::IntegerArray::NONE
+                    || tree->split_left_type() != fb::IntegerArray::NONE
+                    || tree->split_right_type() != fb::IntegerArray::NONE)
+            {
+                return reject(t, "a single-leaf tree has split arrays");
+            }
+            const auto* defaultLeft = tree->split_default_left();
+            const auto* decisionLte = tree->split_decision_lte();
+            if((splits > 0
+                && (features.size() != splits || thresholdIds.size() != splits
+                    || lefts.size() != splits || rights.size() != splits))
+               || (defaultLeft != nullptr && defaultLeft->size() != splits)
+               || (decisionLte != nullptr && decisionLte->size() != splits))
+            {
+                return reject(t,
+                              "split arrays do not hold one entry per split (one fewer "
+                              "than the leaves)");
+            }
+
+            // Child c >= 0 is split c; c < 0 is leaf ~c.
+            const auto node = [&](int32_t child, uint32_t& at) {
+                if(child >= 0)
+                {
+                    at = static_cast<uint32_t>(child);
+                    return at < splits;
+                }
+                at = splits + static_cast<uint32_t>(~child);
+                return static_cast<uint32_t>(~child) < leafCount;
+            };
+            incoming.assign(count, 0);
+            for(uint32_t i = 0; i < splits; ++i)
+            {
+                uint32_t left = 0;
+                uint32_t right = 0;
+                if(!node(lefts[i], left) || !node(rights[i], right))
+                {
+                    return reject(t, "child index outside the tree");
+                }
+                const int32_t id = thresholdIds[i];
+                if(id < 0 || static_cast<size_t>(id) >= thresholdTable.size())
+                {
+                    return reject(t, "split threshold index outside the threshold table");
+                }
+                if(!std::isfinite(thresholdTable[static_cast<size_t>(id)]))
+                {
+                    return reject(t, "split threshold is not finite");
+                }
+                if(features[i] < 0 || features[i] >= numFeatures)
+                {
+                    return reject(t, "split feature outside the declared feature count");
+                }
+                ++incoming[left];
+                ++incoming[right];
+                nodes.push_back(
+                    {thresholdTable[static_cast<size_t>(id)],
+                     {offset + left, offset + right},
+                     features[i],
+                     defaultLeft != nullptr ? defaultLeft->Get(i) != 0 : tree->default_left_fill(),
+                     decisionLte == nullptr || decisionLte->Get(i) != 0});
+            }
+            for(const double leaf : leaves)
+            {
+                if(!std::isfinite(leaf))
                 {
                     return reject(t, "leaf prediction is not finite");
                 }
-                nodes.push_back({tree->leaf_values()->Get(i), {0, 0}, -1, false, false});
-                continue;
+                nodes.push_back({leaf, {0, 0}, -1, false, false});
             }
+        }
+        else
+        {
+            if(tree->right_children() == nullptr || tree->feature_indices() == nullptr
+               || tree->thresholds() == nullptr || tree->leaf_values() == nullptr)
+            {
+                return reject(t, "missing nodes or a required node array");
+            }
+            count = tree->left_children()->size();
+            if(tree->right_children()->size() != count || tree->feature_indices()->size() != count
+               || tree->thresholds()->size() != count)
+            {
+                return reject(t, "node-parallel arrays have different lengths");
+            }
+            const auto* defaultLeft = tree->default_left();
+            const auto* decisionLte = tree->decision_lte();
+            const bool hasDecisionLte = decisionLte != nullptr && !decisionLte->empty();
+            incoming.assign(count, 0);
 
-            const int32_t right = tree->right_children()->Get(i);
-            if(left < 0 || right < 0 || static_cast<uint32_t>(left) >= count
-               || static_cast<uint32_t>(right) >= count)
+            for(flatbuffers::uoffset_t i = 0; i < count; ++i)
             {
-                return reject(t, "child index outside the tree");
+                const int32_t left = tree->left_children()->Get(i);
+                if(left == -1)
+                {
+                    if(i >= tree->leaf_values()->size())
+                    {
+                        return reject(t, "leaf has no prediction");
+                    }
+                    if(!std::isfinite(tree->leaf_values()->Get(i)))
+                    {
+                        return reject(t, "leaf prediction is not finite");
+                    }
+                    nodes.push_back({tree->leaf_values()->Get(i), {0, 0}, -1, false, false});
+                    continue;
+                }
+
+                const int32_t right = tree->right_children()->Get(i);
+                if(left < 0 || right < 0 || static_cast<uint32_t>(left) >= count
+                   || static_cast<uint32_t>(right) >= count)
+                {
+                    return reject(t, "child index outside the tree");
+                }
+                if(!std::isfinite(tree->thresholds()->Get(i)))
+                {
+                    return reject(t, "split threshold is not finite");
+                }
+                const int32_t feature = tree->feature_indices()->Get(i);
+                if(feature < 0 || feature >= numFeatures)
+                {
+                    return reject(t, "split feature outside the declared feature count");
+                }
+                const auto leftIndex = static_cast<uint32_t>(left);
+                const auto rightIndex = static_cast<uint32_t>(right);
+                ++incoming[leftIndex];
+                ++incoming[rightIndex];
+                nodes.push_back(
+                    {tree->thresholds()->Get(i),
+                     {offset + leftIndex, offset + rightIndex},
+                     feature,
+                     defaultLeft != nullptr && i < defaultLeft->size() && defaultLeft->Get(i) != 0,
+                     !hasDecisionLte || (i < decisionLte->size() && decisionLte->Get(i) != 0)});
             }
-            if(!std::isfinite(tree->thresholds()->Get(i)))
-            {
-                return reject(t, "split threshold is not finite");
-            }
-            const int32_t feature = tree->feature_indices()->Get(i);
-            if(feature < 0 || feature >= numFeatures)
-            {
-                return reject(t, "split feature outside the declared feature count");
-            }
-            const auto leftIndex = static_cast<uint32_t>(left);
-            const auto rightIndex = static_cast<uint32_t>(right);
-            ++incoming[leftIndex];
-            ++incoming[rightIndex];
-            nodes.push_back(
-                {tree->thresholds()->Get(i),
-                 {offset + leftIndex, offset + rightIndex},
-                 feature,
-                 defaultLeft != nullptr && i < defaultLeft->size() && defaultLeft->Get(i) != 0,
-                 !hasDecisionLte || (i < decisionLte->size() && decisionLte->Get(i) != 0)});
         }
 
+        ready.clear();
+        ready.reserve(count);
         for(uint32_t i = 0; i < count; ++i)
         {
             if(incoming[i] == 0)

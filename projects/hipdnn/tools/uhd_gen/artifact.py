@@ -12,11 +12,18 @@ import math
 import struct
 from pathlib import Path
 
+import numpy as np
+
 #: `TreeDataAdapter::load` reads at most this many bytes (and refuses an empty file).
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 #: `loadFromBuffer`'s floor: a root offset and a file identifier.
 _MIN_ARTIFACT_BYTES = 4 + 4
 GBDT_MODEL_IDENTIFIER = b"HGBM"
+
+#: Element width of each IntegerArray / RealArray union member, by tag (gbdt_model.fbs).
+#: A tag missing here is one this reader, like the runtime, cannot decode.
+INTEGER_ARRAY_BYTES = {1: 1, 2: 1, 3: 2, 4: 2, 5: 4}
+REAL_ARRAY_BYTES = {1: 4, 2: 8}
 
 
 class _Unverifiable(ValueError):
@@ -135,6 +142,21 @@ class _GbdtModelVerifier:
             slot = at + 4 + 4 * index
             yield slot + self._u32(slot)
 
+    def _typed_array(self, at: int, vtable: int, field: int, widths, what: str) -> None:
+        """A union field (type at `field`, value at `field + 2`), then `Verify<Union>`: a known
+        member is a table of one `values` vector; NONE or an unknown tag verifies, as the
+        generated code does, and is refused by the decoder instead."""
+        self._scalar_field(at, vtable, field, 1, f"{what}_type")
+        value = self._pointer_field(at, vtable, field + 2, what)
+        offset = self._field(at, vtable, field)
+        tag = self._data[at + offset] if offset else 0
+        if value is None or tag not in widths:
+            return
+        table = self._table(value, what)
+        where = f"{what}.values"
+        self._vector(self._pointer_field(value, table, 4, where), widths[tag], where)
+        self._depth -= 1
+
     def _tree(self, at: int, what: str) -> None:
         vtable = self._table(at, what)
         for field, width, name in (
@@ -148,6 +170,18 @@ class _GbdtModelVerifier:
         ):
             where = f"{what}.{name}"
             self._vector(self._pointer_field(at, vtable, field, where), width, where)
+        for field, name in (
+            (18, "split_features"),
+            (22, "split_thresholds"),
+            (26, "split_left"),
+            (30, "split_right"),
+        ):
+            self._typed_array(at, vtable, field, INTEGER_ARRAY_BYTES, f"{what}.{name}")
+        for field, name in ((34, "split_default_left"), (36, "split_decision_lte")):
+            where = f"{what}.{name}"
+            self._vector(self._pointer_field(at, vtable, field, where), 1, where)
+        self._scalar_field(at, vtable, 38, 1, f"{what}.default_left_fill")
+        self._typed_array(at, vtable, 40, REAL_ARRAY_BYTES, f"{what}.leaves")
         self._depth -= 1
 
     def _trees(self, at: int, vtable: int, field: int, what: str) -> None:
@@ -192,6 +226,7 @@ class _GbdtModelVerifier:
         count = self._vector(groups, 4, "groups")
         for index, group in enumerate(self._elements(groups, count)):
             self._group(group, f"groups[{index}]")
+        self._typed_array(at, vtable, 30, REAL_ARRAY_BYTES, "threshold_table")
         self._depth -= 1
 
     def verify(self) -> None:
@@ -251,60 +286,272 @@ def is_contained_relative_path(payload: str) -> bool:
     return ".." not in segments and segments[-1] not in ("", ".")
 
 
-def _check_trees(
-    trees, num_features: int, where: str, total: int, max_nodes: int
-) -> int:
-    """`TreeDataAdapter::prepareTrees`, check for check, with its reasons; returns `total`
-    plus these trees' nodes. Every layer shares one node store, so `max_nodes` bounds them all.
+def _values(array):
+    """A decoded typed array's values, or None when the member or its values are absent."""
+    return None if array is None or array.values is None else array.values
+
+
+def _decoded(tag: int, array, widths, reject, name: str):
+    """The runtime's decodeIntegers / decodeReals: the values, or a rejection naming why."""
+    if tag == 0:
+        reject(f"{name} is absent")
+    if tag not in widths:
+        reject(
+            f"{name} is stored as {'integer' if widths is INTEGER_ARRAY_BYTES else 'real'} "
+            f"array type {tag}, which this runtime cannot read"
+        )
+    values = _values(array)
+    if values is None:
+        reject(f"{name} has no values")
+    return values
+
+
+def _length(tag: int, array) -> int:
+    values = _values(array) if tag in REAL_ARRAY_BYTES else None
+    return 0 if values is None else len(values)
+
+
+def _split_leaf_arrays(tree, table, num_features: int, reject):
+    """A split/leaf tree as node arrays (splits first, then leaves; -1 children mark a leaf),
+    checked as `prepareTrees` checks it."""
+    leaves = _decoded(tree.leavesType, tree.leaves, REAL_ARRAY_BYTES, reject, "leaves")
+    if len(leaves) == 0:
+        reject("leaves are empty")
+    splits = len(leaves) - 1
+    if splits > 0:
+        features, thresholds, lefts, rights = (
+            _decoded(tag, array, INTEGER_ARRAY_BYTES, reject, name)
+            for tag, array, name in (
+                (tree.splitFeaturesType, tree.splitFeatures, "split_features"),
+                (tree.splitThresholdsType, tree.splitThresholds, "split_thresholds"),
+                (tree.splitLeftType, tree.splitLeft, "split_left"),
+                (tree.splitRightType, tree.splitRight, "split_right"),
+            )
+        )
+    elif any(
+        tag != 0
+        for tag in (
+            tree.splitFeaturesType,
+            tree.splitThresholdsType,
+            tree.splitLeftType,
+            tree.splitRightType,
+        )
+    ):
+        reject("a single-leaf tree has split arrays")
+    default_left = tree.splitDefaultLeft
+    decision_lte = tree.splitDecisionLte
+    # The object API reads an absent bool vector as None and a present empty one as [].
+    if (
+        splits > 0
+        and any(len(a) != splits for a in (features, thresholds, lefts, rights))
+    ) or any(
+        flags is not None and len(flags) != splits
+        for flags in (default_left, decision_lte)
+    ):
+        reject(
+            "split arrays do not hold one entry per split (one fewer than the leaves)"
+        )
+
+    count = splits + len(leaves)
+    feature_out = np.full(count, -1, dtype=np.int64)
+    threshold_out = np.zeros(count, dtype=np.float64)
+    left_out = np.full(count, -1, dtype=np.int64)
+    right_out = np.full(count, -1, dtype=np.int64)
+    leaf_out = np.zeros(count, dtype=np.float64)
+    default_out = np.zeros(count, dtype=bool)
+    lte_out = np.ones(count, dtype=bool)
+
+    def node(child: int) -> int:
+        child = int(child)
+        if child >= 0:
+            if child >= splits:
+                reject("child index outside the tree")
+            return child
+        if ~child >= len(leaves):
+            reject("child index outside the tree")
+        return splits + ~child
+
+    for i in range(splits):
+        left_out[i] = node(lefts[i])
+        right_out[i] = node(rights[i])
+        index = int(thresholds[i])
+        if index < 0 or index >= len(table):
+            reject("split threshold index outside the threshold table")
+        threshold = float(table[index])
+        if not math.isfinite(threshold):
+            reject("split threshold is not finite")
+        feature = int(features[i])
+        if feature < 0 or feature >= num_features:
+            reject("split feature outside the declared feature count")
+        feature_out[i] = feature
+        threshold_out[i] = threshold
+        default_out[i] = (
+            bool(default_left[i])
+            if default_left is not None
+            else bool(tree.defaultLeftFill)
+        )
+        lte_out[i] = True if decision_lte is None else bool(decision_lte[i])
+    for j, leaf in enumerate(leaves):
+        if not math.isfinite(float(leaf)):
+            reject("leaf prediction is not finite")
+        leaf_out[splits + j] = float(leaf)
+    return (
+        feature_out,
+        threshold_out,
+        left_out,
+        right_out,
+        leaf_out,
+        default_out,
+        lte_out,
+    )
+
+
+def _node_arrays(tree, reject):
+    """A node-array tree as checked by `prepareTrees`, with routing flags read as it does."""
+    if (
+        tree.rightChildren is None
+        or tree.featureIndices is None
+        or tree.thresholds is None
+        or tree.leafValues is None
+    ):
+        reject("missing nodes or a required node array")
+    count = len(tree.leftChildren)
+    if (
+        len(tree.rightChildren) != count
+        or len(tree.featureIndices) != count
+        or len(tree.thresholds) != count
+    ):
+        reject("node-parallel arrays have different lengths")
+    return count
+
+
+def tree_arrays(tree, table, num_features: int, where: str = "tree"):
+    """Node arrays of either encoding, as the runtime decodes and checks them:
+    (feature, threshold, left, right, leaf, default_left, decision_lte), one entry per node,
+    node 0 the root, -1 children marking a leaf. ValueError names what the runtime refuses.
     """
-    for index, tree in enumerate(trees or []):
+
+    def reject(reason: str):
+        raise ValueError(f"{where}: {reason}")
+
+    if tree.leavesType != 0:
+        return _split_leaf_arrays(tree, table, num_features, reject)
+    count = _node_arrays(tree, reject)
+    feature = np.asarray(tree.featureIndices, dtype=np.int64)
+    threshold = np.asarray(tree.thresholds, dtype=np.float64)
+    left = np.asarray(tree.leftChildren, dtype=np.int64)
+    right = np.asarray(tree.rightChildren, dtype=np.int64)
+    leaf_values = np.asarray(tree.leafValues, dtype=np.float64)
+    leaf = np.zeros(count, dtype=np.float64)
+    leaf[: min(count, len(leaf_values))] = leaf_values[:count]
+
+    def routing(values, absent: bool) -> np.ndarray:
+        """Supplied entries, then `absent`, as `prepareTrees` reads a short flag vector."""
+        flags = np.full(count, absent, dtype=bool)
+        supplied = np.asarray([] if values is None else values, dtype=bool)[:count]
+        flags[: len(supplied)] = supplied
+        return flags
+
+    lte = tree.decisionLte
+    for node in range(count):
+        if int(left[node]) == -1:
+            if node >= len(leaf_values):
+                reject("leaf has no prediction")
+            if not math.isfinite(float(leaf_values[node])):
+                reject("leaf prediction is not finite")
+            continue
+        if (
+            left[node] < 0
+            or right[node] < 0
+            or left[node] >= count
+            or right[node] >= count
+        ):
+            reject("child index outside the tree")
+        if not math.isfinite(float(threshold[node])):
+            reject("split threshold is not finite")
+        if feature[node] < 0 or feature[node] >= num_features:
+            reject("split feature outside the declared feature count")
+    return (
+        feature,
+        threshold,
+        left,
+        right,
+        leaf,
+        routing(tree.defaultLeft, False),
+        # Absent or empty `decision_lte` is `<=` everywhere; a nonempty short one is `<`.
+        routing(lte, lte is None or len(lte) == 0),
+    )
+
+
+def threshold_table(model, where: str) -> np.ndarray:
+    """The model's split threshold table as the runtime decodes it (empty when absent)."""
+    if model.thresholdTableType == 0:
+        return np.zeros(0, dtype=np.float64)
+
+    def reject(reason: str):
+        raise ValueError(f"{where}: {reason}")
+
+    values = _decoded(
+        model.thresholdTableType,
+        model.thresholdTable,
+        REAL_ARRAY_BYTES,
+        reject,
+        "threshold_table",
+    )
+    return np.asarray(values, dtype=np.float64)
+
+
+def _check_trees(
+    trees, table, num_features: int, where: str, budget: int, max_bytes: int
+) -> int:
+    """`TreeDataAdapter::prepareTrees`, check for check, with its reasons; returns `budget`
+    plus the bytes these trees' nodes claim. Every layer shares one node store, so
+    `max_bytes` bounds them all.
+    """
+    trees = list(trees or [])
+    for index, tree in enumerate(trees):
 
         def reject(reason: str):
             raise ValueError(f"{where} tree {index}: {reason}")
 
-        if (
-            tree is None
-            or tree.leftChildren is None
-            or len(tree.leftChildren) == 0
-            or tree.rightChildren is None
-            or tree.featureIndices is None
-            or tree.thresholds is None
-            or tree.leafValues is None
-        ):
+        if tree is None:
             reject("missing nodes or a required node array")
-        count = len(tree.leftChildren)
-        if (
-            len(tree.rightChildren) != count
-            or len(tree.featureIndices) != count
-            or len(tree.thresholds) != count
-        ):
-            reject("node-parallel arrays have different lengths")
-        # Entries may share one table, so the count is bounded by the buffer, not by them.
-        if count > max_nodes - total:
+        if tree.leavesType != 0:
+            leaf_bytes = REAL_ARRAY_BYTES.get(tree.leavesType, 0)
+            child_bytes = INTEGER_ARRAY_BYTES.get(tree.splitLeftType, 0)
+            if leaf_bytes == 0:
+                reject("leaves are stored in a type this runtime cannot read")
+            leaves = _length(tree.leavesType, tree.leaves)
+            splits = max(leaves - 1, 0)
+            if splits > 0 and child_bytes == 0:
+                reject("split children are stored in a type this runtime cannot read")
+            count, used = leaves + splits, leaves * leaf_bytes + splits * child_bytes
+        else:
+            if tree.leftChildren is None or len(tree.leftChildren) == 0:
+                reject("missing nodes or a required node array")
+            count = len(tree.leftChildren)
+            used = 4 * count
+        if count == 0:
+            reject("missing nodes or a required node array")
+        # Entries may share arrays, so the count is bounded by the buffer, not by them.
+        if used > max_bytes - budget:
             reject("ensemble has more nodes than the model buffer can hold")
-        total += count
+        budget += used
+
+    for index, tree in enumerate(trees):
+        feature, threshold, left, right, *_ = tree_arrays(
+            tree, table, num_features, f"{where} tree {index}"
+        )
+        count = len(left)
         incoming = [0] * count
         children: list[tuple[int, int] | None] = []
         for node in range(count):
-            left = int(tree.leftChildren[node])
-            if left == -1:
-                if node >= len(tree.leafValues):
-                    reject("leaf has no prediction")
-                if not math.isfinite(float(tree.leafValues[node])):
-                    reject("leaf prediction is not finite")
+            if int(left[node]) < 0:
                 children.append(None)
                 continue
-            right = int(tree.rightChildren[node])
-            if left < 0 or right < 0 or left >= count or right >= count:
-                reject("child index outside the tree")
-            if not math.isfinite(float(tree.thresholds[node])):
-                reject("split threshold is not finite")
-            feature = int(tree.featureIndices[node])
-            if feature < 0 or feature >= num_features:
-                reject("split feature outside the declared feature count")
-            incoming[left] += 1
-            incoming[right] += 1
-            children.append((left, right))
+            incoming[int(left[node])] += 1
+            incoming[int(right[node])] += 1
+            children.append((int(left[node]), int(right[node])))
         # Kahn's algorithm over every node, reached or not, as the runtime does.
         ready = [node for node in range(count) if incoming[node] == 0]
         position = 0
@@ -316,8 +563,8 @@ def _check_trees(
                 if incoming[child] == 0:
                     ready.append(child)
         if len(ready) != count:
-            reject("cycle in child indices")
-    return total
+            raise ValueError(f"{where} tree {index}: cycle in child indices")
+    return budget
 
 
 def verify_tree_artifact(
@@ -359,9 +606,10 @@ def verify_tree_artifact(
         raise ValueError(f"{path}: negative feature count")
     if not math.isfinite(model.baseScore):
         raise ValueError(f"{path}: base score is not finite")
-    # Each distinct node needs an int32 in left_children, as TreeDataAdapter bounds it.
-    max_nodes = min(len(data) // 4, 2**32 - 1)
-    total = _check_trees(model.trees, model.numFeatures, str(path), 0, max_nodes)
+    table = threshold_table(model, str(path))
+    # Each distinct node needs its child entry in the buffer, as TreeDataAdapter bounds it.
+    max_bytes = min(len(data), (2**32 - 1) * 4)
+    total = _check_trees(model.trees, table, model.numFeatures, str(path), 0, max_bytes)
     if model.groups:
         if not 0 <= model.groupByFeatureIndex < model.numFeatures:
             raise ValueError(
@@ -381,10 +629,11 @@ def verify_tree_artifact(
             values.add(value)
             total = _check_trees(
                 group.trees,
+                table,
                 model.numFeatures,
                 f"{path} group {index}",
                 total,
-                max_nodes,
+                max_bytes,
             )
     if feature_count is not None:
         verify_feature_count(model.numFeatures, feature_count, path)

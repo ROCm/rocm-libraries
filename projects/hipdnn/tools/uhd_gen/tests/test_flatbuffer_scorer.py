@@ -14,6 +14,7 @@ import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT  # noqa: E402
 
 from uhd_gen import train_uhd  # noqa: E402
+from uhd_gen.artifact import threshold_table, tree_arrays  # noqa: E402
 from uhd_gen.evaluate import _flatbuffer_scorer  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model  # noqa: E402
 
@@ -34,9 +35,18 @@ def _missing_data(seed: int = 3):
     return X, y
 
 
-def _shipped(path, booster, base_score):
+def _shipped(path, booster, base_score, encoding="split_leaf"):
+    # float64 leaves: the comparison below is exact against LightGBM.
     model = GbdtModelT.InitFromPackedBuf(
-        bytearray(build_gbdt_model(booster.dump_model(), "sha256:test")), 0
+        bytearray(
+            build_gbdt_model(
+                booster.dump_model(),
+                "sha256:test",
+                encoding=encoding,
+                leaf_precision="float64",
+            )
+        ),
+        0,
     )
     model.baseScore = base_score
     builder = flatbuffers.Builder(1024)
@@ -45,9 +55,10 @@ def _shipped(path, booster, base_score):
     return model
 
 
+@pytest.mark.parametrize("encoding", ["split_leaf", "node_arrays"])
 @pytest.mark.parametrize("base_score", [0.0, 0.75])
 def test_the_shipped_artifact_scores_missing_values_as_lightgbm_does(
-    tmp_path, monkeypatch, base_score
+    tmp_path, monkeypatch, base_score, encoding
 ):
     """A NaN feature takes its node's `default_left`, either way, and every row starts
     from the artifact's base score, as `TreeDataAdapter::score` sums it."""
@@ -57,13 +68,14 @@ def test_the_shipped_artifact_scores_missing_values_as_lightgbm_does(
         lgb.Dataset(X, label=y),
         num_boost_round=20,
     )
-    model = _shipped(tmp_path / "model.bin", booster, base_score)
-    directions = {
-        bool(flag)
-        for tree in model.trees
-        for flag, left in zip(tree.defaultLeft, tree.leftChildren)
-        if left >= 0
-    }
+    model = _shipped(tmp_path / "model.bin", booster, base_score, encoding)
+    table = threshold_table(model, "model")
+    directions = set()
+    for tree in model.trees:
+        _, _, left, _, _, default_left, _ = tree_arrays(tree, table, model.numFeatures)
+        directions |= {
+            bool(flag) for flag, child in zip(default_left, left) if child >= 0
+        }
     assert directions == {True, False}, "the model must route missing values both ways"
 
     probes = np.vstack([X[:200], np.full((1, len(FEATURES)), np.nan)])

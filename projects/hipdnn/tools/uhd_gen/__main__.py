@@ -79,7 +79,13 @@ from .features import (
     parse_signature_entry,
     signature_references,
 )
-from .lgbm_to_flatbuffer import convert, resolve_training_date
+from .lgbm_to_flatbuffer import (
+    ENCODINGS,
+    LEAF_PRECISIONS,
+    SPLIT_LEAF,
+    convert,
+    resolve_training_date,
+)
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 from . import score_transform
@@ -404,6 +410,21 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         dest="keep_lgbm",
         help="Keep intermediate .lgbm file",
+    )
+    parser.add_argument(
+        "--model-encoding",
+        choices=ENCODINGS,
+        default=SPLIT_LEAF,
+        help="Tree encoding of model.bin (gbdt_model.fbs). split_leaf (default) stores each "
+        "array in the narrowest type that holds it; node_arrays is the original encoding, for "
+        "a runtime that predates split_leaf",
+    )
+    parser.add_argument(
+        "--leaf-precision",
+        choices=LEAF_PRECISIONS,
+        default="float32",
+        help="Storage of split_leaf leaf values: float32 (default; each within 2**-24 of "
+        "itself) or float64 (exact)",
     )
     parser.add_argument(
         "--training-arches",
@@ -955,6 +976,8 @@ def _run_train(args: argparse.Namespace) -> int:
         training_date=training_date,
         group_by_feature_index=group_index,
         group_models=group_models or None,
+        encoding=args.model_encoding,
+        leaf_precision=args.leaf_precision,
     )
     if not args.keep_lgbm:
         lgbm_path.unlink()

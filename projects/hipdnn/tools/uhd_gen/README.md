@@ -174,6 +174,8 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
+| `--model-encoding` | No | `model.bin` tree encoding: `split_leaf` (default) or `node_arrays`, for a runtime that predates `split_leaf` (see [The `model.bin` encoding](#the-modelbin-encoding)) |
+| `--leaf-precision` | No | `split_leaf` leaf storage: `float32` (default) or `float64` (exact) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -1142,6 +1144,37 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m uhd_gen train ...
 sha256sum model.bin   # equals tree_data.hash, and equals it again on the next conversion
 ```
 
+## The `model.bin` encoding
+
+`gbdt_model.fbs` holds a tree in one of two encodings, and each tree says which it uses.
+
+- **`split_leaf`** (written by default) stores splits and leaves apart. Every array is a
+  union of typed arrays, so its tag in the file says how it is stored, and the writer picks
+  the narrowest type that holds it exactly: split features, children and threshold indices
+  as `int8`/`uint8`, `int16`/`uint16` or `int32`; thresholds once each in a model-wide
+  `threshold_table`, `float32` when every one is exactly a `float32` and `float64` otherwise;
+  leaves as `float32` (`--leaf-precision float64` keeps them exact); and the per-split
+  routing flags only when they are not all the default.
+- **`node_arrays`** is the original encoding: seven node-parallel arrays of `int32`,
+  `double` and `bool`.
+
+The runtime reads both. It decodes either one, at load, into the same in-memory nodes the
+tree walk reads, so scoring speed does not depend on the encoding. A tag it does not know (a
+type a later schema adds) is refused by name ("stored as integer array type N, which this
+runtime cannot read") rather than read as another type.
+
+Measured on a 500-tree, 127-leaf model with 54 features:
+
+| Encoding | `model.bin` | Load | Score |
+|---|---|---|---|
+| `node_arrays` | 3.83 MB | 1.22 ms | 32 µs/row |
+| `split_leaf`, `float64` leaves | 0.98 MB | 1.15 ms | 32 µs/row, identical scores |
+| `split_leaf`, `float32` leaves | 0.72 MB | 1.15 ms | 32 µs/row, within 2.4e-7 |
+
+A `float32` leaf is within 2^-24 of its `float64` value, so a row's score moves by at most
+2^-24 × Σ over trees of that tree's largest |leaf|, far below the accuracy of a measured
+throughput. Thresholds are never rounded: a split compares against the value LightGBM chose.
+
 ## Generated FlatBuffers bindings
 
 `model.bin` is written through flatc-generated Python bindings that
@@ -1150,7 +1183,8 @@ live in `_generated/`, committed alongside the tool the same way the C++
 
 ```
 _generated/hipdnn_flatbuffers_sdk/data_objects/
-└── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
+├── GbdtModel.py, GbdtTree.py, GbdtGroup.py                          # gbdt_model.fbs
+└── IntegerArray.py, RealArray.py, *Array.py                         # its typed arrays
 ```
 
 `uhd_gen/__init__.py` prepends that directory to `sys.path`, so `import

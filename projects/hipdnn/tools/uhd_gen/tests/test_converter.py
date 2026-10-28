@@ -19,7 +19,10 @@ np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
 import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
-from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel  # noqa: E402
+from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import (
+    GbdtModel,
+    GbdtModelT,
+)  # noqa: E402
 from uhd_gen.__main__ import _looks_like_cost_metric, main  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import (  # noqa: E402
     GBDT_MODEL_FILE_IDENTIFIER,
@@ -62,12 +65,63 @@ def _score_flatbuffer_model(buffer: bytes, features) -> float:
 
     `learning_rate` is not applied (LightGBM folds it into leaf values); absent
     `decision_lte` means `<=`; a NaN or out-of-range feature takes `default_left`.
+    Split/leaf-encoded trees are walked from their own arrays, not through the decoder the
+    tools share, so this also checks that decoder's reading of them.
     """
     model = GbdtModel.GetRootAs(buffer, 0)
     total = model.BaseScore()
+    unpacked = GbdtModelT.InitFromPackedBuf(bytearray(buffer), 0)
+    table = (
+        [] if unpacked.thresholdTable is None else list(unpacked.thresholdTable.values)
+    )
     for tree_idx in range(model.TreesLength()):
-        total += _score_flatbuffer_tree(model.Trees(tree_idx), features)
+        tree = unpacked.trees[tree_idx]
+        total += (
+            _score_split_leaf_tree(tree, table, features)
+            if tree.leavesType
+            else _score_flatbuffer_tree(model.Trees(tree_idx), features)
+        )
     return total
+
+
+def _score_split_leaf_tree(tree, table, features) -> float:
+    """A split/leaf tree: child c >= 0 is split c, c < 0 is leaf ~c; root is split 0."""
+    leaves = list(tree.leaves.values)
+    if len(leaves) == 1:
+        return float(leaves[0])
+    features_at = list(tree.splitFeatures.values)
+    thresholds = [table[int(i)] for i in tree.splitThresholds.values]
+    lefts, rights = list(tree.splitLeft.values), list(tree.splitRight.values)
+    default_left = tree.splitDefaultLeft
+    lte = tree.splitDecisionLte
+    node = 0
+    for _ in range(len(leaves)):
+        feature = int(features_at[node])
+        value = features[feature] if 0 <= feature < len(features) else float("nan")
+        if value != value:
+            go_left = (
+                bool(default_left[node])
+                if default_left is not None
+                else tree.defaultLeftFill
+            )
+        elif lte is None or lte[node]:
+            go_left = value <= thresholds[node]
+        else:
+            go_left = value < thresholds[node]
+        child = int(lefts[node] if go_left else rights[node])
+        if child < 0:
+            return float(leaves[~child])
+        node = child
+    raise AssertionError("tree descent exceeded the split count: cyclic child indices")
+
+
+#: (encoding, leaf precision, relative and absolute tolerance against LightGBM). A float32
+#: leaf is within 2**-24 of its float64 value, so a dozen-tree sum is well within 1e-6.
+ENCODINGS = [
+    pytest.param("node_arrays", "float64", 1e-9, id="node_arrays"),
+    pytest.param("split_leaf", "float64", 1e-9, id="split_leaf-float64"),
+    pytest.param("split_leaf", "float32", 1e-6, id="split_leaf-float32"),
+]
 
 
 def _score_flatbuffer_tree(tree, features) -> float:
@@ -228,24 +282,33 @@ class TestConverter:
 class TestRoundTrip:
     """Converted models must predict what LightGBM predicts (RFC 0019 §15 Phase 4)."""
 
-    def test_predictions_match_lightgbm(self):
+    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
+    def test_predictions_match_lightgbm(self, encoding, precision, tolerance):
         X, y = _create_synthetic_data(n_samples=800, n_features=6)
         model = _train_simple_model(X, y, num_trees=12)
-        buffer = build_gbdt_model(model.dump_model(), "sha256:test")
+        buffer = build_gbdt_model(
+            model.dump_model(),
+            "sha256:test",
+            encoding=encoding,
+            leaf_precision=precision,
+        )
 
         expected = model.predict(X, raw_score=True)
         for row in range(X.shape[0]):
             actual = _score_flatbuffer_model(buffer, X[row])
             assert actual == pytest.approx(
-                expected[row], rel=1e-9, abs=1e-9
+                expected[row], rel=tolerance, abs=tolerance
             ), f"row {row}: flatbuffer {actual} != lightgbm {expected[row]}"
 
-    def test_exact_threshold_values_match(self):
+    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
+    def test_exact_threshold_values_match(self, encoding, precision, tolerance):
         """Only values exactly on a threshold observe `decision_lte` (`<=` vs `<`)."""
         X, y = _create_synthetic_data(n_samples=400, n_features=4)
         model = _train_simple_model(X, y, num_trees=6)
         model_json = model.dump_model()
-        buffer = build_gbdt_model(model_json, "sha256:test")
+        buffer = build_gbdt_model(
+            model_json, "sha256:test", encoding=encoding, leaf_precision=precision
+        )
 
         thresholds = _collect_thresholds(model_json)
         assert thresholds, "model produced no internal splits to probe"
@@ -261,14 +324,20 @@ class TestRoundTrip:
         for i, row in enumerate(probes):
             actual = _score_flatbuffer_model(buffer, row)
             assert actual == pytest.approx(
-                expected[i], rel=1e-9, abs=1e-9
+                expected[i], rel=tolerance, abs=tolerance
             ), f"probe {i} on threshold: flatbuffer {actual} != lightgbm {expected[i]}"
 
-    def test_missing_values_match(self):
+    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
+    def test_missing_values_match(self, encoding, precision, tolerance):
         """NaN features must take the direction `default_left` records."""
         X, y = _create_synthetic_data(n_samples=600, n_features=5)
         model = _train_simple_model(X, y, num_trees=8)
-        buffer = build_gbdt_model(model.dump_model(), "sha256:test")
+        buffer = build_gbdt_model(
+            model.dump_model(),
+            "sha256:test",
+            encoding=encoding,
+            leaf_precision=precision,
+        )
 
         rng = np.random.default_rng(7)
         probes = X[:60].copy()
@@ -279,10 +348,11 @@ class TestRoundTrip:
         for i, row in enumerate(probes):
             actual = _score_flatbuffer_model(buffer, row)
             assert actual == pytest.approx(
-                expected[i], rel=1e-9, abs=1e-9
+                expected[i], rel=tolerance, abs=tolerance
             ), f"NaN probe {i}: flatbuffer {actual} != lightgbm {expected[i]}"
 
-    def test_learning_rate_is_not_applied_twice(self):
+    @pytest.mark.parametrize(("encoding", "precision", "tolerance"), ENCODINGS)
+    def test_learning_rate_is_not_applied_twice(self, encoding, precision, tolerance):
         """Leaf values already include `learning_rate`; it must not be applied again.
 
         0.3 (not the usual 0.1) makes a double application a 3x error, not rounding.
@@ -300,14 +370,19 @@ class TestRoundTrip:
             train_data,
             num_boost_round=5,
         )
-        buffer = build_gbdt_model(model.dump_model(), "sha256:test")
+        buffer = build_gbdt_model(
+            model.dump_model(),
+            "sha256:test",
+            encoding=encoding,
+            leaf_precision=precision,
+        )
 
         assert GbdtModel.GetRootAs(buffer, 0).LearningRate() == pytest.approx(1.0)
 
         expected = model.predict(X[:50], raw_score=True)
         for i in range(50):
             assert _score_flatbuffer_model(buffer, X[i]) == pytest.approx(
-                expected[i], rel=1e-9, abs=1e-9
+                expected[i], rel=tolerance, abs=tolerance
             )
 
 
