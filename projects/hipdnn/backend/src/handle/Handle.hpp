@@ -21,6 +21,9 @@ public:
     virtual ~hipdnnHandle() = default;
     virtual void setStream(hipStream_t stream);
     virtual hipStream_t getStream() const;
+    // Device the handle's stream runs on: a concrete stream's owning device, or the calling
+    // thread's current device for the null, hipStreamLegacy and hipStreamPerThread tokens.
+    virtual hipError_t getDevice(int* deviceId) const;
     virtual std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager>
         getPluginResourceManager() const;
     virtual std::shared_ptr<hipdnn_backend::plugin::HeuristicPluginResourceManager>
