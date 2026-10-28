@@ -197,9 +197,14 @@ namespace TensileLite
 
                     // Not while a library manifest is collected (OrigamiOLC::libraryManifest).
                     if(OrigamiOLC::enabled() && !Library::deserializeObserver)
+                    {
                         lib.nn_models.olc
                             = OrigamiOLC::loadForLogic(logic_stem_from_path(ctx->filename),
                                                          directory_from_path(ctx->filename));
+                        if(lib.nn_models.olc >= 0)
+                            lib.solution_name_ids
+                                = OrigamiOLC::solutionNameIds(lib.solution_list);
+                    }
                 }
             }
             const static bool flow = false;
