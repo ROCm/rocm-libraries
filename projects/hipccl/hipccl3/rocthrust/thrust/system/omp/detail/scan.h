@@ -98,7 +98,7 @@ OutputIterator scan_impl(
     }
   }
 
-  // Parallel scan requires multiple threads (num_threads > 1 is guaranteed above).
+  _CCCL_ASSERT(num_threads > 1, "Parallel scan requires multiple threads");
 
   temporary_array<accum_t, DerivedPolicy> block_sums(exec, num_threads);
 
