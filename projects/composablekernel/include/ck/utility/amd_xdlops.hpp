@@ -548,9 +548,16 @@ struct intrin_mfma_f32_32x32x64f8f6f4;
 template <>
 struct intrin_mfma_f32_32x32x64f8f6f4<32, 32>
 {
-    template <class FloatC>
-    __device__ static void Run(const f8x32_t& reg_a, const f8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         reg_c.template AsType<float16_t>()(Number<0>{}) =
             __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
@@ -570,9 +577,16 @@ struct intrin_mfma_f32_32x32x64f8f6f4<32, 32>
 #endif
     }
 
-    template <class FloatC>
-    __device__ static void Run(const bf8x32_t& reg_a, const bf8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         reg_c.template AsType<float16_t>()(Number<0>{}) =
             __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
@@ -592,9 +606,16 @@ struct intrin_mfma_f32_32x32x64f8f6f4<32, 32>
 #endif
     }
 
-    template <class FloatC>
-    __device__ static void Run(const bf8x32_t& reg_a, const f8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         reg_c.template AsType<float16_t>()(Number<0>{}) =
             __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
@@ -614,9 +635,16 @@ struct intrin_mfma_f32_32x32x64f8f6f4<32, 32>
 #endif
     }
 
-    template <class FloatC>
-    __device__ static void Run(const f8x32_t& reg_a, const bf8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         reg_c.template AsType<float16_t>()(Number<0>{}) =
             __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
@@ -1269,9 +1297,16 @@ struct intrin_mfma_f32_16x16x128f8f6f4;
 template <>
 struct intrin_mfma_f32_16x16x128f8f6f4<16, 16>
 {
-    template <class FloatC>
-    __device__ static void Run(const f8x32_t& reg_a, const f8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         // https://github.com/ROCm/llvm-project/blob/656552edc693e2bb4abc9258399c39d190fce2b3/llvm/test/Verifier/AMDGPU/mfma-scale.ll#L10
         reg_c.template AsType<float4_t>()(Number<0>{}) =
@@ -1292,9 +1327,16 @@ struct intrin_mfma_f32_16x16x128f8f6f4<16, 16>
 #endif
     }
 
-    template <class FloatC>
-    __device__ static void Run(const bf8x32_t& reg_a, const bf8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         // https://github.com/ROCm/llvm-project/blob/656552edc693e2bb4abc9258399c39d190fce2b3/llvm/test/Verifier/AMDGPU/mfma-scale.ll#L10
         reg_c.template AsType<float4_t>()(Number<0>{}) =
@@ -1315,9 +1357,16 @@ struct intrin_mfma_f32_16x16x128f8f6f4<16, 16>
 #endif
     }
 
-    template <class FloatC>
-    __device__ static void Run(const bf8x32_t& reg_a, const f8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         // https://github.com/ROCm/llvm-project/blob/656552edc693e2bb4abc9258399c39d190fce2b3/llvm/test/Verifier/AMDGPU/mfma-scale.ll#L10
         reg_c.template AsType<float4_t>()(Number<0>{}) =
@@ -1338,9 +1387,16 @@ struct intrin_mfma_f32_16x16x128f8f6f4<16, 16>
 #endif
     }
 
-    template <class FloatC>
-    __device__ static void Run(const f8x32_t& reg_a, const bf8x32_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 32>& reg_a,
+                               const non_native_vector_base<B, 32>& reg_b,
+                               FloatC& reg_c)
     {
+        if constexpr(!is_native_fp8_type<A>() || !is_native_fp8_type<B>())
+            __builtin_trap();
 #if defined(__gfx950__)
         // https://github.com/ROCm/llvm-project/blob/656552edc693e2bb4abc9258399c39d190fce2b3/llvm/test/Verifier/AMDGPU/mfma-scale.ll#L10
         reg_c.template AsType<float4_t>()(Number<0>{}) =
@@ -1449,29 +1505,39 @@ struct intrin_mfma_f32_32x32x16f8f8;
 template <>
 struct intrin_mfma_f32_32x32x16f8f8<32, 32>
 {
-    template <class FloatC>
-    __device__ static void Run(const f8x8_t& reg_a, const f8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float16_t>()(Number<0>{}) =
-            __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(
-                bit_cast<int64_t>(reg_a),
-                bit_cast<int64_t>(reg_b),
-                reg_c.template AsType<float16_t>()[Number<0>{}],
-                0,
-                0,
-                0);
-#else
-        vector_type<f8_t, 8> reg_a_v(reg_a);
-        vector_type<f8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<f8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<f8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float16_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float16_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1481,28 +1547,39 @@ struct intrin_mfma_f32_16x16x32f8f8;
 template <>
 struct intrin_mfma_f32_16x16x32f8f8<16, 16>
 {
-    template <class FloatC>
-    __device__ static void Run(const f8x8_t& reg_a, const f8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float4_t>()(Number<0>{}) = __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(
-            bit_cast<int64_t>(reg_a),
-            bit_cast<int64_t>(reg_b),
-            reg_c.template AsType<float4_t>()[Number<0>{}],
-            0,
-            0,
-            0);
-#else
-        vector_type<f8_t, 8> reg_a_v(reg_a);
-        vector_type<f8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<f8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<f8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float4_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float4_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1512,29 +1589,39 @@ struct intrin_mfma_f32_32x32x16bf8bf8;
 template <>
 struct intrin_mfma_f32_32x32x16bf8bf8<32, 32>
 {
-    template <class FloatC>
-    __device__ static void Run(const bf8x8_t& reg_a, const bf8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float16_t>()(Number<0>{}) =
-            __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8(
-                bit_cast<int64_t>(reg_a),
-                bit_cast<int64_t>(reg_b),
-                reg_c.template AsType<float16_t>()[Number<0>{}],
-                0,
-                0,
-                0);
-#else
-        vector_type<bf8_t, 8> reg_a_v(reg_a);
-        vector_type<bf8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<bf8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<bf8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float16_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float16_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1544,28 +1631,39 @@ struct intrin_mfma_f32_16x16x32bf8bf8;
 template <>
 struct intrin_mfma_f32_16x16x32bf8bf8<16, 16>
 {
-    template <class FloatC>
-    __device__ static void Run(const bf8x8_t& reg_a, const bf8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float4_t>()(Number<0>{}) = __builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8(
-            bit_cast<int64_t>(reg_a),
-            bit_cast<int64_t>(reg_b),
-            reg_c.template AsType<float4_t>()[Number<0>{}],
-            0,
-            0,
-            0);
-#else
-        vector_type<bf8_t, 8> reg_a_v(reg_a);
-        vector_type<bf8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<bf8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<bf8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float4_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float4_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1575,29 +1673,39 @@ struct intrin_mfma_f32_32x32x16f8bf8;
 template <>
 struct intrin_mfma_f32_32x32x16f8bf8<32, 32>
 {
-    template <class FloatC>
-    __device__ static void Run(const f8x8_t& reg_a, const bf8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float16_t>()(Number<0>{}) =
-            __builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8(
-                bit_cast<int64_t>(reg_a),
-                bit_cast<int64_t>(reg_b),
-                reg_c.template AsType<float16_t>()[Number<0>{}],
-                0,
-                0,
-                0);
-#else
-        vector_type<f8_t, 8> reg_a_v(reg_a);
-        vector_type<bf8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<f8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<bf8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float16_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float16_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1607,28 +1715,39 @@ struct intrin_mfma_f32_16x16x32f8bf8;
 template <>
 struct intrin_mfma_f32_16x16x32f8bf8<16, 16>
 {
-    template <class FloatC>
-    __device__ static void Run(const f8x8_t& reg_a, const bf8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_f8_type_v<A> && is_bf8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float4_t>()(Number<0>{}) = __builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8(
-            bit_cast<int64_t>(reg_a),
-            bit_cast<int64_t>(reg_b),
-            reg_c.template AsType<float4_t>()[Number<0>{}],
-            0,
-            0,
-            0);
-#else
-        vector_type<f8_t, 8> reg_a_v(reg_a);
-        vector_type<bf8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<f8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<bf8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float4_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float4_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1638,29 +1757,39 @@ struct intrin_mfma_f32_32x32x16bf8f8;
 template <>
 struct intrin_mfma_f32_32x32x16bf8f8<32, 32>
 {
-    template <class FloatC>
-    __device__ static void Run(const bf8x8_t& reg_a, const f8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float16_t>()(Number<0>{}) =
-            __builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8(
-                bit_cast<int64_t>(reg_a),
-                bit_cast<int64_t>(reg_b),
-                reg_c.template AsType<float16_t>()[Number<0>{}],
-                0,
-                0,
-                0);
-#else
-        vector_type<bf8_t, 8> reg_a_v(reg_a);
-        vector_type<f8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<bf8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<f8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float16_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float16_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_32x32x2f32<32, 32>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 
@@ -1670,28 +1799,39 @@ struct intrin_mfma_f32_16x16x32bf8f8;
 template <>
 struct intrin_mfma_f32_16x16x32bf8f8<16, 16>
 {
-    template <class FloatC>
-    __device__ static void Run(const bf8x8_t& reg_a, const f8x8_t& reg_b, FloatC& reg_c)
+    template <typename A,
+              typename B,
+              class FloatC,
+              enable_if_t<is_bf8_type_v<A> && is_f8_type_v<B>, bool> = true>
+    __device__ static void Run(const non_native_vector_base<A, 8>& reg_a,
+                               const non_native_vector_base<B, 8>& reg_b,
+                               FloatC& reg_c)
     {
-#if defined(__gfx94__)
-        reg_c.template AsType<float4_t>()(Number<0>{}) = __builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8(
-            bit_cast<int64_t>(reg_a),
-            bit_cast<int64_t>(reg_b),
-            reg_c.template AsType<float4_t>()[Number<0>{}],
-            0,
-            0,
-            0);
-#else
-        vector_type<bf8_t, 8> reg_a_v(reg_a);
-        vector_type<f8_t, 8> reg_b_v(reg_b);
-
-        static_for<0, 8, 1>{}([&](auto k) {
-            float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<bf8_t>()[Number<k>{}]);
-            float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<f8_t>()[Number<k>{}]);
-
-            intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
-        });
+#if defined(__gfx94__) || defined(__gfx950__)
+        if constexpr(is_native_fp8_type<A>() && is_native_fp8_type<B>())
+        {
+            reg_c.template AsType<float4_t>()(Number<0>{}) =
+                __builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8(
+                    bit_cast<int64_t>(reg_a),
+                    bit_cast<int64_t>(reg_b),
+                    reg_c.template AsType<float4_t>()[Number<0>{}],
+                    0,
+                    0,
+                    0);
+        }
+        else
 #endif
+        {
+            vector_type<A, 8> reg_a_v(reg_a);
+            vector_type<B, 8> reg_b_v(reg_b);
+
+            static_for<0, 8, 1>{}([&](auto k) {
+                float reg_a_f32 = type_convert<float>(reg_a_v.template AsType<A>()[Number<k>{}]);
+                float reg_b_f32 = type_convert<float>(reg_b_v.template AsType<B>()[Number<k>{}]);
+
+                intrin_mfma_f32_16x16x4f32<16, 16>::Run(reg_a_f32, reg_b_f32, reg_c);
+            });
+        }
     }
 };
 

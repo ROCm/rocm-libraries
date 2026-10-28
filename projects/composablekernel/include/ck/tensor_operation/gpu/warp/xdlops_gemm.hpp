@@ -2389,16 +2389,22 @@ struct MfmaSelector
 #endif
     }
 
-    static constexpr auto selected_mfma = mfma_type<GetMfma<element_type_t<base_type>,
-                                                            MPerXdlops,
-                                                            NPerXdlops,
-                                                            element_type_t<additional_type>,
-                                                            is_single_rate_mfma,
-                                                            is_scale_mfma,
-                                                            element_type_t<AccType>,
-                                                            ScaleBlkSize,
-                                                            AScaleDataType,
-                                                            BScaleDataType>()>{}; // default init
+    template <typename T>
+    using instruction_type =
+        conditional_t<is_f8_type_v<T>, f8_t, conditional_t<is_bf8_type_v<T>, bf8_t, T>>;
+
+    static constexpr auto selected_mfma = mfma_type<GetMfma<
+        instruction_type<element_type_t<base_type>>,
+        MPerXdlops,
+        NPerXdlops,
+        instruction_type<element_type_t<additional_type>>,
+        is_single_rate_mfma || (is_fp8_type_v<base_type> && !is_native_fp8_type<base_type>()) ||
+            (is_fp8_type_v<additional_type> && !is_native_fp8_type<additional_type>()),
+        is_scale_mfma,
+        element_type_t<AccType>,
+        ScaleBlkSize,
+        AScaleDataType,
+        BScaleDataType>()>{}; // default init
 
     __host__ __device__ constexpr MfmaSelector()
     {
@@ -2705,9 +2711,9 @@ struct XdlopsGemm
             is_same<base_type, double>::value || is_same<base_type, float>::value ||
                 is_same<base_type, tf32_t>::value || is_same<base_type, half_t>::value ||
                 is_same<base_type, bhalf_t>::value || is_same<base_type, int8_t>::value ||
-                is_same<base_type, f8_t>::value || is_same<base_type, bf8_t>::value ||
-                (is_same<base_type, f8_t>::value && is_same<additional_type, bf8_t>::value) ||
-                (is_same<base_type, bf8_t>::value && is_same<additional_type, f8_t>::value),
+                is_f8_type_v<base_type> || is_bf8_type_v<base_type> ||
+                (is_f8_type_v<base_type> && is_bf8_type_v<additional_type>) ||
+                (is_bf8_type_v<base_type> && is_f8_type_v<additional_type>),
             "base_type must be double, float, tf32_t, half, bfloat16, int8_t, f8_t or bf8_t!");
 
         static_for<0, KPack / mfma_instr.k_per_blk, 1>{}([&](auto k) {
@@ -2870,7 +2876,7 @@ struct XdlopsGemm
         (((is_same<base_type, half_t>::value || is_same<base_type, bhalf_t>::value) &&
           KPack <= 4) ||
          (is_same<base_type, int8_t>::value && KPack <= 8) ||
-         ((is_same<base_type, f8_t>::value || is_same<base_type, bf8_t>::value) &&
+         ((is_f8_type_v<base_type> || is_bf8_type_v<base_type>) &&
 #if defined(__gfx125__)
           KPack < 128) ||
 #else

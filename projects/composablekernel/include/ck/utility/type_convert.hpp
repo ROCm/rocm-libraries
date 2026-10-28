@@ -340,7 +340,7 @@ inline __host__ __device__ f8_fnuz_t f8_convert_sr<f8_fnuz_t, float>(float x)
     uint32_t rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), x);
 #endif // #ifndef CK_CODE_GEN_RTC
 #endif // #if defined(__gfx950__)
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     union
     {
         float fval;
@@ -371,7 +371,7 @@ inline __host__ __device__ f8_fnuz_t f8_convert_sr<f8_fnuz_t, float>(float x)
 template <>
 inline __host__ __device__ f8_fnuz_t f8_convert_sr<f8_fnuz_t, half_t>(half_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     // convert to float and use native converion
     return f8_convert_sr<f8_fnuz_t>(type_convert<float>(x));
 #else
@@ -408,7 +408,7 @@ inline __host__ __device__ bf8_fnuz_t f8_convert_sr<bf8_fnuz_t, float>(float x)
     uint32_t rng = prand_generator<float, seed>(reinterpret_cast<size_t>(&x), x);
 #endif // #ifndef CK_CODE_GEN_RTC
 #endif // #if defined(__gfx950__)
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     union
     {
         float fval;
@@ -441,7 +441,7 @@ inline __host__ __device__ bf8_fnuz_t f8_convert_sr<bf8_fnuz_t, float>(float x)
 template <>
 inline __host__ __device__ bf8_fnuz_t f8_convert_sr<bf8_fnuz_t, half_t>(half_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     // convert to float and use native converion
     return f8_convert_sr<bf8_fnuz_t>(type_convert<float>(x));
 #else
@@ -644,7 +644,7 @@ __host__ __device__ constexpr Y f8_convert_rne(X x);
 template <>
 inline __host__ __device__ f8_fnuz_t f8_convert_rne<f8_fnuz_t, float>(float x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     union
     {
         float fval;
@@ -676,7 +676,7 @@ inline __host__ __device__ f8_fnuz_t f8_convert_rne<f8_fnuz_t, float>(float x)
 template <>
 inline __host__ __device__ f8_fnuz_t f8_convert_rne<f8_fnuz_t, half_t>(half_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     // convert to float and use native converion
     return f8_convert_rne<f8_fnuz_t>(type_convert<float>(x));
 #else
@@ -696,7 +696,7 @@ inline __host__ __device__ f8_fnuz_t f8_convert_rne<f8_fnuz_t, half_t>(half_t x)
 template <>
 inline __host__ __device__ bf8_fnuz_t f8_convert_rne<bf8_fnuz_t, float>(float x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     union
     {
         float fval;
@@ -730,7 +730,7 @@ inline __host__ __device__ bf8_fnuz_t f8_convert_rne<bf8_fnuz_t, float>(float x)
 template <>
 inline __host__ __device__ bf8_fnuz_t f8_convert_rne<bf8_fnuz_t, half_t>(half_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     // convert to float and use native converion
     return f8_convert_rne<bf8_fnuz_t>(type_convert<float>(x));
 #else
@@ -927,7 +927,7 @@ inline __host__ __device__ f8_fnuz_t type_convert<f8_fnuz_t, float>(float x)
 template <>
 inline __host__ __device__ float type_convert<float, f8_fnuz_t>(f8_fnuz_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     float fval;
     uint32_t i32val = static_cast<uint32_t>(static_cast<uint8_t>(x));
     fval            = __builtin_amdgcn_cvt_f32_fp8(i32val, 0);
@@ -942,7 +942,7 @@ inline __host__ __device__ float type_convert<float, f8_fnuz_t>(f8_fnuz_t x)
 template <>
 inline __host__ __device__ float2_t type_convert<float2_t, f8x2_fnuz_t>(f8x2_fnuz_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     const auto i16val = bit_cast<uint16_t>(x);
     return __builtin_amdgcn_cvt_pk_f32_fp8(i16val, 0);
 #else
@@ -1421,7 +1421,7 @@ inline __host__ __device__ bf8_ocp_t type_convert<bf8_ocp_t, half_t>(half_t x)
 template <>
 inline __host__ __device__ half_t type_convert<half_t, f8_fnuz_t>(f8_fnuz_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     // use native conversion to float and convert to fp16
     return type_convert<half_t>(type_convert<float>(x));
 #else
@@ -1509,7 +1509,7 @@ inline __host__ __device__ bf8_ocp_t type_convert<bf8_ocp_t, bhalf_t>(bhalf_t x)
 template <>
 inline __host__ __device__ float type_convert<float, bf8_fnuz_t>(bf8_fnuz_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     float fval;
     uint32_t i32val = static_cast<uint32_t>(static_cast<uint8_t>(x));
     fval            = __builtin_amdgcn_cvt_f32_bf8(i32val, 0);
@@ -1536,7 +1536,7 @@ inline __host__ __device__ bf8_fnuz_t type_convert<bf8_fnuz_t, half_t>(half_t x)
 template <>
 inline __host__ __device__ half_t type_convert<half_t, bf8_fnuz_t>(bf8_fnuz_t x)
 {
-#if defined(__gfx94__)
+#if defined(__gfx94__) && !defined(__gfx950__)
     // use native conversion to float and convert to fp16
     return type_convert<half_t>(type_convert<float>(x));
 #else

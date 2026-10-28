@@ -14,6 +14,14 @@ endif()
 
 add_custom_target(test_fp8)
 
+# Both encodings must retain their meaning in a multi-architecture executable.
+add_gtest_executable(test_fp8_formats test_fp8_formats.cpp)
+if(result EQUAL 0)
+  target_link_libraries(test_fp8_formats PRIVATE utility)
+  target_compile_options(test_fp8_formats PRIVATE -UNDEBUG)
+  add_dependencies(test_fp8 test_fp8_formats)
+endif()
+
 if (CK_USE_OCP_FP8)
   # add test for ocp data types
   add_gtest_executable(test_fp8_ocp test_fp8_ocp.cpp)
