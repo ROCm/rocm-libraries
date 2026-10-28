@@ -7,7 +7,7 @@ Documentation for rocRAND is available at
 
 ### Resolved Issues
 
-* Fixed race condition inside `poisson` distribution
+* Fixed race condition inside `poisson` distribution.
 
 
 ## rocRAND 5.2.0 for ROCm 10.2.0
