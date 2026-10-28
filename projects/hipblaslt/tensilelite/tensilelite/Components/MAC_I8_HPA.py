@@ -23,7 +23,10 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VAShiftRightI32, VLShiftLeftB32, VMadI32I24
+
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
@@ -51,32 +54,56 @@ class FMA_I8_HPA(MAC):
             for iui in range(0, innerUnroll):
                 src  = a // elemPerReg
                 idx  = a %  elemPerReg
-                sStr = f'v[vgprValuA_X{m}_I{iui}+{src}]'
-                tStr = f'v[vgprValuA_X{m}_I{iui}+{a}]'
-                module.addInst("v_lshlrev_b32", tStr, {(spacePerReg-idx-1)*8}, sStr, "")
-                module.add(priority(writer, 1, "Raise priority while processing macs"))
-                module.addInst("v_ashrrev_i32", tStr, {(spacePerReg    -1)*8}, tStr, "")
+                sStr = f'ValuA_X{m}_I{iui}+{src}'
+                tStr = f'ValuA_X{m}_I{iui}+{a}'
+                module.add(VLShiftLeftB32(dst=vgpr(tStr),
+                                          shiftHex=hex((spacePerReg-idx-1)*8),
+                                          src=vgpr(sStr),
+                                          comment="Sign extend A"))
+                prio = priority(writer, 1, "Raise priority while processing macs")
+                if prio:
+                    module.add(prio)
+                module.add(VAShiftRightI32(dst=vgpr(tStr),
+                                           shiftHex=hex((spacePerReg-1)*8),
+                                           src=vgpr(tStr),
+                                           comment="Sign extend A"))
 
         for b in range(kernel["ThreadTile1"]-1, -1, -1):
             for iui in range(0, innerUnroll):
                 src  = b // elemPerReg
                 idx  = b %  elemPerReg
-                sStr = f'v[vgprValuB_X{m}_I{iui}+{src}]'
-                tStr = f'v[vgprValuB_X{m}_I{iui}+{b}]'
-                module.addInst("v_lshlrev_b32", tStr, {(spacePerReg-idx-1)*8}, sStr, "")
-                module.add(priority(writer, 1, "Raise priority while processing macs"))
-                module.addInst("v_ashrrev_i32", tStr, {(spacePerReg    -1)*8}, tStr, "")
+                sStr = f'ValuB_X{m}_I{iui}+{src}'
+                tStr = f'ValuB_X{m}_I{iui}+{b}'
+                module.add(VLShiftLeftB32(dst=vgpr(tStr),
+                                          shiftHex=hex((spacePerReg-idx-1)*8),
+                                          src=vgpr(sStr),
+                                          comment="Sign extend B"))
+                prio = priority(writer, 1, "Raise priority while processing macs")
+                if prio:
+                    module.add(prio)
+                module.add(VAShiftRightI32(dst=vgpr(tStr),
+                                           shiftHex=hex((spacePerReg-1)*8),
+                                           src=vgpr(tStr),
+                                           comment="Sign extend B"))
 
         ThreadTile0 = kernel["ThreadTile0"]
         for b in range(0, kernel["ThreadTile1"]):
             for a in range(0, kernel["ThreadTile0"]):
                 for iui in range(0, innerUnroll):
-                    cStr = f'v[vgprValuC + {a} + {b}*{ThreadTile0}]'
-                    aStr = f'v[vgprValuA_X{m}_I{iui} + {a}]'
-                    bStr = f'v[vgprValuB_X{m}_I{iui} + {b}]'
-                    module.addInst("v_mad_i32_i24", cStr, aStr, bStr, cStr, "")
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
+                    cStr = f'ValuC+{a + b*ThreadTile0}'
+                    aStr = f'ValuA_X{m}_I{iui}+{a}'
+                    bStr = f'ValuB_X{m}_I{iui}+{b}'
+                    module.add(VMadI32I24(dst=vgpr(cStr),
+                                          src0=vgpr(aStr),
+                                          src1=vgpr(bStr),
+                                          src2=vgpr(cStr),
+                                          comment="Accumulate"))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
 
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
 
         return module

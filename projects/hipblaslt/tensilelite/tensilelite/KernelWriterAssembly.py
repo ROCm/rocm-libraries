@@ -2390,16 +2390,22 @@ class KernelWriterAssembly(KernelWriter):
             macro.add(item)
         module.add(macro)
 
-      # dot2: oneIUI for tail loop
-      if kernel["UseDotInstruction"]:
-        macro = Macro("MAC_%ux%u_X%u_OneIUI" % (kernel["ThreadTile0"],kernel["ThreadTile1"], 0), [""])
-        component = Component.MAC.find(self)
-        if not component:
-          printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
-        innerModule = component(self, tPA, tPB, 0, 1)
-        for item in innerModule.items():
-            macro.add(item)
-        module.add(macro)
+      # oneIUI for tail loop.
+      #
+      # macIter() names this macro whenever the kernel's InnerUnroll is above
+      # one and it is asked for a single inner unroll, which the tail loop does
+      # on every non-dot2 path that cannot unroll the tail.  Defining it only
+      # for the dot2 path left the reference dangling on the others: the macro
+      # inliner looked the name up, did not find it, and dereferenced the end
+      # of the lookup.
+      macro = Macro("MAC_%ux%u_X%u_OneIUI" % (kernel["ThreadTile0"],kernel["ThreadTile1"], 0), [""])
+      component = Component.MAC.find(self)
+      if not component:
+        printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
+      innerModule = component(self, tPA, tPB, 0, 1)
+      for item in innerModule.items():
+        macro.add(item)
+      module.add(macro)
 
     module.setNoOpt(True)
     return module
@@ -11264,10 +11270,10 @@ class KernelWriterAssembly(KernelWriter):
       else:
         imod.add(SCMovB32(sgpr("SrdMetadata+2"), sgpr("ShadowLimitMetadata+0"), "Move shadow to real if we are within 2^32"))
     else:
-      imod.addInst(SSubU32(sgpr("SrdMetadata+2"), \
-                           sgpr("SrdMetadata+2"), \
-                           incSparseLower, \
-                           "limit -= inc)" ))
+      imod.add(SSubU32(sgpr("SrdMetadata+2"), \
+                       sgpr("SrdMetadata+2"), \
+                       incSparseLower, \
+                       "limit -= inc)" ))
     return imod
 
   ##############################################################################

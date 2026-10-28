@@ -122,10 +122,8 @@ class LocalReadVALU(LocalRead):
                             dbgVgprList = (dbgVgprList[1].split("]")[0]).split(':')
                             dbgVgpr = "v[%s]"%dbgVgprList[0]
 
-                        # localReadCode.addInst("s_waitcnt lgkmcnt(0)", "CheckValue1 wait for LDS read")
                         localReadCode.add(SWaitCnt(dscnt=0, comment="CheckValue1 wait for lds read"))
                         if writer.asmCaps["SeparateVscnt"]:
-                            # localReadCode.addInst( "s_waitcnt_vscnt", -2, "0", "")
                             localReadCode.add(SWaitCnt(vlcnt=0, vscnt=0))
 
                         if kernel["ProblemType"]["DataType"].isHalf():

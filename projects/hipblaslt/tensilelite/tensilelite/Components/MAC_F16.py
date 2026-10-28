@@ -25,7 +25,7 @@
 from rocisa.code import Module
 from rocisa.container import vgpr, VOP3PModifiers
 from rocisa.enum import DataTypeEnum
-from rocisa.instruction import VFmaF16, VFmaPKF16
+from rocisa.instruction import VFmaF16, VFmaPKF16, VMacF16
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
@@ -69,10 +69,10 @@ class MAC_F16_Plain(MAC):
                             vars["blockB"] = blockB
                             vars["iui"] = iui
 
-                            cStr = "v[vgprValuC+{blockA}+{blockB}*{ThreadTile0}+0]".format_map(vars)
-                            aStr = "v[vgprValuA_X{m}_I{iui}+{blockA}]".format_map(vars)
-                            bStr = "v[vgprValuB_X{m}_I{iui}+{blockB}]".format_map(vars)
-                            module.addInst("v_mac_f16", cStr, aStr, bStr, "")
+                            cStr = vgpr("ValuC+{blockA}+{blockB}*{ThreadTile0}+0".format_map(vars))
+                            aStr = vgpr("ValuA_X{m}_I{iui}+{blockA}".format_map(vars))
+                            bStr = vgpr("ValuB_X{m}_I{iui}+{blockB}".format_map(vars))
+                            module.add(VMacF16(dst=cStr, src0=aStr, src1=bStr))
                             prio = priority(writer, 1, "Raise priority while processing macs")
                             if prio:
                                 module.add(prio)
