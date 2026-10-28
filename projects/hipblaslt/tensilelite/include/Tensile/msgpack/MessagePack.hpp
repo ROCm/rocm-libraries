@@ -326,12 +326,38 @@ namespace TensileLite
                     addError(concatenate("Unexpected msgpack type for enum: ", (int)object.type,
                                        " (expected STRING or INTEGER)"));
                 }
-                    
+
                 if(match)
                 {
                     enumFound++;
                     member = value;
                 }
+            }
+
+            template <typename T>
+            bool enumLookup(T& member, std::unordered_map<std::string, T> const& map)
+            {
+                if(object.type == msgpack::type::object_type::STR)
+                {
+                    std::string_view sv(object.via.str.ptr, object.via.str.size);
+                    auto it = map.find(std::string(sv));
+                    if(it != map.end())
+                    {
+                        member = it->second;
+                        enumFound = 1;
+                        return true;
+                    }
+                }
+                else if(object.type == msgpack::type::POSITIVE_INTEGER ||
+                        object.type == msgpack::type::NEGATIVE_INTEGER)
+                {
+                    int64_t intValue;
+                    object.convert(intValue);
+                    member = static_cast<T>(intValue);
+                    enumFound = 1;
+                    return true;
+                }
+                return false;
             }
         };
 
@@ -420,6 +446,141 @@ namespace TensileLite
             static void enumCase(MessagePackInput& io, T& member, const char* key, T value)
             {
                 io.enumCase(member, key, value);
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomArgSemantic, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomArgSemantic& value)
+            {
+                static const auto map = [] {
+                    std::unordered_map<std::string, CustomArgSemantic> m;
+                    for(int i = 0; i < static_cast<int>(CustomArgSemantic::COUNT); i++)
+                    {
+                        auto v = static_cast<CustomArgSemantic>(i);
+                        m.emplace(TensileLite::toString(v), v);
+                    }
+                    return m;
+                }();
+                if(!io.enumLookup(value, map))
+                    EnumTraits<CustomArgSemantic, MessagePackInput>::fallback(io, value);
+            }
+            static void fallback(MessagePackInput& io, CustomArgSemantic& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomArgSemantic::COUNT); i++)
+                {
+                    auto v = static_cast<CustomArgSemantic>(i);
+                    io.enumCase(value, TensileLite::toString(v).c_str(), v);
+                }
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomArgType, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomArgType& value)
+            {
+                static const auto map = [] {
+                    std::unordered_map<std::string, CustomArgType> m;
+                    for(int i = 0; i < static_cast<int>(CustomArgType::CustomArgType_Count); i++)
+                    {
+                        auto v = static_cast<CustomArgType>(i);
+                        m.emplace(TensileLite::toString(v), v);
+                    }
+                    return m;
+                }();
+                if(!io.enumLookup(value, map))
+                    EnumTraits<CustomArgType, MessagePackInput>::fallback(io, value);
+            }
+            static void fallback(MessagePackInput& io, CustomArgType& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomArgType::CustomArgType_Count); i++)
+                {
+                    auto v = static_cast<CustomArgType>(i);
+                    io.enumCase(value, TensileLite::toString(v).c_str(), v);
+                }
+            }
+        };
+
+        template <>
+        struct EnumTraits<rocisa::DataType, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, rocisa::DataType& value)
+            {
+                static const auto map = [] {
+                    std::unordered_map<std::string, rocisa::DataType> m;
+                    for(int i = 0; i < static_cast<int>(rocisa::DataType::Count); i++)
+                    {
+                        auto const& info = DataTypeInfo::Get(i);
+                        m.emplace(info.name, info.dataType);
+                    }
+                    return m;
+                }();
+                if(!io.enumLookup(value, map))
+                    EnumTraits<rocisa::DataType, MessagePackInput>::fallback(io, value);
+            }
+            static void fallback(MessagePackInput& io, rocisa::DataType& value)
+            {
+                for(int i = 0; i < static_cast<int>(rocisa::DataType::Count); i++)
+                {
+                    auto const& info = DataTypeInfo::Get(i);
+                    io.enumCase(value, info.name.c_str(), info.dataType);
+                }
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomGridSize, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomGridSize& value)
+            {
+                static const auto map = [] {
+                    std::unordered_map<std::string, CustomGridSize> m;
+                    for(int i = 0; i < static_cast<int>(CustomGridSize::CustomGridSize_Count); i++)
+                    {
+                        auto v = static_cast<CustomGridSize>(i);
+                        m.emplace(TensileLite::toString(v), v);
+                    }
+                    return m;
+                }();
+                if(!io.enumLookup(value, map))
+                    EnumTraits<CustomGridSize, MessagePackInput>::fallback(io, value);
+            }
+            static void fallback(MessagePackInput& io, CustomGridSize& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomGridSize::CustomGridSize_Count); i++)
+                {
+                    auto v = static_cast<CustomGridSize>(i);
+                    io.enumCase(value, TensileLite::toString(v).c_str(), v);
+                }
+            }
+        };
+
+        template <>
+        struct EnumTraits<CustomWorkspaceType, MessagePackInput>
+        {
+            static void enumeration(MessagePackInput& io, CustomWorkspaceType& value)
+            {
+                static const auto map = [] {
+                    std::unordered_map<std::string, CustomWorkspaceType> m;
+                    for(int i = 0; i < static_cast<int>(CustomWorkspaceType::CustomWorkspaceType_Count); i++)
+                    {
+                        auto v = static_cast<CustomWorkspaceType>(i);
+                        m.emplace(TensileLite::toString(v), v);
+                    }
+                    return m;
+                }();
+                if(!io.enumLookup(value, map))
+                    EnumTraits<CustomWorkspaceType, MessagePackInput>::fallback(io, value);
+            }
+            static void fallback(MessagePackInput& io, CustomWorkspaceType& value)
+            {
+                for(int i = 0; i < static_cast<int>(CustomWorkspaceType::CustomWorkspaceType_Count); i++)
+                {
+                    auto v = static_cast<CustomWorkspaceType>(i);
+                    io.enumCase(value, TensileLite::toString(v).c_str(), v);
+                }
             }
         };
 

@@ -270,6 +270,12 @@ def loadData(filename: str) -> list[Any]:
     normalized = False
     wasList = isinstance(data, list)
     data = convertToDict(data, filename)
+    lib_type = data.get("LibraryType")
+    if lib_type == "MeshBased":
+        sys.exit(
+            f"[Error] {filename}: MeshBased library type is not yet supported "
+            f"by TensileMergeLibrary."
+        )
     layoutUpdated = normalizeDictLibraryLayout(data)
     normalized = wasList or layoutUpdated
     return [filename, data, normalized]

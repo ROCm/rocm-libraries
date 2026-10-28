@@ -32,6 +32,7 @@
 #include <Tensile/SingleSolutionLibrary.hpp>
 
 #include <cstddef>
+#include <cstring>
 #include <tuple>
 #include <unordered_set>
 
@@ -57,7 +58,107 @@ namespace TensileLite
 
             static void mapping(IO& io, Table& table)
             {
-                iot::mapRequired(io, "table", table.table);
+                bool usedBin = false;
+
+                if constexpr(std::is_same_v<Key, std::array<int64_t, 4>>)
+                {
+                    const uint8_t* binPtr  = nullptr;
+                    size_t         binSize = 0;
+
+                    if(!iot::outputting(io)
+                       && iot::mapRawBytes(io, "table_bin", binPtr, binSize))
+                    {
+                        usedBin = true;
+
+                        int32_t count = 0;
+                        iot::mapRequired(io, "table_count", count);
+
+                        if(binSize != static_cast<size_t>(count) * 20)
+                        {
+                            iot::setError(
+                                io,
+                                concatenate("table_bin size mismatch: expected ",
+                                            count * 20, " bytes, got ", binSize));
+                        }
+                        else
+                        {
+                            using SSLibrary = SingleSolutionLibrary<ContractionProblemGemm,
+                                                                    ContractionSolution>;
+                            auto ctx = static_cast<LibraryIOContext<ContractionSolution>*>(
+                                iot::getContext(io));
+
+                            if(!ctx || (!ctx->blobCache && !ctx->solutions))
+                            {
+                                iot::setError(
+                                    io,
+                                    "table_bin requires LibraryIOContext with "
+                                    "solutions or blobCache.");
+                                return;
+                            }
+
+                            std::unordered_map<int32_t, std::shared_ptr<SSLibrary>> solCache;
+                            table.table.resize(count);
+
+                            for(int32_t i = 0; i < count; ++i)
+                            {
+                                const uint8_t* rec = binPtr + i * 20;
+                                int32_t k0, k1, k2, k3, idx;
+                                std::memcpy(&k0, rec,      sizeof(int32_t));
+                                std::memcpy(&k1, rec + 4,  sizeof(int32_t));
+                                std::memcpy(&k2, rec + 8,  sizeof(int32_t));
+                                std::memcpy(&k3, rec + 12, sizeof(int32_t));
+                                std::memcpy(&idx, rec + 16, sizeof(int32_t));
+
+                                auto& entry = table.table[i];
+                                entry.key   = {static_cast<int64_t>(k0),
+                                               static_cast<int64_t>(k1),
+                                               static_cast<int64_t>(k2),
+                                               static_cast<int64_t>(k3)};
+                                entry.speed = 0.0;
+
+                                auto [cacheIt, inserted] = solCache.try_emplace(idx, nullptr);
+                                if(inserted)
+                                {
+                                    if(ctx->blobCache)
+                                    {
+                                        if(!ctx->blobCache->contains(idx))
+                                        {
+                                            iot::setError(
+                                                io,
+                                                concatenate(
+                                                    "[MatchingLibrary] Invalid solution index: ",
+                                                    idx));
+                                            return;
+                                        }
+                                        cacheIt->second
+                                            = std::make_shared<SSLibrary>(idx, ctx->blobCache);
+                                    }
+                                    else
+                                    {
+                                        auto iter = ctx->solutions->find(idx);
+                                        if(iter == ctx->solutions->end())
+                                        {
+                                            iot::setError(
+                                                io,
+                                                concatenate(
+                                                    "[MatchingLibrary] Invalid solution index: ",
+                                                    idx));
+                                            return;
+                                        }
+                                        cacheIt->second
+                                            = std::make_shared<SSLibrary>(iter->second);
+                                    }
+                                }
+                                entry.value = cacheIt->second;
+                            }
+                        }
+                    }
+                }
+
+                if(!usedBin)
+                {
+                    iot::mapRequired(io, "table", table.table);
+                }
 
                 /// Should this GridBased matching table carry a kd-tree index?
                 ///
@@ -216,7 +317,7 @@ namespace TensileLite
                     success
                         = mappingDistance<Key, Matching::RandomDistance<Key>>(io, lib, properties);
                 }
-                else if(distanceType == "GridBased")
+                else if(distanceType == "GridBased" || distanceType == "MeshBased")
                 {
                     success = mappingDistance<Key, Matching::GridBasedDistance<Key>>(
                         io, lib, properties);

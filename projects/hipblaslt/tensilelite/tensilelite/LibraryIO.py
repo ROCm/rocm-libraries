@@ -260,6 +260,9 @@ def writeJson(filename, data):
         json_object = json.dumps(data, option=json.OPT_INDENT_2).decode("utf-8") if 'orjson' in sys.modules else json.dumps(data, indent=2)
         f.write(json_object)
 
+_packMeshTables = BinaryLibraryIO._packMeshTables
+
+
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
     BinaryLibraryIO.writeMessagePack(filename, data)
@@ -568,6 +571,69 @@ def parseLibraryLogicFile(
            )
 
 
+def _companionCsvXzPath(yamlPath):
+    p = yamlPath + ".csv.xz"
+    return p if os.path.isfile(p) else None
+
+
+def _loadMeshTableFromCsvXz(csvXzPath):
+    import csv as _csv
+    import lzma
+
+    table = []
+    with lzma.open(csvXzPath, "rt") as f:
+        reader = _csv.reader(f)
+        header = next(reader)
+        numCols = len(header)
+        if numCols == 6:
+            if header != ["M", "N", "batch", "K", "solutionIdx", "speed"]:
+                raise ValueError(
+                    f"{csvXzPath}: unexpected 6-column header: {header}"
+                )
+            hasSpeed = True
+        elif numCols == 5:
+            if header != ["M", "N", "batch", "K", "solutionIdx"]:
+                raise ValueError(
+                    f"{csvXzPath}: unexpected 5-column header: {header}"
+                )
+            hasSpeed = False
+        else:
+            raise ValueError(
+                f"{csvXzPath}: expected 5 or 6 columns, got {numCols}: {header}"
+            )
+        for lineNum, row in enumerate(reader, start=2):
+            if len(row) != numCols:
+                raise ValueError(
+                    f"{csvXzPath}:{lineNum}: expected {numCols} columns, "
+                    f"got {len(row)}"
+                )
+            key = [int(row[0]), int(row[1]), int(row[2]), int(row[3])]
+            if hasSpeed:
+                try:
+                    speed = float(row[5])
+                except (ValueError, IndexError) as e:
+                    raise ValueError(
+                        f"{csvXzPath}:{lineNum}: invalid speed value: {row[5]!r}"
+                    ) from e
+            else:
+                speed = 0.0
+            table.append([key, [int(row[4]), speed]])
+    return table
+
+
+def _validateTableSolutionIndices(table, solutions, sourcePath):
+    validIndices = {s["SolutionIndex"] for s in solutions}
+    if not validIndices:
+        return
+    csvIndices = {entry[1][0] for entry in table}
+    invalid = csvIndices - validIndices
+    if invalid:
+        raise ValueError(
+            f"{sourcePath}: references {len(invalid)} solution "
+            f"index(es) not in YAML: {sorted(invalid)[:20]}"
+        )
+
+
 def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
     """Attach runtime ``Library`` fields for dict-format library logic.
 
@@ -595,7 +661,7 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = None
         data["Library"]["table"] = [0, len(data["Solutions"])]
         data["Library"]["distance"] = None
-    elif libraryType in ("Equality", "GridBased", "Range"):
+    elif libraryType in ("Equality", "GridBased", "MeshBased", "Range"):
         data["LibraryType"] = "Matching"
         data["Library"] = {}
         data["Library"]["indexOrder"] = data["IndexOrder"]
@@ -700,6 +766,23 @@ def parseLibraryLogicData(
 
     if archRenames:
         data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
+
+    if data.get("Library", {}).get("distance") == "MeshBased" and srcFile:
+        companion = _companionCsvXzPath(srcFile)
+        if data.get("Library", {}).get("table"):
+            if companion:
+                printWarning(f"Companion CSV {companion} ignored — "
+                             f"table already present in YAML")
+        else:
+            if not companion:
+                printExit(f"No companion CSV found for {srcFile} and "
+                          f"ExactLogic is empty")
+            data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
+            data["ExactLogic"] = data["Library"]["table"]
+            _validateTableSolutionIndices(
+                data["Library"]["table"], data.get("Solutions", []), companion
+            )
+
     if "CUCount" not in data:
         data["CUCount"] = None
     normalizeLogicProblemType(data["ProblemType"])
