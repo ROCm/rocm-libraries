@@ -78,6 +78,7 @@ if(TENSILELITE_ENABLE_CODEGEN)
 
     target_sources(tensilelite-codegen
         PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/API/SkinnyGEMM.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Codegen/IRBuilder.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Codegen/Kernel.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/Codegen/Registers.cpp"
