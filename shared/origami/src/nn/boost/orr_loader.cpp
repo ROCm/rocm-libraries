@@ -19,6 +19,11 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#  include <emmintrin.h>
+#  include <xmmintrin.h>
+#endif
+
 #include "origami/nn/boost/library_stamp.hpp"
 #include "origami/nn/boost/load_limits.hpp"
 #include "origami/nn/boost/loaded_model.hpp"
@@ -77,23 +82,32 @@ struct node_t {
 // thresholds of feature f and bin(x) = #{t in T_f : t < x}, x <= T_f[k] exactly when
 // bin(x) <= k, so a node keeps only its threshold's index k and the walk compares bytes. Rows
 // are binned once per call. NaN bins to 255 and goes right, as !(NaN <= t) does.
+//
+// A tree's leaf values are stored in the order of their positions, so the walk reads no value
+// slots for internal nodes: a leaf keeps its ordinal in bin (bin < 255 = its feature's bin, so it
+// still goes "right", to itself). A tree with more than 255 leaves keeps a value per position.
 struct detail::forest_t {
   struct node_t {
     std::uint8_t  feature;  // kLeafFeature for a leaf
-    std::uint8_t  bin;      // index of the threshold in T_feature (0 for a leaf)
+    std::uint8_t  bin;      // index of the threshold in T_feature; a leaf's ordinal in its tree
     std::uint16_t left;     // left child relative to the tree root; a leaf holds itself - 1
   };
   static constexpr std::uint8_t kLeafFeature = 255;  // its bin is always 255: a leaf goes "right"
-  std::vector<node_t>        nodes;       // same positions as ensemble_t::nodes_
-  std::vector<double>        thresholds;  // every T_f, concatenated
-  std::vector<std::uint32_t> begin;       // T_f = thresholds[begin[f], begin[f + 1])
-  std::vector<std::uint8_t>  used;        // features with at least one split
+  static constexpr std::size_t  kMaxOrdinals = 255;  // leaves per tree with ordinals in bin
+  std::vector<node_t>        nodes;        // same positions as model_parser's nodes
+  std::vector<double>        leaf_values;  // per tree, from leaf_begin[t]
+  std::vector<std::uint32_t> leaf_begin;
+  std::vector<std::uint8_t>  by_position;  // per tree: values indexed by position, not ordinal
+  std::vector<double>        thresholds;   // every T_f, concatenated
+  std::vector<std::uint32_t> begin;        // T_f = thresholds[begin[f], begin[f + 1])
+  std::vector<std::uint8_t>  used;         // features with at least one split
 };
 
 namespace {
 
 // nullptr when the model does not fit the byte encoding (the loader then refuses it).
 std::shared_ptr<const detail::forest_t> build_forest(const std::vector<node_t>& nodes,
+                                                     const std::vector<double>& values,
                                                      const std::vector<std::int32_t>& roots,
                                                      std::size_t                      num_features) {
   using forest_t = detail::forest_t;
@@ -121,10 +135,18 @@ std::shared_ptr<const detail::forest_t> build_forest(const std::vector<node_t>& 
     const std::size_t b = static_cast<std::size_t>(roots[t]);
     const std::size_t e = t + 1 < roots.size() ? static_cast<std::size_t>(roots[t + 1]) : nodes.size();
     if (e - b > detail::kMaxNodesPerTree) return nullptr;
+    std::size_t num_leaves = 0;
+    for (std::size_t p = b; p < e; ++p) num_leaves += is_leaf(p);
+    const bool by_position = num_leaves > forest_t::kMaxOrdinals;
+    f->leaf_begin.push_back(static_cast<std::uint32_t>(f->leaf_values.size()));
+    f->by_position.push_back(by_position);
+    std::size_t ordinal = 0;
     for (std::size_t p = b; p < e; ++p) {
       const auto& nd = nodes[p];
       if (is_leaf(p)) {
-        f->nodes[p] = {forest_t::kLeafFeature, 0, static_cast<std::uint16_t>(p - b - 1)};
+        const auto bin = static_cast<std::uint8_t>(by_position ? 0 : ordinal++);
+        f->nodes[p]    = {forest_t::kLeafFeature, bin, static_cast<std::uint16_t>(p - b - 1)};
+        if (!by_position) f->leaf_values.push_back(values[p]);
         continue;
       }
       const double* T   = f->thresholds.data() + f->begin[nd.feature];
@@ -133,17 +155,70 @@ std::shared_ptr<const detail::forest_t> build_forest(const std::vector<node_t>& 
                            static_cast<std::uint8_t>(std::lower_bound(T, end, nd.threshold) - T),
                            static_cast<std::uint16_t>(static_cast<std::size_t>(nd.left) - b)};
     }
+    if (by_position)
+      f->leaf_values.insert(f->leaf_values.end(), values.begin() + static_cast<std::ptrdiff_t>(b),
+                            values.begin() + static_cast<std::ptrdiff_t>(e));
   }
+  f->leaf_begin.push_back(static_cast<std::uint32_t>(f->leaf_values.size()));
   return f;
 }
 
+// All ones if a < b, else 0 (false for NaN, as a < b). Without a branch: which way each step of
+// the threshold search goes depends on the row, so a branch mispredicts on every new problem
+// (the gate's repeated call hid this), and the mispredictions cost more than the search.
+inline std::size_t less_mask(double a, double b) {
+#if defined(__x86_64__) || defined(_M_X64)
+  return static_cast<std::size_t>(
+      _mm_cvtsi128_si64(_mm_castpd_si128(_mm_cmplt_sd(_mm_set_sd(a), _mm_set_sd(b)))));
+#else
+  return std::size_t{0} - static_cast<std::size_t>(a < b);
+#endif
+}
+
+// Requests every cache line of [p, p + bytes) (a hint: it never faults).
+inline void prefetch_lines(const void* p, std::size_t bytes) {
+  const auto begin = reinterpret_cast<std::uintptr_t>(p) & ~std::uintptr_t{63};
+  const auto end   = reinterpret_cast<std::uintptr_t>(p) + bytes;
+  for (std::uintptr_t q = begin; q < end; q += 64) {
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_prefetch(reinterpret_cast<const void*>(q));
+#elif defined(_M_X64)
+    _mm_prefetch(reinterpret_cast<const char*>(q), _MM_HINT_T0);
+#endif
+  }
+}
+
+// How far ahead the walk requests the thresholds of the features it bins and the nodes and leaf
+// values of the trees it walks. Selection evaluates the model once per call; in a process that
+// makes few heuristic calls with other memory traffic in between (hipblaslt-bench), none of the
+// model is cached, and without the requests each search step and tree level waits on DRAM.
+constexpr std::size_t kThresholdLookahead = 2;  // features
+constexpr std::size_t kTreeLookahead      = 8;  // trees
+
 // All R rows through one tree at a time; leaves are added in tree order.
 template <int R>
-void forest_walk(const detail::forest_t& f, const double* values, const std::int32_t* roots,
+void forest_walk(const detail::forest_t& f, const std::int32_t* roots,
                  const std::uint32_t* depths, std::size_t num_trees, const double* rows,
                  std::size_t nf, double init, double* out) {
+  auto prefetch_feature = [&](std::size_t u) {
+    const std::uint8_t j = f.used[u];
+    prefetch_lines(f.thresholds.data() + f.begin[j],
+                   (f.begin[j + 1u] - f.begin[j]) * sizeof(double));
+  };
+  auto prefetch_tree = [&](std::size_t t) {
+    const std::size_t b = static_cast<std::size_t>(roots[t]);
+    const std::size_t e =
+        t + 1 < num_trees ? static_cast<std::size_t>(roots[t + 1]) : f.nodes.size();
+    prefetch_lines(f.nodes.data() + b, (e - b) * sizeof(detail::forest_t::node_t));
+    prefetch_lines(f.leaf_values.data() + f.leaf_begin[t],
+                   (f.leaf_begin[t + 1] - f.leaf_begin[t]) * sizeof(double));
+  };
+  const std::size_t nu = f.used.size();
+  for (std::size_t u = 0; u < std::min(kThresholdLookahead, nu); ++u) prefetch_feature(u);
   alignas(64) std::uint8_t xb[R][256];
-  for (const std::uint8_t j : f.used) {
+  for (std::size_t u = 0; u < nu; ++u) {
+    if (u + kThresholdLookahead < nu) prefetch_feature(u + kThresholdLookahead);
+    const std::uint8_t j = f.used[u];
     const double*     T = f.thresholds.data() + f.begin[j];
     const std::size_t K = f.begin[j + 1u] - f.begin[j];
     std::size_t       lo[R];
@@ -155,7 +230,7 @@ void forest_walk(const detail::forest_t& f, const double* values, const std::int
     for (std::size_t len = K; len > 1;) {
       const std::size_t half = len / 2;
       for (int i = 0; i < R; ++i)
-        lo[i] += half & (std::size_t{0} - static_cast<std::size_t>(T[lo[i] + half - 1] < x[i]));
+        lo[i] += half & less_mask(T[lo[i] + half - 1], x[i]);
       len -= half;
     }
     for (int i = 0; i < R; ++i)
@@ -166,7 +241,9 @@ void forest_walk(const detail::forest_t& f, const double* values, const std::int
 
   double sum[R];
   for (int i = 0; i < R; ++i) sum[i] = 0.0;
+  for (std::size_t t = 0; t < std::min(kTreeLookahead, num_trees); ++t) prefetch_tree(t);
   for (std::size_t t = 0; t < num_trees; ++t) {
+    if (t + kTreeLookahead < num_trees) prefetch_tree(t + kTreeLookahead);
     const auto*   nb = f.nodes.data() + roots[t];
     std::uint32_t cur[R];
     for (int i = 0; i < R; ++i) cur[i] = 0;
@@ -175,8 +252,11 @@ void forest_walk(const detail::forest_t& f, const double* values, const std::int
         const auto& nd = nb[cur[i]];
         cur[i]         = nd.left + static_cast<std::uint32_t>(nd.bin < xb[i][nd.feature]);
       }
-    const double* v = values + roots[t];
-    for (int i = 0; i < R; ++i) sum[i] += v[cur[i]];
+    const double* v = f.leaf_values.data() + f.leaf_begin[t];
+    if (f.by_position[t])
+      for (int i = 0; i < R; ++i) sum[i] += v[cur[i]];
+    else
+      for (int i = 0; i < R; ++i) sum[i] += v[nb[cur[i]].bin];
   }
   for (int i = 0; i < R; ++i) out[i] = sum[i] + init;
 }
@@ -215,6 +295,7 @@ struct model_parser {
 
     std::shared_ptr<ensemble_t> m(new ensemble_t());
     std::vector<node_t>         nodes;
+    std::vector<double>         values;  // leaf value per node position
     std::string                 mani_dtype;
     reader_t                    r{body, static_cast<std::size_t>(body_len)};
     std::set<std::string>       seen;
@@ -242,7 +323,7 @@ struct model_parser {
       const bool sec_ok = tag == "HEAD"   ? parse_head(s, *m, detail)
                           : tag == "FEAT" ? parse_feat(s, *m, detail)
                           : tag == "RNGE" ? parse_rnge(s, *m)
-                                          : parse_tree(s, *m, nodes, status, detail);
+                                          : parse_tree(s, *m, nodes, values, status, detail);
       if (!sec_ok || !s.ok || s.o != s.n) {
         if (detail.empty()) detail = "malformed section " + tag;
         return nullptr;
@@ -272,7 +353,7 @@ struct model_parser {
       detail = "MANI dtype " + mani_dtype + " differs from HEAD dtype " + m->head_string("dtype");
       return nullptr;
     }
-    m->forest_ = build_forest(nodes, m->tree_root_, m->features_.size());
+    m->forest_ = build_forest(nodes, values, m->tree_root_, m->features_.size());
     if (!m->forest_) {
       status = status_t::unsupported_format;
       detail = "trees do not fit the quantized evaluator (more than 254 features, 254 thresholds "
@@ -365,8 +446,8 @@ struct model_parser {
     return true;
   }
 
-  static bool parse_tree(reader_t& s, ensemble_t& m, std::vector<node_t>& nodes, status_t& status,
-                         std::string& detail) {
+  static bool parse_tree(reader_t& s, ensemble_t& m, std::vector<node_t>& nodes,
+                         std::vector<double>& values, status_t& status, std::string& detail) {
     const auto num_trees = s.get<std::uint32_t>();
     const auto nf        = static_cast<std::int32_t>(m.features_.size());
     for (std::uint32_t t = 0; t < num_trees && s.ok; ++t) {
@@ -435,7 +516,7 @@ struct model_parser {
       std::vector<std::int32_t> slot_leaf(static_cast<std::size_t>(L), -1);
       const std::size_t total = static_cast<std::size_t>(I) + static_cast<std::size_t>(L);
       nodes.resize(nodes.size() + total);
-      m.values_.resize(m.values_.size() + total, 0.0);
+      values.resize(values.size() + total, 0.0);
       std::int32_t next = base;
       if (I == 0) {
         slot_leaf[0] = next++;
@@ -475,7 +556,7 @@ struct model_parser {
         const std::int32_t pos = slot_leaf[static_cast<std::size_t>(j)];
         nodes[static_cast<std::size_t>(pos)] = {std::numeric_limits<double>::infinity(), pos, 0, 0,
                                                 0};
-        m.values_[static_cast<std::size_t>(pos)] = leaf[static_cast<std::size_t>(j)];
+        values[static_cast<std::size_t>(pos)] = leaf[static_cast<std::size_t>(j)];
       }
       m.tree_root_.push_back(base);
       m.tree_depth_.push_back(max_depth);
@@ -527,8 +608,8 @@ double ensemble_t::evaluate(const double* row) const {
 void ensemble_t::evaluate_batch(const double* rows, std::size_t n, double* out) const {
   const std::size_t nf  = features_.size();
   auto              run = [&](auto r, const double* x, double* y) {
-    forest_walk<decltype(r)::value>(*forest_, values_.data(), tree_root_.data(),
-                                    tree_depth_.data(), tree_root_.size(), x, nf, 0.0, y);
+    forest_walk<decltype(r)::value>(*forest_, tree_root_.data(), tree_depth_.data(),
+                                    tree_root_.size(), x, nf, 0.0, y);
   };
   constexpr std::size_t kMax = 16;
   for (; n >= kMax; n -= kMax, rows += kMax * nf, out += kMax)
