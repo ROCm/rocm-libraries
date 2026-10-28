@@ -26,6 +26,7 @@
 #include <fstream>
 #include <new>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #ifdef _WIN32
@@ -547,6 +548,8 @@ namespace hipblaslt_jit
             std::shared_ptr<GemmMaster>                       master;
             files::FileIdentity                               masterFile, mappingFile;
             std::map<int, TensileLite::hip::SolutionAdapter*> adapters;
+            // Code-object prefixes already passed to hipModuleLoad on this device.
+            std::map<int, std::set<std::string>>              loadedCodeObjects;
 
             fs::path masterPath(const Target& target) const
             {
@@ -564,6 +567,7 @@ namespace hipblaslt_jit
                 const auto mappingNow = files::identify(mappingPath(target));
                 if(loaded && masterNow == masterFile && mappingNow == mappingFile)
                     return {};
+                loadedCodeObjects.clear();
                 std::shared_ptr<GemmMaster> library;
                 if(masterNow.exists)
                 {
@@ -603,6 +607,31 @@ namespace hipblaslt_jit
 
         std::mutex                                  sliceMutex;
         std::map<std::string, std::unique_ptr<Slice>> slices;
+        std::mutex                                    indexMutex;
+        files::FileIdentity                           indexIdentity;
+        bool                                          indexKnown = false;
+        std::map<int, std::string>                    indexCache;
+
+        // Reads indices.msgpack again only when the file changes.
+        Status indexMap(std::map<int, std::string>& mapping)
+        {
+            std::lock_guard<std::mutex> lock(indexMutex);
+            const auto                  now = files::identify(indexMapPath());
+            if(!indexKnown || now != indexIdentity)
+            {
+                std::map<int, std::string> fresh;
+                if(now.exists)
+                {
+                    if(auto status = readMapping(Stage::Lookup, indexMapPath(), fresh); !status.ok())
+                        return status;
+                }
+                indexCache    = std::move(fresh);
+                indexIdentity = now;
+                indexKnown    = true;
+            }
+            mapping = indexCache;
+            return {};
+        }
 
         fs::path keyPath() const
         {
@@ -1232,9 +1261,7 @@ namespace hipblaslt_jit
                 for(auto* directory : routes)
                 {
                     std::map<int, std::string> indexMap;
-                    if(auto status
-                       = readMapping(Stage::Lookup, directory->indexMapPath(), indexMap);
-                       !status.ok())
+                    if(auto status = directory->indexMap(indexMap); !status.ok())
                     {
                         reloadFailure = std::move(status);
                         continue;
@@ -1256,8 +1283,9 @@ namespace hipblaslt_jit
                     {
                         auto*      adapter = slice->adapter(device);
                         const auto prefix  = slice->master->libraryMapping.at(index);
-                        static_cast<void>(adapter->loadCodeObjectFile(
-                            (slice->path / (prefix + ".co")).string()));
+                        if(slice->loadedCodeObjects[device].insert(prefix).second)
+                            static_cast<void>(adapter->loadCodeObjectFile(
+                                (slice->path / (prefix + ".co")).string()));
                         view = {slice->master, adapter};
                         return {};
                     }
@@ -1325,6 +1353,25 @@ namespace hipblaslt_jit
             auto problemCopy = problem;
             problemCopy.setWorkspaceSize(query.workspace);
             const auto key = CacheKey::make(query.target, query.backend, jitCodeObjectVersion);
+            std::ostringstream attempt;
+            attempt << query.target.device << '|' << query.target.processorName() << '|'
+                    << query.backend.id << '|' << query.backend.version << '|' << query.workspace
+                    << '|' << problem.operationIdentifier();
+            for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                attempt << "|a" << problem.freeSizeA(i);
+            for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                attempt << "|b" << problem.freeSizeB(i);
+            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                attempt << "|batch" << problem.batchSize(i);
+            for(const auto& name : query.exclude)
+                attempt << "|x" << name;
+            static std::mutex            attemptedMutex;
+            static std::set<std::string> attempted;
+            bool                         alreadyGenerated = false;
+            {
+                std::lock_guard<std::mutex> guard(attemptedMutex);
+                alreadyGenerated = attempted.count(attempt.str()) != 0;
+            }
             std::vector<int32_t> indices;
             query.failure = library.lookup(key,
                                            query.target.device,
@@ -1334,8 +1381,11 @@ namespace hipblaslt_jit
                                            query.exclude,
                                            indices);
             const bool miss = indices.size() < static_cast<size_t>(numSolutions);
-            if(generate && query.allowGeneration && miss && query.generate && query.failure.ok())
+            if(generate && query.allowGeneration && miss && !alreadyGenerated && query.generate
+               && query.failure.ok())
             {
+                std::lock_guard<std::mutex> guard(attemptedMutex);
+                attempted.insert(attempt.str());
                 auto exclude = query.exclude;
                 for(auto index : indices)
                 {
