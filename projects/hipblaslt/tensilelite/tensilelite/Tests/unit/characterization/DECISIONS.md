@@ -701,3 +701,30 @@ tests carry the evidence for this change.
 **ADR:** [`adr/0032-leave-epilogues-out-by-default.md`](adr/0032-leave-epilogues-out-by-default.md)
 
 **Decision:** geko's merge adds the epilogue settings (`Activation`, `ActivationType`, `UseBias`, `BiasDataTypeList`, `UseScaleAlphaVec`, `UseScaleAB`) to every library after tuning, so carrying them (D48) made the extracted config tune the shipped epilogue kernel rather than the kernel the run tuned. They are now removed unless `--keep-epilogues` is given (a handwritten custom kernel keeps them), a benchmark header's bias types go with them, and an empty `BiasTypeArgs` is no longer written. The gfx950 `test_TensileLibLogicToYaml` golden loses those four lines, `test_benchmark_tree_to_config` no longer expects the header's bias types, and the `main()` stubs take the new argument; the kept behavior moves to new tests. Intended behavior change.
+
+## D50 — `LocalDotLayout` added as a solution parameter
+
+**ADR:** [`adr/0037-local-dot-layout-solution-parameter.md`](adr/0037-local-dot-layout-solution-parameter.md)
+
+**Decision:** Re-add `LocalDotLayout` as a benchmark common parameter with the values 1, 2, 4 and
+8, default 1, so that `LocalDotLayout=4` selects the four-way signed 8-bit dot product
+(`v_dot4c_i32_i8`). TensileLite 5 dropped the parameter, and with it the only int8 MAC that is
+correct for packed 8-bit data: the classic one-byte-per-register MAC scatters four bytes over
+four 32-byte planes on the local write and fetches four contiguous bytes on the local read, so
+one byte in four survives and the result is silently wrong.
+
+**Why:** the four-way dot is the path AMD's own shipped rocBLAS gfx1030 int8 kernel uses, and
+without a parameter to select it there is no way to ask TensileLite for that kernel.
+
+**Verification:** 17 golden nodes are re-recorded, one at a time
+(`pytest <node-id> --snapshot-update`) — twelve in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr`, three in
+`SolutionClass/__snapshots__/test_solution_class_char.ambr` and two in
+`ValidParameters/__snapshots__/test_builders_char.ambr`. Each affected node gains exactly one
+entry (`'LocalDotLayout': 1`) and nothing else moves, except the solution name, which gains an
+`LDL1` token, and the solution key count, which goes from 355 to 356 — upstream's base adds a
+solution parameter of its own, so the count starts one higher than the 354 the re-record was
+first made against. The kernel
+identity does not move — `LocalDotLayout` is not in the required (min-naming) parameter set, so
+no kernel basename or hash changes and the `_codegen` goldens that pin the emitted assembly stay
+byte-identical. Intended behavior change.
