@@ -102,7 +102,7 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSize(hipsparseHandle_t         
                                                       size_t*                   pBufferSizeInBytes);
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSize computes the the size of the user-allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSize computes the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
@@ -247,7 +247,7 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSizeExt computes the the size of the user-allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSizeExt computes the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details

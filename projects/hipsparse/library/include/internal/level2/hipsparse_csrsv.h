@@ -123,7 +123,7 @@ hipsparseStatus_t hipsparseScsrsv2_bufferSize(hipsparseHandle_t         handle,
 /*! \ingroup level2_module
 *  \details
 *  \p hipsparseXcsrsv2_bufferSize returns the size of the temporary storage buffer in bytes
-*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseScsrsv2_analysis()" and
+*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
 *  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must
 *  be allocated by the user.
 *
@@ -175,7 +175,7 @@ hipsparseStatus_t hipsparseDcsrsv2_bufferSize(hipsparseHandle_t         handle,
 /*! \ingroup level2_module
 *  \details
 *  \p hipsparseXcsrsv2_bufferSize returns the size of the temporary storage buffer in bytes
-*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseScsrsv2_analysis()" and
+*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
 *  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must
 *  be allocated by the user.
 *
@@ -227,7 +227,7 @@ hipsparseStatus_t hipsparseCcsrsv2_bufferSize(hipsparseHandle_t         handle,
 /*! \ingroup level2_module
 *  \details
 *  \p hipsparseXcsrsv2_bufferSize returns the size of the temporary storage buffer in bytes
-*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseScsrsv2_analysis()" and
+*  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
 *  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must
 *  be allocated by the user.
 *
@@ -335,7 +335,7 @@ hipsparseStatus_t hipsparseScsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \details
 *  \p hipsparseXcsrsv2_bufferSizeExt returns the size of the temporary storage buffer in bytes
 *  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
-*  \ref hipsparseScsrsv2_solve "hipsparseScsrsv2_solve()". The temporary storage buffer must be
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must be
 *  allocated by the user.
 *
 *  @param[in]
@@ -386,7 +386,7 @@ hipsparseStatus_t hipsparseDcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \details
 *  \p hipsparseXcsrsv2_bufferSizeExt returns the size of the temporary storage buffer in bytes
 *  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
-*  \ref hipsparseScsrsv2_solve "hipsparseScsrsv2_solve()". The temporary storage buffer must be
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must be
 *  allocated by the user.
 *
 *  @param[in]
@@ -437,7 +437,7 @@ hipsparseStatus_t hipsparseCcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  \details
 *  \p hipsparseXcsrsv2_bufferSizeExt returns the size of the temporary storage buffer in bytes
 *  that is required by \ref hipsparseScsrsv2_analysis "hipsparseXcsrsv2_analysis()" and
-*  \ref hipsparseScsrsv2_solve "hipsparseScsrsv2_solve()". The temporary storage buffer must be
+*  \ref hipsparseScsrsv2_solve "hipsparseXcsrsv2_solve()". The temporary storage buffer must be
 *  allocated by the user.
 *
 *  @param[in]
