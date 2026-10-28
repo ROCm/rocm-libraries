@@ -14,9 +14,9 @@ from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
 ARCH = "gfx950"
 CASES = (
-    (1, "kda_w128", (4, 16, 4)),
-    (8, "kda_w512", (1, 16, 4)),
-    (32, "kda_w_large", (2, 16, 1)),
+    (1, "kda_nw4_wtk16_bpv4", (4, 16, 4)),
+    (8, "kda_nw1_wtk16_bpv4", (1, 16, 4)),
+    (32, "kda_nw2_wtk16_bpv1", (2, 16, 1)),
 )
 
 
@@ -74,11 +74,8 @@ def test_dispatched_kda_tile_is_scratch_free(batch, expected_spec_id, expected_t
             head_v_dim=128,
         )
     )
-    tile = (
-        result.spec.num_warps,
-        result.spec.warp_threads_k,
-        result.spec.blocks_per_v_dim,
-    )
+    spec = result.spec.kernel_spec
+    tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
     assert result.candidate.spec_id == expected_spec_id
     assert tile == expected_tile
 

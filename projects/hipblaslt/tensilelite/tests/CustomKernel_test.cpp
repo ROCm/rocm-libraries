@@ -31,6 +31,7 @@
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -250,4 +251,64 @@ TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
     EXPECT_EQ(computeUnitsLaunch(64, 48), std::make_pair(size_t{48}, int32_t{48}));
     EXPECT_EQ(computeUnitsLaunch(0, 96), std::make_pair(size_t{96}, int32_t{96}));
     EXPECT_EQ(computeUnitsLaunch(4 * cus, 0), std::make_pair(size_t{cus}, int32_t{cus}));
+}
+
+namespace
+{
+    char const fusedPeerFlag = 0;
+    char const fusedCounter  = 0;
+
+    constexpr size_t peerGroupBytes     = FUSED_A2A_SLOT_COUNT * sizeof(void*);
+    constexpr size_t peer0FlagOffset    = 0;
+    constexpr size_t peer1FlagOffset    = peer0FlagOffset + peerGroupBytes;
+    constexpr size_t counterOffset      = peer0FlagOffset + FUSED_A2A_MAX_RANKS * peerGroupBytes;
+    constexpr size_t fusedMyRankOffset  = counterOffset + sizeof(void*);
+    constexpr size_t fusedWOffset       = fusedMyRankOffset + sizeof(uint32_t);
+    constexpr size_t fusedDrainOffset   = fusedWOffset + sizeof(uint32_t);
+    constexpr size_t fusedAMOffset      = fusedDrainOffset + sizeof(uint32_t);
+
+    template <typename T>
+    T packedAt(KernelArguments const& args, size_t offset)
+    {
+        T result{};
+        std::memcpy(&result, static_cast<uint8_t const*>(args.data()) + offset, sizeof(T));
+        return result;
+    }
+
+    KernelInvocation fusedCustomCall()
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
+
+        auto problem = dummyProblem();
+        problem.setFusedGemmA2A(true);
+        problem.setFusedA2AWorld(2);
+        problem.setFusedA2AExtent(256);
+
+        FusedA2APeerFields peer0{};
+        peer0[FUSED_A2A_SLOT_FLAG_PTR] = const_cast<char*>(&fusedPeerFlag);
+
+        ContractionInputs inputs;
+        inputs.fusedA2APeers   = {peer0};
+        inputs.fusedA2ACounter = const_cast<char*>(&fusedCounter);
+        inputs.fusedA2AMyRank  = 1;
+        inputs.fusedA2ADrain   = FUSED_A2A_DRAIN_RECV;
+
+        return solution.generateCustomCall<false>(
+            problem, inputs, probeDevice(), StreamKSettings{});
+    }
+}
+
+TEST(CustomKernelTest, FusedSegmentPacksEveryField)
+{
+    auto fused = fusedCustomCall();
+    ASSERT_EQ(fused.args.size(), FUSED_A2A_SEGMENT_BYTES);
+
+    EXPECT_EQ(packedAt<void*>(fused.args, peer0FlagOffset), const_cast<char*>(&fusedPeerFlag));
+    EXPECT_EQ(packedAt<void*>(fused.args, peer1FlagOffset), nullptr);
+    EXPECT_EQ(packedAt<void*>(fused.args, counterOffset), const_cast<char*>(&fusedCounter));
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedMyRankOffset), 1u);
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
 }

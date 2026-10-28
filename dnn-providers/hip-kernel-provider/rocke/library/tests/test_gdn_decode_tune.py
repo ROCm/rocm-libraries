@@ -47,7 +47,7 @@ def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, cap
     def fake_results(request):
         return () if request.num_k_heads == 16 and request.batch == 2 else (object(),)
 
-    monkeypatch.setattr(tune, "dispatch_gdn_decode_all", fake_results)
+    monkeypatch.setattr(tune, "dispatch_gdn_decode_bases", fake_results)
     monkeypatch.setattr(
         tune,
         "sweep_registry_batch",
@@ -81,7 +81,7 @@ def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
     monkeypatch.setattr(tune, "device_is_visible", lambda: True)
     monkeypatch.setattr(
         tune,
-        "dispatch_gdn_decode_all",
+        "dispatch_gdn_decode_bases",
         lambda request: (object(), object(), object()),
     )
     monkeypatch.setattr(
@@ -114,7 +114,7 @@ def test_main_reports_dispatcher_default_outside_top_rows(monkeypatch, capsys):
 def test_main_reports_missing_gdn_default_and_continues(monkeypatch, capsys):
     monkeypatch.setattr(tune, "device_is_visible", lambda: True)
     monkeypatch.setattr(
-        tune, "dispatch_gdn_decode_all", lambda request: (object(), object())
+        tune, "dispatch_gdn_decode_bases", lambda request: (object(), object())
     )
     # Batch 1: the default failed correctness, so it never reached the rows.
     rows = {
@@ -164,10 +164,12 @@ def test_main_flags_kda_cells_with_equal_work_and_different_best_tiles(
         "dispatch_gdn_decode",
         lambda request: SimpleNamespace(
             spec=SimpleNamespace(
-                num_warps=shipped[0],
-                warp_threads_k=shipped[1],
-                blocks_per_v_dim=shipped[2],
-                num_v_heads=request.num_v_heads,
+                kernel_spec=SimpleNamespace(
+                    num_warps=shipped[0],
+                    warp_threads_k=shipped[1],
+                    blocks_per_v_dim=shipped[2],
+                    num_v_heads=request.num_v_heads,
+                )
             )
         ),
     )

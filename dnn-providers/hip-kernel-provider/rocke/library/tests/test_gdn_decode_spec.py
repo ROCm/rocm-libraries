@@ -367,40 +367,53 @@ class TestEmission(unittest.TestCase):
         # 1188 B with ROCm 7.13 on gfx950). Require only that it compiles.
         _compiled_scratch_bytes(self, GdnDecodeSpec(simple=True))
 
-    def test_registered_gdn_tiles_compile(self):
-        from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+    def test_registered_tiles_compile(self):
+        from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
+        from dispatch.gdn.gfx950 import spec_id_for
 
         # Register-bound tiles: warp_threads_k=1 gives each lane the whole K
         # reduction, so these sit at the 512-VGPR limit and whether (and how
-        # much) they spill depends on the compiler. Measured on gfx950:
-        #   nw1_wtk1_bpv1  448 B (ROCm 7.1)  364 B (ROCm 7.13)
-        #   nw1_wtk1_bpv2    0 B             372-388 B
-        #   nw2_wtk1_bpv1    0 B             376-404 B
-        # GDN ``auto`` never selects them (it always picks DEFAULT_TILE); they
-        # stay registered because they can be pinned and (1,1,1) is the
-        # fallback when DEFAULT_TILE is illegal. They may spill up to
-        # SPILL_BUDGET_BYTES, which absorbs compiler drift but still catches a
-        # register-pressure blowup. Every other registered tile must not spill.
-        SPILL_BUDGET_BYTES = 512
-        may_spill = {"nw1_wtk1_bpv1", "nw1_wtk1_bpv2", "nw2_wtk1_bpv1"}
-        results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=16, arch="gfx950"))
-        registered = {result.candidate.spec_id for result in results}
-        self.assertLessEqual(may_spill, registered, "stale may_spill entry")
-        for result in results:
-            with self.subTest(spec_id=result.candidate.spec_id):
-                scratch = _compiled_scratch_bytes(self, result.spec)
-                if result.candidate.spec_id in may_spill:
-                    self.assertLessEqual(scratch, SPILL_BUDGET_BYTES)
-                else:
-                    self.assertEqual(scratch, 0)
+        # much) they spill depends on the compiler. Measured on gfx950, bf16
+        # state:
+        #                     ROCm 7.1   ROCm 7.13
+        #   nw1_wtk1_bpv1      448 B      364-372 B
+        #   nw1_wtk1_bpv2        0 B      372-388 B
+        #   nw2_wtk1_bpv1        0 B      376-404 B
+        #   kda_nw1_wtk1_bpv1  980 B      496 B
+        #   kda_nw1_wtk1_bpv2    0 B      388 B
+        #   kda_nw2_wtk1_bpv1    0 B      364 B
+        # (the KDA gate holds a decay per K channel, hence more registers).
+        # ``auto`` never selects them (GDN always picks DEFAULT_TILE, KDA its
+        # work table); they stay registered for both gate kinds because they
+        # can be pinned and (1,1,1) is the fallback when the auto tile is
+        # illegal. They may spill up to their gate kind's budget, which absorbs
+        # compiler drift but still catches a register-pressure blowup. Every
+        # other registered tile of either gate kind must not spill.
+        spill_budget_bytes = {"gdn": 512, "kda": 1024}
+        register_bound = ((1, 1, 1), (1, 1, 2), (2, 1, 1))
+        for gate_kind in ("gdn", "kda"):
+            may_spill = {spec_id_for(tile, gate_kind) for tile in register_bound}
+            # Each registered tile's base configuration (the knob-free kernel).
+            results = dispatch_gdn_decode_bases(
+                GdnDecodeRequest(batch=16, arch="gfx950", gate_kind=gate_kind)
+            )
+            registered = {result.candidate.spec_id for result in results}
+            self.assertLessEqual(may_spill, registered, "stale may_spill entry")
+            for result in results:
+                with self.subTest(spec_id=result.candidate.spec_id):
+                    scratch = _compiled_scratch_bytes(self, result.spec.kernel_spec)
+                    if result.candidate.spec_id in may_spill:
+                        self.assertLessEqual(scratch, spill_budget_bytes[gate_kind])
+                    else:
+                        self.assertEqual(scratch, 0)
 
     def test_every_kda_tuned_tile_compiles(self):
         from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
 
         # f32 doubles the state registers each lane loads, so both widths run.
         for state_dtype in ("bf16", "f32"):
-            for _, tile, spec_id in _TUNED_TILES_KDA:
-                with self.subTest(spec_id=spec_id, state_dtype=state_dtype):
+            for _, tile in _TUNED_TILES_KDA:
+                with self.subTest(tile=tile, state_dtype=state_dtype):
                     spec = dc.replace(
                         GdnDecodeSpec(),
                         gate_kind="kda",

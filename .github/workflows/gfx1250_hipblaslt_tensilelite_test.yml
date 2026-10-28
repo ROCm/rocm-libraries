@@ -129,8 +129,18 @@ jobs:
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
       # Unset: the strict-mode check falls back to the runner name's -gpuN.
+      # --memory is this job's memory budget, not just a runaway guard: RUNNERS_PER_HOST=4
+      # of these share one ~499 GiB machine, so the cap has to be near host/4 for four
+      # concurrent jobs to fit. 110g leaves ~59 GiB for the OS and Docker. A larger cap
+      # is not a real boundary: a job can sit under it while the host still goes OOM,
+      # which is how the 10-27 failure happened (one job peaked ~393 GiB).
+      # --memory-swap must be set to the same value; left unset, Docker allows swap up
+      # to 2x --memory and the cap does not hold. Note --ipc host puts /dev/shm outside
+      # this cgroup, so shared-memory allocations are not covered.
       options: >-
         -e ROCR_VISIBLE_DEVICES
+        --memory 110g
+        --memory-swap 110g
         --ipc host
         --ulimit memlock=-1:-1
         --ulimit nofile=1048576:1048576

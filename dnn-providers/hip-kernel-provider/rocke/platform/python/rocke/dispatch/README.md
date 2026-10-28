@@ -17,6 +17,7 @@ rocke/dispatch/
     walk.py        #   sweep levels, pruned depth-first walk, sampler
     identity.py    #   config_key / tuning_id
     space.py       #   KnobSpace: canonicalize, default, stream, sample, find
+    waves.py       #   WavesPerEuSpace: waves_per_eu as the outer knob
     candidate.py   #   make_tuned_candidate and pin resolution
     spec.py        #   TunedSpec / TunableRequest protocols
     testing.py     #   assert_tuning_contract, the conformance kit
@@ -223,9 +224,9 @@ field. What a family needs beyond its axes is a `KnobSpace` hook:
 - `outer_knob` with `outer_values(base, level)` and `outer_default(base)`
   names one field that is cheap to sweep on top of every knob set: the walk
   checks a knob set once and only rebuilds it per outer value, so the drop
-  rules must not read it. Attention uses `waves_per_eu`
-  (`library/dispatch/attention/waves.py`); a space without one sweeps nothing
-  extra.
+  rules must not read it. A space whose outer knob is `waves_per_eu`
+  (attention, GDN decode) subclasses `WavesPerEuSpace` (`waves.py`); a space
+  without one sweeps nothing extra.
 - `stem(kernel)` / `stem_prefix()` give the display part of the id
   (`variant_id` by default) and the prefix a bare id must carry to be looked
   up.
