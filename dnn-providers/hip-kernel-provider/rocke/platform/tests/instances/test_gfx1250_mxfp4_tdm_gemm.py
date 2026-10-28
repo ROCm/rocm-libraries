@@ -149,7 +149,8 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    wave_separated_tdm=True,
+                    scale_tdm=True,
+                    scale_double_buffer=True,
                 ),
                 "not implemented yet",
             ),
@@ -239,6 +240,31 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
         # Prefetched scale packs still originate as global i8 loads.
         self.assertIn("load <4 x i8>, ptr addrspace(1)", llvm)
+
+    def test_step6_4_wave_separated_tdm_emits_and_validates(self):
+        self.assertIn("step6_4_mxfp4_gemm", variant_names())
+        spec = variant_spec(
+            "step6_4_mxfp4_gemm",
+            128,
+            64,
+            256,
+        )
+        self.assertTrue(spec.wave_separated_tdm)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        base = variant_spec("step6_3_mxfp4_gemm", 128, 64, 256)
+        llvm_sep = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        llvm_base = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(base, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertGreaterEqual(llvm_sep.count("llvm.amdgcn.tensor.load.to.lds"), 4)
+        # Wave-0-only path guards TDM; wave-separated issues without that gate.
+        self.assertNotEqual(llvm_sep, llvm_base)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

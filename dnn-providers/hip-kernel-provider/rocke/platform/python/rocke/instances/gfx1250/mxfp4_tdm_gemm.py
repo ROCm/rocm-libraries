@@ -149,7 +149,6 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "wave_separated_tdm",
         "scale_tdm",
         "lds_pad",
         "lds_segment_interleave",
@@ -195,6 +194,13 @@ def is_valid_spec(spec: MxFp4TdmGemmSpec, arch: str = "gfx1250") -> tuple[bool, 
         return False, "lds_segment_b_rotate requires lds_segment_interleave"
     if spec.scale_tdm and not spec.scale_double_buffer:
         return False, "scale_tdm requires scale_double_buffer"
+    if spec.wave_separated_tdm:
+        num_waves = spec.warp_m * spec.warp_n * spec.warp_k
+        if spec.tile_m % num_waves or spec.tile_n % num_waves:
+            return False, (
+                "wave_separated_tdm requires tile_m and tile_n divisible by "
+                f"num_waves ({num_waves})"
+            )
     if spec.cluster_dim is not None:
         if len(spec.cluster_dim) != 3 or any(d < 1 for d in spec.cluster_dim):
             return False, "cluster_dim must be a positive (x, y, z) triple"
@@ -316,23 +322,43 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
 
     def _issue_tdm(k0, parity) -> None:
         a_lds_offset, b_lds_offset = _buffer_offsets(parity)
-        a_lds = b.smem_ptr_add(shared_addr, b.zext(a_lds_offset, shared_addr.type))
-        b_lds = b.smem_ptr_add(shared_addr, b.zext(b_lds_offset, shared_addr.type))
         k_byte = b.div(k0, b.const_i32(2))
-        a_element = b.add(b.mul(block_m, packed_k), k_byte)
-        b_element = b.add(b.mul(block_n, packed_k), k_byte)
         remaining_k = b.sub(packed_k, k_byte)
-        with b.scf_if(b.cmp_eq(wave, c0)):
+        a_row_stride = b.const_i32(spec.tile_k // 2)
+
+        def _issue_ab_strip(a_row0, a_rows, b_row0, b_rows) -> None:
+            a_lds = b.smem_ptr_add(
+                shared_addr,
+                b.zext(
+                    b.add(a_lds_offset, b.mul(a_row0, a_row_stride)),
+                    shared_addr.type,
+                ),
+            )
+            b_lds = b.smem_ptr_add(
+                shared_addr,
+                b.zext(
+                    b.add(b_lds_offset, b.mul(b_row0, a_row_stride)),
+                    shared_addr.type,
+                ),
+            )
+            a_element = b.add(
+                b.mul(b.add(block_m, a_row0), packed_k),
+                k_byte,
+            )
+            b_element = b.add(
+                b.mul(b.add(block_n, b_row0), packed_k),
+                k_byte,
+            )
             b.tensor_load_to_lds(
                 *b.tdm_descriptor_2d(
                     b.global_ptr_add(A, a_element),
                     a_lds,
                     elem_bytes=1,
                     tensor_dim0=remaining_k,
-                    tensor_dim1=b.sub(M, block_m),
+                    tensor_dim1=b.sub(M, b.add(block_m, a_row0)),
                     row_stride=packed_k,
                     tile_dim0=spec.tile_k // 2,
-                    tile_dim1=spec.tile_m,
+                    tile_dim1=a_rows,
                 )
             )
             b.tensor_load_to_lds(
@@ -341,12 +367,23 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                     b_lds,
                     elem_bytes=1,
                     tensor_dim0=remaining_k,
-                    tensor_dim1=b.sub(N, block_n),
+                    tensor_dim1=b.sub(N, b.add(block_n, b_row0)),
                     row_stride=packed_k,
                     tile_dim0=spec.tile_k // 2,
-                    tile_dim1=spec.tile_n,
+                    tile_dim1=b_rows,
                 )
             )
+
+        if spec.wave_separated_tdm:
+            num_waves = spec.warp_m * spec.warp_n * spec.warp_k
+            a_rows = spec.tile_m // num_waves
+            b_rows = spec.tile_n // num_waves
+            a_row0 = b.mul(wave, b.const_i32(a_rows))
+            b_row0 = b.mul(wave, b.const_i32(b_rows))
+            _issue_ab_strip(a_row0, a_rows, b_row0, b_rows)
+        else:
+            with b.scf_if(b.cmp_eq(wave, c0)):
+                _issue_ab_strip(c0, spec.tile_m, c0, spec.tile_n)
 
     def _prefetch_gl2(k0) -> None:
         """PrefetchGL2=2: hint A/B rows two DepthU tiles ahead into GL2."""

@@ -33,6 +33,15 @@ MXFP4_GEMM_VARIANTS: list[tuple[str, dict[str, Any]]] = [
             "scale_double_buffer": True,
         },
     ),
+    (
+        "step6_4_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+        },
+    ),
 ]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []

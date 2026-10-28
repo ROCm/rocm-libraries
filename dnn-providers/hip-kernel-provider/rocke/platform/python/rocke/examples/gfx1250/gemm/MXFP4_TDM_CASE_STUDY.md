@@ -106,6 +106,7 @@ silicon bench harness (timings outside the repo).
 | `step6_1_mxfp4_gemm` | `local_read_prefetch` | `bad=0` |
 | `step6_2_mxfp4_gemm` | + `prefetch_gl2` | `bad=0` |
 | `step6_3_mxfp4_gemm` | + `scale_double_buffer` | `bad=0` (YAML `256x256x512`: `vgpr=774`, `vgpr_spill=4`, scratch=20; smoke tile_k=512 spill-free) |
+| `step6_4_mxfp4_gemm` | + `wave_separated_tdm` | `bad=0` |
 
 ## Deferred controls
 
