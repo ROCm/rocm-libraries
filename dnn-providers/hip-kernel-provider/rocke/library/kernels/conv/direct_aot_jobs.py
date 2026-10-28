@@ -1433,6 +1433,9 @@ def _helper_identity(
     # stride and padding are zeroed so every pipeline entry that shares a
     # filter shares the helper binary. The wgrad fold depends on its knobs
     # alone (the dW extent it folds), so it zeroes the channel counts too.
+    # The two-stage reduce depends on its replica count alone.
+    if variant == DIRECT_WGRAD_REDUCE:
+        return wgrad_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
     if variant == _WGRAD_FOLD:
         return _identity(
             arch,

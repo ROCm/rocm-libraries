@@ -2308,13 +2308,14 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
                 ok, why = is_valid_wgrad_spec(other, arch)
                 self.assertFalse(ok, f"{dtype} split-K on {arch} must stay rejected")
                 self.assertIn("enabled only on", why)
-            # And no WMMA epilogue but 'default' is admitted for split-K.
-            ok, _ = is_valid_wgrad_spec(
+            # The cshuffle epilogue is admitted for WMMA split-K too: it pairs
+            # the 16-bit atomics through LDS, as on MFMA.
+            ok, why = is_valid_wgrad_spec(
                 self._gfx1250_spec(data=data, split_k=4, epilogue="cshuffle"),
                 "gfx1250",
             )
-            self.assertFalse(
-                ok, f"{dtype} cshuffle split-K on gfx1250 must be rejected"
+            self.assertTrue(
+                ok, f"{dtype} cshuffle split-K on gfx1250 must be valid: {why}"
             )
 
     def test_wmma_split_k_ignores_store_vec(self):
