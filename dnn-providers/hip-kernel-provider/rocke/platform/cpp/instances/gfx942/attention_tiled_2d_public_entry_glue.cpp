@@ -243,6 +243,25 @@ bool rocke_gfx942_attention_tiled_2d_supports(
         rocke__reason(reason, reason_cap, buf);
         return false;
     }
+    if(!(args->num_warps == 1 || args->num_warps == 2 || args->num_warps == 4
+         || args->num_warps == 8))
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "tiled 2D kernel requires num_warps in {1,2,4,8} (got %d)",
+                 args->num_warps);
+        rocke__reason(reason, reason_cap, buf);
+        return false;
+    }
+    if(!(args->block_m_per_warp == 16 || args->block_m_per_warp == 32))
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "tiled 2D kernel requires block_m_per_warp in {16,32} (got %d)",
+                 args->block_m_per_warp);
+        rocke__reason(reason, reason_cap, buf);
+        return false;
+    }
     /* kv_storage_dtype is None here (early-rejected above), so the
      * "unsupported kv_storage_dtype" and "use_fp8=True requires fp8e4m3"
      * branches are unreachable given the gfx942 None-only path; reproduce them
@@ -642,6 +661,11 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar_new(
         if(rocke__attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
             return NULL;
         if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
+            return NULL;
+        /* Python validates the spec in __post_init__, so every build is checked.
+         * Validate here rather than in the shared builder, which the gfx950
+         * fastKV register-P path also drives with a gfx950 spec. */
+        if(!rocke_attention_tiled_2d_spec_validate(b, spec))
             return NULL;
         return rocke_build_unified_attention_2d_tiled_scalar(b, spec, arch);
     });

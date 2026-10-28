@@ -183,10 +183,32 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->USE_QQ_BIAS = spec->use_qq_bias;
 
     ctx->TRANSPOSED_SCALAR_STATE = spec->use_transposed_scalar_state;
+    /* No kernel body in this engine reads TRANSPOSED_INVARIANT_HOIST; accepting
+     * it would silently build the plain kernel body under a name claiming the
+     * hoist code path. Reject rather than emit that. */
+    if(spec->use_transposed_invariant_hoist)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "use_transposed_invariant_hoist: the gfx942 C twin does not emit the "
+                 "invariant-hoist code path (not yet ported)");
+        return false;
+    }
     ctx->TRANSPOSED_INVARIANT_HOIST = spec->use_transposed_invariant_hoist;
     ctx->TRANSPOSED_MASK_ONCE = spec->use_transposed_mask_once;
     ctx->TRANSPOSED_HALF_LOCAL_PV = spec->use_transposed_half_local_pv;
     ctx->SKIP_LEGACY_QREG = spec->use_mfma32_skip_legacy_qreg;
+    /* Same reasoning as above, for TRANSPOSED_MASK_LIMIT. */
+    if(spec->use_transposed_mask_limit)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "use_transposed_mask_limit: the gfx942 C twin does not emit the "
+                 "mask-limit code path (not yet ported)");
+        return false;
+    }
     ctx->TRANSPOSED_MASK_LIMIT = spec->use_transposed_mask_limit;
     ctx->GROUPED_KV2 = spec->use_grouped_kv2_softmax;
     ctx->FAST_PAGED_KV_DESC = spec->use_fast_paged_kv_desc;

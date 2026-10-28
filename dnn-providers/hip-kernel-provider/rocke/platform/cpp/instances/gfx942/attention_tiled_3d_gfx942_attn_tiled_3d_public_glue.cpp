@@ -155,6 +155,21 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_3d spec is NULL");
         return false;
     }
+    if(s->num_segments < 1)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "num_segments must be >= 1");
+        return false;
+    }
+    /* The segment loaders never read this flag, so accepting it would build a
+     * kernel with 32-bit KV addressing for a cache that needs 64-bit. */
+    if(s->use_i64_kv_addr)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "gfx942 tiled 3D kernel does not support use_i64_kv_addr "
+                        "(paged KV cache > 2 GiB) yet");
+        return false;
+    }
     if(s->kv_storage_dtype != NULL && !rocke_attn3d_streq(s->kv_storage_dtype, "fp8e4m3"))
     {
         rocke_i_set_err(b,
