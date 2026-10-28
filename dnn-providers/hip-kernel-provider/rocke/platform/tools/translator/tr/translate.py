@@ -1060,7 +1060,9 @@ def derived_free(env: Env, mod: Module, header: str) -> dict[str, list[str]]:
 
 
 def derived_default(env: Env, mod: Module, header: str) -> dict[str, list[str]]:
-    """<struct>_default(): the dataclass's defaults (None -> has_ flag false)."""
+    """<struct>_default(): the dataclass's defaults (None -> has_ flag false; a
+    default_factory other than an empty list / tuple / dict only through the
+    field struct's own C _default(), else the class gets no derived default)."""
     import dataclasses
 
     from .family import stem as own_stem
@@ -1094,10 +1096,28 @@ def derived_default(env: Env, mod: Module, header: str) -> dict[str, list[str]]:
             body.append(
                 f"    s.kind = {kind_const(fam, cls)};"
             )  # tagged values: the member's tag
+        ok = True
         for f_ in dataclasses.fields(pycls):
-            if f_.default is dataclasses.MISSING or (
-                f_.name not in s_.fields and f_.name.lstrip("_") not in s_.fields
-            ):
+            if f_.name not in s_.fields and f_.name.lstrip("_") not in s_.fields:
+                continue
+            fac = f_.default_factory
+            if f_.default is dataclasses.MISSING and fac is not dataclasses.MISSING:
+                if fac in (list, tuple, dict):
+                    continue  # empty: memset left (NULL, 0, 0)
+                # a factory (TraitSpec): its struct's own C default, else no
+                # derivation (zeros are not the factory's value)
+                ft = s_.fields.get(f_.name, "")
+                dcf = (
+                    env.headers.funcs.get(ft[:-2] + "_default")
+                    if ft.endswith("_t")
+                    else None
+                )
+                if dcf is None or dcf.params or dcf.ret != ft:
+                    ok = False
+                    break
+                body.append(f"    s.{f_.name} = {dcf.name}();")
+                continue
+            if f_.default is dataclasses.MISSING:
                 continue
             if f_.default is None:
                 if "has_" + f_.name in s_.fields:
@@ -1120,6 +1140,8 @@ def derived_default(env: Env, mod: Module, header: str) -> dict[str, list[str]]:
                     body.append(f"    s.{f_.name} = {{{items}}};")
                 continue
             body.append(f"    s.{f_.name} = {lit_code(d)};")
+        if not ok:
+            continue
         body += ["    return s;", "}"]
         out[cf.name] = body
     return out
