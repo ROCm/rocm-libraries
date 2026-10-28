@@ -142,12 +142,30 @@ _PROBLEM = {
 }
 
 
-def test_selector_hook_returns_every_spec_field(engine):
-    spec = engine.gfx950_attn_tiled_spec_from_problem(_PROBLEM, "gfx950")
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_selector_hook_returns_every_spec_field(engine, arch):
+    hook = getattr(engine, f"{arch}_attn_tiled_spec_from_problem")
+    spec = hook(_PROBLEM, arch)
     python_fields = {f.name for f in fields(Gfx942Spec2D)} | {
         f.name for f in fields(Gfx950Spec2D)
     }
     assert set(spec) == python_fields - _UNPORTED_2D
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_3d_selector_hook_returns_every_spec_field(engine, arch):
+    from kernels.gfx942.attention_tiled_3d import (
+        UnifiedAttention3DTiledSpec as Gfx942Spec3D,
+    )
+
+    hook = getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem")
+    spec = hook(_PROBLEM, arch)
+    python_fields = {f.name for f in fields(Gfx942Spec3D)} | {
+        f.name for f in fields(UnifiedAttention3DTiledSpec)
+    }
+    # kv_layout selects the strided-KV builder; the problem always builds paged.
+    unported = {"use_additive_bias", "causal_top_left", "right_bound", "kv_layout"}
+    assert set(spec) == python_fields - unported
 
 
 def test_selector_hook_rejects_unported_arch_and_fields(engine):

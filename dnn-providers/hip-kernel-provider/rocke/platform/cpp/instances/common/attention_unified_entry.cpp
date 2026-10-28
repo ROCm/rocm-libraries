@@ -295,17 +295,6 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
             reason, reason_cap, "Additive bias is not enabled in CK DSL attention yet");
     if(rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap))
         return false;
-
-    /* Python admits these; the C++ scalar kernels do not implement them. */
-    if(p->use_fp8)
-        return scalar_gate_fail(reason, reason_cap, "scalar fp8 K/V is not ported to C++ yet");
-    if(!rocke_unified_attention_problem_default_mask(p))
-    {
-        char label[64];
-        rocke_attn_unified_mask_label(p, label, sizeof(label));
-        return scalar_gate_fail(
-            reason, reason_cap, "scalar %s masks are not ported to C++ yet", label);
-    }
     scalar_gate_fail(reason, reason_cap, "supported by scalar CK DSL 2D attention backend");
     return true;
 }
@@ -313,6 +302,17 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
 /* ===================================================================== *
  *  kernel_name fns  (UnifiedAttention*Spec.kernel_name)
  * ===================================================================== */
+
+/* Python _right_bound_flag: "rbu" for an unbounded right side, else "rb<R>"
+ * (only emitted when right_bound != 0). */
+static const char*
+    right_bound_token(const rocke_unified_attention_problem_t* p, char* buf, size_t cap)
+{
+    if(p->right_bound < 0)
+        return "rbu";
+    snprintf(buf, cap, "rb%d", p->right_bound);
+    return buf;
+}
 
 rocke_status_t rocke_unified_attention_2d_scalar_kernel_name(
     const rocke_unified_attention_problem_t* p, const char* name, char* out, size_t out_cap)
@@ -330,11 +330,17 @@ rocke_status_t rocke_unified_attention_2d_scalar_kernel_name(
 
     {
         const char* parts[5] = {hbuf, kvbuf, dbuf, bbuf, p->dtype ? p->dtype : ""};
-        /* flags={"sink":use_sinks,"sw":sliding_window>0,"softcap":softcap>0} */
-        const char* flag_names[3] = {"sink", "sw", "softcap"};
-        int flag_on[3]
-            = {p->use_sinks ? 1 : 0, p->sliding_window > 0 ? 1 : 0, p->softcap > 0.0 ? 1 : 0};
-        return rocke_kernel_name_join(prefix, parts, 5, flag_names, flag_on, 3, out, out_cap, NULL);
+        char rbbuf[32];
+        /* flags={"sink", "sw", "softcap", "fp8kv", "tl", **_right_bound_flag(p)} */
+        const char* flag_names[6]
+            = {"sink", "sw", "softcap", "fp8kv", "tl", right_bound_token(p, rbbuf, sizeof(rbbuf))};
+        int flag_on[6] = {p->use_sinks ? 1 : 0,
+                          p->sliding_window > 0 ? 1 : 0,
+                          p->softcap > 0.0 ? 1 : 0,
+                          p->use_fp8 ? 1 : 0,
+                          p->causal_top_left ? 1 : 0,
+                          p->right_bound != 0 ? 1 : 0};
+        return rocke_kernel_name_join(prefix, parts, 5, flag_names, flag_on, 6, out, out_cap, NULL);
     }
 }
 
@@ -359,7 +365,15 @@ rocke_status_t
 
     {
         const char* parts[6] = {hbuf, kvbuf, dbuf, bbuf, segbuf, p->dtype ? p->dtype : ""};
-        return rocke_kernel_name_join(prefix, parts, 6, NULL, NULL, 0, out, out_cap, NULL);
+        char rbbuf[32];
+        /* flags={"tl", **_right_bound_flag(p), "sw"}; the default-mask 3D kernel
+         * never applies the window, so "sw" marks only a non-default mask. */
+        const char* flag_names[3] = {"tl", right_bound_token(p, rbbuf, sizeof(rbbuf)), "sw"};
+        int flag_on[3]
+            = {p->causal_top_left ? 1 : 0,
+               p->right_bound != 0 ? 1 : 0,
+               (p->sliding_window > 0 && !rocke_unified_attention_problem_default_mask(p)) ? 1 : 0};
+        return rocke_kernel_name_join(prefix, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
 
@@ -433,6 +447,7 @@ rocke_status_t
     rocke_signature_builder_t sb;
     rocke_status_t st;
     const char* io;
+    const char* kv_io;
     if(p == NULL || arena == NULL || out_items == NULL || out_count == NULL)
         return ROCKE_ERR_VALUE;
     io = rocke__io_dtype(p->dtype);
@@ -443,8 +458,12 @@ rocke_status_t
 
     rocke_signature_builder_ptr(&sb, "output_ptr", io, NULL);
     rocke_signature_builder_ptr(&sb, "query_ptr", io, NULL);
-    rocke_signature_builder_ptr(&sb, "key_cache_ptr", io, NULL);
-    rocke_signature_builder_ptr(&sb, "value_cache_ptr", io, NULL);
+    /* The fp8 K/V path types the cache pointers with the storage dtype. */
+    kv_io = rocke_unified_attn_kv_storage_dtype(p);
+    if(kv_io == NULL)
+        kv_io = io;
+    rocke_signature_builder_ptr(&sb, "key_cache_ptr", kv_io, NULL);
+    rocke_signature_builder_ptr(&sb, "value_cache_ptr", kv_io, NULL);
     rocke_signature_builder_ptr(&sb, "sink_ptr", io, NULL);
     rocke_signature_builder_ptr(&sb, "block_tables_ptr", "i32", NULL);
     rocke_signature_builder_ptr(&sb, "seq_lens_ptr", "i32", NULL);

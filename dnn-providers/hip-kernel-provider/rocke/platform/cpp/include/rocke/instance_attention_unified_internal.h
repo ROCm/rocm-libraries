@@ -156,7 +156,7 @@ typedef struct rocke_attn_unified_build_ctx
     rocke_value_t* q_len; /* cu_stop - cu_start                           */
     rocke_value_t* query_pos; /* q_tok - cu_start                             */
     rocke_value_t* kv_len; /* seq_lens[seq_idx]                            */
-    rocke_value_t* context_len; /* kv_len - q_len                               */
+    rocke_value_t* context_len; /* kv_len - q_len; 0 for a top-left mask         */
     rocke_value_t* kv_head; /* magic_div(q_head, num_queries_per_kv)        */
 
     /* ---------- 3D segment span (prologue) ---------- */
@@ -218,10 +218,9 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
  * narrower declaration -- see rocke_attn_unified_declare_reduce_params.) */
 void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ctx);
 
-/* Python: _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) -> seq_idx (3D), and
- * the inline linear cu_q scan (2D). Emits the scan and fills ctx->seq_idx.
- * (2D uses the inline linear scf.for scan; 3D delegates to the bounded binary
- * search -- numerically identical seq_idx.) */
+/* Python: _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) -> seq_idx (3D: the
+ * per-token binary search), and the inline linear cu_q scan (2D). Emits the scan
+ * and fills ctx->seq_idx. */
 void rocke_attn_unified_emit_find_seq_idx(rocke_attn_unified_build_ctx_t* ctx);
 
 /* Common prologue after the ABI prefix + seq-idx scan: grid ids, the cu_q
@@ -241,9 +240,18 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx);
  * V element fold. Reads ctx prologue/desc fields; writes ctx->loop_m/l/acc. */
 void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The 2D guarded epilogue: out_val = acc * rcp(l); cast to dtype; store at
+/* The 2D guarded epilogue: out_val = acc * rcp(l) (0 where l == 0 off the default
+ * mask); cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under (active && dim < head_size). */
 void rocke_attn_unified_emit_2d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
+
+/* Python: _scalar_band_ok(b, p, context_len, query_pos, kpos, window=window).
+ * Visibility of key ``kpos``: the right bound k <= context_len + query_pos + R
+ * (R >= 0) and, when ``window``, the sliding-window left bound. Returns NULL
+ * when neither bounds anything. Shared by the 2D and 3D bodies. */
+rocke_value_t* rocke_attn_unified_scalar_band_ok(rocke_attn_unified_build_ctx_t* ctx,
+                                                 rocke_value_t* kpos,
+                                                 bool window);
 
 /* ============================================================ *
  * 3D scalar segment kernel phases (build_unified_attention_3d)

@@ -313,6 +313,18 @@ static void test_supports_scalar(void)
     CHECK(rocke_unified_attention_supports_scalar(&p, "gfx950", reason, sizeof(reason)));
     CHECK_EQ_STR(reason, "supported by scalar CK DSL 2D attention backend");
 
+    /* fp8 K/V and the non-default masks build in C++ too. */
+    p.use_fp8 = true;
+    CHECK(rocke_unified_attention_supports_scalar(&p, "gfx950", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "supported by scalar CK DSL 2D attention backend");
+    p.use_fp8 = false;
+    p.causal_top_left = true;
+    p.right_bound = -1;
+    CHECK(rocke_unified_attention_supports_scalar(&p, "gfx942", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "supported by scalar CK DSL 2D attention backend");
+    p.causal_top_left = false;
+    p.right_bound = 0;
+
     p.head_size = 96;
     CHECK(!rocke_unified_attention_supports_scalar(&p, "gfx950", reason, sizeof(reason)));
     CHECK_EQ_STR(reason, "unsupported head_size 96");

@@ -101,9 +101,9 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
  *                         iv_name="kpos")
  *   with loop as (kpos, (m_val, l_val, acc_val)):
  *       score = _emit_qk_score(...)
- *       causal_ok = cmp_le(kpos, context_len + query_pos)
- *       score = select(causal_ok, score, neg_inf)
- *       new_m = fmax(m_val, score)
+ *       band_ok = _scalar_band_ok(..., window=not default_mask)
+ *       score = select(band_ok, score, neg_inf)      (when band_ok)
+ *       new_m = fmax(m_val, score)  (forced to 0 where -inf off the default mask)
  *       alpha = exp2(m_val - new_m)
  *       prob  = exp2(score - new_m)
  *       new_l = fadd(fmul(l_val, alpha), prob)
@@ -119,7 +119,8 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_iter_arg_t iter_args[3];
     rocke_for_t loop;
     rocke_value_t *kpos, *m_val, *l_val, *acc_val;
-    rocke_value_t *score, *causal_ok, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
+    rocke_value_t *score, *band_ok, *new_m, *alpha, *prob, *new_l, *vv, *new_acc;
+    const bool default_mask = rocke_unified_attention_problem_default_mask(ctx->p);
     rocke_value_t* yields[3];
 
     iter_args[0].name = "m";
@@ -161,11 +162,20 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                              ctx->abi_scale,
                                              ctx->rcp_ln2);
 
-    /* causal_ok = cmp_le(kpos, context_len + query_pos) */
-    causal_ok = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
-    score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
+    /* The default mask keeps the 3D kernel's historical no-window body. */
+    band_ok = rocke_attn_unified_scalar_band_ok(ctx, kpos, !default_mask);
+    if(band_ok != NULL)
+    {
+        score = rocke_b_select(b, band_ok, score, ctx->neg_inf);
+    }
 
     new_m = rocke_b_fmax(b, m_val, score);
+    if(!default_mask)
+    {
+        /* A non-default mask can leave a whole segment masked: force m to 0 so
+         * alpha / prob are 0 rather than NaN. */
+        new_m = rocke_b_select(b, rocke_b_fcmp(b, "ogt", new_m, ctx->neg_inf), new_m, ctx->zero_f);
+    }
     alpha = rocke_b_exp2(b, rocke_b_fsub(b, m_val, new_m));
     prob = rocke_b_exp2(b, rocke_b_fsub(b, score, new_m));
     new_l = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), prob);
@@ -181,7 +191,11 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
                                         kpos,
                                         ctx->dim);
 
-    new_acc = rocke_b_fadd(b, rocke_b_fmul(b, acc_val, alpha), rocke_b_fmul(b, prob, vv));
+    {
+        /* Sequenced: Python emits acc * alpha before prob * vv. */
+        rocke_value_t* acc_scaled = rocke_b_fmul(b, acc_val, alpha);
+        new_acc = rocke_b_fadd(b, acc_scaled, rocke_b_fmul(b, prob, vv));
+    }
 
     yields[0] = new_m;
     yields[1] = new_l;

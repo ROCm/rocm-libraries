@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors_3d.h"
 
 #define NA (-1) /* field not checked for this case */
 
@@ -186,6 +187,22 @@ static void set_env(const char* name, const char* value)
 #endif
 }
 
+/* Unset every HIPDNN_GFX942_* knob the selectors read. */
+static void clear_gfx942_env(void)
+{
+    static const char* const knobs[] = {"HIPDNN_GFX942_FLASH_MLIM",
+                                        "HIPDNN_GFX942_K_SLICED_RING",
+                                        "HIPDNN_GFX942_K_SLICE_HD",
+                                        "HIPDNN_GFX942_K_LDSSEQ",
+                                        "HIPDNN_GFX942_D128_SMALLTILE_DK",
+                                        "HIPDNN_GFX942_BF16_CFVST",
+                                        "HIPDNN_GFX942_FLASH_WIDE"};
+    size_t i;
+
+    for(i = 0; i < sizeof(knobs) / sizeof(knobs[0]); ++i)
+        set_env(knobs[i], NULL);
+}
+
 static void test_gfx942(void)
 {
     static const struct
@@ -358,16 +375,9 @@ static void test_gfx942_flash(void)
         {"HIPDNN_GFX942_FLASH_WIDE", "0", 'C', 1, 0, 64, 4, 0, 1, 0, 1, 1, 1, 3, 16, 1},
         {"HIPDNN_GFX942_FLASH_WIDE", "0", 'E', 0, 0, 64, 2, 1, 0, 0, 1, 1, 1, 2, 32, 1},
     };
-    static const char* const knobs[] = {"HIPDNN_GFX942_FLASH_MLIM",
-                                        "HIPDNN_GFX942_K_SLICED_RING",
-                                        "HIPDNN_GFX942_K_SLICE_HD",
-                                        "HIPDNN_GFX942_D128_SMALLTILE_DK",
-                                        "HIPDNN_GFX942_BF16_CFVST",
-                                        "HIPDNN_GFX942_FLASH_WIDE"};
     size_t i;
 
-    for(i = 0; i < sizeof(knobs) / sizeof(knobs[0]); ++i)
-        set_env(knobs[i], NULL);
+    clear_gfx942_env();
     for(i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i)
     {
         rocke_unified_attention_problem_t p = flash_problem(rows[i].id);
@@ -460,6 +470,485 @@ static void test_gfx942_flash(void)
                   "ring_depth gfx950",
                   rocke_unified_attn_select_gfx942_flash_ring_depth(&p, "gfx950"),
                   3);
+    }
+}
+
+/* ------------------------------------------------------------- fp8 MFMA QK */
+
+/* base() as fp8 decode: 4 seqs, q=1, k=512. */
+static rocke_unified_attention_problem_t fp8_decode(void)
+{
+    rocke_unified_attention_problem_t p = base();
+    p.use_fp8 = true;
+    p.num_seqs = 4;
+    p.total_q = 4;
+    p.max_seqlen_q = 1;
+    p.max_seqlen_k = 512;
+    return p;
+}
+
+static void test_fp8_mfma_qk(void)
+{
+    static const char* const archs[] = {"gfx950", "gfx942"};
+    /* Values from the Python selectors; the same on both archs. */
+    static const struct
+    {
+        const char* name;
+        int seqlen_q, seqlen_k, sliding_window, head_size, block_size, nq, use_fp8;
+        int want;
+    } rows[] = {
+        {"decode k512", 1, 512, 0, 128, 16, 32, 1, 1},
+        {"decode k4096", 1, 4096, 0, 128, 16, 32, 1, 0},
+        {"decode k4096 SW", 1, 4096, 256, 128, 16, 32, 1, 1},
+        {"q512", 512, 512, 0, 128, 16, 32, 1, 0},
+        {"q256 k512", 256, 512, 0, 128, 16, 32, 1, 1},
+        {"no fp8", 1, 512, 0, 128, 16, 32, 0, 0},
+        {"d64 bs32 nq64 q256", 256, 512, 0, 64, 32, 64, 1, 1},
+    };
+    /* Explicit tile_size / num_warps, on gfx950 d64 decode k512. */
+    static const struct
+    {
+        int tile_size, num_warps, fits, want;
+    } overrides[] = {
+        {16, 8, 0, 0}, /* 1 KB of K: no payload fits 512 lanes */
+        {16, 4, 1, 0}, /* fits, but k512 > 16*T */
+        {48, 4, 1, 1}, /* only the 12-byte payload fits */
+        {32, 8, 1, 1},
+    };
+    size_t i;
+    size_t a;
+    char what[64];
+
+    for(a = 0; a < sizeof(archs) / sizeof(archs[0]); ++a)
+    {
+        for(i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i)
+        {
+            rocke_unified_attention_problem_t p = fp8_decode();
+            p.max_seqlen_q = rows[i].seqlen_q;
+            p.total_q = rows[i].seqlen_q * p.num_seqs;
+            p.max_seqlen_k = rows[i].seqlen_k;
+            p.sliding_window = rows[i].sliding_window;
+            p.head_size = rows[i].head_size;
+            p.block_size = rows[i].block_size;
+            p.num_query_heads = rows[i].nq;
+            p.use_fp8 = rows[i].use_fp8 != 0;
+            snprintf(what, sizeof(what), "fp8_mfma_qk %s", archs[a]);
+            check_gate(rows[i].name,
+                       what,
+                       rocke_unified_attn_enable_fp8_mfma_qk(&p, archs[a], 0, 0),
+                       rows[i].want != 0);
+        }
+    }
+    for(i = 0; i < sizeof(overrides) / sizeof(overrides[0]); ++i)
+    {
+        rocke_unified_attention_problem_t p = fp8_decode();
+        p.head_size = 64;
+        snprintf(what, sizeof(what), "T%d nw%d", overrides[i].tile_size, overrides[i].num_warps);
+        check_gate(what,
+                   "fp8_qk_loader_fits",
+                   rocke_unified_attn_fp8_qk_loader_fits(
+                       &p, "gfx950", overrides[i].tile_size, overrides[i].num_warps),
+                   overrides[i].fits != 0);
+        check_gate(what,
+                   "fp8_mfma_qk",
+                   rocke_unified_attn_enable_fp8_mfma_qk(
+                       &p, "gfx950", overrides[i].tile_size, overrides[i].num_warps),
+                   overrides[i].want != 0);
+    }
+    {
+        rocke_unified_attention_problem_t p = fp8_decode();
+        check_spec_flag("fp8 decode k512",
+                        "use_fp8_mfma_qk",
+                        rocke_unified_attn_tiled_spec_from_problem(&p, "gfx950").use_fp8_mfma_qk,
+                        true);
+        p.max_seqlen_k = 4096;
+        check_spec_flag("fp8 decode k4096",
+                        "use_fp8_mfma_qk",
+                        rocke_unified_attn_tiled_spec_from_problem(&p, "gfx950").use_fp8_mfma_qk,
+                        false);
+    }
+}
+
+/* ------------------------------------------------- gfx942 spec from problem */
+
+/* The base() problem varied per case id: A fp16 D128, B fp16 D128 SW (4-warp
+ * route), C bf16 D64, D bf16 D128, E bf16 D128 bs32, F bf16 D128 small-q,
+ * G fp16 D64 MHA decode. */
+static rocke_unified_attention_problem_t spec_problem(char id)
+{
+    rocke_unified_attention_problem_t p = base();
+    switch(id)
+    {
+    case 'A':
+        p.dtype = "fp16";
+        break;
+    case 'B':
+        p.dtype = "fp16";
+        p.sliding_window = 256;
+        break;
+    case 'C':
+        p.head_size = 64;
+        break;
+    case 'E':
+        p.block_size = 32;
+        break;
+    case 'F':
+        p.max_seqlen_q = 512;
+        p.total_q = 512;
+        break;
+    case 'G':
+        p.dtype = "fp16";
+        p.head_size = 64;
+        p.num_query_heads = 8;
+        p.max_seqlen_q = 1;
+        p.total_q = 1;
+        break;
+    default:
+        break;
+    }
+    return p;
+}
+
+static void test_gfx942_spec(void)
+{
+    /* Values from Python's attention_spec_builder._tiled_spec_from_problem. */
+    static const struct
+    {
+        const char* ldsseq_env;
+        char id;
+        int nw, tile, mw, x8, tqk, mlim, cfvst, single_k, ring, depth, kslice, ldsseq, qdirect,
+            policy_all, regpv;
+    } rows[] = {
+        {NULL, 'A', 4, 64, 32, 1, 1, 1, 1, 0, 1, 2, 32, 0, 0, 1, 0},
+        {NULL, 'B', 1, 32, 32, 0, 0, 0, 0, 0, 0, 3, 32, 0, 0, 0, 0},
+        {NULL, 'C', 4, 64, 32, 1, 1, 1, 1, 0, 1, 3, 16, 0, 1, 1, 0},
+        {NULL, 'D', 2, 64, 32, 1, 1, 1, 0, 1, 0, 3, 32, 0, 0, 1, 0},
+        {NULL, 'E', 2, 32, 32, 1, 1, 1, 0, 0, 0, 3, 32, 0, 0, 1, 0},
+        {NULL, 'F', 2, 64, 16, 0, 0, 0, 0, 0, 0, 3, 32, 0, 0, 0, 1},
+        {NULL, 'G', 4, 64, 32, 1, 1, 1, 1, 0, 0, 3, 16, 0, 1, 1, 0},
+        {"ck", 'C', 4, 64, 32, 1, 1, 1, 1, 0, 1, 3, 16, 1, 1, 1, 0},
+        {"ck", 'A', 4, 64, 32, 1, 1, 1, 1, 0, 1, 2, 32, 0, 0, 1, 0},
+    };
+    static const struct
+    {
+        const char* value;
+        int bf16_d64, fp16_d128;
+    } ldsseq[] = {{"ck", 1, 0}, {" On ", 1, 0}, {"0", 0, 0}, {"2", 0, 0}};
+    size_t i;
+
+    clear_gfx942_env();
+    for(i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i)
+    {
+        rocke_unified_attention_problem_t p = spec_problem(rows[i].id);
+        rocke_attention_tiled_2d_spec_t s;
+        char name[48];
+
+        set_env("HIPDNN_GFX942_K_LDSSEQ", rows[i].ldsseq_env);
+        s = rocke_unified_attn_tiled_spec_from_problem(&p, "gfx942");
+        snprintf(name,
+                 sizeof(name),
+                 "gfx942 spec %c%s",
+                 rows[i].id,
+                 rows[i].ldsseq_env != NULL ? " ldsseq" : "");
+        check_int(name, "num_warps", s.num_warps, rows[i].nw);
+        check_int(name, "tile_size", s.has_tile_size ? s.tile_size : -2, rows[i].tile);
+        check_int(name, "block_m_per_warp", s.block_m_per_warp, rows[i].mw);
+        check_int(name, "waves_per_eu", s.has_waves_per_eu ? s.waves_per_eu : 0, 2);
+        check_spec_flag(name, "use_mfma_32x32x8", s.use_mfma_32x32x8, rows[i].x8);
+        check_spec_flag(name, "use_transposed_qk_32x32", s.use_transposed_qk_32x32, rows[i].tqk);
+        check_spec_flag(
+            name, "use_transposed_mask_limit", s.use_transposed_mask_limit, rows[i].mlim);
+        check_spec_flag(
+            name, "use_transposed_invariant_hoist", s.use_transposed_invariant_hoist, rows[i].mlim);
+        check_spec_flag(
+            name, "use_conflict_free_v_store", s.use_conflict_free_v_store, rows[i].cfvst);
+        check_spec_flag(name, "use_k_single_buffer", s.use_k_single_buffer, rows[i].single_k);
+        check_spec_flag(name, "use_k_sliced_ring", s.use_k_sliced_ring, rows[i].ring);
+        check_int(name, "ring_depth", s.ring_depth, rows[i].depth);
+        check_int(name, "k_slice_hd", s.k_slice_hd, rows[i].kslice);
+        check_spec_flag(name, "use_k_sliced_ldsseq", s.use_k_sliced_ldsseq, rows[i].ldsseq);
+        check_spec_flag(name, "use_q_direct_global", s.use_q_direct_global, rows[i].qdirect);
+        check_spec_flag(
+            name, "kv_cache_policy all", strcmp(s.kv_cache_policy, "all") == 0, rows[i].policy_all);
+        check_spec_flag(name, "use_register_pv", s.use_register_pv, rows[i].regpv);
+        check_spec_flag(name, "use_mfma_32x32", s.use_mfma_32x32, false);
+    }
+    for(i = 0; i < sizeof(ldsseq) / sizeof(ldsseq[0]); ++i)
+    {
+        rocke_unified_attention_problem_t c = spec_problem('C');
+        rocke_unified_attention_problem_t a = spec_problem('A');
+        set_env("HIPDNN_GFX942_K_LDSSEQ", ldsseq[i].value);
+        check_gate(ldsseq[i].value,
+                   "k_sliced_ldsseq bf16 D64",
+                   rocke_unified_attn_enable_gfx942_flash_k_sliced_ldsseq(&c, "gfx942"),
+                   ldsseq[i].bf16_d64 != 0);
+        check_gate(ldsseq[i].value,
+                   "k_sliced_ldsseq fp16 D128 (depth 2)",
+                   rocke_unified_attn_enable_gfx942_flash_k_sliced_ldsseq(&a, "gfx942"),
+                   ldsseq[i].fp16_d128 != 0);
+    }
+    set_env("HIPDNN_GFX942_K_LDSSEQ", NULL);
+    {
+        rocke_unified_attention_problem_t c = spec_problem('C');
+        rocke_unified_attention_problem_t f = spec_problem('F');
+        rocke_attention_tiled_2d_spec_t s;
+        check_gate(
+            "C", "q_direct", rocke_unified_attn_enable_gfx942_flash_q_direct(&c, "gfx942"), true);
+        check_gate("C",
+                   "q_direct gfx950",
+                   rocke_unified_attn_enable_gfx942_flash_q_direct(&c, "gfx950"),
+                   false);
+        check_gate(
+            "F", "q_direct", rocke_unified_attn_enable_gfx942_flash_q_direct(&f, "gfx942"), false);
+        check_spec_flag("C",
+                        "kv_cache_policy",
+                        strcmp(rocke_unified_attn_gfx942_flash_kv_cache_policy(&c), "all") == 0,
+                        true);
+        /* Every non-gfx950 arch other than gfx1250 takes the generic builder. */
+        s = rocke_unified_attn_tiled_spec_from_problem(&f, "gfx1201");
+        check_int("gfx1201 F", "num_warps", s.num_warps, 2);
+        check_int("gfx1201 F", "tile_size", s.tile_size, 32);
+        check_int("gfx1201 F", "block_m_per_warp", s.block_m_per_warp, 16);
+        check_spec_flag("gfx1201 F", "use_register_pv", s.use_register_pv, true);
+        s = rocke_unified_attn_tiled_spec_from_problem(&f, "gfx1250");
+        check_spec_flag("gfx1250 F", "default spec", s.head_size == 0 && !s.has_tile_size, true);
+    }
+}
+
+/* ------------------------------------------------------------ 3D selectors */
+
+/* Decode base: bf16 D128 bs16 32/8 heads, 4 seqs, q=1, k=2048, 304 CUs. */
+static rocke_unified_attention_problem_t decode_3d(void)
+{
+    rocke_unified_attention_problem_t p = base();
+    p.num_seqs = 4;
+    p.total_q = 4;
+    p.max_seqlen_q = 1;
+    p.max_seqlen_k = 2048;
+    p.num_cus = 304;
+    return p;
+}
+
+static void test_3d_selectors(void)
+{
+    /* Values from the Python 3D selectors (tile overrides: -1 is None). */
+    static const struct
+    {
+        const char* name;
+        const char* arch;
+        int head_size, block_size, num_seqs, seqlen_q, seqlen_k, sliding_window, num_cus,
+            target_ctas, use_fp8;
+        int segments, tile_override, wide_kv, decode_grid, stream, swizzle, page_ids;
+    } rows[] = {
+        {"942 decode rule", "gfx942", 128, 16, 4, 1, 2048, 0, 304, 0, 0, 38, -1, 1, 1, 1, 1, 1},
+        {"942 D64 bs32 short kv",
+         "gfx942",
+         64,
+         32,
+         4,
+         1,
+         2048,
+         0,
+         304,
+         0,
+         0,
+         32,
+         -1,
+         1,
+         1,
+         1,
+         1,
+         1},
+        {"942 D128 bs32 short kv",
+         "gfx942",
+         128,
+         32,
+         4,
+         1,
+         2048,
+         0,
+         304,
+         0,
+         0,
+         16,
+         16,
+         1,
+         1,
+         1,
+         1,
+         0},
+        {"942 D256 bs32 short kv",
+         "gfx942",
+         256,
+         32,
+         4,
+         1,
+         2048,
+         0,
+         304,
+         0,
+         0,
+         32,
+         16,
+         0,
+         1,
+         1,
+         0,
+         0},
+        {"942 D128 bs32 k16384",
+         "gfx942",
+         128,
+         32,
+         4,
+         1,
+         16384,
+         0,
+         304,
+         0,
+         0,
+         16,
+         16,
+         1,
+         1,
+         1,
+         1,
+         0},
+        {"942 prefill clamp", "gfx942", 128, 16, 4, 8, 2048, 0, 1024, 0, 0, 16, -1, 1, 0, 0, 0, 0},
+        {"942 sliding window",
+         "gfx942",
+         128,
+         16,
+         4,
+         1,
+         2048,
+         256,
+         304,
+         0,
+         0,
+         32,
+         -1,
+         1,
+         1,
+         1,
+         1,
+         1},
+        {"942 fp8 decode", "gfx942", 128, 16, 4, 1, 2048, 0, 304, 0, 1, 16, -1, 0, 1, 0, 0, 0},
+        {"942 D256 bs16", "gfx942", 256, 16, 4, 1, 2048, 0, 304, 0, 0, 32, -1, 0, 1, 1, 1, 1},
+        {"950 thin decode", "gfx950", 128, 16, 1, 1, 65536, 0, 304, 0, 0, 64, 64, 0, 1, 1, 1, 1},
+        {"950 thin decode 600 cus",
+         "gfx950",
+         128,
+         16,
+         1,
+         1,
+         65536,
+         0,
+         600,
+         0,
+         0,
+         128,
+         64,
+         0,
+         1,
+         1,
+         1,
+         1},
+        {"950 decode rule", "gfx950", 128, 16, 16, 1, 2048, 0, 304, 0, 0, 9, -1, 0, 1, 1, 0, 1},
+        {"950 prefill clamp", "gfx950", 128, 16, 4, 8, 2048, 0, 1024, 0, 0, 16, -1, 0, 0, 0, 0, 0},
+        {"950 target_ctas", "gfx950", 128, 16, 4, 8, 2048, 0, 304, 2048, 0, 32, -1, 0, 0, 0, 0, 0},
+    };
+    size_t i;
+
+    set_env("HIPDNN_GFX942_3D_WKV", NULL);
+    for(i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i)
+    {
+        rocke_unified_attention_problem_t p = decode_3d();
+        rocke_unified_attention_3d_tiled_spec_t s;
+        int tile = -1;
+        bool is950 = strcmp(rows[i].arch, "gfx950") == 0;
+
+        p.head_size = rows[i].head_size;
+        p.block_size = rows[i].block_size;
+        p.num_seqs = rows[i].num_seqs;
+        p.max_seqlen_q = rows[i].seqlen_q;
+        p.total_q = rows[i].seqlen_q * rows[i].num_seqs;
+        p.max_seqlen_k = rows[i].seqlen_k;
+        p.sliding_window = rows[i].sliding_window;
+        p.num_cus = rows[i].num_cus;
+        p.target_ctas = rows[i].target_ctas;
+        p.use_fp8 = rows[i].use_fp8 != 0;
+
+        check_int(rows[i].name,
+                  "num_segments",
+                  rocke_unified_attn_num_segments(&p, rows[i].arch),
+                  rows[i].segments);
+        if(is950)
+            (void)rocke_unified_attn_gfx950_3d_tile_size_override(&p, rows[i].arch, &tile);
+        else
+            (void)rocke_unified_attn_gfx942_3d_tile_size_override(&p, rows[i].arch, &tile);
+        check_int(rows[i].name, "tile_size_override", tile, rows[i].tile_override);
+        check_gate(rows[i].name,
+                   "wide_kv_load",
+                   rocke_unified_attn_enable_gfx942_3d_wide_kv_load(&p, rows[i].arch),
+                   rows[i].wide_kv);
+        check_gate(rows[i].name,
+                   "decode_grid",
+                   rocke_unified_attn_use_decode_grid(&p, rows[i].arch),
+                   rows[i].decode_grid);
+        check_gate(rows[i].name,
+                   "kv_cache_policy stream",
+                   strcmp(rocke_unified_attn_kv_cache_policy_3d(&p, rows[i].arch), "stream") == 0,
+                   rows[i].stream);
+        check_gate(rows[i].name,
+                   "kv_lds_swizzle",
+                   rocke_unified_attn_kv_lds_swizzle_3d(&p, rows[i].arch),
+                   rows[i].swizzle);
+        check_gate(rows[i].name,
+                   "wave_page_id_load",
+                   rocke_unified_attn_wave_page_id_load_3d(&p, rows[i].arch),
+                   rows[i].page_ids);
+
+        /* The assembled spec carries the same values. */
+        s = rocke_unified_attn_tiled_3d_spec_from_problem(&p, rows[i].arch);
+        check_int(rows[i].name, "spec.num_segments", s.num_segments, rows[i].segments);
+        check_int(rows[i].name,
+                  "spec.tile_size_override",
+                  s.has_tile_size_override ? s.tile_size_override : -1,
+                  rows[i].tile_override);
+        check_spec_flag(rows[i].name, "use_wide_kv_load", s.use_wide_kv_load, rows[i].wide_kv);
+        check_spec_flag(rows[i].name, "use_decode_grid", s.use_decode_grid, rows[i].decode_grid);
+        check_spec_flag(rows[i].name, "use_kv_lds_swizzle", s.use_kv_lds_swizzle, rows[i].swizzle);
+        check_spec_flag(
+            rows[i].name, "use_wave_page_id_load", s.use_wave_page_id_load, rows[i].page_ids);
+        check_spec_flag(rows[i].name, "waves_per_eu None", !s.has_waves_per_eu, true);
+    }
+    {
+        rocke_unified_attention_problem_t p = decode_3d();
+        int wpe = -1;
+        rocke_unified_attention_3d_tiled_spec_t s;
+
+        check_int("3d", "pre_bump_segments", rocke_unified_attn_pre_bump_segments(&p), 16);
+        set_env("HIPDNN_GFX942_3D_WKV", " Off ");
+        check_gate("3d WKV off",
+                   "wide_kv_load",
+                   rocke_unified_attn_enable_gfx942_3d_wide_kv_load(&p, "gfx942"),
+                   false);
+        check_gate("3d WKV off",
+                   "kv_lds_swizzle",
+                   rocke_unified_attn_kv_lds_swizzle_3d(&p, "gfx942"),
+                   false);
+        set_env("HIPDNN_GFX942_3D_WKV", NULL);
+        check_gate("3d gfx1250",
+                   "waves_per_eu",
+                   rocke_unified_attn_select_3d_waves_per_eu(&p, "gfx1250", &wpe),
+                   true);
+        check_int("3d gfx1250", "waves_per_eu", wpe, 2);
+        p.waves_per_eu_set = true;
+        p.waves_per_eu = 3;
+        s = rocke_unified_attn_tiled_3d_spec_from_problem(&p, "gfx942");
+        check_int("3d wpe pin", "spec.waves_per_eu", s.has_waves_per_eu ? s.waves_per_eu : 0, 3);
+        s = rocke_unified_attn_tiled_3d_spec_from_problem(&p, "gfx1250");
+        check_spec_flag("3d gfx1250", "default spec", s.head_size == 0, true);
     }
 }
 
@@ -584,6 +1073,9 @@ int main(void)
     test_gfx942();
     test_bias();
     test_gfx942_flash();
+    test_fp8_mfma_qk();
+    test_gfx942_spec();
+    test_3d_selectors();
 
     if(g_failures != 0)
     {

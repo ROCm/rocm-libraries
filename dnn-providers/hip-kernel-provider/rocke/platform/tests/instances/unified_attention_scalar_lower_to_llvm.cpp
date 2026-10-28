@@ -16,11 +16,15 @@
  * kernels are arch-neutral (no MMA atom, no LDS, no cross-lane op), so the text
  * is the same on every gfx9 target: the comparison pins the wrapper's behavior,
  * not which gfx9 constant it names.
+ *
+ * It also pins the scalar kernel names (fp8 K/V and mask tokens) and the 2D
+ * signature's fp8 K/V pointer type to the values the Python specs produce.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arena.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/lower_llvm.h"
 
@@ -176,6 +180,91 @@ done:
     return rc;
 }
 
+/* Kernel names and the fp8 K/V signature, from the Python specs for the same
+ * problem (make_problem() plus the listed fields). */
+static int check_names_and_signature(void)
+{
+    static const struct
+    {
+        bool use_fp8, top_left;
+        int sliding_window, right_bound;
+        const char* name_2d;
+        const char* name_3d;
+    } rows[] = {
+        {true,
+         false,
+         0,
+         0,
+         "rocke_unified_attention_2d_scalar_h8_kv2_d64_b16_fp16_fp8kv",
+         "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16"},
+        {false,
+         true,
+         64,
+         5,
+         "rocke_unified_attention_2d_scalar_h8_kv2_d64_b16_fp16_sw_tl_rb5",
+         "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16_tl_rb5_sw"},
+        {false,
+         false,
+         0,
+         -1,
+         "rocke_unified_attention_2d_scalar_h8_kv2_d64_b16_fp16_rbu",
+         "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16_rbu"},
+        /* The default-mask 3D kernel never applies the window: no "sw". */
+        {false,
+         false,
+         64,
+         0,
+         "rocke_unified_attention_2d_scalar_h8_kv2_d64_b16_fp16_sw",
+         "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16"},
+    };
+    int failures = 0;
+    size_t i;
+
+    for(i = 0; i < sizeof rows / sizeof rows[0]; ++i)
+    {
+        rocke_unified_attention_problem_t p = make_problem();
+        char name[256];
+        p.use_fp8 = rows[i].use_fp8;
+        p.causal_top_left = rows[i].top_left;
+        p.sliding_window = rows[i].sliding_window;
+        p.right_bound = rows[i].right_bound;
+        if(rocke_unified_attention_2d_scalar_kernel_name(&p, NULL, name, sizeof name) != ROCKE_OK
+           || strcmp(name, rows[i].name_2d) != 0)
+        {
+            fprintf(stderr, "2d name: got %s, want %s\n", name, rows[i].name_2d);
+            ++failures;
+        }
+        if(rocke_unified_attention_3d_scalar_kernel_name(&p, NULL, NUM_SEGMENTS, name, sizeof name)
+               != ROCKE_OK
+           || strcmp(name, rows[i].name_3d) != 0)
+        {
+            fprintf(stderr, "3d name: got %s, want %s\n", name, rows[i].name_3d);
+            ++failures;
+        }
+    }
+
+    for(i = 0; i < 2; ++i)
+    {
+        rocke_unified_attention_problem_t p = make_problem();
+        const char* want = i == 0 ? "ptr<f16, global>" : "ptr<fp8e4m3, global>";
+        rocke_arena_t arena;
+        const rocke_sig_entry_t* items = NULL;
+        size_t n = 0;
+        p.use_fp8 = i == 1;
+        rocke_arena_init(&arena, 4096);
+        if(rocke_unified_attention_2d_scalar_signature(&p, &arena, &items, &n) != ROCKE_OK || n < 4
+           || strcmp(items[2].name, "key_cache_ptr") != 0 || strcmp(items[2].type, want) != 0
+           || strcmp(items[3].name, "value_cache_ptr") != 0 || strcmp(items[3].type, want) != 0)
+        {
+            fprintf(
+                stderr, "2d signature (use_fp8=%d): K/V pointer type is not %s\n", (int)i, want);
+            ++failures;
+        }
+        rocke_arena_destroy(&arena);
+    }
+    return failures;
+}
+
 int main(void)
 {
     static const kind_t kinds[] = {KIND_2D, KIND_3D, KIND_REDUCE};
@@ -184,10 +273,11 @@ int main(void)
 
     for(i = 0; i < sizeof kinds / sizeof kinds[0]; ++i)
         failures += run_case(kinds[i]);
+    failures += check_names_and_signature();
 
     if(failures != 0)
     {
-        fprintf(stderr, "%d of %zu wrappers failed\n", failures, sizeof kinds / sizeof kinds[0]);
+        fprintf(stderr, "%d check(s) failed\n", failures);
         return 1;
     }
     return 0;

@@ -193,6 +193,27 @@ bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attention_pro
 bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attention_problem_t* p,
                                                 const char* arch);
 
+/* Python: _fp8_qk_loader_fits(problem, arch, *, tile_size=None, num_warps=None).
+ * A ``tile_size`` / ``num_warps`` <= 0 is Python's None: the 2D selector's value
+ * is used. */
+bool rocke_unified_attn_fp8_qk_loader_fits(const rocke_unified_attention_problem_t* p,
+                                           const char* arch,
+                                           int tile_size,
+                                           int num_warps);
+/* Python: _enable_fp8_mfma_qk(problem, arch, *, tile_size=None, num_warps=None)
+ * -- keep K as fp8 in LDS for decode / short prefill. Overrides as above. */
+bool rocke_unified_attn_enable_fp8_mfma_qk(const rocke_unified_attention_problem_t* p,
+                                           const char* arch,
+                                           int tile_size,
+                                           int num_warps);
+
+/* True when env var ``name``, stripped and case-folded as the Python knobs read
+ * it, is one of the off keywords (0, off, disable, disabled, no, false). */
+bool rocke_unified_attn_env_is_off(const char* name);
+/* Python: _enable_i64_kv_addr(problem) -- the paged KV cache exceeds the i32
+ * buffer range. */
+bool rocke_unified_attn_enable_i64_kv_addr(const rocke_unified_attention_problem_t* p);
+
 /* --------------------------------------------- gfx942 flash / 4-warp selectors *
  * Mirrors of the Python gfx942 flash-family selectors. Several read HIPDNN_GFX942_*
  * env knobs with Python's parsing (stripped, case-folded, same keyword sets). */
@@ -244,15 +265,28 @@ int rocke_unified_attn_select_gfx942_flash_k_slice_hd(const rocke_unified_attent
  * HIPDNN_GFX942_FLASH_WIDE. */
 int rocke_unified_attn_select_gfx942_flash_num_warps(const rocke_unified_attention_problem_t* p,
                                                      const char* arch);
+/* Python: _enable_gfx942_flash_q_direct(problem, arch). */
+bool rocke_unified_attn_enable_gfx942_flash_q_direct(const rocke_unified_attention_problem_t* p,
+                                                     const char* arch);
+/* Python: _gfx942_flash_kv_cache_policy(problem). */
+const char*
+    rocke_unified_attn_gfx942_flash_kv_cache_policy(const rocke_unified_attention_problem_t* p);
+/* Python: _enable_gfx942_flash_k_sliced_ldsseq(problem, arch). Reads
+ * HIPDNN_GFX942_K_LDSSEQ. */
+bool rocke_unified_attn_enable_gfx942_flash_k_sliced_ldsseq(
+    const rocke_unified_attention_problem_t* p, const char* arch);
 
-/* Python: _tiled_spec_from_problem(problem, arch) -> rocke_attention_tiled_2d_spec_t.
- * Assembles the full tiled-2D spec for gfx950 by running every selector and gate
- * predicate exactly as attention_spec_builder._tiled_spec_from_problem does.
- * Returns the filled spec; on a non-gfx950 arch or an unresolvable LDS budget the
- * caller should check rocke_unified_attn_resolve_lds_budget separately.
+/* Python: attention_spec_builder._tiled_spec_from_problem(problem, arch) ->
+ * rocke_attention_tiled_2d_spec_t. Runs the same selectors and gate predicates
+ * in the same order: the gfx942 bf16 / fp16 flash builders, the gfx950 generic
+ * builder, and the generic builder every other arch shares. Not ported: the
+ * gfx1250 branch (returns the default spec, as does a NULL arch), the gfx950
+ * D256 fast-route overrides and the softmax-interleave fields.
  *
- * Every selector and gate predicate runs against ``arch``. Pass "gfx950" for the
- * primary production path. */
+ * Python's attention_unified._tiled_spec_from_problem also validates the spec
+ * (the spec class __post_init__) and runs _resolve_lds_budget. Callers do both
+ * here: rocke_attention_tiled_2d_spec_validate for a gfx942 spec, then
+ * rocke_unified_attn_resolve_lds_budget. */
 rocke_attention_tiled_2d_spec_t
     rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attention_problem_t* p,
                                                const char* arch);

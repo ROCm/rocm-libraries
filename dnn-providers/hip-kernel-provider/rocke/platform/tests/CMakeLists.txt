@@ -667,6 +667,40 @@ if(BUILD_TESTING)
                  rocke_wmma_fmha_decode_host)
   endif()
 
+  # Python-vs-C++ parity of the unified-attention selectors, routing gates and
+  # the binding's spec fields, run through the rocke_engine module. Needs that
+  # module and the sibling library tree; a platform-only copy still configures.
+  set(_rocke_library_tests "${CMAKE_CURRENT_SOURCE_DIR}/../../library/tests")
+  if(ROCKE_BUILD_PYBIND
+     AND EXISTS "${_rocke_library_tests}/test_attention_selector_cpp_parity.py")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
+                    RESULT_VARIABLE _rocke_has_pytest
+                    OUTPUT_QUIET ERROR_QUIET)
+    if(_rocke_has_pytest EQUAL 0)
+      # The pytest files skip without the module; this entry fails instead, so
+      # a missing or unbuilt module can't pass as a fully skipped run.
+      add_test(NAME rocke_engine_import
+               COMMAND "${Python3_EXECUTABLE}" -c "import rocke_engine")
+      add_test(NAME rocke_attention_cpp_parity_pytest
+               COMMAND "${Python3_EXECUTABLE}" -m pytest
+                       "${_rocke_library_tests}/test_attention_selector_cpp_parity.py"
+                       "${_rocke_library_tests}/test_attention_routing_cpp_parity.py"
+                       "${_rocke_library_tests}/test_attention_binding_spec_fields.py"
+                       "${_rocke_library_tests}/test_attention_spec_cpp_parity.py"
+                       -q -rsx -p no:cacheprovider
+               WORKING_DIRECTORY "${_rocke_library_tests}")
+      # The library conftest puts the library and platform/python on sys.path.
+      set_tests_properties(rocke_engine_import rocke_attention_cpp_parity_pytest
+                           PROPERTIES LABELS "ckc;python;attention;host"
+                                      ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:rocke_engine>")
+      set_tests_properties(rocke_attention_cpp_parity_pytest PROPERTIES TIMEOUT 600)
+    else()
+      message(STATUS "rocKE: ${Python3_EXECUTABLE} cannot import pytest; "
+                     "rocke_attention_cpp_parity_pytest is not registered")
+    endif()
+  endif()
+
   # Apply YAML-driven quick/standard/comprehensive/full tier labels to the
   # tests above. Must run in THIS directory scope: CMake (pre-3.28,
   # which this project's cmake_minimum_required predates) only allows
