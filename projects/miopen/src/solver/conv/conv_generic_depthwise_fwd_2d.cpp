@@ -310,6 +310,7 @@ ConvSolution GetGenericDepthwiseFwdSolution(const ProblemDescription& problem, b
     };
     result.construction_params.push_back(std::move(kernel));
     return result;
+}
 
 } // namespace
 
