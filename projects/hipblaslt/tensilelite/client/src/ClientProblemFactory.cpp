@@ -492,6 +492,13 @@ namespace TensileLite
                                 rv.back().setFusedGemmA2A(m_fusedGemmA2A);
                                 if(m_fusedGemmA2A)
                                 {
+                                    if(static_cast<size_t>(m_fusedA2AExtents[i])
+                                       > rv.back().freeSizeA(0))
+                                        throw std::invalid_argument(
+                                            concatenate("fused-a2a-extent=",
+                                                        m_fusedA2AExtents[i],
+                                                        " exceeds M=",
+                                                        rv.back().freeSizeA(0)));
                                     rv.back().setWorld(m_worlds[i]);
                                     rv.back().setFusedA2AExtent(m_fusedA2AExtents[i]);
                                     rv.back().setA2ARecv();
