@@ -186,7 +186,9 @@ A hole is a function with no translation rule. The generated `.cpp` then holds
   Methods use `Class_method`. A C-only function with no Python twin (an ABI
   companion such as a `_count` function) uses its C name. The fill is plain
   C++ with the header's signature. Start it with a comment that quotes the
-  Python it stands for.
+  Python it stands for. A filled function keeps its C entry, so its callers
+  translate and call that entry (its header signature) instead of becoming
+  holes themselves.
 - A dispatch fill (first lines contain `hole fill (dispatch`) is used even
   though the function translates. Its C entry first dispatches on a C-only
   struct field. That field is declared in `holes/<module>/<Class>.fields`,

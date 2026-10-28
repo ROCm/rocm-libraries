@@ -5063,6 +5063,10 @@ class Fn:
         cls, dsig = self.family_resolve(recv, cls, attr, node)
         sig = dsig or self.mod.sigs.get(f"{cls}.{attr}")
         fn = self.mod.methods.get((cls, attr)) or (dsig.py if dsig else None)
+        if sig is None and fn is not None and self.mod.family(cls) is None:
+            filled = self.call_filled(f"{cls}.{attr}", fn, node, recv=recv)
+            if filled is not None:
+                return filled
         if sig is None or fn is None:
             raise Refuse(node, f"method {cls}.{attr} is not translated")
         bound = self.bind_call_args(node, py_params(fn), skip=1)
@@ -6666,14 +6670,16 @@ class Fn:
             g["opt_has"] = h
             args.append(f"&{h}")
             return True
-        if role == "reason":
+        if role in ("reason", "reason_str"):
+            # reason: a raise's text; reason_str: the str of an (ok, reason) result
             r = self.tmp("reason")
             self.emit(f'char {r}[512] = "";')
-            g["reason"] = r
+            g[role] = r
+            g["reason_buf"] = r
             args.append(r)
             return True
         if role == "reason_cap":
-            args.append(f"sizeof({g['reason']})")
+            args.append(f"sizeof({g['reason_buf']})")
             return True
         if role == "str_out":
             b_ = self.tmp("buf")
@@ -6710,6 +6716,13 @@ class Fn:
         else:
             self.emit(f"{call};")
         takes_b = any(t == T.B for t, _ in cf.params)
+        if "reason_str" in g and ok:
+            # (ok, reason) through the validity-gate ABI: the Python tuple, no raise
+            return CE(
+                f"std::tuple<bool, std::string>{{{ok}, std::string({g['reason_str']})}}",
+                "std::tuple<bool, std::string>",
+                True,
+            )
         if "reason" in g and ok:
             self.emit(
                 f"if({'!' + ok if cf.ret == 'bool' else ok + ' < 0'}) throw ckc::ValueError(std::string({g['reason']}));"
@@ -7230,6 +7243,10 @@ class Fn:
                 name,
             )
         fn = self.mod.functions[name]
+        if self.mod.sigs.get(name) is None:
+            filled = self.call_filled(name, fn, node)
+            if filled is not None:
+                return filled
         if self.mod.sigs.get(name) is None and builder_param(fn) is None:
             raise Refuse(node, f"call to {name}, which is not translated")
         pyparams = py_params(fn)
@@ -7254,6 +7271,36 @@ class Fn:
             else:
                 raise Refuse(node, f"missing argument {pname} to {name}")
         return self.bind(CE(f"{sig.name}({', '.join(args)})", sig.ret, False), name)
+
+    def call_filled(self, qual: str, fn, node, recv: CE | None = None) -> CE | None:
+        """A call of a function (or method, `Class.method` on recv) that did not
+        translate but has a hand fill (holes/<module>/<f>.cpp): the fill defines
+        its C entry, so the call goes through that entry (its header signature),
+        as a call into another module's C twin does. None when there is no fill
+        or no C entry in this module's header."""
+        import os
+
+        from .env import holes_dir
+        from .translate import abi_of
+
+        fill = os.path.join(
+            holes_dir(), self.mod.modname, qual.replace(".", "_") + ".cpp"
+        )
+        if not os.path.isfile(fill):
+            return None
+        entry, cf = abi_of(self.env, self.mod, qual)
+        if cf is None:
+            return None
+        bound = self.bind_call_args(node, py_params(fn), skip=0 if recv is None else 1)
+        slots = {s["c"]: s for s in entry["c"]["slots"]}
+        extra = {x["c"]: x["role"] for x in entry["c"].get("extra_c", [])}
+        self_arg = None
+        if recv is not None:
+            if not cf.params or not T.struct_of(cf.params[0][0]):
+                raise Refuse(node, f"filled method {qual}: its C entry takes no self")
+            self_arg = self.coerce(recv, cf.params[0][0], node)
+        args = self.c_args(cf, bound, slots, extra, node, self_arg=self_arg)
+        return self.gen_call(cf, args, qual.rsplit(".", 1)[-1], node)
 
     def callee_sig(self, name: str, cls: str | None, fn, bound: dict, node):
         """The internal signature a call reaches: the IR version, or (host clones) the
