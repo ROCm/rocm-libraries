@@ -122,17 +122,21 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
         return checkResult;
     }
 
-    constexpr std::array<std::array<hiptensorDataType_t, 4>, 3> validDataTypes
+    constexpr std::array<std::array<hiptensorDataType_t, 4>, 6> validDataTypes
         = {{// typeA, typeB, typeC, typeScalar
             {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+            {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF},
+            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
             {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
             {HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
 
     std::array<hiptensorDataType_t, 4> inputTensorTypes
         = {descA->mType, descB->mType, descC->mType, typeScalar};
-    if(std::none_of(validDataTypes.cbegin(),
-                    validDataTypes.cend(),
-                    [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
+    if(descC->mType != descD->mType
+       || std::none_of(validDataTypes.cbegin(),
+                       validDataTypes.cend(),
+                       [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg,

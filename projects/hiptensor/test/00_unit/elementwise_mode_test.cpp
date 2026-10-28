@@ -336,3 +336,57 @@ TEST_F(ElementwiseModeTest, TrinaryWithReorderedModesIsSupported)
               HIPTENSOR_STATUS_SUCCESS);
     hiptensorDestroyOperationDescriptor(opDesc);
 }
+
+// D must have the same data type as C: no instance converts types on output, so a mismatch is
+// rejected up front instead of failing later in kernel selection.
+TEST_F(ElementwiseModeTest, TrinaryWithMismatchedOutputTypeReturnsNotSupported)
+{
+    int64_t                     lengths[2] = {2, 3};
+    hiptensorTensorDescriptor_t f16Desc{};
+    ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                  mHandle, &f16Desc, 2, lengths, nullptr, HIPTENSOR_R_16F, alignment),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                &opDesc,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                f16Desc,
+                                                mFullModes,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    hiptensorPlanPreference_t pref{};
+    ASSERT_EQ(hiptensorCreatePlanPreference(
+                  mHandle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t plan{};
+    ASSERT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, pref, 0), HIPTENSOR_STATUS_SUCCESS);
+
+    void* abc = nullptr;
+    void* d   = nullptr;
+    ASSERT_EQ(hipMalloc(&abc, 2 * 3 * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&d, 2 * 3 * sizeof(uint16_t)), hipSuccess);
+
+    float scalar = 1.0f;
+    EXPECT_EQ(hiptensorElementwiseTrinaryExecute(
+                  mHandle, plan, &scalar, abc, &scalar, abc, &scalar, abc, d, nullptr),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
+
+    EXPECT_EQ(hipFree(d), hipSuccess);
+    EXPECT_EQ(hipFree(abc), hipSuccess);
+    hiptensorDestroyPlan(plan);
+    hiptensorDestroyPlanPreference(pref);
+    hiptensorDestroyOperationDescriptor(opDesc);
+    hiptensorDestroyTensorDescriptor(f16Desc);
+}

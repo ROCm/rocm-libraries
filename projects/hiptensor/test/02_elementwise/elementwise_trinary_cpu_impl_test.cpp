@@ -75,18 +75,18 @@ auto elementaryTrinaryOpWithCpu(hiptensorDataType_t inputType,
     }
 
     std::vector<InputType> aArray(inElements);
-    std::iota(aArray.begin(), aArray.end(), 0);
+    std::iota(aArray.begin(), aArray.end(), static_cast<InputType>(0.0f));
     std::vector<InputType>  bArray(aArray);
     std::vector<InputType>  cArray(aArray);
     std::vector<OutputType> dArray(outputElements);
-    std::vector<OutputType> referenceArray;
+    std::vector<double>     referenceValues;
 
     using hiptensor::HiptensorOptions;
     auto& options = HiptensorOptions::instance();
 
     if(options->isColMajorStrides())
     {
-        referenceArray = {
+        referenceValues = {
             0.,     -21.6,  -43.2,  -64.8,  -86.4,  -108.,  -129.6, -151.2, -172.8, -194.4, -216.,
             -237.6, -259.2, -280.8, -302.4, -324.,  -345.6, -367.2, -388.8, -410.4, -10.8,  -32.4,
             -54.,   -75.6,  -97.2,  -118.8, -140.4, -162.,  -183.6, -205.2, -226.8, -248.4, -270.,
@@ -101,7 +101,7 @@ auto elementaryTrinaryOpWithCpu(hiptensorDataType_t inputType,
     }
     else
     {
-        referenceArray = {
+        referenceValues = {
             0.,     -144.,  -288.,  -72.,   -216.,  -360.,  -3.6,   -147.6, -291.6, -75.6,  -219.6,
             -363.6, -7.2,   -151.2, -295.2, -79.2,  -223.2, -367.2, -10.8,  -154.8, -298.8, -82.8,
             -226.8, -370.8, -14.4,  -158.4, -302.4, -86.4,  -230.4, -374.4, -18.,   -162.,  -306.,
@@ -115,9 +115,15 @@ auto elementaryTrinaryOpWithCpu(hiptensorDataType_t inputType,
             -352.8, -136.8, -280.8, -424.8, -68.4,  -212.4, -356.4, -140.4, -284.4, -428.4};
     }
 
-    const ComputeType alphaValue = 0.3f;
-    const ComputeType betaValue  = 2.1f;
-    const ComputeType gammaValue = 1.2f;
+    std::vector<OutputType> referenceArray;
+    for(auto v : referenceValues)
+    {
+        referenceArray.push_back(static_cast<OutputType>(v));
+    }
+
+    const ComputeType alphaValue = static_cast<ComputeType>(0.3f);
+    const ComputeType betaValue  = static_cast<ComputeType>(2.1f);
+    const ComputeType gammaValue = static_cast<ComputeType>(1.2f);
 
     hiptensorHandle_t handle;
     CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
@@ -213,6 +219,54 @@ TEST(ElementaryTrinaryOpCpuImplTest, CompareF16ResultWithReference)
     hiptensorDataType_t inputType   = HIPTENSOR_R_16F;
     hiptensorDataType_t outputType  = HIPTENSOR_R_16F;
     hiptensorDataType_t typeCompute = HIPTENSOR_R_16F;
+
+    auto [result, maxRelativeError]
+        = elementaryTrinaryOpWithCpu<InputType, OutputType, ComputeType>(
+            inputType, outputType, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(ElementaryTrinaryOpCpuImplTest, CompareBF16ResultWithReference)
+{
+    typedef hip_bfloat16 InputType;
+    typedef hip_bfloat16 OutputType;
+    typedef hip_bfloat16 ComputeType;
+
+    hiptensorDataType_t inputType   = HIPTENSOR_R_16BF;
+    hiptensorDataType_t outputType  = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_16BF;
+
+    auto [result, maxRelativeError]
+        = elementaryTrinaryOpWithCpu<InputType, OutputType, ComputeType>(
+            inputType, outputType, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(ElementaryTrinaryOpCpuImplTest, CompareBF16WithF32ScalarResultWithReference)
+{
+    typedef hip_bfloat16 InputType;
+    typedef hip_bfloat16 OutputType;
+    typedef float        ComputeType;
+
+    hiptensorDataType_t inputType   = HIPTENSOR_R_16BF;
+    hiptensorDataType_t outputType  = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_32F;
+
+    auto [result, maxRelativeError]
+        = elementaryTrinaryOpWithCpu<InputType, OutputType, ComputeType>(
+            inputType, outputType, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(ElementaryTrinaryOpCpuImplTest, CompareF16WithF32ScalarResultWithReference)
+{
+    typedef _Float16 InputType;
+    typedef _Float16 OutputType;
+    typedef float    ComputeType;
+
+    hiptensorDataType_t inputType   = HIPTENSOR_R_16F;
+    hiptensorDataType_t outputType  = HIPTENSOR_R_16F;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_32F;
 
     auto [result, maxRelativeError]
         = elementaryTrinaryOpWithCpu<InputType, OutputType, ComputeType>(
