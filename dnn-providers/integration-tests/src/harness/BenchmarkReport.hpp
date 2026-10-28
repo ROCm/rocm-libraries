@@ -71,9 +71,9 @@ inline void reportReferenceBenchmark(const ReferenceBenchmarkResult& result)
         return out.str();
     };
     const std::string prefix = "reference_benchmark_" + result.reference + "_";
-    ::testing::Test::RecordProperty(prefix + "status", result.status);
+    ::testing::Test::RecordProperty(prefix + "status", toString(result.status));
     ::testing::Test::RecordProperty(prefix + "validator", result.validator);
-    if(result.status == "verified" || result.status == "mismatch")
+    if(result.hasSample())
     {
         ::testing::Test::RecordProperty(prefix + "samples", 1);
         ::testing::Test::RecordProperty(prefix + "prepare_ms", format(result.prepareMs));
@@ -81,16 +81,17 @@ inline void reportReferenceBenchmark(const ReferenceBenchmarkResult& result)
         ::testing::Test::RecordProperty(prefix + "materialize_ms", format(result.materializeMs));
         ::testing::Test::RecordProperty(prefix + "total_ms", format(result.totalMs()));
     }
-    if(result.status == "verified")
+    // A mismatch is a sample but not a verified reference, so it stays out of the totals.
+    if(result.status == ReferenceBenchmarkStatus::VERIFIED)
     {
         auto& total = ReferenceBenchmarkSummary::totals()[result.reference];
         ++total.count;
         total.milliseconds += result.totalMs();
     }
     std::cout << "[ REFERENCE BENCHMARK ] " << currentTestName()
-              << " reference=" << result.reference << " status=" << result.status
+              << " reference=" << result.reference << " status=" << toString(result.status)
               << " validator=" << result.validator;
-    if(result.status == "verified" || result.status == "mismatch")
+    if(result.hasSample())
     {
         std::cout << " samples=1 prepare_ms=" << format(result.prepareMs)
                   << " execute_ms=" << format(result.executeMs)

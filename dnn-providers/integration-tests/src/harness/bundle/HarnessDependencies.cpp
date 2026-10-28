@@ -21,7 +21,7 @@ HarnessDependencies productionDependencies(TensorPlacement placement,
     deps.reporter = std::make_shared<GlobalVerificationReporter>();
     deps.policy = productionPolicy(placement);
     deps.deviceFiller = std::move(deviceFiller);
-    deps.referenceTimer = ReferenceBenchmarkTimer(synchronizeReferenceBenchmark);
+    deps.referenceTimer = productionReferenceTimer();
     return deps;
 }
 
