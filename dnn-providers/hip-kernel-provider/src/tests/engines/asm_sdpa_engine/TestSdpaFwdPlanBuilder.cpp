@@ -1629,7 +1629,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsEachFp8VByteStrideField)
         GTEST_SKIP();
     }
 
-    constexpr int64_t K_FP8_STRIDE_LIMIT = static_cast<int64_t>(UINT32_MAX);
+    constexpr auto K_FP8_STRIDE_LIMIT = static_cast<int64_t>(UINT32_MAX);
     constexpr int64_t K_BF16_PAST_LIMIT = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
     const std::vector<int64_t> dims = {4, 8, 256, 128};
 
