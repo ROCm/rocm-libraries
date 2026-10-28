@@ -467,7 +467,7 @@ def test_activation_func_call_uses_tensile_default() -> None:
 
 
 def test_check_registry_lists_defaults_and_skip() -> None:
-    """The registry lists every default check and honors --skip.
+    """The registry lists default and deferred checks and honors --skip.
 
     Args:
         None.
@@ -489,6 +489,18 @@ def test_check_registry_lists_defaults_and_skip() -> None:
         "solution_uid_present",
     ):
         assert check_id in text
+    deferred = (
+        "streamk_gsu",
+        "use_custom_main_loop_schedule",
+        "activation_func_call",
+        "kernel_name_matches_filename",
+        "origami_assert_multiples",
+    )
+    enabled = resolve_enabled_checks(None, None)
+    for check_id in deferred:
+        assert check_id not in DEFAULT_CHECK_IDS
+        assert check_id not in enabled
+        assert f"{check_id} (deferred)" in text
     assert "use_custom_main_loop_schedule" not in resolve_enabled_checks(
         None, ["use_custom_main_loop_schedule"]
     )

@@ -1302,16 +1302,35 @@ def validate_origami_assert_multiples(
 
 
 def validate_library_type_folder(record: LibraryRecord, sink: ErrorSink) -> None:
-    """Library type in YAML should match the parent folder when present.
+    """Require the YAML library type to match its parent folder.
+
+    ``Prediction`` is accepted only in an Origami folder. An Origami folder
+    accepts only ``Prediction``.
 
     Args:
         record: Parsed library record.
         sink: Error callback.
+
+    Returns:
+        None.
+
+    Raises:
+        No exceptions are raised.
     """
     folder = path_library_folder(record.path)
     if not folder:
         return
     lib_type = record.library_type
+    if lib_type == "Prediction" or folder == "Origami":
+        if lib_type != "Prediction" or folder != "Origami":
+            _emit(
+                sink,
+                record.path,
+                "library_type_folder",
+                f"Prediction is accepted only in an Origami folder "
+                f"(found LibraryType {lib_type} in {folder}).",
+            )
+        return
     if lib_type == "Matching":
         if folder not in ("GridBased", "Equality", "Range"):
             _emit(
@@ -1321,7 +1340,7 @@ def validate_library_type_folder(record: LibraryRecord, sink: ErrorSink) -> None
                 f"Matching library in unexpected folder {folder}",
             )
         return
-    if lib_type != folder and not (lib_type == "Prediction" and folder == "Origami"):
+    if lib_type != folder:
         _emit(
             sink,
             record.path,
@@ -1428,7 +1447,8 @@ CHECK_CATALOG: tuple[tuple[str, str, CheckFn], ...] = (
     ),
     (
         "library_type_folder",
-        "YAML LibraryType must match the parent folder (Prediction may live under Origami).",
+        "YAML LibraryType must match the parent folder. "
+        "Prediction is accepted only in an Origami folder, and Origami accepts only Prediction.",
         _legacy_check(validate_library_type_folder),
     ),
     (
@@ -1449,7 +1469,20 @@ CHECK_CATALOG: tuple[tuple[str, str, CheckFn], ...] = (
 )
 
 CHECK_FUNCS: dict[str, CheckFn] = {check_id: fn for check_id, _, fn in CHECK_CATALOG}
-DEFAULT_CHECK_IDS: tuple[str, ...] = tuple(check_id for check_id, _, _ in CHECK_CATALOG)
+
+# Registered, but omitted from the default audit for now. ``--checks`` still selects them.
+_DEFERRED_CHECK_IDS: frozenset[str] = frozenset(
+    {
+        "streamk_gsu",
+        "use_custom_main_loop_schedule",
+        "activation_func_call",
+        "kernel_name_matches_filename",
+        "origami_assert_multiples",
+    }
+)
+DEFAULT_CHECK_IDS: tuple[str, ...] = tuple(
+    check_id for check_id, _, _ in CHECK_CATALOG if check_id not in _DEFERRED_CHECK_IDS
+)
 
 
 def format_check_list() -> str:
@@ -1459,14 +1492,19 @@ def format_check_list() -> str:
         None.
 
     Returns:
-        Multi-line catalog of check id and description.
+        Multi-line catalog of check id, whether it runs by default, and description.
 
     Raises:
         No exceptions are raised.
     """
-    lines = ["Enabled by default. Toggle with --checks id,id or --skip id,id.", ""]
+    lines = [
+        "Default checks run unless --checks or --skip is set.",
+        "Deferred checks stay in the registry and run only when named with --checks.",
+        "",
+    ]
     for check_id, description, _ in CHECK_CATALOG:
-        lines.append(f"{check_id}")
+        state = "deferred" if check_id in _DEFERRED_CHECK_IDS else "default"
+        lines.append(f"{check_id} ({state})")
         lines.append(f"    {description}")
     return "\n".join(lines)
 

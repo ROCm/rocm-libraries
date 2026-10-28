@@ -462,6 +462,13 @@ def test_policy_checks_report_each_failure_branch() -> None:
         _record(library_type="Prediction", path=Path("gfx950/Origami/a.yaml")),
         "library_type_folder",
     ) == []
+    for misplaced in (
+        _record(library_type="Prediction", path=Path("gfx950/Prediction/a.yaml")),
+        _record(library_type="Prediction", path=Path("gfx950/Equality/a.yaml")),
+        _record(library_type="Equality", path=Path("gfx950/Origami/a.yaml")),
+        _record(library_type="Origami", path=Path("gfx950/Origami/a.yaml")),
+    ):
+        assert "library_type_folder" in _codes(misplaced, "library_type_folder")
     assert _codes(_record(path=Path("loose.yaml")), "library_type_folder") == []
 
 
@@ -742,7 +749,7 @@ def test_absent_filled_fields_are_skipped() -> None:
 
 
 def test_run_all_validators_adapts_legacy_signatures() -> None:
-    """Run the full registry, including both legacy call shapes.
+    """Run the default checks, including both legacy call shapes.
 
     Args:
         None.
@@ -751,15 +758,26 @@ def test_run_all_validators_adapts_legacy_signatures() -> None:
         None.
 
     Raises:
-        AssertionError: If the registry emits nothing for an incomplete library.
+        AssertionError: If a deferred check runs, or a remaining check does not.
     """
     found: list[str] = []
     audit.run_all_validators(
-        _record(solutions=[{"SolutionIndex": 1, "StreamK": 3, "GlobalSplitU": 4}]),
+        _record(
+            solutions=[{"SolutionIndex": 1, "StreamK": 3, "GlobalSplitU": 4}],
+            exact_logic=[([128, 128, 64, 1], [0, 1.5])],
+        ),
         {},
         lambda _path, code, _message: found.append(code),
     )
-    assert "streamk_gsu" in found
+    assert "performance_nonzero" in found
+    for deferred in (
+        "streamk_gsu",
+        "use_custom_main_loop_schedule",
+        "activation_func_call",
+        "kernel_name_matches_filename",
+        "origami_assert_multiples",
+    ):
+        assert deferred not in found
 
 
 def test_audit_cache_hits_misses_and_invalid_manifests(tmp_path: Path) -> None:
