@@ -106,6 +106,11 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/library_stamp.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/load_limits.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/loaded_model.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/sha256.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/types.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
@@ -149,6 +154,14 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
+)
+
+# Origami Boost (nn/boost) is built either way: it needs neither ORIGAMI_ENABLE_NN nor YAML.
+target_sources(
+    origami
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/library_stamp.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/orr_loader.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/sha256.cpp"
 )
 
 if(ORIGAMI_ENABLE_NN)
