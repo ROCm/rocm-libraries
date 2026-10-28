@@ -123,22 +123,41 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     ///
     /// The workspace size recorded in find-db is not trusted: shipped find-dbs have been found
     /// with wrong values, and the record may come from another library version. The solver's own
-    /// requirement (the value returned by GetWorkspaceSize/GetSolutionWorkspaceSize) is used
-    /// instead, both for the IsEnoughWorkspace() check and for the value returned to the caller.
+    /// requirement is used instead, both for the IsEnoughWorkspace() check and for the value
+    /// returned to the caller:
+    /// - In Find (non-zero InvokeParams), the solver's GetWorkspaceSize(), i.e. the maximum over
+    ///   its configurations, which is also what GWSS returns.
+    /// - Otherwise (immediate mode), the workspace of the configuration that Immediate will run.
+    ///   For tunable solvers this is the perf-db (or default) configuration resolved the same way
+    ///   as in CompileSolution(). This avoids GetWorkspaceSize() walking every configuration,
+    ///   which takes milliseconds for some CK solvers.
     ///
     /// The loop below does all the above at once.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
-    auto n_copied = 0;
+    auto n_copied                        = 0;
+    auto immediate_ctx                   = ctx;
+    immediate_ctx.disable_search_enforce = true;
+    auto db                              = MakeConvDbGetter(immediate_ctx);
+    const auto required_workspace        = [&](const solver::AnySolver& solver) -> std::size_t {
+        if(!solver.MayNeedWorkspace())
+            return 0;
+        if(invokeParams == nullptr && solver.IsTunable())
+        {
+            const auto solution = solver.FindSolution(immediate_ctx, problem, db, {});
+            if(solution.Succeeded())
+                return solution.workspace_sz;
+        }
+        return solver.GetWorkspaceSize(ctx, problem);
+    };
     for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
         const auto& solver   = solver_id.GetSolver();
         if(!solver.IsApplicable(ctx, problem))
             continue;
-        const auto workspace_size =
-            solver.MayNeedWorkspace() ? solver.GetWorkspaceSize(ctx, problem) : 0;
+        const auto workspace_size = required_workspace(solver);
         if(workspace_size != s.workspace_size)
         {
             MIOPEN_LOG_I2(solver_id.ToString()
