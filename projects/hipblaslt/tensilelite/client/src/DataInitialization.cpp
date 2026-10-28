@@ -2231,9 +2231,14 @@ namespace TensileLite
                   bool const kIsRows = (isMatrixA && transposed) || (!isMatrixA && !transposed);
 
                   // maf2_0 seeds each matrix and batch apart, as hipBLASLt does: abc + 3 * batch.
-                  // maf1_0 takes sin (A) or cos (B) and the batch's index offset from it.
-                  auto maf2_0SeedIndex = [isMatrixA](size_t b) {
-                      return static_cast<uint32_t>((isMatrixA ? 0 : 1) + 3 * b);
+                  // maf1_0 takes sin (A) or cos (B) and the batch's index offset from it. A
+                  // zero batch stride broadcasts one matrix, so every batch regenerates batch 0
+                  // and the shared data matches each batch's scales and the reference.
+                  bool const broadcastBatch
+                      = dataDesc.sizes().size() > 2 && dataDesc.strides()[2] == 0;
+                  auto maf2_0SeedIndex = [isMatrixA, broadcastBatch](size_t b) {
+                      return static_cast<uint32_t>((isMatrixA ? 0 : 1)
+                                                   + 3 * (broadcastBatch ? 0 : b));
                   };
 
                   auto& pristineData = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
@@ -2653,7 +2658,9 @@ namespace TensileLite
                                 initModeToMXMethod(m_vdata[scaleTensorEnum].init),
                                 // abc + 3 * batch, as initOneMXSide passes: maf2_0 seeds A, B
                                 // and each batch apart; maf1_0 takes sin/cos and the offset.
-                                static_cast<uint32_t>((isMatrixA ? 0 : 1) + 3 * b));
+                                // A zero batch stride (broadcast) regenerates batch 0.
+                                static_cast<uint32_t>((isMatrixA ? 0 : 1)
+                                                      + 3 * (batchStrideBytes == 0 ? 0 : b)));
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR

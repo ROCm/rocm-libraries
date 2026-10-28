@@ -3269,7 +3269,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f,
                                       /*scaleInitMethod=*/"",
-                                      /*seedIndex=*/static_cast<uint32_t>(0 + 3 * b));
+                                      // A broadcast A (stride 0) is one matrix: every batch
+                                      // regenerates batch 0, so data, scales and reference agree.
+                                      /*seedIndex=*/
+                                      static_cast<uint32_t>(0 + 3 * (stride_a[i] == 0 ? 0 : b)));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -3391,7 +3394,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f,
                                       /*scaleInitMethod=*/"",
-                                      /*seedIndex=*/static_cast<uint32_t>(1 + 3 * b));
+                                      // A broadcast B (stride 0) is one matrix, as for A above.
+                                      /*seedIndex=*/
+                                      static_cast<uint32_t>(1 + 3 * (stride_b[i] == 0 ? 0 : b)));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
