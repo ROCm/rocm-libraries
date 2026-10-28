@@ -13,15 +13,9 @@ No GPU / torch: only request construction and candidate admission are exercised.
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
-_LIB = Path(__file__).resolve().parents[1]
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-
-from benchmarks.common import attention_combo_sweep as cs  # noqa: E402
-from dispatch.attention import attention_candidates  # noqa: E402
+from benchmarks.common import attention_combo_sweep as cs
+from dispatch.attention import attention_candidates
 
 
 def _args(use_fp8: bool) -> argparse.Namespace:
@@ -92,10 +86,3 @@ def test_child_argv_forwards_use_fp8():
     result = cs.attention_dispatch_result(pinned, grid, grid.select_spec(pinned))
     assert "--use-fp8" in cs._child_argv(_args(use_fp8=True), pinned, result)
     assert "--use-fp8" not in cs._child_argv(_args(use_fp8=False), pinned, result)
-
-
-if __name__ == "__main__":
-    test_use_fp8_request_carries_the_feature()
-    test_use_fp8_routes_dense_grid_to_an_fp8_spec()
-    test_child_argv_forwards_use_fp8()
-    print("ok")
