@@ -1501,8 +1501,7 @@ static rocke_attention_tiled_2d_spec_t
     return spec_base_2d_generic(p, arch);
 }
 
-/* Python: spec_builder._spec_gfx950_generic(problem, arch), without the D256
- * fast-route overrides and the softmax-interleave fields. */
+/* Python: spec_builder._spec_gfx950_generic(problem, arch). */
 static rocke_attention_tiled_2d_spec_t
     spec_gfx950_generic(const rocke_unified_attention_problem_t* p, const char* arch)
 {
@@ -1517,6 +1516,39 @@ static rocke_attention_tiled_2d_spec_t
         int block_m_ks = s.num_warps * s.block_m_per_warp;
         int t_eff_ks = s.has_tile_size ? s.tile_size : s.block_size;
         s.use_k_single_buffer = enable_d128_small_tile(p, arch) && (block_m_ks <= t_eff_ks);
+    }
+    if(enable_softmax_mfma_interleave(p, arch))
+    {
+        s.use_softmax_mfma_interleave = true;
+        s.softmax_interleave_mode = 1;
+    }
+
+    /* D256 bf16 prefill fast route: pin the 32x32 transposed stack, the
+     * direct-to-register Q gather, the mask phase split, the K-slab LDS pad and
+     * the mode-2 softmax<->MFMA interleave on top of the gated geometry
+     * (Python _d256_gfx950_spec_overrides). */
+    if(d256_gfx950_fast(p, arch))
+    {
+        s.use_mfma_32x32 = true;
+        s.use_transposed_qk_32x32 = true;
+        s.use_q_direct_reg = true;
+        s.use_transposed_half_local_pv = true;
+        s.use_transposed_scalar_state = true;
+        s.use_transposed_mask_once = true;
+        s.use_transposed_mask_limit = true;
+        s.use_mask_phase_split = true;
+        s.use_register_pv = false;
+        s.use_k_single_buffer = true;
+        s.use_v_double_buffer = false;
+        s.use_early_v_schedule = false;
+        s.use_sched_barrier = false;
+        s.use_softmax_mfma_interleave = true;
+        s.softmax_interleave_mode = 2;
+        s.softmax_interleave_groups = 4;
+        s.use_fast_paged_kv_desc = false;
+        s.use_mfma32_skip_legacy_qreg = false;
+        s.use_kq_lds_pad = true;
+        s.kq_lds_pad_halves = 16;
     }
     return s;
 }

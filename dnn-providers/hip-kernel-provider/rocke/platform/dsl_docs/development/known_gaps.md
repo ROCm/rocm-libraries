@@ -281,25 +281,26 @@ llvm23.
 
 ---
 
-## 8. gfx950 tiled 2D — V double-buffer and deep-prefetch schedules
+## 8. gfx950 tiled 2D — deep-prefetch ring and Q-reread schedules
 
-**Subsystem:** `instances/gfx950/attention_tiled_2d_public_entry_glue.cpp`, `instances/common/attention_unified_selectors.cpp`
+**Subsystem:** `instances/gfx950/attention_tiled_2d_public_entry_glue.cpp`
 
 The Python gfx950 tiled-2D builder emits these schedules. The C++ builder
-emits only the depth-2 single / early-V schedule and rejects each of these
-spec fields with `ROCKE_ERR_NOTIMPL`. These rejects are not faithful
-mirrors of Python behavior. They are deliberate rejects that stop C++
-from silently building a different schedule.
+rejects each of these spec fields with `ROCKE_ERR_NOTIMPL`. These rejects are
+not faithful mirrors of Python behavior. They are deliberate rejects that stop
+C++ from silently building a different schedule. The C++ selector never sets
+either field, and Python marks both experimental.
 
-The byte-identity gate stays green because no parity-emitter config sets any
-of these fields. The C++ selector **does** reach one of them:
-`rocke_unified_attn_tiled_spec_from_problem` sets `use_v_double_buffer` exactly
-as Python's `_enable_v_double_buffer` does (single-batch d64 bf16/fp16 prefill
-with `256 < max_seqlen_q <= 1024`). The selector is intentionally kept in step
-with Python, so selector parity holds. Building that spec in C++ fails loudly.
+The V double-buffer (`use_v_double_buffer`) and the staggered iter-start wait
+(`use_staggered_iter_wait`) are ported and pinned by the gfx950 tiled-2D parity
+emitter.
 
 | Spec field | Selected by the shared selector? | What unblocks it |
 |---|---|---|
+| `kv_ring_depth != 2` | No | Port the 3-slot deep K prefetch ring. |
+| `use_q_reread` | No | Port the Q-reread path. |
+
+---|---|---|
 | `use_v_double_buffer` (and `use_sched_barrier`, which gates on it) | Yes, see above | Port the V[i+1] prefetch slots and the double-buffer PV schedule, then drop the reject. |
 | `use_staggered_iter_wait` | No | Port the staggered-wait schedule together with the above. |
 | `kv_ring_depth != 2` | No | Port the 3-slot deep K prefetch ring. |

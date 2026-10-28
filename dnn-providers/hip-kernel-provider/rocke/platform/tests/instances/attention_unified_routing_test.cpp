@@ -284,7 +284,8 @@ static void test_supports_tiled_2d(void)
     check_tiled_2d(
         &p, "gfx942", false, "gfx942 tiled 2D flash mask-limit is not ported to C++ yet");
 
-    /* gfx950: single-batch fp16 D64 MHA picks the V double-buffer. */
+    /* gfx950: single-batch fp16 D64 MHA picks the V double-buffer, which the
+     * C++ builder builds. */
     p = decode_problem();
     p.dtype = "fp16";
     p.head_size = 64;
@@ -292,7 +293,7 @@ static void test_supports_tiled_2d(void)
     p.num_seqs = 1;
     p.max_seqlen_q = 512;
     p.total_q = 512;
-    check_tiled_2d(&p, "gfx950", false, "tiled 2D V double-buffer is not ported to C++ yet");
+    check_tiled_2d(&p, "gfx950", true, "supported");
 
     p = decode_problem();
     p.dtype = "fp16";

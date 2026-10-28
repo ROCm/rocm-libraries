@@ -30,9 +30,6 @@ _UNPORTED_2D = {
     "use_k_hbm_direct",
     "use_causal_mask_phase_split",
     "use_additive_bias",
-    "use_kq_lds_pad",
-    "kq_lds_pad_halves",
-    "use_mask_phase_split",
     "causal_top_left",
     "right_bound",
 }
@@ -85,7 +82,7 @@ def test_gfx950_2d_default_spec_round_trips(engine):
 
 @pytest.mark.parametrize(
     "field, value",
-    [("use_additive_bias", True), ("kq_lds_pad_halves", 16), ("right_bound", -1)],
+    [("use_additive_bias", True), ("causal_top_left", True), ("right_bound", -1)],
 )
 def test_2d_binding_rejects_unported_fields(engine, field, value):
     d = asdict(Gfx950Spec2D(**_REQUIRED_2D, dtype="bf16"))

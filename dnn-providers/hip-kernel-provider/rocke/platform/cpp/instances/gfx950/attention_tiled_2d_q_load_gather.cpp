@@ -103,12 +103,15 @@ void rocke_gfx950_attn2d_emit_q_load(rocke_gfx950_attn2d_build_ctx_t* ctx)
      * cooperative loop; emit it here to reproduce the exact IR order (it is not a
      * shared ctx field -- its sole consumer is the staged-store fallback below). */
     z8 = rocke_b_zero_vec(b, dtype, 8);
+    ctx->z8_v = z8;
 
     /* ---------------- Q -> LDS (cooperative vec8 chunks) ----------------
      * Q_VECS_PER_ROW = HD // 8 ; Q_VECS_PER_THREAD = (BLOCK_M * Q_VECS_PER_ROW)
      * // THREADS. Both are host-only ints. */
     Q_VECS_PER_ROW = ctx->HD / 8;
-    Q_VECS_PER_THREAD = (ctx->BLOCK_M * Q_VECS_PER_ROW) / ctx->THREADS;
+    /* direct-reg: no cooperative Q->LDS staging; the Q32 operand is gathered
+     * straight from global in emit_q_gather. */
+    Q_VECS_PER_THREAD = ctx->Q_DIRECT_REG ? 0 : (ctx->BLOCK_M * Q_VECS_PER_ROW) / ctx->THREADS;
 
     /* q_desc = TensorDescriptor.naive("Q", lengths=[1<<30, NUM_QH, HD],
      *          coord_names=("token","head","dim")). Stored on ctx for the
@@ -413,6 +416,40 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
     ctx->iter_args_count = n_args;
 }
 
+/* Python _read_q32_global(k): the direct-to-register Q32 operand gather. */
+static rocke_value_t* q_read_q32_global(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                        rocke_value_t* q32_row,
+                                        rocke_value_t* lane_half,
+                                        int k)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* q32_col_base = rocke_b_const_i32(b, (int64_t)(k * 16));
+    rocke_value_t* q32_col
+        = rocke_b_add(b, q32_col_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
+    rocke_value_t* qg_pos = rocke_b_add(
+        b, ctx->qb_start_pos, rocke_b_div(b, q32_row, rocke_b_const_i32(b, ctx->NQK)));
+    rocke_value_t* qg_h_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+    rocke_value_t* qg_h_mod = rocke_b_mod(b, q32_row, rocke_b_const_i32(b, ctx->NQK));
+    rocke_value_t* qg_h = rocke_b_add(b, qg_h_mul, qg_h_mod);
+    rocke_value_t* qg_ok_pos = rocke_b_cmp_lt(b, qg_pos, ctx->cur_batch_q_len);
+    rocke_value_t* qg_ok_h = rocke_b_cmp_lt(b, qg_h, rocke_b_const_i32(b, ctx->NUM_QH));
+    rocke_value_t* qg_mask = rocke_b_land(b, qg_ok_pos, qg_ok_h);
+    rocke_value_t* qg_pos_safe = rocke_b_select(b, qg_mask, qg_pos, rocke_b_const_i32(b, 0));
+    rocke_value_t* qg_h_safe = rocke_b_select(b, qg_mask, qg_h, rocke_b_const_i32(b, 0));
+    rocke_value_t* qg_off = NULL;
+    {
+        static const char* const in_names[3] = {"token", "head", "dim"};
+        rocke_value_t* in_values[3];
+        in_values[0] = rocke_b_add(b, ctx->cu_q_start, qg_pos_safe);
+        in_values[1] = qg_h_safe;
+        in_values[2] = rocke_b_const_i32(b, 0);
+        rocke_transforms_descriptor_offset(b, ctx->q_desc, in_names, in_values, 3, &qg_off, NULL);
+    }
+    rocke_value_t* v8
+        = rocke_b_global_load_vN(b, ctx->query, rocke_b_add(b, qg_off, q32_col), ctx->dtype, 8, 16);
+    return rocke_b_vector_select(b, rocke_b_vector_splat(b, qg_mask, 8), v8, ctx->z8_v);
+}
+
 /* ============================================================ *
  *  Per-lane Q -> VGPR gather (Python lines 2250-2363, excluding the trailing
  *  _issue_k(tile_start, 0) prefetch which the preloop bucket owns).
@@ -446,7 +483,7 @@ void rocke_gfx950_attn2d_emit_q_gather(rocke_gfx950_attn2d_build_ctx_t* ctx)
     ctx->q_regs_count = ctx->M_ATOMS_PER_WARP * ctx->QK_K_ITERS;
 
     /* if not (USE_MFMA_32X32 and SKIP_LEGACY_QREG): (line 2258) */
-    if(!(ctx->USE_MFMA_32X32 && ctx->SKIP_LEGACY_QREG))
+    if(!(ctx->USE_MFMA_32X32 && ctx->SKIP_LEGACY_QREG) && !ctx->Q_DIRECT_REG)
     {
         for(atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
         {
@@ -573,7 +610,17 @@ void rocke_gfx950_attn2d_emit_q_gather(rocke_gfx950_attn2d_build_ctx_t* ctx)
             }
         }
 
-        for(k = 0; k < ctx->QK_K_ITERS; ++k)
+        /* direct-to-register Q gather: load this lane's 8-element Q32 operand
+         * straight from HBM, indexing the BLOCK_M x HD Q tile exactly as the
+         * LDS-staged read would. Out-of-range rows read zero, like the staging
+         * store's masked fill. */
+        if(ctx->Q_DIRECT_REG)
+        {
+            for(k = 0; k < ctx->QK_K_ITERS; ++k)
+                ctx->q32_regs[k] = q_read_q32_global(ctx, q32_row, lane_half, k);
+        }
+
+        for(k = 0; k < (ctx->Q_DIRECT_REG ? 0 : ctx->QK_K_ITERS); ++k)
         {
             rocke_value_t* q32_col;
             rocke_value_t* q32;
@@ -628,6 +675,10 @@ void rocke_gfx950_attn2d_emit_preloop_prefetch(rocke_gfx950_attn2d_build_ctx_t* 
 
     /* Prefetch tile_start's K into buffer 0 BEFORE the loop (2384). */
     rocke_gfx950_attn2d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(B, 0));
+    /* V double-buffer: V[tile_start] goes into slot 0 too, so iter 0 finds it
+     * ready; each iter then prefetches V[i+1] into the alternate slot. */
+    if(ctx->V_DOUBLE_BUF)
+        rocke_gfx950_attn2d_issue_v(ctx, ctx->tile_start, rocke_b_const_i32(B, 0));
 
     /* cur_buf_init = const_i32(0); iter_args.append(("cur_buf", cur_buf_init))
      * (2399-2400). */

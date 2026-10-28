@@ -848,9 +848,6 @@ const unported_field k_t2d_unported[] = {
     {"use_k_hbm_direct", false, 0},
     {"use_causal_mask_phase_split", false, 0},
     {"use_additive_bias", false, 0},
-    {"use_kq_lds_pad", false, 0},
-    {"kq_lds_pad_halves", false, 8},
-    {"use_mask_phase_split", false, 0},
     {"causal_top_left", false, 0},
     {"right_bound", false, 0},
 };
@@ -937,6 +934,9 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
     s.use_q_direct_global = a_bool(d, "use_q_direct_global", s.use_q_direct_global);
     s.use_global_load_lds_k = a_bool(d, "use_global_load_lds_k", s.use_global_load_lds_k);
     s.use_q_major_grid = a_bool(d, "use_q_major_grid", s.use_q_major_grid);
+    s.use_kq_lds_pad = a_bool(d, "use_kq_lds_pad", s.use_kq_lds_pad);
+    s.kq_lds_pad_halves = a_int(d, "kq_lds_pad_halves", s.kq_lds_pad_halves);
+    s.use_mask_phase_split = a_bool(d, "use_mask_phase_split", s.use_mask_phase_split);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1564,6 +1564,9 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
         = s.kv_cache_policy ? py::cast(std::string(s.kv_cache_policy)) : py::none();
     d["use_global_load_lds_k"] = s.use_global_load_lds_k;
     d["use_q_major_grid"] = s.use_q_major_grid;
+    d["use_kq_lds_pad"] = s.use_kq_lds_pad;
+    d["kq_lds_pad_halves"] = s.kq_lds_pad_halves;
+    d["use_mask_phase_split"] = s.use_mask_phase_split;
     return d;
 }
 

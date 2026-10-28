@@ -38,6 +38,7 @@
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 #include <assert.h>
+#include <stdio.h>
 
 /* ============================================================ *
  *  Local dtype-dispatch wrappers mirroring the Python module aliases
@@ -277,6 +278,14 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
         rocke_b_s_waitcnt(b, 0, 0, -1);
         rocke_b_sync(b);
     }
+    else if(ctx->V_DOUBLE_BUF)
+    {
+        /* V[i] (cur_buf) is the oldest pending stream in both V double-buffer
+         * schedules (or already drained at iter start); leave this iter's
+         * K[i+1] + V[i+1] prefetches in flight. */
+        rocke_b_s_waitcnt(b, 2 * kv_calls_per_tile, 2 * kv_calls_per_tile, -1);
+        rocke_b_sync(b);
+    }
     else if(ctx->K_SINGLE_BUFFER)
     {
         /* single K slot. Only V[i] is in flight here (next-K was deferred).
@@ -307,7 +316,7 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
             /* Transposed PV: O^T = V^T @ P^T via register P^T (Python 3221-3341).
              * v_buf and use_hi are emitted ONCE here (Python 3231-3232), before
              * the per-N acc-scale + apply loop, and reused by every apply call. */
-            ctx->pv_v_buf_v = rocke_b_const_i32(b, 0);
+            ctx->pv_v_buf_v = ctx->V_DOUBLE_BUF ? ctx->cur_buf : rocke_b_const_i32(b, 0);
             ctx->pv_use_hi_v = rocke_b_cmp_eq(b, ctx->lane_half32_v, rocke_b_const_i32(b, 1));
             for(n = 0; n < ctx->ACC_N_TILES; ++n)
             {
@@ -349,7 +358,7 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
         else
         {
             /* Transitional 32x32 PV from the P_lds bridge (Python 3342-3412). */
-            rocke_value_t* v_buf = rocke_b_const_i32(b, 0);
+            rocke_value_t* v_buf = ctx->V_DOUBLE_BUF ? ctx->cur_buf : rocke_b_const_i32(b, 0);
             for(n = 0; n < ctx->ACC_N_TILES; ++n)
             {
                 rocke_value_t* scaled[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
@@ -459,7 +468,7 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
                 rocke_value_t* ncb_16 = rocke_b_const_i32(b, 16);
                 n_col_base = rocke_b_add(b, rocke_b_mul(b, ncb_n, ncb_16), ctx->pv_tr_reader->col);
             }
-            v_buf = rocke_b_const_i32(b, 0);
+            v_buf = ctx->V_DOUBLE_BUF ? ctx->cur_buf : rocke_b_const_i32(b, 0);
 
             for(k = 0; k < ctx->PV_K_ITERS; ++k)
             {
@@ -675,14 +684,56 @@ void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,
  *  emitter, then leave. Returns the loop handle; the epilogue reads the
  *  rewritten carry from kvloop.op->results.
  * ============================================================ */
+/* One scf_for_iter phase over [lo, hi): enter the body, unpack the carry the
+ * way the Python body does (lines 2495-2508), run the full body emitter with the
+ * given skip_mask, then leave. */
+static rocke_for_t drive_kv_phase(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                  rocke_value_t* lo,
+                                  rocke_value_t* hi,
+                                  const rocke_iter_arg_t* iter_args,
+                                  const char* iv_name,
+                                  bool skip_mask)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    int ml = ctx->ml_count;
+    int num_accs = ctx->ACC_N_TILES * ctx->ACC_M_ATOMS;
+    int i;
+    rocke_for_t loop = rocke_b_scf_for_iter(
+        b, lo, hi, ctx->kv_step, iter_args, ctx->iter_args_count, iv_name, false, true);
+
+    rocke_b_region_enter(b, loop.body);
+    ctx->kv_tile_iv = loop.iv;
+    for(i = 0; i < ctx->SOFTMAX_STATE_SLOTS; ++i)
+    {
+        ctx->m_cur[i] = loop.iter_vars[2 * i];
+        ctx->l_cur[i] = loop.iter_vars[2 * i + 1];
+    }
+    for(i = 0; i < num_accs; ++i)
+        ctx->acc_cur[i] = loop.iter_vars[ml + i];
+    ctx->cur_buf = loop.iter_vars[ml + num_accs];
+    ctx->skip_mask = skip_mask;
+
+    rocke_gfx950_attn2d_emit_kv_body(ctx);
+
+    rocke_b_region_leave(b);
+    return loop;
+}
+
+/* ============================================================ *
+ *  rocke_gfx950_attn2d_drive_kv_loop   (Python lines 4442-4486)
+ *
+ *  scf_for_iter over [tile_start, tile_end) step kv_step with the named
+ *  iter_args carry. With the mask phase split (no-SW transposed mask-limit
+ *  path) the range splits at the first tile that needs causal / prefix
+ *  masking: a mask-free full-tile loop, then the masked boundary loop, with the
+ *  carry threaded through. Returns the last loop; the epilogue reads the
+ *  rewritten carry from its results.
+ * ============================================================ */
 rocke_for_t rocke_gfx950_attn2d_drive_kv_loop(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS];
-    rocke_for_t kvloop;
     int i;
-    int ml = ctx->ml_count;
-    int num_accs = ctx->ACC_N_TILES * ctx->ACC_M_ATOMS;
 
     for(i = 0; i < ctx->iter_args_count; ++i)
     {
@@ -690,33 +741,38 @@ rocke_for_t rocke_gfx950_attn2d_drive_kv_loop(rocke_gfx950_attn2d_build_ctx_t* c
         iter_args[i].init = ctx->iter_args[i];
     }
 
-    kvloop = rocke_b_scf_for_iter(b,
-                                  ctx->tile_start,
-                                  ctx->tile_end,
-                                  ctx->kv_step,
-                                  iter_args,
-                                  ctx->iter_args_count,
-                                  "kv_tile",
-                                  false,
-                                  true);
+    if(!(ctx->spec->use_mask_phase_split && ctx->TRANSPOSED_MASK_LIMIT && ctx->SLIDING_WINDOW == 0))
+        return drive_kv_phase(ctx, ctx->tile_start, ctx->tile_end, iter_args, "kv_tile", false);
 
-    rocke_b_region_enter(b, kvloop.body);
-    ctx->kv_tile_iv = kvloop.iv;
-    /* Unpack the carry the same way the Python body does (lines 2495-2508). */
-    for(i = 0; i < ctx->SOFTMAX_STATE_SLOTS; ++i)
+    /* A tile needs no masking iff its last key is within the causal bound of
+     * the block's first query row and below max_seq_prefix_len, so the first
+     * masked tile is min((context_len + qb_start_pos + 1) / T,
+     * max_seq_prefix_len / T), clamped into [tile_start, tile_end]. */
+    rocke_value_t* min_causal_lim = rocke_b_add(b, ctx->context_len, ctx->qb_start_pos);
+    rocke_value_t* causal_p1 = rocke_b_add(b, min_causal_lim, rocke_b_const_i32(b, 1));
+    rocke_value_t* full_by_causal = rocke_b_div(b, causal_p1, rocke_b_const_i32(b, ctx->T));
+    rocke_value_t* full_by_prefix
+        = rocke_b_div(b, ctx->max_seq_prefix_len_v, rocke_b_const_i32(b, ctx->T));
+    rocke_value_t* split_raw = rocke_b_select(
+        b, rocke_b_cmp_lt(b, full_by_causal, full_by_prefix), full_by_causal, full_by_prefix);
+    rocke_value_t* split_lo = rocke_b_select(
+        b, rocke_b_cmp_lt(b, split_raw, ctx->tile_start), ctx->tile_start, split_raw);
+    rocke_value_t* split
+        = rocke_b_select(b, rocke_b_cmp_lt(b, split_lo, ctx->tile_end), split_lo, ctx->tile_end);
+
+    rocke_for_t loop1 = drive_kv_phase(ctx, ctx->tile_start, split, iter_args, "kv_tile_f", true);
+
+    /* The iter-arg names seed the loop's SSA names, so the second loop's must
+     * differ from the first's. */
+    rocke_iter_arg_t iter_args2[ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS];
+    for(i = 0; i < ctx->iter_args_count; ++i)
     {
-        ctx->m_cur[i] = kvloop.iter_vars[2 * i];
-        ctx->l_cur[i] = kvloop.iter_vars[2 * i + 1];
+        char name[64];
+        snprintf(name, sizeof(name), "%s_b", ctx->iter_args_names[i]);
+        iter_args2[i].name = rocke_arena_strdup(&b->arena, name);
+        iter_args2[i].init = loop1.op->results[i];
     }
-    for(i = 0; i < num_accs; ++i)
-        ctx->acc_cur[i] = kvloop.iter_vars[ml + i];
-    ctx->cur_buf = kvloop.iter_vars[ml + num_accs];
-    ctx->skip_mask = false;
-
-    rocke_gfx950_attn2d_emit_kv_body(ctx);
-
-    rocke_b_region_leave(b);
-    return kvloop;
+    return drive_kv_phase(ctx, split, ctx->tile_end, iter_args2, "kv_tile_b", false);
 }
 
 /* ============================================================ *

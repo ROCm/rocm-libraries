@@ -223,9 +223,6 @@ _PY_ONLY_SPEC_FIELDS = {
     "use_additive_bias": "additive bias is not in the C++ tiled-2D spec",
     "causal_top_left": "the top-left mask band is not in the C++ tiled-2D spec",
     "right_bound": "the right-bound mask band is not in the C++ tiled-2D spec",
-    "use_mask_phase_split": "the D256 fast path's mask phase split is not in the C++ tiled-2D spec",
-    "use_kq_lds_pad": "the D256 fast path's K/Q LDS padding is not in the C++ tiled-2D spec",
-    "kq_lds_pad_halves": "the D256 fast path's K/Q LDS padding is not in the C++ tiled-2D spec",
 }
 
 # gfx942 knobs carried by the C spec struct both arches share; the gfx950
@@ -260,18 +257,7 @@ class _Gap:
 
 # Spec drift the C++ side still has to port. Remove a row (and its xfail
 # below) when the port lands.
-_KNOWN_SPEC_GAPS = {
-    "d256_gfx950_overrides": _Gap(
-        "the gfx950 D256 fast-path spec overrides are not applied by the C++ spec builder",
-        frozenset(au._d256_gfx950_spec_overrides()),
-        lambda p, arch: au._d256_gfx950_fast(p, arch),
-    ),
-    "softmax_mfma_interleave": _Gap(
-        "the C++ spec builder never sets use_softmax_mfma_interleave",
-        frozenset({"use_softmax_mfma_interleave"}),
-        lambda p, arch: au._enable_softmax_mfma_interleave(p, arch),
-    ),
-}
+_KNOWN_SPEC_GAPS: dict[str, _Gap] = {}
 
 
 def _norm(v):
