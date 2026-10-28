@@ -97,7 +97,8 @@ public:
         {
             // In the windows system, the host memory's capacity is the half of the physical memory
             // And previous allocation of host memory is got cleared before
-            return memStatus.ullTotalPhys / 2;
+            return std::min(size_t(memStatus.ullTotalPhys / 2),
+                            host_memory_limit_override().value_or(SIZE_MAX));
         }
         else
         {

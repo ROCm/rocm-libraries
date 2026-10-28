@@ -8,9 +8,11 @@
 
 #include <gtest/gtest.h>
 
+#include "fast_check.hpp"
 #include "hipBuffer.hpp"
 #include "host_memory.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -275,6 +277,76 @@ namespace
         EXPECT_GT(available, 0u);
         // MemAvailable moves between the two reads, so allow 1 GiB of drift.
         EXPECT_LE(available, available_host_memory_bytes(meminfo_only.sources) + kGiB);
+    }
+
+    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT for one scope.
+    class ScopedLimit
+    {
+    public:
+        explicit ScopedLimit(const char* value)
+        {
+            setenv("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", value, 1);
+        }
+        ~ScopedLimit()
+        {
+            unsetenv("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT");
+        }
+    };
+
+    TEST(HostMemory_pre_checkin, limit_is_a_byte_count_with_an_optional_suffix)
+    {
+        EXPECT_EQ(parse_host_memory_size("1024"), size_t(1024));
+        EXPECT_EQ(parse_host_memory_size("0"), size_t(0));
+        EXPECT_EQ(parse_host_memory_size("4K"), size_t(4) << 10);
+        EXPECT_EQ(parse_host_memory_size("512m"), size_t(512) << 20);
+        EXPECT_EQ(parse_host_memory_size("64G"), size_t(64) << 30);
+        EXPECT_EQ(parse_host_memory_size("2T"), size_t(2) << 40);
+        for(const char* bad :
+            {"", "G", "64GB", "-1", "1.5G", " 64G", "64 G", "16777216T", "99999999999999999999"})
+            EXPECT_EQ(parse_host_memory_size(bad), std::nullopt) << '"' << bad << '"';
+    }
+
+    TEST(HostMemory_pre_checkin, limit_caps_the_query_and_never_raises_it)
+    {
+        FakeHost host;
+        host.mem_available(8 * kGiB);
+        {
+            ScopedLimit limit("2G");
+            EXPECT_EQ(available_host_memory_bytes(host.sources), 2 * kGiB);
+        }
+        {
+            ScopedLimit limit("16G");
+            EXPECT_EQ(available_host_memory_bytes(host.sources), 8 * kGiB);
+        }
+        {
+            // A full container stays full.
+            host.write(host.sources.self_cgroup, "0::/job\n");
+            host.cgroup("job", std::to_string(kGiB), kGiB);
+            ScopedLimit limit("2G");
+            EXPECT_EQ(available_host_memory_bytes(host.sources), 0u);
+        }
+        {
+            ScopedLimit limit("not-a-size");
+            EXPECT_EQ(available_host_memory_bytes(host.sources), 0u);
+            EXPECT_EQ(host_memory_limit_override(), std::nullopt);
+        }
+        EXPECT_EQ(available_host_memory_bytes(host.sources), 0u);
+    }
+
+    TEST(HostMemory_pre_checkin, limit_is_the_budget_when_the_system_cannot_be_read)
+    {
+        FakeHost    host;
+        ScopedLimit limit("3G");
+        EXPECT_EQ(available_host_memory_bytes(host.sources), 3 * kGiB);
+    }
+
+    TEST(HostMemory_pre_checkin, limit_makes_the_preflight_skip)
+    {
+        EXPECT_EQ(fast_check_memory_shortfall(0, 2 * kGiB), "");
+        ScopedLimit limit("1G");
+        std::string why = fast_check_memory_shortfall(0, 2 * kGiB);
+        EXPECT_NE(why.find("needs 2 GiB of host memory and 1 GiB is available"), std::string::npos)
+            << why;
     }
 #endif
 } // namespace
