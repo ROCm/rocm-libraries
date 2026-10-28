@@ -519,6 +519,132 @@ const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key)
     return v->u.s;
 }
 
+/* ir._INT_ADD_WRAPS / ir._INT_CMP_PREDICATES. */
+static const char* const k_int_add_wraps[] = {"nsw", "nuw", NULL};
+static const char* const k_int_cmp_predicates[] = {"lt", "le", "gt", "ge", "eq", "ne", "ult", NULL};
+
+/* The shared body of rocke_i_add_wrap_error / rocke_i_cmp_pred_error: the
+ * error for the string attr `key` of `op_name`, or NULL when it is absent or
+ * one of `allowed`. The unsigned value `unsigned_value` takes i32 or i64
+ * operands only. */
+static const char* string_attr_error(const rocke_attr_map_t* attrs,
+                                     const char* op_name,
+                                     const char* key,
+                                     const char* const* allowed,
+                                     const char* not_a_string,
+                                     const char* unsigned_value,
+                                     const rocke_type_t* operand_type,
+                                     char* buf,
+                                     size_t cap)
+{
+    const rocke_attr_value_t* v = rocke_attr_get(attrs, key);
+    if(!v)
+        return NULL;
+    if(v->kind != ROCKE_ATTR_STR)
+        return not_a_string;
+    bool known = false;
+    for(const char* const* s = allowed; *s; ++s)
+    {
+        if(strcmp(v->u.s, *s) == 0)
+            known = true;
+    }
+    if(!known)
+    {
+        snprintf(buf, cap, "%s: unknown %s '%s'", op_name, key, v->u.s);
+        return buf;
+    }
+    const char* type_name = operand_type ? operand_type->name : "?";
+    if(strcmp(v->u.s, unsigned_value) == 0 && strcmp(type_name, "i32") != 0
+       && strcmp(type_name, "i64") != 0)
+    {
+        snprintf(buf,
+                 cap,
+                 "%s: %s '%s' needs i32 or i64 operands, got %s",
+                 op_name,
+                 key,
+                 unsigned_value,
+                 type_name);
+        return buf;
+    }
+    return NULL;
+}
+
+const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap)
+{
+    return string_attr_error(attrs,
+                             "arith.add",
+                             "wrap",
+                             k_int_add_wraps,
+                             "arith.add: wrap must be the string 'nsw' or 'nuw'",
+                             "nuw",
+                             operand_type,
+                             buf,
+                             cap);
+}
+
+const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap)
+{
+    return string_attr_error(attrs,
+                             "arith.cmp",
+                             "pred",
+                             k_int_cmp_predicates,
+                             "arith.cmp: pred must be a string",
+                             "ult",
+                             operand_type,
+                             buf,
+                             cap);
+}
+
+bool rocke_i_is_buffer_descriptor(const rocke_value_t* value)
+{
+    return value && value->op && value->op->opcode == ROCKE_OP_TILE_BUFFER_RSRC;
+}
+
+const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for iter_arg %d is a buffer descriptor, which a loop cannot carry; build the "
+             "descriptor before the loop and advance the offset, or rebuild it inside the loop "
+             "body",
+             index);
+    return buf;
+}
+
+const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    int i;
+    for(i = 3; i < op->num_operands; ++i)
+    {
+        if(rocke_i_is_buffer_descriptor(op->operands[i]))
+            return rocke_i_loop_carried_descriptor_message(i - 3, buf, cap);
+    }
+    if(op->num_regions < 1 || !op->regions[0])
+        return NULL;
+    {
+        const rocke_region_t* body = op->regions[0];
+        int k;
+        for(k = 0; k < body->num_ops; ++k)
+        {
+            const rocke_op_t* body_op = body->ops[k];
+            if(body_op->opcode != ROCKE_OP_SCF_YIELD)
+                continue;
+            for(i = 0; i < body_op->num_operands; ++i)
+            {
+                if(rocke_i_is_buffer_descriptor(body_op->operands[i]))
+                    return rocke_i_loop_carried_descriptor_message(i, buf, cap);
+            }
+        }
+    }
+    return NULL;
+}
+
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
 {
     const rocke_attr_value_t* v = rocke_attr_get(m, key);
@@ -804,7 +930,13 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.umax",
     "arith.umin",
     "arith.uitofp_f32",
-    "arith.cvt_f32_to_u8_sat"};
+    "arith.cvt_f32_to_u8_sat",
+
+    /* arith.* range marker */
+    "arith.assume_range",
+
+    /* arith.fdot2 */
+    "arith.fdot2"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1083,7 +1215,13 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.umax                 */ true,
     /* arith.umin                 */ true,
     /* arith.uitofp_f32           */ true,
-    /* arith.cvt_f32_to_u8_sat    */ true};
+    /* arith.cvt_f32_to_u8_sat    */ true,
+
+    /* arith.* range marker */
+    /* arith.assume_range         */ true,
+
+    /* arith.fdot2 */
+    /* arith.fdot2                */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

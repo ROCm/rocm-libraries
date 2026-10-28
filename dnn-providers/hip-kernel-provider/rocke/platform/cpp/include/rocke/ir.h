@@ -55,7 +55,10 @@ typedef enum rocke_status
     ROCKE_ERR_TYPE, /* maps to Python TypeError                           */
     ROCKE_ERR_KEY, /* maps to Python KeyError (unknown op_id / param)    */
     ROCKE_ERR_OOM, /* allocation failure                                 */
-    ROCKE_ERR_NOTIMPL /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_NOTIMPL, /* maps to Python NotImplementedError                 */
+    ROCKE_ERR_ARCH_DOMAIN /* maps to Python ArchDomainError: the committed    */
+    /* arch-domain table says the target cannot lower  */
+    /* an intrinsic the kernel demands                  */
 } rocke_status_t;
 
 #define ROCKE_ERR_MSG_CAP 256
@@ -465,6 +468,13 @@ typedef enum rocke_opcode
     ROCKE_OP_ARITH_UITOFP_F32,
     ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT,
 
+    /* Range marker (Python IRBuilder._assume_range): its result is its first
+     * operand; it emits no instruction. Appended so no existing index shifts. */
+    ROCKE_OP_ARITH_ASSUME_RANGE,
+
+    /* arith.fdot2 (appended: keeps every earlier opcode value stable) */
+    ROCKE_OP_ARITH_FDOT2,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -798,6 +808,9 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
 
 /* ----- arith integer / logic ----- */
 rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python add_nuw: integer a + c that does not wrap as unsigned ("add nuw").
+ * Operands are two i32 or two i64 values. */
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_mul(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_div(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -825,6 +838,9 @@ rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t*
     rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+/* fdot2(a, c, d) = a.x*c.x + a.y*c.y + d; a, c: vec<f16|bf16 x2>, d: f32 -> f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t*
@@ -843,6 +859,9 @@ rocke_value_t* rocke_b_cmp_gt(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_ge(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
+ * values. */
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
@@ -888,6 +907,9 @@ rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
+/* Fused E8M0-scaled convert (v_cvt_scalef32_pk_f32_fp8 / _bf8). Only gfx950
+ * has the instruction, so lowering for any other target fails with
+ * ROCKE_ERR_VALUE (the builder has no target to check against). */
 rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* v,
                                                  rocke_value_t* scale);
@@ -896,6 +918,10 @@ rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
                                                  rocke_value_t* scale);
 /* Explicit RNE conversion; bitcast preserves raw FP32 payloads instead. */
 rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v);
+/* f32 -> fp8 / bf8 (scalar and packed): round to nearest even, no saturation.
+ * A value past the largest finite value becomes NaN (fp8, and bf8 on gfx942)
+ * or +-inf (bf8 on gfx950); clamp first for a saturating conversion. See the
+ * Python builders for the per-target encodings. */
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_i8_sat(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1005,6 +1031,10 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_f64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
 rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -1223,20 +1253,65 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
-                                              rocke_value_t* a,
-                                              rocke_value_t* bb,
-                                              rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b,
-                                             rocke_value_t* a,
-                                             rocke_value_t* bb,
-                                             rocke_value_t* c);
+/* gfx950 unscaled 16x16x128 MFMA for fp8, bf8, fp6 and fp4. The instruction
+ * applies no scale. The lowering passes literal 0 for both scale operands of the
+ * f8f6f4 intrinsic, and the backend then selects the unscaled instruction
+ * v_mfma_f32_16x16x128_f8f6f4. A loaded or computed 0 would mean the factor
+ * 2^-127, so use the MX op when the scale is not a literal.
+ *
+ * a_format and b_format name the data type: "fp8e4m3", "bf8e5m2", "fp6e2m3",
+ * "fp6e3m2" or "fp4e2m1". NULL means "fp8e4m3". They set the cbsz and blgp
+ * format selectors.
+ *
+ * A and B must use the same format in this version. A call with different
+ * formats records ROCKE_ERR_VALUE and returns NULL. The signature already has
+ * both arguments, so a later change can allow mixed formats without changing it.
+ *
+ * a and bb hold 256 bits per lane for every format (an <8 x i32> or any type of
+ * that width). fp8 and bf8 data fill all 8 dwords. fp6 data fills the low 6 and
+ * fp4 data the low 4; the instruction ignores the remaining dwords. Any other
+ * width, or an unknown format name, records ROCKE_ERR_VALUE and returns NULL. */
+rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4fp6fp8(rocke_ir_builder_t* b,
+                                                    rocke_value_t* a,
+                                                    rocke_value_t* bb,
+                                                    rocke_value_t* c,
+                                                    const char* a_format,
+                                                    const char* b_format);
+/* gfx950 16x16x128 MFMA with in-instruction E8M0 scales (the MX op), fp8e4m3
+ * for A and B. Same as the _fmt variant with both formats NULL. */
+rocke_value_t* rocke_b_mfma_f32_4x4x4_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* a,
+                                           rocke_value_t* bb,
+                                           rocke_value_t* c);
 rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* a,
                                                        rocke_value_t* bb,
                                                        rocke_value_t* c,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale);
+/* The MX op with a selectable data type for A and B. a_format and b_format name
+ * the format: "fp8e4m3", "bf8e5m2", "fp6e2m3", "fp6e3m2" or "fp4e2m1". NULL
+ * means "fp8e4m3". They set the cbsz and blgp format selectors.
+ *
+ * A and B must use the same format in this version. A call with different
+ * formats records ROCKE_ERR_VALUE and returns NULL. The signature already has
+ * both arguments, so a later change can allow mixed formats without changing it.
+ *
+ * a and bb hold 256 bits per lane for every format (an <8 x i32> or any type of
+ * that width). fp8 and bf8 data fill all 8 dwords. fp6 data fills the low 6 and
+ * fp4 data the low 4; the instruction ignores the remaining dwords. Any other
+ * width, or an unknown format name, records ROCKE_ERR_VALUE and returns NULL.
+ * The instruction multiplies by 2^(e - 127) for each scale byte e; e = 0 gives
+ * 2^-127, not 1.0. If both scales are literal 0, the backend selects the
+ * unscaled instruction instead. */
+rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4_fmt(rocke_ir_builder_t* b,
+                                                           rocke_value_t* a,
+                                                           rocke_value_t* bb,
+                                                           rocke_value_t* c,
+                                                           rocke_value_t* a_scale,
+                                                           rocke_value_t* b_scale,
+                                                           const char* a_format,
+                                                           const char* b_format);
 rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
                                              rocke_value_t* bb,

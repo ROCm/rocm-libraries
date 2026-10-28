@@ -159,7 +159,7 @@ node type in the graph is in its CPU-required set. That set is a subset of the o
 BatchNorm (all four variants), Layernorm (forward/backward), RMSNorm (forward/backward), Pointwise and
 SDPA Forward (see `ReferenceOpCoverage.cpp` in the integration test project). SDPA bundles are
 additionally limited to `quick`-tier bundles with a bounded working set, to keep CPU time down. See the
-[integration test README](../../../dnn-providers/integration-tests/README.md#verification-modes)
+[integration test docs](../../../dnn-providers/integration-tests/docs/running-tests.md#verification-modes)
 for the verification modes.
 
 ## Legend
@@ -200,4 +200,4 @@ For detailed information on adding new operations or datatypes to the CPU Refere
 - [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
 - [GPU Reference Implementation - Operation Support](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md) - GPU counterpart in the integration test project
 - [CPU Graph Executor Design](./rfcs/0001_CpuGraphExecutorDesign.md) - Detailed architecture documentation
-- [Feature Release Test Plan](./feature_release/TestPlan.md) - Testing strategy and procedures
+- [Release Testing](./testing/RELEASE_TESTING.md) - Testing strategy and procedures

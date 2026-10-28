@@ -24,9 +24,9 @@ Pattern: A (codegen-component method calls, pure Python).
 import pytest
 from types import SimpleNamespace
 
-import rocisa  # noqa: F401 — must import before Tensile.Component to avoid SIGABRT
-import Tensile.Component  # noqa: F401 — ensures Component.py is loaded before LocalRead.py
-from Tensile.Components.LocalRead import LocalReadMFMA
+import rocisa  # noqa: F401 — must import before tensilelite.Component to avoid SIGABRT
+import tensilelite.Component  # noqa: F401 — ensures Component.py is loaded before LocalRead.py
+from tensilelite.Components.LocalRead import LocalReadMFMA
 
 pytestmark = pytest.mark.unit
 
@@ -355,10 +355,10 @@ class TestLocalReadVALUCheckValue1:
             os.path.dirname(__file__), "..", "_codegen"
         ))
         from config_harness import _toolchain_for, _isolated_globals_with_isa, _solutions_from_config_unguarded
-        from codegen_harness import _init_rocisa_for, _prepare_kernel
-        from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions, processKernelSource
-        from Tensile.KernelWriterAssembly import KernelWriterAssembly
-        from Tensile.Common.Types import DebugConfig
+        from codegen_harness import _prepare_kernel, emit_one_kernel
+        from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+        from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+        from tensilelite.Common.Types import DebugConfig
 
         arch = "gfx942"
         assembler, iim = _toolchain_for(arch)
@@ -378,13 +378,11 @@ class TestLocalReadVALUCheckValue1:
             dbg = DebugConfig(enableDebugA=enableDebugA)
             kwa = KernelWriterAssembly(assembler, dbg)
             k = kernels[0]
-            ri = _init_rocisa_for(k)
-            data = ri.getData()
-            outOptions = ri.getOutputOptions()
             base = _prepare_kernel(k)
             try:
-                res = processKernelSource(kwa, data, outOptions, False, k)
-                return base, res.err
+                # gfx942 leaves a stinkytofu process; AttributeError still propagates.
+                _base, _src, err = emit_one_kernel(kwa, k, canonical=False)
+                return _base, err
             except AttributeError as exc:
                 # AttributeError: 'RegisterContainer' has no attribute 'split'
                 # This is the real behavior at line 118 when CheckValue1A=True

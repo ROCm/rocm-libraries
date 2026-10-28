@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
@@ -218,11 +219,18 @@ typedef struct rocke_isa_backend
      * is one the opcode cannot carry (the caller then fails with the same
      * message Python raises). */
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
+    /* Python ISABackend.has_fp8_scale_conversion: the fused scale-and-convert
+     * fp8/bf8 instructions (v_cvt_scalef32_pk_f32_fp8 / _bf8). True only on
+     * gfx950. Elsewhere LLVM may still select the intrinsic and write an
+     * encoding the GPU does not have, so the lowerer refuses the ops. */
+    bool has_fp8_scale_conversion;
 } rocke_isa_backend_t;
 
-/* Resolve a gfx string to its backend (Python backend_for). Returns NULL and
- * sets *st to ROCKE_ERR_VALUE for a NULL arch (there is no default) and to
- * ROCKE_ERR_KEY for an unknown one. */
+/* Resolve a gfx string to its backend (Python backend_for). Returns the
+ * target's shared, read-only table row, whose datalayout and triple are unset
+ * (a lowering fills them in its own copy, rocke_lower.backend_resolved); safe
+ * to call from any thread. Returns NULL and sets *st to ROCKE_ERR_VALUE for a
+ * NULL arch (there is no default) and to ROCKE_ERR_KEY for an unknown one. */
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st);
 
 /* The two CDNA waitcnt encoders (Python _encode_waitcnt_gfx9_10 /
@@ -237,10 +245,9 @@ int rocke_ll_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem);
 void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem);
 
-/* The two ds_read_tr16_b128 opcode selections (Python
- * ISABackend.ds_tr16_b128_spec and the Gfx1250Backend override). Defined in
- * the crosslane bucket alongside the handler. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out);
+/* The gfx1250 ds_read_tr16_b128 opcode selection (Python
+ * Gfx1250Backend.ds_tr16_b128_spec). Defined in the crosslane bucket alongside
+ * the handler. Other backends leave the pointer NULL. */
 bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out);
 
 /* ====================================================================== */
@@ -396,8 +403,11 @@ struct rocke_lower
 {
     rocke_arena_t arena; /* owns blocks, lines, fresh names    */
     const rocke_kernel_def_t* kernel;
-    const rocke_isa_backend_t* backend;
+    const rocke_isa_backend_t* backend; /* &backend_resolved once running  */
+    rocke_isa_backend_t backend_resolved; /* the target's row + datalayout/triple */
     rocke_llvm_flavor_t flavor; /* resolved (never AUTO once running) */
+    /* The arch-domain lane's mode, read once per lowering at entry. */
+    rocke_arch_domain_mode_t arch_domain_mode;
 
     /* block model */
     ROCKE_VEC(rocke_ll_block_t*) blocks; /* blocks[len-1] is _current()       */
@@ -467,6 +477,29 @@ struct rocke_lower
 /* True if the lowerer is usable (non-null). The lowerer no longer carries a
  * sticky error -- a failure raises instead -- so this is just a null guard. */
 bool rocke_ll_live(const rocke_lower_t* L);
+
+/* The recorded target fact that admits an LLVM-23-only operation (Python
+ * _OpTargetFact). The memory.* flags name one hardware feature each;
+ * target_family gfx12_cdna covers the instructions no flag records: the split
+ * and named barriers, s_setreg (hardware-register field layouts differ between
+ * families), global_load_tr16_b128 and global_store_async_from_lds. */
+typedef enum rocke_ll_target_fact
+{
+    ROCKE_LL_FACT_TDM, /* memory.has_tdm */
+    ROCKE_LL_FACT_CLUSTER_LAUNCH, /* memory.has_cluster_launch */
+    ROCKE_LL_FACT_MULTICAST_LOAD, /* memory.has_multicast_load */
+    ROCKE_LL_FACT_SCALAR_DATA_PREFETCH, /* memory.has_scalar_data_prefetch */
+    ROCKE_LL_FACT_GLOBAL_PREFETCH, /* memory.has_global_prefetch */
+    ROCKE_LL_FACT_GFX12_CDNA_FAMILY /* target_family gfx12_cdna */
+} rocke_ll_target_fact_t;
+
+/* Fail unless the target records `fact` and the flavor is llvm23 (Python
+ * _Lowerer._require_llvm23_target_fact). The rule reads the target's facts,
+ * never its name, so a target whose row records the fact lowers `op` with no
+ * code change. */
+void rocke_ll_require_llvm23_target_fact(rocke_lower_t* L,
+                                         const char* op,
+                                         rocke_ll_target_fact_t fact);
 
 /* ====================================================================== */
 /* Core plumbing (Python _Lowerer helpers) -- DEFINED IN BUCKET 0         */
