@@ -3,7 +3,10 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 

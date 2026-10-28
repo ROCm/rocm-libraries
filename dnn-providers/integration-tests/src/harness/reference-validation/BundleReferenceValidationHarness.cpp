@@ -8,13 +8,18 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "harness/BundleMetadata.hpp"
-#include "harness/IReferenceExecutors.hpp"
+#include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/ValidationSite.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
+#include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {

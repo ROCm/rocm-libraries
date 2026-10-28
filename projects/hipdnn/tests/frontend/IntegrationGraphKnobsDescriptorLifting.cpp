@@ -1,7 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_frontend.hpp>
+#include "test_plugins/TestPluginEngineIdMap.hpp"
+#include <gtest/gtest.h>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
+#include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <test_plugins/TestPluginConstants.hpp>

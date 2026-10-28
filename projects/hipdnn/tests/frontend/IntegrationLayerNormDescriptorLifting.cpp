@@ -6,7 +6,10 @@
 #include <memory>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_test_sdk/constants/LayernormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

@@ -9,7 +9,17 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 #include "PointwiseGraphUtils.hpp"
-#include "PointwiseTensorBundles.hpp"
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>

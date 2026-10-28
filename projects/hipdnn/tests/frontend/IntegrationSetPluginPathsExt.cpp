@@ -9,7 +9,9 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_frontend/Handle.hpp>
+#include <hipdnn_frontend/PluginPaths.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 

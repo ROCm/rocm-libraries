@@ -8,9 +8,13 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>

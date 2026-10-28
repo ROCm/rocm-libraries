@@ -8,7 +8,9 @@
 #include <set>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 #include <hipdnn_test_sdk/constants/ReductionConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

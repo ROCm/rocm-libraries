@@ -8,7 +8,13 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnStatus.h"
+#include <hipdnn_backend.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>

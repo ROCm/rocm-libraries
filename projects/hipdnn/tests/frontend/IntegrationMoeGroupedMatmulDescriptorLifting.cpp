@@ -9,7 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_test_sdk/constants/MoeGroupedMatmulConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

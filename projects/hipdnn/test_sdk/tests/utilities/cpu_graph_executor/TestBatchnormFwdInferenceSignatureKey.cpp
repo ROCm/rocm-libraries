@@ -6,7 +6,8 @@
 #include <unordered_set>
 
 #include "BatchnormGraphUtils.hpp"
-#include "BatchnormTensorBundles.hpp"
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceSignatureKey.hpp>
 

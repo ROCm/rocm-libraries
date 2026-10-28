@@ -7,9 +7,16 @@
 #include <unordered_set>
 #include <vector>
 
+#include "HipdnnStatus.h"
+#include <hipdnn_backend.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/constants/ResampleBwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>

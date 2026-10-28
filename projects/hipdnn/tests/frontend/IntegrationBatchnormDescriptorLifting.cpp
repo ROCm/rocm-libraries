@@ -8,7 +8,10 @@
 #include <string>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

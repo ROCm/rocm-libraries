@@ -11,8 +11,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include "test_plugins/TestPluginEngineIdMap.hpp"
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 #include "AutotuneIntegrationFixture.hpp"
 

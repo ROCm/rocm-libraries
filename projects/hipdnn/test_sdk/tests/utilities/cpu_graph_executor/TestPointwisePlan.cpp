@@ -6,13 +6,18 @@
 #include "PointwiseGraphUtils.hpp"
 #include "hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
-#include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;

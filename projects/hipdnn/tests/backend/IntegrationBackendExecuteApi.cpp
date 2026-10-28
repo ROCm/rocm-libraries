@@ -9,10 +9,15 @@
 #include "hipdnn_backend.h"
 #include <test_plugins/TestPluginConstants.hpp>
 
+#include "HipdnnBackendAttributeType.h"
+#include "HipdnnBackendCallbackTypes.h"
+#include "HipdnnBackendDescriptorType.h"
+#include "HipdnnBackendLimits.h"
+#include "HipdnnBackendPluginLoadingMode.h"
+#include "test_plugins/TestPluginEngineIdMap.hpp"
 #include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 

@@ -5,7 +5,8 @@
 
 #include <algorithm>
 
-#include <hipdnn_frontend/Graph.hpp>
+#include "harness/bundle/LoadedEngine.hpp"
+#include <hipdnn_frontend/Error.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {

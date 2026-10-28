@@ -8,7 +8,9 @@
 #include <set>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_test_sdk/constants/ResampleBwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

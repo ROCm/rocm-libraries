@@ -5,13 +5,18 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnStatus.h"
+#include "harness/ValidationSite.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
+#include "harness/input-init/FillInputs.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>

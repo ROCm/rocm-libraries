@@ -20,8 +20,12 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
+#include "harness/TestConfig.hpp"
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
-#include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaims.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
+#include <gmock/gmock.h>
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;

@@ -6,9 +6,11 @@ SPDX-License-Identifier: MIT
 #include <array>
 #include <gtest/gtest.h>
 
+#include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnStatus.h"
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>

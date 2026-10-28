@@ -8,7 +8,10 @@
 #include <set>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_test_sdk/constants/RMSNormBackwardConstants.hpp>

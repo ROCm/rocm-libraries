@@ -9,12 +9,18 @@
 #include <vector>
 
 #include "PointwiseGraphUtils.hpp"
-#include "PointwiseTensorBundles.hpp"
+#include <flatbuffers/buffer.h>
+#include <flatbuffers/flatbuffer_builder.h>
+#include <flatbuffers/stl_emulation.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwiseSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;

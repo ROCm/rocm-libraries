@@ -3,8 +3,10 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Float.hpp>
+#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 

@@ -7,7 +7,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_test_sdk/constants/CustomOpConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

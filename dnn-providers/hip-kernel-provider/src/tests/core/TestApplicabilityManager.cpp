@@ -28,14 +28,12 @@
 
 #include "core/ApplicabilityManager.hpp"
 #include "core/ApplicabilityPool.hpp"
-#include "core/Container.hpp"
-#include "core/Handle.hpp"
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>

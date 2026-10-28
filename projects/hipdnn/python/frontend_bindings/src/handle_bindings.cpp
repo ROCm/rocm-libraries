@@ -3,8 +3,9 @@
 
 #include "bindings.hpp"
 
+#include "HipdnnStatus.h"
 #include <hipdnn_backend.h>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Handle.hpp>
 #include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>

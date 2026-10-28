@@ -1,10 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnStatus.h"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_backend.h>
+#include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>

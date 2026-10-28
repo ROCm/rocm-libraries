@@ -1,9 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "HipdnnBackendCallbackTypes.h"
+#include "HipdnnBackendPluginLoadingMode.h"
+#include "HipdnnStatus.h"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_backend.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>

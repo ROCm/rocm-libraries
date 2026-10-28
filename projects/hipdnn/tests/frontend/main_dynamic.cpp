@@ -5,7 +5,8 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Logging.hpp>
+#include <hipdnn_frontend/PluginPaths.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <test_plugins/TestPluginConstants.hpp>

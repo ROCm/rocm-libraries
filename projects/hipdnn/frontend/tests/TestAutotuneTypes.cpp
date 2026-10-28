@@ -4,10 +4,11 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
+#include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_frontend/autotune/CartesianProduct.hpp>
-#include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <algorithm>
 #include <cmath>

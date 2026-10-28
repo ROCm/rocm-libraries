@@ -40,7 +40,9 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "AutotuneIntegrationFixture.hpp"

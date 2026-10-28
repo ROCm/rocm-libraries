@@ -7,7 +7,9 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_test_sdk/constants/BlockScaleDequantizeConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>

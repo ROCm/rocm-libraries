@@ -25,7 +25,10 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/gpu-graph-executor/detail/GpuSdpaFwdPlan.hpp"
-#include "harness/gpu-graph-executor/detail/GpuSdpaFwdSignatureKey.hpp"
+#include <flatbuffers/flatbuffer_builder.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;

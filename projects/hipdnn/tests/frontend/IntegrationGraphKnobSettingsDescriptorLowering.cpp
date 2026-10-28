@@ -4,8 +4,15 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "HipdnnStatus.h"
+#include "test_plugins/TestPluginEngineIdMap.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_frontend.hpp>
+#include <hipdnn_backend.h>
+#include <hipdnn_frontend/PluginPaths.hpp>
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginKnobRecorder.hpp>
 

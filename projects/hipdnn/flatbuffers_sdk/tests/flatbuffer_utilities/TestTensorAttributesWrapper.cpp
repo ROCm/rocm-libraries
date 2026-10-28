@@ -5,9 +5,11 @@
 #include <gtest/gtest.h>
 #include <set>
 
+#include <flatbuffers/buffer.h>
+#include <flatbuffers/flatbuffer_builder.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_flatbuffers_sdk::data_objects;
