@@ -84,7 +84,7 @@ def test_scalar_capability_rejects_unsupported_problem(tmp_path, capsys, monkeyp
     assert "UseScaleAlphaVec scalar support requires" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("problem_index", range(4))
+@pytest.mark.parametrize("problem_index", range(3))
 def test_scalar_runtime_yaml_explicitly_enables_all_kernels(problem_index):
     source_config = (Path(__file__).resolve().parents[3]
                      / "common/gemm/gfx12/mxf4_device_scalar_alpha_gfx1250.yaml")

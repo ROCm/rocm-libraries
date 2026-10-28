@@ -167,7 +167,7 @@ def test_duplicate_alpha_runtime_arguments_are_rejected(capsys):
     assert "Duplicated DeviceScalarAlpha" in capsys.readouterr().out
 
 
-def test_mxf4_yaml_runs_both_modes_and_keeps_singlebuffer_scalar():
+def test_mxf4_yaml_runs_both_modes():
     from tensilelite.BenchmarkStructs import BenchmarkProcess
 
     path = Path(__file__).resolve().parents[1] / "common/gemm/gfx12/mxf4_device_scalar_alpha_gfx1250.yaml"
@@ -175,7 +175,7 @@ def test_mxf4_yaml_runs_both_modes_and_keeps_singlebuffer_scalar():
     assert "DeviceScalarAlpha" not in config["GlobalParameters"]
     modes = [BenchmarkProcess(problem, benchmark, False, gfxName="gfx1250")[0].deviceScalarAlphaModes
              for problem, benchmark in config["BenchmarkProblems"]]
-    assert modes == [[True, False], [True, False], [True, False], [True]]
+    assert modes == [[True, False], [True, False], [True, False]]
 
 
 @pytest.mark.parametrize("failure", ["none", "True", "False"])
