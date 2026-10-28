@@ -1622,70 +1622,57 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheDqReduceHandlerHasTheDqHandlersScratch)
               size_t{2} * 8 * 16 * 16 * 2);
 }
 
-TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowLaunchesOnlyDqWithoutABroadcastDbias)
-{
-    // The row carries no reduce launch at all: the dq launch is the only one resolved, so
-    // prepare() reaches its code object.
-    const auto kernel = sourcesRow(bareDqRow(), std::nullopt);
-    for(const auto& spec : {withBias(baseSpec(), false), withBias(baseSpec(), true)})
-    {
-        const auto failure = prepareFailure(DQ_REDUCE, spec, kernel);
-        EXPECT_TRUE(contains(failure, DQ_ENTRY_SYMBOL)) << failure;
-        EXPECT_FALSE(contains(failure, "no launch")) << failure;
-    }
-}
+// The checks below read only refusals prepare() raises on the host before any code object
+// loads (a missing launch, a reduce argument list that disagrees with the pack's), so they
+// do not depend on what the loader reports for an archive that does not exist, which
+// differs with and without a device.
 
-TEST(TestFlydslSdpaBwdSplitDispatch, ABroadcastDbiasLaunchesTheReduceKernelFromItsOwnEntry)
+TEST(TestFlydslSdpaBwdSplitDispatch, TheReduceLaunchIsBuiltOnlyForABroadcastDbias)
 {
     const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
 
-    // Both entries present and agreeing: the dq launch is the first to load.
-    const auto loads = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow()));
-    EXPECT_TRUE(contains(loads, DQ_ENTRY_SYMBOL)) << loads;
-    EXPECT_FALSE(contains(loads, "is packaged with arguments")) << loads;
-
-    // The second launch is required...
+    // A broadcast dBias needs the reduce launch: a row without it is refused...
     const auto missing
         = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), std::nullopt));
     EXPECT_TRUE(contains(missing, "no launch 'dbias_reduce'")) << missing;
 
-    // ...and is the entry's own: its recorded argument list is checked, before any load.
+    // ...and its entry is the one consumed, whose argument list is checked.
     auto dropped = recordedSignature(reduceParams());
     dropped.pop_back();
     const auto refused = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
     EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
     EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
-    EXPECT_FALSE(contains(refused, DQ_ENTRY_SYMBOL)) << refused;
+
+    // Without a broadcast dBias that launch is neither required nor looked at: the same
+    // two rows are not refused for it.
+    for(const auto& spec :
+        {baseSpec().withEdit([](SdpaBwdGraph& g) { addBias(g); }), withBias(baseSpec(), true)})
+    {
+        for(const auto& kernel :
+            {sourcesRow(bareDqRow(), std::nullopt), sourcesRow(bareDqRow(), dropped)})
+        {
+            const auto failure = prepareFailure(DQ_REDUCE, spec, kernel);
+            EXPECT_FALSE(contains(failure, "no launch")) << failure;
+            EXPECT_FALSE(contains(failure, "is packaged with arguments")) << failure;
+            EXPECT_FALSE(failure.empty());
+        }
+    }
 }
 
 TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowNeverTakesTheBySymbolPath)
 {
     const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
-    const auto kernel = sourcesRow(bareDqRow());
-    // The row's reduce_symbol names a symbol no entry has; no failure ever mentions it.
-    const auto failure = prepareFailure(DQ_REDUCE, broadcast, kernel);
+    // By symbol, the reduce launch would carry the pack's own argument list and the row's
+    // reduce_symbol; here it is the entry's, whose list the pack refuses.
+    auto dropped = recordedSignature(reduceParams());
+    dropped.pop_back();
+    const auto failure = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
+    EXPECT_TRUE(contains(failure, "is packaged with arguments")) << failure;
+    EXPECT_TRUE(contains(failure, REDUCE_ENTRY_SYMBOL)) << failure;
     EXPECT_FALSE(contains(failure, "fmha_reduce_by_symbol")) << failure;
     // The single-launch dq dispatch reads `source`, which a multi-launch row does not have.
-    const auto single = prepareFailure(splitSymbols(Slot::DQ), broadcast, kernel);
+    const auto single = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow()));
     EXPECT_TRUE(contains(single, "several launches")) << single;
-}
-
-TEST(TestFlydslSdpaBwdSplitDispatch, TheDqDispatchStillReducesBySymbol)
-{
-    // One code object, the reduce symbol the row names: dq loads first, under the row's
-    // own symbol.
-    auto kernel = makeRow(Slot::DQ, bareDqRow());
-    const auto tree = std::filesystem::temp_directory_path().string();
-    kernel.originDirectory = tree;
-    kernel.treeRoot = tree;
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.source.library = "there-is-no-archive-here.kpack";
-    kernel.source.tocKey = "toc#0";
-    kernel.source.symbol = DQ_ENTRY_SYMBOL;
-    kernel.source.signature = recordedSignature(dqParams());
-    const auto failure = prepareFailure(
-        splitSymbols(Slot::DQ), withBias(baseSpec(), true, {1, 1, 16, 16}), kernel);
-    EXPECT_TRUE(contains(failure, DQ_ENTRY_SYMBOL)) << failure;
 }
 
 // ---------------------------------------------------------------------------
