@@ -1306,7 +1306,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
         }
 
         // gfx942: the set of types defaulting to hipBLASLt depends on the device.
-        //   MI300X (304 CUs) and MI300A (228 CUs):  fp16/bf16/fp64/fp32
+        //   MI300X (304 CUs) and MI300A (228 CUs):  fp16/bf16/fp64/fp32/int8
         //   228-CU MI300A only:                     complex-fp64, complex-fp32
         //   every other gfx942 configuration:       nothing, Tensile remains the default
         // The CU count is the one reported for the visible device, so a partitioned
@@ -1314,7 +1314,8 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
         if(arch == 942)
         {
             constexpr bool MI300A_or_MI300X = sizeof(Ti) == 2 || std::is_same<Ti, double>::value
-                                              || std::is_same<Ti, float>::value;
+                                              || std::is_same<Ti, float>::value
+                                              || std::is_same<Ti, int8_t>::value;
 
             constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
                                          || std::is_same<Ti, rocblas_float_complex>::value;

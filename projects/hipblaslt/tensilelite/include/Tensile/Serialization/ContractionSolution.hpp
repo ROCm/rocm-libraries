@@ -118,6 +118,7 @@ namespace TensileLite
             static void mapping(IO& io, SizeMapping& s)
             {
                 iot::mapRequired(io, "waveNum", s.waveNum);
+                iot::mapOptional(io, "WavefrontSize", s.WavefrontSize);
 
                 iot::mapRequired(io, "workGroup", s.workGroupSize);
                 iot::mapRequired(io, "threadTile", s.threadTile);
@@ -233,6 +234,11 @@ namespace TensileLite
                 iot::mapRequired(io, "LocalSplitU", s.LocalSplitU);
                 iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
                 iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
+                iot::mapOptional(io, "OneLDSBuffer", s.OneLDSBuffer);
+                iot::mapOptional(io, "UnrollMajorLDSA", s.UnrollMajorLDSA);
+                iot::mapOptional(io, "UnrollMajorLDSB", s.UnrollMajorLDSB);
+                iot::mapOptional(io, "enableLDSTrA", s.enableLDSTrA);
+                iot::mapOptional(io, "enableLDSTrB", s.enableLDSTrB);
                 iot::mapOptional(io, "ExpertSchedulingMode", s.expertSchedulingMode);
                 iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "BufferLoad", s.BufferLoad);
@@ -256,6 +262,7 @@ namespace TensileLite
                 // Optional so older logic files that omit the field deserialize
                 // as false (no per-tile extra-iters capability).
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
+                iot::mapOptional(io, "occupancyProbe", s.occupancyProbe);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
@@ -312,6 +319,7 @@ namespace TensileLite
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
                 iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
+                iot::mapOptional(io, "stochasticRounding", s.stochasticRounding);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it
                 // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.

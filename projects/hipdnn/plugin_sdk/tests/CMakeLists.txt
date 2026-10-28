@@ -86,6 +86,7 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericEngine.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlanBuilder.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestStagedApplicability.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestBenchmarkPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptorLoader.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
@@ -205,7 +206,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES)
     target_link_options(hipdnn_plugin_sdk_tests PRIVATE
         "LINKER:--wrap=hipStreamWaitValue32"
-        "LINKER:--wrap=hipDeviceGetAttribute")
+        "LINKER:--wrap=hipDeviceGetAttribute"
+        "LINKER:--wrap=hipEventElapsedTime")
 endif()
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
