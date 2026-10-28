@@ -462,8 +462,7 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(const ExecutionContext& ctx
 {
     if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
+    // No deterministic gate: forward never uses split-K, so every instance is deterministic.
     if(problem.HasNonPackedTensors())
         return false;
     if(problem.IsTensorsCasted())
