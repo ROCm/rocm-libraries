@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <roc/hostnumerics/tensor.hpp>
 #include <utility>
@@ -62,8 +61,8 @@ struct StructuredSparseTensor {
 struct StructuredSparsitySliceRange {
     size_t firstSlice = 0;
 
-    // maximum means every remaining slice.
-    size_t sliceCount = std::numeric_limits<size_t>::max();
+    // Without a value, the range extends through the last slice.
+    std::optional<size_t> sliceCount;
 };
 
 StructuredSparseTensor applyStructuredSparsity(Tensor input, StructuredSparsityPattern pattern,

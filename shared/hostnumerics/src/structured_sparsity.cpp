@@ -15,8 +15,7 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
     const auto [firstSlice, endSlice] =
         detail::validateStructuredSparsitySliceRange(plan, sliceRange);
     if (problem.input.elementCount() == 0) return {};
-    const bool completeRange =
-        sliceRange.firstSlice == 0 && sliceRange.sliceCount == std::numeric_limits<size_t>::max();
+    const bool completeRange = firstSlice == 0 && endSlice == plan.lineCount;
     const bool independentOutputs =
         detail::hasProvablyIndependentElements(problem.pruned) &&
         detail::hasProvablyIndependentElements(problem.compressed) &&

@@ -35,6 +35,7 @@ class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
                     hv.encode_two_of_four_metadata(tensor, 2)
 
     def test_structured_sparsity_all_fixed_two_of_four_patterns(self):
+        self.assertIsNone(hv.StructuredSparsitySliceRange().slice_count)
         values = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
         retained_position_sets = (
             (0, 1),

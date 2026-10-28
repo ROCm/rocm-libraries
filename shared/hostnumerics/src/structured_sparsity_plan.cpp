@@ -273,12 +273,11 @@ std::pair<size_t, size_t> validateStructuredSparsitySliceRange(const StructuredS
     if (range.firstSlice > plan.lineCount)
         throw std::runtime_error(
             "Structured sparsity first slice exceeds the available slice count.");
-    if (range.sliceCount == std::numeric_limits<size_t>::max())
-        return {range.firstSlice, plan.lineCount};
-    if (range.sliceCount > plan.lineCount - range.firstSlice)
+    if (!range.sliceCount) return {range.firstSlice, plan.lineCount};
+    if (*range.sliceCount > plan.lineCount - range.firstSlice)
         throw std::runtime_error(
             "Structured sparsity slice range exceeds the available slice count.");
-    return {range.firstSlice, range.firstSlice + range.sliceCount};
+    return {range.firstSlice, range.firstSlice + *range.sliceCount};
 }
 
 }  // namespace roc::hostnumerics::detail
