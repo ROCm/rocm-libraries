@@ -1403,7 +1403,10 @@ def test_default_grouping_is_not_rejected():
     assert tdmPapRejectReason(_ks(fuse=0)) is None
 
 
-@pytest.mark.parametrize("decline", [{"NumWaves": 1}, {"TDMSplit": True},
+# The split is not a decline: `TDMSplitA`/`TDMSplitB` are per operand, so a split alone leaves
+# the row standing and its set still shares -- `test_scale_less_types_share_nothing` covers the
+# case that does collapse.
+@pytest.mark.parametrize("decline", [{"NumWaves": 1},
                                      {"UseSubtileImpl": True}, {"TDMInst": 1}])
 def test_declined_grouping_answers_with_the_fallback(decline):
     """A grouping TDMFuse asked for but the predicates declined shares nothing."""

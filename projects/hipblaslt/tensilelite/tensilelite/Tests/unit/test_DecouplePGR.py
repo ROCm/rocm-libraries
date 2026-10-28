@@ -1554,10 +1554,18 @@ PAIRS = (
 
 # Expected A/B separation per row, written out so it cannot share a bug with the table.
 ROW_SEPARATES_AB = {
-    "MX_AB": False,   # {A,B} + {MXSA,MXSB}
-    "paired": True,   # {A,MXSA} + {MXSB,B}
-    "A_MX": True,     # {A,MXSA,MXSB} + {B}
-    "B_MX": True,     # {B,MXSA,MXSB} + {A}
+    "MX_AB": False,     # {A,B} + {MXSA,MXSB}
+    "paired": True,     # {A,MXSA} + {MXSB,B}
+    "A_MX": True,       # {A,MXSA,MXSB} + {B}
+    "B_MX": True,       # {B,MXSA,MXSB} + {A}
+    "AB_first": False,  # {A,B} + {A} + {B} + {MXSA,MXSB}: region 0 still seats both
+    "unfused": True,    # {A} + {B}
+}
+
+
+# What a row needs before it is accepted, on top of what `ks()` already gives.
+ROW_PRECONDITIONS = {
+    "AB_first": {"UseLoopModel": True, "TDMSplitA": 1, "TDMSplitB": 1},
 }
 
 def test_every_grouping_row_has_a_stated_expectation():
@@ -1605,19 +1613,30 @@ def test_presence_follows_the_pair_not_the_fuse_integer(pgrA, pgrB, shape):
 
 @pytest.mark.parametrize("fuse,expected", sorted(TDM_FUSE_GROUPING.items()))
 def test_reachable_fuse_integers_resolve_to_their_row(fuse, expected):
-    assert tdmGrouping(ks(fuse=fuse)).name == expected
+    assert tdmGrouping(ks(fuse=fuse, **ROW_PRECONDITIONS.get(expected, {}))).name == expected
 
 
 # Declined TDMFuse must not look paired. Unreachable in Valid solutions.
 DECLINES = (
-    ("TDMSplit", {"TDMSplit": True}),
     ("UseSubtileImpl", {"UseSubtileImpl": True}),
-    ("no MX scale on A", {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}}),
-    ("no MX scale on B", {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}}),
     ("NumWaves==1", {"NumWaves": 1}),
     ("TDM moves A only", {"TDMInst": 1}),
     ("TDM moves B only", {"TDMInst": 2}),
 )
+
+
+# Not declines: the split is per operand, and a pair with no scale to pair has nothing to share,
+# so each resolves to a row of its own instead of collapsing onto the shared default.
+RESOLVES = (
+    ("TDMSplit", {"TDMSplit": True}, "paired"),
+    ("no MX scale on A", {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}}, "unfused"),
+    ("no MX scale on B", {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}}, "unfused"),
+)
+
+
+@pytest.mark.parametrize("why,override,expected", RESOLVES)
+def test_a_relaxed_precondition_resolves_to_its_own_row(why, override, expected):
+    assert tdmGrouping(ks(fuse=1, **override)).name == expected, why
 
 
 @pytest.mark.parametrize("why,override", DECLINES)

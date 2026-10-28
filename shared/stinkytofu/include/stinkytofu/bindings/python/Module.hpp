@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/pipeline/CloneSpec.hpp"
@@ -97,7 +98,11 @@
     X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
+    X(DisableWaitCntRemoval, bool)                \
+    X(DisableTensorcntInsertion, bool)            \
     X(EnableLoopCarriedTokenDeps, bool)           \
+    X(EnableGirFramePipeline, bool)               \
+    X(EnableGirFrameWaitCntInsertion, bool)       \
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
@@ -129,9 +134,9 @@
     X(DsReadOrder, int)                           \
     X(ArchName, std::string)
 
-// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
-// WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
-// have fixed defaults and
+// Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, LockWmmaOrder,
+// EvenSpreadFillers, WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas,
+// which have fixed defaults and
 // are not resolved by the heuristics. Gfx1250Backend resolves unset
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
 // wins; degenerate main-loop IR falls back to the static default). See
@@ -140,6 +145,7 @@
 // trigger, >0 = one handshake per enclosing loop. propose() currently leaves it off.
 #define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                       \
     X(LockDsReadOrder, bool, true)                                                                 \
+    X(LockWmmaOrder, bool, false) /* true: WMMAs issue in program order, loads still move */       \
     X(EvenSpreadFillers, bool, true)                                                               \
     X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */    \
     X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */    \
@@ -406,6 +412,11 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 
     void setPluginDataI64(const std::string& key, int64_t value);
     int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    /// The GIR frame contract as the object Python already built -- no text, so no pair of
+    /// hand-written parsers to keep in step.
+    void setGirFrameContract(std::shared_ptr<const GirFrameContract> contract);
+    std::shared_ptr<const GirFrameContract> getGirFrameContract() const;
 
     void setPluginDataStr(const std::string& key, const std::string& value);
     std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;

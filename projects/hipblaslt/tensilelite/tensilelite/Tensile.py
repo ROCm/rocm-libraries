@@ -263,6 +263,13 @@ def addCommonArguments(argParser):
         help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
              "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
              "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
+    scheduleGroup = argParser.add_mutually_exclusive_group()
+    scheduleGroup.add_argument("--dump-gir-schedule", dest="GIRScheduleDumpPath",
+        metavar="DIR", default="",
+        help="Write one compact, editable GIR schedule YAML per true-SIA0 kernel")
+    scheduleGroup.add_argument("--load-gir-schedule", dest="GIRScheduleLoadPath",
+        metavar="DIR", default="",
+        help="Apply edited GIR schedule YAML files from DIR to true-SIA0 kernels")
     # extend (not store): repeated --global-parameters accumulate instead of the last
     # occurrence clobbering earlier ones.
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters,
@@ -294,6 +301,13 @@ def argUpdatedGlobalParameters(args):
     if args.MXScaleFormat:
         print1("# Command-line override: MXScaleFormat")
         rv["MXScaleFormat"] = args.MXScaleFormat
+
+    if getattr(args, "GIRScheduleDumpPath", ""):
+        rv["GIRScheduleDumpPath"] = os.path.abspath(
+            os.path.expanduser(args.GIRScheduleDumpPath))
+    if getattr(args, "GIRScheduleLoadPath", ""):
+        rv["GIRScheduleLoadPath"] = os.path.abspath(
+            os.path.expanduser(args.GIRScheduleLoadPath))
 
     for key, value in args.global_parameters:
         rv[key] = value

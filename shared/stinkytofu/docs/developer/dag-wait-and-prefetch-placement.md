@@ -11,8 +11,7 @@ scoreboard instead (see [Scoreboard-driven filler placement](waitalu-placement.m
 
 Prefetch placement is not a hazard but a **performance** placement. Left alone, the DAG
 issues a prefetch as soon as its address is ready, far ahead of the `tensor_load_to_lds` it
-belongs with. The former WaitAwareScheduleRepairPass (now removed) hid that by accident: it
-carried the prefetch forward to the segment end, the barrier right before the tensor_load.
+belongs with, so the rules below place it explicitly.
 
 ## Rules, in order of measured impact
 
@@ -91,12 +90,10 @@ Findings behind the rules:
   loop a staggered lead. A lead of 80 on henry is −14%.
 - A stage under 64 WMMAs (MAB, medium mxf8) has no room for a multi-stage lead: the address
   chain is ready only a few windows before the tensor_load, and a prefetch issued there is
-  worse than one grouped at the tensor_load. That grouping used to come from the former
-  WaitAwareScheduleRepairPass, which moved the prefetches next to the stage barrier. Without
-  the pass, lead 0 issues them mid-stage among the ds_loads, and the next WMMAs wait longer
-  for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4 0.63%. The single-stage grouping
-  (lead below 8) is therefore kept at any stage length; it brings MAB nvf4 level with
-  develop and MAB bf16 to 0.25% behind.
+  worse than one grouped at the tensor_load. Lead 0 issues them mid-stage among the ds_loads,
+  and the next WMMAs wait longer for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4
+  0.63%. The single-stage grouping (lead below 8) is therefore kept at any stage length; it
+  brings MAB nvf4 level with develop and MAB bf16 to 0.25% behind.
 - An LDS-address swap (`v_xor`) issued while ds_loads still read the old address pays a
   `vm_vsrc` wait (about 100 cycles/iteration on medium mxf4). Moving it after the barrier
   is worse: the next stage's first ds_loads read the new address right after the barrier.

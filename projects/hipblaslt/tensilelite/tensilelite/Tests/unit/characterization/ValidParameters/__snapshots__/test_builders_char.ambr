@@ -1382,6 +1382,8 @@
     'ClusterAIDMapping',
     'ClusterDim',
     'ClusterLocalRead',
+    'ClusterLocalReadA',
+    'ClusterLocalReadB',
     'CompactLoopStore',
     'ConvertAfterDS',
     'CustomKernel',
@@ -1476,6 +1478,8 @@
     'PrefetchGlobalReadA',
     'PrefetchGlobalReadB',
     'PrefetchLocalRead',
+    'PrefetchLocalReadA',
+    'PrefetchLocalReadB',
     'PreloadKernArgs',
     'ReuseAcrossPersistent',
     'SFCWGM',
@@ -1510,6 +1514,8 @@
     'TDMLoadWaveSync',
     'TDMPlusLdsBuf',
     'TDMSplit',
+    'TDMSplitA',
+    'TDMSplitB',
     'TailloopInNll',
     'TemporalHint',
     'TemporalHintA',
@@ -1532,16 +1538,26 @@
     'UseCustomMainLoopSchedule',
     'UseDualFMAC',
     'UseInstOffsetForGRO',
+    'UseLoopModel',
     'UsePLRPack',
     'UseSgprForGRO',
     'UseSubtileImpl',
     'VectorStore',
     'VectorWidthA',
     'VectorWidthB',
+    'VgprAllocA',
+    'VgprAllocB',
+    'VgprGroupA',
+    'VgprGroupB',
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
     'WavefrontSize',
+    'WmmaFactorK',
+    'WmmaFactorM',
+    'WmmaFactorN',
+    'WmmaInnerOrder',
+    'WmmaOuterOrder',
     'WorkAssignment',
     'WorkGroup',
     'WorkGroupMapping',
@@ -1720,6 +1736,24 @@
         1,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'ClusterLocalReadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'ClusterLocalReadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'CompactLoopStore': dict({
@@ -2547,6 +2581,24 @@
       'len': 129,
       'type': 'list',
     }),
+    'PrefetchLocalReadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 130,
+      'type': 'list',
+    }),
+    'PrefetchLocalReadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 130,
+      'type': 'list',
+    }),
     'PreloadKernArgs': dict({
       'head': list([
         False,
@@ -2773,7 +2825,7 @@
         1,
         2,
       ]),
-      'len': 4,
+      'len': 5,
       'type': 'list',
     }),
     'TDMInst': dict({
@@ -2817,6 +2869,24 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TDMSplitA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'TDMSplitB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'TailloopInNll': dict({
@@ -3021,6 +3091,14 @@
       'len': 3,
       'type': 'list',
     }),
+    'UseLoopModel': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'UsePLRPack': dict({
       'head': list([
         0,
@@ -3073,6 +3151,42 @@
       'len': 7,
       'type': 'list',
     }),
+    'VgprAllocA': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 129,
+      'type': 'list',
+    }),
+    'VgprAllocB': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 129,
+      'type': 'list',
+    }),
+    'VgprGroupA': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 9,
+      'type': 'list',
+    }),
+    'VgprGroupB': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 9,
+      'type': 'list',
+    }),
     'WaveSeparateGlobalReadA': dict({
       'head': list([
         0,
@@ -3106,6 +3220,51 @@
         64,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'WmmaFactorK': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
+    'WmmaFactorM': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
+    'WmmaFactorN': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
+    'WmmaInnerOrder': dict({
+      'head': list([
+        1,
+        2,
+        3,
+      ]),
+      'len': 6,
+      'type': 'list',
+    }),
+    'WmmaOuterOrder': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 5,
       'type': 'list',
     }),
     'WorkAssignment': dict({
