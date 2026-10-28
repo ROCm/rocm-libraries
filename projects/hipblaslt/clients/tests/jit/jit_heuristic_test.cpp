@@ -29,6 +29,10 @@ namespace
     constexpr hipblasOperation_t opA = HIPBLAS_OP_T;
     constexpr const char* wideSuffix = "HK_gemm_f16_TN";
     constexpr const char* narrowSuffix = "HK_gemm_f16_TN";
+    // The K of the problem no JIT backend solves. The replayed bundle solves
+    // only NN, so the problem stays TN; the HipKittens kernels need K to be a
+    // multiple of 128, which this K is not.
+    constexpr int kOutside = 64;
 #else
     constexpr int M = hipblaslt_jit_test::Fp16Gemm::rows;
     constexpr int N = hipblaslt_jit_test::Fp16Gemm::cols;
@@ -37,6 +41,8 @@ namespace
     constexpr hipblasOperation_t opA = HIPBLAS_OP_N;
     constexpr const char* wideSuffix = "_K512_WGM8";
     constexpr const char* narrowSuffix = "_WGM1";
+    // The replayed bundle solves only NN, so a TN problem of any K is outside it.
+    constexpr int kOutside = kWide;
 #endif
     constexpr uint64_t workspaceLimit = 64ull << 20;
 
@@ -376,8 +382,8 @@ namespace
             for(const auto& size : equalitySizes)
                 tuned = tuned || equalitySize(handle, desc, size[0], size[1], size[2]);
         }
-#ifdef HIPBLASLT_JIT_HIPKITTENS
         const hipblasOperation_t transpose = HIPBLAS_OP_T;
+#ifdef HIPBLASLT_JIT_HIPKITTENS
         {
             INFO(("transpose A"));
             REQUIRE((hipblasLtMatmulDescSetAttribute(
@@ -447,21 +453,9 @@ namespace
 
         if(mode == "forced" || mode == "fallback")
         {
-#ifdef HIPBLASLT_JIT_HIPKITTENS
-            // NN is outside the HipKittens kernel.
+            // A TN problem of kOutside: the replayed bundle solves only NN, and
+            // the HipKittens kernels need K to be a multiple of 128.
             hipblasLtMatmulDesc_t outside{};
-            {
-                INFO(("NN descriptor"));
-                REQUIRE((hipblasLtMatmulDescCreate(&outside, HIPBLAS_COMPUTE_32F, HIP_R_32F)
-                    == HIPBLAS_STATUS_SUCCESS));
-            }
-            Layouts    nn(M, kWide, M, kWide, N, kWide);
-            const auto cT = queryC(handle, outside, pref, nn, 4);
-            const auto cppT = queryCpp(handle, outside, HIPBLAS_OP_N, HIPBLAS_OP_N, nn, A.pointer,
-                                       B.pointer, C.pointer, D.pointer, 4);
-#else
-            hipblasLtMatmulDesc_t    outside{};
-            const hipblasOperation_t transpose = HIPBLAS_OP_T;
             {
                 INFO(("transposed descriptor"));
                 REQUIRE((hipblasLtMatmulDescCreate(&outside, HIPBLAS_COMPUTE_32F, HIP_R_32F)
@@ -473,11 +467,10 @@ namespace
                                                         &transpose, sizeof(transpose))
                     == HIPBLAS_STATUS_SUCCESS));
             }
-            Layouts    nn(kWide, M, kWide, kWide, N, kWide);
-            const auto cT = queryC(handle, outside, pref, nn, 4);
-            const auto cppT = queryCpp(handle, outside, HIPBLAS_OP_T, HIPBLAS_OP_N, nn, A.pointer,
-                                       B.pointer, C.pointer, D.pointer, 4);
-#endif
+            Layouts    outsideLayouts(kOutside, M, kOutside, kOutside, N, kOutside);
+            const auto cT = queryC(handle, outside, pref, outsideLayouts, 4);
+            const auto cppT = queryCpp(handle, outside, HIPBLAS_OP_T, HIPBLAS_OP_N, outsideLayouts,
+                                       A.pointer, B.pointer, C.pointer, D.pointer, 4);
             if(mode == "forced")
             {
                 {
