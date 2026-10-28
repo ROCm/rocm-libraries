@@ -1206,6 +1206,10 @@ validParameters = { # we need to make sure this matches develop
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
     "TailloopInNll": [False, True],
+    # Fuse the D-tile buffer_store into the No-Load-Loop (NLL) so early-completed
+    # accumulator pairs are stored while the final-K-step MFMAs for later pairs run.
+    # Scoped to fp4-input (MXFP4) + UseSubtileImpl on gfx950; auto-disabled otherwise.
+    "PostLoopStoreInNll": [False, True],
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.
     # -1: auto (enable this for PGR>=3)
@@ -1240,6 +1244,25 @@ validParameters = { # we need to make sure this matches develop
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
+    # StinkyTofu register allocation, per kernel: a mode, or a StinkyTofu config
+    # string that starts with one, such as "apply,classes=vs".
+    #   0  off
+    #   1  shadow      colour and report, rewrite nothing
+    #   2  apply       rewrite operands; an over-budget kernel is still rejected
+    #                  before allocation is asked
+    #   3  force       as apply, but an over-budget kernel reaches allocation and
+    #                  its verdict is re-judged against the count that comes out
+    # Only mode 3 changes which kernels are accepted; the rest change only how
+    # the accepted ones are coloured. The string's other settings (classes,
+    # allocator, unbankable, quadrant, ...) are listed in StinkyTofu's
+    # docs/developer/register-allocation.md, "Configuring allocation", and
+    # StinkyTofu parses them, so Tensile accepts exactly what the pipeline runs.
+    # A solution keeps the shortest spelling: "apply" and "2,classes=vs" are both
+    # 2. The kernel name records only the mode: nothing for 0, STRA<mode>
+    # otherwise. The string's other settings stay in the solution and out of
+    # the name, so two configs with one mode are one kernel, built with the
+    # first; Tensile warns about the other.
+    "StinkyTofuRegisterAllocation": -1,
     # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
     # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
     # not two heterogeneous regions in one instruction.
@@ -1282,6 +1305,8 @@ validParameters = { # we need to make sure this matches develop
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
+    # DataParallel and StreamK/StaticGrid derive spatial clustering on either axis.
+    # StreamK supports linear/tree fixup and requires PrefetchAcrossPersistent=0.
     "ClusterDim": validClusterDimensions,
     # Remap clusters onto the two AIDs (4 XCCs and one GL2 each) so that each GL2 reads
     # one operand once and only the other operand is duplicated across GL2s.
@@ -1452,6 +1477,7 @@ def checkSpaceFillAlgoIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
+
 def checkSpaceFillAlgoWGMIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a nested list of values"
@@ -1468,6 +1494,32 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
+
+
+@lru_cache(maxsize=None, typed=True)
+def parseStinkyTofuRegisterAllocation(value):
+    """``(canonical, mode)`` for a StinkyTofuRegisterAllocation value.
+
+    StinkyTofu does the parsing, so a value is valid exactly when the pipeline
+    can run it. ``canonical`` is the shortest spelling of the same
+    configuration: the int mode when that is all it says, a string otherwise.
+    Raises ValueError, naming what is wrong, when the value does not parse.
+    """
+    if type(value) is int and not 0 <= value <= 3:
+        raise ValueError(f"mode {value} is not one of 0..3")
+    if type(value) not in (int, str):
+        raise ValueError("must be a mode 0..3 or a string such as 'apply,classes=vs'")
+    import rocisa
+    text, mode = rocisa.parseRegisterAllocationConfig(value)
+    return (int(text) if text.isdigit() else text), mode
+
+
+def checkStinkyTofuRegisterAllocationIsValid(name, value):
+    try:
+        parseStinkyTofuRegisterAllocation(value)
+    except (TypeError, ValueError) as error:
+        msgBase = "Invalid parameter value: {} = {!r}\n{}"
+        raise Exception(msgBase.format(name, value, error))
 
 
 def checkParametersAreValid(
@@ -1532,6 +1584,8 @@ def checkParametersAreValid(
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
             checkSpaceFillAlgoWGMIsValid(name, value)
+        elif name == "StinkyTofuRegisterAllocation":
+            checkStinkyTofuRegisterAllocationIsValid(name, value)
 
         if runTypeCheck:
             expectedTypes = _expectedParamTypes[name]

@@ -695,6 +695,17 @@ void rocke_i_refuse_unsigned_operands(const rocke_op_t* op, const char* instead)
     }
 }
 
+void rocke_i_refuse_non_u8_source(const rocke_op_t* op)
+{
+    const rocke_type_t* source = op->operands[0]->type;
+    if(source->kind == ROCKE_TYPE_SCALAR && source->scalar == ROCKE_SCALAR_U8)
+    {
+        return;
+    }
+    throw ckc::TypeError(ckc::format_error(
+        "%s expects a u8 source, got %s", rocke_opcode_name(op->opcode), source->name));
+}
+
 /* ============================== BUILDER ================================= */
 
 rocke_status_t rocke_ir_builder_init(rocke_ir_builder_t* b, const char* kernel_name)

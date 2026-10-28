@@ -1,9 +1,9 @@
 # Saved paged split-KV decode binding host overhead case study
 
 This case study concerns host submission from saved explicit gfx942/gfx950
-paged one-token attention bindings. It describes preparation outside the timed
-loop and validation of equivalent segment/reducer kernels. It does not measure
-the native provider or change heuristic attention routing.
+non-FP8, LSE-off paged one-token attention bindings. It describes preparation
+outside the timed loop and validation of equivalent segment/reducer kernels.
+It does not measure the native provider or change heuristic attention routing.
 
 ## Caller and preparation
 
@@ -35,6 +35,10 @@ scratch. Each binding uses
 There is no new global cache, eviction policy, until-drain registry or cleanup
 API. Generic HIP runtime and launcher code are unchanged.
 
+LSE-on bindings use the general runner on every invocation, preserving live LSE
+buffer overrides and the runner's output validation. They keep the existing
+integer-stream interface and default; they do not prepare private eager scratch.
+
 Only the binding's creating host thread reuses its scratch under the existing
 execution owner's whole-pair guard. Different streams/devices/layouts, foreign
 host threads, reentrant calls, internal graphs and external capture use the
@@ -56,6 +60,10 @@ foreign/reentrant calls, capture/graph fallback, enqueue failure and ordinary
 retention after discarding a binding. The focused test is installed in the
 attention CPU lane. Tests for the withdrawn global cache and runtime changes
 are removed; pre-existing suites retain their baseline source.
+
+The LSE dispatch host regression separately checks repeated calls of one saved
+binding on gfx942/gfx950, including LSE-buffer and integer-stream overrides.
+It verifies that each call reaches the general runner without preparation.
 
 Fresh hardware validation compares the final binding implementation against the
 pinned base using identical executable specs, LLVM/HSACO hashes and geometry.

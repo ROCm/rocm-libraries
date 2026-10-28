@@ -83,6 +83,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
         problem.fp8_fnuz
     ):
         raise ValueError("request FP8 encoding disagrees with attention problem")
+    if bool(request.emit_lse) != problem.emit_lse:
+        raise ValueError(
+            f"request.emit_lse={bool(request.emit_lse)} disagrees with "
+            f"problem.emit_lse={problem.emit_lse}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -524,10 +529,11 @@ def bind_tuning_attention_torch(
     ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
     check; structural ABI validation is never skipped.
 
-    Saved gfx942/gfx950 one-token 3D bindings prepare private eager scratch and
-    fixed launch context on their first ordinary launch. Other execution contexts
-    and graph calls use the general runner. None selects Torch's current stream;
-    existing integer stream behavior is preserved.
+    Saved gfx942/gfx950 non-FP8, LSE-off one-token 3D bindings prepare private
+    eager scratch and fixed launch context on their first ordinary launch.
+    LSE-on bindings, other execution contexts and graph calls use the general
+    runner. None selects Torch's current stream for prepared bindings; existing
+    integer stream behavior is preserved.
     """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
@@ -546,6 +552,14 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
+    # The caller-owned LSE buffer must be bound exactly when the problem asks
+    # for it, so misuse fails here and not at the first launch. Its shape,
+    # dtype, device and overlap are validated by the runner, which needs torch.
+    has_lse = tensors.get("lse") is not None
+    if problem.emit_lse and not has_lse:
+        raise ValueError("emit_lse=True requires tensors['lse']")
+    if has_lse and not problem.emit_lse:
+        raise ValueError("tensors['lse'] was given but emit_lse is off")
     # Explicit specs are built without additive bias (the spec makers reject
     # it), so refuse a bias-on problem or bias inputs here instead of launching
     # a kernel that would silently ignore them.
@@ -568,6 +582,7 @@ def bind_tuning_attention_torch(
         and spec.arch in ("gfx942", "gfx950")
         and problem.all_decode
         and not problem.use_fp8
+        and not problem.emit_lse
     )
     stream = kwargs.get("stream", None if decode else 0)
     scale = kwargs.get("softmax_scale")
@@ -599,6 +614,7 @@ def bind_tuning_attention_torch(
             backend=backend,
             stream=_kw.get("stream", stream),
             tuning_spec=spec,
+            lse=_kw.get("lse", tensors.get("lse")),
         )
         if prepared_launch is not None:
             return prepared_launch(call)
