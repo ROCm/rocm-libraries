@@ -62,7 +62,7 @@ if(ROCBLAS_ENABLE_TENSILE)
   endif()
   set(ROCBLAS_TENSILE_SUBDIR_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../Tensile" CACHE STRING "Path to Tensile subdirectory")
   # GPU_TARGETS remains the full offload list for the rocBLAS library.
-  set(ROCBLAS_TENSILE_ARCH_SKIPLIST "" CACHE STRING
+  set(ROCBLAS_TENSILE_ARCH_SKIPLIST "amdgcnspirv;gfx1250-strict" CACHE STRING
     "GPU targets skipped during Tensile library generation; rocBLAS still compiles for GPU_TARGETS")
   include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/tensile-arch-skiplist.cmake")
   rocblas_tensile_arch_skiplist_c_literals(ROCBLAS_TENSILE_ARCH_SKIPLIST
