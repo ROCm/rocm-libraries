@@ -40,8 +40,8 @@ else:
     _torch_register_fake_wrapper = noop_register_fake_wrapper
 
 
-@_torch_custom_op_wrapper("ck_tile_fmha::_flash_attn_forward", mutates_args=(), device_types="cuda")
-def _flash_attn_forward(
+@_torch_custom_op_wrapper("ck_tile_fmha::_fmha_forward", mutates_args=(), device_types="cuda")
+def _fmha_forward(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -89,8 +89,8 @@ def _flash_attn_forward(
     return out, softmax_lse, S_dmask, rng_state
 
 
-@_torch_register_fake_wrapper("ck_tile_fmha::_flash_attn_forward")
-def _flash_attn_forward_fake(
+@_torch_register_fake_wrapper("ck_tile_fmha::_fmha_forward")
+def _fmha_forward_fake(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -138,12 +138,12 @@ def _flash_attn_forward_fake(
 
 
 if tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >= (2, 4):
-    _wrapped_flash_attn_forward = torch.ops.ck_tile_fmha._flash_attn_forward
+    _wrapped_fmha_forward = torch.ops.ck_tile_fmha._fmha_forward
 else:
-    _wrapped_flash_attn_forward = _flash_attn_forward
+    _wrapped_fmha_forward = _fmha_forward
 
 
-def flash_attn_fp8_func(
+def fmha_fp8_func(
     q,
     k,
     v,
@@ -190,7 +190,7 @@ def flash_attn_fp8_func(
         softmax_scale = head_size ** (-0.5)
     if head_size % 8:
         q, k, v = (torch.nn.functional.pad(x, (0, 8 - head_size % 8)) for x in (q, k, v))
-    out, lse, _, _ = _wrapped_flash_attn_forward(
+    out, lse, _, _ = _wrapped_fmha_forward(
         q,
         k,
         v,
@@ -216,9 +216,9 @@ def flash_attn_fp8_func(
 
 
 @_torch_custom_op_wrapper(
-    "ck_tile_fmha::_flash_attn_varlen_forward", mutates_args=(), device_types="cuda"
+    "ck_tile_fmha::_fmha_varlen_forward", mutates_args=(), device_types="cuda"
 )
-def _flash_attn_varlen_forward(
+def _fmha_varlen_forward(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -268,8 +268,8 @@ def _flash_attn_varlen_forward(
     return out, softmax_lse, S_dmask, rng_state
 
 
-@_torch_register_fake_wrapper("ck_tile_fmha::_flash_attn_varlen_forward")
-def _flash_attn_varlen_forward_fake(
+@_torch_register_fake_wrapper("ck_tile_fmha::_fmha_varlen_forward")
+def _fmha_varlen_forward_fake(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -311,17 +311,17 @@ def _flash_attn_varlen_forward_fake(
 
 
 if tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >= (2, 4):
-    _wrapped_flash_attn_varlen_forward = torch.ops.ck_tile_fmha._flash_attn_varlen_forward
+    _wrapped_fmha_varlen_forward = torch.ops.ck_tile_fmha._fmha_varlen_forward
 else:
-    _wrapped_flash_attn_varlen_forward = _flash_attn_varlen_forward
+    _wrapped_fmha_varlen_forward = _fmha_varlen_forward
 
 
 @_torch_custom_op_wrapper(
-    "ck_tile_fmha::_flash_attn_backward",
+    "ck_tile_fmha::_fmha_backward",
     mutates_args=("dq", "dk", "dv", "dbias"),
     device_types="cuda",
 )
-def _flash_attn_backward(
+def _fmha_backward(
     dout: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -376,8 +376,8 @@ def _flash_attn_backward(
     return softmax_d
 
 
-@_torch_register_fake_wrapper("ck_tile_fmha::_flash_attn_backward")
-def _flash_attn_backward_fake(
+@_torch_register_fake_wrapper("ck_tile_fmha::_fmha_backward")
+def _fmha_backward_fake(
     dout: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -413,17 +413,17 @@ def _flash_attn_backward_fake(
 
 
 if tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >= (2, 4):
-    _wrapped_flash_attn_backward = torch.ops.ck_tile_fmha._flash_attn_backward
+    _wrapped_fmha_backward = torch.ops.ck_tile_fmha._fmha_backward
 else:
-    _wrapped_flash_attn_backward = _flash_attn_backward
+    _wrapped_fmha_backward = _fmha_backward
 
 
 @_torch_custom_op_wrapper(
-    "ck_tile_fmha::_flash_attn_varlen_backward",
+    "ck_tile_fmha::_fmha_varlen_backward",
     mutates_args=("dq", "dk", "dv"),
     device_types="cuda",
 )
-def _flash_attn_varlen_backward(
+def _fmha_varlen_backward(
     dout: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -484,8 +484,8 @@ def _flash_attn_varlen_backward(
     return softmax_d
 
 
-@_torch_register_fake_wrapper("ck_tile_fmha::_flash_attn_varlen_backward")
-def _flash_attn_varlen_backward_fake(
+@_torch_register_fake_wrapper("ck_tile_fmha::_fmha_varlen_backward")
+def _fmha_varlen_backward_fake(
     dout: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -528,12 +528,12 @@ def _flash_attn_varlen_backward_fake(
 
 
 if tuple(int(part) for part in torch.__version__.split("+")[0].split(".")[:2]) >= (2, 4):
-    _wrapped_flash_attn_varlen_backward = torch.ops.ck_tile_fmha._flash_attn_varlen_backward
+    _wrapped_fmha_varlen_backward = torch.ops.ck_tile_fmha._fmha_varlen_backward
 else:
-    _wrapped_flash_attn_varlen_backward = _flash_attn_varlen_backward
+    _wrapped_fmha_varlen_backward = _fmha_varlen_backward
 
 
-class FlashAttnQKVPackedFunc(torch.autograd.Function):
+class FmhaQKVPackedFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -560,7 +560,7 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_flash_attn_forward(
+        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_fmha_forward(
             q,
             k,
             v,
@@ -596,7 +596,7 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
         dout_padded = dout
         if head_size_og % 8 != 0:
             dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
-        _wrapped_flash_attn_backward(
+        _wrapped_fmha_backward(
             dout_padded,
             q,
             k,
@@ -622,7 +622,7 @@ class FlashAttnQKVPackedFunc(torch.autograd.Function):
         return dqkv, None, None, None, None, None, None, None, None, None, dbias
 
 
-class FlashAttnVarlenQKVPackedFunc(torch.autograd.Function):
+class FmhaVarlenQKVPackedFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -648,7 +648,7 @@ class FlashAttnVarlenQKVPackedFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_flash_attn_varlen_forward(
+        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_fmha_varlen_forward(
             q,
             k,
             v,
@@ -688,7 +688,7 @@ class FlashAttnVarlenQKVPackedFunc(torch.autograd.Function):
         dout_padded = dout
         if head_size_og % 8 != 0:
             dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
-        _wrapped_flash_attn_varlen_backward(
+        _wrapped_fmha_varlen_backward(
             dout_padded,
             q,
             k,
@@ -716,7 +716,7 @@ class FlashAttnVarlenQKVPackedFunc(torch.autograd.Function):
         return dqkv, None, None, None, None, None, None, None, None, None, None, None
 
 
-class FlashAttnKVPackedFunc(torch.autograd.Function):
+class FmhaKVPackedFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -744,7 +744,7 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_flash_attn_forward(
+        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_fmha_forward(
             q,
             k,
             v,
@@ -781,7 +781,7 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
         dout_padded = dout
         if head_size_og % 8 != 0:
             dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
-        _wrapped_flash_attn_backward(
+        _wrapped_fmha_backward(
             dout_padded,
             q,
             k,
@@ -808,7 +808,7 @@ class FlashAttnKVPackedFunc(torch.autograd.Function):
         return dq, dkv, None, None, None, None, None, None, None, None, None, dbias
 
 
-class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
+class FmhaVarlenKVPackedFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -837,7 +837,7 @@ class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_flash_attn_varlen_forward(
+        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_fmha_varlen_forward(
             q,
             k,
             v,
@@ -881,7 +881,7 @@ class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
         dout_padded = dout
         if head_size_og % 8 != 0:
             dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
-        _wrapped_flash_attn_varlen_backward(
+        _wrapped_fmha_varlen_backward(
             dout_padded,
             q,
             k,
@@ -910,7 +910,7 @@ class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
         return dq, dkv, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 
-class FlashAttnFunc(torch.autograd.Function):
+class FmhaFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -938,7 +938,7 @@ class FlashAttnFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_flash_attn_forward(
+        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_fmha_forward(
             q,
             k,
             v,
@@ -973,7 +973,7 @@ class FlashAttnFunc(torch.autograd.Function):
         dout_padded = dout
         if head_size_og % 8 != 0:
             dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
-        _wrapped_flash_attn_backward(
+        _wrapped_fmha_backward(
             dout_padded,
             q,
             k,
@@ -1001,7 +1001,7 @@ class FlashAttnFunc(torch.autograd.Function):
         return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias
 
 
-class FlashAttnVarlenFunc(torch.autograd.Function):
+class FmhaVarlenFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -1031,7 +1031,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_flash_attn_varlen_forward(
+        out_padded, softmax_lse, S_dmask, rng_state = _wrapped_fmha_varlen_forward(
             q,
             k,
             v,
@@ -1074,7 +1074,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         dout_padded = dout
         if head_size_og % 8 != 0:
             dout_padded = torch.nn.functional.pad(dout, [0, 8 - head_size_og % 8])
-        _wrapped_flash_attn_varlen_backward(
+        _wrapped_fmha_varlen_backward(
             dout_padded,
             q,
             k,
@@ -1122,7 +1122,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         )
 
 
-def flash_attn_qkvpacked_func(
+def fmha_qkvpacked_func(
     qkv,
     dropout_p=0.0,
     softmax_scale=None,
@@ -1136,10 +1136,10 @@ def flash_attn_qkvpacked_func(
 ):
     """dropout_p should be set to 0.0 during evaluation
     If Q, K, V are already stacked into 1 tensor, this function will be faster than
-    calling flash_attn_func on Q, K, V since the backward pass avoids explicit concatenation
+    calling fmha_func on Q, K, V since the backward pass avoids explicit concatenation
     of the gradients of Q, K, V.
     For multi-query and grouped-query attention (MQA/GQA), please see
-    flash_attn_kvpacked_func and flash_attn_func.
+    fmha_kvpacked_func and fmha_func.
 
     If window_size != (-1, -1), implements sliding window local attention. Query at position i
     will only attend to keys between [i - window_size[0], i + window_size[1]] inclusive.
@@ -1172,7 +1172,7 @@ def flash_attn_qkvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    return FlashAttnQKVPackedFunc.apply(
+    return FmhaQKVPackedFunc.apply(
         qkv,
         dropout_p,
         softmax_scale,
@@ -1187,7 +1187,7 @@ def flash_attn_qkvpacked_func(
     )
 
 
-def flash_attn_kvpacked_func(
+def fmha_kvpacked_func(
     q,
     kv,
     dropout_p=0.0,
@@ -1202,7 +1202,7 @@ def flash_attn_kvpacked_func(
 ):
     """dropout_p should be set to 0.0 during evaluation
     If K, V are already stacked into 1 tensor, this function will be faster than
-    calling flash_attn_func on Q, K, V since the backward pass avoids explicit concatenation
+    calling fmha_func on Q, K, V since the backward pass avoids explicit concatenation
     of the gradients of K, V.
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
     than Q. Note that the number of heads in Q must be divisible by the number of heads in KV.
@@ -1255,7 +1255,7 @@ def flash_attn_kvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    return FlashAttnKVPackedFunc.apply(
+    return FmhaKVPackedFunc.apply(
         q,
         kv,
         dropout_p,
@@ -1271,7 +1271,7 @@ def flash_attn_kvpacked_func(
     )
 
 
-def flash_attn_func(
+def fmha_func(
     q,
     k,
     v,
@@ -1337,7 +1337,7 @@ def flash_attn_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    return FlashAttnFunc.apply(
+    return FmhaFunc.apply(
         q,
         k,
         v,
@@ -1354,7 +1354,7 @@ def flash_attn_func(
     )
 
 
-def flash_attn_varlen_qkvpacked_func(
+def fmha_varlen_qkvpacked_func(
     qkv,
     cu_seqlens,
     max_seqlen,
@@ -1369,10 +1369,10 @@ def flash_attn_varlen_qkvpacked_func(
 ):
     """dropout_p should be set to 0.0 during evaluation
     If Q, K, V are already stacked into 1 tensor, this function will be faster than
-    calling flash_attn_varlen_func on Q, K, V since the backward pass avoids explicit concatenation
+    calling fmha_varlen_func on Q, K, V since the backward pass avoids explicit concatenation
     of the gradients of Q, K, V.
     For multi-query and grouped-query attention (MQA/GQA), please see
-    flash_attn_varlen_kvpacked_func and flash_attn_varlen_func.
+    fmha_varlen_kvpacked_func and fmha_varlen_func.
 
     If window_size != (-1, -1), implements sliding window local attention. Query at position i
     will only attend to keys between [i - window_size[0], i + window_size[1]] inclusive.
@@ -1404,7 +1404,7 @@ def flash_attn_varlen_qkvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    return FlashAttnVarlenQKVPackedFunc.apply(
+    return FmhaVarlenQKVPackedFunc.apply(
         qkv,
         cu_seqlens,
         max_seqlen,
@@ -1420,7 +1420,7 @@ def flash_attn_varlen_qkvpacked_func(
     )
 
 
-def flash_attn_varlen_kvpacked_func(
+def fmha_varlen_kvpacked_func(
     q,
     kv,
     cu_seqlens_q,
@@ -1438,7 +1438,7 @@ def flash_attn_varlen_kvpacked_func(
 ):
     """dropout_p should be set to 0.0 during evaluation
     If K, V are already stacked into 1 tensor, this function will be faster than
-    calling flash_attn_func on Q, K, V since the backward pass avoids explicit concatenation
+    calling fmha_func on Q, K, V since the backward pass avoids explicit concatenation
     of the gradients of K, V.
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
     than Q. Note that the number of heads in Q must be divisible by the number of heads in KV.
@@ -1493,7 +1493,7 @@ def flash_attn_varlen_kvpacked_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    return FlashAttnVarlenKVPackedFunc.apply(
+    return FmhaVarlenKVPackedFunc.apply(
         q,
         kv,
         cu_seqlens_q,
@@ -1512,7 +1512,7 @@ def flash_attn_varlen_kvpacked_func(
     )
 
 
-def flash_attn_varlen_func(
+def fmha_varlen_func(
     q,
     k,
     v,
@@ -1585,7 +1585,7 @@ def flash_attn_varlen_func(
             The output of softmax (possibly with different scaling). It also encodes the dropout
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
-    return FlashAttnVarlenFunc.apply(
+    return FmhaVarlenFunc.apply(
         q,
         k,
         v,
@@ -1606,7 +1606,7 @@ def flash_attn_varlen_func(
     )
 
 
-def flash_attn_with_kvcache(
+def fmha_with_kvcache(
     q,
     k_cache,
     v_cache,
@@ -1644,7 +1644,7 @@ def flash_attn_with_kvcache(
     If not causal and not local, the query @q will be rotated by rotary_cos and rotary_sin at
     indices cache_seqlens only (i.e. we consider all tokens in @q to be at position cache_seqlens).
 
-    See tests/test_flash_attn.py::test_flash_attn_kvcache for examples of how to use this function.
+    See tests/test_kvcache.py::test_fmha_kvcache for examples of how to use this function.
 
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
     than Q. Note that the number of heads in Q must be divisible by the number of heads in KV.

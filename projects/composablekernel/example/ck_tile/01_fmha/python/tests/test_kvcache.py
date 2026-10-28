@@ -14,7 +14,7 @@ from reference import (
 )
 
 from ck_tile_fmha import (
-    flash_attn_with_kvcache,
+    fmha_with_kvcache,
 )
 
 
@@ -48,7 +48,7 @@ from ck_tile_fmha import (
         (128, 128),
     ],
 )
-def test_flash_attn_kvcache(
+def test_fmha_kvcache(
     seqlen_q,
     seqlen_k,
     d,
@@ -211,7 +211,7 @@ def test_flash_attn_kvcache(
         v_cache_ref[update_mask] = rearrange(v, "b s ... -> (b s) ...")
     k_cache_rep = repeat(k_cache_ref, "b s h d -> b s (h g) d", g=nheads // nheads_k)
     v_cache_rep = repeat(v_cache_ref, "b s h d -> b s (h g) d", g=nheads // nheads_k)
-    out = flash_attn_with_kvcache(
+    out = fmha_with_kvcache(
         q,
         k_cache if paged_kv_block_size is None else k_cache_paged,
         v_cache if paged_kv_block_size is None else v_cache_paged,
@@ -229,10 +229,10 @@ def test_flash_attn_kvcache(
         alibi_slopes=alibi_slopes,
         num_splits=num_splits,
     )
-    # out = flash_attn_with_kvcache(
+    # out = fmha_with_kvcache(
     #     q, k_cache, v_cache, cache_seqlens=cache_seqlens, causal=causal, window_size=window_size
     # )
-    # out = flash_attn_with_kvcache(q, k_cache, v_cache, causal=causal, window_size=window_size)
+    # out = fmha_with_kvcache(q, k_cache, v_cache, causal=causal, window_size=window_size)
     # qk = torch.einsum("bqhd,bkhd->bhqk", q, k_cache_ref)
     # m = qk.amax(-1, keepdim=True)
     # s_tmp = torch.exp((qk - m) / math.sqrt(d))
@@ -272,7 +272,7 @@ def test_flash_attn_kvcache(
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most twice the numerical error
+    # Check that FMHA's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     if new_kv:
         if paged_kv_block_size is None:

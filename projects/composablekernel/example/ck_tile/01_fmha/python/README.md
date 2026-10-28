@@ -42,24 +42,23 @@ restart Python after rebuilding a loaded native extension.
 
 ```python
 import torch
-from ck_tile_fmha import flash_attn_func
+from ck_tile_fmha import fmha_func
 
 q = torch.randn(2, 128, 8, 64, device="cuda", dtype=torch.float16, requires_grad=True)
 k = torch.randn_like(q, requires_grad=True)
 v = torch.randn_like(q, requires_grad=True)
-out = flash_attn_func(q, k, v, causal=True)
+out = fmha_func(q, k, v, causal=True)
 out.sum().backward()
 ```
 
-Import FlashAttention function names from `ck_tile_fmha`; existing positional
-arguments are preserved. ROCm PyTorch uses the `cuda` device name.
+Import FMHA functions from `ck_tile_fmha`. ROCm PyTorch uses the `cuda` device name.
 
-Fixed-length `flash_attn_func`, `flash_attn_kvpacked_func`, and
-`flash_attn_qkvpacked_func` additionally accept an optional trailing `bias` argument:
+Fixed-length `fmha_func`, `fmha_kvpacked_func`, and
+`fmha_qkvpacked_func` additionally accept an optional trailing `bias` argument:
 
 ```python
 bias = torch.randn(128, 128, device="cuda", dtype=q.dtype, requires_grad=True)
-out = flash_attn_func(q, k, v, bias=bias, causal=True)
+out = fmha_func(q, k, v, bias=bias, causal=True)
 out.sum().backward()  # Computes gradients for q, k, v, and bias.
 ```
 
@@ -73,7 +72,7 @@ reduced across batches and heads.
 
 ## FP8 fixed-length forward
 
-`flash_attn_fp8_func` takes prequantized E4M3 Q/K/V and returns BF16 output.
+`fmha_fp8_func` takes prequantized E4M3 Q/K/V and returns BF16 output.
 Use `torch.float8_e4m3fn` on gfx1250/gfx950 and `torch.float8_e4m3fnuz` on gfx94x.
 Descales are FP32 tensors on the same GPU; dequantization is `input.float() * descale`.
 
@@ -85,7 +84,7 @@ Descales are FP32 tensors on the same GPU; dequantization is `input.float() * de
 | `blockscale` | `[batch, nheads, ceil(seqlen_q / block_size_q)]` | `[batch, nheads_kv, ceil(seqlen_k / block_size_kv)]` |
 
 ```python
-from ck_tile_fmha import flash_attn_fp8_func
+from ck_tile_fmha import fmha_fp8_func
 
 # Quantize each tensor independently; reduce over sequence/features for per-head.
 def quantize_perhead(x):
@@ -96,7 +95,7 @@ def quantize_perhead(x):
 q8, qs = quantize_perhead(q.detach())
 k8, ks = quantize_perhead(k.detach())
 v8, vs = quantize_perhead(v.detach())
-out, lse = flash_attn_fp8_func(q8, k8, v8, qs, ks, vs, qscale="perhead", return_lse=True)
+out, lse = fmha_fp8_func(q8, k8, v8, qs, ks, vs, qscale="perhead", return_lse=True)
 ```
 
 Supports MHA/GQA/MQA and causal/local masks. FP8 backward, dropout, bias and ALiBi
@@ -120,7 +119,7 @@ must be positive powers of two** (E8M0); Q/K descales may be general FP32 values
 | `tests/test_kvcache.py` | Cache updates, decode, rotary embeddings, cache indexing |
 | `tests/test_interface.py` | Validation, native compatibility, fake tensors, `torch.compile` |
 
-FP8 tests compare against `flash_attn_func` using dequantized inputs cast to BF16;
+FP8 tests compare against `fmha_func` using dequantized inputs cast to BF16;
 other numerical tests use GPU PyTorch references in `tests/reference.py`.
 FlashAttention and Triton are not required. Shared helpers live in `tests/utils.py`.
 

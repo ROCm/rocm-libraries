@@ -9,7 +9,7 @@ from reference import (
     attention_qkvpacked_ref,
     attention_ref,
     attn_bias_from_alibi_slopes,
-    convert_flash_attn_S_to_softmax,
+    convert_fmha_S_to_softmax,
 )
 from utils import (
     ck_randval_to_dropout_mask,
@@ -18,9 +18,9 @@ from utils import (
 )
 
 from ck_tile_fmha import (
-    flash_attn_func,
-    flash_attn_kvpacked_func,
-    flash_attn_qkvpacked_func,
+    fmha_func,
+    fmha_kvpacked_func,
+    fmha_qkvpacked_func,
 )
 
 
@@ -32,7 +32,7 @@ from ck_tile_fmha import (
 @pytest.mark.parametrize("d", [32, 40, 59, 64, 80, 96, 111, 128, 160, 192, 224, 256])
 @pytest.mark.parametrize("seqlen", [97, 128, 200, 384, 768, 1024, 1025, 2048])
 @pytest.mark.parametrize("dropout_p", [0.0, 0.17])
-def test_flash_attn_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, deterministic, dtype):
+def test_fmha_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, deterministic, dtype):
     if d > 256:
         pytest.skip()
 
@@ -52,7 +52,7 @@ def test_flash_attn_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, determ
         attn_bias = attn_bias_from_alibi_slopes(alibi_slopes, seqlen, seqlen, causal=causal)
     else:
         alibi_slopes, attn_bias = None, None
-    out, lse, S_dmask = flash_attn_qkvpacked_func(
+    out, lse, S_dmask = fmha_qkvpacked_func(
         qkv,
         dropout_p,
         causal=causal,
@@ -64,7 +64,7 @@ def test_flash_attn_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, determ
     if dropout_p > 0.0:
         # TODO - move to c++ mha_varlen_fwd()
         S_dmask = ck_randval_to_dropout_mask(S_dmask, dropout_p)
-        S_dmask_converted = convert_flash_attn_S_to_softmax(
+        S_dmask_converted = convert_fmha_S_to_softmax(
             S_dmask,
             seqlen,
             seqlen,
@@ -100,7 +100,7 @@ def test_flash_attn_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, determ
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most twice the numerical error
+    # Check that FMHA's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item()
 
@@ -146,7 +146,7 @@ def test_flash_attn_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, determ
     ],
 )
 @pytest.mark.parametrize("dropout_p", [0.0, 0.17])
-def test_flash_attn_output(
+def test_fmha_output(
     seqlen_q, seqlen_k, d, dropout_p, causal, local, alibi, deterministic, mha_type, dtype, kvpacked
 ):
     device = "cuda"
@@ -176,7 +176,7 @@ def test_flash_attn_output(
         alibi_slopes, attn_bias = None, None
 
     if kvpacked:
-        out, lse, S_dmask = flash_attn_kvpacked_func(
+        out, lse, S_dmask = fmha_kvpacked_func(
             q,
             kv,
             dropout_p,
@@ -187,7 +187,7 @@ def test_flash_attn_output(
             return_attn_probs=True,
         )
     else:
-        out, lse, S_dmask = flash_attn_func(
+        out, lse, S_dmask = fmha_func(
             q,
             k,
             v,
@@ -201,7 +201,7 @@ def test_flash_attn_output(
     if dropout_p > 0.0:
         # TODO - move to c++ mha_varlen_fwd()
         S_dmask = ck_randval_to_dropout_mask(S_dmask, dropout_p)
-        S_dmask_converted = convert_flash_attn_S_to_softmax(
+        S_dmask_converted = convert_fmha_S_to_softmax(
             S_dmask,
             seqlen_q,
             seqlen_k,
@@ -281,7 +281,7 @@ def test_flash_attn_output(
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most twice the numerical error
+    # Check that FMHA's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item()
 
@@ -357,7 +357,7 @@ def test_flash_attn_output(
         (1023, 1024),
     ],
 )
-def test_flash_attn_causal(seqlen_q, seqlen_k, swap_sq_sk, d, local, dtype):
+def test_fmha_causal(seqlen_q, seqlen_k, swap_sq_sk, d, local, dtype):
     if max(seqlen_q, seqlen_k) >= 2048:
         pytest.skip()
     if swap_sq_sk:
@@ -372,7 +372,7 @@ def test_flash_attn_causal(seqlen_q, seqlen_k, swap_sq_sk, d, local, dtype):
     q = torch.randn(batch_size, seqlen_q, nheads, d, device=device, dtype=dtype, requires_grad=True)
     k = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=True)
     v = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=True)
-    out = flash_attn_func(q, k, v, 0.0, causal=causal, window_size=window_size)
+    out = fmha_func(q, k, v, 0.0, causal=causal, window_size=window_size)
     out_ref, attn_ref = attention_ref(
         q, k, v, None, None, None, 0.0, None, causal=causal, window_size=window_size
     )
@@ -396,7 +396,7 @@ def test_flash_attn_causal(seqlen_q, seqlen_k, swap_sq_sk, d, local, dtype):
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most 4 times the numerical error
+    # Check that FMHA's numerical error is at most 4 times the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 4 * (out_pt - out_ref).abs().max().item() + 1e-5
 
@@ -460,7 +460,7 @@ def test_flash_attn_causal(seqlen_q, seqlen_k, swap_sq_sk, d, local, dtype):
     ],
 )
 @pytest.mark.parametrize("dropout_p", [0.0, 0.17])
-def test_flash_attn_race_condition(seqlen_q, seqlen_k, d, dropout_p, causal, dtype):
+def test_fmha_race_condition(seqlen_q, seqlen_k, d, dropout_p, causal, dtype):
     device = "cuda"
     # set seed
     torch.random.manual_seed(0)
@@ -470,7 +470,7 @@ def test_flash_attn_race_condition(seqlen_q, seqlen_k, d, dropout_p, causal, dty
     k = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=True)
     v = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=True)
     torch.random.manual_seed(42)
-    out0, lse0, _ = flash_attn_func(q, k, v, dropout_p, causal=causal, return_attn_probs=True)
+    out0, lse0, _ = fmha_func(q, k, v, dropout_p, causal=causal, return_attn_probs=True)
     g = torch.randn_like(out0)
     test_backward = dropout_p == 0 and is_bwd_supported(d, deterministic=False)
     if test_backward:
@@ -484,7 +484,7 @@ def test_flash_attn_race_condition(seqlen_q, seqlen_k, d, dropout_p, causal, dty
 
     for i in range(250):
         torch.random.manual_seed(42)
-        out, lse, _ = flash_attn_func(q, k, v, dropout_p, causal=causal, return_attn_probs=True)
+        out, lse, _ = fmha_func(q, k, v, dropout_p, causal=causal, return_attn_probs=True)
         assert torch.equal(out, out0)
         assert torch.equal(lse, lse0)
 
@@ -507,7 +507,7 @@ def test_flash_attn_race_condition(seqlen_q, seqlen_k, d, dropout_p, causal, dty
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("d", [16, 32, 64])
 @pytest.mark.parametrize("seqlen", [1, 2, 5, 17, 128])
-def test_flash_attn_bwd_overflow(seqlen, d, causal, dtype):
+def test_fmha_bwd_overflow(seqlen, d, causal, dtype):
     """We previously had a bug where not masking elements beyond seqlen_k caused NaN in dQ,
     in the case where seqlen % 128 != 0.
     """
@@ -531,7 +531,7 @@ def test_flash_attn_bwd_overflow(seqlen, d, causal, dtype):
     q.requires_grad_(True)
     k.requires_grad_(True)
     v.requires_grad_(True)
-    out = flash_attn_func(q, k, v, causal=causal)
+    out = fmha_func(q, k, v, causal=causal)
     g = torch.randn_like(out)
     out.backward(g)
     q_pt = q.detach().clone().requires_grad_(True)
@@ -566,7 +566,7 @@ def test_flash_attn_bwd_overflow(seqlen, d, causal, dtype):
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("d", [64, 128])
 @pytest.mark.parametrize("seqlen", [97, 128, 200, 256])
-def test_flash_attn_bwd_transpose(seqlen, d, causal, dtype):
+def test_fmha_bwd_transpose(seqlen, d, causal, dtype):
     """We previously had a bug where we were using the wrong strides of dout, which shows up
     when dout is not contiguous.
     """
@@ -582,7 +582,7 @@ def test_flash_attn_bwd_transpose(seqlen, d, causal, dtype):
         torch.randn([batch_size, seqlen, nheads, d], dtype=dtype, device="cuda", requires_grad=True)
         for _ in range(3)
     ]
-    out = rearrange(flash_attn_func(q, k, v, causal=causal), "b s ... -> s b ...")
+    out = rearrange(fmha_func(q, k, v, causal=causal), "b s ... -> s b ...")
     # So g is not contiguous
     g = torch.randn(seqlen, 2 * batch_size, nheads, d, dtype=dtype, device="cuda")[:, ::2]
     out.backward(g)
@@ -636,7 +636,7 @@ def test_flash_attn_bwd_transpose(seqlen, d, causal, dtype):
         (1023, 1024),
     ],
 )
-def test_flash_attn_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dtype):
+def test_fmha_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dtype):
     if (
         max(seqlen_q, seqlen_k) >= 2048
         and torch.cuda.get_device_properties("cuda").total_memory <= 16 * 2**30
@@ -653,7 +653,7 @@ def test_flash_attn_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, causal, loc
     q = torch.randn(batch_size, seqlen_q, nheads, d, device=device, dtype=dtype, requires_grad=True)
     k = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=True)
     v = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=True)
-    out = flash_attn_func(q, k, v, 0.0, causal=causal, window_size=window_size, deterministic=True)
+    out = fmha_func(q, k, v, 0.0, causal=causal, window_size=window_size, deterministic=True)
 
     if not is_bwd_supported(d, deterministic=True):
         pytest.skip(get_bwd_unsupported_reason(d, deterministic=True))
@@ -694,11 +694,11 @@ def test_bias_forward_backward(dtype, api, mask, dropout_p, bias_grad):
         return_attn_probs=True,
     )
     if api == "separate":
-        out, lse, randval = flash_attn_func(q, k, v, **kwargs)
+        out, lse, randval = fmha_func(q, k, v, **kwargs)
     elif api == "kvpacked":
-        out, lse, randval = flash_attn_kvpacked_func(q, torch.stack((k, v), dim=2), **kwargs)
+        out, lse, randval = fmha_kvpacked_func(q, torch.stack((k, v), dim=2), **kwargs)
     else:
-        out, lse, randval = flash_attn_qkvpacked_func(torch.stack((q, k, v), dim=2), **kwargs)
+        out, lse, randval = fmha_qkvpacked_func(torch.stack((q, k, v), dim=2), **kwargs)
     dropout_mask = ck_randval_to_dropout_mask(randval, dropout_p) >= 0 if dropout_p else None
     out_ref, _, lse_ref = attention_ref(
         q.float(),
@@ -747,7 +747,7 @@ def test_bias_shapes_and_determinism(dtype, sq, sk, d, hk, deterministic):
     k = torch.randn(2, sk, hk, d, device="cuda", dtype=dtype, requires_grad=True)
     v = torch.randn_like(k, requires_grad=True)
     bias = torch.randn(sq, sk, device="cuda", dtype=dtype, requires_grad=True)
-    out, lse, randval = flash_attn_func(
+    out, lse, randval = fmha_func(
         q, k, v, bias=bias, causal=True, deterministic=deterministic, return_attn_probs=True
     )
     ref, _, lse_ref = attention_ref(
@@ -773,14 +773,14 @@ def test_only_bias_requires_grad(api):
     q, k, v = (torch.randn(2, 32, 2, 64, device="cuda", dtype=torch.float16) for _ in range(3))
     bias = torch.randn(32, 32, device="cuda", dtype=q.dtype, requires_grad=True)
     if api == "separate":
-        out = flash_attn_func(q, k, v, bias=bias)
+        out = fmha_func(q, k, v, bias=bias)
     elif api == "kvpacked":
-        out = flash_attn_kvpacked_func(q, torch.stack((k, v), dim=2), bias=bias)
+        out = fmha_kvpacked_func(q, torch.stack((k, v), dim=2), bias=bias)
     else:
-        out = flash_attn_qkvpacked_func(torch.stack((q, k, v), dim=2), bias=bias)
+        out = fmha_qkvpacked_func(torch.stack((q, k, v), dim=2), bias=bias)
     ref, _ = attention_ref(q.float(), k.float(), v.float(), attn_bias=bias.float())
     (actual,) = torch.autograd.grad(out.sum(), (bias,))
     (expected,) = torch.autograd.grad(ref.sum(), (bias,))
     torch.testing.assert_close(actual, expected, atol=3e-3, rtol=3e-3)
     with torch.no_grad():
-        assert not flash_attn_func(q, k, v, bias=bias).requires_grad
+        assert not fmha_func(q, k, v, bias=bias).requires_grad

@@ -4,7 +4,7 @@
 import pytest
 import torch
 
-from ck_tile_fmha import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
+from ck_tile_fmha import fmha_func, fmha_varlen_func, fmha_with_kvcache
 from reference import apply_rotary_emb
 
 
@@ -14,12 +14,12 @@ def test_softcap_is_rejected(api):
     k, v = torch.randn_like(q), torch.randn_like(q)
     with pytest.raises(RuntimeError, match="do not support softcap"):
         if api == "fixed":
-            flash_attn_func(q, k, v, softcap=1.0)
+            fmha_func(q, k, v, softcap=1.0)
         elif api == "varlen":
             cu_seqlens = torch.tensor([0, 4], dtype=torch.int32, device="cuda")
-            flash_attn_varlen_func(q[0], k[0], v[0], cu_seqlens, cu_seqlens, 4, 4, softcap=1.0)
+            fmha_varlen_func(q[0], k[0], v[0], cu_seqlens, cu_seqlens, 4, 4, softcap=1.0)
         else:
-            flash_attn_with_kvcache(q, k, v, softcap=1.0)
+            fmha_with_kvcache(q, k, v, softcap=1.0)
 
 
 @pytest.mark.parametrize("varlen", [False, True])
@@ -36,7 +36,7 @@ def test_registered_operator_fake_metadata(varlen, backward):
         cu_q = torch.tensor([0, 97, 194], device="cuda", dtype=torch.int32)
         cu_k = torch.tensor([0, 113, 226], device="cuda", dtype=torch.int32)
         sequence_args = (cu_q, cu_k, 97, 113)
-    name = "_flash_attn_varlen_" if varlen else "_flash_attn_"
+    name = "_fmha_varlen_" if varlen else "_fmha_"
     op = getattr(torch.ops.ck_tile_fmha, name + "forward")
     args = (q, k, v, *sequence_args, 0.17, 0.125, False, -1, -1, 0.0, None, True)
     if backward:
@@ -103,14 +103,14 @@ def test_bias_validation(invalid):
         kwargs["alibi_slopes"] = torch.ones(2, device=q.device)
         message = "cannot apply bias and alibi"
     with pytest.raises(RuntimeError, match=message):
-        flash_attn_func(q, q, q, bias=bias, **kwargs)
+        fmha_func(q, q, q, bias=bias, **kwargs)
 
 
 def test_bias_operator_metadata():
     q = torch.randn(2, 32, 4, 64, device="cuda", dtype=torch.float16)
     k, v = torch.randn_like(q), torch.randn_like(q)
     bias = torch.randn(32, 32, device=q.device, dtype=q.dtype)
-    fwd = torch.ops.ck_tile_fmha._flash_attn_forward
+    fwd = torch.ops.ck_tile_fmha._fmha_forward
     args = (q, k, v, 0.17, 0.125, False, -1, -1, 0.0, None, True, bias)
     torch.library.opcheck(fwd, args, test_utils=("test_schema", "test_faketensor"))
     out, lse, _, rng = fwd(*args)
@@ -138,7 +138,7 @@ def test_bias_operator_metadata():
         dbias,
     )
     torch.library.opcheck(
-        torch.ops.ck_tile_fmha._flash_attn_backward,
+        torch.ops.ck_tile_fmha._fmha_backward,
         args,
         test_utils=("test_schema", "test_faketensor"),
     )
@@ -150,9 +150,9 @@ def test_bias_torch_compile():
         for _ in range(3)
     )
     bias = torch.randn(32, 32, device=q.device, dtype=q.dtype, requires_grad=True)
-    compiled = torch.compile(flash_attn_func, backend="aot_eager", fullgraph=True)
+    compiled = torch.compile(fmha_func, backend="aot_eager", fullgraph=True)
     actual = compiled(q, k, v, bias=bias)
-    expected = flash_attn_func(q, k, v, bias=bias)
+    expected = fmha_func(q, k, v, bias=bias)
     torch.testing.assert_close(actual, expected)
     dout = torch.randn_like(actual)
     args = (q, k, v, bias)

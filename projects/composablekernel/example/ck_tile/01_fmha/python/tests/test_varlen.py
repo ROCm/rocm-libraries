@@ -10,7 +10,7 @@ from reference import (
     attention_qkvpacked_ref,
     attention_ref,
     attn_bias_from_alibi_slopes,
-    convert_flash_attn_S_to_softmax,
+    convert_fmha_S_to_softmax,
     generate_qkv,
     generate_random_padding_mask,
 )
@@ -22,9 +22,9 @@ from utils import (
 )
 
 from ck_tile_fmha import (
-    flash_attn_varlen_func,
-    flash_attn_varlen_kvpacked_func,
-    flash_attn_varlen_qkvpacked_func,
+    fmha_varlen_func,
+    fmha_varlen_kvpacked_func,
+    fmha_varlen_qkvpacked_func,
 )
 
 
@@ -36,9 +36,7 @@ from ck_tile_fmha import (
 @pytest.mark.parametrize("d", [32, 59, 64, 80, 96, 128, 160, 192, 224, 256])
 @pytest.mark.parametrize("seqlen", [97, 128, 200, 257, 384, 512, 768, 1025, 2048])
 @pytest.mark.parametrize("dropout_p", [0, 0.17])
-def test_flash_attn_varlen_qkvpacked(
-    seqlen, d, dropout_p, causal, local, alibi, deterministic, dtype
-):
+def test_fmha_varlen_qkvpacked(seqlen, d, dropout_p, causal, local, alibi, deterministic, dtype):
     if d > 256:
         pytest.skip()
 
@@ -66,7 +64,7 @@ def test_flash_attn_varlen_qkvpacked(
         *qkv.unbind(dim=2), key_padding_mask, key_padding_mask, qkvpacked=True
     )
 
-    out_unpad, sm_lse, S_dmask = flash_attn_varlen_qkvpacked_func(
+    out_unpad, sm_lse, S_dmask = fmha_varlen_qkvpacked_func(
         qkv_unpad,
         cu_seqlens,
         max_seqlen,
@@ -83,7 +81,7 @@ def test_flash_attn_varlen_qkvpacked(
         S_dmask = ck_randval_to_dropout_mask(S_dmask, dropout_p)
         S_dmask = pad_rearrange_dropout_mask_hts_to_bhss(S_dmask, cu_seqlens, seqlen, seqlen)
 
-        S_dmask_converted = convert_flash_attn_S_to_softmax(
+        S_dmask_converted = convert_fmha_S_to_softmax(
             S_dmask,
             seqlen,
             seqlen,
@@ -125,7 +123,7 @@ def test_flash_attn_varlen_qkvpacked(
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most twice the numerical error
+    # Check that FMHA's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item()
 
@@ -173,7 +171,7 @@ def test_flash_attn_varlen_qkvpacked(
     ],
 )
 @pytest.mark.parametrize("dropout_p", [0.0, 0.17])
-def test_flash_attn_varlen_output(
+def test_fmha_varlen_output(
     seqlen_q, seqlen_k, d, dropout_p, causal, local, alibi, deterministic, mha_type, dtype, kvpacked
 ):
     device = "cuda"
@@ -222,7 +220,7 @@ def test_flash_attn_varlen_output(
             dq_pad_fn,
             dkv_pad_fn,
         ) = generate_qkv(q, *kv.unbind(dim=2), query_padding_mask, key_padding_mask, kvpacked=True)
-        out_unpad, sm_lse, S_dmask = flash_attn_varlen_kvpacked_func(
+        out_unpad, sm_lse, S_dmask = fmha_varlen_kvpacked_func(
             q_unpad,
             kv_unpad,
             cu_seqlens_q,
@@ -252,7 +250,7 @@ def test_flash_attn_varlen_output(
             dq_pad_fn,
             dk_pad_fn,
         ) = generate_qkv(q, k, v, query_padding_mask, key_padding_mask, kvpacked=False)
-        out_unpad, sm_lse, S_dmask = flash_attn_varlen_func(
+        out_unpad, sm_lse, S_dmask = fmha_varlen_func(
             q_unpad,
             k_unpad,
             v_unpad,
@@ -272,7 +270,7 @@ def test_flash_attn_varlen_output(
         # TODO - move to c++ mha_varlen_fwd()
         S_dmask = ck_randval_to_dropout_mask(S_dmask, dropout_p)
         S_dmask = pad_rearrange_dropout_mask_hts_to_bhss(S_dmask, cu_seqlens_q, seqlen_q, seqlen_k)
-        S_dmask_converted = convert_flash_attn_S_to_softmax(
+        S_dmask_converted = convert_fmha_S_to_softmax(
             S_dmask,
             seqlen_q,
             seqlen_k,
@@ -352,7 +350,7 @@ def test_flash_attn_varlen_output(
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most 4 times the numerical error
+    # Check that FMHA's numerical error is at most 4 times the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 4 * (out_pt - out_ref).abs().max().item()
 
@@ -432,9 +430,7 @@ def test_flash_attn_varlen_output(
     ],
 )
 @pytest.mark.parametrize("paged_kv_block_size", [None, 256, 512])
-def test_flash_attn_varlen_causal(
-    seqlen_q, seqlen_k, swap_sq_sk, d, local, paged_kv_block_size, dtype
-):
+def test_fmha_varlen_causal(seqlen_q, seqlen_k, swap_sq_sk, d, local, paged_kv_block_size, dtype):
     if max(seqlen_q, seqlen_k) >= 2048:
         pytest.skip()
     if swap_sq_sk:
@@ -477,7 +473,7 @@ def test_flash_attn_varlen_causal(
         dq_pad_fn,
         dk_pad_fn,
     ) = generate_qkv(q, k, v, query_padding_mask, key_padding_mask, kvpacked=False)
-    out_unpad = flash_attn_varlen_func(
+    out_unpad = fmha_varlen_func(
         q_unpad,
         k_unpad if paged_kv_block_size is None else k_cache_paged,
         v_unpad if paged_kv_block_size is None else v_cache_paged,
@@ -523,7 +519,7 @@ def test_flash_attn_varlen_causal(
     print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
 
-    # Check that FlashAttention's numerical error is at most twice the numerical error
+    # Check that FMHA's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item() + 1e-5
 
@@ -571,7 +567,7 @@ def test_flash_attn_varlen_causal(
 @pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("d", [16, 32, 64])
-def test_flash_attn_bwd_varlen_overflow(d, causal, dtype):
+def test_fmha_bwd_varlen_overflow(d, causal, dtype):
     """We previously had a bug where not masking elements beyond seqlen_k caused NaN in dQ,
     in the case where seqlen % 128 != 0 or varlen.
     """
@@ -593,7 +589,7 @@ def test_flash_attn_bwd_varlen_overflow(d, causal, dtype):
     k.requires_grad_(True)
     v.requires_grad_(True)
 
-    out = flash_attn_varlen_func(q, k, v, q_cuseqlen, k_cuseqlen, Mq, Mk, causal=causal)
+    out = fmha_varlen_func(q, k, v, q_cuseqlen, k_cuseqlen, Mq, Mk, causal=causal)
     g = torch.randn_like(out)
     out.backward(g)
 
@@ -607,7 +603,7 @@ def test_flash_attn_bwd_varlen_overflow(d, causal, dtype):
 @pytest.mark.parametrize("nheads_kv", [1, 8])  # GQA (1) and MHA (8)
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("d", [64, 128])
-def test_flash_attn_bwd_varlen_seqq_zero(d, causal, nheads_kv, deterministic, dtype):
+def test_fmha_bwd_varlen_seqq_zero(d, causal, nheads_kv, deterministic, dtype):
     """Regression test: NaN in dK/dV for the zero-length Q subsequence (run for both GQA and MHA)."""
     if not is_bwd_supported(d, deterministic=deterministic):
         pytest.skip(get_bwd_unsupported_reason(d, deterministic=deterministic))
@@ -629,7 +625,7 @@ def test_flash_attn_bwd_varlen_seqq_zero(d, causal, nheads_kv, deterministic, dt
     k.requires_grad_(True)
     v.requires_grad_(True)
 
-    out = flash_attn_varlen_func(
+    out = fmha_varlen_func(
         q, k, v, q_cuseqlen, k_cuseqlen, Mq, Mk, causal=causal, deterministic=deterministic
     )
     g = torch.randn_like(out)
@@ -667,7 +663,7 @@ def test_flash_attn_bwd_varlen_seqq_zero(d, causal, nheads_kv, deterministic, dt
         (1023, 1024),
     ],
 )
-def test_flash_attn_varlen_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dtype):
+def test_fmha_varlen_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dtype):
     if (
         max(seqlen_q, seqlen_k) >= 2048
         and torch.cuda.get_device_properties("cuda").total_memory <= 16 * 2**30
@@ -701,7 +697,7 @@ def test_flash_attn_varlen_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, caus
         dq_pad_fn,
         dk_pad_fn,
     ) = generate_qkv(q, k, v, query_padding_mask, key_padding_mask, kvpacked=False)
-    out = flash_attn_varlen_func(
+    out = fmha_varlen_func(
         q_unpad,
         k_unpad,
         v_unpad,

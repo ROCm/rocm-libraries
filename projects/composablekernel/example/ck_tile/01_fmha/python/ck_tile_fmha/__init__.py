@@ -2,25 +2,25 @@
 # SPDX-License-Identifier: MIT
 
 from .interface import (
-    flash_attn_fp8_func,
-    flash_attn_func,
-    flash_attn_kvpacked_func,
-    flash_attn_qkvpacked_func,
-    flash_attn_varlen_func,
-    flash_attn_varlen_kvpacked_func,
-    flash_attn_varlen_qkvpacked_func,
-    flash_attn_with_kvcache,
+    fmha_fp8_func,
+    fmha_func,
+    fmha_kvpacked_func,
+    fmha_qkvpacked_func,
+    fmha_varlen_func,
+    fmha_varlen_kvpacked_func,
+    fmha_varlen_qkvpacked_func,
+    fmha_with_kvcache,
 )
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "flash_attn_fp8_func",
-    "flash_attn_func",
-    "flash_attn_kvpacked_func",
-    "flash_attn_qkvpacked_func",
-    "flash_attn_varlen_func",
-    "flash_attn_varlen_kvpacked_func",
-    "flash_attn_varlen_qkvpacked_func",
-    "flash_attn_with_kvcache",
+    "fmha_fp8_func",
+    "fmha_func",
+    "fmha_kvpacked_func",
+    "fmha_qkvpacked_func",
+    "fmha_varlen_func",
+    "fmha_varlen_kvpacked_func",
+    "fmha_varlen_qkvpacked_func",
+    "fmha_with_kvcache",
 ]

@@ -4,7 +4,7 @@
 import pytest
 import torch
 
-from ck_tile_fmha import flash_attn_fp8_func, flash_attn_func
+from ck_tile_fmha import fmha_fp8_func, fmha_func
 
 
 def make_fp8_input(shape, qscale, block_size=128, is_value=False):
@@ -40,8 +40,8 @@ def check_fp8_output(out, q, k, v, scale, causal=False, window=(-1, -1)):
     # Compare the same dequantized FP8 data, rounded to BF16 for the baseline kernel.
     q, k, v = (x.to(torch.bfloat16) for x in (q, k, v))
     kwargs = dict(softmax_scale=scale, causal=causal, window_size=window)
-    ref, lse, _ = flash_attn_func(q, k, v, **kwargs, return_attn_probs=True)
-    magnitude = flash_attn_func(q, k, v.abs(), **kwargs).float()
+    ref, lse, _ = fmha_func(q, k, v, **kwargs, return_attn_probs=True)
+    magnitude = fmha_func(q, k, v.abs(), **kwargs).float()
     ref = ref.float()
     valid = torch.isfinite(lse)
     # Use the C++ example's magnitude and gain checks with a BF16 baseline.
@@ -78,7 +78,7 @@ def test_fp8_fixedlen(qscale, d, mask, sq, sk, h, hk, return_lse):
     causal = mask == "causal"
     window = (37, 11) if mask == "local" else (-1, -1)
     scale = 0.7 / d**0.5
-    actual = flash_attn_fp8_func(
+    actual = fmha_fp8_func(
         q,
         k,
         v,
@@ -113,7 +113,7 @@ def test_fp8_block_sizes(block_size_q, block_size_kv):
     q, qs, qr = make_fp8_input((2, 273, 6, 128), qscale, block_size_q)
     k, ks, kr = make_fp8_input((2, 397, 2, 128), qscale, block_size_kv)
     v, vs, vr = make_fp8_input((2, 397, 2, 128), qscale, block_size_kv, is_value=True)
-    out = flash_attn_fp8_func(
+    out = fmha_fp8_func(
         q, k, v, qs, ks, vs, qscale=qscale, block_size_q=block_size_q, block_size_kv=block_size_kv
     )
     check_fp8_output(out, qr, kr, vr, 128**-0.5)
@@ -128,9 +128,9 @@ def test_fp8_large_head(qscale, d):
     v, vs, vr = make_fp8_input((2, 203, 2, d), qscale)
     if torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250"):
         with pytest.raises(RuntimeError, match="No FMHA forward kernel"):
-            flash_attn_fp8_func(q, k, v, qs, ks, vs, qscale=qscale)
+            fmha_fp8_func(q, k, v, qs, ks, vs, qscale=qscale)
     else:
-        out = flash_attn_fp8_func(q, k, v, qs, ks, vs, qscale=qscale)
+        out = fmha_fp8_func(q, k, v, qs, ks, vs, qscale=qscale)
         check_fp8_output(out, qr, kr, vr, d**-0.5)
 
 
@@ -162,7 +162,7 @@ def test_fp8_operator_and_compile(qscale, return_lse):
         return_lse,
     )
     torch.library.opcheck(
-        torch.ops.ck_tile_fmha._flash_attn_forward,
+        torch.ops.ck_tile_fmha._fmha_forward,
         args,
         test_utils=("test_faketensor",),
     )
@@ -170,10 +170,10 @@ def test_fp8_operator_and_compile(qscale, return_lse):
     # Check input mutation explicitly using exact FP32 representations instead.
     inputs = [x for x in (q, k, v, qs, ks, vs) if x is not None]
     before = [x.float().clone() for x in inputs]
-    compiled = torch.compile(flash_attn_fp8_func, backend="aot_eager", fullgraph=True)
+    compiled = torch.compile(fmha_fp8_func, backend="aot_eager", fullgraph=True)
     torch.testing.assert_close(
         compiled(q, k, v, qs, ks, vs, qscale=qscale, return_lse=return_lse),
-        flash_attn_fp8_func(q, k, v, qs, ks, vs, qscale=qscale, return_lse=return_lse),
+        fmha_fp8_func(q, k, v, qs, ks, vs, qscale=qscale, return_lse=return_lse),
     )
     for x, saved in zip(inputs, before):
         assert torch.equal(x.float(), saved)
@@ -231,4 +231,4 @@ def test_fp8_validation(invalid):
     else:
         k, message = k.half(), "same dtype"
     with pytest.raises((RuntimeError, ValueError), match=message):
-        flash_attn_fp8_func(q, k, v, qs, ks, vs, **kwargs)
+        fmha_fp8_func(q, k, v, qs, ks, vs, **kwargs)

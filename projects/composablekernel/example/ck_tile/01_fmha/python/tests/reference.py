@@ -393,7 +393,7 @@ def attention_qkvpacked_ref(
     )
 
 
-def convert_flash_attn_S_to_softmax(
+def convert_fmha_S_to_softmax(
     S,
     seqlen_q,
     seqlen_k,
