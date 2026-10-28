@@ -308,6 +308,29 @@ emitter.
 
 ---
 
+## 9. gfx942 tiled 2D — 64-bit KV addressing in the sliced-K ring
+
+**Subsystem:** `instances/gfx942/attention_tiled_2d_ctx_prologue.cpp`, `instances/common/attention_unified_gates.cpp`
+
+When the paged KV cache is larger than the 2 GiB i32 voffset range, the Python
+selector sets `use_i64_kv_addr`. The C++ builder mirrors the 64-bit K/V offsets
+of the fast paged descriptor and of the per-page K/V loads, but not those of the
+sliced-K ring's K slice loader, which still builds a single i32 voffset. That
+output would differ from Python, and it would overflow at run time. (The fp8
+K/V loaders also have 64-bit paths in Python, but gfx942 tiled 2D rejects the
+fp8 K/V cache in both engines.)
+
+The C++ builder therefore rejects `use_i64_kv_addr` together with an active
+sliced-K ring with `ROCKE_ERR_NOTIMPL`, and the C++ 2D gate rejects problems
+that select both with "not ported to C++ yet", even though the Python gate
+admits them. The C++ selector still sets both fields exactly as Python does.
+
+| Spec fields | Selected by the shared selector? | What unblocks it |
+|---|---|---|
+| `use_i64_kv_addr` with `use_k_sliced_ring` | Yes, for flash prefill on caches past the i32 voffset range | Port the i64 split offset of the K slice loader, then drop both rejects. |
+
+---
+
 ## Structural debt (not per-family gaps)
 
 These are codebase-level risks worth tracking independently of any single

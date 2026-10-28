@@ -844,9 +844,6 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 /* Python fields of the gfx942 and gfx950 UnifiedAttention2DTiledSpec that the
  * shared C spec struct has no slot for. */
 const unported_field k_t2d_unported[] = {
-    {"use_v_hbm_direct", false, 0},
-    {"use_k_hbm_direct", false, 0},
-    {"use_causal_mask_phase_split", false, 0},
     {"use_additive_bias", false, 0},
     {"causal_top_left", false, 0},
     {"right_bound", false, 0},
@@ -937,6 +934,10 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
     s.use_kq_lds_pad = a_bool(d, "use_kq_lds_pad", s.use_kq_lds_pad);
     s.kq_lds_pad_halves = a_int(d, "kq_lds_pad_halves", s.kq_lds_pad_halves);
     s.use_mask_phase_split = a_bool(d, "use_mask_phase_split", s.use_mask_phase_split);
+    s.use_v_hbm_direct = a_bool(d, "use_v_hbm_direct", s.use_v_hbm_direct);
+    s.use_k_hbm_direct = a_bool(d, "use_k_hbm_direct", s.use_k_hbm_direct);
+    s.use_causal_mask_phase_split
+        = a_bool(d, "use_causal_mask_phase_split", s.use_causal_mask_phase_split);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1567,6 +1568,9 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["use_kq_lds_pad"] = s.use_kq_lds_pad;
     d["kq_lds_pad_halves"] = s.kq_lds_pad_halves;
     d["use_mask_phase_split"] = s.use_mask_phase_split;
+    d["use_v_hbm_direct"] = s.use_v_hbm_direct;
+    d["use_k_hbm_direct"] = s.use_k_hbm_direct;
+    d["use_causal_mask_phase_split"] = s.use_causal_mask_phase_split;
     return d;
 }
 

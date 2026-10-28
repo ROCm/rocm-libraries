@@ -125,6 +125,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     bool TRANSPOSED_SCALAR_STATE, TRANSPOSED_INVARIANT_HOIST;
     bool TRANSPOSED_MASK_ONCE, TRANSPOSED_HALF_LOCAL_PV;
     bool SKIP_LEGACY_QREG, TRANSPOSED_MASK_LIMIT, GROUPED_KV2;
+    bool CAUSAL_MASK_PHASE_SPLIT, V_HBM_DIRECT, K_HBM_DIRECT;
     bool FAST_PAGED_KV_DESC, I64_KV_ADDR, EARLY_V_SCHEDULE;
     /* fp8 K/V cache predicates */
     bool KV_FP8, FP8_MFMA_QK, FP8_MFMA_PV, FP8_NATIVE_QK;
@@ -332,6 +333,12 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* hoist_q_pos[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_q_head[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_row_mask[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    /* Transposed-32x32 per-lane invariants hoisted before the KV loop under
+     * TRANSPOSED_INVARIANT_HOIST (NULL otherwise). */
+    rocke_value_t* st_qp_hoist;
+    rocke_value_t* st_row_ok_hoist;
+    rocke_value_t* st_causal_lim_hoist;
+    rocke_value_t* st_alibi_slope_hoist;
 
     /* ---- KV-loop body live carry (set per _emit_kv_body invocation) ---- *
      * The current loop iter var + the unpacked m/l/acc carry the inner QK/mask/
@@ -447,6 +454,12 @@ rocke_value_t* rocke_gfx942_attn2d_v_t_load(rocke_gfx942_attn2d_build_ctx_t* ctx
                                             rocke_value_t* dim,
                                             rocke_value_t* tok,
                                             int n);
+/* _v_hbm_elem: one V[tok, dim] element of KV tile `tile` read straight from
+ * HBM (V_HBM_DIRECT), zero past the valid KV length. */
+rocke_value_t* rocke_gfx942_attn2d_v_hbm_elem(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                              rocke_value_t* tile,
+                                              rocke_value_t* tok,
+                                              rocke_value_t* dim);
 rocke_value_t* rocke_gfx942_attn2d_v_load1(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                            rocke_value_t* v_buf,
                                            rocke_value_t* v_row,

@@ -29,6 +29,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_mfma_16x16x16_for_dtype */
@@ -46,6 +47,22 @@
  * (lines 2014-2017). The closures capture these from the enclosing scope; in C
  * we recompute the same SSA div/mod each time they are needed inside a phase
  * function (the lowerer/CSE folds the repeats, matching Python LICM). */
+/* One <1 x dtype> V[v_row, v_col] element for the transposed PV A operand:
+ * V_lds, or straight from HBM under V_HBM_DIRECT. */
+static rocke_value_t* fh_pv_v_elem(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                   rocke_value_t* v_buf,
+                                   rocke_value_t* v_row,
+                                   rocke_value_t* v_col)
+{
+    if(ctx->V_HBM_DIRECT)
+    {
+        rocke_value_t* e = rocke_gfx942_attn2d_v_hbm_elem(ctx, ctx->kv_tile_iv, v_row, v_col);
+        return rocke_b_vec_pack(B, &e, 1, DT);
+    }
+    rocke_value_t* idx[3] = {v_buf, v_row, v_col};
+    return rocke_b_smem_load_vN(B, ctx->V_lds, idx, 3, DT, 1);
+}
+
 static rocke_value_t* lane_rg_of(rocke_gfx942_attn2d_build_ctx_t* ctx)
 {
     if(ctx->lane_rg_v != NULL)
@@ -272,10 +289,9 @@ rocke_value_t* rocke_gfx942_attn2d_apply_transposed_pv_regs(rocke_gfx942_attn2d_
                  * the 4 tokens are contiguous along the inner axis -> one wide
                  * read (lines 4596-4628). The naive token base is
                  * k*8 + lane_half32*4. */
+                rocke_value_t* tok_k = rocke_b_const_i32(B, k * 8);
                 rocke_value_t* tok_base
-                    = rocke_b_add(B,
-                                  rocke_b_const_i32(B, k * 8),
-                                  rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
+                    = rocke_b_add(B, tok_k, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
                 if(ctx->CFV_SCALAR_READ)
                 {
                     /* ISOLATION: 4 scalar n=1 reads, same values/order. */
@@ -306,8 +322,7 @@ rocke_value_t* rocke_gfx942_attn2d_apply_transposed_pv_regs(rocke_gfx942_attn2d_
                     rocke_value_t* v_row_base = rocke_b_const_i32(B, k * 8 + kk);
                     rocke_value_t* v_row = rocke_b_add(
                         B, v_row_base, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 4)));
-                    rocke_value_t* idx[3] = {v_buf, v_row, v_dim32};
-                    rocke_value_t* v1 = rocke_b_smem_load_vN(B, ctx->V_lds, idx, 3, DT, 1);
+                    rocke_value_t* v1 = fh_pv_v_elem(ctx, v_buf, v_row, v_dim32);
                     a_v_elems[kk] = rocke_b_vec_extract(B, v1, 0);
                 }
                 A_v_t = rocke_b_vec_pack(B, a_v_elems, 4, DT);
@@ -383,8 +398,7 @@ rocke_value_t* rocke_gfx942_attn2d_apply_transposed_pv_regs(rocke_gfx942_attn2d_
                 rocke_value_t* v_row_base = rocke_b_const_i32(B, k_static);
                 rocke_value_t* v_row = rocke_b_add(
                     B, v_row_base, rocke_b_mul(B, lane_half32, rocke_b_const_i32(B, 8)));
-                rocke_value_t* idx[3] = {v_buf, v_row, v_dim32};
-                rocke_value_t* v1 = rocke_b_smem_load_vN(B, ctx->V_lds, idx, 3, DT, 1);
+                rocke_value_t* v1 = fh_pv_v_elem(ctx, v_buf, v_row, v_dim32);
                 a_v_elems[kk] = rocke_b_vec_extract(B, v1, 0);
             }
             rocke_value_t* b_p_elems[8];
@@ -732,44 +746,35 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
 /* ============================================================ *
  *  Loop driver wiring (Python lines 5043-5052)
  *
- *  ``_phases`` is a single (tile_start, tile_end, skip_mask=False) scf_for_iter
- *  on every gfx942 path (the no-SW transposed full/boundary split is a gfx950
- *  shape). The softmax/acc/buffer carry threads through scf_for_iter results so
- *  a second phase (if any) resumes at the same K/V slot + online-softmax state.
- *
- *  This emits the loop op, enters its body region, sets the live-carry ctx
- *  fields, calls the peer _emit_kv_body bucket (which runs QK/softmax then the
- *  PV bucket above), and leaves the region. The kvloop handle (its results) is
- *  consumed by the epilogue peer via ctx scratch.
+ *  One scf_for_iter over [tile_start, tile_end) with skip_mask=False, except
+ *  under the causal mask phase split (no sliding window, no grouped-kv2): an
+ *  unmasked phase over the tiles wholly below the block's minimum causal limit,
+ *  then the masked boundary phase. The softmax/acc/buffer carry threads from
+ *  the first loop's results into the second, so it resumes at the same K/V slot
+ *  and online-softmax state. The returned handle is the last loop; the
+ *  epilogue reads its results.
  * ============================================================ */
-rocke_for_t rocke_gfx942_attn2d_drive_kv_loop(rocke_gfx942_attn2d_build_ctx_t* ctx)
+static rocke_for_t rocke__run_kv_phase(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* start,
+                                       rocke_value_t* end,
+                                       rocke_iter_arg_t* iargs,
+                                       const char* iv_name,
+                                       bool skip_mask)
 {
-    /* Build the (name, init) iter-arg list from ctx->iter_args. The carry slot
-     * names ("m0","l0",...,"acc0"/"acc0a0","cur_buf") are emitted verbatim as the
-     * loop's phi-node names, so they must come from ctx->iter_args_names to match
-     * the Python iter_args tuple names byte-for-byte. */
-    rocke_iter_arg_t iargs[ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS];
-    static const char* const kIvName = "kv_tile";
-    for(int i = 0; i < ctx->iter_args_count; ++i)
-    {
-        iargs[i].name = ctx->iter_args_names[i];
-        iargs[i].init = ctx->iter_args[i];
-    }
-
     rocke_for_t kvloop = rocke_b_scf_for_iter(B,
-                                              ctx->tile_start,
-                                              ctx->tile_end,
+                                              start,
+                                              end,
                                               ctx->kv_step,
                                               iargs,
                                               ctx->iter_args_count,
-                                              kIvName,
+                                              iv_name,
                                               /*unroll=*/false,
                                               /*elide_trailing_barrier=*/true);
 
     /* Enter the body region; expose iv + carry, run the body bucket. */
     rocke_b_region_enter(B, kvloop.body);
     ctx->kv_tile_iv = kvloop.iv;
-    ctx->skip_mask = false;
+    ctx->skip_mask = skip_mask;
 
     /* Unpack the loop-carried values into the live-carry ctx fields the inner
      * QK/softmax/PV closures read (mirrors the Python ``with kvloop as
@@ -794,7 +799,50 @@ rocke_for_t rocke_gfx942_attn2d_drive_kv_loop(rocke_gfx942_attn2d_build_ctx_t* c
 
     rocke_gfx942_attn2d_emit_kv_body(ctx);
     rocke_b_region_leave(B);
+    ctx->skip_mask = false;
     return kvloop;
+}
+
+rocke_for_t rocke_gfx942_attn2d_drive_kv_loop(rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    /* Build the (name, init) iter-arg list from ctx->iter_args. The carry slot
+     * names ("m0","l0",...,"acc0"/"acc0a0","cur_buf") are emitted verbatim as the
+     * loop's phi-node names, so they must come from ctx->iter_args_names to match
+     * the Python iter_args tuple names byte-for-byte. */
+    rocke_iter_arg_t iargs[ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS];
+    for(int i = 0; i < ctx->iter_args_count; ++i)
+    {
+        iargs[i].name = ctx->iter_args_names[i];
+        iargs[i].init = ctx->iter_args[i];
+    }
+
+    const bool cmps = ctx->CAUSAL_MASK_PHASE_SPLIT && ctx->SLIDING_WINDOW == 0 && !ctx->GROUPED_KV2;
+    if(!cmps)
+        return rocke__run_kv_phase(ctx, ctx->tile_start, ctx->tile_end, iargs, "kv_tile", false);
+
+    /* Tiles below split hold only keys <= the block's minimum causal limit
+     * (context_len + qb_start_pos), so the mask there is a no-op. */
+    rocke_value_t* min_causal_lim = rocke_b_add(B, ctx->context_len, ctx->qb_start_pos);
+    rocke_value_t* split_raw = rocke_b_div(B, min_causal_lim, rocke_b_const_i32(B, ctx->T));
+    rocke_value_t* split_lo = rocke_b_cmp_lt(B, split_raw, ctx->tile_start);
+    rocke_value_t* split = rocke_b_select(B, split_lo, ctx->tile_start, split_raw);
+    rocke_value_t* split_hi = rocke_b_cmp_lt(B, ctx->tile_end, split);
+    split = rocke_b_select(B, split_hi, ctx->tile_end, split);
+
+    /* Both loops lower into one LLVM function, so the first phase's phi names
+     * take a "u" suffix to stay unique. */
+    char names_u[ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS][40];
+    rocke_iter_arg_t iargs_u[ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS];
+    for(int i = 0; i < ctx->iter_args_count; ++i)
+    {
+        snprintf(names_u[i], sizeof(names_u[i]), "%su", ctx->iter_args_names[i]);
+        iargs_u[i].name = names_u[i];
+        iargs_u[i].init = ctx->iter_args[i];
+    }
+    rocke_for_t ph1 = rocke__run_kv_phase(ctx, ctx->tile_start, split, iargs_u, "kv_tile_u", true);
+    for(int i = 0; i < ctx->iter_args_count; ++i)
+        iargs[i].init = ph1.op->results[i];
+    return rocke__run_kv_phase(ctx, split, ctx->tile_end, iargs, "kv_tile", false);
 }
 
 #undef B

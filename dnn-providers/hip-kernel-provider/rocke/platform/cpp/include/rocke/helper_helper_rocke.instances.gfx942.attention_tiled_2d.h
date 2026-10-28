@@ -177,6 +177,13 @@ typedef struct rocke_attention_tiled_2d_spec
     /* gfx950-only: split the KV loop into a mask-free full-tile phase and a
      * masked boundary phase (transposed-32x32 mask-limit path, no SW). */
     bool use_mask_phase_split; /* False */
+    /* gfx942 only (the gfx950 builder ignores them, as it does the ring and
+     * cfvst fields): read V / K straight from HBM in the PV / QK MFMA loops
+     * instead of staging them through LDS, and split the causal KV loop into an
+     * unmasked full-tile phase plus a masked boundary phase. */
+    bool use_v_hbm_direct; /* False */
+    bool use_k_hbm_direct; /* False */
+    bool use_causal_mask_phase_split; /* False */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

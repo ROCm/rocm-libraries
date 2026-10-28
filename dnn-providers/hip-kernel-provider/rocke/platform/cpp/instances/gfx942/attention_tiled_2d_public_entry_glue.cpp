@@ -640,6 +640,8 @@ static rocke_status_t
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
             s->use_q_direct_global ? "qdir" : "",
+            s->use_v_hbm_direct ? "vhbm" : "",
+            s->use_k_hbm_direct ? "khbm" : "",
             s->use_qk_pv_sched_group_barrier ? "qsgb" : "",
             kvcp_buf,
             s->use_global_load_lds_k ? "gldlds" : "",
@@ -657,6 +659,7 @@ static rocke_status_t
             ks_buf,
             s->use_k_sliced_ldsseq ? "ldsseq" : "",
             s->use_iglp_opt ? "iglp1" : "",
+            s->use_causal_mask_phase_split ? "cmps" : "",
             s->use_k_single_buffer ? "k1buf" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
