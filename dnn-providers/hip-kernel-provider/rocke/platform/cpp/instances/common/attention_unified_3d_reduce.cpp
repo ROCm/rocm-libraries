@@ -342,21 +342,17 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[1];
     rocke_for_t max_loop;
-    rocke_value_t *seg, *mx, *idx, *mv;
+    rocke_value_t *seg, *mx, *idx, *mv, *lo, *hi, *step;
     rocke_value_t* yields[1];
 
     iter_args[0].name = "mx";
     iter_args[0].init = ctx->neg_inf;
 
-    max_loop = rocke_b_scf_for_iter(b,
-                                    rocke_b_const_i32(b, 0),
-                                    rocke_b_const_i32(b, ctx->num_segments),
-                                    rocke_b_const_i32(b, 1),
-                                    iter_args,
-                                    1,
-                                    "seg",
-                                    false,
-                                    true);
+    /* Sequenced: Python emits the bounds in argument order. */
+    lo = rocke_b_const_i32(b, 0);
+    hi = rocke_b_const_i32(b, ctx->num_segments);
+    step = rocke_b_const_i32(b, 1);
+    max_loop = rocke_b_scf_for_iter(b, lo, hi, step, iter_args, 1, "seg", false, true);
 
     rocke_b_region_enter(b, max_loop.body);
 
@@ -399,6 +395,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     rocke_iter_arg_t iter_args[2];
     rocke_for_t red;
     rocke_value_t *seg, *den, *acc, *idx, *mv, *lv, *factor, *den2, *out_idx, *ov, *acc2;
+    rocke_value_t *lo, *hi, *step;
     rocke_value_t* yields[2];
 
     iter_args[0].name = "den";
@@ -406,15 +403,11 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     iter_args[1].name = "acc";
     iter_args[1].init = ctx->zero_f;
 
-    red = rocke_b_scf_for_iter(b,
-                               rocke_b_const_i32(b, 0),
-                               rocke_b_const_i32(b, ctx->num_segments),
-                               rocke_b_const_i32(b, 1),
-                               iter_args,
-                               2,
-                               "seg2",
-                               false,
-                               true);
+    /* Sequenced: Python emits the bounds in argument order. */
+    lo = rocke_b_const_i32(b, 0);
+    hi = rocke_b_const_i32(b, ctx->num_segments);
+    step = rocke_b_const_i32(b, 1);
+    red = rocke_b_scf_for_iter(b, lo, hi, step, iter_args, 2, "seg2", false, true);
 
     rocke_b_region_enter(b, red.body);
 

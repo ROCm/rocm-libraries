@@ -20,6 +20,7 @@ in attention_unified_selectors.cpp now do the same.
 
 from __future__ import annotations
 
+import os
 import unittest
 from contextlib import contextmanager
 from dataclasses import asdict, fields, replace
@@ -49,7 +50,6 @@ from kernels.gfx950.attention_tiled_2d import (
 from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx1250TiledSpec,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -471,6 +471,68 @@ class TestI64KvAddr(unittest.TestCase):
                         )
                     self.assertEqual(meta.kv_addr_limit, limit)
                     _au._check_kv_addr_width(p, _kv_cache(n, p), limit)
+
+    @staticmethod
+    def _decode_prob(num_kv_blocks: int) -> UnifiedAttentionProblem:
+        # 16 tokens x 8 kv-heads x 128 dims x 2 bytes = 32 KiB blocks, like the
+        # combo shape, so the same block counts straddle the i32 buffer range.
+        return _prob(
+            128,
+            16,
+            32,
+            8,
+            max_seqlen_q=1,
+            max_seqlen_k=8192,
+            num_seqs=4,
+            total_q=4,
+            num_kv_blocks=num_kv_blocks,
+        )
+
+    _GFX942_3D_I64_REASON = (
+        "gfx942 tiled 3D does not support i64 KV addressing "
+        "(paged KV cache past what its K/V loader reads) yet"
+    )
+
+    def test_gfx942_3d_gate_rejects_i64_kv(self):
+        # The gfx942 3D spec has no i64 KV path. Rejecting at the gate lets auto
+        # dispatch fall back to 2D for a decode problem select_path() sends to
+        # 3D, instead of raising from the spec. 65537 blocks are past 2^31 bytes,
+        # beyond every gfx942 3D K/V loader.
+        small = self._decode_prob(_AT_I32_LIMIT)
+        large = self._decode_prob(65537)
+        self.assertEqual(large.select_path(), "3d")
+        for arch in ("gfx942", "gfx942:sramecc+"):
+            with self.subTest(arch=arch):
+                ok, _ = _au.supports_native_unified_attention_3d_tiled(small, arch)
+                self.assertTrue(ok)
+                self.assertEqual(
+                    _au.supports_native_unified_attention_3d_tiled(large, arch),
+                    (False, self._GFX942_3D_I64_REASON),
+                )
+        ok, _ = _au.supports_native_unified_attention_tiled(large, "gfx942")
+        self.assertTrue(ok)
+
+    def test_gfx942_3d_gate_follows_the_kv_loader(self):
+        # Past the i32 buffer range but within 2^31 bytes: the wide K/V loader
+        # reads it with i32 offsets, so the 3D spec needs no i64 and the gate
+        # admits it. The async copies are bounded by the buffer range, so with
+        # the wide loader off the spec would need i64 and the gate rejects it.
+        for n in (_OVER_I32_LIMIT, 65536):
+            p = self._decode_prob(n)
+            with self.subTest(num_kv_blocks=n):
+                ok, _ = _au.supports_native_unified_attention_3d_tiled(p, "gfx942")
+                self.assertTrue(ok)
+                with mock.patch.dict(os.environ, {"HIPDNN_GFX942_3D_WKV": "0"}):
+                    self.assertEqual(
+                        _au.supports_native_unified_attention_3d_tiled(p, "gfx942"),
+                        (False, self._GFX942_3D_I64_REASON),
+                    )
+
+    def test_gfx950_3d_gate_admits_i64_kv(self):
+        ok, _ = _au.supports_native_unified_attention_3d_tiled(
+            self._decode_prob(_OVER_I32_LIMIT), "gfx950"
+        )
+        self.assertTrue(ok)
 
 
 # d128 bs16 4-kv-head bf16 blocks are 16 KiB, so 131072 blocks are exactly 2^31

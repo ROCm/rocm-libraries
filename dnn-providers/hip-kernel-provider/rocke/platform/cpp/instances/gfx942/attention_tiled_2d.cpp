@@ -251,21 +251,48 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
-    /* gfx950-only experimental knobs rejected up front on gfx942.
+    /* gfx950-only experimental knobs rejected up front on gfx942, named in
+     * Python's order.
      * NOTE: use_agpr_alloc_zero is NOT an ISA feature -- it is a backend codegen
      * hint ("amdgpu-agpr-alloc"="0,0" + -amdgpu-mfma-vgpr-form) that keeps MFMA
      * accumulators in VGPR. It is legal on the gfx942 wide x8 transposed path;
-     * the detailed pairing guard below enforces that (mirrors Python
-     * attention_tiled_2d.py line 765). So it is gated there, not blanket-rejected
-     * here. */
-    if(s->use_mfma_32x32 || s->use_transposed_half_local_pv || s->use_mfma32_skip_legacy_qreg
-       || s->use_grouped_kv2_softmax || s->use_fp8_mfma_qk || s->use_fp8_mfma_pv)
+     * the detailed pairing guard below enforces that. So it is gated there, not
+     * blanket-rejected here. */
     {
-        rocke_attn2d_set_err(b,
-                             ROCKE_ERR_VALUE,
-                             "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
-                             "default path; gfx950-only knobs are not available on gfx942");
-        return false;
+        const char* const names[] = {"use_mfma_32x32",
+                                     "use_transposed_half_local_pv",
+                                     "use_mfma32_skip_legacy_qreg",
+                                     "use_grouped_kv2_softmax",
+                                     "use_fp8_mfma_qk",
+                                     "use_fp8_mfma_pv"};
+        const bool on[] = {s->use_mfma_32x32,
+                           s->use_transposed_half_local_pv,
+                           s->use_mfma32_skip_legacy_qreg,
+                           s->use_grouped_kv2_softmax,
+                           s->use_fp8_mfma_qk,
+                           s->use_fp8_mfma_pv};
+        char knobs[256] = "";
+        size_t len = 0;
+        for(size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        {
+            if(on[i])
+            {
+                len += (size_t)snprintf(
+                    knobs + len, sizeof(knobs) - len, "%s%s", len ? ", " : "", names[i]);
+            }
+        }
+        if(len > 0)
+        {
+            /* All six knobs exceed ROCKE_ERR_MSG_CAP, so raise directly rather
+             * than through rocke_attn2d_set_err's buffer. */
+            char msg[512];
+            snprintf(msg,
+                     sizeof(msg),
+                     "gfx942 tiled-2D attention supports only the narrow 16x16x16 default path "
+                     "and the K=8 32x32x8 wide path; these are not available on gfx942: %s",
+                     knobs);
+            ckc::raise_status(ROCKE_ERR_VALUE, msg);
+        }
     }
 
     /* transposed orientation legal only in the x8 pairing. */
@@ -281,8 +308,8 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     {
         rocke_attn2d_set_err(b,
                              ROCKE_ERR_VALUE,
-                             "gfx942 tiled-2D attention has no fp8 K/V cache path "
-                             "(kv_storage_dtype must be None on gfx942)");
+                             "gfx942 tiled-2D attention does not support the fp8 K/V cache "
+                             "(its PV path uses ds_read_tr_b8, a gfx950-only transpose read)");
         return false;
     }
 

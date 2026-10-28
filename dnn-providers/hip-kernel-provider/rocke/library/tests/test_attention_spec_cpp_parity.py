@@ -10,6 +10,7 @@ validation, LDS budget) C++ must raise the same exception type."""
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import asdict, replace
 
 import pytest
@@ -143,6 +144,47 @@ def test_2d_hook_honours_waves_per_eu_pin(engine, clean_env, arch):
     p = replace(next(_problems_2d()), waves_per_eu=3)
     spec = getattr(engine, f"{arch}_attn_tiled_spec_from_problem")(asdict(p), arch)
     assert spec["waves_per_eu"] == 3
+
+
+# The gfx942 2D validator rejects whose text C++ copies from Python. The others
+# are only compared by exception type.
+_GFX942_2D_COPIED_MESSAGES = (
+    "gfx942 tiled-2D attention does not support the fp8 K/V cache",
+    "gfx942 tiled-2D attention supports only the narrow",
+)
+
+
+def test_gfx942_2d_validator_messages_match_python(engine, clean_env):
+    hits = dict.fromkeys(_GFX942_2D_COPIED_MESSAGES, 0)
+    for p in _problems_2d():
+        try:
+            _tiled_spec_from_problem(p, "gfx942")
+            continue
+        except ValueError as e:
+            message = str(e)
+        except (RuntimeError, NotImplementedError):
+            continue
+        prefix = next((m for m in hits if message.startswith(m)), None)
+        if prefix is None:
+            continue
+        hits[prefix] += 1
+        with pytest.raises(ValueError) as cpp:
+            engine.gfx942_attn_tiled_spec_from_problem(asdict(p), "gfx942")
+        assert str(cpp.value) == message, p
+    assert all(hits.values()), hits
+
+
+def test_gfx942_2d_knob_list_order_matches_python(engine):
+    # Set at opposite ends of Python's list, so a C++ list built in any other
+    # order shows up.
+    knobs = {"use_fp8_mfma_pv": True, "use_mfma_32x32": True}
+    p = next(_problems_2d())
+    with pytest.raises(ValueError) as py:
+        replace(_tiled_spec_from_problem(p, "gfx942"), **knobs)
+    assert str(py.value).endswith("use_mfma_32x32, use_fp8_mfma_pv"), py.value
+    spec = engine.gfx942_attn_tiled_spec_from_problem(asdict(p), "gfx942")
+    with pytest.raises(RuntimeError, match=re.escape(str(py.value))):
+        engine.gfx942_attention_tiled_2d_lower_llvm({**spec, **knobs}, "gfx942")
 
 
 def _problems_3d():
