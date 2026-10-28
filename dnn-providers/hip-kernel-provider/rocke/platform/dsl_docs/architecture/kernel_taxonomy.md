@@ -33,8 +33,6 @@ The catalog currently contains the following operation IDs.
     `mfma_f32_32x32x8_bf16`, `mfma_f32_32x32x16_bf16`
   - fp8: `mfma_f32_16x16x32_fp8`, `mfma_f32_32x32x16_fp8`
   - bf8: `mfma_f32_16x16x32_bf8`, `mfma_f32_32x32x16_bf8`
-  - fp4: `mfma_f32_16x16x128_fp4`
-  - fp6: `mfma_f32_16x16x96_fp6`
 - **`gfx1151` and `gfx11-generic` (wave32)**
   - f16: `wmma_f32_16x16x16_f16`
   - bf16: `wmma_f32_16x16x16_bf16`
