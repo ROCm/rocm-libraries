@@ -87,25 +87,28 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
       - | Integer value in bytes (default: 128 * 1024 * 1024)
         | Limits workspace size for solution selection
 
-Runtime tuning cache
-====================
+Runtime tuning
+==============
 
-The runtime tuning cache is opt-in and off by default. ``HIPBLASLT_TUNING_MODE`` and
+Runtime tuning is opt-in and off by default. ``HIPBLASLT_TUNING_MODE`` and
 ``HIPBLASLT_TUNING_CACHE_PATH`` are read the first time they are needed in a process, so set them
-before the first hipBLASLt call. A process running in a secure execution context (set-user-ID,
-set-group-ID, or another credential-changing exec such as file capabilities) ignores both, and the
-cache stays off. For more information, see
-:doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
+before the first hipBLASLt call. The scratch cap is read on the first scratch allocation. A process
+running in a secure execution context (set-user-ID, set-group-ID, or another credential-changing exec
+such as file capabilities) ignores every variable in this section, so tuning stays off. For more
+information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
 
-``cache`` mode writes two notices without any logging variable: one line naming the mode, the file
-and how many entries loaded, and a closing summary. Replaying the cache adds no output per call.
-Where the notices go depends on logging:
+``cache`` and ``tune`` mode write a few notices without any logging variable, because tuning can
+block the first call on a new shape for minutes and a silent pause looks like a hang. The notices are
+bounded: one line naming the mode and what loaded, one start and one result per shape that is
+actually tuned, and one closing summary. Replaying a cache adds no output per call. Where the notices
+go depends on logging:
 
 * No level or mask: stderr. ``HIPBLASLT_LOG_FILE`` alone does not open a log file.
 * ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the stream logging already opened,
   including ``HIPBLASLT_LOG_FILE``.
 * ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``: the same stream,
-  formatted like every other log line, plus a cache hit, miss or invalidation line once per problem.
+  formatted like every other log line, plus a cache hit, miss or invalidation line once per problem,
+  the scratch and candidate setup, a progress heartbeat, and measurement results.
 
 .. list-table::
     :header-rows: 1
@@ -118,11 +121,50 @@ Where the notices go depends on logging:
         | Selects runtime tuning behavior.
       - | ``off``: Disable runtime tuning (default)
         | ``cache``: Replay valid entries from the cache file
+        | ``tune``: Benchmark uncached supported problems and append winners
 
     * - | ``HIPBLASLT_TUNING_CACHE_PATH``
         | Specifies the runtime cache file.
       - | Path to a tuning file
-        | Required for ``cache`` mode
+        | Required for ``cache`` and ``tune`` modes
+
+    * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
+        | Selects exhaustive or ranked-prefix candidate enumeration.
+      - | 1: Enumerate every candidate (default)
+        | 0: Use a ranked prefix
+
+    * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+        | Limits the ranked prefix when exhaustive enumeration is disabled.
+      - | Positive integer (default: 128)
+
+    * - | ``HIPBLASLT_TUNING_COLD_ITERS``
+        | Sets untimed warm-up launches per candidate.
+      - | Non-negative integer (default: 1000)
+        | 0 disables warm-up
+
+    * - | ``HIPBLASLT_TUNING_HOT_ITERS``
+        | Sets timed launches per candidate.
+      - | Positive integer (default: 1000)
+
+    * - | ``HIPBLASLT_TUNING_ROTATING_MB``
+        | Sets the target rotating-buffer footprint.
+      - | MiB (default: 512)
+        | 0 disables rotation
+
+    * - | ``HIPBLASLT_TUNING_FLUSH_ICACHE``
+        | Invalidates the instruction cache between timed launches, matching the bench client.
+      - | 1: Flush (default); costs about 5% of tuning time
+        | 0: Do not flush; winners become less reproducible
+
+    * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
+        | Sets a soft wall-clock limit on one shape's search, checked between candidates.
+      - | Milliseconds (default: 300000, five minutes; 0 is unlimited)
+        | A truncated search records its best candidate as incomplete
+        | A single candidate can overrun the limit
+
+    * - | ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``
+        | Caps library-owned tuning scratch per device.
+      - | Bytes (default: 1 GiB)
 
 Origami with Stream-K configuration
 ===================================
@@ -200,6 +242,60 @@ even if its value is invalid; it does not fall back to the legacy value.
         | 0: Force static assignment
         | 1: Force dynamic work-queue assignment
         | Malformed or out-of-range values are ignored.
+
+Adaptive compute-unit target
+============================
+
+The adaptive ``sm_count_target`` environment variables for hipBLASLt are collected in the following table.
+They are read once per process. Boolean values accept ``1``, ``on``, ``true``, ``0``, ``off``, and ``false``
+(case-insensitive). Invalid or out-of-range values keep the default and log a warning.
+For requirements and behavior, see :ref:`Adapting to the available compute units <adaptive-sm-count>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT``
+        | Measures the compute units available to GEMMs and uses the count as an implicit ``sm_count_target``.
+        | Applies to C API calls with Stream-K tile scheduling ``AUTO`` or ``ON`` and no explicit ``sm_count_target``.
+        | The hint only moves when the launched kernels carry the occupancy probe (a probe-built device library and gfx950 Stream-K Hybrid kernels); otherwise it stays 0.
+      - | 0: Off (default)
+        | 1: On
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_PROBE_EVERY``
+        | Launches per stream between probes.
+      - | Integer, 1 or greater
+        | Default: 8
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_TINY_MFLOPS``
+        | GEMMs below this many MFLOPs (``2*M*N*K*batch / 10^6``) never probe.
+      - | Non-negative integer
+        | Default: 256
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_PROBE_WINDOW``
+        | Number of latest probe readings that decide the hint. The hint changes only when all of them are below it or all are above it, and then takes the smallest reading. No hint counts as the device's CU count. A single reading of the device's CU count clears the hint at once, and a new hint then needs a full set of readings below that count.
+      - | Integer from 1 to 16
+        | Default: 3
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_LOG``
+        | Logs adaptive mode activity to ``HIPBLASLT_LOG_FILE``, or stderr if unset.
+      - | 0: Off (default)
+        | 1: Configuration, hint changes, and failed probe events
+        | 2: Also every probe reading
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``
+        | Uses a fixed CU count as the hint instead of measuring it. A positive value enables adaptive mode on its own.
+      - | Integer from 0 to 65535
+        | Default: 0 (measure)
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE``
+        | With ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``, still runs the probes and discards their readings, so timing includes the probe cost.
+        | Ignored with a warning without ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``.
+      - | 0: Off (default)
+        | 1: On
 
 .. _env-type_overrides:
 

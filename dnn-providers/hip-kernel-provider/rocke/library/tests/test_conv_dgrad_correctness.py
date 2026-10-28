@@ -888,9 +888,18 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
 # M-outer default for the identical problem and tiling.
 
 
-def _dgrad_run_inprocess(spec, dtype, seed=0):
-    """Launch one dgrad kernel and return dX as a torch tensor (NHWC)."""
+def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
+    """Launch one dgrad kernel and return dX as a torch tensor (NHWC).
+
+    The kernel is built from ``spec`` (its problem is the build probe) and
+    launched on ``problem`` (default: the spec's own), as an AOT binary is:
+    the shape travels as kernargs and the sub-GEMM records are packed for the
+    launched problem. ``poison=True`` pre-fills dX with 0xFF bytes (NaN in
+    fp16/bf16) when the kernel stores rather than accumulates, so an output
+    the kernel never writes shows up as NaN instead of passing as zero.
+    """
     import ctypes
+    from dataclasses import replace as dc_replace
 
     import torch
 
@@ -911,7 +920,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
         build_implicit_gemm_conv_dgrad(spec, arch=ARCH), arch=ARCH
     )
     td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-    p = spec.problem
+    p = spec.problem if problem is None else problem
     torch.manual_seed(seed)
     dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
     W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
@@ -921,9 +930,10 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     dY_d, W_d, dX_d = rt.alloc(dY.nbytes), rt.alloc(W.nbytes), rt.alloc(dX.nbytes)
     rt.memcpy_h2d(dY_d, _u8(dY), dY.nbytes)
     rt.memcpy_h2d(W_d, _u8(W), W.nbytes)
-    rt.memset(dX_d, 0, dX.nbytes)  # split-K atomic-add needs a zeroed dX
+    # split-K atomic-add needs a zeroed dX.
+    rt.memset(dX_d, 0xFF if (poison and not spec.needs_atomic) else 0, dX.nbytes)
 
-    sub_gemms = spec.compute_sub_gemms()
+    sub_gemms = dc_replace(spec, problem=p).compute_sub_gemms()
     buf = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
     raw = (ctypes.c_int32 * len(buf))(*buf)
     sg_d = rt.alloc(ctypes.sizeof(raw))
@@ -958,6 +968,27 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     for d in (dY_d, W_d, dX_d, sg_d):
         rt.free(d)
     return out
+
+
+def _dgrad_reference(problem, dtype, seed=0):
+    """fp32 torch reference dX (NHWC) for the inputs _dgrad_run_inprocess draws."""
+    import torch
+
+    td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    p = problem
+    torch.manual_seed(seed)
+    # Same draw order as _dgrad_run_inprocess, so the inputs match.
+    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
+    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
+    return torch.nn.grad.conv2d_input(
+        (p.N, p.C, p.Hi, p.Wi),
+        W.float().permute(0, 3, 1, 2).contiguous(),
+        dY.float().permute(0, 3, 1, 2).contiguous(),
+        stride=(p.sH, p.sW),
+        padding=(p.pH, p.pW),
+        dilation=(p.dH, p.dW),
+        groups=p.groups,
+    ).permute(0, 2, 3, 1)
 
 
 # The K-outer B tile runs in two lane-mapping regimes, and the A/B has to cover
@@ -1445,6 +1476,451 @@ class TestConvDgradPatch(unittest.TestCase):
             fold=True,
             vec_bc=2,
         )
+
+
+# Stride-1 binaries (DgradConvSpec.folds_sub_gemm_record, and the tap-outer
+# K loop of tap_outer_k), built as the AOT cache builds them: once, against a
+# probe problem with the binary's capabilities (grouped, stride 1), and
+# launched on every case below with the shape in the kernargs. Each is
+# compared bit for bit with the tilde binary (built against a stride-2 probe:
+# runtime record search and loads) on the same launch, and against the torch
+# reference with dX poisoned. They all reduce in the same order -- tap-major,
+# output-channel chunk, then the tile's MFMA sequence -- so they must agree
+# exactly. The tap-outer binaries run where the cache would offer them. The cases are
+# adversarial: odd and non-square H/W, N=1, 5x5 and 1x3 filters, pad 0/1/2
+# (including pads that shrink the output), M not a multiple of the tile, C not
+# a multiple of tile_n, kpg not a multiple of tile_k, grouped, dilation 2.
+_STRIDE1_CASES = (
+    # (label, dtype, N, Hi, Wi, C, K, Y, X, pad or (pH, pW), dil, groups)
+    ("odd_7x13_n1", "bf16", 1, 7, 13, 64, 128, 3, 3, 1, 1, 1),
+    ("odd_15x17", "fp16", 3, 15, 17, 96, 64, 3, 3, 1, 1, 1),
+    ("5x5_pad2_c48", "bf16", 2, 13, 9, 48, 64, 5, 5, 2, 1, 1),
+    ("pad0_shrinks", "fp16", 2, 11, 11, 64, 64, 3, 3, 0, 1, 1),
+    ("pad2_grows", "bf16", 1, 9, 10, 64, 64, 3, 3, 2, 1, 1),
+    ("k_not_tile_aligned", "bf16", 2, 14, 14, 64, 96, 3, 3, 1, 1, 1),
+    ("grouped_g4", "bf16", 2, 12, 12, 128, 256, 3, 3, 1, 1, 4),
+    ("grouped_g3_partial_n", "fp16", 1, 13, 11, 288, 480, 3, 3, 1, 1, 3),
+    ("1x3_pad1", "fp16", 2, 6, 19, 64, 128, 1, 3, 1, 1, 1),
+    ("dil2_pad2", "bf16", 2, 12, 15, 64, 128, 3, 3, 2, 2, 1),
+    ("dil2_grouped_pad1", "fp16", 1, 11, 9, 128, 128, 3, 3, 1, 2, 2),
+    ("asym_pad_0_2", "fp16", 2, 9, 13, 64, 64, 3, 3, (0, 2), 1, 1),
+    # Grids the XCD tile order remaps (gfx950: many groups, one N tile, 3x3)
+    # and keeps in launch order (one tap and one N tile).
+    ("grouped_g12_xcd", "fp16", 2, 10, 10, 384, 768, 3, 3, 1, 1, 12),
+    ("grouped_1x1_g6_launch_order", "bf16", 1, 9, 9, 384, 384, 1, 1, 0, 1, 6),
+)
+
+
+@unittest.skipUnless(
+    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
+)
+class TestConvDgradStride1Specializations(unittest.TestCase):
+    """Stride-1 (folded record) AOT binaries vs the tilde binary."""
+
+    def _problem(self, N, Hi, Wi, C, K, Y, X, pad, dil, groups, stride=1):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        pH, pW = pad if isinstance(pad, tuple) else (pad, pad)
+        return ConvProblem(
+            N=N,
+            Hi=Hi,
+            Wi=Wi,
+            C=C,
+            K=K,
+            Y=Y,
+            X=X,
+            pH=pH,
+            pW=pW,
+            sH=stride,
+            sW=stride,
+            dH=dil,
+            dW=dil,
+            groups=groups,
+        )
+
+    def _probe(self, stride, dil=1):
+        # The AOT dgrad probe: grouped, 3x3, pad = dilation.
+        return self._problem(1, 16, 16, 128, 128, 3, 3, dil, dil, 2, stride=stride)
+
+    def _spec(self, probe, dtype, **kw):
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+        from rocke.core.arch import ArchTarget
+
+        wt = 32
+        atom = ArchTarget.from_gfx(ARCH).mma.select_largest_k(
+            family="mma", a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=wt, n=wt
+        )
+        base = {
+            "problem": probe,
+            "name": "rocke_test_dgrad_s1",
+            "data": ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            "tile_m": 64,
+            "tile_n": 64,
+            "tile_k": 64,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_m": wt,
+            "warp_tile_n": wt,
+            "warp_tile_k": atom.k,
+            "pipeline": "mem",
+            "epilogue": "cshuffle",
+            "vector_size_a": 8,
+            "vector_size_b": 8,
+            "vector_size_c": 8,
+            "lds_k_outer": DgradConvSpec.default_lds_k_outer(
+                arch=ARCH, dtype_b=dtype, warp_tile_n=wt, cpg=8
+            ),
+            "uniform_k_decode": DgradConvSpec.default_uniform_k_decode(arch=ARCH),
+        }
+        base.update(kw)
+        return DgradConvSpec(**base)
+
+    def _binaries(self, dtype):
+        from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec
+
+        tapk = {"tap_outer_k": True, "uniform_k_decode": False}
+        out = {
+            "s1": self._spec(self._probe(1), dtype),
+            "s1_d2": self._spec(self._probe(1, 2), dtype),
+            "tilde": self._spec(self._probe(2), dtype),
+            # The tap-outer K loop, with both B tile layouts.
+            "tapk": self._spec(self._probe(1), dtype, **tapk),
+            "tapk_mouter": self._spec(self._probe(1), dtype, lds_k_outer=False, **tapk),
+            # The launch-order A/B build of the XCD tile order.
+            "tapk_noxcd": self._spec(
+                self._probe(1), dtype, xcd_tile_order=False, **tapk
+            ),
+        }
+        for label, spec in out.items():
+            ok, why = is_valid_dgrad_spec(spec, ARCH)
+            self.assertTrue(ok, f"{label}: {why}")
+        self.assertTrue(out["s1"].folds_sub_gemm_record)
+        self.assertTrue(out["s1_d2"].folds_sub_gemm_record)
+        self.assertFalse(out["tilde"].folds_sub_gemm_record)
+        return out
+
+    @staticmethod
+    def _serves(spec, problem):
+        """The tap-outer binaries serve stride 1 / dilation 1 with kpg a
+        multiple of tile_k only (KernelCache.supports_problem)."""
+        if not spec.tap_outer_k:
+            return True
+        return problem.dH == problem.dW == 1 and problem.kpg % spec.tile_k == 0
+
+    def _check(self, label, problem, dtype, outs):
+        import torch
+
+        ref = _dgrad_reference(problem, dtype)
+        names = list(outs)
+        for name in names[1:]:
+            self.assertTrue(
+                torch.equal(outs[names[0]], outs[name]),
+                f"{label}: {names[0]} vs {name}, max |diff| = "
+                f"{(outs[names[0]].float() - outs[name].float()).abs().max().item()}",
+            )
+        got = outs[names[0]].float()
+        self.assertFalse(torch.isnan(got).any(), f"{label}: NaN in dX")
+        bad = (got - ref).abs() > 1e-2 + 1e-2 * ref.abs()
+        self.assertEqual(int(bad.sum()), 0, f"{label}: tolerance violations")
+
+    def test_folded_record_matches_the_tilde_binary(self):
+        bins = {d: self._binaries(d) for d in ("fp16", "bf16")}
+        for label, dtype, N, Hi, Wi, C, K, Y, X, pad, dil, g in _STRIDE1_CASES:
+            with self.subTest(case=label):
+                problem = self._problem(N, Hi, Wi, C, K, Y, X, pad, dil, g)
+                b = bins[dtype]
+                # The folded binary is offered for its own dilation; at
+                # stride 1 the record (and the unit-stride epilogue) are the
+                # same at any dilation, so the d1 binary is run at d2 too.
+                outs = {
+                    name: _dgrad_run_inprocess(
+                        spec, dtype, poison=True, problem=problem
+                    )
+                    for name, spec in b.items()
+                    if self._serves(spec, problem)
+                }
+                self._check(label, problem, dtype, outs)
+
+    def test_folded_split_k(self):
+        """The folded gemm_k_padded (dg_K rounded to tile_k * split_k)."""
+        for label, K in (("k_aligned", 128), ("k_partial", 96)):
+            with self.subTest(case=label):
+                problem = self._problem(2, 9, 11, 64, K, 3, 3, 1, 1, 1)
+                outs = {
+                    name: _dgrad_run_inprocess(
+                        self._spec(
+                            self._probe(stride),
+                            "fp16",
+                            split_k=2,
+                            uniform_k_decode=False,
+                            vector_size_a=None,
+                            vector_size_c=2,
+                        ),
+                        "fp16",
+                        problem=problem,
+                    )
+                    for name, stride in (("s1", 1), ("tilde", 2))
+                }
+                # The split slices meet in atomic adds, whose order is not
+                # fixed: compare each against the reference only.
+                for name, out in outs.items():
+                    self._check(f"{label}/{name}", problem, "fp16", {name: out})
+
+
+# dY halo (DgradConvSpec.dy_halo) cases: Ho == Hi, Wo == Wi, kpg a multiple
+# of tile_k. (label, dtype, N, Hi, Wi, C, K, Y, X, groups); pad (Y-1)/2,
+# (X-1)/2.
+_HALO_CASES = (
+    ("n1_odd_13x17", "fp16", 1, 13, 17, 64, 256, 3, 3, 1),
+    ("straddle_3x70", "fp16", 2, 3, 70, 64, 128, 3, 3, 1),
+    ("w1_column", "fp16", 2, 33, 1, 64, 192, 3, 3, 1),
+    ("1x1_image", "bf16", 1, 1, 1, 64, 64, 3, 3, 1),
+    ("partial_n_c96", "bf16", 3, 9, 31, 96, 128, 3, 3, 1),
+    ("partial_n_c200", "fp16", 5, 6, 32, 200, 320, 3, 3, 1),
+    ("5x5_15x13", "fp16", 2, 15, 13, 128, 64, 5, 5, 1),
+    ("7x7_w2", "bf16", 3, 9, 2, 64, 128, 7, 7, 1),
+    ("7x7_8x32", "fp16", 4, 8, 32, 64, 64, 7, 7, 1),
+    ("grouped_g2", "bf16", 2, 14, 14, 256, 256, 3, 3, 2),
+    ("grouped_g4_5x5", "fp16", 1, 11, 9, 256, 512, 5, 5, 4),
+    ("1x7_12x20", "bf16", 2, 12, 20, 64, 128, 1, 7, 1),
+    ("7x1_21x9", "fp16", 1, 21, 9, 64, 64, 7, 1, 1),
+    ("3x1_odd_11x5", "bf16", 3, 11, 5, 96, 128, 3, 1, 1),
+    ("3x5_10x14", "bf16", 1, 10, 14, 128, 64, 3, 5, 1),
+)
+# (label, spec overrides) per tiling.
+_HALO_TILINGS = (
+    ("halo1_64x64", {"dy_halo": 1}),
+    ("halo2_64x64", {"dy_halo": 2}),
+    (
+        "halo2_128x64_4x1_prio_kpad",
+        {
+            "dy_halo": 2,
+            "tile_m": 128,
+            "warp_m": 4,
+            "warp_n": 1,
+            "dy_halo_setprio": 1,
+            "dy_halo_kouter_pad": 32,
+        },
+    ),
+    ("halo2_256x64_4x1", {"dy_halo": 2, "tile_m": 256, "warp_m": 4, "warp_n": 1}),
+    ("halo2_64x64_mouter", {"dy_halo": 2, "lds_k_outer": False}),
+)
+# The widest Wo the test binaries are sized for (every case fits).
+_HALO_MAX_WO = 72
+
+
+@unittest.skipUnless(
+    ARCH == "gfx950" and _HAS_TORCH,
+    "the dY halo dgrad loop is gfx950 wave64 MFMA + torch",
+)
+class TestConvDgradDyHalo(unittest.TestCase):
+    """The dY halo loop against the reference on adversarial shapes.
+
+    As the AOT cache builds it: one binary per (tiling, filter, halo_max_wo),
+    built once against a grouped probe of that filter and width, launched
+    through ConvArgs launch values on every case of the filter -- narrower
+    images, odd widths, a one-pixel column or image, partial N tiles, groups.
+    """
+
+    def _probe(self, Y, X, max_wo):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(
+            N=1,
+            Hi=max(Y, 8),
+            Wi=max_wo,
+            C=128,
+            K=128,
+            Y=Y,
+            X=X,
+            pH=(Y - 1) // 2,
+            pW=(X - 1) // 2,
+            groups=2,
+        )
+
+    def _spec(self, Y, X, dtype, max_wo=_HALO_MAX_WO, **kw):
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        base = {
+            "problem": self._probe(Y, X, max_wo),
+            "name": "rocke_test_dgrad_halo",
+            "data": ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            "tile_m": 64,
+            "tile_n": 64,
+            "tile_k": 64,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_m": 32,
+            "warp_tile_n": 32,
+            "warp_tile_k": 16,
+            "pipeline": "mem",
+            "epilogue": "cshuffle",
+            "lds_k_outer": True,
+            "tap_outer_k": True,
+            "halo_max_wo": max_wo,
+        }
+        base.update(kw)
+        spec = DgradConvSpec(**base)
+        ok, why = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, why)
+        return spec
+
+    def _problem(self, N, Hi, Wi, C, K, Y, X, g):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(
+            N=N,
+            Hi=Hi,
+            Wi=Wi,
+            C=C,
+            K=K,
+            Y=Y,
+            X=X,
+            pH=(Y - 1) // 2,
+            pW=(X - 1) // 2,
+            groups=g,
+        )
+
+    def _check(self, label, out, problem, dtype):
+        import torch
+
+        out = out.float()
+        ref = _dgrad_reference(problem, dtype)
+        bad = ((out - ref).abs() > 1e-2 + 1e-2 * ref.abs()) | ~torch.isfinite(out)
+        self.assertEqual(int(bad.sum()), 0, f"{label}: bad elements (NaN/Inf = bad)")
+
+    def test_halo_tilings_match_reference(self):
+        ran = 0
+        for tlabel, kw in _HALO_TILINGS:
+            for label, dtype, N, Hi, Wi, C, K, Y, X, g in _HALO_CASES:
+                with self.subTest(case=label, tiling=tlabel):
+                    spec = self._spec(Y, X, dtype, **kw)
+                    p = self._problem(N, Hi, Wi, C, K, Y, X, g)
+                    self.assertEqual((p.Ho, p.Wo), (p.Hi, p.Wi))
+                    out = _dgrad_run_inprocess(spec, dtype, poison=True, problem=p)
+                    self._check(f"{label}/{tlabel}", out, p, dtype)
+                    ran += 1
+        self.assertEqual(ran, len(_HALO_TILINGS) * len(_HALO_CASES))
+
+    def test_halo_max_wo_does_not_change_the_result(self):
+        # A binary sized for the problem's own width and one sized for a much
+        # wider image compute the same dX bit for bit: the bucket changes
+        # only the LDS the halo tile reserves and the rows the loader skips.
+        import torch
+
+        for label, dtype, N, Hi, Wi, C, K, Y, X, g in _HALO_CASES:
+            with self.subTest(case=label):
+                p = self._problem(N, Hi, Wi, C, K, Y, X, g)
+                tight = self._spec(Y, X, dtype, max_wo=Wi, dy_halo=2)
+                wide = self._spec(Y, X, dtype, dy_halo=2)
+                a = _dgrad_run_inprocess(tight, dtype, poison=True, problem=p)
+                b = _dgrad_run_inprocess(wide, dtype, poison=True, problem=p)
+                self.assertTrue(torch.equal(a, b), label)
+                self._check(label, a, p, dtype)
+
+
+@unittest.skipUnless(
+    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
+)
+class TestConvDgradResolvedSplitK(unittest.TestCase):
+    """dX is accurate at the degree the split-K resolver picks, and at its cap.
+
+    A one-tile output over a long reduction (N*Hi*Wi = 64 rows, Y*X*K = 18432)
+    is where the cost model splits deepest: on gfx950 it resolves to about a
+    hundred slices for bf16, each rounding its partial into the 16-bit dX.
+    The override is held to the 16-bit atomic's accuracy limit, so a forced
+    degree past it must come back at the limit and still be accurate.
+    """
+
+    def _problem(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
+
+    def _spec(self, dtype, split_k):
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
+        return DgradConvSpec(
+            problem=self._problem(),
+            name="rocke_test_dgrad_resolved_split_k",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            wave_size=64,
+            epilogue="cshuffle",
+            split_k=split_k,
+        )
+
+    def _resolve(self, dtype, **kw):
+        from kernels.common.conv_split_k import resolve_conv_split_k
+
+        return resolve_conv_split_k(
+            "dgrad",
+            self._problem(),
+            arch=ARCH,
+            dtype=dtype,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            block_size=256,
+            **kw,
+        ).split_k
+
+    def _assert_accurate(self, dtype, split_k):
+        import torch
+
+        p = self._problem()
+        got = _dgrad_run_inprocess(self._spec(dtype, split_k), dtype)
+        # Same draws as _dgrad_run_inprocess.
+        td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+        torch.manual_seed(0)
+        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
+        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
+        ref = torch.nn.grad.conv2d_input(
+            (p.N, p.C, p.Hi, p.Wi),
+            W.float().permute(0, 3, 1, 2),
+            dY.float().permute(0, 3, 1, 2),
+            padding=1,
+        ).permute(0, 2, 3, 1)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        # The benchmark's verify gate: peak-normalised max error.
+        delta = (got.float() - ref).abs().max().item()
+        self.assertLess(
+            delta / max(ref.abs().max().item(), 1.0),
+            5e-2,
+            f"{dtype} split_k={split_k}",
+        )
+
+    def test_resolved_degree(self):
+        from rocke.helpers.split_k_planner import split_k_cost_model
+
+        for dtype in ("bf16", "fp16"):
+            with self.subTest(dtype=dtype):
+                split_k = self._resolve(dtype)
+                if split_k_cost_model(ARCH) is not None:
+                    self.assertGreater(split_k, 1, "the shape is meant to split")
+                self._assert_accurate(dtype, split_k)
+
+    def test_override_past_the_16bit_atomic_limit(self):
+        from kernels.common.conv_split_k import ATOMIC_16BIT_MAX_SPLIT_K
+
+        for dtype in ("bf16", "fp16"):
+            with self.subTest(dtype=dtype):
+                split_k = self._resolve(dtype, override=2 * ATOMIC_16BIT_MAX_SPLIT_K)
+                self.assertEqual(split_k, ATOMIC_16BIT_MAX_SPLIT_K)
+                self._assert_accurate(dtype, split_k)
 
 
 if __name__ == "__main__":

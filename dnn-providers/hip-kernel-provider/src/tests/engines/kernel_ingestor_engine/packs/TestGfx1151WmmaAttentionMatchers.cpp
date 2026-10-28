@@ -3,15 +3,22 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
+#include <initializer_list>
+#include <limits>
 #include <optional>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -20,12 +27,15 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+#include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
@@ -36,13 +46,31 @@ namespace
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::DeviceProperties;
+using hipdnn_plugin_sdk::ingestor::KernelArgument;
 using hipdnn_plugin_sdk::ingestor::KernelDefinition;
+using hipdnn_plugin_sdk::ingestor::KernelSource;
+using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx1151_wmma_attention.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx1151_wmma_attention.kernel_match";
-constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx1151_wmma_attention.score";
+/// The native symbols one engine registers (hipkernel:Gfx1151WmmaAttention is the
+/// prefill, hipkernel:Gfx1151WmmaAttentionDecode the decode).
+struct EngineSymbols
+{
+    std::string_view graphMatcher;
+    std::string_view kernelMatcher;
+    std::string_view score;
+    std::string_view dispatch;
+};
+
+constexpr EngineSymbols PREFILL_SYMBOLS{"hipkernel.gfx1151_wmma_attention.graph_match",
+                                        "hipkernel.gfx1151_wmma_attention.kernel_match",
+                                        "hipkernel.gfx1151_wmma_attention.score",
+                                        "hipkernel.gfx1151_wmma_attention.dispatch"};
+constexpr EngineSymbols DECODE_SYMBOLS{"hipkernel.gfx1151_wmma_attention_decode.graph_match",
+                                       "hipkernel.gfx1151_wmma_attention_decode.kernel_match",
+                                       "hipkernel.gfx1151_wmma_attention_decode.score",
+                                       "hipkernel.gfx1151_wmma_attention_decode.dispatch"};
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -113,25 +141,47 @@ struct GraphSpec
     std::optional<int64_t> raggedOperand;
     bool causalMask = false;
     bool causalMaskBottomRight = false;
+    bool bottomRight = false;
     ScaleForm scale = ScaleForm::VALUE;
+    // The VALUE form's attn_scale_value and the CONSTANT_TENSOR form's baked value, when
+    // not their defaults (0.125 and 0.25).
+    std::optional<float> scaleValue;
     bool overrideShape = false;
+    // Elements of padding after each Q row: a row stride that is not a multiple of 8
+    // elements leaves rows off the kernels' 16-byte vector alignment.
+    int64_t qRowPad = 0;
 };
 
-DeviceProperties testDeviceProperties()
+// The default device is gfx12: the dispatcher's rule keeps a small-query graph with a
+// short key window on prefill there, where on gfx11 it sends it to decode, and most
+// tests below match a prefill object against such a graph. Tests of the rule itself, and
+// of what only one family does, name their device.
+struct Device
+{
+    std::string arch = "gfx1201";
+    int multiprocessors = 32; // RDNA WGPs, as HIP reports them
+};
+
+DeviceProperties testDeviceProperties(const Device& device = {})
 {
     DeviceProperties properties;
-    properties.gcnArchName = "gfx1151";
+    properties.gcnArchName = device.arch;
     properties.warpSize = 32;
+    properties.multiProcessorCount = device.multiprocessors;
     return properties;
 }
 
-std::vector<int64_t> denseStrides(bool bhsd, int64_t heads, int64_t sequence, int64_t headSize)
+/// Dense strides with @p rowPad elements after every row of @p headSize.
+std::vector<int64_t>
+    denseStrides(bool bhsd, int64_t heads, int64_t sequence, int64_t headSize, int64_t rowPad = 0)
 {
     if(bhsd)
     {
-        return {heads * sequence * headSize, sequence * headSize, headSize, 1};
+        const int64_t row = headSize + rowPad;
+        return {heads * sequence * row, sequence * row, row, 1};
     }
-    return {sequence * heads * headSize, headSize, heads * headSize, 1};
+    const int64_t token = heads * headSize + rowPad;
+    return {sequence * token, headSize, token, 1};
 }
 
 flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
@@ -146,7 +196,8 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const std::vector<int64_t> oDims{spec.batch, spec.queryHeads, spec.queryLength, oHeadSize};
     const std::vector<int64_t> lseDims{spec.batch, spec.queryHeads, spec.queryLength, 1};
 
-    const auto qStrides = denseStrides(spec.bhsd, spec.queryHeads, spec.queryLength, spec.headSize);
+    const auto qStrides
+        = denseStrides(spec.bhsd, spec.queryHeads, spec.queryLength, spec.headSize, spec.qRowPad);
     const auto kStrides = denseStrides(spec.bhsd, spec.kvHeads, spec.kvLength, spec.headSize);
     const auto vStrides = denseStrides(spec.bhsd, vHeads, spec.kvLength, vHeadSize);
     const auto oStrides = denseStrides(spec.bhsd, spec.queryHeads, spec.queryLength, oHeadSize);
@@ -209,7 +260,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     case ScaleForm::CONSTANT_TENSOR:
     case ScaleForm::VALUE_AND_TENSOR:
     {
-        const data_objects::Float32Value value(0.25F);
+        const data_objects::Float32Value value(spec.scaleValue.value_or(0.25F));
         const auto valueOffset = builder.CreateStruct(value).Union();
         tensors.push_back(
             data_objects::CreateTensorAttributesDirect(builder,
@@ -255,10 +306,12 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     attributes.add_causal_mask(spec.causalMask);
     attributes.add_causal_mask_bottom_right(spec.causalMaskBottomRight);
     attributes.add_right_bound(spec.rightBound);
-    attributes.add_diagonal_alignment(data_objects::DiagonalAlignment::TOP_LEFT);
+    attributes.add_diagonal_alignment(spec.bottomRight
+                                          ? data_objects::DiagonalAlignment::BOTTOM_RIGHT
+                                          : data_objects::DiagonalAlignment::TOP_LEFT);
     if(spec.scale == ScaleForm::VALUE || spec.scale == ScaleForm::VALUE_AND_TENSOR)
     {
-        attributes.add_attn_scale_value(0.125F);
+        attributes.add_attn_scale_value(spec.scaleValue.value_or(0.125F));
     }
     if(spec.scale != ScaleForm::VALUE && spec.scale != ScaleForm::ABSENT)
     {
@@ -290,59 +343,81 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     return builder;
 }
 
-std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
+/// A graph and the device it is matched for.
+class Fixture
 {
-    registerNativeIngestorSymbols();
-    const auto matcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL));
-    auto builder = buildSdpaGraph(spec);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto properties = testDeviceProperties();
-    return matcher(MatchContext{graph, 0, properties});
-}
+public:
+    explicit Fixture(const GraphSpec& spec, const Device& device = {})
+        : _builder(buildSdpaGraph(spec))
+        , _graph(_builder.GetBufferPointer(), _builder.GetSize())
+        , _properties(testDeviceProperties(device))
+    {
+        registerNativeIngestorSymbols();
+    }
 
-struct KernelSpec
-{
-    std::string dtype = "FP16";
-    int64_t headSize = 96;
-    std::string maskMode = "window";
-    int64_t transposedQk = 0;
-    int64_t queryTail = 1;
-    int64_t kvTail = 1;
-    int64_t blockN = 32;
-    int64_t numWaves = 1;
-    int64_t runtimeHeadDims = 0;
-    int64_t useAttnBias = 0;
-    std::string biasDtype = "f32";
+    MatchContext context() const
+    {
+        return MatchContext{_graph, 0, _properties};
+    }
+
+    std::optional<BoundTokens> bound() const
+    {
+        return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+            std::string(PREFILL_SYMBOLS.graphMatcher))(context());
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _builder;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
+    DeviceProperties _properties;
 };
 
-// A standard-path object compiled for head widths up to @p bucket, as shipped.
-KernelSpec runtimeKernel(int64_t bucket,
-                         std::string maskMode = "window",
-                         std::optional<std::string> biasDtype = std::nullopt)
+std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 {
-    KernelSpec spec;
-    spec.headSize = bucket;
-    spec.maskMode = std::move(maskMode);
-    spec.runtimeHeadDims = 1;
-    if(biasDtype.has_value())
-    {
-        spec.useAttnBias = 1;
-        spec.biasDtype = *biasDtype;
-    }
-    return spec;
+    return Fixture(spec).bound();
 }
 
-// An exact-size transposed-QK object, as shipped (32-key, single wave).
-KernelSpec transposedKernel(int64_t headSize, std::string maskMode)
+/// The catalog metadata of one object (configs/gfx1151_wmma_attention.yaml).
+struct KernelSpec
+{
+    std::string kind = "prefill";
+    std::string dtype = "FP16";
+    int64_t headSize = 128;
+    int64_t headSizeV = 128;
+    std::string maskMode = "causal";
+    std::string bias = "none";
+    int64_t blockSize = 256;
+    int64_t blockM = 128;
+    int64_t dvSplit = 1;
+};
+
+/// A shipped prefill object: the causal class, block_m 128 (64 over a wave pair).
+KernelSpec prefillKernel(int64_t headSize,
+                         int64_t headSizeV,
+                         std::string bias = "none",
+                         std::string maskMode = "causal")
 {
     KernelSpec spec;
     spec.headSize = headSize;
+    spec.headSizeV = headSizeV;
+    spec.bias = std::move(bias);
     spec.maskMode = std::move(maskMode);
-    spec.transposedQk = 1;
-    spec.queryTail = 0;
-    spec.kvTail = 0;
+    spec.blockM = std::max(headSize, headSizeV) > 128 ? 64 : 128;
+    return spec;
+}
+
+/// A shipped decode object: four waves, runtime masks.
+KernelSpec decodeKernel(int64_t bucket, std::string bias = "none", int64_t dvSplit = 1)
+{
+    KernelSpec spec;
+    spec.kind = "decode";
+    spec.headSize = bucket;
+    spec.headSizeV = bucket;
+    spec.maskMode = "runtime";
+    spec.bias = std::move(bias);
+    spec.blockSize = 128;
+    spec.blockM = 16;
+    spec.dvSplit = dvSplit;
     return spec;
 }
 
@@ -356,49 +431,91 @@ KernelDefinition makeKernel(const KernelSpec& spec)
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000003");
     kernel.metadata = {{"dtype", spec.dtype},
+                       {"kind", spec.kind},
                        {"head_size", spec.headSize},
+                       {"head_size_v", spec.headSizeV},
                        {"mask_mode", spec.maskMode},
-                       {"transposed_qk", spec.transposedQk},
-                       {"query_tail", spec.queryTail},
-                       {"kv_tail", spec.kvTail},
-                       {"block_n", spec.blockN},
-                       {"num_waves", spec.numWaves},
-                       {"runtime_head_dims", spec.runtimeHeadDims},
-                       {"use_attn_bias", spec.useAttnBias},
-                       {"bias_dtype", spec.biasDtype}};
+                       {"bias", spec.bias},
+                       {"block_size", spec.blockSize},
+                       {"block_m", spec.blockM},
+                       {"dv_split", spec.dvSplit}};
     return kernel;
 }
 
-bool matchesKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
+bool isDecode(const KernelSpec& spec)
 {
-    registerNativeIngestorSymbols();
-    const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-        std::string(GRAPH_MATCHER_SYMBOL));
-    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(KERNEL_MATCHER_SYMBOL));
-    auto builder = buildSdpaGraph(graphSpec);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
-    const auto bound = graphMatcher(context);
+    return spec.kind == "decode";
+}
+
+const EngineSymbols& symbolsFor(const KernelSpec& spec)
+{
+    return isDecode(spec) ? DECODE_SYMBOLS : PREFILL_SYMBOLS;
+}
+
+/// Whether the engine owning @p kernelSpec's kind matches it; the other engine's kernel
+/// matcher never sees it.
+bool matchesKernel(const GraphSpec& graphSpec,
+                   const KernelSpec& kernelSpec,
+                   const Device& device = {})
+{
+    const Fixture fixture(graphSpec, device);
+    const auto bound = fixture.bound();
     if(!bound.has_value())
     {
         return false;
     }
-    return kernelMatcher(context, *bound, makeKernel(kernelSpec));
+    return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(std::string(
+        symbolsFor(kernelSpec).kernelMatcher))(fixture.context(), *bound, makeKernel(kernelSpec));
 }
 
-double scoreOf(const KernelSpec& kernelSpec)
+double scoreOf(const KernelSpec& kernelSpec, const GraphSpec& graphSpec = {})
+{
+    const Fixture fixture(graphSpec);
+    const auto bound = fixture.bound();
+    if(!bound.has_value())
+    {
+        throw std::logic_error("the scored graph does not match");
+    }
+    return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(
+        symbolsFor(kernelSpec).score))(fixture.context(), *bound, makeKernel(kernelSpec));
+}
+
+/// The registered dispatch handler of one engine; a named failure, not a null
+/// dereference, when the symbol the catalog's descriptors name is not registered.
+const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
+    dispatchHandler(const EngineSymbols& symbols)
 {
     registerNativeIngestorSymbols();
-    const auto scorer
-        = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
-    auto builder = buildSdpaGraph(GraphSpec{});
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto properties = testDeviceProperties();
-    return scorer(MatchContext{graph, 0, properties}, BoundTokens{}, makeKernel(kernelSpec));
+    const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
+        std::string(symbols.dispatch));
+    if(handler == nullptr)
+    {
+        throw std::logic_error(std::string(symbols.dispatch) + " is not registered");
+    }
+    return *handler;
+}
+
+/// The handler of the engine @p kernel's own `kind` metadata names.
+const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
+    dispatchHandlerOf(const KernelDefinition& kernel)
+{
+    const auto kind = kernel.metadata.find("kind");
+    const bool decode = kind != kernel.metadata.end()
+                        && std::holds_alternative<std::string>(kind->second)
+                        && std::get<std::string>(kind->second) == "decode";
+    return dispatchHandler(decode ? DECODE_SYMBOLS : PREFILL_SYMBOLS);
+}
+
+size_t workspaceOf(const GraphSpec& graphSpec, const KernelSpec& kernelSpec, const Device& device)
+{
+    const Fixture fixture(graphSpec, device);
+    const auto bound = fixture.bound();
+    if(!bound.has_value())
+    {
+        throw std::logic_error("the dispatched graph does not match");
+    }
+    const auto kernel = makeKernel(kernelSpec);
+    return dispatchHandlerOf(kernel).workspaceBytes(fixture.context(), *bound, kernel);
 }
 
 // GraphSpec{} with no mask (left/right bounds unbounded).
@@ -419,11 +536,17 @@ GraphSpec causalGraph()
     return spec;
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, FixtureConstructsGfx1151DeviceByValue)
+/// One decode step: Sq = 1 against a long KV cache, BSHD, GQA 32/8, D128, no mask.
+GraphSpec decodeGraph()
 {
-    const auto properties = testDeviceProperties();
-    EXPECT_EQ(properties.gcnArchName, "gfx1151");
-    EXPECT_EQ(properties.warpSize, 32);
+    GraphSpec spec = unmaskedGraph();
+    spec.batch = 1;
+    spec.queryHeads = 32;
+    spec.kvHeads = 8;
+    spec.queryLength = 1;
+    spec.kvLength = 4096;
+    spec.headSize = 128;
+    return spec;
 }
 
 TEST(TestGfx1151WmmaAttentionMatchers, AcceptsD96BhsdWindowAndLse)
@@ -484,7 +607,6 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
 // hipDNN reference; otherwise a left bound would drop the causal limit.
 TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
 {
-    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
     for(const bool bottomRight : {false, true})
     {
         GraphSpec spec;
@@ -497,15 +619,10 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
         EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_right"), 0);
         EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.bottom_right"),
                   bottomRight ? 1 : 0);
-        // A causal request is served by a causal object or, through runtime
-        // bounds, by the band ("window") object; never by a no-mask object.
-        auto causal = KernelSpec{};
-        causal.maskMode = "causal";
-        auto none = KernelSpec{};
-        none.maskMode = "none";
-        EXPECT_TRUE(matchesKernel(spec, causal));
-        EXPECT_TRUE(matchesKernel(spec, KernelSpec{}));
-        EXPECT_FALSE(matchesKernel(spec, none));
+        // A causal request is served by the causal class through runtime bounds;
+        // never by a no-mask object.
+        EXPECT_TRUE(matchesKernel(spec, prefillKernel(96, 96)));
+        EXPECT_FALSE(matchesKernel(spec, prefillKernel(96, 96, "none", "none")));
     }
 }
 
@@ -513,7 +630,6 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
 // launch) or neither (1.0). Device tensors and both forms at once are declined.
 TEST(TestGfx1151WmmaAttentionMatchers, ResolvesEveryHipdnnScaleForm)
 {
-    using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
     const auto bitsOf = [](float value) {
         int32_t bits = 0;
         std::memcpy(&bits, &value, sizeof(bits));
@@ -546,107 +662,53 @@ TEST(TestGfx1151WmmaAttentionMatchers, ResolvesEveryHipdnnScaleForm)
     EXPECT_FALSE(bound(ScaleForm::VALUE_AND_TENSOR).has_value());
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, KernelMatcherUsesRuntimeMaskDtypeAndHeadSize)
+// The kernels take scale_log2 = log2(e) * scale and require it positive (rdna_attention.py
+// precondition); at 0 or below they return all-NaN or all-zero output with a success
+// status (measured on gfx1100 and gfx1101), so the matcher declines such constants as
+// the Python route does.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesScalesThatAreNotFiniteAndPositive)
 {
-    EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
-
-    auto wrongMask = KernelSpec{};
-    wrongMask.maskMode = "causal";
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, wrongMask));
-
-    auto wrongHeadSize = KernelSpec{};
-    wrongHeadSize.headSize = 128;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, wrongHeadSize));
-
-    GraphSpec bf16Graph;
-    bf16Graph.dtype = data_objects::DataType::BFLOAT16;
-    bf16Graph.headSize = 64;
-    bf16Graph.queryLength = 32;
-    bf16Graph.kvLength = 64;
-    bf16Graph.leftBound = -1;
-    bf16Graph.rightBound = 0;
-    KernelSpec bf16Kernel;
-    bf16Kernel.dtype = "BF16";
-    bf16Kernel.headSize = 64;
-    bf16Kernel.maskMode = "causal";
-    bf16Kernel.transposedQk = 1;
-    bf16Kernel.queryTail = 0;
-    bf16Kernel.kvTail = 0;
-    EXPECT_TRUE(matchesKernel(bf16Graph, bf16Kernel));
-}
-
-TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersFastTransposedKernel)
-{
-    registerNativeIngestorSymbols();
-    const auto scorer
-        = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
-    auto builder = buildSdpaGraph(GraphSpec{});
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
-
-    // The strongest standard object: the smallest bucket with its mask compiled in.
-    const auto standard = runtimeKernel(64, "none");
-    const auto fast = transposedKernel(64, "none");
-    EXPECT_GT(scorer(context, BoundTokens{}, makeKernel(fast)),
-              scorer(context, BoundTokens{}, makeKernel(standard)));
-}
-
-TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersNarrowTransposedGeometryForLongSequences)
-{
-    registerNativeIngestorSymbols();
-    const auto scorer
-        = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
-    GraphSpec longSequence;
-    longSequence.queryLength = 1024;
-    longSequence.kvLength = 1024;
-    auto builder = buildSdpaGraph(longSequence);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
-
-    KernelSpec narrow;
-    narrow.transposedQk = 1;
-    KernelSpec wide = narrow;
-    wide.blockN = 64;
-    wide.numWaves = 2;
-    EXPECT_GT(scorer(context, BoundTokens{}, makeKernel(narrow)),
-              scorer(context, BoundTokens{}, makeKernel(wide)));
-}
-
-// -----------------------------------------------------------------------------
-// Runtime head widths and V heads
-// -----------------------------------------------------------------------------
-
-TEST(TestGfx1151WmmaAttentionMatchers, AcceptsEveryServedHeadWidth)
-{
-    for(const int64_t headDim : {16, 80, 112, 192, 256})
+    for(const ScaleForm form : {ScaleForm::VALUE, ScaleForm::CONSTANT_TENSOR})
     {
-        GraphSpec spec;
-        spec.headSize = headDim;
-        const auto bound = matchGraph(spec);
-        ASSERT_TRUE(bound.has_value()) << "d" << headDim;
-        EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.head_dim_q"), headDim);
-        EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.head_dim_v"), headDim);
+        for(const float scale : {0.0F,
+                                 -0.0F,
+                                 -0.125F,
+                                 std::numeric_limits<float>::infinity(),
+                                 std::numeric_limits<float>::quiet_NaN()})
+        {
+            GraphSpec spec;
+            spec.scale = form;
+            spec.scaleValue = scale;
+            EXPECT_FALSE(matchGraph(spec).has_value())
+                << "scale " << scale << " form " << static_cast<int>(form);
+        }
+        GraphSpec tiny;
+        tiny.scale = form;
+        tiny.scaleValue = std::numeric_limits<float>::denorm_min();
+        EXPECT_TRUE(matchGraph(tiny).has_value()) << "form " << static_cast<int>(form);
     }
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, AcceptsDistinctValueHeadWidth)
+// -----------------------------------------------------------------------------
+// Head widths, rows and head counts
+// -----------------------------------------------------------------------------
+
+TEST(TestGfx1151WmmaAttentionMatchers, AcceptsEveryMultipleOfEightHeadWidth)
 {
-    GraphSpec spec;
-    spec.headSize = 64;
-    spec.vHeadSize = 128;
-    const auto bound = matchGraph(spec);
-    ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.head_dim_q"), 64);
-    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.head_dim_v"), 128);
+    for(const int64_t headDim : {8, 16, 40, 72, 80, 112, 136, 192, 248, 256})
+    {
+        GraphSpec qk;
+        qk.headSize = headDim;
+        EXPECT_TRUE(matchGraph(qk).has_value()) << "Q/K d" << headDim;
+        GraphSpec vo;
+        vo.vHeadSize = headDim;
+        EXPECT_TRUE(matchGraph(vo).has_value()) << "V/O d" << headDim;
+    }
 }
 
 TEST(TestGfx1151WmmaAttentionMatchers, DeclinesUnservedHeadWidths)
 {
-    for(const int64_t headDim : {8, 72, 272})
+    for(const int64_t headDim : {4, 12, 100, 260, 264})
     {
         GraphSpec qk;
         qk.headSize = headDim;
@@ -657,16 +719,30 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesUnservedHeadWidths)
     }
 }
 
+// Rows load as 16-byte vectors, so every outer stride is a multiple of 8 elements.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRowsOffTheVectorAlignment)
+{
+    for(const bool bhsd : {false, true})
+    {
+        GraphSpec aligned;
+        aligned.bhsd = bhsd;
+        aligned.qRowPad = 8;
+        EXPECT_TRUE(matchGraph(aligned).has_value()) << "bhsd " << bhsd;
+        GraphSpec misaligned = aligned;
+        misaligned.qRowPad = 4;
+        EXPECT_FALSE(matchGraph(misaligned).has_value()) << "bhsd " << bhsd;
+    }
+}
+
 TEST(TestGfx1151WmmaAttentionMatchers, AcceptsValueHeadsDividingQueryHeads)
 {
     // Eight query heads, two K heads.
-    for(const int64_t vHeads : {1, 4, 8})
+    for(const int64_t vHeads : {1, 2, 4, 8})
     {
         GraphSpec spec;
         spec.vHeads = vHeads;
-        const auto bound = matchGraph(spec);
-        ASSERT_TRUE(bound.has_value()) << "Hv " << vHeads;
-        EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.v_heads"), vHeads);
+        EXPECT_TRUE(matchGraph(spec).has_value()) << "Hv " << vHeads;
+        EXPECT_TRUE(matchesKernel(spec, prefillKernel(96, 96))) << "Hv " << vHeads;
     }
     for(const int64_t vHeads : {3, 16})
     {
@@ -676,63 +752,51 @@ TEST(TestGfx1151WmmaAttentionMatchers, AcceptsValueHeadsDividingQueryHeads)
     }
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, RuntimeObjectServesWidthsUpToItsBucket)
+// -----------------------------------------------------------------------------
+// Prefill objects
+// -----------------------------------------------------------------------------
+
+TEST(TestGfx1151WmmaAttentionMatchers, PrefillObjectServesWidthsUpToItsBuckets)
 {
     GraphSpec d80;
     d80.headSize = 80;
-    EXPECT_FALSE(matchesKernel(d80, runtimeKernel(64)));
-    EXPECT_TRUE(matchesKernel(d80, runtimeKernel(128)));
-    EXPECT_TRUE(matchesKernel(d80, runtimeKernel(256)));
+    EXPECT_FALSE(matchesKernel(d80, prefillKernel(64, 64)));
+    EXPECT_TRUE(matchesKernel(d80, prefillKernel(96, 96)));
+    EXPECT_TRUE(matchesKernel(d80, prefillKernel(256, 256)));
 
-    GraphSpec d256;
-    d256.headSize = 256;
-    EXPECT_FALSE(matchesKernel(d256, runtimeKernel(128)));
-    EXPECT_TRUE(matchesKernel(d256, runtimeKernel(256)));
-
-    // The wider of the two widths picks the bucket.
-    GraphSpec mixed;
-    mixed.headSize = 64;
-    mixed.vHeadSize = 128;
-    EXPECT_FALSE(matchesKernel(mixed, runtimeKernel(64)));
-    EXPECT_TRUE(matchesKernel(mixed, runtimeKernel(128)));
+    // Q/K and V/O against their own buckets.
+    GraphSpec q192v128;
+    q192v128.headSize = 192;
+    q192v128.vHeadSize = 128;
+    EXPECT_TRUE(matchesKernel(q192v128, prefillKernel(192, 128)));
+    EXPECT_FALSE(matchesKernel(q192v128, prefillKernel(128, 128)));
+    q192v128.vHeadSize = 136;
+    EXPECT_FALSE(matchesKernel(q192v128, prefillKernel(192, 128)));
+    EXPECT_TRUE(matchesKernel(q192v128, prefillKernel(256, 256)));
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, ExactObjectNeedsItsOwnWidthAndSharedKvHeads)
+TEST(TestGfx1151WmmaAttentionMatchers, CausalClassServesEveryMask)
 {
-    const KernelSpec exact; // d96, runtime_head_dims 0
-    EXPECT_TRUE(matchesKernel(GraphSpec{}, exact));
-
-    GraphSpec mixed;
-    mixed.vHeadSize = 64;
-    EXPECT_FALSE(matchesKernel(mixed, exact));
-
-    GraphSpec ownValueHeads;
-    ownValueHeads.vHeads = 1;
-    EXPECT_FALSE(matchesKernel(ownValueHeads, exact));
-    EXPECT_TRUE(matchesKernel(ownValueHeads, runtimeKernel(128)));
-
-    GraphSpec halfValueHeads;
-    halfValueHeads.vHeads = 4;
-    EXPECT_TRUE(matchesKernel(halfValueHeads, runtimeKernel(128)));
-}
-
-TEST(TestGfx1151WmmaAttentionMatchers, MaskModeServesItsRequests)
-{
-    const auto none = runtimeKernel(128, "none");
-    const auto band = runtimeKernel(128, "window");
-    const auto causal = runtimeKernel(128, "causal");
+    const auto causal = prefillKernel(128, 128);
+    const auto none = prefillKernel(128, 128, "none", "none");
+    EXPECT_TRUE(matchesKernel(unmaskedGraph(), causal));
+    EXPECT_TRUE(matchesKernel(causalGraph(), causal));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, causal)); // window 7/3
 
     EXPECT_TRUE(matchesKernel(unmaskedGraph(), none));
-    EXPECT_TRUE(matchesKernel(unmaskedGraph(), band));
-    EXPECT_FALSE(matchesKernel(unmaskedGraph(), causal));
-
     EXPECT_FALSE(matchesKernel(causalGraph(), none));
-    EXPECT_TRUE(matchesKernel(causalGraph(), band));
-    EXPECT_TRUE(matchesKernel(causalGraph(), causal));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, none));
+}
 
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, none)); // window 7/3
-    EXPECT_TRUE(matchesKernel(GraphSpec{}, band));
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, causal));
+TEST(TestGfx1151WmmaAttentionMatchers, KernelMatcherReadsTheDtype)
+{
+    auto bf16 = prefillKernel(128, 128);
+    bf16.dtype = "BF16";
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, bf16));
+    GraphSpec bf16Graph;
+    bf16Graph.dtype = data_objects::DataType::BFLOAT16;
+    EXPECT_TRUE(matchesKernel(bf16Graph, bf16));
+    EXPECT_FALSE(matchesKernel(bf16Graph, prefillKernel(128, 128)));
 }
 
 // -----------------------------------------------------------------------------
@@ -801,114 +865,238 @@ TEST(TestGfx1151WmmaAttentionMatchers, BiasObjectMustMatchTheBiasClass)
 {
     GraphSpec f32Bias;
     f32Bias.bias = packedBias({2, 8, 33, 65});
-    EXPECT_TRUE(matchesKernel(f32Bias, runtimeKernel(128, "window", "f32")));
-    EXPECT_FALSE(matchesKernel(f32Bias, runtimeKernel(128, "window", "q")));
-    EXPECT_FALSE(matchesKernel(f32Bias, runtimeKernel(128, "window")));
-    EXPECT_FALSE(matchesKernel(f32Bias, runtimeKernel(128, "none")));
+    EXPECT_TRUE(matchesKernel(f32Bias, prefillKernel(128, 128, "f32")));
+    EXPECT_FALSE(matchesKernel(f32Bias, prefillKernel(128, 128, "q")));
+    EXPECT_FALSE(matchesKernel(f32Bias, prefillKernel(128, 128)));
 
     GraphSpec qBias;
     qBias.bias = packedBias({2, 8, 33, 65}, data_objects::DataType::HALF);
-    EXPECT_TRUE(matchesKernel(qBias, runtimeKernel(128, "window", "q")));
-    EXPECT_FALSE(matchesKernel(qBias, runtimeKernel(128, "window", "f32")));
+    EXPECT_TRUE(matchesKernel(qBias, prefillKernel(128, 128, "q")));
+    EXPECT_FALSE(matchesKernel(qBias, prefillKernel(128, 128, "f32")));
 
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, runtimeKernel(128, "window", "f32")));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, prefillKernel(128, 128, "f32")));
 
-    // Transposed objects never take a bias.
-    GraphSpec aligned = causalGraph();
-    aligned.headSize = 64;
-    aligned.queryLength = 32;
-    aligned.kvLength = 64;
-    aligned.bias = packedBias({2, 8, 32, 64});
-    auto transposedBias = transposedKernel(64, "causal");
-    transposedBias.useAttnBias = 1;
-    EXPECT_FALSE(matchesKernel(aligned, transposedBias));
-    EXPECT_TRUE(matchesKernel(aligned, runtimeKernel(64, "window", "f32")));
+    GraphSpec decodeBias = decodeGraph();
+    decodeBias.bias = packedBias({1, 32, 1, 4096});
+    EXPECT_TRUE(matchesKernel(decodeBias, decodeKernel(128, "f32")));
+    EXPECT_FALSE(matchesKernel(decodeBias, decodeKernel(128)));
+    EXPECT_FALSE(matchesKernel(decodeGraph(), decodeKernel(128, "f32")));
 }
 
 // -----------------------------------------------------------------------------
-// Score
+// Decode objects: the rocKE dispatcher's rule and launch plan
 // -----------------------------------------------------------------------------
 
-TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersTheTightestBucket)
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeObjectServesTheDispatcherDecodeRule)
 {
-    EXPECT_GT(scoreOf(runtimeKernel(64)), scoreOf(runtimeKernel(128)));
-    EXPECT_GT(scoreOf(runtimeKernel(128)), scoreOf(runtimeKernel(256)));
-    // The bucket outranks the mask specialization.
-    EXPECT_GT(scoreOf(runtimeKernel(128, "window")), scoreOf(runtimeKernel(256, "none")));
+    // gfx1151.py rdna_attention_use_decode, g = Hq / Hkv, num_cus = 2 x multiProcessorCount:
+    //   Sq > 64: 4 * B * Hq * ceil(Sq / 128) < num_cus
+    //   gfx12:   Sq <= 32 or g == 1 or visible_keys >= 2048
+    //   gfx11:   g * Sq < 512 or visible_keys < 64 * num_cus or B * visible_keys < 512 * num_cus
+    // Vectors: test_gfx1151_attention_selection.py::test_decode_rule_vectors.
+    EXPECT_TRUE(matchesKernel(decodeGraph(), decodeKernel(128)));
+    struct Case
+    {
+        int64_t queryLength;
+        int64_t kvLength; // unmasked: every key is visible
+        int64_t queryHeads;
+        int64_t kvHeads;
+        int64_t batch;
+        Device device;
+        bool decode;
+    };
+    const Device gfx11{"gfx1101", 30}; // 60 CUs
+    const Device gfx12{"gfx1201", 32}; // 64 CUs
+    const Device gfx1100{"gfx1100", 48}; // 96 CUs
+    for(const Case& c :
+        {Case{1, 4096, 32, 8, 1, gfx11, true},     Case{32, 32768, 64, 8, 8, gfx11, true},
+         Case{64, 4096, 64, 8, 1, gfx11, true},    Case{64, 4096, 64, 8, 8, gfx11, false},
+         Case{64, 2048, 64, 8, 32, gfx11, true},   Case{64, 32768, 64, 8, 1, gfx11, false},
+         Case{64, 32768, 32, 8, 8, gfx11, true},   Case{32, 512, 64, 8, 32, gfx12, true},
+         Case{64, 512, 8, 8, 32, gfx12, true},     Case{64, 512, 32, 8, 8, gfx12, false},
+         Case{64, 1024, 64, 8, 1, gfx12, false},   Case{64, 2048, 64, 8, 8, gfx12, true},
+         Case{96, 4096, 8, 8, 1, gfx12, true},     Case{128, 4096, 8, 8, 8, gfx12, false},
+         Case{256, 4096, 8, 8, 1, gfx12, false},   Case{128, 4096, 8, 8, 1, gfx11, true},
+         Case{96, 4096, 32, 8, 1, gfx11, false},   Case{64, 4096, 64, 8, 8, gfx1100, true},
+         Case{64, 32768, 64, 8, 1, gfx1100, true}, Case{64, 32768, 64, 8, 8, gfx1100, false}})
+    {
+        GraphSpec spec = decodeGraph();
+        spec.queryLength = c.queryLength;
+        spec.kvLength = c.kvLength;
+        spec.queryHeads = c.queryHeads;
+        spec.kvHeads = c.kvHeads;
+        spec.batch = c.batch;
+        EXPECT_EQ(matchesKernel(spec, decodeKernel(128), c.device), c.decode)
+            << c.device.arch << " Sq " << c.queryLength << " Sk " << c.kvLength << " Hq "
+            << c.queryHeads << " Hkv " << c.kvHeads << " B " << c.batch;
+        // The engines split the rule's problem space exactly: prefill serves the rest.
+        EXPECT_EQ(matchesKernel(spec, prefillKernel(128, 128), c.device), !c.decode)
+            << c.device.arch << " Sq " << c.queryLength << " Sk " << c.kvLength << " Hq "
+            << c.queryHeads << " Hkv " << c.kvHeads << " B " << c.batch;
+    }
+    // visible_keys is the window's span: a bottom-right 1024-key window over 4096 keys
+    // sees 1087 keys, under gfx12's 2048-key threshold.
+    GraphSpec window = decodeGraph();
+    window.queryLength = 64;
+    window.queryHeads = 64;
+    window.kvHeads = 8;
+    EXPECT_TRUE(matchesKernel(window, decodeKernel(128), gfx12));
+    window.bottomRight = true;
+    window.leftBound = 1023;
+    window.rightBound = 0;
+    EXPECT_FALSE(matchesKernel(window, decodeKernel(128), gfx12));
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersTheMaskSpecializedObject)
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeObjectIsTheDispatcherBucket)
 {
-    EXPECT_GT(scoreOf(runtimeKernel(128, "none")), scoreOf(runtimeKernel(128, "window")));
-    EXPECT_GT(scoreOf(runtimeKernel(128, "causal")), scoreOf(runtimeKernel(128, "window")));
+    // wmma_fmha_decode_bucket: the smallest of 64/128/256 holding both widths whose
+    // narrowest served Q/K width (16/72/136) is at most head_dim_q.
+    struct Case
+    {
+        int64_t headDimQ;
+        int64_t headDimV;
+        int64_t bucket; // 0: no decode object serves it
+    };
+    for(const Case& c : {Case{64, 64, 64},
+                         Case{16, 64, 64},
+                         Case{8, 8, 0},
+                         Case{96, 96, 128},
+                         Case{72, 128, 128},
+                         Case{64, 128, 0},
+                         Case{192, 192, 256},
+                         Case{136, 64, 256},
+                         Case{128, 256, 0}})
+    {
+        GraphSpec spec = decodeGraph();
+        spec.headSize = c.headDimQ;
+        spec.vHeadSize = c.headDimV;
+        for(const int64_t bucket : {64, 128, 256})
+        {
+            EXPECT_EQ(matchesKernel(spec, decodeKernel(bucket)), bucket == c.bucket)
+                << "Q " << c.headDimQ << " V " << c.headDimV << " bucket " << bucket;
+        }
+    }
 }
 
-// An exact-size standard object (runtime_head_dims 0), as shipped for 192/256.
-KernelSpec exactKernel(int64_t headSize, std::string maskMode)
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeNeedsPackableHeadCounts)
 {
-    KernelSpec spec;
-    spec.headSize = headSize;
-    spec.maskMode = std::move(maskMode);
-    return spec;
+    // P = max(Hkv, Hv) pack groups: one of the two head counts divides the other.
+    GraphSpec packs = decodeGraph();
+    packs.vHeads = 16;
+    EXPECT_TRUE(matchesKernel(packs, decodeKernel(128)));
+    GraphSpec mixed = decodeGraph();
+    mixed.queryHeads = 24;
+    mixed.kvHeads = 4;
+    mixed.vHeads = 6;
+    EXPECT_FALSE(matchesKernel(mixed, decodeKernel(128)));
+    EXPECT_TRUE(matchesKernel(mixed, prefillKernel(128, 128)));
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersAnExactObjectAtTheSameWidth)
+TEST(TestGfx1151WmmaAttentionMatchers, DecodeWorkspaceMirrorsTheDispatcherPlan)
 {
-    // Over the runtime object of the same head_size, whatever the masks.
-    EXPECT_GT(scoreOf(exactKernel(256, "window")), scoreOf(runtimeKernel(256, "none")));
-    EXPECT_GT(scoreOf(exactKernel(256, "none")), scoreOf(runtimeKernel(256, "none")));
-    // Over a larger bucket.
-    EXPECT_GT(scoreOf(exactKernel(192, "window")), scoreOf(runtimeKernel(256, "none")));
-    // The mask specialization still separates two exact objects.
-    EXPECT_GT(scoreOf(exactKernel(256, "causal")), scoreOf(exactKernel(256, "window")));
-    // And the transposed path still outranks everything standard.
-    EXPECT_GT(scoreOf(transposedKernel(128, "none")), scoreOf(exactKernel(256, "none")));
-    EXPECT_GT(scoreOf(transposedKernel(128, "none")), scoreOf(runtimeKernel(64, "none")));
+    // decode_launch_plan(...).workspace for these problems (rocKE host helpers, num_cus =
+    // 2 x multiProcessorCount) without the WS_CNT counter region: every multi-split
+    // launch merges in the merge kernel, so the workspace holds only the split partials,
+    // B * Hq * Sq * splits * (Dv + 1) FP32 values.
+    const Device gfx1201{"gfx1201", 32};
+    // 8 splits.
+    EXPECT_EQ(workspaceOf(decodeGraph(), decodeKernel(128), gfx1201), 132096U);
+    // A bottom-right 1024-key window: 2 splits (still merged by the merge kernel).
+    GraphSpec window = decodeGraph();
+    window.bottomRight = true;
+    window.leftBound = 1023;
+    window.rightBound = 0;
+    EXPECT_EQ(workspaceOf(window, decodeKernel(128), gfx1201), 33024U);
+    // Batch 4: 2 splits.
+    GraphSpec batch4 = decodeGraph();
+    batch4.batch = 4;
+    EXPECT_EQ(workspaceOf(batch4, decodeKernel(128), gfx1201), 132096U);
+    // Batch 8 fills the device with one split: no workspace.
+    GraphSpec batch8 = decodeGraph();
+    batch8.batch = 8;
+    EXPECT_EQ(workspaceOf(batch8, decodeKernel(128), gfx1201), 0U);
+    // gfx11 D256 (dv_split 2), Sq 4, 48 WGPs: 12 splits.
+    GraphSpec d256 = decodeGraph();
+    d256.queryHeads = 16;
+    d256.kvHeads = 2;
+    d256.queryLength = 4;
+    d256.kvLength = 8192;
+    d256.headSize = 256;
+    EXPECT_EQ(workspaceOf(d256, decodeKernel(256, "none", 2), Device{"gfx1100", 48}), 789504U);
+    // Prefill takes no workspace.
+    EXPECT_EQ(workspaceOf(GraphSpec{}, prefillKernel(96, 96), gfx1201), 0U);
+}
+
+// -----------------------------------------------------------------------------
+// Score and selection
+// -----------------------------------------------------------------------------
+
+TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersTheTightestBucketPair)
+{
+    EXPECT_GT(scoreOf(prefillKernel(64, 64)), scoreOf(prefillKernel(96, 96)));
+    EXPECT_GT(scoreOf(prefillKernel(128, 128)), scoreOf(prefillKernel(192, 128)));
+    EXPECT_GT(scoreOf(prefillKernel(192, 128)), scoreOf(prefillKernel(256, 128)));
+    EXPECT_GT(scoreOf(prefillKernel(256, 128)), scoreOf(prefillKernel(256, 256)));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, ScorePrefersANoMaskObjectOnlyForUnmaskedGraphs)
+{
+    const auto none = prefillKernel(128, 128, "none", "none");
+    const auto causal = prefillKernel(128, 128);
+    EXPECT_GT(scoreOf(none, unmaskedGraph()), scoreOf(causal, unmaskedGraph()));
+    // The bucket still outranks the mask specialization.
+    EXPECT_GT(scoreOf(prefillKernel(96, 96), unmaskedGraph()), scoreOf(none, unmaskedGraph()));
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, ScoreRanksAnEligibleDecodeObjectFirst)
+{
+    EXPECT_GT(scoreOf(decodeKernel(256), decodeGraph()),
+              scoreOf(prefillKernel(64, 64), decodeGraph()));
 }
 
 using CatalogEntry = std::pair<std::string, KernelSpec>;
 
-// The shipped standard FP16 objects, after configs/gfx1151_wmma_attention.yaml,
-// under their names without the dtype and arch affixes.
-std::vector<CatalogEntry> shippedStandardCatalog()
+/// The shipped FP16 no-bias objects of one family (configs/gfx1151_wmma_attention.yaml),
+/// under their descriptor names without the dtype and bias affixes.
+std::vector<CatalogEntry> shippedCatalog(bool gfx12)
 {
     std::vector<CatalogEntry> catalog;
-    for(const int64_t bucket : {64, 96, 128, 160, 256})
+    for(const auto& [q, v] : std::vector<std::pair<int64_t, int64_t>>{
+            {64, 64}, {96, 96}, {128, 128}, {192, 128}, {256, 128}, {256, 256}})
     {
-        const std::string prefix = "dmax" + std::to_string(bucket) + "_";
-        catalog.emplace_back(prefix + "none", runtimeKernel(bucket, "none"));
-        if(bucket > 128)
+        auto spec = prefillKernel(q, v);
+        if(gfx12 && v <= 128)
         {
-            catalog.emplace_back(prefix + "causal", runtimeKernel(bucket, "causal"));
+            spec.blockM = 128; // gfx12 keeps an unsplit Q up to 256 while V fits 128
         }
-        catalog.emplace_back(prefix + "window", runtimeKernel(bucket, "window"));
-        catalog.emplace_back(prefix + "window_bias_f32", runtimeKernel(bucket, "window", "f32"));
-        catalog.emplace_back(prefix + "window_bias_q", runtimeKernel(bucket, "window", "q"));
+        catalog.emplace_back("prefill_d" + std::to_string(q) + "v" + std::to_string(v), spec);
     }
-    for(const int64_t headSize : {192, 256})
+    for(const int64_t bucket : {64, 128, 256})
     {
-        const std::string prefix = "d" + std::to_string(headSize) + "_";
-        for(const char* mask : {"none", "causal", "window"})
+        int64_t dvSplit = 1;
+        if(bucket == 256)
         {
-            catalog.emplace_back(prefix + mask, exactKernel(headSize, mask));
+            dvSplit = gfx12 ? 4 : 2;
         }
+        catalog.emplace_back("decode_d" + std::to_string(bucket),
+                             decodeKernel(bucket, "none", dvSplit));
     }
     return catalog;
 }
 
-// The shipped standard object the engine selects for @p graphSpec: the highest
-// score among the matching ones. A tie names every tied object, joined by '|'.
-std::string selectedObject(const GraphSpec& graphSpec)
+/// The shipped object the engine selects for @p graphSpec on @p device: the highest
+/// score among the matching ones. A tie names every tied object, joined by '|'.
+std::string selectedObject(const GraphSpec& graphSpec, const Device& device = {})
 {
     std::string best;
     double bestScore = 0.0;
-    for(const auto& [name, spec] : shippedStandardCatalog())
+    for(const auto& [name, spec] : shippedCatalog(device.arch.rfind("gfx12", 0) == 0))
     {
-        if(!matchesKernel(graphSpec, spec))
+        if(!matchesKernel(graphSpec, spec, device))
         {
             continue;
         }
-        const double score = scoreOf(spec);
+        const double score = scoreOf(spec, graphSpec);
         if(best.empty() || score > bestScore)
         {
             best = name;
@@ -922,46 +1110,364 @@ std::string selectedObject(const GraphSpec& graphSpec)
     return best;
 }
 
-TEST(TestGfx1151WmmaAttentionMatchers, SelectsTheShippedStandardObject)
+TEST(TestGfx1151WmmaAttentionMatchers, SelectsTheShippedObject)
 {
-    GraphSpec d256 = unmaskedGraph();
-    d256.headSize = 256;
-    EXPECT_EQ(selectedObject(d256), "d256_none");
+    struct Case
+    {
+        int64_t headDimQ;
+        int64_t headDimV;
+        const char* prefill;
+    };
+    // gfx1151.py prefill_head_buckets over the shipped bucket pairs.
+    for(const Case& c : {Case{64, 64, "prefill_d64v64"},
+                         Case{80, 80, "prefill_d96v96"},
+                         Case{64, 128, "prefill_d128v128"},
+                         Case{136, 64, "prefill_d192v128"},
+                         Case{192, 128, "prefill_d192v128"},
+                         Case{200, 128, "prefill_d256v128"},
+                         Case{256, 96, "prefill_d256v128"},
+                         Case{128, 192, "prefill_d256v256"},
+                         Case{256, 256, "prefill_d256v256"}})
+    {
+        for(const Device& device : {Device{"gfx1151", 20}, Device{"gfx1201", 32}})
+        {
+            // 128 query rows of 8 heads x 2 batches fill both devices' prefill CTAs, so
+            // the dispatcher's rule picks the prefill kernel.
+            GraphSpec spec;
+            spec.queryLength = 128;
+            spec.headSize = c.headDimQ;
+            spec.vHeadSize = c.headDimV;
+            EXPECT_EQ(selectedObject(spec, device), c.prefill)
+                << "Q " << c.headDimQ << " V " << c.headDimV << " " << device.arch;
+        }
+    }
 
-    GraphSpec d240 = unmaskedGraph();
-    d240.headSize = 240;
-    EXPECT_EQ(selectedObject(d240), "dmax256_none");
+    EXPECT_EQ(selectedObject(decodeGraph()), "decode_d128");
+    GraphSpec d96 = decodeGraph();
+    d96.headSize = 96;
+    EXPECT_EQ(selectedObject(d96), "decode_d128");
+    // No decode bucket serves Q/K 64 beside V/O 128: prefill takes it.
+    GraphSpec q64v128 = decodeGraph();
+    q64v128.headSize = 64;
+    q64v128.vHeadSize = 128;
+    EXPECT_EQ(selectedObject(q64v128), "prefill_d128v128");
+}
 
-    GraphSpec d192Bias;
-    d192Bias.headSize = 192;
-    d192Bias.bias = packedBias({2, 8, 33, 65});
-    EXPECT_EQ(selectedObject(d192Bias), "dmax256_window_bias_f32");
+// -----------------------------------------------------------------------------
+// Dispatch
+// -----------------------------------------------------------------------------
 
-    GraphSpec d160Causal = causalGraph();
-    d160Causal.headSize = 160;
-    EXPECT_EQ(selectedObject(d160Causal), "dmax160_causal");
+// Unknown catalog metadata fails at plan build, never at launch.
+TEST(TestGfx1151WmmaAttentionMatchers, DispatchRefusesIncompleteMetadata)
+{
+    const Fixture fixture(GraphSpec{});
+    const auto bound = fixture.bound();
+    ASSERT_TRUE(bound.has_value());
+    auto kernel = makeKernel(prefillKernel(96, 96));
+    kernel.metadata.erase("block_m");
+    const auto& handler = dispatchHandler(PREFILL_SYMBOLS);
+    EXPECT_THROW(handler.workspaceBytes(fixture.context(), *bound, kernel),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(handler.prepare(fixture.context(), *bound, kernel),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
 
-    GraphSpec d96Causal = causalGraph();
-    d96Causal.headSize = 96;
-    EXPECT_EQ(selectedObject(d96Causal), "dmax96_window");
+// The decode engine launches two kernels, the prefill engine one: the launch names are
+// what the state manager checks every kernel of an engine against.
+TEST(TestGfx1151WmmaAttentionMatchers, EnginesDeclareTheirLaunchNames)
+{
+    EXPECT_TRUE(dispatchHandler(PREFILL_SYMBOLS).launchNames().empty());
+    EXPECT_EQ(dispatchHandler(DECODE_SYMBOLS).launchNames(),
+              (std::set<std::string>{"decode", "merge"}));
+}
 
-    GraphSpec d256Causal = causalGraph();
-    d256Causal.headSize = 256;
-    EXPECT_EQ(selectedObject(d256Causal), "d256_causal");
+// An engine refuses the other engine's kernel: its matcher never admits one, and its
+// handler fails at plan build rather than launching it with the wrong shape of launches.
+TEST(TestGfx1151WmmaAttentionMatchers, EachEngineRefusesTheOtherEnginesKernel)
+{
+    const Fixture fixture(decodeGraph());
+    const auto bound = fixture.bound();
+    ASSERT_TRUE(bound.has_value());
+    const auto decode = makeKernel(decodeKernel(128));
+    const auto prefill = makeKernel(prefillKernel(128, 128));
+    EXPECT_TRUE(hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(DECODE_SYMBOLS.kernelMatcher))(fixture.context(), *bound, decode));
+    EXPECT_FALSE(hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(PREFILL_SYMBOLS.kernelMatcher))(fixture.context(), *bound, decode));
+    EXPECT_FALSE(hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(DECODE_SYMBOLS.kernelMatcher))(fixture.context(), *bound, prefill));
+    EXPECT_THROW(dispatchHandler(PREFILL_SYMBOLS).workspaceBytes(fixture.context(), *bound, decode),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(dispatchHandler(DECODE_SYMBOLS).workspaceBytes(fixture.context(), *bound, prefill),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
 
-    GraphSpec d192Window;
-    d192Window.headSize = 192;
-    EXPECT_EQ(selectedObject(d192Window), "d192_window");
+// -----------------------------------------------------------------------------
+// Kernel ABIs. A wrong argument count, order or name is not a launch error: the
+// kernel reads the kernarg segment as it was compiled, so the failure is misread
+// arguments with a success status. prepare() compares the list the native marshals
+// against the descriptor's (requireSignatureMatch: kind, size and name), so a
+// descriptor recording the ABI rocKE declares must pass that comparison and fail only
+// on the absent archive. No device: the archive named here does not exist.
+// -----------------------------------------------------------------------------
 
-    // An exact object needs V to share the K heads.
-    GraphSpec d256OwnValueHeads = unmaskedGraph();
-    d256OwnValueHeads.headSize = 256;
-    d256OwnValueHeads.vHeads = 1;
-    EXPECT_EQ(selectedObject(d256OwnValueHeads), "dmax256_none");
+constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
-    GraphSpec d80 = unmaskedGraph();
-    d80.headSize = 80;
-    EXPECT_EQ(selectedObject(d80), "dmax96_none");
+KernelArgument pointerArgument(const char* name)
+{
+    return KernelArgument{"global_buffer", 8, 0, name};
+}
+
+KernelArgument scalarArgument(const std::string& name)
+{
+    return KernelArgument{"by_value", 4, 0, name};
+}
+
+void appendScalars(std::vector<KernelArgument>& abi, std::initializer_list<const char*> names)
+{
+    for(const char* name : names)
+    {
+        abi.push_back(scalarArgument(name));
+    }
+}
+
+void appendStrides(std::vector<KernelArgument>& abi, std::initializer_list<const char*> tensors)
+{
+    for(const char* tensor : tensors)
+    {
+        for(const char* axis : {"batch", "token", "head"})
+        {
+            abi.push_back(scalarArgument(std::string("stride_") + tensor + "_" + axis));
+        }
+    }
+}
+
+void appendBias(std::vector<KernelArgument>& abi)
+{
+    abi.push_back(pointerArgument("attn_bias_ptr"));
+    appendScalars(abi, {"bias_stride_b", "bias_stride_h", "bias_stride_q"});
+}
+
+/// wmma_fmha_fwd_v2._declare_params for a shipped object (no softcap, sinks, ALiBi).
+std::vector<KernelArgument> rockePrefillAbi(bool bias)
+{
+    std::vector<KernelArgument> abi;
+    for(const char* name : {"Q", "K", "V", "O", "LSE"})
+    {
+        abi.push_back(pointerArgument(name));
+    }
+    abi.push_back(scalarArgument("scale_log2"));
+    appendScalars(abi,
+                  {"batch",
+                   "seqlen_q",
+                   "seqlen_k",
+                   "num_query_heads",
+                   "num_kv_heads",
+                   "num_v_heads",
+                   "head_dim_q",
+                   "head_dim_v",
+                   "bottom_right",
+                   "window_left",
+                   "window_right",
+                   "write_lse"});
+    appendStrides(abi, {"q", "k", "v", "o", "lse"});
+    if(bias)
+    {
+        appendBias(abi);
+    }
+    return abi;
+}
+
+/// wmma_fmha_decode._declare_params for a shipped object.
+std::vector<KernelArgument> rockeDecodeAbi(bool bias)
+{
+    std::vector<KernelArgument> abi;
+    for(const char* name : {"Q", "K", "V", "O", "LSE", "WS_O", "WS_LSE", "WS_CNT"})
+    {
+        abi.push_back(pointerArgument(name));
+    }
+    abi.push_back(scalarArgument("scale_log2"));
+    appendScalars(abi,
+                  {"seqlen_q",
+                   "seqlen_k",
+                   "num_query_heads",
+                   "num_kv_heads",
+                   "num_v_heads",
+                   "head_dim_q",
+                   "head_dim_v",
+                   "bottom_right",
+                   "window_left",
+                   "window_right",
+                   "write_lse",
+                   "num_splits"});
+    appendStrides(abi, {"q", "k", "v", "o", "lse"});
+    if(bias)
+    {
+        appendBias(abi);
+    }
+    return abi;
+}
+
+/// wmma_fmha_decode._declare_merge_params (dense).
+std::vector<KernelArgument> rockeMergeAbi()
+{
+    std::vector<KernelArgument> abi;
+    for(const char* name : {"O", "LSE", "WS_O", "WS_LSE"})
+    {
+        abi.push_back(pointerArgument(name));
+    }
+    appendScalars(abi, {"seqlen_q", "num_query_heads", "head_dim_v", "num_splits", "write_lse"});
+    appendStrides(abi, {"o", "lse"});
+    return abi;
+}
+
+/// A kpack descriptor of @p spec recording @p recorded. A decode object carries its two
+/// launches in `sources`, as hkp_pack writes them: "decode" with @p recorded, and "merge"
+/// with @p merge, out of the same archive and toc key.
+KernelDefinition kpackKernel(const KernelSpec& spec,
+                             const std::vector<KernelArgument>& recorded,
+                             const std::vector<KernelArgument>& merge = rockeMergeAbi())
+{
+    auto kernel = makeKernel(spec);
+    kernel.name = "wmma_attention.signature_fixture";
+    kernel.source.kind = KernelSourceKind::KPACK;
+    kernel.source.library = "there-is-no-archive-here.kpack";
+    kernel.source.tocKey = "toc#0";
+    kernel.source.symbol = isDecode(spec) ? "wmma_fmha_decode" : "wmma_fmha_fwd_v2";
+    kernel.source.signature = recorded;
+    // An existing tree, so the containment check passes and the signature comparison
+    // runs; the archive itself is absent from it.
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    if(isDecode(spec))
+    {
+        KernelSource mergeSource = kernel.source;
+        mergeSource.symbol = "wmma_fmha_decode_merge";
+        mergeSource.signature = merge;
+        kernel.sources = {{"decode", kernel.source}, {"merge", std::move(mergeSource)}};
+    }
+    return kernel;
+}
+
+/// What prepare() throws for @p kernel against @p graphSpec on a gfx1201 (32 WGP) device;
+/// empty when it throws nothing, which no case expects (no archive exists).
+std::string prepareFailure(const GraphSpec& graphSpec, const KernelDefinition& kernel)
+{
+    const Fixture fixture(graphSpec, Device{"gfx1201", 32});
+    const auto bound = fixture.bound();
+    EXPECT_TRUE(bound.has_value()) << "the fixture graph does not match, so prepare() never ran";
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    try
+    {
+        dispatchHandlerOf(kernel).prepare(fixture.context(), *bound, kernel);
+    }
+    catch(const std::exception& error)
+    {
+        return error.what();
+    }
+    return {};
+}
+
+/// Asserts prepare() got past every signature comparison and failed only in the loader,
+/// which names the symbol it was opening ("..., symbol '<symbol>': ...").
+void expectPastTheSignatureCheck(const std::string& failure, const char* what)
+{
+    ASSERT_FALSE(failure.empty()) << what
+                                  << ": the archive does not exist, so prepare() "
+                                     "cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << what << ": the native refused the ABI rocKE declares: " << failure;
+    EXPECT_TRUE(failure.find(", symbol 'wmma_fmha_fwd_v2':") != std::string::npos
+                || failure.find(", symbol 'wmma_fmha_decode':") != std::string::npos)
+        << what << ": prepare() failed before loading the primary: " << failure;
+}
+
+void expectSignatureRefusal(const std::string& failure, const char* what)
+{
+    EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
+        << what << ", but the failure was: " << failure;
+}
+
+GraphSpec biasedGraph(GraphSpec spec)
+{
+    spec.bias = packedBias({spec.batch, spec.queryHeads, spec.queryLength, spec.kvLength});
+    return spec;
+}
+
+TEST(TestGfx1151WmmaAttentionSignature, PrefillMarshalsTheRockeAbi)
+{
+    expectPastTheSignatureCheck(
+        prepareFailure(GraphSpec{}, kpackKernel(prefillKernel(96, 96), rockePrefillAbi(false))),
+        "prefill");
+    expectPastTheSignatureCheck(
+        prepareFailure(biasedGraph(GraphSpec{}),
+                       kpackKernel(prefillKernel(96, 96, "f32"), rockePrefillAbi(true))),
+        "prefill with bias");
+}
+
+TEST(TestGfx1151WmmaAttentionSignature, DecodeAndMergeMarshalTheRockeAbis)
+{
+    // decodeGraph() runs 8 splits on this device, so the merge launch happens too.
+    ASSERT_EQ(workspaceOf(decodeGraph(), decodeKernel(128), Device{"gfx1201", 32}), 132096U);
+    expectPastTheSignatureCheck(
+        prepareFailure(decodeGraph(), kpackKernel(decodeKernel(128), rockeDecodeAbi(false))),
+        "decode");
+    expectPastTheSignatureCheck(
+        prepareFailure(biasedGraph(decodeGraph()),
+                       kpackKernel(decodeKernel(128, "f32"), rockeDecodeAbi(true))),
+        "decode with bias");
+}
+
+// The merge launch's list is the one packaged under `sources["merge"]` of the decode
+// object; a merge list in another order or of another length is refused, and so is a
+// decode object packaged without the launch.
+TEST(TestGfx1151WmmaAttentionSignature, MergeLaunchIsCheckedUnderItsLaunchName)
+{
+    auto swapped = rockeMergeAbi();
+    std::swap(swapped.at(7), swapped.at(8)); // num_splits <-> write_lse
+    expectSignatureRefusal(
+        prepareFailure(decodeGraph(),
+                       kpackKernel(decodeKernel(128), rockeDecodeAbi(false), swapped)),
+        "merge with num_splits and write_lse exchanged");
+
+    auto dropped = rockeMergeAbi();
+    dropped.pop_back();
+    expectSignatureRefusal(
+        prepareFailure(decodeGraph(),
+                       kpackKernel(decodeKernel(128), rockeDecodeAbi(false), dropped)),
+        "merge without its last stride");
+
+    auto noMerge = kpackKernel(decodeKernel(128), rockeDecodeAbi(false));
+    noMerge.sources.erase("merge");
+    const std::string failure = prepareFailure(decodeGraph(), noMerge);
+    EXPECT_NE(failure.find("no launch 'merge'"), std::string::npos) << failure;
+}
+
+TEST(TestGfx1151WmmaAttentionSignature, RefusesEachExchangeOfTwoLikeDecodeSlots)
+{
+    // Kind and size agree position by position, so only the names separate these from
+    // the shipped ABI; accepted, the kernel would read num_splits as write_lse, or K as Q.
+    const auto abi = rockeDecodeAbi(false);
+    for(size_t first = 0; first < abi.size(); ++first)
+    {
+        for(size_t second = first + 1; second < abi.size(); ++second)
+        {
+            if(abi.at(first).kind != abi.at(second).kind)
+            {
+                continue;
+            }
+            auto exchanged = abi;
+            std::swap(exchanged.at(first), exchanged.at(second));
+            const std::string what = abi.at(first).name + " <-> " + abi.at(second).name;
+            expectSignatureRefusal(
+                prepareFailure(decodeGraph(), kpackKernel(decodeKernel(128), exchanged)),
+                what.c_str());
+        }
+    }
 }
 
 } // namespace

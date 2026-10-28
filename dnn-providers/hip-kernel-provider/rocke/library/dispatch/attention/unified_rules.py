@@ -22,6 +22,8 @@ from kernels.common.attention_unified import (
     _wave_page_id_load_3d,
 )
 
+from rocke.dispatch.tuning import WavesPerEuSpace
+
 from .axes import (
     DEAD_END_KNOBS,
     KNOWN_WRONG_KNOBS,
@@ -50,7 +52,7 @@ from .tuning_specs import (
     make_explicit_attention_3d_specs,
     resolve_num_segments,
 )
-from .waves import FULL_WAVES, PRODUCTION_WAVES, WavesPerEuSpace
+from .waves import FULL_WAVES, PRODUCTION_WAVES
 
 TUNING_ALGORITHM = "unified_tuning"
 
@@ -392,8 +394,17 @@ class UnifiedSpace(WavesPerEuSpace):
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
                 if name not in recorded
             },
+            # ``emit_lse`` is an output the problem selects, not a default that
+            # knobs are a delta against: keeping it out leaves every split-KV
+            # config_key, and so every stored pin, as before the field existed.
             "reduce": (
-                None if reduce is None else dict(_declared_defaults(type(reduce)))
+                None
+                if reduce is None
+                else {
+                    name: value
+                    for name, value in _declared_defaults(type(reduce))
+                    if name != "emit_lse"
+                }
             ),
         }
 
