@@ -77,25 +77,31 @@ struct StubbedDeviceOp
     std::string GetTypeString() { return typeString; }
 };
 
+static std::vector<std::unique_ptr<StubbedDeviceOp>>
+MakeStubbedInstances(const std::vector<std::string>& names)
+{
+    std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
+    ops.reserve(names.size());
+
+    std::transform(names.begin(), names.end(), std::back_inserter(ops), [&](auto& name) {
+        return std::make_unique<StubbedDeviceOp>(name);
+    });
+
+    return ops;
+}
+
+// IsCKArgsSupported keeps the first GetInstances() result per DeviceOpType, so a
+// stub's instance list must be fixed, as a CK instance factory's is.
 struct StubbedDeviceOps
 {
-    static std::vector<std::string> deviceOps;
-
     static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
     {
-        std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
-        ops.reserve(deviceOps.size());
-
-        std::transform(deviceOps.begin(),
-                       deviceOps.end(),
-                       std::back_inserter(ops),
-                       [&](auto& deviceOp) { return std::make_unique<StubbedDeviceOp>(deviceOp); });
-
-        return ops;
+        std::vector<std::string> names;
+        for(const auto& tc : GetTestCases())
+            names.push_back(tc.instanceToCheck);
+        return MakeStubbedInstances(names);
     }
 };
-
-std::vector<std::string> StubbedDeviceOps::deviceOps = {};
 
 struct StubbedCKArgs
 {
@@ -121,10 +127,6 @@ protected:
     void TestParsing()
     {
         auto testCase = GetParam();
-
-        // Set up stubbed instances to match test
-        DeviceOpType::deviceOps.clear();
-        DeviceOpType::deviceOps.push_back(testCase.instanceToCheck);
 
         bool success;
         if(testCase.checkSplitK)
@@ -254,6 +256,28 @@ static std::vector<SplitKGenericTestCase> GetSplitKGenericTestCases()
 }
 
 /**
+ * @brief Fixed instance list for the split_k tests
+ *
+ * Holds every kernel the parameterized cases register, plus the kernels the
+ * direct tests use. "NonExistentKernel" has no supported split_k values and is
+ * left out, so it is never found.
+ */
+struct StubbedSplitKDeviceOps
+{
+    static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
+    {
+        std::vector<std::string> names = {"SomeKernel", "TestKernel", "KernelA", "KernelB"};
+        for(const auto& tc : GetSplitKGenericTestCases())
+        {
+            if(!tc.supportedSplitKs.empty() &&
+               std::find(names.begin(), names.end(), tc.kernelId) == names.end())
+                names.push_back(tc.kernelId);
+        }
+        return MakeStubbedInstances(names);
+    }
+};
+
+/**
  * @brief Parameterized test fixture for IsCKSplitKSupportedGeneric
  */
 class CPU_SplitKGenericTest_NONE : public ::testing::TestWithParam<SplitKGenericTestCase>
@@ -262,14 +286,12 @@ protected:
     void SetUp() override
     {
         // Clear state before each test
-        StubbedDeviceOps::deviceOps.clear();
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
     }
 
     void TearDown() override
     {
         // Clean up after each test
-        StubbedDeviceOps::deviceOps.clear();
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
     }
 };
@@ -280,18 +302,16 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto testCase = GetParam();
 
-    // Set up the stubbed device ops to include the kernel we're testing
     if(!testCase.supportedSplitKs.empty())
     {
-        StubbedDeviceOps::deviceOps.push_back(testCase.kernelId);
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[testCase.kernelId] =
             testCase.supportedSplitKs;
     }
 
     // Test IsCKSplitKSupported (single data type version)
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, testCase.kernelId, testCase.splitK);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, testCase.kernelId, testCase.splitK);
 
     EXPECT_EQ(result, testCase.expectedResult)
         << "Failed for kernel: " << testCase.kernelId << " split_k: " << testCase.splitK;
@@ -310,28 +330,19 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 class CPU_SplitKGenericDirectTest_NONE : public ::testing::Test
 {
 protected:
-    void SetUp() override
-    {
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void SetUp() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 
-    void TearDown() override
-    {
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void TearDown() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 };
 
 TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    StubbedDeviceOps::deviceOps.push_back("SomeKernel");
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel["SomeKernel"] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, "", 1);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, "", 1);
 
     EXPECT_FALSE(result) << "Empty kernel_id should return false";
 #else
@@ -343,13 +354,12 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId = "TestKernel";
-    StubbedDeviceOps::deviceOps.push_back(kernelId);
     // Only support positive split_k values
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernelId, 0);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernelId, 0);
 
     // split_k=0 is not in the supported set, so should return false
     EXPECT_FALSE(result) << "split_k=0 should not be supported";
@@ -361,13 +371,12 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    const std::string kernelId = "TestKernel";
-    StubbedDeviceOps::deviceOps.push_back(kernelId);
+    const std::string kernelId                                           = "TestKernel";
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernelId, -1);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernelId, -1);
 
     // split_k=-1 is not in the supported set, so should return false
     EXPECT_FALSE(result) << "Negative split_k should not be supported";
@@ -382,9 +391,6 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
     const std::string kernel1 = "KernelA";
     const std::string kernel2 = "KernelB";
 
-    StubbedDeviceOps::deviceOps.push_back(kernel1);
-    StubbedDeviceOps::deviceOps.push_back(kernel2);
-
     // Kernel1 supports split_k = 1, 2, 4
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernel1] = {1, 2, 4};
     // Kernel2 supports split_k = 1, 8, 16
@@ -392,25 +398,25 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 
     // Test kernel1 with its supported values
     // Note: Use parentheses around function call to prevent macro from misinterpreting commas
-    bool k1_s2 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel1, 2);
+    bool k1_s2 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel1, 2);
     EXPECT_TRUE(k1_s2);
 
-    bool k1_s8 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel1, 8);
+    bool k1_s8 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel1, 8);
     EXPECT_FALSE(k1_s8);
 
     // Test kernel2 with its supported values
-    bool k2_s8 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel2, 8);
+    bool k2_s8 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel2, 8);
     EXPECT_TRUE(k2_s8);
 
-    bool k2_s4 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel2, 4);
+    bool k2_s4 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel2, 4);
     EXPECT_FALSE(k2_s4);
 #else
     GTEST_SKIP();
