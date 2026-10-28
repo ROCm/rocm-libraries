@@ -3428,6 +3428,37 @@ def cases():
             use_i64_kv_addr=True,
         ),
     )
+    # LSE-on tiled 2D, one case per epilogue branch (transposed 32x32x8 direct
+    # store, non-transposed 32x32x8 via Acc_lds, narrow 16x16 striped). The
+    # LSE-off cases above stay byte-identical.
+    for _branch, _branch_kw in (
+        (
+            "transposed32",
+            dict(
+                use_mfma_32x32x8=True,
+                use_transposed_qk_32x32=True,
+                block_m_per_warp=32,
+            ),
+        ),
+        ("mfma32", dict(use_mfma_32x32x8=True, block_m_per_warp=32)),
+        ("striped16", {}),
+    ):
+        add(
+            "attention",
+            f"attention/gfx942/2d_lse_{_branch}_bf16_d128",
+            "gfx942",
+            build_attention_2d(
+                f"irhash_attn_942_2d_lse_{_branch}_bf16",
+                "gfx942",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                emit_lse=True,
+                **_branch_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/3d_fp16_d128_b64",
