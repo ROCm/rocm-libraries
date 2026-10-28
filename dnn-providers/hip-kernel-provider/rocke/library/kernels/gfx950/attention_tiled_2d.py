@@ -4781,27 +4781,6 @@ def build_unified_attention_2d_tiled(
         head=op_qh,
         dim=b.const_i32(0),
     )
-    if spec.emit_lse:
-        # Slot r's row is wave_row_base + _in_warp_row(r) (= hoist_row[r]); the
-        # 16 lanes of a row group agree, lane_col == 0 (one per lane_rg) writes.
-        lse_writer16 = b.cmp_eq(lane_col, b.const_i32(0))
-        for reg in range(REGS_PER_LANE):
-            with b.scf_if(b.land(lse_writer16, hoist_row_ok[reg])):
-                lse_store(
-                    b,
-                    lse,
-                    b.add(
-                        b.mul(
-                            b.add(cu_q_start, hoist_qp_r[reg]),
-                            b.const_i32(NUM_QH),
-                        ),
-                        hoist_qh_r[reg],
-                    ),
-                    m_final[reg],
-                    l_final[reg],
-                    row_has_mass=lse_row_has_mass(b, l_final[reg]),
-                )
-
     for stripe in range(OUT_STRIPES):
         n_start = stripe * N_TILES_PER_STRIPE
         # ---- stage 1: write this stripe's N-tiles into Acc_lds ----
@@ -4838,6 +4817,31 @@ def build_unified_attention_2d_tiled(
         # ---- stage 3: sync so the next stripe can overwrite Acc_lds ----
         if stripe + 1 < OUT_STRIPES:
             b.sync()
+
+    if spec.emit_lse:
+        # After the O stripes, not before: emitted ahead of them, the LSE store
+        # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
+        # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
+        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # Slot r's row is wave_row_base + _in_warp_row(r) (= hoist_row[r]); the
+        # 16 lanes of a row group agree, lane_col == 0 (one per lane_rg) writes.
+        lse_writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for reg in range(REGS_PER_LANE):
+            with b.scf_if(b.land(lse_writer16, hoist_row_ok[reg])):
+                lse_store(
+                    b,
+                    lse,
+                    b.add(
+                        b.mul(
+                            b.add(cu_q_start, hoist_qp_r[reg]),
+                            b.const_i32(NUM_QH),
+                        ),
+                        hoist_qh_r[reg],
+                    ),
+                    m_final[reg],
+                    l_final[reg],
+                    row_has_mass=lse_row_has_mass(b, l_final[reg]),
+                )
 
     return b.kernel
 

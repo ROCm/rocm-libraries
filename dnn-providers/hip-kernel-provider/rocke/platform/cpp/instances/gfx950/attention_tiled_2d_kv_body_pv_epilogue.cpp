@@ -1065,29 +1065,6 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
         if(!rocke_transforms_descriptor_offset(
                b, ctx->q_desc, in_names, in_values, 3, &out_base, NULL))
             return NULL;
-        if(ctx->spec->emit_lse)
-        {
-            /* Slot r's row is wave_row_base + _in_warp_row(r); the 16 lanes of a
-             * row group agree, lane_col == 0 (one per lane_rg) writes. */
-            rocke_value_t* zero_i = rocke_b_const_i32(b, 0);
-            rocke_value_t* writer16 = rocke_b_cmp_eq(b, ctx->lane_col_v, zero_i);
-            for(r = 0; r < ctx->REGS_PER_LANE; ++r)
-            {
-                rocke_value_t* guard = rocke_b_land(b, writer16, ctx->hoist_row_mask[r]);
-                rocke_if_t lse_if = rocke_b_scf_if(b, guard);
-                rocke_b_region_enter(b, lse_if.then_region);
-                {
-                    rocke_value_t* tok = rocke_b_add(b, ctx->cu_q_start, ctx->hoist_q_pos[r]);
-                    rocke_value_t* nqh = rocke_b_const_i32(b, ctx->NUM_QH);
-                    rocke_value_t* tok_qh = rocke_b_mul(b, tok, nqh);
-                    rocke_value_t* off = rocke_b_add(b, tok_qh, ctx->hoist_qh_r[r]);
-                    rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->l_final[r]);
-                    rocke_lse_store(b, ctx->lse, off, ctx->m_final[r], ctx->l_final[r], has_mass);
-                }
-                rocke_b_region_leave(b);
-            }
-        }
-
         for(stripe = 0; stripe < ctx->OUT_STRIPES; ++stripe)
         {
             int n_start = stripe * N_TILES_PER_STRIPE;
@@ -1143,6 +1120,33 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             }
             if(stripe + 1 < ctx->OUT_STRIPES)
                 rocke_b_sync(b);
+        }
+        if(ctx->spec->emit_lse)
+        {
+            /* After the O stripes, not before: emitted ahead of them, the LSE
+             * store let LLVM fuse the O multiply and FP16 convert into
+             * v_fma_mixlo_f16 (one rounding; LSE-off rounds twice), moving FP16
+             * O by 1 ulp versus LSE-off on MI300X/MI355X (ROCm 10). Here the O
+             * ISA matches LSE-off. Slot r's row is wave_row_base +
+             * _in_warp_row(r); the 16 lanes of a row group agree, lane_col == 0
+             * (one per lane_rg) writes. */
+            rocke_value_t* zero_i = rocke_b_const_i32(b, 0);
+            rocke_value_t* writer16 = rocke_b_cmp_eq(b, ctx->lane_col_v, zero_i);
+            for(r = 0; r < ctx->REGS_PER_LANE; ++r)
+            {
+                rocke_value_t* guard = rocke_b_land(b, writer16, ctx->hoist_row_mask[r]);
+                rocke_if_t lse_if = rocke_b_scf_if(b, guard);
+                rocke_b_region_enter(b, lse_if.then_region);
+                {
+                    rocke_value_t* tok = rocke_b_add(b, ctx->cu_q_start, ctx->hoist_q_pos[r]);
+                    rocke_value_t* nqh = rocke_b_const_i32(b, ctx->NUM_QH);
+                    rocke_value_t* tok_qh = rocke_b_mul(b, tok, nqh);
+                    rocke_value_t* off = rocke_b_add(b, tok_qh, ctx->hoist_qh_r[r]);
+                    rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->l_final[r]);
+                    rocke_lse_store(b, ctx->lse, off, ctx->m_final[r], ctx->l_final[r], has_mass);
+                }
+                rocke_b_region_leave(b);
+            }
         }
     }
 

@@ -5784,13 +5784,6 @@ def build_unified_attention_2d_tiled(
         dim=b.const_i32(0),
     )
 
-    if spec.emit_lse:
-        # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
-        # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
-        # (lane_col == 0) write; each owns REGS_PER_LANE rows.
-        writer16 = b.cmp_eq(lane_col, b.const_i32(0))
-        for r in range(SOFTMAX_STATE_SLOTS):
-            _store_row_lse(b.add(wave_row_base, _in_warp_row(r)), r, writer16)
     for stripe in range(OUT_STRIPES):
         n_start = stripe * N_TILES_PER_STRIPE
         # ---- stage 1: write this stripe's N-tiles into Acc_lds ----
@@ -5828,6 +5821,17 @@ def build_unified_attention_2d_tiled(
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    if spec.emit_lse:
+        # After the O stripes, not before: emitted ahead of them, the LSE store
+        # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
+        # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
+        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
+        # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
+        # (lane_col == 0) write; each owns REGS_PER_LANE rows.
+        writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for r in range(SOFTMAX_STATE_SLOTS):
+            _store_row_lse(b.add(wave_row_base, _in_warp_row(r)), r, writer16)
     return b.kernel
 
 

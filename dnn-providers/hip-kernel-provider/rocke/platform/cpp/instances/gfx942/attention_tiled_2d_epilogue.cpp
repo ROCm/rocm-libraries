@@ -402,19 +402,6 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
     rocke_value_t* out_dim0 = rocke_b_const_i32(b, 0);
     rocke_value_t* out_base = epilogue_q_desc_offset(ctx, out_token, op_qh, out_dim0);
 
-    if(ctx->spec->emit_lse)
-    {
-        /* Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
-         * lane_col lanes; lane_col == 0 (lanes 0/16/32/48) writes. */
-        rocke_value_t* writer16 = rocke_b_cmp_eq(b, lane_col, rocke_b_const_i32(b, 0));
-        for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
-        {
-            rocke_value_t* iw_row = rocke_gfx942_attn2d_in_warp_row(ctx, r);
-            rocke_value_t* lse_row = rocke_b_add(b, wave_row_base, iw_row);
-            epilogue_store_row_lse(ctx, lse_row, m_final[r], ctx->l_final[r], writer16);
-        }
-    }
-
     for(stripe = 0; stripe < OUT_STRIPES; ++stripe)
     {
         int n_start = stripe * N_TILES_PER_STRIPE;
@@ -465,6 +452,23 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
         /* ---- stage 3: sync so the next stripe can overwrite Acc_lds ---- */
         if(stripe + 1 < OUT_STRIPES)
             rocke_b_sync(b);
+    }
+
+    if(ctx->spec->emit_lse)
+    {
+        /* After the O stripes, not before: emitted ahead of them, the LSE store
+         * let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
+         * (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
+         * LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+         * Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
+         * lane_col lanes; lane_col == 0 (lanes 0/16/32/48) writes. */
+        rocke_value_t* writer16 = rocke_b_cmp_eq(b, lane_col, rocke_b_const_i32(b, 0));
+        for(r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
+        {
+            rocke_value_t* iw_row = rocke_gfx942_attn2d_in_warp_row(ctx, r);
+            rocke_value_t* lse_row = rocke_b_add(b, wave_row_base, iw_row);
+            epilogue_store_row_lse(ctx, lse_row, m_final[r], ctx->l_final[r], writer16);
+        }
     }
 
     return rocke_ir_builder_kernel(b);

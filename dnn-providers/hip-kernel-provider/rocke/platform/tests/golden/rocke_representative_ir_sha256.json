@@ -39,7 +39,7 @@
           "bytes": 399667,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16_lse",
-          "sha256": "31c273e907b3cc85abdf17dd1cfb3c79ec2f64f7cd04bae3a42591192b93822c",
+          "sha256": "cdf465e6eaf51cc27605e081f72f49674235e9d56f98055b01ea3086d9b499be",
           "status": "ok"
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
@@ -231,7 +231,7 @@
           "bytes": 171440,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16_lse",
-          "sha256": "37d9659ba78691eaa7d7a5e4cb9abfe1c61ad7444da3573330649d39936bf04a",
+          "sha256": "5aeedb828a6fa25fff9e19e90e54d24c3aa08d13922127805ec341bdefeaa62d",
           "status": "ok"
         },
         "attention/gfx950/2d_lse_transposed32_bf16_d128": {
@@ -2492,7 +2492,7 @@
           "bytes": 399763,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16_lse",
-          "sha256": "75ea1843e8e8ce28b5ec9e99886c6d73bff1ee14dbc24cc00e9f946cf0b3ffff",
+          "sha256": "66c78d3b143707697544f2e966bcd4fe1001d535f400a695c9b18546edcfb69b",
           "status": "ok"
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
@@ -2684,7 +2684,7 @@
           "bytes": 171536,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16_lse",
-          "sha256": "cfae23a69fd5966f65b31c25482e3a7297e0fb753b9a87563806c4f51894ee64",
+          "sha256": "ed1a4d6bac001f05df0bbd02c75f734edd6a0eb58513a4ff811ce46362ee90c2",
           "status": "ok"
         },
         "attention/gfx950/2d_lse_transposed32_bf16_d128": {
@@ -4945,7 +4945,7 @@
           "bytes": 399827,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16_lse",
-          "sha256": "8736eea399cf0b09ecd3bb29da0a64b295c64449347791ac8d20d41edd8896c6",
+          "sha256": "f6cc646fe6d445b9af784cb1268d1cd6878d0724239cdb2427c30eed45b4f55e",
           "status": "ok"
         },
         "attention/gfx942/2d_lse_transposed32_bf16_d128": {
@@ -5137,7 +5137,7 @@
           "bytes": 171600,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_bf16_lse",
-          "sha256": "e66ceb549d2e565d3d3770afdb9bef5f5b48abbd9a676aed2cd47a194d345488",
+          "sha256": "bf5f5cbd18c705680d81a4206941df460e6d9cddded09b2e0a3338d90690df73",
           "status": "ok"
         },
         "attention/gfx950/2d_lse_transposed32_bf16_d128": {
