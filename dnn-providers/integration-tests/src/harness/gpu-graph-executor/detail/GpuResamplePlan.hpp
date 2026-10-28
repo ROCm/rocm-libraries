@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <optional>
 
@@ -25,12 +26,14 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 // GPU resample forward and backward plans
 // ===========================================================================
 
-struct GpuResampleFwdParams
+// Shared by forward (x -> y) and backward (dy -> dx): both reference calls take the
+// input tensor, the output tensor and the same geometry in the same order.
+struct GpuResampleParams
 {
-    GpuResampleFwdParams() = default;
-    GpuResampleFwdParams(
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+    GpuResampleParams() = default;
+    GpuResampleParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& inputAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& outputAttributes,
         const std::vector<int64_t>& prePadding,
         const std::vector<int64_t>& postPadding,
         const std::vector<int64_t>& stride,
@@ -38,8 +41,8 @@ struct GpuResampleFwdParams
         const hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
         const hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* indexAttributes = nullptr)
-        : xTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(xAttributes))
-        , yTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(yAttributes))
+        : inputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(inputAttributes))
+        , outputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(outputAttributes))
         , prePadding(prePadding)
         , postPadding(postPadding)
         , stride(stride)
@@ -53,8 +56,8 @@ struct GpuResampleFwdParams
     {
     }
 
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT yTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT inputTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT outputTensor;
     std::vector<int64_t> prePadding;
     std::vector<int64_t> postPadding;
     std::vector<int64_t> stride;
@@ -66,50 +69,8 @@ struct GpuResampleFwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> indexTensor;
 };
 
-struct GpuResampleBwdParams
-{
-    GpuResampleBwdParams() = default;
-    GpuResampleBwdParams(
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dyAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dxAttributes,
-        const std::vector<int64_t>& prePadding,
-        const std::vector<int64_t>& postPadding,
-        const std::vector<int64_t>& stride,
-        const std::vector<int64_t>& window,
-        const hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode,
-        const hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* indexAttributes = nullptr)
-        : dyTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(dyAttributes))
-        , dxTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(dxAttributes))
-        , prePadding(prePadding)
-        , postPadding(postPadding)
-        , stride(stride)
-        , window(window)
-        , resampleMode(resampleMode)
-        , paddingMode(paddingMode)
-        , indexTensor(indexAttributes != nullptr
-                          ? std::make_optional(
-                                hipdnn_test_sdk::detail::unpackTensorAttributes(*indexAttributes))
-                          : std::nullopt)
-    {
-    }
-
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dyTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dxTensor;
-    std::vector<int64_t> prePadding;
-    std::vector<int64_t> postPadding;
-    std::vector<int64_t> stride;
-    std::vector<int64_t> window;
-    hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode
-        = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET;
-    hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode
-        = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET;
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> indexTensor;
-};
-
-// ===========================================================================
-// GPU resample forward and backward plans
-// ===========================================================================
+using GpuResampleFwdParams = GpuResampleParams;
+using GpuResampleBwdParams = GpuResampleParams;
 
 template <typename XDataType, typename YDataType, typename ComputeDataType, typename IndexDataType>
 class GpuResampleFwdPlan : public IGpuGraphNodePlanExecutor
@@ -122,10 +83,13 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        hipdnn_gpu_ref::ShallowGpuTensor<XDataType> xTensor(
-            variantPack.at(_params.xTensor.uid), _params.xTensor.dims, _params.xTensor.strides);
+        hipdnn_gpu_ref::ShallowGpuTensor<XDataType> xTensor(variantPack.at(_params.inputTensor.uid),
+                                                            _params.inputTensor.dims,
+                                                            _params.inputTensor.strides);
         hipdnn_gpu_ref::ShallowGpuTensor<YDataType> yTensor(
-            variantPack.at(_params.yTensor.uid), _params.yTensor.dims, _params.yTensor.strides);
+            variantPack.at(_params.outputTensor.uid),
+            _params.outputTensor.dims,
+            _params.outputTensor.strides);
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<IndexDataType>> indexTensor;
         if(_params.indexTensor.has_value())
@@ -167,9 +131,13 @@ public:
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
         hipdnn_gpu_ref::ShallowGpuTensor<DyDataType> dyTensor(
-            variantPack.at(_params.dyTensor.uid), _params.dyTensor.dims, _params.dyTensor.strides);
+            variantPack.at(_params.inputTensor.uid),
+            _params.inputTensor.dims,
+            _params.inputTensor.strides);
         hipdnn_gpu_ref::ShallowGpuTensor<DxDataType> dxTensor(
-            variantPack.at(_params.dxTensor.uid), _params.dxTensor.dims, _params.dxTensor.strides);
+            variantPack.at(_params.outputTensor.uid),
+            _params.outputTensor.dims,
+            _params.outputTensor.strides);
 
         std::optional<hipdnn_gpu_ref::ShallowGpuTensor<IndexDataType>> indexTensor;
         if(_params.indexTensor.has_value())
@@ -200,17 +168,7 @@ private:
 // GPU resample forward and backward plan builders
 // ==========================================================================
 
-template <hipdnn_flatbuffers_sdk::data_objects::DataType IndexDataTypeEnum>
-struct ResampleIndexNative
-{
-    using type = hipdnn_test_sdk::utilities::DataTypeToNative<IndexDataTypeEnum>;
-};
-
-template <>
-struct ResampleIndexNative<hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
-{
-    using type = int32_t;
-};
+using hipdnn_test_sdk::detail::ResampleIndexNative;
 
 template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_flatbuffers_sdk::data_objects::DataType YDataTypeEnum,
@@ -294,10 +252,7 @@ public:
 
             if constexpr(IndexDataTypeEnum != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
             {
-                if(nodeAttributes->index_tensor_uid().has_value())
-                {
-                    uids.push_back(nodeAttributes->index_tensor_uid().value());
-                }
+                uids.push_back(nodeAttributes->index_tensor_uid().value());
             }
             return uids;
         }();
@@ -428,10 +383,7 @@ public:
 
             if constexpr(IndexDataTypeEnum != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
             {
-                if(nodeAttributes->index_tensor_uid().has_value())
-                {
-                    uids.push_back(nodeAttributes->index_tensor_uid().value());
-                }
+                uids.push_back(nodeAttributes->index_tensor_uid().value());
             }
             return uids;
         }();
