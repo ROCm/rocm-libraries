@@ -446,6 +446,11 @@ TEST(LocalKernelRegister, DISABLED_ForeignProcessorMetadataWorker)
     std::memcpy(algo.data, &indices[0], sizeof(indices[0]));
     EXPECT_TRUE(hipblaslt_ext::getKernelNameFromAlgo(handle, algo).empty());
     EXPECT_TRUE(hipblaslt_ext::getSolutionNameFromAlgo(handle, algo).empty());
+    EXPECT_EQ(hipblasLtLocalKernelSetExactMatch(handle, indices[0], 16, 16, 1, 16),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    size_t selectable = 123;
+    EXPECT_EQ(hipblasLtLocalKernelGetCounts(handle, nullptr, &selectable), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(selectable, 0u) << "a rejected index must not publish a mapping";
     EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
 
@@ -561,13 +566,19 @@ TEST(LocalKernelRegister, DISABLED_IndexedPayloadWorker)
     auto const valid = scratch.file("valid_indexed.dat");
     ASSERT_TRUE(writeIndexedPayload(dat, valid, IndexedPayloadRecord::None));
     int numIndices = 0;
+    int index      = -1;
     EXPECT_EQ(
-        hipblasLtLocalKernelRegister(handle, valid.c_str(), co.c_str(), nullptr, 0, &numIndices),
+        hipblasLtLocalKernelRegister(handle, valid.c_str(), co.c_str(), &index, 1, &numIndices),
         HIPBLAS_STATUS_SUCCESS);
     EXPECT_EQ(numIndices, 1);
     size_t registered = 0;
     ASSERT_EQ(hipblasLtLocalKernelGetCounts(handle, &registered, nullptr), HIPBLAS_STATUS_SUCCESS);
     EXPECT_EQ(registered, 1u);
+    EXPECT_EQ(hipblasLtLocalKernelSetExactMatch(handle, index, 16, 16, 1, 16),
+              HIPBLAS_STATUS_SUCCESS);
+    size_t selectable = 0;
+    EXPECT_EQ(hipblasLtLocalKernelGetCounts(handle, nullptr, &selectable), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(selectable, 1u);
     EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
 }
 
