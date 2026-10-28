@@ -1929,6 +1929,63 @@ class SBarrier(Instruction):
 
 
 # ==========================================================================
+# SBarrierSignalIsFirst -- barrier-signal with first-wave election.
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:1734-1792
+#
+# Like SBarrier's signal half, but the first wave to arrive at the barrier
+# gets SCC=1 (the rest SCC=0); used to elect a single wave for a
+# cluster-scope handshake without a separate WaveIdx compare. Signal-only
+# (no operands); pair with a plain SBarrier wait. Not constructed anywhere
+# in tensilelite today -- KernelWriterAssembly only imports the type for an
+# isinstance() classifier tuple -- so there is no to_stinky_logical bridge
+# (no stinkytofu logical-IR counterpart exists to bridge to either).
+
+
+class SBarrierSignalIsFirst(Instruction):
+    """``s_barrier_signal_isfirst`` shim (no stinkytofu left-path bridge)."""
+
+    __slots__ = ("cluster_barrier",)
+
+    def __init__(self, clusterBarrier: bool = False, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.cluster_barrier = bool(clusterBarrier)
+        # Mirror rocisa::SBarrierSignalIsFirst (common.hpp:1736-1749): code is
+        # -3 only when the target supports cluster barriers and this signal is
+        # cluster-scoped; -1 (workgroup-scope) otherwise. Unlike SBarrier there
+        # is no HasNewBarrier gate -- this instruction has no legacy fallback.
+        from .base import getAsmCaps  # noqa: WPS433
+        try:
+            caps = getAsmCaps()
+        except RuntimeError:
+            caps = {}
+        code = -3 if (caps.get("HasClusterBarrier", 0) and self.cluster_barrier) else -1
+        self.setInst(f"s_barrier_signal_isfirst {code}")
+
+    def getParams(self):
+        return []
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SBarrierSignalIsFirst(
+            clusterBarrier=self.cluster_barrier, comment=self.comment,
+        )
+        memo[id(self)] = dup
+        return dup
+
+
+# ==========================================================================
 # SGetRegB32 / SSetRegB32 / SSetRegIMM32B32 -- HW register access (Step 2).
 # ==========================================================================
 #
