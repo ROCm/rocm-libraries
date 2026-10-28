@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <array>
+#include <mutex>
+#include <set>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -292,6 +294,17 @@ inline bool eq(const char* a, const char* b)
 inline bool eq(const std::string& a, const char* b)
 {
     return b != NULL && a == b;
+}
+
+/* A str a function returns as const char*: the std::string it was built in
+ * dies with the function, so its text is interned (one copy per distinct
+ * value, kept for the life of the process, like a Python str constant). */
+inline const char* keep(const std::string& s)
+{
+    static std::mutex m;
+    static std::set<std::string> pool;
+    std::lock_guard<std::mutex> lock(m);
+    return pool.insert(s).first->c_str();
 }
 
 /* str() and repr() of the values generated code formats. */

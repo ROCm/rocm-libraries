@@ -66,12 +66,18 @@ rocke_kernel_def_t* kernel_entry(rocke_ir_builder_t* b, Fn&& fn)
     }
 }
 
-/* ArchTarget.from_gfx(gfx): KeyError for an unknown target. */
+/* ArchTarget.from_gfx(gfx): KeyError for an unknown target. Its message is
+ * Python's str(e) ("\"unknown gfx target '<gfx>'; known: [...]. ...\""), so a
+ * translated `except KeyError as e: ... str(e)` reports the Python text. */
 inline const rocke_arch_target_t* arch_target(const char* gfx)
 {
     const rocke_arch_target_t* t = rocke_arch_target_from_gfx(gfx);
     if(t == nullptr)
-        throw ckc::KeyError(py::repr(gfx));
+    {
+        char why[4096];
+        rocke_set_unknown_arch_reason(why, sizeof why, gfx);
+        throw ckc::KeyError(why);
+    }
     return t;
 }
 

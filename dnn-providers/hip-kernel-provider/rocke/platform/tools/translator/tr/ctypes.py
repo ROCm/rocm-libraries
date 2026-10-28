@@ -23,6 +23,8 @@ IV = PKG.iv_t
 VOID = "void"
 NONE = "None"  # the type of the literal None
 AUTO = "auto"
+# the exception an `except ... as e` handler binds (only str(e) has a rule)
+EXC = "const ckc::Error&"
 
 INT_TYPES = {I64, INT, "int32_t", "unsigned", "uint32_t", "size_t", "long", "long long"}
 # scalar typedefs that end in _t but are not structs

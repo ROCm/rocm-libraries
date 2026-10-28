@@ -781,6 +781,7 @@ class Fn:
         self.ind = 1
         self.vars: dict[str, str] = {}
         self.declared: set[str] = set()
+        self.returning = False  # lowering a return value (st_Return)
         self.narrow: list[dict] = []
         self.counter = itertools.count(1) if outer is None else outer.counter
         self.hints = (
@@ -1150,14 +1151,19 @@ class Fn:
             self.sig.ret = self.record_type(rid)
             self.emit(f"return {ce.code};")
             return
-        ce = self.expr(st.value, want=ret)
-        if self.sig.ret == T.AUTO:
-            self.sig.ret = ce.t
-            ret = ce.t
-        direct = self.take_temp(ce) if ce.t == ret else None
-        if direct is not None:
-            ce = direct
-        self.emit(f"return {self.coerce(ce, ret, st)};")
+        # a std::string returned as const char* outlives the function (coerce)
+        self.returning = True
+        try:
+            ce = self.expr(st.value, want=ret)
+            if self.sig.ret == T.AUTO:
+                self.sig.ret = ce.t
+                ret = ce.t
+            direct = self.take_temp(ce) if ce.t == ret else None
+            if direct is not None:
+                ce = direct
+            self.emit(f"return {self.coerce(ce, ret, st)};")
+        finally:
+            self.returning = False
 
     def st_ImportFrom(self, st):
         """A function-local `from .m import name`: the name resolves like a module import."""
@@ -2288,7 +2294,14 @@ class Fn:
         )
 
     def st_Try(self, st):
-        """RT-R1: try/except over ckc exception classes; no else or finally."""
+        """RT-R1: try/except over ckc exception classes; no else or finally.
+
+        `except KeyError as e:` binds e to the caught ckc exception (type
+        T.EXC) for its handler only, as Python unbinds it at the handler's end.
+        The one use of e with a rule is str(e): a ckc exception's message is
+        the Python str() of the exception it stands for (a KeyError's is the
+        repr of its argument, as every translated raise and adapter writes it),
+        so str(e) is its message."""
         if st.orelse or st.finalbody:
             raise Refuse(st, "try with else or finally")
         saved = set(self.declared)
@@ -2306,14 +2319,23 @@ class Fn:
             "NotImplementedError": "ckc::NotImplError",
         }
         for h in st.handlers:
-            if not isinstance(h.type, ast.Name) or h.type.id not in cls_of or h.name:
+            if not isinstance(h.type, ast.Name) or h.type.id not in cls_of:
                 raise Refuse(
                     st, f"except {ast.unparse(h.type) if h.type else ''} (RT-R1 shape)"
                 )
-            self.emit(f"catch(const {cls_of[h.type.id]}&)")
+            if h.name and (h.name in self.vars or h.name in self.declared):
+                raise Refuse(st, f"except ... as {h.name}: the name is already a local")
+            self.emit(
+                f"catch(const {cls_of[h.type.id]}&{' ' + h.name if h.name else ''})"
+            )
             self.emit("{")
             self.ind += 1
+            if h.name:
+                self.vars[h.name] = T.EXC
+                self.declared.add(h.name)
             self.block(h.body)
+            if h.name:
+                del self.vars[h.name]
             self.ind -= 1
             self.emit("}")
             self.declared = saved
@@ -6041,6 +6063,11 @@ class Fn:
             return CE("{}", "set?")  # typed by its first add()
         if name in ("str", "repr") and len(args) == 1 and not node.keywords:
             v = self.expr(args[0])
+            if v.t == T.EXC:
+                if name != "str":
+                    raise Refuse(node, f"{name}() of a caught exception")
+                # str(e): the ckc message is the Python str() (st_Try)
+                return CE(f"{v.code}.message()", T.SSTR, True)
             ts = self.tuple_struct_items(v)
             if (
                 ts is not None
@@ -7505,6 +7532,9 @@ class Fn:
         if to in ("double", "float") and (T.is_int(t) or t == T.F64):
             return ce.code
         if to == T.STR and t == T.SSTR:
+            if self.returning:
+                # the std::string dies with this function: intern its text
+                return f"py::keep({ce.code})"
             return f"({ce.code}).c_str()"
         if to == T.STR and t == "const rocke_mma_op_t*":
             # b.mma(op, ...) takes an MmaOp or its op_id; the C builder the op_id
