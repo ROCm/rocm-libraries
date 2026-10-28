@@ -1496,10 +1496,21 @@ static const unported_field k_problem_unported[] = {
     {"right_bound", false, 0},
 };
 
+/* The C problem struct has no slot for these: dropping one would answer for a
+ * different problem, so every problem binding refuses it. emit_lse steers the
+ * support gates and the split-KV reduce spec (known_gaps.md section 7). */
+static const unported_field k_problem_no_c_field[] = {
+    {"emit_lse", false, 0},
+};
+
 /* Convert every field of a Python UnifiedAttentionProblem dict to the C
  * struct. */
 static rocke_unified_attention_problem_t problem_fields_from_dict(const py::dict& d, Store& st)
 {
+    reject_unported(d,
+                    "unified_attention_problem",
+                    k_problem_no_c_field,
+                    sizeof(k_problem_no_c_field) / sizeof(k_problem_no_c_field[0]));
     rocke_unified_attention_problem_t p{};
     p.total_q = a_int(d, "total_q", 0);
     p.num_seqs = a_int(d, "num_seqs", 0);

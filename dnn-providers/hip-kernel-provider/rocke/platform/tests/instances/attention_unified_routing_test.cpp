@@ -59,6 +59,18 @@ static int g_failures = 0;
     } while(0)
 
 /* bf16 D128 GQA 32/8 decode, 4 seqs, bs16, max_seqlen_k 8192 (num_2d = 40). */
+static void set_env(const char* name, const char* value)
+{
+#ifdef _WIN32
+    _putenv_s(name, value != NULL ? value : "");
+#else
+    if(value != NULL)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
+#endif
+}
+
 static rocke_unified_attention_problem_t decode_problem(void)
 {
     rocke_unified_attention_problem_t p = rocke_unified_attention_problem_default();
@@ -201,6 +213,33 @@ static void test_supports_tiled_3d(void)
     CHECK_EQ_STR(reason, "tiled 3D top-left/causal masks are not ported to C++ yet");
     p.causal_top_left = false;
 
+    /* 32 KiB blocks: 65534 fill the i32 KV buffer range, 65536 are exactly
+     * 2^31 bytes. The gfx942 3D kernel has no i64 path, so its limit is what
+     * the K/V loader reads: the wide loader (the default here) reads up to
+     * 2^31 bytes, the async copies only the buffer range. gfx950 has an i64
+     * path. */
+    static const char* const k_i64_3d
+        = "gfx942 tiled 3D does not support i64 KV addressing (paged KV cache past what its "
+          "K/V loader reads) yet";
+    set_env("HIPDNN_GFX942_3D_WKV", NULL);
+    p.num_kv_blocks = 65534;
+    CHECK(rocke_unified_attention_supports_tiled_3d(&p, "gfx942", reason, sizeof(reason)));
+    p.num_kv_blocks = 65536;
+    CHECK(rocke_unified_attention_supports_tiled_3d(&p, "gfx942", reason, sizeof(reason)));
+    p.num_kv_blocks = 65537;
+    CHECK(!rocke_unified_attention_supports_tiled_3d(&p, "gfx942", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, k_i64_3d);
+    CHECK(
+        !rocke_unified_attention_supports_tiled_3d(&p, "gfx942:sramecc+", reason, sizeof(reason)));
+    CHECK(rocke_unified_attention_supports_tiled_3d(&p, "gfx950", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, "supported");
+    set_env("HIPDNN_GFX942_3D_WKV", "0");
+    p.num_kv_blocks = 65535;
+    CHECK(!rocke_unified_attention_supports_tiled_3d(&p, "gfx942", reason, sizeof(reason)));
+    CHECK_EQ_STR(reason, k_i64_3d);
+    set_env("HIPDNN_GFX942_3D_WKV", NULL);
+    p.num_kv_blocks = 0;
+
     p.use_fp8 = true;
     CHECK(
         !rocke_unified_attention_supports_tiled_3d(&p, "gfx942:sramecc+", reason, sizeof(reason)));
@@ -264,8 +303,8 @@ static void test_supports_tiled_2d(void)
     check_tiled_2d(&p, "gfx950", false, "tiled 2D additive bias is not ported to C++ yet");
     check_tiled_2d(&p, "gfx942", false, "additive bias is only implemented on gfx950");
 
-    /* gfx942 prefill: D128 sliding window (4-warp, not ported), fp16 D64 MHA (sliced-K ring) and
-     * bf16 D128 (mask-limit), both built by C++. */
+    /* gfx942 prefill: D128 sliding window (4-warp GQA), fp16 D64 MHA (sliced-K ring) and
+     * bf16 D128 (mask-limit), all built by C++. */
     p = decode_problem();
     p.sliding_window = 256;
     p.max_seqlen_q = 512;

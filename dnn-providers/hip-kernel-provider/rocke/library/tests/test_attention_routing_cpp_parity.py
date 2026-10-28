@@ -13,7 +13,6 @@ predicates, and checks that every problem C++ admits actually builds."""
 from __future__ import annotations
 
 import itertools
-import re
 from dataclasses import asdict, replace
 
 import pytest
@@ -26,7 +25,6 @@ from kernels.common.attention_unified import (
     _mask_label,
     _reject_mask_on_arch,
     _reject_mask_semantics,
-    _tiled_3d_spec_from_problem,
     supports_native_unified_attention,
     supports_native_unified_attention_3d_tiled,
     supports_native_unified_attention_tiled,
@@ -182,7 +180,11 @@ def _python_gate(fn, p, arch):
 
 
 def test_tiled_3d_gate_matches_python(engine):
-    for p, arch in itertools.product(_gate_problems(), _ARCHES):
+    # _tiled_2d_shapes() adds the caches that need i64 KV addressing.
+    for p, arch in itertools.chain(
+        itertools.product(_gate_problems(), _ARCHES),
+        itertools.product(_tiled_2d_shapes(), ("gfx942", "gfx950")),
+    ):
         ok, reason = engine.unified_attention_supports_tiled_3d(asdict(p), arch)
         py_ok, py_reason = _python_gate(
             supports_native_unified_attention_3d_tiled, p, arch
@@ -201,24 +203,15 @@ def test_tiled_3d_gate_matches_python(engine):
 
 def test_tiled_3d_admitted_problems_build(engine):
     """Every problem the C++ 3D gate admits lowers through the C++ 3D segment
-    builder, from the spec the C++ 3D selectors build.
-
-    Python's gate also admits gfx942 problems whose KV cache needs 64-bit
-    addressing, which the gfx942 3D spec rejects as not implemented; C++ must
-    reject those the same way."""
+    builder, from the spec the C++ 3D selectors build."""
     seen = set()
     for p, arch in itertools.product(_tiled_2d_shapes(), ("gfx942", "gfx950")):
         ok, _ = engine.unified_attention_supports_tiled_3d(asdict(p), arch)
         if not ok:
             continue
-        hook = getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem")
-        try:
-            _tiled_3d_spec_from_problem(p, arch)
-        except NotImplementedError as e:
-            with pytest.raises(NotImplementedError, match=re.escape(str(e))):
-                hook(asdict(p), arch)
-            continue
-        spec = hook(asdict(p), arch)
+        spec = getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem")(
+            asdict(p), arch
+        )
         key = (arch, repr(sorted(spec.items())))
         if key in seen:
             continue
@@ -305,13 +298,25 @@ def _tiled_2d_shapes():
         (1, 4),
         (1, 512, 1024, 2048),
         (0, 256),
-        (None, "use_sinks", "softcap", "use_alibi", "use_qq_bias", "num_kv_blocks"),
+        (
+            None,
+            "use_sinks",
+            "softcap",
+            "use_alibi",
+            "use_qq_bias",
+            "num_kv_blocks",
+            "kv_2gib",
+        ),
     ):
         kw = {}
         if extra == "softcap":
             kw["softcap"] = 30.0
         elif extra == "num_kv_blocks":
             kw["num_kv_blocks"] = 1 << 22  # past the i32 KV buffer range
+        elif extra == "kv_2gib":
+            # Past the 0x7FFF0000-byte buffer bound but within 2^31 bytes, which
+            # only the gfx942 3D wide and fp8 K/V loaders read with i32 offsets.
+            kw["num_kv_blocks"] = (1 << 31) // (block_size * nkv * head_size * 2)
         elif extra is not None:
             kw[extra] = True
         yield _problem(

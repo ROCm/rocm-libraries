@@ -15,12 +15,15 @@
  *   3. supports_tiled_2d rejects num_warps / block_m_per_warp outside the
  *      MFMA distribution's range;
  *   4. the 3D segment builder rejects num_segments < 1 (ROCKE_ERR_VALUE) and
- *      paged use_i64_kv_addr (ROCKE_ERR_NOTIMPL).
+ *      paged use_i64_kv_addr (ROCKE_ERR_NOTIMPL);
+ *   5. the 2D validator's gfx950-only-knob and fp8 K/V rejects carry Python's
+ *      exact text, the knob list untruncated and in Python's order.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/error.hpp"
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/lower_llvm.h"
@@ -175,6 +178,74 @@ static void test_2d_spec_guards(void)
     expect_2d_rejects("2d/mask_limit_sliding_window", &spec, ROCKE_ERR_VALUE, "no sliding window");
 }
 
+/* Runs the validator directly, outside the builder's ROCKE_ERR_MSG_CAP error
+ * latch, so a long message is seen whole. */
+static void expect_2d_validate_message(const char* what,
+                                       const rocke_attention_tiled_2d_spec_t* spec,
+                                       const char* want)
+{
+    rocke_ir_builder_t b;
+
+    if(rocke_ir_builder_init(&b, "spec_guards") != ROCKE_OK)
+    {
+        fail(what, "builder init failed");
+        return;
+    }
+    try
+    {
+        rocke_attention_tiled_2d_spec_validate(&b, spec);
+        fail(what, "expected rejection, spec was accepted");
+    }
+    catch(const ckc::Error& e)
+    {
+        if(e.code() != ROCKE_ERR_VALUE || strcmp(e.what(), want) != 0)
+        {
+            char detail[1024];
+            snprintf(detail,
+                     sizeof(detail),
+                     "status %d, message \"%s\", expected \"%s\"",
+                     (int)e.code(),
+                     e.what(),
+                     want);
+            fail(what, detail);
+        }
+        else
+        {
+            printf("ok   %s (exact message)\n", what);
+        }
+    }
+    rocke_ir_builder_free(&b);
+}
+
+static void test_2d_reject_messages(void)
+{
+    rocke_attention_tiled_2d_spec_t spec;
+
+    /* Every gfx950-only knob: past ROCKE_ERR_MSG_CAP, listed in Python's
+     * order whatever order the flags are set in. */
+    spec = spec_2d(64, 32, 32, 32, "bf16");
+    spec.use_fp8_mfma_pv = true;
+    spec.use_fp8_mfma_qk = true;
+    spec.use_grouped_kv2_softmax = true;
+    spec.use_mfma32_skip_legacy_qreg = true;
+    spec.use_transposed_half_local_pv = true;
+    spec.use_mfma_32x32 = true;
+    expect_2d_validate_message(
+        "2d/gfx950_only_knobs_message",
+        &spec,
+        "gfx942 tiled-2D attention supports only the narrow 16x16x16 default path and the K=8 "
+        "32x32x8 wide path; these are not available on gfx942: use_mfma_32x32, "
+        "use_transposed_half_local_pv, use_mfma32_skip_legacy_qreg, use_grouped_kv2_softmax, "
+        "use_fp8_mfma_qk, use_fp8_mfma_pv");
+
+    spec = spec_2d(64, 32, 32, 32, "bf16");
+    spec.kv_storage_dtype = "fp8e4m3";
+    expect_2d_validate_message("2d/fp8_kv_message",
+                               &spec,
+                               "gfx942 tiled-2D attention does not support the fp8 K/V cache "
+                               "(its PV path uses ds_read_tr_b8, a gfx950-only transpose read)");
+}
+
 /* ----------------------------------------------------------------- supports */
 
 static rocke_gfx942_attention_tiled_2d_supports_args_t supports_args(void)
@@ -313,6 +384,7 @@ static void test_3d_spec_guards(void)
 int main(void)
 {
     test_2d_spec_guards();
+    test_2d_reject_messages();
     test_supports_guards();
     test_3d_spec_guards();
 

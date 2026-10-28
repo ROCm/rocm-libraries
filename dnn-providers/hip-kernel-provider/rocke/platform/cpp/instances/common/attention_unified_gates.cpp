@@ -24,6 +24,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors_3d.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_attention_unified_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
@@ -353,6 +354,14 @@ bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_pro
     if(p->use_additive_bias && !streq(arch, "gfx950"))
     {
         gate_reason(reason, reason_cap, "additive bias is only implemented on gfx950");
+        return false;
+    }
+    if(streq(arch, "gfx942") && rocke_unified_attn_enable_i64_kv_addr_3d(p, arch))
+    {
+        gate_reason(reason,
+                    reason_cap,
+                    "gfx942 tiled 3D does not support i64 KV addressing "
+                    "(paged KV cache past what its K/V loader reads) yet");
         return false;
     }
     if(streq(arch, "gfx1250"))

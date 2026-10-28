@@ -266,7 +266,7 @@ This entry covers `emit_lse` only, not other changes to the reduce kernel.
 | Trailing `lse_ptr` param and the `tid == 0` LSE store | both C reduce builders |
 | A C twin of `_lse_store.py` | `helpers/`; none exists (its dense-attention users have no C twin either) |
 | Gate coverage of an LSE-on reduce | `library/tests/parity/gfx9{42,50}_attention_tiled_3d_emit.{py,c}` emit the LSE-off reduce only; neither takes `emit_lse` |
-| `emit_lse` on the unified problem and the `_reject_lse` support gate (`library/kernels/common/attention_unified.py`) | `rocke_unified_attn_problem_t`; the C selectors carry no support gates to mirror it into. No codegen selector reads `emit_lse`: the selected split-KV spec differs only in `reduce_spec.emit_lse` between LSE on and off, so C selector output is unaffected |
+| `emit_lse` on the unified problem and the `_reject_lse` support gate (`library/kernels/common/attention_unified.py`) | `rocke_unified_attn_problem_t`; the C support gates (`instances/common/attention_unified_gates.cpp`) do not mirror `_reject_lse`, so the `rocke_engine` problem bindings refuse `emit_lse=True` rather than drop it. No codegen selector reads `emit_lse`: the selected split-KV spec differs only in `reduce_spec.emit_lse` between LSE on and off, so C selector output is unaffected |
 
 **Why deferred:** owner decision for ROCm/rocm-libraries#13955 (time-sensitive;
 the C engine is expected to be deprecated). Python is the only engine that
@@ -297,12 +297,6 @@ emitter.
 
 | Spec field | Selected by the shared selector? | What unblocks it |
 |---|---|---|
-| `kv_ring_depth != 2` | No | Port the 3-slot deep K prefetch ring. |
-| `use_q_reread` | No | Port the Q-reread path. |
-
----|---|---|
-| `use_v_double_buffer` (and `use_sched_barrier`, which gates on it) | Yes, see above | Port the V[i+1] prefetch slots and the double-buffer PV schedule, then drop the reject. |
-| `use_staggered_iter_wait` | No | Port the staggered-wait schedule together with the above. |
 | `kv_ring_depth != 2` | No | Port the 3-slot deep K prefetch ring. |
 | `use_q_reread` | No | Port the Q-reread path. |
 

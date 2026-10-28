@@ -757,6 +757,12 @@ def supports_native_unified_attention_3d_tiled(
         return rejected
     if problem.use_additive_bias and arch != "gfx950":
         return False, "additive bias is only implemented on gfx950"
+    # Rejected here rather than by the spec, so auto dispatch falls back to 2D.
+    if arch == "gfx942" and _enable_i64_kv_addr_3d(problem, arch):
+        return False, (
+            "gfx942 tiled 3D does not support i64 KV addressing "
+            "(paged KV cache past what its K/V loader reads) yet"
+        )
     *_, supports_tiled_3d = _tiled_3d_impl(arch)
     return supports_tiled_3d(
         head_size=problem.head_size,
