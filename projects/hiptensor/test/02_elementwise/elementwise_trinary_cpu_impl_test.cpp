@@ -115,11 +115,7 @@ auto elementaryTrinaryOpWithCpu(hiptensorDataType_t inputType,
             -352.8, -136.8, -280.8, -424.8, -68.4,  -212.4, -356.4, -140.4, -284.4, -428.4};
     }
 
-    std::vector<OutputType> referenceArray;
-    for(auto v : referenceValues)
-    {
-        referenceArray.push_back(static_cast<OutputType>(v));
-    }
+    std::vector<OutputType> referenceArray(referenceValues.begin(), referenceValues.end());
 
     const ComputeType alphaValue = static_cast<ComputeType>(0.3f);
     const ComputeType betaValue  = static_cast<ComputeType>(2.1f);
@@ -143,28 +139,28 @@ auto elementaryTrinaryOpWithCpu(hiptensorDataType_t inputType,
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
         handle, &descD, noutputMode, outputExtent.data(), NULL /* stride */, outputType, 0));
 
-    hiptensorElementwiseTrinaryOpReference(&alphaValue,
-                                           aArray.data(),
-                                           descA,
-                                           inMode.data(),
-                                           HIPTENSOR_OP_NEG,
-                                           &betaValue,
-                                           bArray.data(),
-                                           descB,
-                                           inMode.data(),
-                                           HIPTENSOR_OP_NEG,
-                                           &gammaValue,
-                                           cArray.data(),
-                                           descC,
-                                           inMode.data(),
-                                           HIPTENSOR_OP_NEG,
-                                           dArray.data(),
-                                           descD,
-                                           outputMode.data(),
-                                           HIPTENSOR_OP_ADD,
-                                           HIPTENSOR_OP_ADD,
-                                           typeCompute,
-                                           0);
+    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryOpReference(&alphaValue,
+                                                                 aArray.data(),
+                                                                 descA,
+                                                                 inMode.data(),
+                                                                 HIPTENSOR_OP_NEG,
+                                                                 &betaValue,
+                                                                 bArray.data(),
+                                                                 descB,
+                                                                 inMode.data(),
+                                                                 HIPTENSOR_OP_NEG,
+                                                                 &gammaValue,
+                                                                 cArray.data(),
+                                                                 descC,
+                                                                 inMode.data(),
+                                                                 HIPTENSOR_OP_NEG,
+                                                                 dArray.data(),
+                                                                 descD,
+                                                                 outputMode.data(),
+                                                                 HIPTENSOR_OP_ADD,
+                                                                 HIPTENSOR_OP_ADD,
+                                                                 typeCompute,
+                                                                 0));
 
     CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
     if(descA)

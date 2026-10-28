@@ -61,9 +61,7 @@ namespace hiptensor
     // False = skip test
     bool ElementwiseBinaryOpTest::checkDevice(hiptensorDataType_t datatype) const
     {
-        return (isF16Supported() && (datatype == HIPTENSOR_R_16F || datatype == HIPTENSOR_R_16BF))
-               || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
-               || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
+        return isElementwiseTypeSupportedOnDevice(datatype);
     }
 
     bool ElementwiseBinaryOpTest::checkSizes() const

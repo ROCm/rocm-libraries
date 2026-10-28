@@ -117,11 +117,7 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
             -323.4, -125.4, -257.4, -389.4, -62.7,  -194.7, -326.7, -128.7, -260.7, -392.7};
     }
 
-    std::vector<OutputType> referenceArray;
-    for(auto v : referenceValues)
-    {
-        referenceArray.push_back(static_cast<OutputType>(v));
-    }
+    std::vector<OutputType> referenceArray(referenceValues.begin(), referenceValues.end());
 
     const ComputeType alphaValue = static_cast<ComputeType>(2.1f);
     const ComputeType gammaValue = static_cast<ComputeType>(1.2f);
@@ -138,22 +134,22 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
         handle, &descD, noutputMode, outputExtent.data(), NULL /* stride */, outputType, 0));
 
-    hiptensorElementwiseBinaryOpReference(&alphaValue,
-                                          aArray.data(),
-                                          descA,
-                                          inMode.data(),
-                                          HIPTENSOR_OP_NEG,
-                                          &gammaValue,
-                                          cArray.data(),
-                                          descC,
-                                          inMode.data(),
-                                          HIPTENSOR_OP_NEG,
-                                          dArray.data(),
-                                          descD,
-                                          outputMode.data(),
-                                          HIPTENSOR_OP_ADD,
-                                          typeCompute,
-                                          0);
+    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryOpReference(&alphaValue,
+                                                                aArray.data(),
+                                                                descA,
+                                                                inMode.data(),
+                                                                HIPTENSOR_OP_NEG,
+                                                                &gammaValue,
+                                                                cArray.data(),
+                                                                descC,
+                                                                inMode.data(),
+                                                                HIPTENSOR_OP_NEG,
+                                                                dArray.data(),
+                                                                descD,
+                                                                outputMode.data(),
+                                                                HIPTENSOR_OP_ADD,
+                                                                typeCompute,
+                                                                0));
 
     auto result = compareEqual(referenceArray.data(),
                                dArray.data(),

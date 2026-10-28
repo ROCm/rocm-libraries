@@ -61,6 +61,14 @@ namespace hiptensor
         }
     }
 
+    // Whether the current device can run elementwise tests whose tensors have data type `type`.
+    inline bool isElementwiseTypeSupportedOnDevice(hiptensorDataType_t type)
+    {
+        return (isF16Supported() && (type == HIPTENSOR_R_16F || type == HIPTENSOR_R_16BF))
+               || (isF32Supported() && type == HIPTENSOR_R_32F)
+               || (isF64Supported() && type == HIPTENSOR_R_64F);
+    }
+
     // Stores `value` in `storage` with the representation of `type`. The 8-byte storage holds any
     // of the scalar types, so its address can be passed as the API's alpha/beta/gamma pointer.
     inline bool writeElementwiseScalar(double& storage, hiptensorDataType_t type, double value)

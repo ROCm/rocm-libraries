@@ -28,6 +28,7 @@
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
+#include "elementwise_type_support.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -122,21 +123,8 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
         return checkResult;
     }
 
-    constexpr std::array<std::array<hiptensorDataType_t, 4>, 6> validDataTypes
-        = {{// typeA, typeB, typeC, typeScalar
-            {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
-            {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF},
-            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
-
-    std::array<hiptensorDataType_t, 4> inputTensorTypes
-        = {descA->mType, descB->mType, descC->mType, typeScalar};
-    if(descC->mType != descD->mType
-       || std::none_of(validDataTypes.cbegin(),
-                       validDataTypes.cend(),
-                       [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
+    if(!hiptensor::isSupportedElementwiseTypeCombination(
+           {descA->mType, descB->mType, descC->mType, descD->mType}, typeScalar))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg,
@@ -144,7 +132,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
                  "Unsupported Data Type Error : The combination of data types for input tensors A, "
                  "B, C, and D is not supported. "
                  "See the link for details "
-                 "https://rocm.docs.amd.com/projects/hipTensor/en/docs-6.5.0/api-reference/"
+                 "https://rocm.docs.amd.com/projects/hipTensor/en/latest/api-reference/"
                  "api-reference.html "
                  "(%s)",
                  hiptensorGetErrorString(errorCode));
