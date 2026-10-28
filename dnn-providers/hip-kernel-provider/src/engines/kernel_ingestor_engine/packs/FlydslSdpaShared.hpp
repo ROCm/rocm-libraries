@@ -309,9 +309,10 @@ inline std::optional<int64_t> servableSinkStride(const MatchContext& context,
     return stride;
 }
 
-/// A graph's mask bounds in the reference's terms (CpuFpReferenceSdpa isMasked): key j is
-/// hidden from query row i when j > i + align + right or j < i + align - left, with align 0
-/// top-left and Skv - Sq bottom-right; UNBOUNDED for a side with no bound.
+/// A graph's mask bounds in the kernels' terms: key j is hidden from query row i when
+/// j > i + align + right or j < i + align - left, with align 0 top-left and Skv - Sq
+/// bottom-right; UNBOUNDED for a side with no bound. left is the FlashAttention
+/// window_size_left, one less than the graph's left_bound (see resolveMaskBounds).
 struct MaskBounds
 {
     int64_t left = UNBOUNDED;
@@ -328,6 +329,10 @@ struct MaskBounds
  * window, as gpt-oss and Mistral graphs set it). causal_mask keeps the stored alignment, so
  * diagonal_alignment refines it; causal_mask_bottom_right is always bottom-right. Both
  * booleans together, a bound below -1, and an alignment the schema does not name decline.
+ *
+ * The graph's left_bound follows cuDNN: left_bound = L keeps the L keys ending at the
+ * diagonal, diagonal included, so the returned left is L - 1. left_bound = 0 keeps no key at
+ * or before the diagonal, and L - 1 would read it as unbounded, so it declines.
  */
 inline std::optional<MaskBounds> resolveMaskBounds(const data_objects::SdpaAttributes& attributes)
 {
@@ -341,9 +346,13 @@ inline std::optional<MaskBounds> resolveMaskBounds(const data_objects::SdpaAttri
     bounds.left = attributes.left_bound().has_value() ? attributes.left_bound().value() : UNBOUNDED;
     bounds.right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
-    if(bounds.left < UNBOUNDED || bounds.right < UNBOUNDED)
+    if(bounds.left < UNBOUNDED || bounds.right < UNBOUNDED || bounds.left == 0)
     {
         return std::nullopt;
+    }
+    if(bounds.left != UNBOUNDED)
+    {
+        bounds.left -= 1;
     }
     if((topLeftDeprecated || bottomRightDeprecated) && bounds.right == UNBOUNDED)
     {

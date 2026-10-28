@@ -946,6 +946,7 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
         s.diagonalAlignment = static_cast<data_objects::DiagonalAlignment>(7);
     });
     edit("LeftBoundBelowMinusOne", [](SdpaGraphSpec& s) { s.leftBound = -2; });
+    edit("LeftBoundZero", [](SdpaGraphSpec& s) { s.leftBound = 0; });
     edit("RightBoundBelowMinusOne", [](SdpaGraphSpec& s) { s.rightBound = -2; });
 
     // Dtypes the kernels have no objects for.

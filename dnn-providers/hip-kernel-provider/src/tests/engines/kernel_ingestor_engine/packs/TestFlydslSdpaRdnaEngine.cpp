@@ -428,6 +428,9 @@ INSTANTIATE_TEST_SUITE_P(
         // A bound below -1 has no meaning in the reference's convention.
         AcceptedCase{"LeftBoundBelowMinusOne",
                      accepted([](SdpaGraphSpec& s) { s.leftBound = -2; })},
+        // left_bound = 0 keeps no key at or before the diagonal (cuDNN's convention), and the
+        // kernel's window, one less, would read it as unbounded.
+        AcceptedCase{"LeftBoundZero", accepted([](SdpaGraphSpec& s) { s.leftBound = 0; })},
         // The kernel reads a bias in f32 or the query's dtype, and only one that broadcasts
         // to [B, H, Sq, Skv].
         AcceptedCase{"BiasInAThirdDtype", accepted([](SdpaGraphSpec& s) {
@@ -528,9 +531,10 @@ TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedBottomRightBooleanIsCausalAtTheBott
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_CAUSAL_TOKEN), 1);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_RIGHT_BOUND_TOKEN), 0);
     EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_ALIGN_BOTTOM_RIGHT_TOKEN), 1);
-    // With a left_bound too, the window is kept (cuDNN and #13065), not dropped.
+    // With a left_bound too, the window is kept (cuDNN and #13065), not dropped, as the
+    // kernel's window: one less than the graph's bound.
     spec.leftBound = 32;
-    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 32);
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 31);
 }
 
 TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedTopLeftBooleanIsCausalAtTheStoredAlignment)
@@ -561,9 +565,13 @@ TEST(TestFlydslSdpaRdnaBinding, TheDeprecatedTopLeftBooleanIsCausalAtTheStoredAl
 
 TEST(TestFlydslSdpaRdnaBinding, AWindowBindsItsLeftBoundAndClampsAnOversizedOne)
 {
+    // left_bound = L keeps the L keys ending at the diagonal (cuDNN); the kernel keeps
+    // left_bound + 1, so it is bound one less, and 1 binds 0, the diagonal alone.
     SdpaGraphSpec spec;
     spec.mask = SdpaMask::SLIDING_WINDOW;
-    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 64);
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 63);
+    spec.leftBound = 1;
+    EXPECT_EQ(boundInt(bindingsFor(spec), FLYDSL_SDPA_RDNA_LEFT_BOUND_TOKEN), 0);
 
     // Past Sq + Skv a window masks nothing more, and the kernel's int32 sums need the
     // bound kept in range.
@@ -1418,7 +1426,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                                 const KernelDefinition* forced)
 {
     const bool decode = family == RdnaFamily::DECODE;
-    // The bounds the graph builder writes for this spec, in CpuFpReferenceSdpa's terms.
+    // The bounds the graph builder writes for this spec, in CpuFpReferenceSdpa's terms: a
+    // left bound L keeps the L keys ending at the diagonal, as cuDNN's does.
     int64_t left = -1;
     int64_t right = -1;
     if(spec.mask == SdpaMask::TOP_LEFT_CAUSAL || spec.mask == SdpaMask::BOTTOM_RIGHT_CAUSAL)
@@ -1436,7 +1445,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
         = spec.mask == SdpaMask::BOTTOM_RIGHT_CAUSAL ? spec.seqLenKv - spec.seqLenQ : 0;
     const auto isMasked = [&](int64_t row, int64_t key) {
         return (right >= 0 && key >= row + 1 + align + right)
-               || (left >= 0 && key < row + align - left);
+               || (left >= 0 && key <= row + align - left);
     };
 
     const std::string dtype = spec.dataType == DataType::BFLOAT16 ? "bf16" : "f16";

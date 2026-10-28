@@ -97,9 +97,9 @@ inline constexpr std::string_view V_TOKEN = "flydsl_sdpa_rdna.v.uid";
 inline constexpr std::string_view O_TOKEN = "flydsl_sdpa_rdna.o.uid";
 /// 0 or 1: which of the two kernel variants the graph needs.
 inline constexpr std::string_view CAUSAL_TOKEN = "flydsl_sdpa_rdna.causal";
-/// The mask, in the reference's own terms (CpuFpReferenceSdpa isMasked): right and left
-/// bounds (-1 for none) and whether the diagonal is bottom-right aligned. The kernel derives
-/// the diagonal's offset from the sequence lengths itself.
+/// The mask, in the kernels' terms (resolveMaskBounds): right and left bounds (-1 for none;
+/// left is the graph's left_bound - 1) and whether the diagonal is bottom-right aligned. The
+/// kernel derives the diagonal's offset from the sequence lengths itself.
 inline constexpr std::string_view RIGHT_BOUND_TOKEN = "flydsl_sdpa_rdna.right_bound";
 inline constexpr std::string_view LEFT_BOUND_TOKEN = "flydsl_sdpa_rdna.left_bound";
 inline constexpr std::string_view ALIGN_BOTTOM_RIGHT_TOKEN = "flydsl_sdpa_rdna.align_bottom_right";
@@ -209,7 +209,7 @@ inline bool isServableOperand(const data_objects::TensorAttributes& tensor)
     return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
 }
 
-/// The mask a graph asks for, in the reference's terms (CpuFpReferenceSdpa isMasked): kv is
+/// The mask a graph asks for, in the kernels' terms (resolveMaskBounds): kv is
 /// masked when kv >= q + 1 + align + right (right >= 0), or kv < q + align - left
 /// (left >= 0), where align is 0 top-left and Skv - Sq bottom-right.
 struct SdpaMask

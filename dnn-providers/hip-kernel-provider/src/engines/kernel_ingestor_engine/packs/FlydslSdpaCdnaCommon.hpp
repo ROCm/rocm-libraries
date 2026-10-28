@@ -531,7 +531,8 @@ struct CdnaMask
 /**
  * @brief The graph's mask in the kernels' terms, or nullopt for one they cannot apply.
  *
- * The reference (CpuFpReferenceSdpa isMasked) hides key j from query row i when
+ * In the kernels' terms (resolveMaskBounds; left is the graph's left_bound - 1) the
+ * reference hides key j from query row i when
  * j > i + align + right, with align 0 top-left and Skv - Sq bottom-right; so causal and a
  * band to the right of the diagonal are both one offset, align + right. It hides j <
  * i + align - left too, a sliding window: the window's lower edge, align - left, is the
