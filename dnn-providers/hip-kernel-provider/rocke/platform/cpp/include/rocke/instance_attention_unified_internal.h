@@ -274,15 +274,19 @@ void rocke_attn_unified_emit_3d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
  * ctx->output / segm_* / abi_seq_lens / abi_cu_q + grid ids. */
 void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce max-pass over [0, num_segments): overall = max(segm_max[..,seg]).
+/* The reduce max-pass over [0, num_segments):
+ * overall = max over seg of select(segm_expsum == 0, -inf, segm_max). Only an
+ * exact-zero sum marks an empty segment, so a NaN sum is not skipped.
  * Writes ctx->overall. */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce combine-pass over [0, num_segments): den += l*exp2(m-overall);
- * acc += segm_output[..,seg,dim]*exp2(m-overall). Writes ctx->red_den/red_acc. */
+/* The reduce combine-pass over [0, num_segments):
+ * factor = select(l == 0, 0, exp2(m - overall)); den += l*factor;
+ * acc += segm_output[..,seg,dim]*factor. Writes ctx->red_den/red_acc. */
 void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce guarded epilogue: result = acc * rcp(den); cast to dtype; store at
+/* The reduce guarded epilogue: result = select(den == 0, 0, acc * rcp(den));
+ * a NaN den still reaches the output. Cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under active. */
 void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx);
 

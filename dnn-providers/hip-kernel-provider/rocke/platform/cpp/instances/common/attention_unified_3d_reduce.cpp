@@ -318,15 +318,20 @@ void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ct
  *   with max_loop as (seg, (mx,)):
  *       idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
  *       mv = global_load_f32(segm_max, idx)
+ *       lv = global_load_f32(segm_expsum, idx)
+ *       mv = select(fcmp("oeq", lv, zero), neg_inf, mv)
  *       scf_yield(fmax(mx, mv))
  *   overall = max_loop.results[0]
+ *
+ * A segment that saw no key stores max = -inf with sum = 0: it is skipped.
+ * Only an exact zero sum counts as empty, so a NaN sum still propagates.
  * ============================================================ */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[1];
     rocke_for_t max_loop;
-    rocke_value_t *seg, *mx, *idx, *mv;
+    rocke_value_t *seg, *mx, *idx, *mv, *lv, *empty;
     rocke_value_t* yields[1];
 
     iter_args[0].name = "mx";
@@ -349,6 +354,9 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
 
     idx = rocke__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
     mv = rocke_b_global_load_f32(b, ctx->segm_max, idx, 0);
+    lv = rocke_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
+    empty = rocke_b_fcmp(b, "oeq", lv, ctx->zero_f);
+    mv = rocke_b_select(b, empty, ctx->neg_inf, mv);
 
     yields[0] = rocke_b_fmax(b, mx, mv);
     rocke_b_scf_yield(b, yields, 1);
@@ -370,7 +378,7 @@ void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx
  *       idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
  *       mv = global_load_f32(segm_max, idx)
  *       lv = global_load_f32(segm_expsum, idx)
- *       factor = exp2(mv - overall)
+ *       factor = select(fcmp("oeq", lv, zero), zero, exp2(mv - overall))
  *       den2 = fadd(den, fmul(lv, factor))
  *       out_idx, _ = seg_out_desc.offset(b, token=q_tok, head=q_head, seg=seg, dim=dim)
  *       ov = global_load_f32(segm_output, out_idx)
@@ -382,7 +390,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     rocke_ir_builder_t* b = ctx->b;
     rocke_iter_arg_t iter_args[2];
     rocke_for_t red;
-    rocke_value_t *seg, *den, *acc, *idx, *mv, *lv, *factor, *den2, *out_idx, *ov, *acc2;
+    rocke_value_t *seg, *den, *acc, *idx, *mv, *lv, *empty, *factor, *den2, *out_idx, *ov, *acc2;
     rocke_value_t* yields[2];
 
     iter_args[0].name = "den";
@@ -409,7 +417,10 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
     idx = rocke__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
     mv = rocke_b_global_load_f32(b, ctx->segm_max, idx, 0);
     lv = rocke_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
+    /* Python evaluates select's operands left to right: fcmp before exp2. */
+    empty = rocke_b_fcmp(b, "oeq", lv, ctx->zero_f);
     factor = rocke_b_exp2(b, rocke_b_fsub(b, mv, ctx->overall));
+    factor = rocke_b_select(b, empty, ctx->zero_f, factor);
     den2 = rocke_b_fadd(b, den, rocke_b_fmul(b, lv, factor));
 
     out_idx = rocke__out_offset(ctx, ctx->q_tok, ctx->q_head, seg, ctx->dim);
@@ -433,6 +444,7 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
  * Reduce guarded epilogue (Python lines 3004-3008).
  *
  *   result = fmul(red.results[1], rcp(red.results[0]))
+ *   result = select(fcmp("oeq", red.results[0], zero), zero, result)
  *   cast = cast_f32_to(result, dtype)
  *   out_idx, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
  *   with b.scf_if(active):
@@ -445,6 +457,10 @@ void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx
     rocke_if_t guard;
 
     result = rocke_b_fmul(b, ctx->red_acc, rocke_b_rcp(b, ctx->red_den));
+    /* A row with no key at all has den == 0: O = 0 instead of acc * rcp(0).
+     * Only an exact zero counts as empty, so a NaN den still yields NaN. */
+    result
+        = rocke_b_select(b, rocke_b_fcmp(b, "oeq", ctx->red_den, ctx->zero_f), ctx->zero_f, result);
     cast = rocke_b_cast_f32_to(b, result, ctx->dtype);
 
     out_idx = rocke__q_offset(ctx, ctx->q_tok, ctx->q_head, ctx->dim);

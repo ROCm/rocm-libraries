@@ -464,6 +464,7 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
@@ -840,6 +841,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
+        "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"
+        "tests/library/tests/test_attention_unified_scalar_masked_tile_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_wave_page_id_load.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
