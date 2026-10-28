@@ -345,7 +345,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             };
 
             build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
-            if (MIOPEN_USE_RNE_BFLOAT16)
+            if(MIOPEN_USE_RNE_BFLOAT16)
             {
                 build_params.Define("MIOPEN_USE_RNE_BFLOAT16");
             }
