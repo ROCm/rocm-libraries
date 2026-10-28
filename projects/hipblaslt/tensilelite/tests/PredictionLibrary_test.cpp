@@ -40,8 +40,8 @@
 
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
-#include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/hip/HipHardware.hpp>
+#include <Tensile/MasterSolutionLibrary.hpp>
 
 #if defined(TENSILE_MSGPACK)
 #include <Tensile/msgpack/MessagePack.hpp>
@@ -260,4 +260,128 @@ TEST(PredictionLibraryTest, ClusterDimStaysIndexAlignedWithSolutionList)
     EXPECT_EQ(lib.solution_list[1].first, 7);
     expectClusterDim(lib.origami_config_list[0], TensileLite::dim3(2, 4, 1));
     expectClusterDim(lib.origami_config_list[1], TensileLite::dim3(1, 1, 1));
+}
+
+TEST(PredictionLibraryTest, LegacyNonTemporalBecomesOrigamiCacheHint)
+{
+    auto solution                      = makeMappedSolution(42);
+    solution->sizeMapping.nonTemporalA = 4;
+    solution->sizeMapping.nonTemporalB = 0;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
+}
+
+TEST(PredictionLibraryTest, TemporalHintsOverrideLegacyNonTemporal)
+{
+    auto solution                         = makeMappedSolution(42);
+    solution->sizeMapping.hasTemporalHint = true;
+    solution->sizeMapping.temporalHintA   = 1;
+    solution->sizeMapping.temporalHintB   = 2;
+    solution->sizeMapping.nonTemporalA    = 0;
+    solution->sizeMapping.nonTemporalB    = 4;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
+}
+
+// cacheHintA/B only treat temporal hints 1 (TH_NT) and 3 (TH_LU / TH_WB) as
+// non-temporal. TH_NT_RT, TH_RT_NT, TH_NT_HT, and TH_NT_WB (4-7) stay cached,
+// and that mapping overrides a legacy non-temporal value.
+TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
+{
+    struct Case
+    {
+        int hint;
+        int cache;
+    };
+    // 3 is the other non-temporal encoding. 4-7 currently collapse to 0.
+    Case const cases[] = {{3, 4}, {4, 0}, {5, 0}, {6, 0}, {7, 0}};
+
+    for(auto const& c : cases)
+    {
+        auto solution                         = makeMappedSolution(42);
+        solution->sizeMapping.hasTemporalHint = true;
+        solution->sizeMapping.temporalHintA   = c.hint;
+        solution->sizeMapping.temporalHintB   = c.hint;
+        solution->sizeMapping.nonTemporalA    = 4;
+        solution->sizeMapping.nonTemporalB    = 4;
+
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(42, solution);
+
+        ContractionProblemPredictionLibrary lib;
+        loadPredictionLibrary({42}, solutions, lib);
+        ASSERT_EQ(lib.origami_config_list.size(), 1u) << "temporalHint " << c.hint;
+        EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, c.cache) << "temporalHint " << c.hint;
+        EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, c.cache) << "temporalHint " << c.hint;
+    }
+}
+
+// The per-tile flags are written once while the library is loaded.
+// An NT-B solution at 128x256 must not mark the 256x256 solution.
+TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
+{
+    auto ntB                        = makeMappedSolution(42);
+    ntB->sizeMapping.macroTile      = TensileLite::dim3(128, 256, 1);
+    ntB->sizeMapping.nonTemporalB   = 4;
+    auto temporal                   = makeMappedSolution(7);
+    temporal->sizeMapping.macroTile = TensileLite::dim3(256, 256, 1);
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, ntB);
+    solutions.emplace(7, temporal);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42, 7}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 2u);
+
+    EXPECT_FALSE(lib.origami_config_list[0].non_temporal_a_available);
+    EXPECT_TRUE(lib.origami_config_list[0].non_temporal_b_available);
+    EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
+    EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
+}
+
+TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLookup)
+{
+    auto clustered = makeMappedSolution(42, TensileLite::dim3(8, 1, 1));
+    auto plain = makeMappedSolution(7);
+    for(auto const& solution : {clustered, plain})
+    {
+        solution->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution->sizeMapping.workAssignment = WorkAssignment::StaticGrid;
+        solution->hardwarePredicate = std::make_shared<Predicates::True<Hardware>>();
+        solution->problemPredicate = std::make_shared<Predicates::True<ContractionProblemGemm>>();
+    }
+    clustered->internalArgsSupport.persistentLoopArgsVersion = 2;
+    SolutionMap<ContractionSolution> solutions{{42, clustered}, {7, plain}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42, 7}, solutions, lib);
+    hip::HipAMDGPU device;
+    device.computeUnitCount = 256;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
+        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1, 8192, 8192, 1, 8192, 1, 1.0, false, 1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    const auto ranked = lib.findTopSolutions(problem, device, 2);
+    ASSERT_EQ(ranked.size(), 2u);
+    EXPECT_EQ(ranked[0], plain);
+    EXPECT_EQ(ranked[1], clustered);
+    EXPECT_EQ(lib.getSolutionByIndex(problem, device, 42), clustered);
+    EXPECT_EQ(clustered->sizeMapping.clusterDim.x, 8u);
 }

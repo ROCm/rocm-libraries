@@ -497,6 +497,47 @@ namespace
         expectPolicy(readSize(), policies[0]);
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, OmittedTemporalHintsKeepLegacyNonTemporal)
+    {
+        size.erase("temporalHintA");
+        size.erase("temporalHintB");
+        size.erase("hasTemporalHint");
+        size["nonTemporalA"] = object(4);
+        size["nonTemporalB"] = object(0);
+
+        auto decoded = readSize();
+        EXPECT_EQ(decoded.temporalHintA, 0);
+        EXPECT_EQ(decoded.temporalHintB, 0);
+        EXPECT_FALSE(decoded.hasTemporalHint);
+        EXPECT_EQ(decoded.nonTemporalA, 4);
+        EXPECT_EQ(decoded.cacheHintA(), 4);
+        EXPECT_EQ(decoded.cacheHintB(), 0);
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, TemporalHintsRoundTripAndOverrideLegacy)
+    {
+        size["hasTemporalHint"] = object(true);
+        size["temporalHintA"]   = object(3);
+        size["temporalHintB"]   = object(1);
+        size["nonTemporalA"]    = object(0);
+        size["nonTemporalB"]    = object(4);
+
+        auto decoded = readSize();
+        EXPECT_TRUE(decoded.hasTemporalHint);
+        EXPECT_EQ(decoded.temporalHintA, 3);
+        EXPECT_EQ(decoded.temporalHintB, 1);
+        EXPECT_EQ(decoded.cacheHintA(), 4);
+        EXPECT_EQ(decoded.cacheHintB(), 4);
+
+        size       = output(decoded);
+        auto again = readSize();
+        EXPECT_TRUE(again.hasTemporalHint);
+        EXPECT_EQ(again.temporalHintA, 3);
+        EXPECT_EQ(again.temporalHintB, 1);
+        EXPECT_EQ(again.cacheHintA(), 4);
+        EXPECT_EQ(again.cacheHintB(), 4);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, ConflictingMixedSelectorsAreRejected)
     {
         for(const auto& old : policies)
@@ -775,4 +816,59 @@ namespace
         auto grid              = emittedDescriptor.at("grid").as<std::vector<std::string>>();
         EXPECT_EQ(grid, (std::vector<std::string>{"StreamKWithBatch", "One", "One"}));
     }
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterVersionTwoRoundTrips)
+    {
+        canonical(policies[2]);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 4, 1});
+        auto legacy = readSolution();
+        EXPECT_FALSE(legacy->usesStreamKSpatialCluster());
+        EXPECT_EQ(legacy->internalArgsSupport.persistentLoopArgsVersion, 0);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.y, 4u);
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        for(int outer : {0, 1, 2})
+        {
+            internalArgs["version"] = object(outer);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        internalArgs["version"] = object(3);
+        auto decoded = readSolution();
+        EXPECT_TRUE(decoded->usesStreamKSpatialCluster());
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
+        EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
+        internalArgs = output(decoded->internalArgsSupport);
+        size = output(decoded->sizeMapping);
+        EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterLayoutRejectsInvalidPolicyAndShape)
+    {
+        internalArgs["persistentLoopArgsVersion"] = object(2);
+        internalArgs["version"] = object(3);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 1, 1});
+        for(const auto& policy : policies)
+        {
+            SCOPED_TRACE(::testing::Message() << policy.strategy << '/' << policy.assignment);
+            canonical(policy);
+            if(std::string(policy.strategy) == "StreamK"
+               && std::string(policy.assignment) == "StaticGrid")
+                EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+            else
+                EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        canonical(policies[2]);
+        for(uint32_t n : {2, 4, 8})
+        {
+            size["clusterDim"] = object(std::vector<uint32_t>{1, n, 1});
+            EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+        }
+        for(const auto& shape : std::vector<std::vector<uint32_t>>{
+                {1, 1, 1}, {1, 16, 1}, {3, 1, 1}, {16, 1, 1}, {4, 8, 1}, {2, 1, 2}})
+        {
+            size["clusterDim"] = object(shape);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+    }
+
 }

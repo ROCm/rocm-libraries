@@ -1,0 +1,12 @@
+// Insert into plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp
+// (namespace hipdnn_plugin_sdk::heuristics::detail). Pick one (see node_flops_overload.txt):
+
+// Counted: add the case in the logicalFlops() switch, before `default:`:
+    case NodeAttributes::{{ op.node_attributes_union_member }}:
+        return flopsOf(graph, node.attributes_as_{{ op.node_attributes_union_member }}());
+
+// No counting convention: add the entry to NO_COUNTING_CONVENTION (above logicalFlops),
+// with the reason on the line above it, and skip the case, the nodeFlops overload and
+// the test entry:
+    // TODO: why {{ op.name }} has no counting convention.
+    NodeAttributes::{{ op.node_attributes_union_member }},

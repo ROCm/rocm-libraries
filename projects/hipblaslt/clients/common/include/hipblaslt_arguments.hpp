@@ -154,8 +154,8 @@ struct Arguments
 
     // the gpu arch string after "gfx" for which the test is valid,
     // it represents a regular expression.
-    char gpu_arch[16];
-    char gpu_arch_exclude[16];
+    char gpu_arch[32];
+    char gpu_arch_exclude[32];
 
     // memory padding for testing write out of bounds
     uint32_t pad;
@@ -227,7 +227,7 @@ struct Arguments
     bool    use_ext;
     bool    use_ext_setproblem;
     int     algo_method; // 0 for getheuristic, 1 for get all algos, 2 for algo index
-    int     api_method; // 0 for c, 1 for mix, 2 for cpp
+    int     api_method; // 0 for c, 1 for mix, 2 for cpp, 3 for the grouped C API
     bool    use_user_args;
     int32_t rotating;
     bool    use_gpu_timer;

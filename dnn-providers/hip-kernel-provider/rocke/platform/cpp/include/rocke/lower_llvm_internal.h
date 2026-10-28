@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rocke/arch_domain.h"
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
@@ -218,11 +219,18 @@ typedef struct rocke_isa_backend
      * is one the opcode cannot carry (the caller then fails with the same
      * message Python raises). */
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
+    /* Python ISABackend.has_fp8_scale_conversion: the fused scale-and-convert
+     * fp8/bf8 instructions (v_cvt_scalef32_pk_f32_fp8 / _bf8). True only on
+     * gfx950. Elsewhere LLVM may still select the intrinsic and write an
+     * encoding the GPU does not have, so the lowerer refuses the ops. */
+    bool has_fp8_scale_conversion;
 } rocke_isa_backend_t;
 
-/* Resolve a gfx string to its backend (Python backend_for). Returns NULL and
- * sets *st to ROCKE_ERR_VALUE for a NULL arch (there is no default) and to
- * ROCKE_ERR_KEY for an unknown one. */
+/* Resolve a gfx string to its backend (Python backend_for). Returns the
+ * target's shared, read-only table row, whose datalayout and triple are unset
+ * (a lowering fills them in its own copy, rocke_lower.backend_resolved); safe
+ * to call from any thread. Returns NULL and sets *st to ROCKE_ERR_VALUE for a
+ * NULL arch (there is no default) and to ROCKE_ERR_KEY for an unknown one. */
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st);
 
 /* The two CDNA waitcnt encoders (Python _encode_waitcnt_gfx9_10 /
@@ -237,10 +245,9 @@ int rocke_ll_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem);
 void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem);
 
-/* The two ds_read_tr16_b128 opcode selections (Python
- * ISABackend.ds_tr16_b128_spec and the Gfx1250Backend override). Defined in
- * the crosslane bucket alongside the handler. */
-bool rocke_ll_tr16_spec_b128_default(const char* elem_type, rocke_ll_tr16_spec_t* out);
+/* The gfx1250 ds_read_tr16_b128 opcode selection (Python
+ * Gfx1250Backend.ds_tr16_b128_spec). Defined in the crosslane bucket alongside
+ * the handler. Other backends leave the pointer NULL. */
 bool rocke_ll_tr16_spec_b128_gfx1250(const char* elem_type, rocke_ll_tr16_spec_t* out);
 
 /* ====================================================================== */
@@ -396,8 +403,11 @@ struct rocke_lower
 {
     rocke_arena_t arena; /* owns blocks, lines, fresh names    */
     const rocke_kernel_def_t* kernel;
-    const rocke_isa_backend_t* backend;
+    const rocke_isa_backend_t* backend; /* &backend_resolved once running  */
+    rocke_isa_backend_t backend_resolved; /* the target's row + datalayout/triple */
     rocke_llvm_flavor_t flavor; /* resolved (never AUTO once running) */
+    /* The arch-domain lane's mode, read once per lowering at entry. */
+    rocke_arch_domain_mode_t arch_domain_mode;
 
     /* block model */
     ROCKE_VEC(rocke_ll_block_t*) blocks; /* blocks[len-1] is _current()       */

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,9 +18,9 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// One catalog entry: a kernel that passed every matcher for a graph. Copied out of
-/// KernelIngestorStateManager rather than referenced, so a caller holds a stable
-/// snapshot while the source cache is concurrently evicted or refilled.
+/// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
+/// in an immutable set; catalogs and rankings reference them by pointer, valid for the
+/// manager's lifetime.
 struct KernelDefinition
 {
     DescriptorId kernelId;
@@ -48,6 +49,11 @@ struct KernelDefinition
     /// initializer after it while still compiling -- the exact hazard the assertion below
     /// exists to catch.
     std::filesystem::path treeRoot;
+    /// Copied from KernelDescriptor::sources: the launches of a multi-launch kernel, keyed
+    /// by launch name, in place of `source`. Empty for a single-launch kernel. Appended for
+    /// the same reason as treeRoot. A native handler reaches one entry through the
+    /// provider's launchKernelDefinition(), which returns a single-launch definition.
+    std::map<std::string, KernelSource> sources;
 
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
@@ -114,7 +120,7 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, ten initializers at a time, so its field count
+// KernelDefinition is built positionally, eleven initializers at a time, so its field count
 // is pinned here the way KernelSource's is in Descriptors.hpp. std::string converts
 // implicitly to std::filesystem::path, so a path field inserted ahead of originDirectory
 // would otherwise compile and silently rebind every initializer after it. Only the count
@@ -129,7 +135,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::vector<std::string>,
                                                std::filesystem::path,
                                                std::string,
-                                               std::filesystem::path>
+                                               std::filesystem::path,
+                                               std::map<std::string, KernelSource>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        DescriptorId,
                                                        DescriptorId,
@@ -141,6 +148,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::filesystem::path,
                                                        std::string,
                                                        std::filesystem::path,
+                                                       std::map<std::string, KernelSource>,
                                                        std::string>,
               "KernelDefinition gained or lost a field; append only, then extend this "
               "assertion and every positional construction of it.");

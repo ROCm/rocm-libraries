@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 #
 ################################################################################
-"""Decode Tensile NonTemporal-related parameters into rocisa modifiers."""
+"""Decode TensileLite NonTemporal-related parameters into rocisa modifiers."""
 
 from rocisa.enum import CacheScope, NonVolatile, TemporalHint
 
@@ -38,7 +38,7 @@ def decodeNonTemporal(
 ):
     """Return ``(glc, slc, nt, scope, th, nv)`` for one memory op.
 
-    Legacy arches keep Tensile's existing 3-bit behavior: bit0 -> glc/sc0,
+    Legacy arches keep TensileLite's existing 3-bit behavior: bit0 -> glc/sc0,
     bit1 -> slc/sc1, bit2 -> nt.  On gfx1250, rocisa exposes ``th:`` and
     ``scope:`` instead, so the old sc bits become the gfx1250 scope selection
     (CU/SE/DEV/SYS) and TemporalHint selects the TH field directly.  Helpers
