@@ -1,5 +1,5 @@
 {
- "note": "Magnitude estimates behind the SdpaBackward tolerance classes (plan \u00a76.2). Written by generate_sdpa_bwd_bundles.py --calibrate (NumPy); read by every run. Key: <plan item>/<dtype>; fp: fingerprint of the estimate's inputs.",
+ "note": "Magnitude estimates behind the SdpaBackward tolerance classes (plan \u00a76.1). Written by generate_sdpa_bwd_bundles.py --calibrate (NumPy); read by every run. Key: <plan item>/<dtype>; fp: fingerprint of the estimate's inputs.",
  "estimates": {
   "AP001/fp16": {
    "fp": "0132af71483e",

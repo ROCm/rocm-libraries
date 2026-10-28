@@ -20,7 +20,7 @@ exhaustive tool read it:
 It contains no engine knowledge. A plan item is a plain ``dict`` built by
 ``new``; it becomes one case per data type.
 
-Band conventions (plan §1.5, §3.1):
+Band conventions (plan §1.2):
 
 * ``W`` is the number of keys kept per query row, including the diagonal key;
   ``None`` is unbounded left.
@@ -53,7 +53,7 @@ LEVEL_DIR = {
     "nightly": "comprehensive",
     "full": "full",
 }
-NOTRUN = "notrun"  # declared, not written: the case waits for a gate (plan §4.11)
+NOTRUN = "notrun"  # declared, not written: the case waits for a gate (plan §4.1)
 
 # The generator's baseline is develop plus #14312 (O and Stats derived from
 # the forward in the fill). Each switch flips when its pull request lands.
@@ -94,7 +94,7 @@ UID = {
     "RaggedOffsetQ": 19, "RaggedOffsetK": 20, "RaggedOffsetV": 21, "RaggedOffsetO": 22,
 }
 
-# Template directories under <level>/SdpaBackward/ (plan §4.5) and the
+# Template directories under <level>/SdpaBackward/ (plan §4) and the
 # optional tensors each one adds to Default.
 TOPOLOGIES = OrderedDict([
     ("Default", ()),
@@ -119,7 +119,7 @@ TOPOLOGIES = OrderedDict([
 ISQ = "inv_sqrt"  # attn_scale_value = 1 / sqrt(Dqk)
 
 GEOMETRY = ("B", "Hq", "Hk", "Hv", "Sq", "Skv", "Dqk", "Dv")
-# The default shape (§3.4): g = 1 and Dqk = Dv (deviation DV-1).
+# The default shape (§3): g = 1 and Dqk = Dv (deviation DV-1).
 DEFAULT = dict(B=2, Hq=3, Hk=3, Hv=3, Sq=72, Skv=120, Dqk=128, Dv=128)
 
 CASE_DEFAULTS = dict(
@@ -150,7 +150,7 @@ CASE_DEFAULTS = dict(
     alignment=16,  # declared byte alignment of every tensor
     oracle=None,  # None: ready; else a GATES key
     rejection=False,  # rejection probe (layer U)
-    defect=None,  # open engine defect the probe pins (§4.8)
+    defect=None,  # open engine defect the probe pins (§4.2)
     regression_of=None,  # escaped bug the case pins
     golden=None,  # GL row
     seed=0,
@@ -456,7 +456,7 @@ def scale_value(c):
 
 
 # --------------------------------------------------------------------------
-# Cost model (§3.3; RFC 0022 §7): one model for the case list and the golden
+# Cost model (§3, §4.4; RFC 0022 §7): one model for the case list and the golden
 # set. Wall time of one case with the CPU reference as the oracle:
 #   pilot (binding): t = 4.6e-8 * Dv * T + 8.7e-8 * (3*Dqk + Dv)/4 * U + 0.14 s
 #   alt:  t = 27.9e-9 * f * (U*(3*Dqk + Dv) + T*Dv) + 1e-8 * (Dqk + Dv)/2 * T + 0.08 s,
@@ -540,7 +540,7 @@ def seconds(c, dt):
 
 
 def budget_seconds(pilot, alt):
-    """The per-case and cumulative budget rule (§3.3, §4.7)."""
+    """The per-case and cumulative budget rule (§3, §4.4)."""
     return max(pilot, alt)
 
 
@@ -554,7 +554,7 @@ def fits_level(cost):
 
 
 # --------------------------------------------------------------------------
-# Legality (§2.9). The generator writes claim, regression and probe cases in
+# Legality (§2.8). The generator writes claim, regression and probe cases in
 # WF or EXT, rejection probes in U, and nothing outside F_active.
 #   F         frontend-legal on develop (rules R0-R12, tensor validate)
 #   F_R13     F plus R13 (left_bound -1 or >= 1), from #14287 or #14358
@@ -832,7 +832,7 @@ def layer(r, semantics="develop"):
 
 
 def legality_violations(r):
-    """Violations of the write rule for one record (§2.9)."""
+    """Violations of the write rule for one record (§2.8)."""
     out = []
     lay, why = layer(r, "develop")
     rej = r.get("expected_rejection")
@@ -851,7 +851,7 @@ def legality_violations(r):
 
 
 # --------------------------------------------------------------------------
-# Oracle gates (§4.11). A case whose oracle is not ready has level notrun and
+# Oracle gates (§4.1). A case whose oracle is not ready has level notrun and
 # is written once its gate opens. Each gate names what opens it and its
 # tracking item; "to file" means no ticket exists yet.
 # --------------------------------------------------------------------------
@@ -978,7 +978,7 @@ def domain(name):
 
 
 # --------------------------------------------------------------------------
-# Tolerance classes (§6.2). A case id ends with its class token; each engine
+# Tolerance classes (§6.1). A case id ends with its class token; each engine
 # TOML has one row per class and dtype. Rule order: F32, K1, U, S, P, DL, D.
 # The class must hold the guard (atol <= 0.1 x the smallest non-zero max|ref|
 # over dQ, dK, dV) and, where the kernel model ran, the margin (atol >=
@@ -1168,7 +1168,7 @@ def load_calibration(path=CALIBRATION_FILE):
 def save_calibration(entries, path=CALIBRATION_FILE):
     doc = {
         "note": (
-            "Magnitude estimates behind the SdpaBackward tolerance classes (plan §6.2). "
+            "Magnitude estimates behind the SdpaBackward tolerance classes (plan §6.1). "
             "Written by generate_sdpa_bwd_bundles.py --calibrate (NumPy); read by every run. "
             "Key: <plan item>/<dtype>; fp: fingerprint of the estimate's inputs."
         ),
@@ -1549,7 +1549,7 @@ def axis_projection(c, dt):
         sc = "inv_sqrt" if s == ISQ else "unset"
     else:
         sc = "other" if float(s) > 0 else None
-    # dO's magnitude is a free scale (§6.3): a symmetric dO range is the default domain
+    # dO's magnitude is a free scale (§6.1): a symmetric dO range is the default domain
     ins = {
         k: v
         for k, v in (c.get("inputs") or {}).items()
@@ -1620,10 +1620,10 @@ FEATURE_DISPOSITION = {
     "E1": "not run: repeat with an uncleared workspace needs I5 (HG5)",
     "E2": "not run: plan reuse with new pointers and scale values needs I5 (HG5)",
     "E3": "unit: lowering and lifting round trips",
-    "E5": "n/a: the generator enforces legality (§2.9)",
+    "E5": "n/a: the generator enforces legality (§2.8)",
     "E6": "out of scope (engine knobs)",
     **{f"IVP{i}": "rejection probe until the rule lands; then a frontend unit test" for i in range(1, 16)},
-    **{f"IV{i}": "frontend unit test (§2.10)" for i in range(19)},
+    **{f"IV{i}": "frontend unit test (§2.9)" for i in range(19)},
 }
 # fmt: on
 
@@ -1794,7 +1794,7 @@ def catalog_shape(sid):
     return new(id=sid, set=sid[0], items=list(feats), dtypes=kw.pop("dt", BF16), **kw)
 
 
-# M: model layers (sources in the plan, §3.5). keep_g keeps the GQA ratio;
+# M: model layers (sources in the plan, §3.3). keep_g keeps the GQA ratio;
 # keep_window keeps the model window; fixed_kv keeps the text Skv.
 # fmt: off
 M_MODELS = OrderedDict([
@@ -1908,7 +1908,7 @@ def _halve_seq(r, orig, keep_window):
 
 
 def reduce_model(m, target_s, s_floor, level, keep_window=False):
-    """Model-layer reduction (§3.5). Keeps the model's GQA ratio g as long as
+    """Model-layer reduction (§3.3). Keeps the model's GQA ratio g as long as
     possible: B -> 1; heads -> (2g, 2, 2) (MHA -> 2/2/2); halve S (keep
     Sq:Skv, S mod 64 and a fixed text Skv) down to s_floor; Hkv -> 1 keeping
     g; halve S down to 64; halve g; halve S. A halved S shrinks a window that
