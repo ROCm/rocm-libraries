@@ -61,6 +61,10 @@ namespace TensileLite
         /// The origami::nn models of this row's logic file (origami_nn_index), if any.
         origami::nn::library_models_t nn_models;
 
+        /// With an OLC model: per solution_list entry, the position of the first entry with
+        /// the same solutionName (the re-rank skips repeated kernels by name; set with the model).
+        std::vector<std::uint32_t> solution_name_ids;
+
         /// When set, called with each prediction row as it is deserialized on this thread
         /// (OrigamiOLC builds the library manifest of a model from it).
         static inline thread_local std::function<void(ProblemPredictionLibrary const&)> const*
@@ -219,7 +223,8 @@ namespace TensileLite
                                        MySolution,
                                        decltype(matches),
                                        decltype(keepOrder)>
-                rerankSource(problem, hardware, solution_list, matches, keepOrder);
+                rerankSource(
+                    problem, hardware, solution_list, solution_name_ids, matches, keepOrder);
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 const int known = rerankSource.verdict(solution.get());
