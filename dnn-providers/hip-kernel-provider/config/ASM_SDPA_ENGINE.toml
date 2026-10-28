@@ -36,6 +36,33 @@ filters = [
 ]
 reason = "DEF-03: fp16 dV loses precision at Skv <= 2 and Sq >= 512 (AITER kernel); tracked as ALMIOPEN-3046"
 
+# SdpaBackward defects DEF-01, DEF-02, DEF-04, DEF-05 and DEF-06 (test plan
+# sdpa-bwd.md §4.2): valid graphs this engine accepts today and computes wrong.
+# The fix for each is a typed decline in SdpaBwdPlanBuilder::isApplicable(); once
+# it lands the engine declines these cases itself, so each entry is temporary:
+# delete it in the pull request that adds the decline. Any other engine runs them.
+[[test_skips]]
+filters = ["*_SdpaBackward_*.def01*"]
+reason = "DEF-01: a head-dim stride other than 1 is accepted and misread; tracked as ALMIOPEN-3036 (fix: asm-sdpa-bwd-decline-strides)"
+
+[[test_skips]]
+filters = ["*_SdpaBackward_*.def02*"]
+reason = "DEF-02: Stats strides other than packed [B,Hq,Sq,1] give wrong, run-to-run different gradients; tracked as ALMIOPEN-3037 (fix: asm-sdpa-bwd-decline-strides)"
+
+[[test_skips]]
+filters = ["*_SdpaBackward_*.def04*"]
+reason = "DEF-04: Hk = Hq > Hv is accepted and dV is written past its buffer; tracked as ALMIOPEN-3039 (fix: asm-sdpa-bwd-decline-strides)"
+
+# H61 (random 0-8 element gaps per axis) hits DEF-05 whenever a gap makes a row
+# stride odd.
+[[test_skips]]
+filters = ["*_SdpaBackward_*.def05_*", "*_SdpaBackward_*.h61_*"]
+reason = "DEF-05: an odd element stride on a sequence or dK/dV head axis is misaddressed; tracked as ALMIOPEN-3038 (fix: asm-sdpa-bwd-decline-strides)"
+
+[[test_skips]]
+filters = ["*_SdpaBackward_*.def06*"]
+reason = "DEF-06: an attention scale of 0 or below gives NaN and Inf; tracked as ALMIOPEN-3043 (fix: asm-sdpa-decline-nonpositive-scale)"
+
 # The common suite's ToleranceResolver maps both SdpaAttributes and
 # SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
 # forward), so SDPA backward gradients (dQ/dK/dV) get their own entries here:
