@@ -6643,9 +6643,11 @@ def build_unified_attention_2d(
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
         new_m_raw = b.fmax(m_val, score)
-        # If both running max and current score are -inf, the row is fully
-        # masked; force m to 0 so the resulting alpha/prob are 0 instead of NaN
-        # (matches Triton's `m_j = tl.where(m_j > -inf, m_j, 0.0)`).
+        # If both running max and current score are -inf, the row has seen no key
+        # yet; use 0 as the exponent reference so alpha/prob are 0 instead of NaN
+        # (matches Triton's `m_j = tl.where(m_j > -inf, m_j, 0.0)`). Carry the raw
+        # max: carrying the 0 pins m at 0 past masked leading keys (sliding
+        # window), and exp2(s - 0) then underflows P for very negative scores.
         is_finite = b.fcmp("ogt", new_m_raw, neg_inf)
         new_m = b.select(is_finite, new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
@@ -6663,7 +6665,7 @@ def build_unified_attention_2d(
         if p.use_fp8:
             vv = b.fmul(vv, v_scale)
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
-        b.scf_yield(new_m, new_l, new_acc)
+        b.scf_yield(new_m_raw, new_l, new_acc)
 
     out_val = b.fmul(loop.results[2], b.rcp(loop.results[1]))
     if not p.default_mask:
@@ -6813,19 +6815,23 @@ def build_unified_attention_3d(
         )
         if band_ok is not None:
             score = b.select(band_ok, score, neg_inf)
-        new_m = b.fmax(m_val, score)
+        new_m_raw = b.fmax(m_val, score)
+        new_m = new_m_raw
         if not p.default_mask:
-            # Non-default masks can leave whole segments fully masked (top-left
-            # decode sees only key 0; a window or right bound skips others). Force m
-            # to 0 there so alpha/prob are 0 rather than NaN, which the reduce would
-            # propagate as NaN * 0. The default mask never hits this: IR unchanged.
-            new_m = b.select(b.fcmp("ogt", new_m, neg_inf), new_m, zero_f)
+            # Non-default masks can leave whole segments or a segment's leading
+            # keys masked (top-left decode sees only key 0; a window or right bound
+            # skips others). Use 0 as the exponent reference there so alpha/prob
+            # are 0 rather than NaN, but carry and store the raw max: it stays -inf
+            # until a key is seen, so the reduce ignores an empty segment and a
+            # masked prefix cannot pin m at 0. The default mask never hits this:
+            # IR unchanged.
+            new_m = b.select(b.fcmp("ogt", new_m_raw, neg_inf), new_m_raw, zero_f)
         alpha = b.exp2(b.fsub(m_val, new_m))
         prob = b.exp2(b.fsub(score, new_m))
         new_l = b.fadd(b.fmul(l_val, alpha), prob)
         vv = _emit_v_load(b, p, dtype, value, block_tables, seq_idx, kv_head, kpos, dim)
         new_acc = b.fadd(b.fmul(acc_val, alpha), b.fmul(prob, vv))
-        b.scf_yield(new_m, new_l, new_acc)
+        b.scf_yield(new_m_raw, new_l, new_acc)
 
     ml_desc, out_desc = _segm_descriptors(p, spec.num_segments)
     base, _ = out_desc.offset(b, token=q_tok, head=q_head, seg=segm_idx, dim=dim)
@@ -6911,9 +6917,14 @@ def build_unified_attention_reduce(
         [("mx", neg_inf)],
         iv_name="seg",
     )
+    # A segment that saw no key stores max = -inf with sum = 0. It carries no
+    # mass: skip it in both passes, and give a row with no key at all O = 0
+    # instead of NaN from exp2(-inf - -inf) or acc * rcp(0).
     with max_loop as (seg, (mx,)):
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
+        lv = b.global_load_f32(segm_expsum, idx)
+        mv = b.select(b.fcmp("ogt", lv, zero), mv, neg_inf)
         b.scf_yield(b.fmax(mx, mv))
     overall = max_loop.results[0]
     red = b.scf_for_iter(
@@ -6927,7 +6938,7 @@ def build_unified_attention_reduce(
         idx, _ = ml_desc.offset(b, token=q_tok, head=q_head, seg=seg)
         mv = b.global_load_f32(segm_max, idx)
         lv = b.global_load_f32(segm_expsum, idx)
-        factor = b.exp2(b.fsub(mv, overall))
+        factor = b.select(b.fcmp("ogt", lv, zero), b.exp2(b.fsub(mv, overall)), zero)
         den2 = b.fadd(den, b.fmul(lv, factor))
         out_idx, _ = seg_out_desc.offset(
             b,
@@ -6940,6 +6951,7 @@ def build_unified_attention_reduce(
         acc2 = b.fadd(acc, b.fmul(ov, factor))
         b.scf_yield(den2, acc2)
     result = b.fmul(red.results[1], b.rcp(red.results[0]))
+    result = b.select(b.fcmp("ogt", red.results[0], zero), result, zero)
     cast = b.cast_f32_to(result, dtype)
     out_idx, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim)
     with b.scf_if(active):

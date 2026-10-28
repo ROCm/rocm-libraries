@@ -192,7 +192,8 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
         score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
 
         rocke_value_t* new_m_raw = rocke_b_fmax(b, m_val, score);
-        /* masked-row guard: force m to 0 when fully masked (m_j > -inf ? m_j : 0). */
+        /* masked-row guard: 0 is the exponent reference while no key has been seen
+         * (m_j > -inf ? m_j : 0); the raw max is what the loop carries. */
         rocke_value_t* is_finite = rocke_b_fcmp(b, "ogt", new_m_raw, ctx->neg_inf);
         rocke_value_t* new_m = rocke_b_select(b, is_finite, new_m_raw, ctx->zero_f);
         rocke_value_t* alpha = rocke_b_exp2(b, rocke_b_fsub(b, m_val, new_m));
@@ -211,7 +212,7 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
         rocke_value_t* new_acc = rocke_b_fadd(b, acc_scaled, prob_v);
 
         rocke_value_t* yield_vals[3];
-        yield_vals[0] = new_m;
+        yield_vals[0] = new_m_raw;
         yield_vals[1] = new_l;
         yield_vals[2] = new_acc;
         rocke_b_scf_yield(b, yield_vals, 3);
