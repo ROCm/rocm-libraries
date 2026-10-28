@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    local_read_prefetch=True,
+                    prefetch_gl2=True,
                 ),
                 "not implemented yet",
             ),
@@ -160,9 +160,9 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn(message, reason)
 
-    def test_variant_registry_base_only_and_cumulative(self):
+    def test_variant_registry_is_cumulative(self):
         assert_variants_cumulative()
-        self.assertEqual(variant_names(), [BASE_VARIANT])
+        self.assertEqual(variant_names()[0], BASE_VARIANT)
         self.assertEqual(MXFP4_GEMM_VARIANTS[0][1], {})
         base = variant_spec(BASE_VARIANT, 128, 64, 256)
         self.assertEqual(base.name, BASE_VARIANT)
@@ -183,6 +183,25 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             base_llvm.replace(BASE_VARIANT, "mxfp4_tdm_gemm"),
             default_llvm,
         )
+
+    def test_step6_1_local_read_prefetch_emits_and_validates(self):
+        self.assertIn("step6_1_mxfp4_gemm", variant_names())
+        spec = variant_spec(
+            "step6_1_mxfp4_gemm",
+            128,
+            64,
+            256,
+            tile_k=256,
+        )
+        self.assertTrue(spec.local_read_prefetch)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("load <4 x i32>, ptr addrspace(3)", llvm)
+        self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

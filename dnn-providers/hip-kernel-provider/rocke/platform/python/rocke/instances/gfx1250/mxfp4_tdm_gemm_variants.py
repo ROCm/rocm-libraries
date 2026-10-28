@@ -20,6 +20,7 @@ BASE_VARIANT = "base_kernel_mxfp4_gemm"
 # Only landed substeps appear here. Blocked substeps are listed separately.
 MXFP4_GEMM_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     (BASE_VARIANT, {}),
+    ("step6_1_mxfp4_gemm", {"local_read_prefetch": True}),
 ]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []

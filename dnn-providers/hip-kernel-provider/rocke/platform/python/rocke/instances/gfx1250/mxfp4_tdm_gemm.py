@@ -149,7 +149,6 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "local_read_prefetch",
         "prefetch_gl2",
         "scale_double_buffer",
         "wave_separated_tdm",
@@ -413,10 +412,33 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
     def _compute_tile(k0, parity, accumulators):
         a_buffer, b_buffer = _buffer_offsets(parity)
         out = list(accumulators)
-        for inner_k in range(0, spec.tile_k, _ATOM_K):
+        inner_ks = list(range(0, spec.tile_k, _ATOM_K))
+        # HalfPLR-style A local-read prefetch: load the next K-step A
+        # fragments before the current WMMA cluster consumes them.
+        a_prefetch = None
+        if spec.local_read_prefetch and inner_ks:
+            a_prefetch = [
+                _load_a_fragment(a_buffer, atom_row, inner_ks[0])
+                for atom_row in atom_rows
+            ]
+        for step_i, inner_k in enumerate(inner_ks):
             group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
+            next_inner = inner_ks[step_i + 1] if step_i + 1 < len(inner_ks) else None
+            if spec.local_read_prefetch:
+                a_frags = a_prefetch
+                if next_inner is not None:
+                    a_prefetch = [
+                        _load_a_fragment(a_buffer, atom_row, next_inner)
+                        for atom_row in atom_rows
+                    ]
+            else:
+                a_frags = None
             for rm, atom_row in enumerate(atom_rows):
-                a_frag = _load_a_fragment(a_buffer, atom_row, inner_k)
+                a_frag = (
+                    a_frags[rm]
+                    if a_frags is not None
+                    else _load_a_fragment(a_buffer, atom_row, inner_k)
+                )
                 a_scale = _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
                 for rn, atom_col in enumerate(atom_cols):
                     index = rm * spec.wave_repeat_n + rn

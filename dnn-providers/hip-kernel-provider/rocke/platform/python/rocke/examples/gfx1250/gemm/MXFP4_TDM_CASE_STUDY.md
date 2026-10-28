@@ -103,6 +103,7 @@ silicon bench harness (timings outside the repo).
 | Variant | Flags on | FFM |
 | --- | --- | --- |
 | `base_kernel_mxfp4_gemm` | (none) | `bad=0` (Step 4/5) |
+| `step6_1_mxfp4_gemm` | `local_read_prefetch` | `bad=0` |
 
 ## Deferred controls
 
