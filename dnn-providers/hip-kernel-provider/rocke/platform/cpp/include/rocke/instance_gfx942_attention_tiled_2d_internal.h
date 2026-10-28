@@ -177,6 +177,8 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* num_seqs_p;
     rocke_value_t* bt_stride_p;
     rocke_value_t* qq_bias_stride0_p;
+    /* Trailing lse_ptr (F32*), declared only when spec->emit_lse; else NULL. */
+    rocke_value_t* lse;
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;

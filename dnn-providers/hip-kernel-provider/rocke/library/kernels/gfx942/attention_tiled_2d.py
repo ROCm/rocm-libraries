@@ -5608,7 +5608,9 @@ def build_unified_attention_2d_tiled(
                 # same state (xor-32 reductions). The lower half writes. Slot 0:
                 # scalar state has 1 slot; without it all 16 slots are
                 # identical and O also reads slot 0.
-                with b.scf_if(b.land(b.cmp_eq(lane_half32, b.const_i32(0)), op_mask_t)):
+                # Same operand order as gfx950: the C fastkv_regp wrapper builds
+                # gfx950 kernels through this arch's C epilogue.
+                with b.scf_if(b.land(op_mask_t, b.cmp_eq(lane_half32, b.const_i32(0)))):
                     lse_store(
                         b,
                         lse,

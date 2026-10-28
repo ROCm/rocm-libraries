@@ -182,6 +182,83 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_i64_kv_addr = true;
         s->use_global_load_lds_k = true;
         break;
+    case 11: /* cfg5 + emit_lse (transposed-x8, 16 slots, slot 0 stored). */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 8;
+        s->num_kv_heads = 1;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_k_single_buffer = false;
+        s->emit_lse = true;
+        break;
+    case 12: /* emit_lse, transposed-x8 one-slot state, NQK=6. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 12;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_k_single_buffer = false;
+        s->emit_lse = true;
+        break;
+    case 13: /* emit_lse, non-transposed x8 Acc_lds epilogue, NQK=6. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 12;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->use_mfma_32x32x8 = true;
+        s->emit_lse = true;
+        break;
+    case 14: /* emit_lse, striped16 epilogue, NQK=6. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 12;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->emit_lse = true;
+        break;
+    case 15: /* emit_lse, striped16, two atoms per warp, q-major grid. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->block_m_per_warp = 32;
+        s->use_q_major_grid = true;
+        s->emit_lse = true;
+        break;
     default:
         return -1;
     }
