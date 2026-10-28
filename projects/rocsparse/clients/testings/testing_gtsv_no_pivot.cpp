@@ -107,12 +107,15 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     host_vector<T> hd(m);
     host_vector<T> hdu(m);
 
+    // A zero matrix selects the identity. Every other matrix is tridiagonal.
+    const bool diagonal = arg.matrix == rocsparse_matrix_zero;
+
     // initialize tri-diagonal matrix
     for(rocsparse_int i = 0; i < m; ++i)
     {
-        hdl[i] = random_cached_generator<T>(1, 8);
-        hd[i]  = random_cached_generator<T>(17, 32);
-        hdu[i] = random_cached_generator<T>(1, 8);
+        hdl[i] = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
+        hd[i]  = diagonal ? static_cast<T>(1) : random_cached_generator<T>(17, 32);
+        hdu[i] = diagonal ? static_cast<T>(0) : random_cached_generator<T>(1, 8);
     }
 
     hdl[0]     = std::numeric_limits<T>::infinity();
