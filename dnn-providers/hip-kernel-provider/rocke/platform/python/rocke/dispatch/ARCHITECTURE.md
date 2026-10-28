@@ -2017,8 +2017,7 @@ means each candidate's `select_spec` returns the builder's actual spec type and
 `AttentionSpec` disappears.
 
 Two constraints shape how this is done. First, **target arch must become a
-request field.** `_resolve_attention_arch()`, and its C++ counterpart
-`rocke_unified_attn_set_resolved_arch`, read the running device; until selection
+request field.** `_resolve_attention_arch()` reads the running device; until selection
 keys off `req.arch`, offline and cross-arch dispatch stay impossible and the
 host-dependence in section 2 remains. Second, **the selectors are dual-engine.**
 They are mirrored in `cpp/instances/common/attention_unified_selectors.cpp`, and

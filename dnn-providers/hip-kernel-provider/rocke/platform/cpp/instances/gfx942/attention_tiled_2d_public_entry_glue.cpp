@@ -334,6 +334,23 @@ bool rocke_gfx942_attention_tiled_2d_supports(
         }
     }
 
+    /* The 4-warp GQA builder keeps K in registers and has its own LDS layout,
+     * so the staged-tile LDS model below does not apply to it. The caller sets
+     * use_d256_fast only for a cohort _gfx942_4warp_fast already validated. */
+    if(args->use_d256_fast)
+    {
+        if((args->head_size == 256 && strcmp(args->dtype, "bf16") == 0) || args->head_size == 128)
+        {
+            rocke__reason(reason, reason_cap, "supported");
+            return true;
+        }
+        rocke__reason(reason,
+                      reason_cap,
+                      "tiled 2D kernel: gfx942 4-warp fast path requires bf16 head_size=256 "
+                      "or head_size=128 (bf16/fp16)");
+        return false;
+    }
+
     /* LDS-budget gate (gate only the validated fp16/bf16 path). */
     if(!args->use_fp8)
     {

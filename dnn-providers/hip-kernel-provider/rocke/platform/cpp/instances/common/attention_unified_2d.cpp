@@ -120,7 +120,7 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
         rocke_value_t* physical = NULL;
         rocke_value_t* token_in_block = NULL;
         (void)rocke_unified_attn_physical_block_and_token(b,
-                                                          &ctx->sel_p,
+                                                          ctx->p,
                                                           ctx->abi_block_tables,
                                                           ctx->block_table_stride,
                                                           ctx->seq_idx,

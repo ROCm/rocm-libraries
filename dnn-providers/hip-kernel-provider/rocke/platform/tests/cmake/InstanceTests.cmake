@@ -49,6 +49,73 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/unified_attention_scalar_lower_
                rocke_unified_attention_scalar_lower_to_llvm)
 endif()
 
+# UnifiedAttentionProblem C port: field defaults, the @property helpers, and
+# the explicit-arch save/restore in the tiled-2D spec-from-problem selector.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_unified_problem_test.cpp")
+  add_executable(rocke_attention_unified_problem
+                 instances/attention_unified_problem_test.cpp)
+  target_link_libraries(rocke_attention_unified_problem PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_unified_problem PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_unified_problem
+           COMMAND rocke_attention_unified_problem)
+  set_tests_properties(rocke_attention_unified_problem
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                                rocke_attention_unified_problem)
+  set_target_properties(rocke_attention_unified_problem
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_unified_problem
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_unified_problem)
+endif()
+
+# Tiled-2D selectors pinned to the values the Python selectors return.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_unified_selectors_test.cpp")
+  add_executable(rocke_attention_unified_selectors
+                 instances/attention_unified_selectors_test.cpp)
+  target_link_libraries(rocke_attention_unified_selectors PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_unified_selectors PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_unified_selectors
+           COMMAND rocke_attention_unified_selectors)
+  set_tests_properties(rocke_attention_unified_selectors
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                                rocke_attention_unified_selectors)
+  set_target_properties(rocke_attention_unified_selectors
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_unified_selectors
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_unified_selectors)
+endif()
+
+# Unified-attention 2D/3D routing and the scalar / tiled-3D coverage gates.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_unified_routing_test.cpp")
+  add_executable(rocke_attention_unified_routing
+                 instances/attention_unified_routing_test.cpp)
+  target_link_libraries(rocke_attention_unified_routing PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_unified_routing PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_unified_routing
+           COMMAND rocke_attention_unified_routing)
+  set_tests_properties(rocke_attention_unified_routing
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                                rocke_attention_unified_routing)
+  set_target_properties(rocke_attention_unified_routing
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_unified_routing
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_unified_routing)
+endif()
+
 # Spec-validation parity for the two C++ fused-MoE mega builders: the
 # whole-kernel LDS budget, the scaled-f8f6f4 arch gate and the fp8 wave-size
 # gate. The byte-identity gate only compares specs both engines accept, so an

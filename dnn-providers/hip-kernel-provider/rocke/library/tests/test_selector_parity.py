@@ -8,18 +8,14 @@ inputs -- covering the selectors and gate predicates that route a problem
 into the correct kernel variant.  No GPU, no subprocess, no rocke_engine .so
 required.
 
-Primary motivation: PR #9220 silently broke parity by removing the bias-
-exclusion guard from Python ``_enable_combo_2d``, routing biased combo-geometry
-attention onto the transposed combo path while C++ still refused bias.  These
-tests encode the expected routing decisions so that kind of regression is caught
-immediately on any developer machine.
+Primary motivation: PR #9220 changed routing without a test, by removing the
+bias-exclusion guard from Python ``_enable_combo_2d``. These tests encode the
+expected routing decisions so that kind of change is caught immediately on any
+developer machine.
 
-NOTE ON EXPECTED FAILURES (PR #9220 regression):
-Tests marked with @skip document a known divergence introduced by
-PR #9220, which removed the bias-exclusion guard from Python _enable_combo_2d.
-Python now routes biased combo-geometry problems onto the combo path while
-C++ (attention_unified_selectors.cpp) still refuses them. The tests are
-written for the CORRECT behavior (bias should block combo_2d) and are being skipped until the Python guard is restored.
+Bias admission is deliberate: biased combo-geometry problems ride the transposed
+combo path (without the mask-once / mask-limit sub-flags), and the C++ selectors
+in attention_unified_selectors.cpp now do the same.
 """
 
 from __future__ import annotations
@@ -141,10 +137,6 @@ class TestEnableCombo2d(unittest.TestCase):
     (sinks or not), or fp16 only when use_sinks (the fp16 widening was measured
     on sink prefill)."""
 
-    _BIAS_BUG = (
-        "PR #9220: Python _enable_combo_2d missing bias guard (C++ still refuses bias)"
-    )
-
     def _gate(self, problem: UnifiedAttentionProblem, arch: str = "gfx950") -> bool:
         with _patch_arch(arch):
             return _au._enable_combo_2d(problem, arch)
@@ -152,18 +144,14 @@ class TestEnableCombo2d(unittest.TestCase):
     def test_canonical_combo_fires(self):
         self.assertTrue(self._gate(_combo_prob()))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_qq_bias_blocks_combo(self):
-        """use_qq_bias=True must disable combo_2d (was the #9220 bug)."""
-        self.assertFalse(self._gate(_combo_prob(use_qq_bias=True)), self._BIAS_BUG)
+    def test_qq_bias_admits_combo(self):
+        self.assertTrue(self._gate(_combo_prob(use_qq_bias=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_blocks_combo(self):
-        self.assertFalse(self._gate(_combo_prob(use_alibi=True)), self._BIAS_BUG)
+    def test_alibi_admits_combo(self):
+        self.assertTrue(self._gate(_combo_prob(use_alibi=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_softcap_blocks_combo(self):
-        self.assertFalse(self._gate(_combo_prob(softcap=50.0)), self._BIAS_BUG)
+    def test_softcap_admits_combo(self):
+        self.assertTrue(self._gate(_combo_prob(softcap=50.0)))
 
     def test_fp16_no_sinks_blocks_combo(self):
         # fp16 combo is sink-prefill only; non-sink fp16 stays off the combo path.
@@ -199,8 +187,6 @@ class TestEnableCombo2d(unittest.TestCase):
 class TestCombo2dRouting(unittest.TestCase):
     """combo_2d problems must get the full 32x32 transposed stack."""
 
-    _BIAS_BUG = "PR #9220: Python _enable_combo_2d missing bias guard"
-
     def test_combo_gets_transposed_flags(self):
         s = _spec(_combo_prob())
         self.assertTrue(s["use_mfma_32x32"])
@@ -208,21 +194,21 @@ class TestCombo2dRouting(unittest.TestCase):
         self.assertTrue(s["use_transposed_half_local_pv"])
         self.assertTrue(s["use_transposed_scalar_state"])
 
-    @unittest.skip(_BIAS_BUG)
-    def test_biased_combo_does_not_get_fast_paged_kv(self):
-        """#9220: biased combo must NOT get use_fast_paged_kv_desc."""
+    def test_qq_bias_combo_gets_fast_paged_kv(self):
+        """Bias keeps the combo stack, including the fast paged-KV descriptor,
+        but drops the mask-once / mask-limit sub-flags."""
         s = _spec(_combo_prob(use_qq_bias=True))
-        self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
+        self.assertTrue(s["use_fast_paged_kv_desc"])
+        self.assertFalse(s["use_transposed_mask_once"])
+        self.assertFalse(s["use_transposed_mask_limit"])
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_combo_no_fast_paged_kv(self):
+    def test_alibi_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(use_alibi=True))
-        self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
+        self.assertTrue(s["use_fast_paged_kv_desc"])
 
-    @unittest.skip(_BIAS_BUG)
-    def test_softcap_combo_no_fast_paged_kv(self):
+    def test_softcap_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(softcap=50.0))
-        self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
+        self.assertTrue(s["use_fast_paged_kv_desc"])
 
     def test_combo_no_sw_gets_fast_paged_kv(self):
         s = _spec(_combo_prob())
@@ -241,8 +227,6 @@ class TestCombo2dRouting(unittest.TestCase):
 class TestBiasGeometryCohorts(unittest.TestCase):
     """Systematic sweep of bias flags x combo-geometry dimensions."""
 
-    _BIAS_BUG = "PR #9220: Python _enable_combo_2d missing bias guard"
-
     def _fast_kv(self, problem: UnifiedAttentionProblem) -> bool:
         return _spec(problem)["use_fast_paged_kv_desc"]
 
@@ -250,26 +234,20 @@ class TestBiasGeometryCohorts(unittest.TestCase):
     def test_canonical_combo(self):
         self.assertTrue(self._fast_kv(_combo_prob()))
 
-    # ---- PR #9220 biased-combo cohort (skip the test until bug is fixed) ----
-    @unittest.skip(_BIAS_BUG)
-    def test_qq_bias_blocks_fast_paged_kv(self):
-        self.assertFalse(self._fast_kv(_combo_prob(use_qq_bias=True)), self._BIAS_BUG)
+    # ---- biased combo cohort: bias is admitted ----
+    def test_qq_bias_keeps_fast_paged_kv(self):
+        self.assertTrue(self._fast_kv(_combo_prob(use_qq_bias=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_blocks_fast_paged_kv(self):
-        self.assertFalse(self._fast_kv(_combo_prob(use_alibi=True)), self._BIAS_BUG)
+    def test_alibi_keeps_fast_paged_kv(self):
+        self.assertTrue(self._fast_kv(_combo_prob(use_alibi=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_softcap_blocks_fast_paged_kv(self):
-        self.assertFalse(self._fast_kv(_combo_prob(softcap=50.0)), self._BIAS_BUG)
+    def test_softcap_keeps_fast_paged_kv(self):
+        self.assertTrue(self._fast_kv(_combo_prob(softcap=50.0)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_and_qq_bias_no_combo(self):
-        self.assertFalse(
-            self._fast_kv(_combo_prob(use_alibi=True, use_qq_bias=True)), self._BIAS_BUG
-        )
+    def test_alibi_and_qq_bias_keep_combo(self):
+        self.assertTrue(self._fast_kv(_combo_prob(use_alibi=True, use_qq_bias=True)))
 
-    # ---- geometry boundaries (not affected by #9220) ----
+    # ---- geometry boundaries (not affected by bias) ----
     def test_seqlen_at_boundary_no_combo(self):
         self.assertFalse(self._fast_kv(_combo_prob(max_seqlen_q=256)))
 

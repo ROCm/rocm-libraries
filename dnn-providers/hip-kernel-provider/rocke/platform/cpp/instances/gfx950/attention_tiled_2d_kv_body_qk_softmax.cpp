@@ -688,6 +688,40 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     b, valid_tail_eff, rocke_b_const_i32(b, (reg / 4) * 8 + (reg % 4)));
         }
 
+        /* Per-lane ALiBi slope: the hoisted or per-iter load when one exists,
+         * else loaded inline here (Python ``slope_for_lane``). */
+        rocke_value_t* slope_for_lane = NULL;
+        if(ctx->USE_ALIBI)
+        {
+            if(ctx->TRANSPOSED_INVARIANT_HOIST)
+            {
+                slope_for_lane = ctx->st_alibi_slope_hoist;
+            }
+            else if(ctx->TRANSPOSED_MASK_ONCE)
+            {
+                slope_for_lane = st_alibi_slope_iter;
+            }
+            else
+            {
+                rocke_value_t* q_row_t_alibi
+                    = rocke_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+                rocke_value_t* qh_mul
+                    = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_mod
+                    = rocke_b_mod(b, q_row_t_alibi, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_t_alibi = rocke_b_add(b, qh_mul, qh_mod);
+                rocke_value_t* qh_ok
+                    = rocke_b_cmp_lt(b, qh_t_alibi, rocke_b_const_i32(b, ctx->NUM_QH));
+                slope_for_lane = rocke_b_masked_global_load(b,
+                                                            ctx->alibi_slopes_ptr,
+                                                            qh_t_alibi,
+                                                            qh_ok,
+                                                            rocke_b_const_f32(b, 0.0),
+                                                            rocke_f32(),
+                                                            4);
+            }
+        }
+
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
         {
             rocke_value_t* const* st_regs = (group_idx == 0) ? ST32_n : ST32_n_g1;
@@ -796,7 +830,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                         rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
                         rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                         rocke_value_t* add_term
-                            = rocke_b_fmul(b, rocke_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
+                            = rocke_b_fmul(b, rocke_b_fmul(b, slope_for_lane, pos_f), rcp_ln2);
                         score = rocke_b_fadd(b, score, add_term);
                     }
                     if(ctx->USE_QQ_BIAS)

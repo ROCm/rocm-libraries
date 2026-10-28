@@ -120,6 +120,8 @@ typedef struct rocke_gfx942_attention_tiled_2d_supports_args
     bool use_k_sliced_ring; /* default False                              */
     int ring_depth; /* default 3; read only when the ring is on    */
     int k_slice_hd; /* default 32; read only when the ring is on   */
+    bool use_d256_fast; /* default False; the 4-warp GQA cohort: skips  */
+    /* the staged-tile LDS model                    */
 } rocke_gfx942_attention_tiled_2d_supports_args_t;
 
 /* Defaulted args (num_warps=1, block_m_per_warp=16, ring_depth=3,
