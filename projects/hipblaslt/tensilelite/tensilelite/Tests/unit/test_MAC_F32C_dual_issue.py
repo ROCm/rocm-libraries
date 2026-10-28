@@ -209,8 +209,11 @@ def test_emitted_stream_computes_the_complex_mac(ccA, ccB, dual, iu):
     names = _bases(kernel, 16, 125)
     resolve = _resolver(kernel, 16, 125)
     rnd = random.Random(1234)
-    regs = {r: rnd.uniform(-2, 2) for r in range(16, 16 + 256)}
-    regs.update({r: rnd.uniform(-2, 2) for r in range(125, 125 + 256)})
+    # only the A and B inputs are filled: reading anything else (vgprValuBNeg before its xor) raises KeyError
+    regs = {}
+    for name, base in names.items():
+        if name.startswith(("ValuA_", "ValuB_X")):
+            regs.update({base + k: rnd.uniform(-2, 2) for k in range(2 * (tt0 if name.startswith("ValuA") else tt1))})
 
     def cplx(name, k, conj):
         r = names[name] + 2*k
@@ -222,6 +225,13 @@ def test_emitted_stream_computes_the_complex_mac(ccA, ccB, dual, iu):
     for (a, b), w in want.items():
         got = complex(regs[2000 + 2*(a + b*tt0)], regs[2001 + 2*(a + b*tt0)])
         assert abs(got - w) < 1e-12, f"a={a} b={b}: {got} != {w}"
+
+
+def test_odd_threadtile1_is_rejected():
+    """The neighbour column b ^ 1 would fall outside an odd tile. The Solution gate keeps these out;
+    the component also refuses instead of reading B registers that are not there."""
+    with pytest.raises(AssertionError, match="ThreadTile1 must be even"):
+        _emit(_kernel(2, 3))
 
 
 @pytest.mark.parametrize("iu", [1, 2])

@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+from itertools import product
+
 from rocisa.code import Module
 from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
@@ -72,54 +74,58 @@ class MAC_F32C_Plain(MAC):
         return module
 
     def _callVopd(self, module, writer, m, innerUnroll, ccA, ccB):
-        # Two v_dual_fmac_f32 pairs per complex MAC; X works on column b, Y on its neighbour column b^1 ('):
-        #   pair 1: c.re += a.re*b.re      c'.im += a.im*b'.re
-        #   pair 2: c.re -= a.im*b.im      c'.im += a.re*b'.im
-        # b and b' are 2 vgprs apart, so src1 banks differ (gfx11 needs it). VOPD can't negate: -b is xor'ed
-        # into vgprValuBNeg, [re, im] per column parity, so each copy keeps its source's bank.
+        # A complex MAC c += a*b is two v_dual_fmac_f32 pairs; each VOPD does two real FMAs, an X half and a Y half.
+        # As in MAC_F32, the two halves work on different cells: any two FMAs of one complex cell share a dst
+        # parity, src0 or src1, which VOPD forbids. B columns are taken in blocks of two, (b0, b0+1). The X half
+        # works on column bX and the Y half on the other column bY of the block (2 vgprs apart, so the src1
+        # banks differ, which gfx11 requires):
+        #   pair 1:  cX.re  += a.re * bX.re      cY.im += a.im * bY.re
+        #   pair 2:  cX.re  -= a.im * bX.im      cY.im += a.re * bY.im
+        # Running (bX, bY) = (b0, b0+1) and then (b0+1, b0) updates both accumulators (re, im) of both columns.
+        # VOPD cannot negate an operand, so each minus comes from a negated copy of B made with xor (vgprValuBNeg).
         kernel = writer.states.kernel
-        tt0 = kernel["ThreadTile0"]
+        tt0, tt1 = kernel["ThreadTile0"], kernel["ThreadTile1"]
+        assert tt1 % 2 == 0, "UseDualFMAC complex MAC takes B columns in blocks of two: ThreadTile1 must be even"
         assert writer.states.b.valuNegTempOffset is not None, \
             "UseDualFMAC complex MAC needs vgprValuBNeg from KernelWriter"
 
-        # which products use the negated b
-        negRealOfAImagBReal = ccA
-        negImagOfAImagBImag = ccA == ccB
-        negImagOfARealBImag = ccB
-        # only pair 1 needs a fresh xor when A alone is conjugated, so pair 2 goes first
+        RE, IM = 0, 1
+        # Per pair, the (A part, B part, takes a minus) of its X and Y half. Conjugating A or B flips the sign
+        # of an imaginary part, which only changes which products take the minus.
+        halves = {1: ((RE, RE, False),      (IM, RE, ccA)),
+                  2: ((IM, IM, ccA == ccB), (RE, IM, ccB))}
+        # Only pair 1 needs a fresh xor when A alone is conjugated, so then pair 2 goes first.
         pairOrder = (2, 1) if (ccA and not ccB) else (1, 2)
+        # The B parts that take a minus somewhere, so they need a negated copy.
+        negParts = {bPart for half in halves.values() for _, bPart, minus in half if minus}
 
-        def bReg(col, iui, k, negated=False):  # k: 0 real, 1 imag
-            if negated:
-                return vgpr("ValuBNeg+%d" % (4*iui + 2*(col % 2) + k))
-            return vgpr("ValuB_X%d_I%d+%d" % (m, iui, col*2 + k))
+        def aReg(a, iui, part):
+            return vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*2 + part))
 
-        for b in range(0, kernel["ThreadTile1"]):
-            nb = b ^ 1
-            for iui in range(0, innerUnroll):
-                if b % 2 == 0:  # negate both neighbour columns once
-                    for col in (b, nb):
-                        if negRealOfAImagBReal:
-                            module.add(VXorB32(dst=bReg(col, iui, 0, True), src0=hex(0x80000000), src1=bReg(col, iui, 0), comment="-b.real"))
-                        if negImagOfAImagBImag or negImagOfARealBImag:
-                            module.add(VXorB32(dst=bReg(col, iui, 1, True), src0=hex(0x80000000), src1=bReg(col, iui, 1), comment="-b.imag"))
+        def cReg(a, col, part):
+            return vgpr("ValuC+%d" % ((a + col*tt0)*2 + part))
 
-                # all rows of one pair before the other: pair 2 accumulates into what pair 1 just wrote
-                for pair in pairOrder:
-                    for a in range(0, tt0):
-                        cReal = vgpr("ValuC+%d" % ((a + b*tt0)*2))
-                        cImag = vgpr("ValuC+%d" % ((a + nb*tt0)*2 + 1))
-                        aReal = vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*2))
-                        aImag = vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*2 + 1))
-                        if pair == 1:
-                            x = (cReal, aReal, bReg(b, iui, 0))
-                            y = (cImag, aImag, bReg(nb, iui, 0, negRealOfAImagBReal))
-                        else:
-                            x = (cReal, aImag, bReg(b, iui, 1, negImagOfAImagBImag))
-                            y = (cImag, aReal, bReg(nb, iui, 1, negImagOfARealBImag))
-                        module.add(VDualFMACF32(*x, *y, comment="VOPD pair %d" % pair))
-                        if (b, iui, pair, a) == (0, 0, pairOrder[0], 0):
-                            module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
+        def bReg(col, iui, part, minus=False):
+            if minus:  # 4 vgprs per iui: [re, im] of even columns then of odd ones, so a copy keeps its source's bank
+                return vgpr("ValuBNeg+%d" % (4*iui + 2*(col % 2) + part))
+            return vgpr("ValuB_X%d_I%d+%d" % (m, iui, col*2 + part))
+
+        firstVopd = True
+        for iui, b0 in product(range(innerUnroll), range(0, tt1, 2)):
+            for col, part in product((b0, b0 + 1), (RE, IM)):  # negated copies of both columns of the block
+                if part in negParts:
+                    module.add(VXorB32(dst=bReg(col, iui, part, minus=True), src0=hex(0x80000000),
+                                       src1=bReg(col, iui, part), comment="-b.real" if part == RE else "-b.imag"))
+
+            # Both column roles, and all rows (a) of one pair before the other: pair 2 accumulates into what pair 1 just wrote.
+            for (bX, bY), pair, a in product(((b0, b0 + 1), (b0 + 1, b0)), pairOrder, range(tt0)):
+                (xA, xB, xMinus), (yA, yB, yMinus) = halves[pair]
+                module.add(VDualFMACF32(dstX=cReg(a, bX, RE), src0X=aReg(a, iui, xA), src1X=bReg(bX, iui, xB, xMinus),
+                                        dstY=cReg(a, bY, IM), src0Y=aReg(a, iui, yA), src1Y=bReg(bY, iui, yB, yMinus),
+                                        comment="VOPD pair %d" % pair))
+                if firstVopd:
+                    firstVopd = False
+                    module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
 
         module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
         return module
