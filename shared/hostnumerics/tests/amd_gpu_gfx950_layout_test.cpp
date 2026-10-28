@@ -117,4 +117,30 @@ TEST(MxScaleStorageGFX950Test, InputSizeMismatch) {
                  std::runtime_error);
 }
 
+TEST(MxScaleStorageGFX950Test, MatchesAiterShuffleWithZeroPadding) {
+    // AITER's e8m0_shuffle views the zero-padded [rows, cols] scales as
+    // [rows / 32, 2, 16, cols / 8, 2, 4], permutes them to (0, 3, 5, 2, 4, 1)
+    // and stores the result contiguously.
+    constexpr size_t rows = 50, cols = 13, paddedRows = 64, paddedCols = 16;
+    std::vector<uint8_t> input(rows * cols);
+    for (size_t index = 0; index < input.size(); ++index)
+        input[index] = static_cast<uint8_t>(index % 251 + 1);
+
+    const auto output = copyScaleStorage(input, {rows, cols}, 32, MxScaleStorageLayout::Gfx950);
+    ASSERT_EQ(output.size(), paddedRows * paddedCols);
+    for (size_t row = 0; row < paddedRows; ++row)
+        for (size_t col = 0; col < paddedCols; ++col) {
+            const size_t rowTile = row / 32, rowHalf = row / 16 % 2, rowLane = row % 16;
+            const size_t colTile = col / 8, colHalf = col / 4 % 2, colLane = col % 4;
+            const size_t destination =
+                ((((rowTile * (paddedCols / 8) + colTile) * 4 + colLane) * 16 + rowLane) * 2 +
+                 colHalf) *
+                    2 +
+                rowHalf;
+            const uint8_t expected = row < rows && col < cols ? input[row * cols + col] : 0;
+            EXPECT_EQ(std::to_integer<uint8_t>(output[destination]), expected)
+                << "row " << row << " col " << col;
+        }
+}
+
 }  // namespace amd_gpu_layout_test
