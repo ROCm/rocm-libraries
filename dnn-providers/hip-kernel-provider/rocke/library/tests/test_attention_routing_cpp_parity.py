@@ -252,7 +252,8 @@ def _tiled_2d_not_ported(p: UnifiedAttentionProblem, arch: str):
     """The "not ported" reason C++ must give for a problem Python admits."""
     if arch == "gfx942":
         if _gfx942_4warp_fast(p, arch):
-            return "gfx942 4-warp GQA tiled 2D is not ported to C++ yet"
+            # Built by the 4-warp GQA builder; the cohort excludes i64 caches.
+            return None
         if _enable_i64_kv_addr(p) and _enable_gfx942_flash_k_sliced_ring(p, arch):
             return (
                 "gfx942 tiled 2D i64 KV addressing with the sliced-K ring is not "
@@ -349,16 +350,23 @@ def test_tiled_2d_gate_follows_gfx942_env(engine, monkeypatch, env):
 
 def test_tiled_2d_admitted_problems_build(engine):
     """Every problem the C++ gate admits lowers through the C++ builder, from
-    the spec the C++ selector builds."""
+    the spec the C++ selector builds; the gfx942 4-warp GQA cohort lowers
+    through the 4-warp GQA builder."""
     seen = set()
+    four_warp = 0
     for p, arch in itertools.product(_tiled_2d_shapes(), ("gfx942", "gfx950")):
         ok, _ = engine.unified_attention_supports_tiled_2d(asdict(p), arch)
         if not ok:
             continue
         spec = getattr(engine, f"{arch}_attn_tiled_spec_from_problem")(asdict(p), arch)
-        lower = getattr(engine, f"{arch}_attention_tiled_2d_lower_llvm")
-        key = (arch, repr(sorted(spec.items())))
+        if arch == "gfx942" and _gfx942_4warp_fast(p, arch):
+            lower = engine.gfx942_attention_4warp_gqa_lower_llvm
+            four_warp += 1
+        else:
+            lower = getattr(engine, f"{arch}_attention_tiled_2d_lower_llvm")
+        key = (arch, lower.__name__, repr(sorted(spec.items())))
         if key in seen:
             continue
         seen.add(key)
         assert lower(spec, arch), (p, arch, spec)
+    assert four_warp, "no 4-warp GQA problem was admitted"

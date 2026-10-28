@@ -44,6 +44,7 @@ extern "C" {
 #include "rocke/instance_fmha_paged_prefill.h"
 #include "rocke/instance_fmha_splitkv_decode.h"
 #include "rocke/instance_fmha_varlen.h"
+#include "rocke/instance_gfx942_attention_4warp_gqa.h"
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d.h"
@@ -1015,6 +1016,53 @@ std::vector<std::string> t942_verify(const py::dict& d, const std::string& arch)
     return out;
 }
 
+/* build_gfx942_4warp_gqa over the shared tiled-2D spec. Throws on a build
+ * failure; on success the caller owns (and frees) b. */
+rocke_kernel_def_t* t942_4w_build(const py::dict& d, const std::string& arch, rocke_ir_builder_t* b)
+{
+    require_arch(arch);
+    Store st;
+    rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+    rocke_kernel_def_t* k = rocke_build_gfx942_4warp_gqa(b, &s, arch.c_str());
+    if(!k || !rocke_ir_builder_ok(b))
+    {
+        std::string m
+            = std::string("gfx942_attention_4warp_gqa build failed: ") + rocke_ir_builder_error(b);
+        rocke_ir_builder_free(b);
+        throw std::runtime_error(m);
+    }
+    return k;
+}
+std::string t942_4w_lower(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = t942_4w_build(d, arch, &b);
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
+    guard.reset();
+    return take_ll(s2, ll, err, "rocke_engine.gfx942_attention_4warp_gqa_lower_llvm");
+}
+std::string t942_4w_serialize(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = t942_4w_build(d, arch, &b);
+    std::string out = ser_kernel(k, "rocke_engine.gfx942_attention_4warp_gqa_serialize_ir");
+    rocke_ir_builder_free(&b);
+    return out;
+}
+std::vector<std::string> t942_4w_verify(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = t942_4w_build(d, arch, &b);
+    std::vector<std::string> out = ver_kernel(k);
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
 std::string t950_lower(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
@@ -1797,6 +1845,7 @@ void register_attention(py::module_& m)
     reg3(m, "sparse_attention", &sparse_lower, &sparse_serialize, &sparse_verify);
     reg3(m, "sage_attention", &sage_lower, &sage_serialize, &sage_verify);
     reg3(m, "gfx942_attention_tiled_2d", &t942_lower, &t942_serialize, &t942_verify);
+    reg3(m, "gfx942_attention_4warp_gqa", &t942_4w_lower, &t942_4w_serialize, &t942_4w_verify);
     reg3(m, "gfx950_attention_tiled_2d", &t950_lower, &t950_serialize, &t950_verify);
     reg3(m, "gfx950_attention_tiled_2d_fastkv_regp", &fkv_lower, &fkv_serialize, &fkv_verify);
     reg3(m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify);
@@ -1906,6 +1955,60 @@ void register_attention(py::module_& m)
         py::arg("problem"),
         py::arg("arch"),
         "supports_native_unified_attention_tiled(problem, arch) -> (ok, reason).");
+    m.def(
+        "gfx942_attention_tiled_2d_supports_spec",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_gfx942_attention_tiled_2d_supports_spec(
+                &s, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "gfx942 supports_tiled_2d_spec(spec, arch) -> (ok, reason).");
+    m.def(
+        "gfx942_attention_4warp_gqa_supports_spec",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_gfx942_attention_4warp_gqa_supports_spec(
+                &s, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "gfx942 supports_gfx942_4warp_gqa_spec(spec, arch) -> (ok, reason).");
+    m.def(
+        "gfx942_gqa_fold_eligible",
+        [](int head_size,
+           int num_queries_per_kv,
+           int sliding_window,
+           const std::string& dtype,
+           int block_size) {
+            return rocke_gfx942_gqa_fold_eligible(
+                head_size, num_queries_per_kv, sliding_window, dtype.c_str(), block_size);
+        },
+        py::arg("head_size"),
+        py::arg("num_queries_per_kv"),
+        py::arg("sliding_window"),
+        py::arg("dtype"),
+        py::arg("block_size"),
+        "gfx942_gqa_fold_eligible(...) -> bool.");
+    m.def(
+        "gfx942_4warp_launch_grid",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            int grid[3] = {0, 0, 0};
+            if(!rocke_gfx942_4warp_launch_grid(&p, grid))
+                raise_bad_problem("gfx942_4warp_launch_grid");
+            return py::make_tuple(grid[0], grid[1], grid[2]);
+        },
+        py::arg("problem"),
+        "gfx942_4warp_launch_grid(problem) -> (x, y, z).");
     m.def(
         "unified_attention_supports_tiled_3d",
         [](const py::dict& d, const std::string& arch) {

@@ -14,6 +14,7 @@
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
 #include "rocke/instance_attention_unified.h"
+#include "rocke/instance_gfx942_attention_4warp_gqa.h"
 
 static int g_failures = 0;
 
@@ -269,7 +270,7 @@ static void test_supports_tiled_2d(void)
     p.sliding_window = 256;
     p.max_seqlen_q = 512;
     p.total_q = 2048;
-    check_tiled_2d(&p, "gfx942", false, "gfx942 4-warp GQA tiled 2D is not ported to C++ yet");
+    check_tiled_2d(&p, "gfx942", true, "supported");
 
     p = decode_problem();
     p.dtype = "fp16";
@@ -331,6 +332,30 @@ static void test_supports_scalar(void)
     CHECK_EQ_STR(reason, "unsupported head_size 96");
 }
 
+/* gfx942_4warp_launch_grid: the GQA head-fold packs four query heads per
+ * kv-head tile; everything else launches one query head per CTA. */
+static void test_gfx942_4warp_launch_grid(void)
+{
+    rocke_unified_attention_problem_t p = decode_problem();
+    p.sliding_window = 256;
+    p.max_seqlen_q = 512;
+    p.total_q = 2048;
+    int grid[3] = {0, 0, 0};
+    CHECK(rocke_gfx942_4warp_launch_grid(&p, grid));
+    CHECK_EQ_INT(grid[0], 8);
+    CHECK_EQ_INT(grid[1], 68);
+    CHECK_EQ_INT(grid[2], 1);
+
+    p.dtype = "fp16";
+    CHECK(rocke_gfx942_4warp_launch_grid(&p, grid));
+    CHECK_EQ_INT(grid[0], 32);
+    CHECK_EQ_INT(grid[1], 20);
+    CHECK_EQ_INT(grid[2], 1);
+
+    p.num_kv_heads = 3;
+    CHECK(!rocke_gfx942_4warp_launch_grid(&p, grid));
+}
+
 int main(void)
 {
     test_select_path();
@@ -340,6 +365,7 @@ int main(void)
     test_supports_tiled_3d();
     test_supports_tiled_2d();
     test_supports_scalar();
+    test_gfx942_4warp_launch_grid();
     if(g_failures)
     {
         fprintf(stderr, "attention_unified_routing_test: %d failure(s)\n", g_failures);

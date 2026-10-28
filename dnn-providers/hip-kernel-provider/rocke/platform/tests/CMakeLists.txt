@@ -688,6 +688,7 @@ if(BUILD_TESTING)
                        "${_rocke_library_tests}/test_attention_routing_cpp_parity.py"
                        "${_rocke_library_tests}/test_attention_binding_spec_fields.py"
                        "${_rocke_library_tests}/test_attention_spec_cpp_parity.py"
+                       "${_rocke_library_tests}/test_attention_4warp_gqa_cpp_parity.py"
                        -q -rsx -p no:cacheprovider
                WORKING_DIRECTORY "${_rocke_library_tests}")
       # The library conftest puts the library and platform/python on sys.path.
