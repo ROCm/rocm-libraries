@@ -36,6 +36,7 @@ def _errors(
     *,
     added: bool = False,
     base_format: Optional[str] = None,
+    base_solution_uids: tuple[tuple[str, str], ...] = (),
 ) -> list[tuple[str, str]]:
     """Run selected checks and collect ``(code, message)`` pairs.
 
@@ -44,6 +45,7 @@ def _errors(
         checks: Check ids to run.
         added: Whether the path is a new file.
         base_format: Root format at the base revision.
+        base_solution_uids: ``(identity, SolutionUID)`` pairs from the base revision.
 
     Returns:
         Errors emitted by the selected checks.
@@ -61,7 +63,11 @@ def _errors(
         record,
         sink,
         {},
-        FileAuditContext(added=added, base_format=base_format),
+        FileAuditContext(
+            added=added,
+            base_format=base_format,
+            base_solution_uids=base_solution_uids,
+        ),
         checks,
     )
     return found
@@ -322,8 +328,8 @@ def test_filename_policy_does_not_synthesize_a_problem_name() -> None:
     assert "suffix" not in messages
 
 
-def test_solution_uid_must_be_present_on_every_solution() -> None:
-    """Changed libraries fail when any solution omits SolutionUID.
+def test_solution_uid_removal_fails_and_absence_is_allowed() -> None:
+    """Fail only when a solution loses a SolutionUID it already had.
 
     Args:
         None.
@@ -332,8 +338,9 @@ def test_solution_uid_must_be_present_on_every_solution() -> None:
         None.
 
     Raises:
-        AssertionError: If a missing, blank, or non-mapping solution is accepted,
-            or if ``DefaultSolution`` is allowed to carry ``SolutionUID``.
+        AssertionError: If a solution without ``SolutionUID`` is rejected, if a
+            removed ``SolutionUID`` is accepted, or if ``DefaultSolution`` is
+            allowed to carry ``SolutionUID``.
     """
     present = _dict_library(
         [
@@ -345,6 +352,14 @@ def test_solution_uid_must_be_present_on_every_solution() -> None:
     assert _errors(present, ("solution_uid_present",)) == []
     assert _errors(_dict_library([]), ("solution_uid_present",)) == []
 
+    missing = _dict_library(
+        [{"SolutionIndex": 1, "SolutionUID": "0u1c"}, {"SolutionIndex": 4}]
+    )
+    blank = _dict_library([{"SolutionIndex": 5, "SolutionUID": "  "}])
+    numeric = _dict_library([{"SolutionIndex": 6, "SolutionUID": 7}])
+    for record in (missing, blank, numeric):
+        assert _errors(record, ("solution_uid_present",)) == []
+
     on_defaults = _dict_library(
         [{"SolutionIndex": 1, "SolutionUID": "0u1c"}],
         default_solution={"SolutionUID": "0u3E"},
@@ -353,14 +368,46 @@ def test_solution_uid_must_be_present_on_every_solution() -> None:
     assert [code for code, _ in default_errors] == ["solution_uid_present"]
     assert "DefaultSolution" in default_errors[0][1]
 
-    missing = _dict_library(
-        [{"SolutionIndex": 1, "SolutionUID": "0u1c"}, {"SolutionIndex": 4}]
+    kept = _dict_library([{"SolutionIndex": 4, "SolutionUID": "0uZZ"}])
+    assert (
+        _errors(
+            kept,
+            ("solution_uid_present",),
+            base_solution_uids=(("index:4", "0u1c"),),
+        )
+        == []
     )
-    blank = _dict_library([{"SolutionIndex": 5, "SolutionUID": "  "}])
-    numeric = _dict_library([{"SolutionIndex": 6, "SolutionUID": 7}])
-    for record in (missing, blank, numeric):
-        errors = _errors(record, ("solution_uid_present",))
+    untouched = _dict_library([{"SolutionIndex": 9}])
+    assert (
+        _errors(
+            untouched,
+            ("solution_uid_present",),
+            base_solution_uids=(("index:4", "0u1c"),),
+        )
+        == []
+    )
+
+    removed = _dict_library([{"SolutionIndex": 4}])
+    blanked = _dict_library([{"SolutionIndex": 4, "SolutionUID": "  "}])
+    replaced = _dict_library([{"SolutionIndex": 4, "SolutionUID": 7}])
+    for record in (removed, blanked, replaced):
+        errors = _errors(
+            record,
+            ("solution_uid_present",),
+            base_solution_uids=(("index:4", "0u1c"),),
+        )
         assert [code for code, _ in errors] == ["solution_uid_present"]
+        assert "SolutionIndex 4" in errors[0][1]
+        assert "0u1c was removed" in errors[0][1]
+
+    unindexed = _dict_library([{"KernelNameMin": "Cijk_sample"}])
+    errors = _errors(
+        unindexed,
+        ("solution_uid_present",),
+        base_solution_uids=(("position:0", "0u9"),),
+    )
+    assert [code for code, _ in errors] == ["solution_uid_present"]
+    assert "position 0" in errors[0][1]
 
     not_a_mapping = normalize_library(
         {
@@ -371,30 +418,14 @@ def test_solution_uid_must_be_present_on_every_solution() -> None:
         },
         Path("gfx950/gfx950/Equality/sample.yaml"),
     )
-    errors = _errors(not_a_mapping, ("solution_uid_present",))
+    assert _errors(not_a_mapping, ("solution_uid_present",)) == []
+    errors = _errors(
+        not_a_mapping,
+        ("solution_uid_present",),
+        base_solution_uids=(("position:0", "0u1c"),),
+    )
     assert [code for code, _ in errors] == ["solution_uid_present"]
     assert "position 0" in errors[0][1]
-
-    listed = normalize_library(
-        [
-            None,
-            "gfx950",
-            "gfx950",
-            ["Device 75a0"],
-            {},
-            [{"SolutionIndex": 0}],
-            [],
-            [],
-            [],
-            None,
-            "DeviceEfficiency",
-            "Equality",
-        ],
-        Path("legacy.yaml"),
-    )
-    errors = _errors(listed, ("solution_uid_present",))
-    assert [code for code, _ in errors] == ["solution_uid_present"]
-    assert "SolutionIndex 0" in errors[0][1]
 
 
 def test_yaml_loader_uses_pure_python_without_c_loader() -> None:

@@ -937,10 +937,10 @@ def test_worker_and_run_audit_use_cache_and_both_worker_counts(tmp_path: Path) -
     )
     bad = _write_logic(hip, "zbad.yaml", ":\n  - [\n")
     logic = hip / LOGIC_REL
-    failed = audit._audit_file_worker((str(bad), {}, ["dict_structure"], False, None))
+    failed = audit._audit_file_worker((str(bad), {}, ["dict_structure"], False, None, ()))
     assert failed["parse_failure"]
     parsed = audit._audit_file_worker(
-        (str(good), {"gfx950": ["75a3"]}, ["dict_structure"], True, "list")
+        (str(good), {"gfx950": ["75a3"]}, ["dict_structure"], True, "list", ())
     )
     assert parsed["parse_failure"] is None
     assert parsed["kernels"] == 1
@@ -1021,7 +1021,11 @@ def test_git_selection_reads_added_and_base_files(tmp_path: Path) -> None:
     rel = LOGIC_REL_PREFIX + "gfx950/lib.yaml"
     target = repo / rel
     target.parent.mkdir(parents=True)
-    target.write_text("{ArchitectureName: gfx950, LibraryType: Equality}\n", encoding="utf-8")
+    target.write_text(
+        "{ArchitectureName: gfx950, LibraryType: Equality, "
+        "Solutions: [{SolutionIndex: 1, SolutionUID: '0u1c'}, {SolutionIndex: 2}]}\n",
+        encoding="utf-8",
+    )
     _git(repo, "add", rel)
     _git(repo, "commit", "-m", "add logic")
     base = _git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -1060,10 +1064,34 @@ def test_git_selection_reads_added_and_base_files(tmp_path: Path) -> None:
         hip,
     )
     assert files is not None and contexts
+    changed_ctx = contexts[str((repo / rel).resolve())]
+    assert changed_ctx.added is False
+    assert changed_ctx.base_format == "dict"
+    assert changed_ctx.base_solution_uids == (("index:1", "0u1c"),)
+    assert audit._library_facts_from_text(None) == (None, ())
+    assert audit._library_facts_from_text(":\n  - [\n") == (None, ())
+    short_format, short_uids = audit._library_facts_from_text("- a\n- b\n")
+    assert short_format == "list" and short_uids == ()
+    broken_solutions, broken_uids = audit._library_facts_from_text(
+        "Solutions: 1\nLibraryType: Equality\n"
+    )
+    assert broken_solutions == "dict" and broken_uids == ()
+    positioned_format, positioned_uids = audit._library_facts_from_text(
+        "Solutions:\n- not-a-solution\n- {SolutionUID: '0u9'}\nLibraryType: Equality\n"
+    )
+    assert positioned_format == "dict"
+    assert positioned_uids == (("position:1", "0u9"),)
+    assert audit._file_audit_context(repo, "", rel, False).base_solution_uids == ()
+    assert audit._file_audit_context(None, base, rel, False).base_format is None
+    added_ctx = audit._file_audit_context(repo, base, rel, True)
+    assert added_ctx.added is True and added_ctx.base_solution_uids == ()
     outside = tmp_path / "outside.yaml"
     outside.write_text("a: 1\n", encoding="utf-8")
     tracked = repo / "tracked.yaml"
-    tracked.write_text("{ArchitectureName: gfx950}\n", encoding="utf-8")
+    tracked.write_text(
+        "{ArchitectureName: gfx950, Solutions: [{SolutionIndex: 3, SolutionUID: '0u9'}]}\n",
+        encoding="utf-8",
+    )
     _git(repo, "add", "tracked.yaml")
     _git(repo, "commit", "-m", "track yaml")
     list_path = tmp_path / "files.txt"
@@ -1089,6 +1117,9 @@ def test_git_selection_reads_added_and_base_files(tmp_path: Path) -> None:
         (Path.cwd() / "relative.yaml").unlink(missing_ok=True)
     assert selected is not None and len(selected) == 3
     assert any(ctx.added for ctx in selected_ctx.values())
+    assert selected_ctx[str(tracked.resolve())].base_solution_uids == (("index:3", "0u9"),)
+    assert selected_ctx[str((Path.cwd() / "relative.yaml").resolve())].base_solution_uids == ()
+    assert selected_ctx[str(outside.resolve())].base_format is None
     assert audit._split_check_args(None) == []
     assert audit._split_check_args([" a, b ", "c"]) == ["a", "b", "c"]
     assert audit._read_path_list(list_path)

@@ -869,10 +869,13 @@ class FileAuditContext:
     Attributes:
         added: True when the path is new or a rename destination.
         base_format: Root format (``list`` or ``dict``) at the base revision.
+        base_solution_uids: ``(identity, SolutionUID)`` pairs for base solutions
+            that have a non-empty ``SolutionUID``. Solutions without one are omitted.
     """
 
     added: bool = False
     base_format: Optional[str] = None
+    base_solution_uids: tuple[tuple[str, str], ...] = ()
 
 
 def validate_list_format_added(
@@ -910,23 +913,104 @@ def validate_list_format_added(
         )
 
 
+def _solution_identity(solution: Any, position: int) -> str:
+    """Return a stable key for pairing a solution with its base revision.
+
+    Args:
+        solution: One solution value from the library.
+        position: Zero-based index in the solutions list.
+
+    Returns:
+        ``index:`` plus the ``SolutionIndex`` repr when that field is present,
+        otherwise ``position:`` plus *position*.
+
+    Raises:
+        No exceptions are raised.
+    """
+    if isinstance(solution, dict) and "SolutionIndex" in solution:
+        return f"index:{solution['SolutionIndex']!r}"
+    return f"position:{position}"
+
+
+def _nonempty_solution_uid(solution: Any) -> Optional[str]:
+    """Return a solution's ``SolutionUID`` when it is a non-empty string.
+
+    Args:
+        solution: One solution value from the library.
+
+    Returns:
+        Stripped UID, or None when the solution has no usable ``SolutionUID``.
+
+    Raises:
+        No exceptions are raised.
+    """
+    if not isinstance(solution, dict):
+        return None
+    uid = solution.get("SolutionUID")
+    if isinstance(uid, str) and uid.strip():
+        return uid.strip()
+    return None
+
+
+def _solution_uids_by_identity(solutions: list[Any]) -> dict[str, str]:
+    """Map each solution that has a ``SolutionUID`` to that UID.
+
+    Args:
+        solutions: Solution list from a library.
+
+    Returns:
+        Mapping of solution identity to its non-empty ``SolutionUID``.
+        Solutions without ``SolutionUID`` are omitted.
+
+    Raises:
+        No exceptions are raised.
+    """
+    found: dict[str, str] = {}
+    for position, solution in enumerate(solutions):
+        uid = _nonempty_solution_uid(solution)
+        if uid is None:
+            continue
+        found[_solution_identity(solution, position)] = uid
+    return found
+
+
+def _solution_uid_label(solution: Any, position: int) -> str:
+    """Return the solution label used in a removal error.
+
+    Args:
+        solution: One solution value from the library.
+        position: Zero-based index in the solutions list.
+
+    Returns:
+        ``SolutionIndex`` text when that field is present, otherwise the
+        solution's position.
+
+    Raises:
+        No exceptions are raised.
+    """
+    if isinstance(solution, dict) and "SolutionIndex" in solution:
+        return f"SolutionIndex {solution['SolutionIndex']}"
+    return f"Solution at position {position}"
+
+
 def validate_solution_uid_present(
     record: LibraryRecord,
     sink: ErrorSink,
     device_folders: Optional[dict[str, set[str]]] = None,
     context: Optional[FileAuditContext] = None,
 ) -> None:
-    """Require every solution to include ``SolutionUID``.
+    """Fail when a solution's ``SolutionUID`` is removed.
 
-    The audit only reads logic files changed in the pull request. Each
-    solution must carry its own non-empty ``SolutionUID``. ``DefaultSolution``
-    must not contain ``SolutionUID``.
+    A solution that does not have ``SolutionUID`` is accepted. When the same
+    solution had a non-empty ``SolutionUID`` at the base revision, dropping
+    that field fails. ``DefaultSolution`` must not contain ``SolutionUID``.
 
     Args:
         record: Parsed library record.
         sink: Error callback.
         device_folders: Unused. Present so every check shares one signature.
-        context: Unused per-file audit context.
+        context: Base-revision solution UIDs. Empty when the file is new or
+            the base revision is unknown.
 
     Returns:
         None.
@@ -934,7 +1018,8 @@ def validate_solution_uid_present(
     Raises:
         No exceptions are raised.
     """
-    del device_folders, context
+    del device_folders
+    ctx = context or FileAuditContext()
     if "SolutionUID" in record.default_solution:
         _emit(
             sink,
@@ -942,24 +1027,18 @@ def validate_solution_uid_present(
             "solution_uid_present",
             "DefaultSolution must not contain SolutionUID.",
         )
+    base_uids = dict(ctx.base_solution_uids)
     for position, sol in enumerate(record.solutions):
-        if not isinstance(sol, dict):
-            _emit(
-                sink,
-                record.path,
-                "solution_uid_present",
-                f"Solution at position {position} is not a mapping, so it has no SolutionUID.",
-            )
+        if _nonempty_solution_uid(sol) is not None:
             continue
-        uid = sol.get("SolutionUID")
-        if isinstance(uid, str) and uid.strip():
+        previous = base_uids.get(_solution_identity(sol, position))
+        if previous is None:
             continue
-        sol_idx = sol.get("SolutionIndex", position)
         _emit(
             sink,
             record.path,
             "solution_uid_present",
-            f"SolutionIndex {sol_idx}: SolutionUID is required on every solution.",
+            f"{_solution_uid_label(sol, position)}: SolutionUID {previous} was removed.",
         )
 
 
@@ -1296,7 +1375,8 @@ CHECK_CATALOG: tuple[tuple[str, str, CheckFn], ...] = (
     ),
     (
         "solution_uid_present",
-        "Every solution must include SolutionUID. DefaultSolution must not.",
+        "Fail when a solution's SolutionUID is removed. A missing SolutionUID is allowed. "
+        "DefaultSolution must not contain SolutionUID.",
         validate_solution_uid_present,
     ),
     (
@@ -1539,13 +1619,21 @@ def _load_yaml(path: Path) -> Any:
 
 
 def _audit_file_worker(
-    args: tuple[str, dict[str, list[str]], list[str], bool, Optional[str]],
+    args: tuple[
+        str,
+        dict[str, list[str]],
+        list[str],
+        bool,
+        Optional[str],
+        tuple[tuple[str, str], ...],
+    ],
 ) -> dict[str, Any]:
     """Process-pool entry point.
 
     Args:
-        args: ``(path_str, device_folders, enabled_checks, added, base_format)``.
-            Device folder values are lists (sets are not picklable on all platforms).
+        args: ``(path_str, device_folders, enabled_checks, added, base_format,
+            base_solution_uids)``. Device folder values are lists (sets are not
+            picklable on all platforms).
 
     Returns:
         Per-file audit result without non-picklable objects.
@@ -1553,7 +1641,7 @@ def _audit_file_worker(
     Raises:
         No exceptions are raised. Parse errors are returned in ``parse_failure``.
     """
-    path_str, folders_lists, enabled, added, base_format = args
+    path_str, folders_lists, enabled, added, base_format, base_solution_uids = args
     path = Path(path_str)
     device_folders = {k: set(v) for k, v in folders_lists.items()}
 
@@ -1580,7 +1668,11 @@ def _audit_file_worker(
         record,
         sink,
         device_folders,
-        FileAuditContext(added=added, base_format=base_format),
+        FileAuditContext(
+            added=added,
+            base_format=base_format,
+            base_solution_uids=base_solution_uids,
+        ),
         enabled,
     )
     key = _group_key(record)
@@ -1804,7 +1896,8 @@ def run_audit(
         no_cache: Disable disk cache.
         files: Explicit YAML paths. When omitted, every YAML file under the logic
             root (or subset) is audited.
-        file_contexts: Per-path addition and base-format info, keyed by resolved path.
+        file_contexts: Per-path addition, base-format, and base solution UID info,
+            keyed by resolved path.
         enabled_checks: Check ids to run. Defaults to the full registry.
 
     Returns:
@@ -1850,7 +1943,14 @@ def run_audit(
         for path in to_process:
             ctx = contexts.get(str(path.resolve()), FileAuditContext())
             job_args.append(
-                (str(path), folders_serializable, enabled, ctx.added, ctx.base_format)
+                (
+                    str(path),
+                    folders_serializable,
+                    enabled,
+                    ctx.added,
+                    ctx.base_format,
+                    ctx.base_solution_uids,
+                )
             )
 
         if workers == 1:
@@ -2015,6 +2115,84 @@ def yaml_root_format(data: Any) -> str:
     return "other"
 
 
+def _git_show_text(repo_root: Path, base_ref: str, rel_path: str) -> Optional[str]:
+    """Return the file contents of ``rel_path`` at ``base_ref``.
+
+    Args:
+        repo_root: Git repository root.
+        base_ref: Commit that holds the previous file contents.
+        rel_path: Repository-relative path.
+
+    Returns:
+        Decoded file text, or None when git cannot show the blob.
+
+    Raises:
+        No exceptions are raised.
+    """
+    proc = subprocess.run(
+        ["git", "show", f"{base_ref}:{rel_path}"],
+        cwd=repo_root,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def _library_facts_from_text(
+    text: Optional[str],
+) -> tuple[Optional[str], tuple[tuple[str, str], ...]]:
+    """Read the root format and solution UIDs from library YAML text.
+
+    Args:
+        text: Library YAML text, or None when the blob is missing.
+
+    Returns:
+        ``(format, solution_uids)``. ``format`` is ``list``, ``dict``, ``other``,
+        or None when *text* is missing or not valid YAML. ``solution_uids`` lists
+        ``(identity, SolutionUID)`` for solutions that have a non-empty UID.
+
+    Raises:
+        No exceptions are raised.
+    """
+    if text is None:
+        return None, ()
+    try:
+        data = _yaml_safe_load(text)
+    except yaml.YAMLError:
+        return None, ()
+    root_format = yaml_root_format(data)
+    try:
+        record = normalize_library(data, Path("base.yaml"))
+    except (ValueError, TypeError):
+        return root_format, ()
+    return root_format, tuple(_solution_uids_by_identity(record.solutions).items())
+
+
+def read_base_library(
+    repo_root: Path,
+    base_ref: str,
+    rel_path: str,
+) -> tuple[Optional[str], tuple[tuple[str, str], ...]]:
+    """Return the root format and solution UIDs of ``rel_path`` at ``base_ref``.
+
+    Args:
+        repo_root: Git repository root.
+        base_ref: Commit that holds the previous file contents.
+        rel_path: Repository-relative path.
+
+    Returns:
+        ``(format, solution_uids)``. ``format`` is ``list``, ``dict``, ``other``,
+        or None when the blob is missing or unreadable. ``solution_uids`` lists
+        solutions that have a non-empty ``SolutionUID``.
+
+    Raises:
+        No exceptions are raised.
+    """
+    return _library_facts_from_text(_git_show_text(repo_root, base_ref, rel_path))
+
+
 def base_yaml_format(repo_root: Path, base_ref: str, rel_path: str) -> Optional[str]:
     """Return the YAML root format of ``rel_path`` at ``base_ref``.
 
@@ -2029,19 +2207,39 @@ def base_yaml_format(repo_root: Path, base_ref: str, rel_path: str) -> Optional[
     Raises:
         No exceptions are raised.
     """
-    proc = subprocess.run(
-        ["git", "show", f"{base_ref}:{rel_path}"],
-        cwd=repo_root,
-        capture_output=True,
-        check=False,
+    root_format, _solution_uids = read_base_library(repo_root, base_ref, rel_path)
+    return root_format
+
+
+def _file_audit_context(
+    repo_root: Optional[Path],
+    base_ref: Optional[str],
+    rel_path: str,
+    added: bool,
+) -> FileAuditContext:
+    """Build the audit context for one selected logic file.
+
+    Args:
+        repo_root: Git repository root. Unused when ``base_ref`` is omitted.
+        base_ref: Commit that holds the previous file contents.
+        rel_path: Repository-relative path. Empty when the file is outside the repo.
+        added: True when the path is new or a rename destination.
+
+    Returns:
+        Context with the base format and solution UIDs for a modified file.
+        Added files and files without a readable base carry no base UIDs.
+
+    Raises:
+        No exceptions are raised.
+    """
+    if added or repo_root is None or not base_ref or not rel_path:
+        return FileAuditContext(added=added)
+    base_format, base_uids = read_base_library(repo_root, base_ref, rel_path)
+    return FileAuditContext(
+        added=False,
+        base_format=base_format,
+        base_solution_uids=base_uids,
     )
-    if proc.returncode != 0:
-        return None
-    try:
-        data = _yaml_safe_load(proc.stdout.decode("utf-8", errors="replace"))
-    except yaml.YAMLError:
-        return None
-    return yaml_root_format(data)
 
 
 def _split_check_args(values: Optional[list[str]]) -> list[str]:
@@ -2170,7 +2368,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--base-ref",
         default=None,
-        help="Git ref used to detect dict-to-list changes for modified files",
+        help="Git ref used to compare modified files with their base revision",
     )
     return parser.parse_args(argv)
 
@@ -2205,11 +2403,10 @@ def _selection_from_args(
         contexts: dict[str, FileAuditContext] = {}
         for rel_path, added in selected:
             path = (repo_root / rel_path).resolve()
-            base_format = None
-            if not added:
-                base_format = base_yaml_format(repo_root, args.changed_since, rel_path)
             files.append(path)
-            contexts[str(path)] = FileAuditContext(added=added, base_format=base_format)
+            contexts[str(path)] = _file_audit_context(
+                repo_root, args.changed_since, rel_path, added
+            )
         return files, contexts
 
     if args.files_from is None:
@@ -2226,16 +2423,14 @@ def _selection_from_args(
             path = Path.cwd() / path
         path = path.resolve()
         added = raw in added_raw or str(path) in added_resolved
-        base_format = None
-        if repo_root is not None and args.base_ref and not added:
+        rel_path = ""
+        if repo_root is not None and not added:
             try:
                 rel_path = str(path.relative_to(repo_root)).replace("\\", "/")
             except ValueError:
                 rel_path = ""
-            if rel_path:
-                base_format = base_yaml_format(repo_root, args.base_ref, rel_path)
         files.append(path)
-        contexts[str(path)] = FileAuditContext(added=added, base_format=base_format)
+        contexts[str(path)] = _file_audit_context(repo_root, args.base_ref, rel_path, added)
     return files, contexts
 
 
