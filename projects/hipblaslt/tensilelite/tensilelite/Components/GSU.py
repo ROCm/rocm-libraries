@@ -22,14 +22,16 @@
 
 from rocisa import countInstruction
 from rocisa.code import Module, Label, RegSet, ValueSet
-from rocisa.container import ContinuousRegister, EXEC, SMEMModifiers, MUBUFModifiers, FLATModifiers, vgpr, sgpr, mgpr, replaceHolder, VCC
+from rocisa.container import ContinuousRegister, EXEC, SMEMModifiers, MUBUFModifiers, FLATModifiers, vgpr, sgpr, mgpr, replaceHolder, VCC, \
+    VOP3PModifiers
 from rocisa.enum import CacheScope
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SWaitXCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
-    SCmpEQU64, BufferStoreB32, BufferLoadB32, VMovB64, FlatAtomicDecU32, VAddCOU32, VAddCCOU32
+    SCmpEQU64, BufferStoreB32, BufferLoadB32, VMovB64, FlatAtomicDecU32, VAddCOU32, VAddCCOU32, \
+    VCvtF16toF32, VCvtF32toF16, VFmaMixF32, VLShiftRightB32, VPackF16toB32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
@@ -39,7 +41,40 @@ from ..AsmAddressCalculation import AddrCalculation
 import abc
 from copy import deepcopy
 from math import ceil
-from ..KernelWriterModules import mapAcctoArchRegs
+from ..KernelWriterModules import mapAcctoArchRegs, hasPackedAccumulators, packedAccSingles, packedArchSinglesToAcc
+
+# f16 accumulation: the MBSK slices hold f16 partials, which the reduction adds as the reduction kernel does
+# (KernelWriterConversion.f16AccumulationBody): slice 0 exactly in f32, each later slice with v_fma_mix_f32
+# (one rounding), in slice order, then one rounding to f16. The packed register src holds element j in half j%2 of
+# src+j//2, or a single element in its low half.
+
+def _f16PartialToF32(dst, src, gwvw):
+  module = Module("f16 partial to f32")
+  for j in range(gwvw):
+    if j % 2:
+      module.add(VLShiftRightB32(dst=vgpr(dst+j), shiftHex=16, src=vgpr(src+j//2), comment="slice 0 element %u" % j))
+      module.add(VCvtF16toF32(dst=vgpr(dst+j), src=vgpr(dst+j), comment="slice 0 to f32"))
+    else:
+      module.add(VCvtF16toF32(dst=vgpr(dst+j), src=vgpr(src+j//2), comment="slice 0 to f32"))
+  return module
+
+def _addF16PartialInF32(dst, src, gwvw):
+  module = Module("add f16 partial in f32")
+  for j in range(gwvw):
+    module.add(VFmaMixF32(dst=vgpr(dst+j), src0=vgpr(src+j//2), src1="1.0", src2=vgpr(dst+j), \
+                          vop3=VOP3PModifiers(op_sel=[j % 2, 0, 0], op_sel_hi=[1, 1, 0]), comment="add f16 partial in f32"))
+  return module
+
+def _f32SumToF16(dst, src, gwvw):
+  module = Module("f32 sum to f16")
+  for j in range(gwvw):
+    module.add(VCvtF32toF16(dst=vgpr(src+j), src=vgpr(src+j), comment="round the sum to f16"))
+  for j in range(0, gwvw, 2):
+    if j + 1 < gwvw:
+      module.add(VPackF16toB32(dst=vgpr(dst+j//2), src0=vgpr(src+j), src1=vgpr(src+j+1), comment="pack the sums"))
+    else:
+      module.add(VMovB32(dst=vgpr(dst+j//2), src=vgpr(src+j), comment="sum in the low half"))
+  return module
 
 class GSU(Component):
     """
@@ -1025,6 +1060,8 @@ class GSUOn(GSU):
                 elementSgprs = tmpSgpr.idx + ss.cfg.numTempSgprPerBatch
                 codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
                 codeAccVgprWrite = deepcopy(writer.codes.accVgprWrite) if writer.states.serializedStore else None
+                if hasPackedAccumulators(kernel) and gwvw == 1 and writer.states.serializedStore:
+                    codeAccVgprRead, codeAccVgprWrite = packedAccSingles(kernel, mulAlpha=False), packedArchSinglesToAcc(kernel)
                 codeAccVgprReadBackup = deepcopy(codeAccVgprRead)
 
                 if kernel["MIArchVgpr"] and alpha and not kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
@@ -1356,7 +1393,12 @@ class GSUOn(GSU):
         # every iter writes the same vregs; wait for the previous store.
         if batchIdx > 0 or clsLoop:
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="Wait previous batch write over"))
-        if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
+        if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1 and hasPackedAccumulators(kernel):
+            for elementIdx in range(0, len(batchElements)):
+                for vi in range(0, gwvw, 2):
+                    module.add(replaceHolder(codeAccVgprRead.popFirstItem(), \
+                        (ss.elementSumIdx[elementIdx] + vi) // 2 - writer.states.c.startVgprValu))
+        elif codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             # loop over store instructions within one batch
             for elementIdx in range(0, len(batchElements)):
@@ -1441,7 +1483,7 @@ class GSUOn(GSU):
                             storeCodeGSUSK.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=0, src1=vgpr(prevAddrVgpr+1), src2=VCC(), comment="Inc flat WS addr hi"))
                     prevAddrVgpr = addrDVgpr
 
-                sumIdx = ss.elementSumIdx[elementIdx]
+                sumIdx = ss.elementSumIdx[elementIdx] // 2 if hasPackedAccumulators(kernel) else ss.elementSumIdx[elementIdx]
                 if not kernel["StoreRemapVectorWidth"]:
                     # Only GSU>1 MBSK write to workspace (GSU1 MBSK will write to output buffer)
                     # so we need wsOffset to coalesced store to workspace buffer
@@ -1576,7 +1618,12 @@ class GSUOn(GSU):
             else:
                 module.add(SMovB32(dst=mgpr(0), src=0,
                     comment="reset M0 for v_movrelsd_2_b32 outside CLS loop"))
-        if codeAccVgprWrite is not None:
+        if codeAccVgprWrite is not None and hasPackedAccumulators(kernel):
+            for elementIdx in range(0, len(batchElements)):
+                for vi in range(0, gwvw, 2):
+                    module.add(replaceHolder(codeAccVgprWrite.popFirstItem(), \
+                        (ss.elementSumIdx[elementIdx] + vi) // 2 - writer.states.c.startVgprValu))
+        elif codeAccVgprWrite is not None:
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             if kernel["MIArchVgpr"] and kernel["LocalSplitU"] > 1:
                 tmpStartVgprValuC = writer.states.c.startVgprValu
@@ -1816,6 +1863,7 @@ class GSUOn(GSU):
                                            reductionBodyLabel, tmpS01, tmpS02, tmpS06, clsLoop)
 
         if not kernel["MbskPrefetchMethod"]:
+            f16Sum = writer.vgprPool.checkOut(gwvw, "MBSK f16 partial sum") if hasPackedAccumulators(kernel) else None
             for elementIdx in range(0, len(batchElements)):
                 addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 if useBuffer:
@@ -1860,6 +1908,8 @@ class GSUOn(GSU):
                 dataType  = kernel["ProblemType"]["DestDataType"]
                 if dataType.isDouble() or dataType.isSingleComplex():
                     vgprstart = vgprstart*2
+                if f16Sum is not None:
+                    vgprstart = vgprstart // 2
                 if useBuffer:
                     module.add(writer.chooseGlobalRead(useBuffer, bps, vgprstart, \
                                     addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope,\
@@ -1917,13 +1967,18 @@ class GSUOn(GSU):
                 #####################################> GSUtotal reduction start#####################################
                 module.addComment("buffer add start")
 
+                if f16Sum is not None:
+                    module.add(SWaitCnt(vlcnt=SyncloadedData-1, comment="wait for slice 0"))
+                    module.add(_f16PartialToF32(f16Sum, vgprstart, gwvw))
                 module.add(Synchronizerlabel)
                 vlcnt = SyncloadedData - 1
 
                 for i in range(0, GSUP1):
                     vlcnt = vlcnt - 1 if vlcnt > 0 else 0
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if f16Sum is not None:
+                        module.add(_addF16PartialInF32(f16Sum, tmpVAdd+gwvw*i, gwvw))
+                    elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                     comment="buffer add"))
@@ -1997,12 +2052,17 @@ class GSUOn(GSU):
                 for k in range(GSUtotal-2, -1, -1):
                     module.addSpaceLine()
                     module.add(SynchronizerAddEndlabel[k])
+                    if f16Sum is not None:
+                        module.add(SWaitCnt(vlcnt=k, comment="wait for slice 0"))
+                        module.add(_f16PartialToF32(f16Sum, vgprstart, gwvw))
 
                     vlcnt = k
                     for i in range(0, k):
                         vlcnt = vlcnt - 1 if vlcnt > 0 else 0
                         module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                        if f16Sum is not None:
+                            module.add(_addF16PartialInF32(f16Sum, tmpVAdd+gwvw*i, gwvw))
+                        elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                         comment="buffer add"))
@@ -2020,10 +2080,16 @@ class GSUOn(GSU):
                             module.add(SBranch(labelName=SynchronizerAddSkiplabel.getLabelName(), comment="SyncAddbranch"))
 
                 module.add(SynchronizerAddSkiplabel)
+                if f16Sum is not None:
+                    module.add(_f32SumToF16(vgprstart, f16Sum, gwvw))
 
                 module.addComment("buffer add end2")
+            if f16Sum is not None:
+                writer.vgprPool.checkIn(f16Sum)
         else:
             tmpWSD = writer.sgprPool.checkOutAligned(4, 4, tag="GSUSynccodegenOpt_tmpWSD", preventOverflow=False)
+            f16Sums = writer.vgprPool.checkOut(gwvw*len(batchElements), "MBSK f16 partial sums") \
+                if hasPackedAccumulators(kernel) else None
             GSUtotal = writer.getMBSKGSUTotal(kernel)-1
             loadWidth = gwvw * int(max(1, kernel["ProblemType"]["DestDataType"].numRegisters()))
             unrolledWGs = GSUtotal // len(batchElements)
@@ -2072,7 +2138,7 @@ class GSUOn(GSU):
                     module.add(SMovB32(dst=sgpr(tmpS01), src=sgpr(loadOffsetSgpr), comment="save first element offset"))
                 for uidx in range(0, 2):
                     if uidx == 0:
-                        data = ss.elementSumIdx[elementIdx]
+                        data = ss.elementSumIdx[elementIdx] // 2 if f16Sums is not None else ss.elementSumIdx[elementIdx]
                         tmpAddr1 = tmpWSD
                     else:
                         data = tmpVAdd[-1][elementIdx]
@@ -2129,7 +2195,10 @@ class GSUOn(GSU):
                 vlcnt       = vlcnt - 2 if vlcnt > 0 else 0
 
                 module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                if f16Sums is not None:
+                    module.add(_f16PartialToF32(f16Sums+gwvw*elementIdx, vgprstart // 2, gwvw))
+                    module.add(_addF16PartialInF32(f16Sums+gwvw*elementIdx, data, gwvw))
+                elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                     for j in range(0, int(gwvw)):
                         module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                 comment="buffer add"))
@@ -2171,7 +2240,9 @@ class GSUOn(GSU):
                     vlcnt       = vlcnt - 1 if vlcnt > 0 else 0
 
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if f16Sums is not None:
+                        module.add(_addF16PartialInF32(f16Sums+gwvw*elementIdx, data, gwvw))
+                    elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                     comment="buffer add"))
@@ -2216,7 +2287,10 @@ class GSUOn(GSU):
                     data  = tmpVAdd[-1][elementIdx]
 
                     module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                    if f16Sums is not None:
+                        module.add(_f16PartialToF32(f16Sums+gwvw*elementIdx, vgprstart // 2, gwvw))
+                        module.add(_addF16PartialInF32(f16Sums+gwvw*elementIdx, data, gwvw))
+                    elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                     comment="buffer add"))
@@ -2237,7 +2311,9 @@ class GSUOn(GSU):
                         data  = tmpVAdd[i-1][elementIdx]
 
                         module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
-                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
+                        if f16Sums is not None:
+                            module.add(_addF16PartialInF32(f16Sums+gwvw*elementIdx, data, gwvw))
+                        elif kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
                                         comment="buffer add"))
@@ -2255,6 +2331,10 @@ class GSUOn(GSU):
 
             module.addComment("buffer add end\n")
             module.add(accumulationEndlabel)
+            if f16Sums is not None:
+                for elementIdx in range(0, len(batchElements)):
+                    module.add(_f32SumToF16(ss.elementSumIdx[elementIdx] // 2, f16Sums+gwvw*elementIdx, gwvw))
+                writer.vgprPool.checkIn(f16Sums)
             writer.sgprPool.checkIn(tmpWSD)
 
         writer.sgprPool.checkIn(tmpS06)
@@ -2271,8 +2351,19 @@ class GSUOn(GSU):
         module.add(SWaitCnt(vlcnt=0, comment="wait for buffer_load to finish"))
 
         tmpVAdd = tmpVgprDynamic.idx
+        if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1 and hasPackedAccumulators(kernel):
+            # Slice 0 (loaded) is the base and this WG's own accumulators are slice 1, as in the reduction kernel.
+            f16Sum = writer.vgprPool.checkOut(gwvw, "MBSK f16 partial sum")
+            for elementIdx in range(0, len(batchElements)):
+                for vi in range(0, gwvw, 2):
+                    module.add(replaceHolder(codeAccVgprRead.popFirstItem(), tmpVAdd + vi // 2 - writer.states.c.startVgprValu))
+                vgprstart = ss.elementSumIdx[elementIdx] // 2
+                module.add(_f16PartialToF32(f16Sum, vgprstart, gwvw))
+                module.add(_addF16PartialInF32(f16Sum, tmpVAdd, gwvw))
+                module.add(_f32SumToF16(vgprstart, f16Sum, gwvw))
+            writer.vgprPool.checkIn(f16Sum)
         # last gsu wg accvgpr read
-        if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
+        elif codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             # loop over store instructions within one batch
             batchNumAccRegs = len(batchElements) * gwvw * regsPerScalar

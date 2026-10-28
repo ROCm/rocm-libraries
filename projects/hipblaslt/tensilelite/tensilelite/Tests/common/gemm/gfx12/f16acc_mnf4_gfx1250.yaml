@@ -1,0 +1,153 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# f16 accumulation with MN-contiguous fp4 operands (A with TransposeA False, B with TransposeB True): they stay
+# MN-major in LDS, are read with ds_load_tr4_b64 and converted to fp8 after the read. F4F8, F8F4 and F4F4, beside a
+# K- or MN-contiguous fp8 operand; the 16x16x64 and 16x16x128 WMMA; D in f16, fp8 and bf16; edge tiles and a tail loop.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 23
+  DataInitTypeB: 26
+  DataInitTypeC: 13
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 17
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  ########################################
+  # F4F8 NN, D f16: A fp4 MN-contiguous, B fp8 K-contiguous
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DataTypeA: F4
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - &mnf4Group # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - ConvertAfterDS: [True]
+        - LDSTrInst: [True]
+        - TransposeLDS: [-1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertFree1ElementMultiple: [2]
+        - AssertSummationElementMultiple: [8]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [66, 34, 1, 192]
+
+  ########################################
+  # F4F8 NT, D fp8: A fp4 and B fp8 both MN-contiguous
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DataTypeA: F4
+      DestDataType: F8
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - *mnf4Group
+
+  ########################################
+  # F8F4 TT, D bf16: A fp8 K-contiguous, B fp4 MN-contiguous
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DataTypeB: F4
+      DestDataType: B
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - *mnf4Group
+
+  ########################################
+  # F8F4 NT, D f16: A fp8 and B fp4 both MN-contiguous
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DataTypeB: F4
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - *mnf4Group
+
+  ########################################
+  # F4F4 NT, D f16: both fp4 operands MN-contiguous
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DataTypeA: F4
+      DataTypeB: F4
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - *mnf4Group

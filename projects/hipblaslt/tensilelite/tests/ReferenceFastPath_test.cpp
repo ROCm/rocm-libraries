@@ -111,3 +111,81 @@ TEST(ReferenceFastPath, AppliesXFloat32OperandMathOpToBothOperands)
     ASSERT_NE(expected, fullF32);
     EXPECT_EQ(d[0], expected);
 }
+
+namespace
+{
+    template <typename T>
+    std::vector<T> f16AccumulationOperand(std::vector<float> const& values)
+    {
+        std::vector<T> out;
+        if constexpr(std::is_same<T, Float4x2>::value)
+            for(size_t i = 0; i < values.size(); i += 2)
+                out.push_back(Float4x2(values[i], values[i + 1]));
+        else
+            for(float v : values)
+                out.push_back(T(v));
+        return out;
+    }
+
+    // One K step of 64. Each group of 16 products has one of +-96 (+-36 for fp4 x fp4) and fifteen of 2^-8 (0.25);
+    // the 2^-8 products are below their group's truncation step, so f16 accumulation gives 0 where f32 accumulation
+    // gives 60 * 2^-8. The fp4 x fp4 products are all kept: 15.
+    template <typename TA, typename TB, typename TD>
+    void expectF16AccumulationCell(rocisa::DataType typeA,
+                                   rocisa::DataType typeB,
+                                   rocisa::DataType computeA,
+                                   rocisa::DataType computeB,
+                                   rocisa::DataType typeD)
+    {
+        constexpr bool fp4A = std::is_same<TA, Float4x2>::value;
+        constexpr bool fp4B = std::is_same<TB, Float4x2>::value;
+        const size_t   K    = 64;
+
+        auto problem = ContractionProblemGemm::GEMM_Strides(
+            false, false, typeA, typeB, typeD, typeD, 1, 1, K, 1, 1, K, K, K, 1, 1, 1, 1, 0.0);
+        problem.setComputeInputTypeA(computeA);
+        problem.setComputeInputTypeB(computeB);
+        problem.setAlphaType(rocisa::DataType::Half);
+        problem.setBetaType(rocisa::DataType::Half);
+        problem.setHighPrecisionAccumulate(false);
+        ASSERT_TRUE(isF16AccumulationProblem(problem));
+        ASSERT_FALSE(isFastPathEligible(problem));
+
+        std::vector<float> a(K), b(K);
+        for(size_t k = 0; k < K; k++)
+        {
+            bool  big  = k % 16 == 0;
+            float sign = (k / 16) % 2 ? -1.0f : 1.0f;
+            a[k]       = big ? sign * (fp4A ? 6.0f : 16.0f) : (fp4A ? 0.5f : 0.0078125f);
+            b[k]       = big ? (fp4B ? 6.0f : 16.0f) : (fp4B ? 0.5f : 0.0078125f);
+        }
+        auto            aData = f16AccumulationOperand<TA>(a);
+        auto            bData = f16AccumulationOperand<TB>(b);
+        std::vector<TD> c(1, TD(0.0f));
+        std::vector<TD> d(1, TD(0.0f));
+
+        ContractionInputs inputs(aData.data(), bData.data(), c.data(), d.data(), Half(1.0f), Half(0.0f));
+        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+        EXPECT_EQ(static_cast<float>(d[0]), fp4A && fp4B ? 15.0f : 0.0f);
+    }
+} // namespace
+
+// Every fp4 cell of f16 accumulation, with the compute input types the library's problem types carry: the reference
+// must dispatch it to the f16-accumulate model.
+TEST(ReferenceF16Accumulation, Fp4CellsUseTheF16AccumulateModel)
+{
+    using DT = rocisa::DataType;
+    expectF16AccumulationCell<Float4x2, Float8, Half>(DT::Float4, DT::Float8, DT::Float4, DT::Float8, DT::Half);
+    expectF16AccumulationCell<Float8, Float4x2, Half>(DT::Float8, DT::Float4, DT::Float8, DT::Float4, DT::Half);
+    expectF16AccumulationCell<Float4x2, Float4x2, Half>(DT::Float4, DT::Float4, DT::Float8, DT::Float8, DT::Half);
+    expectF16AccumulationCell<Float4x2, Float8, Float8>(DT::Float4, DT::Float8, DT::Float4, DT::Float8, DT::Float8);
+    expectF16AccumulationCell<Float8, Float4x2, Float8>(DT::Float8, DT::Float4, DT::Float8, DT::Float4, DT::Float8);
+    expectF16AccumulationCell<Float4x2, Float4x2, Float8>(DT::Float4, DT::Float4, DT::Float8, DT::Float8, DT::Float8);
+    expectF16AccumulationCell<Float4x2, Float8, BFloat16>(
+        DT::Float4, DT::Float8, DT::Float4, DT::Float8, DT::BFloat16);
+    expectF16AccumulationCell<Float8, Float4x2, BFloat16>(
+        DT::Float8, DT::Float4, DT::Float8, DT::Float4, DT::BFloat16);
+    expectF16AccumulationCell<Float4x2, Float4x2, BFloat16>(
+        DT::Float4, DT::Float4, DT::Float8, DT::Float8, DT::BFloat16);
+}

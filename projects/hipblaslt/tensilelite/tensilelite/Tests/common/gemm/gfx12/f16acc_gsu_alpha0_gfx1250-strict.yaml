@@ -1,0 +1,160 @@
+# f16 accumulation with split-K MultipleBuffer and alpha 0: the reduction kernel skips the f16 partials and
+# writes beta * C. GSU 2 and 3, interleaved and coalesced slices, D in f16, fp8 and bf16.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 21
+  DataInitTypeB: 21
+  DataInitTypeC: 21
+  DataInitTypeAlpha: 0
+  DataInitTypeBeta: 3
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  Architecture: gfx1250-strict
+
+BenchmarkProblems:
+  ########################################
+  # D h
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [256]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - SourceSwap: [True]
+        - GlobalSplitU: [2, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitUCoalesced: [False, True]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 96, 2, 1152]
+          - Exact: [64, 32, 1, 128]
+
+  ########################################
+  # D F8
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [256]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - SourceSwap: [True]
+        - GlobalSplitU: [2, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitUCoalesced: [False, True]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 96, 2, 1152]
+          - Exact: [64, 32, 1, 128]
+
+  ########################################
+  # D B
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 128, 1, 1, 2, 2, 1, 1]]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - DepthU: [256]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - SourceSwap: [True]
+        - GlobalSplitU: [2, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitUCoalesced: [False, True]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 96, 2, 1152]
+          - Exact: [64, 32, 1, 128]

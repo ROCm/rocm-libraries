@@ -37,8 +37,8 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
-  VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
-  VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
+  VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
+  VFmaF32, VFmaF64, VFmaPKF16, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
@@ -54,7 +54,7 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
-from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
+from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen, hasPackedAccumulators, deferPackedAlphaScales
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
 # fused-A2A methods (from .Signature) to avoid a circular import at module load time
 # (Component.py does `from .Components import *`, which re-enters this module).
@@ -286,15 +286,18 @@ class GlobalWriteBatchWriter:
     """
     Check if accumulation values need to be converted to destination type:
     1. HighPrecisionAccumulate is enabled (accumulator precision > output precision)
-       e.g., F32 accumulator -> FP16/BF16/FP8/BF8/I32/I8 output
+       e.g., F32 accumulator -> FP16/BF16/FP8/BF8/I32/I8 output,
+       or packed f16 accumulators with a non-f16 output (F16 -> FP8/BF16)
     2. _GlobalAccumulation is not 'MultipleBuffer'
 
     When True, the pack/convert module will be generated to perform:
     - F32 -> FP16/BF16 packing
     - F32 -> FP8/BF8 conversion (with optional stochastic rounding)
     - F32 -> I32/I8 conversion and packing
+    - F16 -> FP8/BF16 conversion
     """
-    return self.kernel["ProblemType"]["HighPrecisionAccumulate"] and \
+    return (self.kernel["ProblemType"]["HighPrecisionAccumulate"] or \
+            (hasPackedAccumulators(self.kernel) and not self.kernel["ProblemType"]["DestDataType"].isHalf())) and \
            (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer')
 
   @property
@@ -319,7 +322,11 @@ class GlobalWriteBatchWriter:
        2x2 read the wrong registers).
     7. CompactLoopStore is off. CLS-loop store reads acc VGPRs via
        v_movrelsd_2_b32 indexing, which relies on the rearrangement layout.
+    8. Not a width-1 store of packed f16 accumulators, which first moves each
+       element to the low half of its own VGPR.
     """
+    if hasPackedAccumulators(self.kernel) and self.gwvw == 1:
+      return False
     if self.parentWriter.states.useBias == DataDirection.READ or \
        self.kernel.get("CompactLoopStore", False) or \
        self.kernel.get("ActivationFuncCall", False) or \
@@ -1101,6 +1108,13 @@ class GlobalWriteBatchWriter:
           else:
             module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
             elementIdx += 1
+      elif hasPackedAccumulators(self.kernel):
+          for elementIdx in range(len(self.batchElements)):
+            items = [replaceHolder(self.codeMulAlpha.popFirstItem(), \
+                       (self.ss.elementSumIdx[elementIdx] + vi) // 2 - self.parentWriter.states.c.startVgprValu) \
+                     for vi in range(0, self.gwvw, 2)]
+            for item in deferPackedAlphaScales(items):
+              module.add(item)
       else:
           regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
           for elementIdx in range(len(self.batchElements)):
@@ -1492,6 +1506,11 @@ class GlobalWriteBatchWriter:
         module.add(RegSet("v", "vgprValuC", 0))
       # loop over store instructions within one batch
       for elementIdx in range(len(self.batchElements)):
+        if hasPackedAccumulators(self.kernel):
+          for vi in range(0, self.gwvw, 2):
+            module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), \
+              (self.ss.elementSumIdx[elementIdx] + vi) // 2 - self.parentWriter.states.c.startVgprValu))
+          continue
         # loop over scalars within one store instruction
         for vi in range(self.gwvw):
           # loop over registers within one scalar
@@ -1574,12 +1593,19 @@ class GlobalWriteBatchWriter:
           interleaveAlpha = self._interleaveAlphaWithPack()
           for elementIdx in range(len(self.batchElements)):
             elementAlpha = Module("alphaElement")
-            for vi in range(self.gwvw):
-              rh = replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu)
-              if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
-                srcRegName = rh.getParams()[2].getCompleteRegName()
-                elementAlpha.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
-              elementAlpha.add(rh)
+            if hasPackedAccumulators(self.kernel):
+              items = [replaceHolder(self.codeMulAlpha.popFirstItem(), \
+                         (self.ss.elementSumIdx[elementIdx] + vi) // 2 - self.parentWriter.states.c.startVgprValu) \
+                       for vi in range(0, self.gwvw, 2)]
+              for item in deferPackedAlphaScales(items):
+                elementAlpha.add(item)
+            else:
+              for vi in range(self.gwvw):
+                rh = replaceHolder(self.codeMulAlpha.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi - self.parentWriter.states.c.startVgprValu)
+                if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
+                  srcRegName = rh.getParams()[2].getCompleteRegName()
+                  elementAlpha.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+                elementAlpha.add(rh)
             if interleaveAlpha:
               self._alphaPerElement[elementIdx] = elementAlpha
             else:
@@ -1881,11 +1907,17 @@ class GlobalWriteBatchWriter:
     activationCDataType = self.kernel["ProblemType"]["ActivationComputeDataType"]
 
     if self.kernel["_GlobalAccumulation"] != 'MultipleBuffer':
-      if self.kernel["ProblemType"]["DestDataType"].isBFloat16() and self.kernel["ProblemType"]["HighPrecisionAccumulate"] \
+      if self.kernel["ProblemType"]["DestDataType"].isBFloat16() and \
+          (self.kernel["ProblemType"]["HighPrecisionAccumulate"] or hasPackedAccumulators(self.kernel)) \
           and not self._pairedStoreClobbersBf16Consts():
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" ))
+        if hasPackedAccumulators(self.kernel):
+          for i, s in enumerate(["Alpha", "Beta"] if self.kernel["ProblemType"]["UseBeta"] else ["Alpha"]):
+            module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprAlphaBeta + i), sgpr(s), comment="%s (f16)" % s.lower()))
+            module.add(ECvtF16toF32(dst=vgpr(self.cvtVgprStruct.vgprAlphaBeta + i), src=vgpr(self.cvtVgprStruct.vgprAlphaBeta + i), \
+                                    sel=HighBitSel.LOW, comment="%s to f32" % s.lower()))
     # is16bitSubtile: controls partner-lane address setup for dwordx4 paired-subtile stores.
     # Must match is16bitSubtilePaired (per-element store dispatch) exactly.
     # Excluded for "MultipleBufferSingleKernel" and "MultipleBuffer" (StreamK partial-tile
@@ -2001,10 +2033,18 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8Max), "0x43700000", comment="Fp8 Max value 240 as float32" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8Min), "0xc3700000", comment="Fp8 Min value -240 as float32" ))
-      elif self.kernel["ProblemType"]["DestDataType"].isFloat8() and self.kernel["ProblemType"]["HighPrecisionAccumulate"]:
-        module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
+      elif self.kernel["ProblemType"]["DestDataType"].isFloat8() and \
+          (self.kernel["ProblemType"]["HighPrecisionAccumulate"] or hasPackedAccumulators(self.kernel)):
+        if hasPackedAccumulators(self.kernel):
+          # f16 accumulation overflows to inf, which saturates to +/-448 like a finite overflow.
+          module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8NanInf), "0x3", comment="Nan" ))
+        else:
+          module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8Max), "0x43E00000", comment="Fp8 Max value 448 as float32" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8Min), "0xc3E00000", comment="Fp8 Min value -448 as float32" ))
+        if hasPackedAccumulators(self.kernel) and self.cvtVgprStruct.vgprFp8ClampPk != -1:
+          module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8ClampPk), "0xdf00df00", comment="-448 in both f16 halves"))
+          module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp8ClampPk + 1), "0x5f005f00", comment="448 in both f16 halves"))
       elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8() and self.kernel["ProblemType"]["HighPrecisionAccumulate"]:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8NanInf), "0x207", comment="Nan and +/- inf" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Max), "0x47600000", comment="BF8 Max value 57344 as float32" ))
@@ -2449,8 +2489,13 @@ class GlobalWriteBatchWriter:
           if not is16bitSubtile:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
+          if hasPackedAccumulators(self.kernel):
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC,
+                                       dataC=self.ss.elementData[elementIdx] if self.beta else None, applyAlpha=self.applyAlpha,
+                                       inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
-          if not is16bitSubtile:
+          elif not is16bitSubtile:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
                                        tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
@@ -5309,7 +5354,13 @@ class GlobalWriteBatchWriter:
       sumIdxV = ss.elementSumIdx[elementIdx] + vi
       if kernel["ProblemType"]["DestDataType"].isHalf():
         if not kernel["ProblemType"]["HighPrecisionAccumulate"]:
-          if self.parentWriter.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
+          if hasPackedAccumulators(kernel):
+            if vi % 2 == 0:
+              newSumIdxV = sumIdxV // 2 - self.parentWriter.states.c.startVgprValu
+              module.add(VFmaPKF16(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(dataV), src1=sgpr("Beta"), \
+                    src2=vgpr("ValuC+%u"%newSumIdxV), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), \
+                    comment="finalSum = sum*alpha + C*beta"))
+          elif self.parentWriter.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
             dataV = ss.elementData[elementIdx] + int(vi / 2 * ss.cfg.numVgprsPerDataPerVI)
             if (vi % 2) == 0:
               module.add(VMulPKF16(dst=vgpr(dataV), src0=sgpr("Beta"), src1=vgpr(dataV+0), \
@@ -5441,6 +5492,16 @@ class GlobalWriteBatchWriter:
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))
             if isPK:
               module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdxV+1)), src0=vgpr(tmpVgpr+1), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta (PK)"))
+        elif hasPackedAccumulators(kernel) and vi % 2 == 0:
+          # beta in f16: two fp8 C values become one packed f16 pair (exact)
+          dataCExternal = ss.elementData[elementIdx] + (vi // 4)
+          newSumIdxV = sumIdxV // 2 - self.parentWriter.states.c.startVgprValu
+          module.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataCExternal), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
+          module.add(SNop(waitState=0))
+          module.add(VCvtPkF32toF16(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vgpr(tmpVgpr+1), comment="C to packed f16"))
+          module.add(VFmaPKF16(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), \
+                src2=vgpr("ValuC+%u"%newSumIdxV), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), \
+                comment="finalSum = sum*alpha + C*beta"))
       # bfloat8 precision
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
