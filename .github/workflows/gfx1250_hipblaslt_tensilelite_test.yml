@@ -44,7 +44,7 @@ on:
         type: string
         default: ""
       hipblaslt_gtest_filter:
-        description: "hipBLASLt --gtest_filter (e.g. -*MX* to exclude MXFP). Empty = run all."
+        description: "hipBLASLt --gtest_filter (e.g. -*MX* to exclude MXFP). Empty = run all. A filter runs as given in the shards, large-memory tests included."
         type: string
         default: ""
       rocm_sdk_version:
@@ -144,6 +144,8 @@ jobs:
         --user 0:0
       volumes:
         - /scratch/pip-cache:/pip-cache${{ github.event_name != 'schedule' && ':ro' || '' }}
+        # Host-wide lock shared by this host's runners (see "Run hipBLASLt tests").
+        - /scratch/ci-locks:/ci-locks
     defaults:
       run:
         shell: bash
@@ -371,25 +373,56 @@ jobs:
             || { echo "::error::cannot list a hipBLASLt code object with the SDK's clang-offload-bundler"; exit 1; }
           grep -q -- '-gfx1250-strict$' <<<"$IDS" \
             || { echo "::error::hipBLASLt code objects are not labelled gfx1250-strict"; exit 1; }
-          FILTER=()
-          [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          # Each shard is scrubbed as it runs (hardware info and timing), so no unscrubbed
+          # Large-memory tests (2^31/2^32 sizes, on gfx1250 since #13504). Sharded, every
+          # shard reaches them at once and a single job nearly fills the host's memory: the
+          # client's pool keeps their pinned host buffers until the process exits. So the
+          # shards skip them, and they run after the shards, one group per process (each
+          # starts with an empty pool), one job at a time on this host.
+          LARGE=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow*'
+            '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
+          FILTER=() RUN_LARGE=0
+          if [ -n "$GTEST_FILTER_ARG" ]; then
+            FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
+          else
+            FILTER+=(--gtest_filter="-$(IFS=:; echo "${LARGE[*]}")")
+            RUN_LARGE=1
+          fi
+          # Each log is scrubbed as it runs (hardware info and timing), so no unscrubbed
           # output reaches disk. The subshell makes wait return the test's status
           # (pipefail), not awk's.
+          run_tests() {  # log name, then hipblaslt-test arguments
+            local log="$1"; shift
+            ( "$BIN" "$@" 2>&1 | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
+                | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/$log" )
+          }
           OUT="$GITHUB_WORKSPACE/test_results"
           mkdir -p "$OUT"
           pids=()
           for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
-            ( GTEST_TOTAL_SHARDS=$HIPBLASLT_TEST_SHARDS GTEST_SHARD_INDEX=$i "$BIN" "${FILTER[@]}" 2>&1 \
-                | sed -E 's/ \([0-9]+ ms( total)?\)//g' \
-                | awk -F, -v OFS=, "$HW_SCRUB" > "$OUT/hipblaslt_test_shard$i.log" ) &
+            GTEST_TOTAL_SHARDS=$HIPBLASLT_TEST_SHARDS GTEST_SHARD_INDEX=$i \
+              run_tests "hipblaslt_test_shard$i.log" "${FILTER[@]}" &
             pids+=($!)
           done
           rc=0
           for p in "${pids[@]}"; do wait "$p" || rc=1; done
-          for i in $(seq 0 $((HIPBLASLT_TEST_SHARDS - 1))); do
-            echo "::group::hipBLASLt shard $i of $HIPBLASLT_TEST_SHARDS"
-            cat "$OUT/hipblaslt_test_shard$i.log"
+          if [ "$RUN_LARGE" = 1 ]; then
+            # The shards are done, so the large tests get this job's whole CPU share.
+            export OMP_NUM_THREADS=$(( T * HIPBLASLT_TEST_SHARDS )) OPENBLAS_NUM_THREADS=$(( T * HIPBLASLT_TEST_SHARDS ))
+            exec 9>/ci-locks/gfx1250-hipblaslt-large-tests.lock
+            echo "Waiting for the host's large-test lock"
+            if flock -x -w 3000 9; then
+              for k in "${!LARGE[@]}"; do
+                run_tests "hipblaslt_test_shard_large$k.log" --gtest_filter="${LARGE[$k]}" || rc=1
+              done
+              flock -u 9
+            else
+              echo "::error::waited 50 min for another job's large hipBLASLt tests; skipped them"
+              rc=1
+            fi
+          fi
+          for f in "$OUT"/hipblaslt_test_shard*.log; do
+            echo "::group::hipBLASLt $(basename "$f" .log)"
+            cat "$f"
             echo "::endgroup::"
           done
           grep -hE '^\[(==========|  PASSED  |  SKIPPED |  FAILED  )\] [0-9]+ test' "$OUT"/hipblaslt_test_shard*.log || true
