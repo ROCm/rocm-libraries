@@ -47,6 +47,54 @@ TEST(Comparison, SymmetricUnitToleranceIsStrictAndComponentwise) {
     EXPECT_TRUE(compare(Tensor(0.0f), Tensor(1.0f), boundary).passed());
 }
 
+TEST(Comparison, NormEvidencePreservesRealAndComplexCriteria) {
+    using namespace roc::hostnumerics;
+    const std::array<double, 2> realObserved{3.0, 4.0};
+    const std::array<double, 2> realExpected{0.0, 4.0};
+    const std::array<std::complex<double>, 1> complexObserved{{{3.0, 4.0}}};
+    const std::array<std::complex<double>, 1> complexExpected{{{0.0, 4.0}}};
+    for (bool complex : {false, true}) {
+        const Tensor observed =
+            complex
+                ? Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexObserved))
+                : Tensor::copyNativeStorage(std::span<const double>(realObserved));
+        const Tensor expected =
+            complex
+                ? Tensor::copyNativeStorage(std::span<const std::complex<double>>(complexExpected))
+                : Tensor::copyNativeStorage(std::span<const double>(realExpected));
+        for (auto mode : {ComplexComparisonMode::Componentwise, ComplexComparisonMode::Magnitude}) {
+            ComparisonOptions options;
+            options.allClose = false;
+            options.computeElementwiseStatistics = false;
+            options.complexComparisonMode = mode;
+            options.absoluteTolerance = 0.25;
+            options.relativeTolerance = 0.5;
+            options.strictElementwiseTolerance = true;
+            options.arithmeticPrecision = ComparisonArithmeticPrecision::Float32;
+            options.relativeFrobeniusTolerance = 0.75;
+            const auto result = compare(observed, expected, options);
+            EXPECT_TRUE(result.passed());
+            EXPECT_EQ(result.compared, complex ? 1u : 2u);
+            EXPECT_EQ(result.frobeniusObserved, 5.0);
+            EXPECT_EQ(result.frobeniusExpected, 4.0);
+            EXPECT_EQ(result.frobeniusDifference, 3.0);
+            EXPECT_EQ(result.relativeFrobeniusError, 0.75);
+            EXPECT_EQ(result.maxAbsoluteDifference, 3.0);
+            EXPECT_EQ(result.maximumObservedMagnitude, complex ? 5.0 : 4.0);
+            EXPECT_EQ(result.maximumExpectedMagnitude, 4.0);
+            options.relativeFrobeniusTolerance = std::nextafter(0.75, 0.0);
+            EXPECT_FALSE(compare(observed, expected, options).passed());
+
+            options.reportMatchingElements = true;
+            const auto reported = compare(observed, expected, options);
+            ASSERT_EQ(reported.reportedComparisons.size(), complex ? 1u : 2u);
+            EXPECT_FALSE(reported.reportedComparisons.front().matched);
+            EXPECT_GT(reported.reportedComparisons.front().tolerance, 0.0);
+            EXPECT_EQ(reported.frobeniusDifference, 3.0);
+        }
+    }
+}
+
 namespace hostnumerics_test {
 void testComparisonProgram() {
     using namespace roc::hostnumerics;

@@ -51,6 +51,11 @@ ComponentResult compareComponent(double observed, double expected,
     }
 
     result.difference = std::abs(observed - expected);
+    // Norm and ULP evidence do not use finite elementwise tolerances or relative differences.
+    // Reporting still needs both, even when the all-close criterion is disabled.
+    if (!options.allClose && !options.computeElementwiseStatistics &&
+        !options.reportMatchingElements)
+        return result;
     if (options.arithmeticPrecision == ComparisonArithmeticPrecision::Float32)
         result.tolerance = elementwiseTolerance(static_cast<float>(std::abs(observed)),
                                                 static_cast<float>(std::abs(expected)), options);
@@ -95,9 +100,12 @@ ComponentResult compareComplexMagnitude(const ComparisonValue& observed,
         return result;
     }
 
-    const double expectedMagnitude = std::hypot(expected.real, expected.imaginary);
     result.difference =
         std::hypot(observed.real - expected.real, observed.imaginary - expected.imaginary);
+    if (!options.allClose && !options.computeElementwiseStatistics &&
+        !options.reportMatchingElements)
+        return result;
+    const double expectedMagnitude = std::hypot(expected.real, expected.imaginary);
     result.relativeDifference =
         expectedMagnitude == 0.0
             ? (result.difference == 0.0 ? 0.0 : std::numeric_limits<double>::infinity())
