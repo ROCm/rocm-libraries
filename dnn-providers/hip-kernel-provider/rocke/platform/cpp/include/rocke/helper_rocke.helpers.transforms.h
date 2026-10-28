@@ -397,7 +397,9 @@ typedef struct rocke_dynamic_tensor_descriptor
 {
     rocke_tensor_descriptor_t base; /* must be first for safe cast */
     int n_dynamic; /* == base.n_base              */
-    rocke_value_t* dynamic_strides[8]; /* parallel to base.base_names */
+    /* Parallel to base.base_names. NULL marks a compile-time stride, read from
+     * base.base_strides with the static rule (no multiply for 1). */
+    rocke_value_t* dynamic_strides[8];
 } rocke_dynamic_tensor_descriptor_t;
 
 rocke_dynamic_tensor_descriptor_t*
@@ -406,6 +408,16 @@ rocke_dynamic_tensor_descriptor_t*
                                           const char* const* coord_names,
                                           int n_coords,
                                           rocke_value_t* const* strides);
+
+/* Python: DynamicTensorDescriptor.create with a mix of Value and int strides.
+ * strides[i] == NULL takes static_strides[i] as a compile-time stride. */
+rocke_dynamic_tensor_descriptor_t*
+    rocke_tensor_descriptor_naive_dynamic_mixed(rocke_ir_builder_t* b,
+                                                const char* name,
+                                                const char* const* coord_names,
+                                                int n_coords,
+                                                rocke_value_t* const* strides,
+                                                const int* static_strides);
 
 bool rocke_dynamic_tensor_descriptor_offset(rocke_ir_builder_t* b,
                                             const rocke_dynamic_tensor_descriptor_t* desc,
@@ -495,7 +507,8 @@ bool rocke_transforms_descriptor_offset(rocke_ir_builder_t* b,
  * terms are summed into a small i32 within-block offset. *out_base_i64 and
  * *out_within are written on success (within is const_i32(0) when no other
  * terms); *out_valid is NULL == Python None. Returns false (builder error set)
- * if base_coord is not among the descriptor's base coords. */
+ * if base_coord is not among the descriptor's base coords. A dynamic descriptor
+ * multiplies by its runtime strides, widening the base_coord one to i64. */
 bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
                                                   const rocke_tensor_descriptor_t* desc,
                                                   const char* base_coord,
