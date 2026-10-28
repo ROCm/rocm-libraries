@@ -279,7 +279,8 @@ or a grouped row) and why. Re-dispatch a non-conforming report once, naming the 
 2. `ledger.py ids "$EVIDENCE" <N>` assigns final `<LANE>-<n>` IDs (all `CORR<k>` share
    `CORR-<n>`), writes `ID-MAP.md` ([report.md](report.md) *Final IDs*) and adds a candidate
    row per finding; re-running keeps assigned IDs; it exits 1 when a report sits below a nested `r<k>/`
-   directory, holds `ID:` lines it cannot parse or a provisional ID not of the form `<LANE>-p<n>`.
+   directory, holds a finding block it cannot parse, cites a provisional ID no report of the round
+   writes as a block, or reports a provisional ID not of the form `<LANE>-p<n>`.
    Cluster findings with the same location and claim, and those a verifier reported as
    `ORCH: cluster <ID> with <ID>` under **Handoffs**: `ledger.py cluster "$EVIDENCE" <N> <kept ID>
    <duplicate ID>...` sets each duplicate's `SUPERSEDED-BY` cell in `ID-MAP.md`, repoints cells

@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import partition  # noqa: E402
 import reviewlib as rl  # noqa: E402
 
 COVERAGE_COLS = ["File", "Lines", "Owner lane", "Read depth", "Tests reaching it"]
@@ -173,11 +174,12 @@ def cmd_ids(a):
     to the provisional IDs in lanes/*.md and verify/VER<batch>.md, continuing each prefix's
     counter in LEDGER.md; write ID-MAP.md; add a candidate row per new finding. IDs already
     in an existing ID-MAP.md keep their value; a SUPERSEDED-BY entry there sets the row's
-    status. Fails when a report is nested below `r<k>/`, holds `ID:` lines it cannot parse,
-    cites its own lane's `<LANE>-p<n>` in its Findings section where no report of the round
-    parsed that finding, reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>` is
-    capitals and an optional number) or a finding whose Tier is missing or not one of the
-    four tiers.
+    status. Fails when a report is nested below `r<k>/`, holds a finding block it cannot
+    parse (reviewlib.unparsed_blocks), cites a provisional ID in its Findings section that
+    no report of the round parsed (a merged agent's other lanes included; cite earlier
+    rounds by final ID), reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>`
+    is capitals and an optional number) or a finding whose Tier is missing or not one of
+    the four tiers.
     """
     rp = rl.round_dir(a.evidence, a.round)
     require_flat(rp)
@@ -206,10 +208,12 @@ def cmd_ids(a):
     tokens = []
     for path in rl.lane_files(rp):
         text = path.read_text(encoding="utf-8")
-        if rl.unparsed_ids(text):
+        if rl.unparsed_blocks(text):
             unparsed.append(path.name)
-        lane = re.sub(r"-f\d+$", "", path.stem)
-        tokens += [(path.name, t) for t in rl.lane_tokens(text, lane)]
+        findings = rl.split_sections(text).get("Findings", "")
+        tokens += [
+            (path.name, t) for t in set(partition.PROVISIONAL_ID.findall(findings))
+        ]
         for f in rl.parse_findings(text):
             prov = f["ID"]
             if f.get("Tier") not in rl.TIERS:
@@ -228,16 +232,17 @@ def cmd_ids(a):
             reported[prov] = (path.stem, f, re.sub(r"\d+$", "", m.group(1)))
     if unparsed:
         raise rl.Fail(
-            f"unparsed ID: lines in {', '.join(unparsed)}: write each finding as plain "
-            "labelled lines starting at column 0 (no bullet, bold or partial fence)"
+            f"unparsed finding blocks in {', '.join(unparsed)}: write each finding as "
+            "plain labelled lines starting at column 0, ID: first (no bullet, bold or "
+            "partial fence)"
         )
     lost = sorted(
         f"{name}: {t}" for name, t in tokens if t not in reported and t not in mapping
     )
     if lost:
         raise rl.Fail(
-            f"own-lane IDs not parsed as findings: {', '.join(lost)}: write each finding "
-            "as plain labelled lines starting at column 0"
+            f"provisional IDs no report parsed: {', '.join(lost)}: write each finding "
+            "as plain labelled lines starting at column 0; cite earlier rounds by final ID"
         )
     for prov, (stem, f, prefix) in sorted(reported.items(), key=lambda kv: kv[1][0]):
         if prov not in mapping:

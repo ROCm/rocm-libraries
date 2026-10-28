@@ -603,7 +603,7 @@ def test_fenced_finding_blocks_are_mapped_and_nested_code_survives(rl):
     assert [b["ID"] for b in blocks] == ["CORR1-p1", "CORR1-p2", "CORR1-p3"]
     assert blocks[0]["Actual"] == "Breaks:\n```cpp\nint x;\n```\nafter"
     assert "```" not in blocks[1]["Fix"] and blocks[1]["Fix"] == "clamp it"
-    assert rl.unparsed_ids(text) == 0
+    assert rl.unparsed_blocks(text) == 0
 
 
 def test_ids_fails_on_id_lines_it_cannot_parse(ledger, ev, capsys):
@@ -662,25 +662,40 @@ def test_ids_fails_on_a_marked_up_id_line(ledger, ev, markup, capsys):
     block = finding("CORR1-p1").replace("ID:", markup, 1)
     with_reports(ledger, ev, CORR1=report("CORR1", [block, finding("CORR1-p2")]))
     assert run(ledger, "ids", ev) == 1
-    assert "unparsed ID: lines in CORR1.md" in capsys.readouterr().err
+    assert "unparsed finding blocks in CORR1.md" in capsys.readouterr().err
 
 
-def test_ids_fails_on_an_own_lane_id_no_block_parsed(ledger, ev, capsys):
+def test_ids_fails_on_a_block_without_an_id_line(ledger, ev, capsys):
     seeded(ledger, ev)
-    lost = finding("CORR1-p2").replace("ID:        CORR1-p2", "Finding CORR1-p2:", 1)
-    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1"), lost]))
+    no_id = finding("CORR1-p2").replace("ID:        CORR1-p2\n", "", 1)
+    with_reports(ledger, ev, CORR1=report("CORR1", [finding("CORR1-p1"), no_id]))
     assert run(ledger, "ids", ev) == 1
-    assert "CORR1.md: CORR1-p2" in capsys.readouterr().err
+    assert "unparsed finding blocks in CORR1.md" in capsys.readouterr().err
 
 
-def test_ids_accepts_other_lane_and_base_report_ids_in_proof(ledger, ev):
+def test_quoted_or_prose_tier_lines_in_a_field_are_not_blocks(rl):
+    quote = "\n```\nVerdict: CONFIRMED\nTier:      IMPORTANT\n```\n- Tier: BLOCKING in CORR1"
+    text = report("CORR1", [finding("CORR1-p1", extra=quote)])
+    assert rl.unparsed_blocks(text) == 0
+
+
+def test_ids_fails_on_a_merged_lane_finding_written_as_a_table_row(ledger, ev, capsys):
+    seeded(ledger, ev)
+    row = "| DOCS-p2 | IMPORTANT | a.cpp:3 | README contradicts the header |"
+    with_reports(ledger, ev, CORR1=report("CORR1", [finding("DOCS-p1"), row]))
+    assert run(ledger, "ids", ev) == 1
+    assert "CORR1.md: DOCS-p2" in capsys.readouterr().err
+
+
+def test_ids_accepts_cited_ids_another_report_of_the_round_parsed(ledger, ev):
     seeded(ledger, ev)
     with_reports(
         ledger,
         ev,
         CORR1=report(
-            "CORR1", [finding("CORR1-p1", extra="same root cause as TESTQ-p3")]
+            "CORR1", [finding("CORR1-p1", extra="same root cause as TESTQ-p1")]
         ),
+        TESTQ=report("TESTQ", [finding("TESTQ-p1")]),
         AUTH=report("AUTH", [finding("AUTH-p1")]),
         AUTH_f1=report("AUTH", [finding("AUTH-p2", extra="narrows AUTH-p1")]),
     )
@@ -712,7 +727,7 @@ def test_a_shell_comment_line_stays_inside_its_field(rl):
 def test_id_line_check_is_linear_on_long_marker_runs(rl):
     text = report("CORR1", [finding("CORR1-p1", extra="\n```\n" + "#" * 500 + "\n```")])
     start = time.perf_counter()
-    assert rl.unparsed_ids(text) == 0
+    assert rl.unparsed_blocks(text) == 0
     assert time.perf_counter() - start < 0.5
 
 

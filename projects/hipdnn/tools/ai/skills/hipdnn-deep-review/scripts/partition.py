@@ -67,6 +67,12 @@ CONCERN_LANES = {
     "RUN",
     "DRIFT",
 }
+# Prefixes of every agent that writes a report. PROVISIONAL_ID matches `<prefix><k>-p<n>`
+# and the invalid follow-up form `<prefix><k>-f<j>-p<n>`.
+REPORT_LANES = ["CORR", "SCOUT", "SYNTH", "VER", "ORCH", *sorted(CONCERN_LANES)]
+PROVISIONAL_ID = re.compile(
+    rf"(?<![A-Za-z0-9-])(?:{'|'.join(REPORT_LANES)})\d*(?:-f\d+)?-p\d+\b"
+)
 
 
 def fail(msg: str):

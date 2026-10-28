@@ -116,11 +116,24 @@ def is_fence(line):
 # A `##` or deeper heading or a thematic break outside fenced code ends a field's
 # continuation; a single `#` line (a shell comment) does not.
 FIELD_END = re.compile(r"^(?:#{2,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
-# An `ID:` line in any markup a lane may wrap it in: bullets, numbering, quotes, table
-# pipes, headings, bold, italics or inline code. Flat prefix class: linear time.
-ID_LINE = re.compile(
-    r"^[\s\-*+>|#]*(?:\d+[.)][\s\-*+>|#]*)*(?:\*\*|__|[*_`])?ID(?:\*\*|__|[*_`])?\s*:"
-)
+
+
+def loose_label(label, value=""):
+    """A `<label>:` line in any markup a lane may wrap it in: bullets, numbering, quotes,
+    table pipes, headings, bold, italics, inline code or a space before the colon,
+    followed by `value` (a regex; empty matches anything). Flat prefix class: linear time.
+    """
+    return re.compile(
+        r"^[\s\-*+>|#]*(?:\d+[.)][\s\-*+>|#]*)*(?:\*\*|__|[*_`])?"
+        + re.escape(label)
+        + r"(?:\*\*|__|[*_`])?\s*:"
+        + value
+    )
+
+
+ID_LINE = loose_label("ID")
+# A `Tier:` line whose whole value is one tier; prose and quotes that mention a tier differ.
+TIER_LINE = loose_label("Tier", r"[\s*_`]*(?:" + "|".join(TIERS) + r")[\s*_`|]*$")
 
 
 def parse_fields(text, labels, first="ID"):
@@ -166,20 +179,22 @@ def parse_fields(text, labels, first="ID"):
     return blocks
 
 
-def unparsed_ids(text):
-    """Number of `ID:` lines of a lane report's Findings section that parse_findings does
-    not read as a finding: marked up (bullet, numbering, quote, table, heading, bold,
-    italics, inline code), spaced (`ID :`) or inside a code fence that does not wrap whole
-    blocks."""
-    findings = split_sections(text).get("Findings", "")
-    seen = sum(1 for line in findings.splitlines() if ID_LINE.match(line))
-    return seen - len(parse_findings(text))
-
-
-def lane_tokens(text, lane):
-    """The `<lane>-p<n>` tokens of a lane report's Findings section, in any markup."""
-    findings = split_sections(text).get("Findings", "")
-    return set(re.findall(rf"(?<![A-Za-z0-9-]){re.escape(lane)}-p\d+\b", findings))
+def unparsed_blocks(text):
+    """Number of finding blocks of a lane report's Findings section that parse_findings
+    does not read: the larger excess over the parsed findings of `ID:` lines (any markup,
+    fenced included) or of unfenced `Tier: <tier>` lines (any markup). Catches marked-up
+    or spaced labels, a block inside a code fence that does not wrap whole blocks, and a
+    block with no `ID:` line (its `Tier:` line is dropped or overwrites the previous
+    block's)."""
+    lines = split_sections(text).get("Findings", "").splitlines()
+    ids = tiers = 0
+    fenced = False
+    for line in lines:
+        ids += bool(ID_LINE.match(line))
+        tiers += not fenced and bool(TIER_LINE.match(line))
+        if is_fence(line):
+            fenced = not fenced
+    return max(ids, tiers) - len(parse_findings(text))
 
 
 def split_sections(text):
