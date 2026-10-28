@@ -99,14 +99,15 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
             auto    y_ptr       = adjust_ptr_batch(y, b_base, stridey);
             int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
 
+            // additional workspace if n_passes as results are only partial sum
+            V* partial_results = (V*)(workspace);
+
             T* output = &results[b_base];
             if(handle->pointer_mode == rocblas_pointer_mode_host)
             {
-                output = (T*)(workspace);
+                // Use the scratch region after the partial results.
+                output = reinterpret_cast<T*>(partial_results + n_passes * batch_count);
             }
-
-            // additional workspace if n_passes as results are only partial sum
-            V* partial_results = (V*)(workspace);
 
             for(int64_t n_base = 0, pass = 0; n_base < n_64; n_base += c_i64_grid_X_chunk, pass++)
             {
@@ -140,12 +141,13 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
 
             // sum partial_results to results always needed if only to down convert
             ROCBLAS_LAUNCH_KERNEL(
-                (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                (rocblas_reduction_kernel_part2_pass_major<NB, WIN, rocblas_finalize_identity>),
                 dim3(batch_count),
                 dim3(NB),
                 0,
                 handle->get_stream(),
                 n_passes,
+                batch_count,
                 partial_results,
                 output);
 
@@ -178,15 +180,15 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                 int32_t batch_count
                     = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
 
-                T* output = &results[b_base];
+                // Keep host-mode output separate from the pass-major partial results.
+                V* partial_results = workspace;
+                T* output          = &results[b_base];
                 if(handle->pointer_mode == rocblas_pointer_mode_host)
                 {
-                    output = (T*)(workspace);
+                    output = reinterpret_cast<T*>(partial_results + n_passes * batch_count);
                 }
 
                 // additional workspace if n_passes as results are only partial sum
-                V* partial_results = (V*)(workspace);
-
                 {
                     // defeat synch copy of partial results by pushing pointer_mode_device
 
@@ -234,12 +236,13 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
                 // reduce n partitions within batch chunk
                 // sum partial_results to results always needed as may down convert
                 ROCBLAS_LAUNCH_KERNEL(
-                    (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                    (rocblas_reduction_kernel_part2_pass_major<NB, WIN, rocblas_finalize_identity>),
                     dim3(batch_count),
                     dim3(NB),
                     0,
                     handle->get_stream(),
                     n_passes,
+                    batch_count,
                     partial_results,
                     output);
 

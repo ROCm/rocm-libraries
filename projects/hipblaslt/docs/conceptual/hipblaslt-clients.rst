@@ -130,7 +130,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --workspace <value>                Set fixed workspace memory size (bytes) instead of using hipblaslt managed memory   (Default value is: 134217728)
    --log_function_name                Function name precedes other items.
    --function_filter <value>          Simple strstr filter on function name only without wildcards
-   --api_method <value>               Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. Options: c, mix, cpp.  (Default value is: c)
+   --api_method <value>               Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. Options: c, mix, cpp, grouped_gemm_c.  (Default value is: c)
    --print_kernel_info                Print solution, kernel name and solution index.
    --rotating <value>                 Use rotating memory blocks for each iteration, size in MB.                          (Default value is: 0)
    --use_gpu_timer                    Use hipEventElapsedTime to profile elapsed time.

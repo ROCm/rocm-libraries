@@ -341,16 +341,12 @@ def _activeCaps() -> Tuple[Dict, Dict, Dict, Dict]:
     """Internal: return ``(asmCaps, archCaps, regCaps, asmBugs)`` for the
     currently-selected ISA. Used by the four public ``get*Caps`` helpers.
 
-    Raises ``RuntimeError`` if no ISA has been selected yet so a missing
-    ``init()`` / ``setKernel()`` produces a loud error rather than a
-    confusing ``KeyError`` deep inside instruction emission.
+    When no ISA has been selected yet, returns empty cap maps to mirror native
+    rocisa (which indexes a default-constructed, empty ``IsaInfo``).
     """
     if _current_isa is None:
-        raise RuntimeError(
-            "rocisa.base: init(arch, ...) or setKernel(arch, ...) must "
-            "be called before getAsmCaps()/getArchCaps()/getRegCaps()/"
-            "getAsmBugs()."
-        )
+        # Mirror native rocisa: an unpinned thread reads empty caps, not an error.
+        return ({}, {}, {}, {})
     info = _data.get(_current_isa)
     if info is None:
         asm, arch_c, reg, bugs = _caps.getCaps(_current_isa)
