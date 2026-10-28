@@ -53,3 +53,4 @@ Update the status, the notes, and the verification date in the same change that 
 | [0018](./0018_UniversalMatchDescriptor.md) | Universal match descriptor (UMD criteria) | In progress |
 | [0019](./0019_UniversalHeuristicDescriptor.md) | Universal heuristic descriptor (UHD) | In progress |
 | [0020](./0020_UniversalEngineDescriptor.md) | Universal engine descriptor (UED) | In progress |
+| [0023](./0023_RuntimeKernelCompilation.md) | Runtime kernel compilation (JIT) requirements | Planned |
