@@ -88,7 +88,7 @@ cd hipBLASLt; cd build/release
 --sm_count_target <value>  Target compute-unit (CU) count for the matmul kernel selection and persistent-grid sizing. 0 (default) means use all CUs the device exposes. Negative values are rejected. (Default value is: 0)
 --hybrid_assignment_policy <value>  Select the assignment policy for a Hybrid kernel: Default, DynamicWorkQueue, or Auto (case-sensitive). (Default value is: unset)
 --streamk_tile_scheduling <value>  Legacy alias for hybrid_assignment_policy: off|0, on|1, or auto|2 (case-insensitive). (Default value is: unset)
---uniform_summation_order <value>  off|0 or on|1. Omit to leave unset.
+--uniform_summation_order <value>  off|0 or on|1. Omit to leave unset, so the library default (on) applies.
 --help |-h                 produces this help message
 --version <value>          Prints the version number
 ```
