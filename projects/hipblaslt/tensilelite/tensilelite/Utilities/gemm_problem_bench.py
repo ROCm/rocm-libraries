@@ -36,6 +36,20 @@ _COMPUTE_NAMES = {
     "ComplexFloat": "c_f32_r",
     "ComplexDouble": "c_f64_r",
 }
+_EXPLICIT_COMPUTE_INPUT_TYPES = frozenset(
+    {
+        "Float",
+        "Half",
+        "BFloat16",
+        "Float8",
+        "BFloat8",
+        "Float8_fnuz",
+        "BFloat8_fnuz",
+        "Float4",
+        "Float6",
+        "BFloat6",
+    }
+)
 # Values belong to the client's hipblaslt_scaling_format, not the public API enum.
 _MX_SCALE_MODES = {
     (32, "E8"): 3,
@@ -154,8 +168,16 @@ def bench_yaml(problems: Iterable[GemmProblem]) -> str:
         # Its compute enum supplies the real component type for double, complex
         # and integer computation when these fields are omitted.
         if problem.compute_type == "Float":
-            row["compute_input_typeA"] = _datatype_name(problem, problem.compute_input_a)
-            row["compute_input_typeB"] = _datatype_name(problem, problem.compute_input_b)
+            inputs = (problem.compute_input_a, problem.compute_input_b)
+            # Bench rejects explicit Int8 compute inputs. With both overrides
+            # unset, A/B storage remains Int8 and Float computation is retained.
+            if inputs != (problem.a_type, problem.b_type) or inputs != ("Int8", "Int8"):
+                for operand, dtype in zip("AB", inputs):
+                    if dtype not in _EXPLICIT_COMPUTE_INPUT_TYPES:
+                        raise UnsupportedBenchProblem(
+                            problem.solution_index, f"compute input {operand} {dtype}"
+                        )
+                    row[f"compute_input_type{operand}"] = _datatype_name(problem, dtype)
         if problem.math_op == "XFloat32":
             row["compute_type"] = "c_xf32_r"
         row.update(zip(("lda", "ldb", "ldc", "ldd"), problem.leading_dimensions))

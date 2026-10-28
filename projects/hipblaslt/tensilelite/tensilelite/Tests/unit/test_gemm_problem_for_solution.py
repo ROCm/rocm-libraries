@@ -501,6 +501,42 @@ def test_storage_and_compute_types(tmp_path, dtype, bench_type):
     assert row["d_type"] == ("i32_r" if dtype == "Int8" else "f32_r")
 
 
+@pytest.mark.parametrize("output_type", ["Int8", "Int32"])
+def test_float_compute_int8_inputs_use_native_derived_input_type(tmp_path, output_type):
+    record = solution()
+    record["problemType"].update(
+        aType="Int8",
+        bType="Int8",
+        cType=output_type,
+        dType=output_type,
+        computeType="Float",
+        computeInputTypeA="Int8",
+        computeInputTypeB="Int8",
+    )
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    assert (problem.compute_input_a, problem.compute_input_b) == ("Int8", "Int8")
+    (row,) = yaml.safe_load(bench_yaml([problem]))
+    assert (row["a_type"], row["b_type"], row["d_type"]) == (
+        "i8_r",
+        "i8_r",
+        "i8_r" if output_type == "Int8" else "i32_r",
+    )
+    assert row["compute_type"] == "c_f32_r"
+    assert row["scale_type"] == "f32_r"
+    assert "compute_input_typeA" not in row
+    assert "compute_input_typeB" not in row
+
+
+def test_unsupported_explicit_compute_input_has_no_native_fallback(tmp_path):
+    record = solution()
+    record["problemType"].update(aType="Half", computeInputTypeA="Int8")
+    write_shard(tmp_path, [record])
+    problem = load_library_metadata(tmp_path, target="gfx942").choose_single_problem(17)
+    with pytest.raises(UnsupportedBenchProblem, match="compute input A Int8"):
+        bench_yaml([problem])
+
+
 @pytest.mark.parametrize("blocks", [1, 3, 8, 17])
 def test_reduction_work_is_configurable(tmp_path, blocks):
     write_shard(tmp_path, [solution(split=4)])
