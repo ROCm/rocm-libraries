@@ -552,6 +552,19 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # EXPERIMENT: clang-tidy as a separate pass over the finished build's compile database,
+      # instead of inline with every compile. continue-on-error so findings do not hide timings.
+      - name: Clang-tidy (post-build)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          start=$(date +%s)
+          "$VENV_PYTHON" projects/hipdnn/tools/ai/skills/hipdnn-tidy/scripts/tidy_changed.py \
+            --build-dir build --all -j "$(nproc)"
+          rc=$?
+          echo "tidy exit code: $rc, elapsed: $(( $(date +%s) - start ))s"
+          exit $rc
+
       # The touch makes the build run flatc again, also when the checkout gives the committed
       # header a newer timestamp than the schema.
       - name: Check the committed ingestor plan header matches its schema
