@@ -581,10 +581,10 @@ namespace
         rocblaslt_handle                           handle,
         hipStream_t                                stream,
         const TensileLite::ContractionProblemGemm& prob,
-        const void*                                D,
+        const TensileLite::ContractionInputs&      inputs,
         uint32_t                                   call_id)
     {
-        if(!handle || !handle->check_numerics || !D || call_id == 0)
+        if(!handle || !handle->check_numerics || (!inputs.d && !inputs.batchD) || call_id == 0)
             return rocblaslt_status_success;
 
         const int64_t m        = prob.c().sizes()[0];
@@ -595,6 +595,17 @@ namespace
         // Tensile builds column-major strides; row-major D has strides()[0] != 1.
         const bool        row_major = (prob.d().strides()[0] != 1);
         const hipDataType type_d    = tensile2HipType(prob.d().dataType());
+        const bool        ptr_array
+            = (prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+        const void* D
+            = ptr_array && inputs.batchD ? static_cast<const void*>(inputs.batchD) : inputs.d;
+        // Tensile stores offsets in bytes; the scanner adds an element offset.
+        const int64_t offset_d
+            = ptr_array && inputs.batchOffsetD != 0
+                  ? inputs.batchOffsetD
+                        / static_cast<int64_t>(
+                            TensileLite::DataTypeInfo::Get(prob.d().dataType()).elementSize)
+                  : 0;
 
         return hipblaslt_check_numerics_scan_D(handle,
                                                stream,
@@ -604,7 +615,9 @@ namespace
                                                D,
                                                ldd,
                                                stride_d,
-                                               row_major);
+                                               row_major,
+                                               ptr_array,
+                                               offset_d);
     }
 
     // Post-launch hook shared by single- and grouped-GEMM. Acquires one
@@ -619,9 +632,10 @@ namespace
             return rocblaslt_status_success;
         rocblaslt_status agg = rocblaslt_status_success;
         enumerate(call_id,
-                  [&](const TensileLite::ContractionProblemGemm& prob, const void* d) {
+                  [&](const TensileLite::ContractionProblemGemm& prob,
+                      const TensileLite::ContractionInputs&      inputs) {
                       const auto st = maybe_check_numerics_problem(
-                          handle, stream, prob, d, call_id);
+                          handle, stream, prob, inputs, call_id);
                       if(st != rocblaslt_status_success && agg == rocblaslt_status_success)
                           agg = st;
                   });
@@ -2030,6 +2044,16 @@ namespace
         return needsPadFreeDim;
     }
 
+    // The adaptive launch's occupancy probe target; none outside one.
+    void setOccupancyProbe(TensileLite::ContractionProblemParameters& params,
+                           const RocblasltContractionProblem&         prob)
+    {
+        if(const auto* launch = prob.adaptive_launch)
+            params.setOccupancyProbe(launch->probeAddr, launch->epoch, launch->minGrid);
+        else
+            params.setOccupancyProbe(nullptr, 0, 0);
+    }
+
     /****************************************************************
  * Construct a Tensile Problem from a RocblasltContractionProblem *
  ****************************************************************/
@@ -2355,6 +2379,7 @@ namespace
         // the effective CU budget. Non-StreamK=5 solutions ignore it.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        setOccupancyProbe(tensileProblem.setParams(), prob);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -2647,6 +2672,7 @@ namespace
         // companion block in ConstructTensileProblem for details.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        setOccupancyProbe(tensileProblem.setParams(), prob);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -3644,7 +3670,8 @@ TensileLite::ProblemOverride
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;
     po.streamkTileScheduling = problem.streamk_tile_scheduling_ext;
-    po.smCountTarget         = problem.sm_count_target;
+    // An adaptive hint is transient; the requested target is 0 then.
+    po.smCountTarget         = problem.adaptive_sm_count ? 0 : problem.sm_count_target;
     po.uniformSummationOrder = problem.uniform_summation_order != 0;
 
     const auto& device = getDeviceIdentity();
@@ -3923,9 +3950,17 @@ namespace
          * 2048x1024x2048 tune in 53 to 146 seconds on MI300X, inside the
          * default.
          *
-         * A search the ceiling cuts short records nothing, and the shape is not
-         * searched again in this process. Zero removes the ceiling, which is how
-         * a shape too large to finish inside it gets tuned.
+         * A search the ceiling cuts short keeps its winner, marked incomplete.
+         * Candidates are not enumerated in order of expected performance, so the
+         * best of an arbitrary prefix is usually not the shape's best kernel,
+         * but default selection's own pick is measured first and so is always in
+         * that prefix, which makes the recorded winner no slower than not tuning
+         * at all. The row carries the ceiling it ran under, and only a run whose
+         * ceiling beats it benchmarks the shape again, so a workload rerun at
+         * the same setting pays nothing and appends nothing.
+         *
+         * Zero removes the ceiling, which is how a shape too large to finish
+         * inside it gets a final answer.
          */
         static double perShapeBudgetUs()
         {
@@ -3958,6 +3993,23 @@ namespace
         static size_t rotatingBytes()
         {
             return size_t(rotatingMegabytes()) * 1024 * 1024;
+        }
+
+        /**
+         * The search this run would perform for a caller with this workspace,
+         * as recorded on the rows it writes and compared against old rows.
+         */
+        static TensileLite::TuningSearch search(size_t workspaceBytes)
+        {
+            TensileLite::TuningSearch s;
+            s.allKernels     = allKernels();
+            s.maxCandidates  = s.allKernels ? 0 : candidateCap();
+            s.workspaceBytes = workspaceBytes;
+            s.coldIters      = coldIterations();
+            s.hotIters       = hotIterations();
+            s.flushICache    = flushICache();
+            s.rotatingMb     = rotatingMegabytes();
+            return s;
         }
     };
 
@@ -4674,8 +4726,9 @@ namespace
                != rocblaslt_status_success)
                 return std::nullopt;
 
-            // In solution-index order, as getAllSolutions returns them, so every
-            // process measures them in the same order.
+            // In solution-index order, as getAllSolutions returns them, so a
+            // search the budget stops covers the same prefix in every process,
+            // which is what lets a rerun under the same ceiling be skipped.
             indexes.reserve(all.size());
             for(const auto& result : all)
                 indexes.push_back(*(int*)result.algo.data);
@@ -4714,7 +4767,9 @@ namespace
      * the normal path afterwards, on the real ones.
      *
      * baselineIndex is the kernel the call launches if tuning finds nothing
-     * faster. It is measured first, so the winner can be reported against it.
+     * faster. It is measured first, and a search the budget stops is recorded
+     * only when it was measured, so a partial winner can never be slower than
+     * what the caller would have run untuned.
      */
     TensileLite::TuningAttempt benchmarkAndSelectWinner(
         rocblaslt_handle                    handle,
@@ -5233,16 +5288,27 @@ namespace
             log_info(__func__, msg.str());
         }
 
-        // A search the budget stopped records nothing: candidates are not in
-        // order of expected performance, so the best of those it reached is
-        // usually not the shape's best kernel.
-        if(found.stopped)
+        // Nothing measured leaves nothing to record, whichever way the search
+        // ended. A budget that expires before the first candidate is timed is
+        // the common way to reach this with the search stopped.
+        //
+        // A stopped search whose baseline was not measured is treated the same
+        // way. Its best candidate was compared against nothing the caller would
+        // otherwise run, so recording it could make the shape slower.
+        bool baselineMeasured = false;
+        for(size_t c = 0; c < candidates.size(); c++)
+            if(candidates[c]->index == baselineIndex && measuredUs[c] >= 0.0)
+                baselineMeasured = true;
+
+        if(found.best >= candidates.size() || (found.stopped && !baselineMeasured))
         {
-            TensileLite::TuningCounters::instance().skipped++;
-            return TuningAttempt::SkippedBudget;
-        }
-        if(found.best >= candidates.size())
+            if(found.stopped)
+            {
+                TensileLite::TuningCounters::instance().skipped++;
+                return TuningAttempt::SkippedBudget;
+            }
             return TuningAttempt::FallbackNoWinner;
+        }
 
         // Clamped because a kernel faster than the flush's own jitter can read at
         // or below zero, and a row records a positive time.
@@ -5268,6 +5334,22 @@ namespace
         // says the shape was measured, so tune mode does not benchmark it again
         // on every process start.
         winnerIndexOut = winner->index;
+
+        // Recorded on every row, so a later run can tell whether it could get
+        // any further than this one: the ceiling rounded down to milliseconds,
+        // zero meaning unlimited, and the search as configured for this caller.
+        winnerOut.budgetMs = static_cast<int64_t>(budgetUs / 1000.0);
+        winnerOut.search   = TuningPolicy::search(prob.workspaceSize);
+
+        // A search the budget stopped keeps its winner, marked incomplete: the
+        // baseline was measured, so the best of the prefix is no slower than
+        // what this call runs untuned, and the flag makes tune mode revisit the
+        // shape in a later run whose budget can finish the search.
+        if(found.stopped)
+        {
+            winnerOut.complete = false;
+            return TuningAttempt::TunedPartial;
+        }
         return TuningAttempt::Tuned;
     }
 } // namespace
@@ -5510,6 +5592,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // and only for a caller that passed no algo.
         int  launchIndex = -1;
         int  tunedIndex  = -1;
+        int  servedIndex = -1;
         bool benchmarked = false;
 
         // Set when an attempt begins, so the handler below can tell an exception
@@ -5533,15 +5616,25 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 return;
 
             std::ostringstream msg;
-            if(result == TensileLite::TuningAttempt::Tuned)
+            if(result == TensileLite::TuningAttempt::Tuned
+               || result == TensileLite::TuningAttempt::TunedPartial)
             {
-                msg << "tuning-done winner=" << winnerIndex << " elapsed=" << std::fixed
-                    << std::setprecision(1) << elapsedSeconds
+                const bool partial = result == TensileLite::TuningAttempt::TunedPartial;
+
+                msg << (partial ? "tuning-partial winner=" : "tuning-done winner=") << winnerIndex
+                    << " elapsed=" << std::fixed << std::setprecision(1) << elapsedSeconds
                     << "s persisted=" << (persisted ? "yes" : "no");
                 if(!persisted)
                     msg << " (could not write "
                         << TensileLite::TuningModeSingleton::getInstance().cachePath()
                         << "; the winner is used now but lost at exit)";
+
+                // The entry is usable but not final: it beats default selection,
+                // it is replayed, and a run with a higher ceiling replaces it.
+                if(partial)
+                    msg << "; the time budget stopped the search, so this is the best of the "
+                           "candidates measured, not of all of them. Raise or unset "
+                           "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE to finish it";
             }
             else
             {
@@ -5564,7 +5657,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         try
         {
-            if(tunes && !replayed)
+            if(tunes)
             {
                 if(!tuningKey)
                 {
@@ -5576,11 +5669,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 const TensileLite::ProblemOverride& key   = *tuningKey;
                 TensileLite::OverrideMap&           cache = TensileLite::OverrideMap::getMap();
 
+                // A shape this process has settled is neither searched nor
+                // asked about again.
+                const bool settled = TensileLite::tuningAlreadyAttempted(key);
+
                 // "No usable entry", not "no entry": rows that failed name
                 // validation after a rebuild stay in the map, and must not keep
                 // their shape from being tuned again. Replay has already looked
-                // for a call that passed no algo.
-                const int cachedIndex = callerSuppliedAlgo
+                // for a call that passed no algo, and launches what it found; a
+                // call with its own algo needs the answer only to decide whether
+                // to tune.
+                const int cachedIndex = replayed ? *solutionIndex
+                                        : callerSuppliedAlgo && !settled
                                             ? tuning_cache_find_valid_entry(
                                                   handle, key, prob, gemmData, prob.workspaceSize)
                                             : -1;
@@ -5588,9 +5688,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // Counted once, by whether this call launches a cached entry,
                 // and only when the caller left the choice to the library. A
                 // call that waits for the tuning lock is counted by what it
-                // finds once it has it, before any search of its own.
+                // finds once it has it, before any search of its own; one that
+                // replay served was counted there.
                 auto countLookup = [&](bool servedFromCache) {
-                    if(callerSuppliedAlgo)
+                    if(callerSuppliedAlgo || replayed)
                         return;
                     TensileLite::recordTuningLookup(key, servedFromCache);
                     auto& counters = TensileLite::TuningCounters::instance();
@@ -5600,7 +5701,40 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                         counters.misses++;
                 };
 
-                if(cachedIndex < 0 && !TensileLite::tuningAlreadyAttempted(key))
+                // A usable entry is not necessarily final. needsRetune says yes
+                // for an entry the budget cut short when this run can get
+                // further, and for a finished entry whose recorded search covered
+                // less than this run would, such as a ranked prefix when this run
+                // searches every kernel. The ceiling is rounded to milliseconds
+                // the way the benchmarker records it, so the two compare on equal
+                // terms.
+                auto needsRetune = [&] {
+                    const int64_t currentBudgetMs
+                        = static_cast<int64_t>(TuningPolicy::perShapeBudgetUs() / 1000.0);
+                    return cache.needsRetune(
+                        key,
+                        TuningPolicy::search(prob.workspaceSize),
+                        currentBudgetMs,
+                        [&](const auto& entry) {
+                            return tuning_cache_entry_is_usable(
+                                handle, key, entry, prob, gemmData, prob.workspaceSize);
+                        });
+                };
+
+                bool searches = false;
+                if(!settled)
+                {
+                    searches = cachedIndex < 0 || needsRetune();
+
+                    // Settled at the shape's first matmul when its search is
+                    // final for this run: asking reads the settings and checks
+                    // every row, and a shape is searched at most once per
+                    // process in any case.
+                    if(!searches)
+                        TensileLite::recordTuningAttempt(key);
+                }
+
+                if(searches)
                 {
                     // Waits rather than skipping: every shape tune mode meets is
                     // tuned whatever the thread timing, and the shared scratch
@@ -5616,14 +5750,16 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                         launchIndex = lockedIndex;
                     countLookup(lockedIndex >= 0);
 
-                    if(lockedIndex < 0 && !TensileLite::tuningAlreadyAttempted(key))
+                    if(!TensileLite::tuningAlreadyAttempted(key)
+                       && (lockedIndex < 0 || needsRetune()))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;
 
                         // What this call launches if tuning finds nothing
-                        // faster: the caller's algo or default selection's pick.
-                        const int untunedIndex = *solutionIndex;
+                        // faster: the caller's algo, else the cached entry, else
+                        // default selection's pick.
+                        const int untunedIndex = launchIndex >= 0 ? launchIndex : *solutionIndex;
 
                         // Started before the key is stored, so the handler's
                         // test for an attempt under way never sees the clock at
@@ -5650,15 +5786,26 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
                         bool persisted = false;
 
-                        if(result == TensileLite::TuningAttempt::Tuned)
+                        if(result == TensileLite::TuningAttempt::Tuned
+                           || result == TensileLite::TuningAttempt::TunedPartial)
                         {
                             winner.schemaVersion = TensileLite::kCurrentTuningSchemaVersion;
                             winner.buildStamp    = TensileLite::currentBuildStamp();
 
-                            // Replace rather than add: any rows still here failed
-                            // validation, and addIfAbsent would refuse the winner
-                            // if it reused one of their indexes.
-                            cache.replaceAll(key, winner);
+                            // Added beside the rows already here rather than in
+                            // their place, so this process holds what a later one
+                            // reads back from the file, and find's order, finished
+                            // searches first and the newest first within each,
+                            // picks the same winner for both. A partial winner
+                            // therefore leaves a usable completed row in use.
+                            // Rows that failed validation stay too; replay and
+                            // needsRetune both pass over them.
+                            cache.addIfAbsent(key, winner);
+
+                            // What this call launches is then what replay picks.
+                            if(!callerSuppliedAlgo)
+                                servedIndex = tuning_cache_find_valid_entry(
+                                    handle, key, prob, gemmData, prob.workspaceSize);
 
                             persisted
                                 = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner);
@@ -5689,17 +5836,19 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                             }
                         }
 
-                        // Latched for the outcomes that spent the search and
-                        // left the shape wanting another: repeating it would
-                        // stall the next matmul as long again for the same
-                        // result, and at the default log level silently, since
-                        // a shape's start and failure are each reported once.
-                        // A completed tune is not latched: its entry closes the
-                        // gate for every call it supports, and a call it does
-                        // not, such as one with less workspace, tunes again. The
-                        // declines made before tuning-start cost microseconds
-                        // and are retried, so a transient condition can clear.
-                        if(result == TensileLite::TuningAttempt::SkippedBudget
+                        // Latched for every outcome that spent the search. A
+                        // shape is searched at most once per process, whatever
+                        // settings later matmuls bring, and repeating a search
+                        // that stopped or failed would stall the next matmul as
+                        // long again for the same result, at the default log
+                        // level silently, since a shape's start and failure are
+                        // each reported once. A partial winner would measure the
+                        // same prefix under the same ceiling. The declines made
+                        // before tuning-start cost microseconds and are retried,
+                        // so a transient condition can clear.
+                        if(result == TensileLite::TuningAttempt::Tuned
+                           || result == TensileLite::TuningAttempt::TunedPartial
+                           || result == TensileLite::TuningAttempt::SkippedBudget
                            || result == TensileLite::TuningAttempt::FallbackSetup
                            || result == TensileLite::TuningAttempt::FallbackEnumeration
                            || result == TensileLite::TuningAttempt::FallbackNoWinner)
@@ -5724,6 +5873,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // restored below.
             static_cast<void>(hipGetLastError());
             tunedIndex  = -1;
+            servedIndex = -1;
             launchIndex = -1;
 
             // Only for an attempt that was announced: an exception from the
@@ -5754,7 +5904,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         if(!callerSuppliedAlgo && tunedIndex >= 0)
-            launchIndex = tunedIndex;
+            launchIndex = servedIndex >= 0 ? servedIndex : tunedIndex;
         if(launchIndex >= 0)
             solutionIndex = &launchIndex;
 
@@ -5932,6 +6082,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             t_lastLaunchedIndex = solution->index;
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            if(prob.adaptive_launch)
+                prob.adaptive_launch->probed
+                    = status == rocblaslt_status_success
+                      && std::any_of(kernels.begin(), kernels.end(), [](auto const& k) {
+                             return k.occupancyProbe;
+                         });
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
@@ -6447,7 +6603,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             {
                 auto st = check_numerics_post_launch(
                     handle, stream, [&](uint32_t /*cid*/, auto visit) {
-                        visit(data->problem, data->inputs.d);
+                        visit(data->problem, data->inputs);
                     });
                 if(st != rocblaslt_status_success)
                     status = st;
@@ -6517,7 +6673,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                         const size_t N = std::min(data->problem.gemms.size(),
                                                   data->inputs.grouped.size());
                         for(size_t i = 0; i < N; ++i)
-                            visit(data->problem.gemms[i], data->inputs.grouped[i].d);
+                            visit(data->problem.gemms[i], data->inputs.grouped[i]);
                     });
                 if(st != rocblaslt_status_success && status == rocblaslt_status_success)
                     status = st;

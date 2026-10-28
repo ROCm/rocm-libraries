@@ -639,6 +639,46 @@ def is_valid_spec_for_problem(
     return True, "ok"
 
 
+def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
+    """LDS a forward spec allocates: ``(total, a_b_bytes, c_bytes, double)``.
+
+    ``a_b_bytes`` is one A/B staging copy, doubled in ``total`` when
+    ``double``; ``c_bytes`` is the cshuffle C tile. Shared by
+    :func:`is_valid_spec` and the AOT grid's per-arch LDS budget.
+    """
+    # LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
+    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
+    _lds_layout = spec.effective_lds_layout()
+    _a_shape = _lds_layout.storage_shape(spec.tile_m)
+    _b_shape = _lds_layout.storage_shape(spec.tile_n)
+    _ab_bytes = (
+        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
+    ) * _ab_dtype_bytes
+    # Only async_dma and unroll_k reach a K-loop that actually alternates between
+    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
+    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
+    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
+    # scheduling hints -- so charging it for a second A/B tile rejected specs for
+    # LDS the kernel never allocates.
+    _double = spec.async_dma or spec.unroll_k
+    _ab_lds = _ab_bytes * (2 if _double else 1)
+    # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
+    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
+    _c_lds = (
+        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
+    )
+    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
+    # bytes, so the LDS budget must be computed per case:
+    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
+    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
+    # wavelet also forces additive: A/B stay live across the whole scf_if_else
+    # body (both branches reference them), so the liveness packer cannot alias
+    # C onto the A/B region even when cshuffle_no_alias=False.
+    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
+    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
+    return _total_lds, _ab_bytes, _c_lds, _double
+
+
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
 
@@ -730,36 +770,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
 
-    # LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
-    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
-    _lds_layout = spec.effective_lds_layout()
-    _a_shape = _lds_layout.storage_shape(spec.tile_m)
-    _b_shape = _lds_layout.storage_shape(spec.tile_n)
-    _ab_bytes = (
-        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
-    ) * _ab_dtype_bytes
-    # Only async_dma and unroll_k reach a K-loop that actually alternates between
-    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
-    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
-    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
-    # scheduling hints -- so charging it for a second A/B tile rejected specs for
-    # LDS the kernel never allocates.
-    _double = spec.async_dma or spec.unroll_k
-    _ab_lds = _ab_bytes * (2 if _double else 1)
-    # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
-    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
-    _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
-    )
-    # cshuffle_no_alias decides whether the cshuffle C tile shares the A/B pool
-    # bytes, so the LDS budget must be computed per case:
-    #   OFF (default, aliased): C reuses the A/B bytes   -> pool = max(ab, c)
-    #   ON  (exclusive):        C gets its own LDS bytes -> pool = ab + c
-    # wavelet also forces additive: A/B stay live across the whole scf_if_else
-    # body (both branches reference them), so the liveness packer cannot alias
-    # C onto the A/B region even when cshuffle_no_alias=False.
-    _no_alias = spec.cshuffle_no_alias or spec.pipeline == "wavelet"
-    _total_lds = (_ab_lds + _c_lds) if _no_alias else max(_ab_lds, _c_lds)
+    _total_lds, _ab_bytes, _c_lds, _double = implicit_gemm_lds_bytes(spec)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
@@ -1389,6 +1400,10 @@ def _build_implicit_gemm_conv_impl(
         _c_K_ir = p_kpg  # runtime Value (was b.const_i32(p.kpg))
         _c_M_ir = p_M  # runtime Value (was b.const_i32(p.M))
         _always_valid = b.const_i32(1)
+        # Grouped: A's pixel row is all C channels and the group's slab starts
+        # at g*cpg. Ungrouped, cpg == C and the base is zero, so nothing is
+        # emitted and the flat A offset stays byte-identical.
+        _pw_a_chan_base = b.mul(group_idx, p_cpg) if grouped else None
     else:
         A_desc = make_a_descriptor_dynamic(
             b,
@@ -1435,7 +1450,12 @@ def _build_implicit_gemm_conv_impl(
         if p.is_pointwise:
             # Flat: offset = m * C + c,  valid = (m < M) & (c < C)
             m_val = b_.add(block_m_off_v, row)
-            off = b_.add(b_.mul(m_val, _c_C_ir), k_val)
+            if grouped:
+                # offset = m * C + g*cpg + c; c stays bounded by cpg below.
+                chan = b_.add(_pw_a_chan_base, k_val)
+                off = b_.add(b_.mul(m_val, p_C), chan)
+            else:
+                off = b_.add(b_.mul(m_val, _c_C_ir), k_val)
             m_ok = b_.cmp_lt(m_val, _c_M_ir)
             c_ok = b_.cmp_lt(k_val, _c_C_ir)
             return off, b_.land(m_ok, c_ok)
@@ -1490,14 +1510,15 @@ def _build_implicit_gemm_conv_impl(
         return off, b_.land(b_.cmp_lt(y, p_Y), diag)
 
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):
-        k_out = b_.add(block_n_off_v, row)
-        if grouped:
-            k_out = b_.add(k_out_group_base, k_out)
+        n_val = b_.add(block_n_off_v, row)
+        k_out = b_.add(k_out_group_base, n_val) if grouped else n_val
         kg = b_.add(k_off_capture[0], col)
         if p.is_pointwise:
-            # Flat: offset = k_out * C + c,  valid = (k_out < K) & (c < C)
+            # Flat: offset = k_out * cpg + c,  valid = (n < kpg) & (c < cpg).
+            # The bound is on the within-group filter n, not the absolute
+            # k_out: every group past the first would otherwise load zeros.
             off = b_.add(b_.mul(k_out, _c_C_ir), kg)
-            k_ok = b_.cmp_lt(k_out, _c_K_ir)
+            k_ok = b_.cmp_lt(n_val, _c_K_ir)
             c_ok = b_.cmp_lt(kg, _c_C_ir)
             return off, b_.land(k_ok, c_ok)
         if split_ab:
@@ -1952,7 +1973,12 @@ def _build_implicit_gemm_conv_impl(
         _always_valid_d = b.const_i32(1)
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-            # Pointwise D is a flat [M, kpg] matrix; no pad guards apply.
+            # Pointwise D is a flat [M, K] matrix; no pad guards apply.
+            # Ungrouped, K == kpg. Grouped, the group's columns start at g*kpg
+            # (the loaders' k_out_group_base) within a row of all K channels.
+            if grouped:
+                k_out = b_.add(k_out_group_base, n_val)
+                return b_.add(b_.mul(m_val, p_K), k_out), _always_valid_d
             return b_.add(b_.mul(m_val, p_kpg), n_val), _always_valid_d
 
     else:

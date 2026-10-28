@@ -26,12 +26,14 @@
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <optional>
+#include <utility>
 
 namespace asm_sdpa_engine
 {
@@ -1162,6 +1164,35 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deprecatedCausalMaskCases()),
                          deprecatedCausalMaskCaseName);
 
+// The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+// included); the band the kernels take is FlashAttention's window_size_left, L - 1.
+TEST(TestSdpaFwdResolveDiagonalBand, ConvertsCudnnLeftBoundToWindowLeft)
+{
+    // Literal expectations, so the test does not restate the conversion it checks.
+    for(const auto& [leftBound, expectedWindowLeft] : {std::pair<int64_t, int64_t>{-1, -1},
+                                                       std::pair<int64_t, int64_t>{1, 0},
+                                                       std::pair<int64_t, int64_t>{2, 1},
+                                                       std::pair<int64_t, int64_t>{64, 63}})
+    {
+        auto builder = createSdpaFwdGraphWithMask(
+            /*causalMask=*/false,
+            /*causalMaskBottomRight=*/false,
+            leftBound,
+            /*rightBound=*/0,
+            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        const auto& attrs
+            = graphWrapper.nodeWrappers()
+                  .front()
+                  ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
+
+        const auto band = plan_utils::resolveDiagonalBand(attrs);
+        EXPECT_EQ(band.leftBound, expectedWindowLeft) << "left_bound=" << leftBound;
+        EXPECT_EQ(band.rightBound, 0);
+    }
+}
+
 // =============================================================================
 // plan_utils::makeCoveringBoundsUnbound
 // =============================================================================
@@ -1472,6 +1503,30 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(
         builderOk.GetBufferPointer(), builderOk.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSinkToken)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // The same graph is accepted without the sink and declined with it: the vendored kernels
+    // cannot add the sink logit to the softmax denominator.
+    auto base = createSdpaFwdGraph();
+    auto withSinkBuilder = addSinkToken(base);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withSink(
+        withSinkBuilder.GetBufferPointer(), withSinkBuilder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper withoutSink(
+        base.GetBufferPointer(), base.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, withoutSink));
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, withSink));
 }
 
 // =============================================================================

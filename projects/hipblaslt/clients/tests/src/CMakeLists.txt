@@ -10,12 +10,14 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/heuristic_workspace_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/grouped_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/data_type_names_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective_gtest.cpp
@@ -53,6 +55,12 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_multiprocess_gtest.cpp
+    )
+endif()
+
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
     )
 endif()
 

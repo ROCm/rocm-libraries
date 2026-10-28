@@ -14,6 +14,31 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  # Build-tree artifact-reproduction gate, deliberately separate from pytest.
+  # It re-probes the full intrinsic/architecture matrix and therefore has a
+  # different timeout, resource, and skip contract from Python unit tests. The
+  # installed test manifest registers the same logical gate against its staged
+  # generator and relocated package data.
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME rocke_arch_domain_reproducibility
+      COMMAND "${Python3_EXECUTABLE}" -u
+              "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
+              --check --unvalidated-exit-code 77)
+    set_tests_properties(
+      rocke_arch_domain_reproducibility
+      PROPERTIES
+        LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+        TIMEOUT 1800
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+  else()
+    message(WARNING
+            "rocKE: Python3 interpreter not found; arch-domain reproducibility "
+            "CTest is not registered")
+  endif()
+
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
   target_link_libraries(rocke_optimization_barrier PRIVATE rocke_core)
   add_test(NAME rocke_optimization_barrier COMMAND rocke_optimization_barrier)
@@ -145,6 +170,23 @@ if(BUILD_TESTING)
                  rocke_future_intrinsic_lowering)
   endif()
 
+  # The C++ engine's arch-domain lane -- mode parsing, the message, and the
+  # refusal itself -- without the rocke_engine extension.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_arch_domain_refusal.cpp")
+    add_executable(rocke_arch_domain_refusal core/test_arch_domain_refusal.cpp)
+    target_link_libraries(rocke_arch_domain_refusal PRIVATE rocke_core)
+    add_test(NAME rocke_arch_domain_refusal COMMAND rocke_arch_domain_refusal)
+    set_tests_properties(rocke_arch_domain_refusal
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_arch_domain_refusal)
+    set_target_properties(rocke_arch_domain_refusal
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_arch_domain_refusal
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_arch_domain_refusal)
+  endif()
+
   # QkScaleSpec validation in the C++ engine: the Python messages, bad value included.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_qk_scale_spec_validate.cpp")
     add_executable(rocke_qk_scale_spec_validate core/test_qk_scale_spec_validate.cpp)
@@ -192,6 +234,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_buffer_rsrc_hip)
+  endif()
+
+  # A buffer descriptor refused as a loop-carried value by the C++ builder and
+  # verifier.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_loop_carried_descriptor.cpp")
+    add_executable(rocke_loop_carried_descriptor core/test_loop_carried_descriptor.cpp)
+    target_link_libraries(rocke_loop_carried_descriptor PRIVATE rocke_core)
+    add_test(NAME rocke_loop_carried_descriptor COMMAND rocke_loop_carried_descriptor)
+    set_tests_properties(rocke_loop_carried_descriptor PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_loop_carried_descriptor)
+    set_target_properties(rocke_loop_carried_descriptor
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_loop_carried_descriptor
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_loop_carried_descriptor)
   endif()
 
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.

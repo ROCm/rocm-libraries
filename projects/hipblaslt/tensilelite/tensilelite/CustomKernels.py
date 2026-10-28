@@ -95,6 +95,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
+    "ESMRuntimeSupported":    "ESMRuntimeSupported",
     "batchOffsetD":           "BatchOffsetD",
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
@@ -111,7 +112,7 @@ _ACTIVATION_ARG_INDEX = {
 # Top-level custom.config keys that are not in validParameters but must survive
 # the parameter-validation/strip pass in getCustomKernelConfig.
 #
-# These two are consumed structurally by Tensile (ProblemType drives the
+# These two are consumed structurally by TensileLite (ProblemType drives the
 # solution; InternalSupportParams threads through to the kernel writer) and
 # would otherwise be popped because they're not tunable parameters.
 #
@@ -372,7 +373,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
         f"Unknown amdgpu_metadata arg name '{name}'{where} while auto-inferring "
         f"a CustomKernel block. Either add an explicit CustomKernel: section "
         f"to custom.config, or extend _METADATA_NAME_TO_SEMANTIC in "
-        f"Tensile/CustomKernels.py."
+        f"tensilelite/CustomKernels.py."
     )
 
 _HEADER_SEMANTIC_ORDER = {
@@ -380,25 +381,47 @@ _HEADER_SEMANTIC_ORDER = {
 }
 
 def validateCustomPersistentArgs(kernelConfig):
-    """Require an argument descriptor for DataParallel argument layout version 1."""
+    """Validate the scheduling payload of a versioned persistent descriptor."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
-    if type(version) is not int or version not in (0, 1):
+    if type(version) is not int or version not in (0, 1, 2):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    if version == 1 and outer_version != 3:
-        raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    if version in (1, 2) and outer_version != 3:
+        raise ValueError(f"PersistentLoopArgsVersion={version} requires KernArgsVersion=3")
     descriptor = kernelConfig.get("CustomKernel")
     if not isinstance(descriptor, dict) or not descriptor.get("name"):
-        if version == 1 and kernelConfig.get("CustomKernelName"):
-            raise ValueError("DataParallel argument layout version 1 requires a custom-kernel argument descriptor")
+        if version in (1, 2) and kernelConfig.get("CustomKernelName"):
+            raise ValueError(f"Persistent argument layout version {version} requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
     if version == 0:
         if persistentGridArgIndices:
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
+        return
+    if version == 2:
+        expected = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                    "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]
+        forbidden = {"PersistentGrid", "TotalIters", "AddressSynchronizer", "Synchronizer", "GSUSync"}
+        scheduling = [(i, arg) for i, arg in enumerate(args)
+                      if arg.get("semantic") in set(expected) | forbidden]
+        if ([arg.get("semantic") for _, arg in scheduling] != expected
+                or any(arg.get("type") != "uint32" or arg.get("padding", 0)
+                       for _, arg in scheduling)
+                or any(right[0] != left[0] + 1
+                       for left, right in zip(scheduling, scheduling[1:]))):
+            raise ValueError("StreamK version-2 scheduling arguments must be six adjacent uint32 values")
+        for semantic in ("AddressWorkspace", "AddressFlags"):
+            pointers = [arg for arg in args if arg.get("semantic") == semantic]
+            if (len(pointers) != 1 or pointers[0].get("type") != "address"
+                    or pointers[0].get("padding", 0)):
+                raise ValueError(f"StreamK version-2 requires one {semantic} pointer")
+        # An omitted workspace declaration is derived from the authoritative
+        # problem compute type by Solution._assignCustomKernelParameters.
+        if descriptor.get("workspaceType", "None") not in ("None", "StreamKWithReduction"):
+            raise ValueError("StreamK version-2 requires tree partial workspace")
         return
     legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
               "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
@@ -489,7 +512,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     # DataParallel assigns whole tiles to persistent workgroups. Ordinary GEMM
     # uses strategy None and reaches the tile-grid branches below.
-    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) == 1:
+    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) in (1, 2):
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
         # sk.grid already counts every batch's tiles, so the launch must not
@@ -613,13 +636,13 @@ def getCustomKernelConfig(
 ################################################################################
 
 _EXTERNAL_HINT = (
-    "External kernels carry their full Tensile-side interface in custom.config. "
-    "To inject one from a Tensile test YAML, run:\n"
-    "  python -m Tensile.AddCustomConfig <file.s> --yaml <test.yaml>\n"
+    "External kernels carry their full TensileLite-side interface in custom.config. "
+    "To inject one from a TensileLite test YAML, run:\n"
+    "  python -m tensilelite.AddCustomConfig <file.s> --yaml <test.yaml>\n"
 )
 
 _TENSILE_HINT = (
-    "Tensile-generated kernels only need InternalSupportParams.KernArgsVersion in "
+    "TensileLite-generated kernels only need InternalSupportParams.KernArgsVersion in "
     "custom.config; ProblemType and tuning state come from the consuming logic file "
     "or test YAML. If the field is missing, regenerate the kernel with the current "
     "kernel writer."
@@ -640,13 +663,13 @@ def _missingMetadataMessage(kind, name, filepath, missing):
 def validateCustomKernelMetadata(name, directory=None):
     """Validates that a kernel has an embedded custom.config with required fields.
 
-    Tensile-generated kernels (no Source.Origin) only need
+    TensileLite-generated kernels (no Source.Origin) only need
     InternalSupportParams.KernArgsVersion -- the only field
     `getCustomKernelConfig` actually requires at runtime. Their ProblemType and
     tuning state live in the consuming logic file or test YAML and are merged
     on top of custom.config there.
 
-    External kernels (Source.Origin present) carry their full Tensile-side
+    External kernels (Source.Origin present) carry their full TensileLite-side
     interface and provenance in custom.config: Source, Features, Version,
     InternalSupportParams.KernArgsVersion, ProblemType, MatrixInstruction, and
     a CustomKernel block with args/macrotile/threads/grid.
@@ -700,7 +723,7 @@ def validateCustomKernelMetadata(name, directory=None):
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
 
     if missing:
-        kind = "External" if is_external else "Tensile"
+        kind = "External" if is_external else "TensileLite"
         return False, _missingMetadataMessage(kind, name, filepath, missing)
 
     return True, f"Kernel '{name}' metadata is valid"
