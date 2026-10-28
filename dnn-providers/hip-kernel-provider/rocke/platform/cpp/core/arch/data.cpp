@@ -305,13 +305,13 @@ static void _mfma_b_32x32x16(rocke_ir_builder_t* b,
         *out1 = n_in_atom;
 }
 
-/* MFMA 16x16x4 fp32 A operand (#8348): scalar float per lane.
+/* MFMA 16x16x4 fp32 / f64 A operand (#8348): one scalar per lane.
  * (lane % 16, lane // 16); slot is always 0 (a_frag_len == 1). */
-static void _mfma_a_16x16x4_f32(rocke_ir_builder_t* b,
-                                rocke_value_t* lane,
-                                int slot,
-                                rocke_value_t** out0,
-                                rocke_value_t** out1)
+static void _mfma_a_16x16x4(rocke_ir_builder_t* b,
+                            rocke_value_t* lane,
+                            int slot,
+                            rocke_value_t** out0,
+                            rocke_value_t** out1)
 {
     rocke_value_t *c16, *m_in_atom, *k;
     (void)slot;
@@ -325,13 +325,13 @@ static void _mfma_a_16x16x4_f32(rocke_ir_builder_t* b,
         *out1 = k;
 }
 
-/* MFMA 16x16x4 fp32 B operand (#8348): scalar float per lane.
+/* MFMA 16x16x4 fp32 / f64 B operand (#8348): one scalar per lane.
  * (lane // 16, lane % 16); slot is always 0 (b_frag_len == 1). */
-static void _mfma_b_16x16x4_f32(rocke_ir_builder_t* b,
-                                rocke_value_t* lane,
-                                int slot,
-                                rocke_value_t** out0,
-                                rocke_value_t** out1)
+static void _mfma_b_16x16x4(rocke_ir_builder_t* b,
+                            rocke_value_t* lane,
+                            int slot,
+                            rocke_value_t** out0,
+                            rocke_value_t** out1)
 {
     rocke_value_t *c16, *n_in_atom, *k;
     (void)slot;
@@ -383,6 +383,69 @@ static void _mfma_b_32x32x2_f32(rocke_ir_builder_t* b,
         *out0 = k;
     if(out1)
         *out1 = n_in_atom;
+}
+
+/* MFMA 16x16x4 f64 accumulator: slot i -> (i*4 + lane // 16, lane % 16). */
+static void _mfma_acc_16x16x4_f64(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    rocke_value_t *c16, *n_in_atom, *m_blk, *row;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c16 = rocke_b_const_i32(b, 16);
+    n_in_atom = rocke_b_mod(b, lane, c16);
+    m_blk = rocke_b_div(b, lane, c16);
+    row = rocke_b_add(b, rocke_b_const_i32(b, slot * 4), m_blk);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = n_in_atom;
+}
+
+/* MFMA 4x4x4 f64 B operand (4 blocks stacked along rows, one scalar per lane):
+ * lane 16*k + 4*blk + n -> (blk*4 + k, n). */
+static void _mfma_b_4x4x4_f64(rocke_ir_builder_t* b,
+                              rocke_value_t* lane,
+                              int slot,
+                              rocke_value_t** out0,
+                              rocke_value_t** out1)
+{
+    rocke_value_t *c4, *n_in_blk, *blk, *k, *row;
+    (void)slot;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c4 = rocke_b_const_i32(b, 4);
+    n_in_blk = rocke_b_mod(b, lane, c4);
+    blk = rocke_b_mod(b, rocke_b_div(b, lane, c4), c4);
+    k = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+    row = rocke_b_add(b, rocke_b_mul(b, blk, c4), k);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = n_in_blk;
+}
+
+/* MFMA 4x4x4 f64 accumulator (4 blocks stacked along rows, one scalar per lane):
+ * lane 16*m + 4*blk + n -> (blk*4 + m, n). */
+static void _mfma_acc_4x4x4_f64(rocke_ir_builder_t* b,
+                                rocke_value_t* lane,
+                                int slot,
+                                rocke_value_t** out0,
+                                rocke_value_t** out1)
+{
+    rocke_value_t *c4, *n_in_blk, *blk, *m, *row;
+    (void)slot;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c4 = rocke_b_const_i32(b, 4);
+    n_in_blk = rocke_b_mod(b, lane, c4);
+    blk = rocke_b_mod(b, rocke_b_div(b, lane, c4), c4);
+    m = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+    row = rocke_b_add(b, rocke_b_mul(b, blk, c4), m);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = n_in_blk;
 }
 
 /* WMMA 16x16x16 accumulator (wave32): (2*slot + lane//16, lane % 16). */
@@ -771,10 +834,8 @@ static const rocke_layout_map_t lm_xf32_32_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a
 static const rocke_layout_map_t lm_xf32_32_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_32x32x4_xf32};
 
 /* --- mfma_f32_16x16x4_f32: a/b/c present (frag 1/1/4, wave64) (#8348) --- */
-static const rocke_layout_map_t lm_mfma_16x16x4_f32_a
-    = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4_f32};
-static const rocke_layout_map_t lm_mfma_16x16x4_f32_b
-    = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_16x16x4_f32};
+static const rocke_layout_map_t lm_mfma_16x16x4_a = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4};
+static const rocke_layout_map_t lm_mfma_16x16x4_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_16x16x4};
 static const rocke_layout_map_t lm_mfma_16x16x4_f32_c
     = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16};
 
@@ -785,6 +846,15 @@ static const rocke_layout_map_t lm_mfma_32x32x2_f32_b
     = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_32x32x2_f32};
 static const rocke_layout_map_t lm_mfma_32x32x2_f32_c
     = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
+
+/* --- mfma_f64_16x16x4_f64: a/b shared with fp32 16x16x4, own c (frag 1/1/4, wave64) --- */
+static const rocke_layout_map_t lm_mfma_16x16x4_f64_c
+    = {ROCKE_MMA_ROLE_ACC, 4, 64, _mfma_acc_16x16x4_f64};
+
+/* --- mfma_f64_4x4x4_f64: a shared with 16x16x4 (frag 1/1/1, wave64) --- */
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_b = {ROCKE_MMA_ROLE_B, 1, 64, _mfma_b_4x4x4_f64};
+static const rocke_layout_map_t lm_mfma_4x4x4_f64_c
+    = {ROCKE_MMA_ROLE_ACC, 1, 64, _mfma_acc_4x4x4_f64};
 
 /* --- wmma_f32_16x16x16_{f16,bf16}: a/b/c present (frag 16/16/8, wave32) --- */
 static const rocke_layout_map_t lm_wmma_16x16x16_a = {ROCKE_MMA_ROLE_A, 16, 32, _wmma_a_16x16};
@@ -959,12 +1029,16 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     /* --- MFMA fp32 (wave64) --- */
     {"mfma_f32_16x16x4_f32", 4},
     {"mfma_f32_32x32x2_f32", 16},
+    /* --- MFMA fp64 (wave64) --- */
+    {"mfma_f64_16x16x4_f64", 4},
+    {"mfma_f64_4x4x4_f64", 1},
     /* --- MFMA f16 (wave64) --- */
     {"mfma_f32_16x16x16_f16", 4},
     {"mfma_f32_16x16x32_f16", 4},
     {"mfma_f32_32x32x8_f16", 16},
     {"mfma_f32_32x32x16_f16", 16},
     {"mfma_f32_4x4x4_f16", 4},
+    {"mfma_f32_4x4x4_bf16", 4},
     /* --- MFMA bf16 (wave64) --- */
     {"mfma_f32_16x16x16_bf16", 4},
     {"mfma_f32_16x16x32_bf16", 4},
@@ -976,9 +1050,8 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"mfma_f32_32x32x16_fp8", 16},
     {"mfma_f32_32x32x16_bf8", 16},
     /* --- MFMA MX (wave64), frag lengths only --- */
-    {"mfma_f32_16x16x128_fp4", 4},
-    {"mfma_f32_16x16x96_fp6", 4},
     {"mfma_f32_16x16x128_fp8", 4},
+    {"mfma_f32_16x16x128_fp4fp6fp8", 4},
     {"mfma_scale_f32_16x16x128_f8f6f4", 4},
     /* --- WMMA f16 / bf16 (wave32, RDNA) --- */
     {"wmma_f32_16x16x16_f16", 8},
@@ -1148,8 +1221,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      1,
      4,
      64,
-     &lm_mfma_16x16x4_f32_a,
-     &lm_mfma_16x16x4_f32_b,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
      &lm_mfma_16x16x4_f32_c},
     {"mma",
      "fp32",
@@ -1166,6 +1239,36 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      &lm_mfma_32x32x2_f32_a,
      &lm_mfma_32x32x2_f32_b,
      &lm_mfma_32x32x2_f32_c},
+    {"mma",
+     "fp64",
+     "fp64",
+     "fp64",
+     16,
+     16,
+     4,
+     "mfma_f64_16x16x4_f64",
+     1,
+     1,
+     4,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
+     &lm_mfma_16x16x4_f64_c},
+    {"mma",
+     "fp64",
+     "fp64",
+     "fp64",
+     4,
+     4,
+     4,
+     "mfma_f64_4x4x4_f64",
+     1,
+     1,
+     1,
+     64,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_4x4x4_f64_b,
+     &lm_mfma_4x4x4_f64_c},
     {"mma",
      "fp16",
      "fp16",
@@ -1902,8 +2005,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      1,
      4,
      64,
-     &lm_mfma_16x16x4_f32_a,
-     &lm_mfma_16x16x4_f32_b,
+     &lm_mfma_16x16x4_a,
+     &lm_mfma_16x16x4_b,
      &lm_mfma_16x16x4_f32_c},
     {"mma",
      "fp32",
@@ -2100,38 +2203,6 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      &lm_mfma_32x32x16_a,
      &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
-    /* Low-bit catalog keys use exponent/mantissa names; op_ids carry frag lengths
-     * only (no verified maps), per _MMA_FRAGMENT_INFO. */
-    {"mma",
-     "fp4e2m1",
-     "fp4e2m1",
-     "fp32",
-     16,
-     16,
-     128,
-     "mfma_f32_16x16x128_fp4",
-     16,
-     16,
-     4,
-     64,
-     NULL,
-     NULL,
-     NULL},
-    {"mma",
-     "fp6e2m3",
-     "fp6e2m3",
-     "fp32",
-     16,
-     16,
-     96,
-     "mfma_f32_16x16x96_fp6",
-     12,
-     12,
-     4,
-     64,
-     NULL,
-     NULL,
-     NULL},
     /* TF32 via BF16x3 emulation. No native encoding: each row issues three
      * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
      * operands. Frag lengths, wave size and layout maps are inherited verbatim
@@ -2360,7 +2431,7 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
 /* ----------------------------- gfx1250 (CDNA/GFX12) ---------------------- */
 /* gfx1250: wave32, WMMA only (no MFMA). fp32 K=4 atom: A/B are scalar float
  * per lane (same lane layout as mfma_f32_16x16x4_f32 on CDNA — reuses
- * lm_mfma_16x16x4_f32_{a,b}); accumulator is <8 x float> in the gfx12
+ * lm_mfma_16x16x4_{a,b}); accumulator is <8 x float> in the gfx12
  * column-distributed layout (lm_wmma_gfx12_c, c_frag_len=8).
  * Primary fp16/bf16 atom is 16x16x32 (K=32, not the gfx12 RDNA 16x16x16).
  * A/B frag_len=16 (16 fp16/bf16 elements per lane); A/B layout maps are NULL
@@ -2729,7 +2800,7 @@ static const rocke_arch_target_t k_target_gfx1250 = {
     "cdna",
     "gfx12_cdna",
     32,
-    163840,
+    327680,
     6,
     {k_mma_gfx1250.ops, K_NUM(k_mma_gfx1250.ops)},
     {false, true, false, true, 4, 0, true, true, true, true},
