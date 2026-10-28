@@ -35,8 +35,8 @@
 
 #include <rocprim/thread/thread_store.hpp> // IWYU pragma: export
 
-#include <stdint.h>
-#include <type_traits>
+#include _HIPCUB_STD_INCLUDE(__memory/pointer_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -51,6 +51,7 @@ enum CacheStoreModifier
 };
 
 template<typename T, typename Fundamental>
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<STORE_VOLATILE>(ptr, val) instead")
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE void ThreadStoreVolatilePtr(T* ptr, T val, Fundamental /*is_fundamental*/)
 {
@@ -58,33 +59,35 @@ HIPCUB_FORCEINLINE void ThreadStoreVolatilePtr(T* ptr, T val, Fundamental /*is_f
 }
 
 template<int MODIFIER, typename T>
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<MODIFIER>(ptr, val) instead")
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE void ThreadStore(T* ptr,
                                     T  val,
                                     detail::int_constant_t<MODIFIER> /*modifier*/,
-                                    ::std::true_type /*is_pointer*/)
+                                    _HIPCUB_STD::true_type /*is_pointer*/)
 {
     rocprim::thread_store<rocprim::cache_store_modifier(MODIFIER), T>(ptr, val);
 }
 
 template<int MODIFIER, typename OutputIteratorT, typename T>
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadStore<MODIFIER>(ptr, val) instead")
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr,
                                     T               val,
                                     detail::int_constant_t<MODIFIER> /*modifier*/,
-                                    ::std::false_type /*is_pointer*/)
+                                    _HIPCUB_STD::false_type /*is_pointer*/)
 {
-    ThreadStore<MODIFIER>(&(*itr), val, detail::int_constant_t<MODIFIER>{}, ::std::true_type{});
+    ThreadStore<MODIFIER>(&(*itr),
+                          val,
+                          detail::int_constant_t<MODIFIER>{},
+                          _HIPCUB_STD::true_type{});
 }
 
-template<CacheStoreModifier MODIFIER = STORE_DEFAULT, typename OutputIteratorT, typename T>
+template<CacheStoreModifier MODIFIER, typename OutputIteratorT, typename T>
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
 {
-    ThreadStore(itr,
-                val,
-                detail::int_constant_t<MODIFIER>{},
-                ::std::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
+    rocprim::thread_store<rocprim::cache_store_modifier(MODIFIER), T>(itr, val);
 }
 
 namespace detail

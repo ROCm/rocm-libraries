@@ -26,8 +26,8 @@
 
 #include <cub/thread/thread_store.cuh> // CUB thread store
 
-#include <cuda/std/cstdint> // IWYU pragma: export
-#include <cuda/std/type_traits> // IWYU pragma: export
+#include _HIPCUB_STD_INCLUDE(__memory/pointer_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
 
 BEGIN_HIPCUB_NAMESPACE
 

@@ -296,17 +296,8 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
     }
     else // index % 7 == 6
     {
-        // TODO: For compatibility, should also change this API in rocm backend
-#ifdef __HIP_PLATFORM_NVIDIA__
-        hipcub::ThreadStoreVolatilePtr(
-            device_output + index,
-            device_input[index],
-            ::cuda::std::integral_constant<bool, std::is_fundamental<Type>::value>{});
-#else
-        hipcub::ThreadStoreVolatilePtr(device_output + index,
-                                       device_input[index],
-                                       std::bool_constant<std::is_fundamental<Type>::value>());
-#endif
+        // ThreadStoreVolatilePtr is deprecated
+        hipcub::ThreadStore<hipcub::STORE_VOLATILE>(device_output + index, device_input[index]);
     }
 }
 

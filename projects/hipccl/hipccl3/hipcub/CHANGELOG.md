@@ -59,6 +59,8 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Deprecated `hipcub::MergePathSearch`.
 * Deprecated `hipcub::ThreadLoad(ptr, modifier, is_pointer)`. Use `hipcub::ThreadLoad<MODIFIER>(*itr)` instead.
 * Deprecated `hipcub::ThreadLoadVolatilePointer(ptr, is_primitive)`. Use `hipcub::ThreadLoad<LOAD_VOLATILE>(*itr)` instead.
+* Deprecated `hipcub::ThreadStore(ptr, val, modifier, is_pointer)`. Use `hipcub::ThreadStore<MODIFIER>(*itr, val)` instead.
+* Deprecated `hipcub::ThreadStoreVolatilePointer(ptr, is_primitive)`. Use `hipcub::ThreadStore<LOAD_VOLATILE>(*itr, val)` instead.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  
