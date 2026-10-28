@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.DataType.DataType`` construction
+"""Characterization tests for ``tensilelite.Common.DataType.DataType`` construction
 and the value-converter / string-builder surface: ``__init__`` (the four
 accepted input forms plus the invalid-type ``RuntimeError``), the
 ``to*`` converters, ``toDevice`` (HIP path + the non-HIP ``assert``), and
@@ -33,7 +33,7 @@ accepted input forms plus the invalid-type ``RuntimeError``), the
 import pytest
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 pytestmark = pytest.mark.unit
 

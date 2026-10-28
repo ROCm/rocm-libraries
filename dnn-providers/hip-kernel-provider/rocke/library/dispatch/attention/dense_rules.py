@@ -19,6 +19,7 @@ from typing import Callable, Iterable, Mapping, Optional, Tuple
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
 from .axes import (
+    DENSE_ARCH_PROBLEM_FIELDS,
     DENSE_OUTPUT_FIELDS,
     DENSE_PROBLEM_FIELDS,
     KnobAxis,
@@ -29,8 +30,11 @@ from .common import AttentionTuningSpec
 from .waves import WavesPerEuSpace, waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
-# Request-set fields: never recorded as a tuning point's defaults.
-_REQUEST_FIELDS = DENSE_PROBLEM_FIELDS.union(*DENSE_OUTPUT_FIELDS.values())
+# Request-set fields: never recorded as a tuning point's defaults (problem fields,
+# including the arch-specific band fields, and output fields).
+_REQUEST_FIELDS = DENSE_PROBLEM_FIELDS.union(
+    *DENSE_ARCH_PROBLEM_FIELDS.values(), *DENSE_OUTPUT_FIELDS.values()
+)
 
 
 def _gfx950_dense_inert_knobs(spec) -> dict:
@@ -94,6 +98,10 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "num_persistent": lambda s: bool(s.persistent),
             "persist_decode": lambda s: bool(s.persistent),
             "interleave": lambda s: bool(s.persistent) and bool(s.causal),
+            # A knob only where the variant leaves the order to auto: a variant
+            # that sets it (qbminor) keeps it in sweeps and ignores the knob.
+            "nonpersist_decode": lambda s: not s.persistent
+            and s.nonpersist_decode == "auto",
             # Wide DMA locks the K/V slab pads.
             "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
             "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
@@ -249,6 +257,17 @@ def _dense_redundant_knobs(spec, arch: str) -> dict:
     ):
         redundant["persist_decode"] = (
             f"persist_decode={spec.persist_decode!r} is what auto resolves to"
+        )
+    if spec.persistent:
+        if spec.nonpersist_decode != "auto":
+            redundant["nonpersist_decode"] = "read only by the non-persistent body"
+    elif (
+        spec.nonpersist_decode != "auto"
+        and replace(spec, nonpersist_decode="auto").resolved_nonpersist_decode
+        == spec.nonpersist_decode
+    ):
+        redundant["nonpersist_decode"] = (
+            f"nonpersist_decode={spec.nonpersist_decode!r} is what auto resolves to"
         )
     if spec.interleave and "interleave" not in redundant:
         nqb = -(-int(spec.seqlen_q) // int(spec.block_m))

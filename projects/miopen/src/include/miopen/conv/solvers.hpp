@@ -3766,13 +3766,13 @@ struct PerformanceConfigHipImplicitGemmGroupFwdXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemmGroupFwdXdlops& other) const;
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
@@ -4090,7 +4090,7 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemmGroupBwdXdlops& other) const;
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
@@ -4194,7 +4194,7 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     {
         return IsValid(problem);
     }
-    bool IsValid(const miopen::conv::ProblemDescription&) const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     bool operator==(const PerformanceConfigHipImplicitGemmGroupWrwXdlops& other) const;
     MIOPEN_INTERNALS_EXPORT bool
     IsModelApplicable(const ExecutionContext& ctx,
@@ -4617,6 +4617,21 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #if defined(__clang__) && defined(CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP)
 #pragma clang diagnostic pop
 #endif
+
+/// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.
+struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvDirectDepthwiseFwd2D>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
 
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver

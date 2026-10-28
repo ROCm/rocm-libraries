@@ -12,8 +12,8 @@ from copy import deepcopy
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getKeyNoInternalArgs
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.SolutionStructs.Naming import getKernelNameMin, getKeyNoInternalArgs
 
 pytestmark = pytest.mark.unit
 
@@ -83,3 +83,27 @@ def test_auto_and_fixed_wgmxcc_produce_distinct_dedup_keys():
   assert "WGMXCC" in auto_key
   assert "WGMXCC" in fixed_key
   assert auto_key != fixed_key
+
+
+@pytest.mark.parametrize("strategy,cluster,version,regenerate,expected", [
+    ("StreamK", [2, 1], 0, False, 0),
+    ("StreamK", [2, 1], 0, True, 2),
+    ("StreamK", [1, 1], 0, True, 0),
+    ("DataParallel", [1, 1], 1, True, 1),
+])
+def test_persistent_payload_marker_is_consistent_across_names(strategy, cluster, version, regenerate, expected):
+    from tensilelite.ExecutionPolicy import normalize_execution_policy
+    from tensilelite.SolutionStructs.Naming import getSolutionNameFull
+
+    source = _minimal_kernel()
+    source.update(TileProcessingStrategy=strategy, ClusterDim=cluster)
+    source["InternalSupportParams"] = {"KernArgsVersion": 3, "PersistentLoopArgsVersion": version}
+    normalized = normalize_execution_policy(source, regenerate=regenerate)
+    for naming in (getKernelNameMin, getSolutionNameFull, getKeyNoInternalArgs):
+        before, after = naming(source, False), naming(normalized, False)
+        assert "SKCM" not in after
+        if expected:
+            assert f"_PLAV{expected}_" in after
+        else:
+            assert "_PLAV" not in after
+        assert after.replace("_PLAV2", "") == before if expected == 2 else after == before
