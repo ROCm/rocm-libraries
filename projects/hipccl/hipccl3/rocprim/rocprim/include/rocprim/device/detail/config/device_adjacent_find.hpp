@@ -40,7 +40,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 // TARGET: {'gen': 'rdna2', 'arch': 'gfx1030', 'gpu': 'rx6900', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -114,7 +114,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'rdna3', 'arch': 'gfx1100', 'gpu': 'rx7900', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -188,7 +188,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1200', 'gpu': 'rx9060', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -254,7 +254,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'rdna4', 'arch': 'gfx1201', 'gpu': 'rx9070', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -328,7 +328,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'gcn5', 'arch': 'gfx906', 'gpu': 'mi50', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target, comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>,
@@ -401,7 +401,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna1', 'arch': 'gfx908', 'gpu': 'mi100', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -475,7 +475,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna2', 'arch': 'gfx90a', 'gpu': 'mi210', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -549,7 +549,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna3', 'arch': 'gfx942', 'gpu': 'mi300x', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -623,7 +623,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi350x', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -697,7 +697,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'cdna4', 'arch': 'gfx950', 'gpu': 'mi355x', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -771,7 +771,7 @@ constexpr auto adjacent_find_config_picker()
 }
 
 // TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
-template<class Target, class key_type, class value_type>
+template<class Target, class input_type>
 constexpr auto adjacent_find_config_picker()
     -> std::enable_if_t<
         std::is_same_v<Target,
@@ -780,8 +780,7 @@ constexpr auto adjacent_find_config_picker()
 {
     return adjacent_find_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
-        key_type,
-        value_type>();
+        input_type>();
 }
 
 // All the existing configs should be auto generated
