@@ -1,0 +1,10 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# The shapes SkinnyGEMMTune.py benchmarks to build the skinny MXFP8 GEMM routing rows.
+orientations: [n, m]        # n: m = wide, n = skinny; m: m = skinny, n = wide (ldc = ldd = skinny rounded up to 4).
+skinny: [1, 2, 3, 4, 6, 8, 12, 16]
+wide: [1024, 2048, 4096, 5120, 8192, 10240, 16384, 32768, 51200, 151936]
+k: [1024, 2048, 3072, 4096, 4100, 5120, 6144, 7168, 8192, 14336, 16384, 25600]
+extra_points: [[2,32768,14336],[3,16384,25600],[5,10240,3872],[6,2048,25600],[6,51200,14336],[12,16384,7168],[12,51200,4096],[16,5120,16384],[8192,6,8192],[16384,16,6144],[51200,6,1024]]  # [[m, n, k], ...] measured besides the lattice; they veto cells that regress there.
+held_out: {count: 150, seed: 0}
+bench: {warmup: 20, iterations: 20, rotating: 512, repeats: 6, refine_repeats: 10}

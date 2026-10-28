@@ -1,0 +1,111 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Tiny input of sweep_skinny_gemm.py for smoke tests (schema in
+# sweep_skinny_gemm_config.py): a few dozen configurations per shape, with
+# invalid ones on purpose (lanesK 32 violates the support constraints; bm 4 with
+# tn 8 and up-front scales exceeds the register budget of the emitter).
+
+settings:
+  iters: 10
+  warmup: 2
+  refine_top: 8
+  refine_iters: 30
+  top: 5
+  # The m-skinny case is above this and is verified by sampling; the others densely.
+  verify_full_max_elems: 40000000
+defaults:
+  useBeta: false
+problems:
+  # Both operands tiled, with the persistent launch as well.
+  - name: smoke-m-skinny
+    m: 4
+    n: 5120
+    k: 8192
+    sweep:
+      - bm: [1, 4]
+        tn: [1, 2, 8]
+        lanesK: [16, 32, 64]
+        waves: 4
+        prefetch: [1, 3]
+        upScales: [0, 1]
+        grid3d: true
+      - bm: 2
+        tn: 1
+        lanesK: 64
+        waves: 4
+        prefetch: 2
+        upScales: 1
+        grid3d: false
+        group: [1, 2]
+        numXcds: [1, 8]
+        blocks: [256, 1024]
+  # K % (64 * lanesK) != 0 for the larger lanesK: the partial tail step.
+  - name: smoke-partial-tail
+    m: 1
+    n: 4096
+    k: 4100
+    sweep:
+      bm: 1
+      tn: [1, 2]
+      lanesK: [8, 16, 64]
+      waves: [1, 4]
+      prefetch: [1, 2]
+      upScales: [0, 1]
+  # Split-K, with 2 splits and with a single split.
+  - name: smoke-split-k
+    m: 4
+    n: 4096
+    k: 8192
+    spk: [4096, k]
+    sweep:
+      bm: [1, 4]
+      tn: [1, 2]
+      lanesK: [16, 64]
+      waves: 4
+      prefetch: 2
+      upScales: [0, 1]
+  # The useBeta kernel with a non-zero beta.
+  - name: smoke-use-beta
+    m: 3
+    n: 4096
+    k: 4096
+    useBeta: true
+    alpha: 0.75
+    beta: 0.5
+    sweep:
+      bm: [1, 3]
+      tn: [1, 2]
+      lanesK: [16, 64]
+      waves: 4
+      prefetch: 2
+      upScales: [0, 1]
+  # The default useBeta [false, true] and beta modes [zero, random]: the kernel
+  # that never reads C once, the useBeta kernel with beta 0 (C poisoned) and with
+  # a seeded nonzero beta, each its own case, verified.
+  - name: smoke-beta-modes
+    m: 3
+    n: 4096
+    k: 4096
+    useBeta: [false, true]
+    sweep:
+      bm: [1, 3]
+      tn: [1, 2]
+      lanesK: [16, 64]
+      waves: 4
+      prefetch: 2
+      upScales: [0, 1]
+  # Split-K: the reduce applies beta * C even though useBeta is false, so beta
+  # runs in both modes.
+  - name: smoke-split-k-random-beta
+    m: 4
+    n: 4096
+    k: 8192
+    spk: 4096
+    sweep:
+      bm: [1, 4]
+      tn: [1, 2]
+      lanesK: [16, 64]
+      waves: 4
+      prefetch: 2
+      upScales: 0
