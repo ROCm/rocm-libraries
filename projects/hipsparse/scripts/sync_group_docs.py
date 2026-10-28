@@ -52,8 +52,9 @@ GROUP_PATTERN = re.compile(
     + r"(?P<close>/\*\*@\}\*/)",
     re.DOTALL,
 )
+GROUP_OPEN = "/**@{*/"
 ENTRY_PATTERN = re.compile(
-    r"(?:(?P<doc>" + DOC_PATTERN + r")\n)?"
+    r"(?:(?P<doc>" + DOC_PATTERN + r")(?P<separator>\s*))?"
     r"(?P<prefix>(?:" + PREFIX_PATTERN + r"\n)+)"
     r"(?=hipsparseStatus_t\s+(?P<name>hipsparse[A-Za-z0-9_]+)\s*\()",
     re.DOTALL,
@@ -63,19 +64,23 @@ DECL_NAME_PATTERN = re.compile(
 )
 
 
+class SyncError(RuntimeError):
+    pass
+
+
 def header_files(paths: Iterable[Path]) -> List[Path]:
     files = []
     for path in paths:
         if path.is_dir():
             files.extend(path.rglob("*.h"))
-        else:
+        elif path.is_file():
             files.append(path)
+        else:
+            raise SyncError(f"{path}: no such file or directory")
     return sorted(set(files))
 
 
-def synchronize_group(
-    match: Match[str], write: bool
-) -> Tuple[str, List[str]]:
+def synchronize_group(match: Match[str], write: bool) -> Tuple[str, List[str]]:
     canonical = "\n".join(
         line.rstrip() for line in match.group("canonical").splitlines()
     )
@@ -90,18 +95,21 @@ def synchronize_group(
             for name in declared
             if name not in {entry.group("name") for entry in entries}
         ]
-        raise RuntimeError(
+        raise SyncError(
             "unable to parse grouped declarations: " + ", ".join(unmatched)
         )
+    if not entries:
+        raise SyncError("group without hipsparse declarations")
 
+    if match.group("canonical") != canonical:
+        stale.append(entries[0].group("name"))
     for entry in entries[1:]:
-        if entry.group("doc") != canonical:
+        if entry.group("doc") != canonical or entry.group("separator") != "\n":
             stale.append(entry.group("name"))
 
-    if write:
-        for entry in reversed(entries[1:]):
-            replacement = canonical + "\n" + entry.group("prefix")
-            body = body[: entry.start()] + replacement + body[entry.end() :]
+    for entry in reversed(entries[1:]):
+        replacement = canonical + "\n" + entry.group("prefix")
+        body = body[: entry.start()] + replacement + body[entry.end() :]
 
     replacement = (
         canonical
@@ -111,21 +119,38 @@ def synchronize_group(
         + body
         + match.group("close")
     )
-    return replacement, stale
+    if replacement != match.group(0) and not stale:
+        stale.append(entries[0].group("name"))
+    return (replacement if write else match.group(0)), stale
 
 
 def synchronize_file(path: Path, write: bool) -> List[str]:
     source = path.read_text(encoding="utf-8")
     stale = []
 
+    groups = 0
+
     def replace(match: Match[str]) -> str:
+        nonlocal groups
+        groups += 1
         replacement, group_stale = synchronize_group(match, write)
         stale.extend(group_stale)
         return replacement
 
-    updated = GROUP_PATTERN.sub(replace, source)
+    try:
+        updated = GROUP_PATTERN.sub(replace, source)
+        markers = source.count(GROUP_OPEN)
+        if groups != markers:
+            raise SyncError(
+                f"{markers - groups} of {markers} {GROUP_OPEN} group(s) do not "
+                "directly follow a /*! ... */ block"
+            )
+    except SyncError as error:
+        raise SyncError(f"{path}: {error}") from error
+
     if write and updated != source:
-        path.write_text(updated, encoding="utf-8")
+        with path.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(updated)
     return stale
 
 
@@ -152,12 +177,16 @@ def main() -> int:
     args = parser.parse_args()
 
     stale_count = 0
-    for path in header_files(args.paths):
-        stale = synchronize_file(path, args.write)
-        stale_count += len(stale)
-        for function in stale:
-            action = "synchronized" if args.write else "out of sync"
-            print(f"{path}:{function}: {action}")
+    try:
+        for path in header_files(args.paths):
+            stale = synchronize_file(path, args.write)
+            stale_count += len(stale)
+            for function in stale:
+                action = "synchronized" if args.write else "out of sync"
+                print(f"{path}:{function}: {action}")
+    except SyncError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
     if stale_count and not args.write:
         print(
