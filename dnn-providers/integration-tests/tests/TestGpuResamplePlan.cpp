@@ -3,9 +3,9 @@
 
 #include <cstdint>
 #include <gtest/gtest.h>
-
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -225,6 +225,62 @@ TEST(TestGpuResampleFwdPlanBuilder, IsApplicableFalseWithIndexTensor)
     EXPECT_FALSE(patient.isApplicable(graphWithIndex.getNode(0), tensorMapCopy));
 }
 
+TEST(TestGpuResampleFwdPlanBuilder, IsApplicableAcrossModesPaddingAndIndexPresence)
+{
+    const GpuResampleFwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::UNSET>
+        noIndexBuilder;
+    const GpuResampleFwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::INT32>
+        indexBuilder;
+
+    for(const auto mode : {ResampleMode::MAXPOOL,
+                           ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                           ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        for(const auto paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
+        {
+            for(const bool hasIndex : {false, true})
+            {
+                SCOPED_TRACE(testing::Message() << "mode=" << static_cast<int>(mode)
+                                                << ", padding=" << static_cast<int>(paddingMode)
+                                                << ", hasIndex=" << hasIndex);
+                auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
+                    hasIndex, mode, paddingMode);
+                auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+                    builder.GetBufferPointer(), builder.GetSize());
+
+                EXPECT_EQ(noIndexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()),
+                          !hasIndex);
+                EXPECT_EQ(indexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()),
+                          hasIndex && mode == ResampleMode::MAXPOOL);
+            }
+        }
+    }
+
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleFwdAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    auto tensorMap = graph.getTensorMap();
+    tensorMap[nodeAttributes->index_tensor_uid().value()]
+        = tensorMap.at(nodeAttributes->x_tensor_uid());
+    EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), tensorMap));
+
+    auto computeTypeBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph();
+    auto computeTypeGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        computeTypeBuilder.GetBufferPointer(), computeTypeBuilder.GetSize());
+    auto* node = const_cast<Node*>(&computeTypeGraph.getNode(0));
+    ASSERT_TRUE(node->mutate_compute_data_type(DataType::HALF));
+    EXPECT_FALSE(
+        noIndexBuilder.isApplicable(computeTypeGraph.getNode(0), computeTypeGraph.getTensorMap()));
+}
+
 // =============================================================
 // Test GpuResampleBwdPlan
 // =============================================================
@@ -426,6 +482,72 @@ TEST(TestGpuResampleBwdPlanBuilder, IsApplicableFalseWithIndexTensor)
     EXPECT_NE(nodeAttributes, nullptr);
     tensorMapCopy.erase(nodeAttributes->index_tensor_uid().value());
     EXPECT_FALSE(patient.isApplicable(graphWithIndex.getNode(0), tensorMapCopy));
+}
+
+TEST(TestGpuResampleBwdPlanBuilder, IsApplicableAcrossModesPaddingAndIndexPresence)
+{
+    const GpuResampleBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::UNSET>
+        noIndexBuilder;
+    const GpuResampleBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::INT32>
+        indexBuilder;
+
+    for(const auto mode : {ResampleMode::MAXPOOL,
+                           ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                           ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        for(const auto paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
+        {
+            for(const bool hasIndex : {false, true})
+            {
+                SCOPED_TRACE(testing::Message() << "mode=" << static_cast<int>(mode)
+                                                << ", padding=" << static_cast<int>(paddingMode)
+                                                << ", hasIndex=" << hasIndex);
+                auto builder
+                    = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(hasIndex, mode);
+                auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+                    builder.GetBufferPointer(), builder.GetSize());
+                auto* nodeAttributes = const_cast<ResampleBwdAttributes*>(
+                    graph.getNode(0).attributes_as_ResampleBwdAttributes());
+                ASSERT_NE(nodeAttributes, nullptr);
+                ASSERT_TRUE(nodeAttributes->mutate_padding_mode(paddingMode));
+
+                EXPECT_EQ(noIndexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()),
+                          !hasIndex && mode != ResampleMode::MAXPOOL);
+                EXPECT_EQ(indexBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()),
+                          hasIndex && mode == ResampleMode::MAXPOOL);
+            }
+        }
+    }
+
+    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto* nodeAttributes = graph.getNode(0).attributes_as_ResampleBwdAttributes();
+    ASSERT_NE(nodeAttributes, nullptr);
+    auto tensorMap = graph.getTensorMap();
+    tensorMap[nodeAttributes->index_tensor_uid().value()]
+        = tensorMap.at(nodeAttributes->dy_tensor_uid());
+    EXPECT_FALSE(indexBuilder.isApplicable(graph.getNode(0), tensorMap));
+
+    auto computeTypeBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+        false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+    auto computeTypeGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        computeTypeBuilder.GetBufferPointer(), computeTypeBuilder.GetSize());
+    auto* node = const_cast<Node*>(&computeTypeGraph.getNode(0));
+    ASSERT_TRUE(node->mutate_compute_data_type(DataType::HALF));
+    const GpuResampleBwdPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::UNSET>
+        noIndexFloatBuilder;
+    EXPECT_FALSE(noIndexFloatBuilder.isApplicable(computeTypeGraph.getNode(0),
+                                                  computeTypeGraph.getTensorMap()));
 }
 
 namespace
@@ -730,284 +852,73 @@ void runResampleBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& dxDims,
     }
 }
 
+template <typename T>
+void runResamplePlanExecuteForType(const TensorLayout& layout, bool isForward)
+{
+    for(const auto resampleMode : {ResampleMode::MAXPOOL,
+                                   ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                                   ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    {
+        for(const auto paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
+        {
+            if(isForward)
+            {
+                runResampleFwdPlanExecuteVsCpuRef<T, T, float, int32_t>({2, 3, 14, 14},
+                                                                        layout,
+                                                                        {2, 1},
+                                                                        {1, 2},
+                                                                        {2, 2},
+                                                                        {3, 3},
+                                                                        resampleMode,
+                                                                        paddingMode);
+            }
+            else
+            {
+                runResampleBwdPlanExecuteVsCpuRef<T, T, float, int32_t>({2, 3, 14, 14},
+                                                                        layout,
+                                                                        {2, 1},
+                                                                        {1, 2},
+                                                                        {2, 2},
+                                                                        {3, 3},
+                                                                        resampleMode,
+                                                                        paddingMode);
+            }
+        }
+    }
+}
+
 } // namespace
 
-// =============================================================
-// FP32 plan execution tests
-// =============================================================
+class GpuResamplePlanExecutionTest : public testing::TestWithParam<std::tuple<DataType, bool, bool>>
+{
+};
 
-TEST(TestGpuResampleFwdPlanFp32, ExecutePlanNchw)
+TEST_P(GpuResamplePlanExecutionTest, MatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
+    const auto [dataType, isNhwc, isForward] = GetParam();
+    const auto& layout = isNhwc ? TensorLayout::NHWC : TensorLayout::NCHW;
+
+    switch(dataType)
     {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleFwdPlanExecuteVsCpuRef<float, float, float, int32_t>({2, 3, 14, 14},
-                                                                            TensorLayout::NCHW,
-                                                                            {2, 1},
-                                                                            {1, 2},
-                                                                            {2, 2},
-                                                                            {3, 3},
-                                                                            resampleMode,
-                                                                            paddingMode);
-        }
+    case DataType::FLOAT:
+        runResamplePlanExecuteForType<float>(layout, isForward);
+        break;
+    case DataType::HALF:
+        runResamplePlanExecuteForType<half>(layout, isForward);
+        break;
+    case DataType::BFLOAT16:
+        runResamplePlanExecuteForType<bfloat16>(layout, isForward);
+        break;
+    default:
+        FAIL() << "Unsupported resample test data type: " << static_cast<int>(dataType);
     }
 }
 
-TEST(TestGpuResampleFwdPlanFp32, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleFwdPlanExecuteVsCpuRef<float, float, float, int32_t>({2, 3, 14, 14},
-                                                                            TensorLayout::NHWC,
-                                                                            {2, 1},
-                                                                            {1, 2},
-                                                                            {2, 2},
-                                                                            {3, 3},
-                                                                            resampleMode,
-                                                                            paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleBwdPlanFp32, ExecutePlanNchw)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleBwdPlanExecuteVsCpuRef<float, float, float, int32_t>({2, 3, 14, 14},
-                                                                            TensorLayout::NCHW,
-                                                                            {2, 1},
-                                                                            {1, 2},
-                                                                            {2, 2},
-                                                                            {3, 3},
-                                                                            resampleMode,
-                                                                            paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleBwdPlanFp32, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleBwdPlanExecuteVsCpuRef<float, float, float, int32_t>({2, 3, 14, 14},
-                                                                            TensorLayout::NHWC,
-                                                                            {2, 1},
-                                                                            {1, 2},
-                                                                            {2, 2},
-                                                                            {3, 3},
-                                                                            resampleMode,
-                                                                            paddingMode);
-        }
-    }
-}
-
-// =============================================================
-// FP16 plan execution tests
-// =============================================================
-
-TEST(TestGpuResampleFwdPlanFp16, ExecutePlanNchw)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleFwdPlanExecuteVsCpuRef<half, half, float, int32_t>({2, 3, 14, 14},
-                                                                          TensorLayout::NCHW,
-                                                                          {2, 1},
-                                                                          {1, 2},
-                                                                          {2, 2},
-                                                                          {3, 3},
-                                                                          resampleMode,
-                                                                          paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleFwdPlanFp16, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleFwdPlanExecuteVsCpuRef<half, half, float, int32_t>({2, 3, 14, 14},
-                                                                          TensorLayout::NHWC,
-                                                                          {2, 1},
-                                                                          {1, 2},
-                                                                          {2, 2},
-                                                                          {3, 3},
-                                                                          resampleMode,
-                                                                          paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleBwdPlanFp16, ExecutePlanNchw)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleBwdPlanExecuteVsCpuRef<half, half, float, int32_t>({2, 3, 14, 14},
-                                                                          TensorLayout::NCHW,
-                                                                          {2, 1},
-                                                                          {1, 2},
-                                                                          {2, 2},
-                                                                          {3, 3},
-                                                                          resampleMode,
-                                                                          paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleBwdPlanFp16, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleBwdPlanExecuteVsCpuRef<half, half, float, int32_t>({2, 3, 14, 14},
-                                                                          TensorLayout::NHWC,
-                                                                          {2, 1},
-                                                                          {1, 2},
-                                                                          {2, 2},
-                                                                          {3, 3},
-                                                                          resampleMode,
-                                                                          paddingMode);
-        }
-    }
-}
-
-// =============================================================
-// BFP16 plan execution tests
-// =============================================================
-
-TEST(TestGpuResampleFwdPlanBfp16, ExecutePlanNchw)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleFwdPlanExecuteVsCpuRef<bfloat16, bfloat16, float, int32_t>(
-                {2, 3, 14, 14},
-                TensorLayout::NCHW,
-                {2, 1},
-                {1, 2},
-                {2, 2},
-                {3, 3},
-                resampleMode,
-                paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleFwdPlanBfp16, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleFwdPlanExecuteVsCpuRef<bfloat16, bfloat16, float, int32_t>(
-                {2, 3, 14, 14},
-                TensorLayout::NHWC,
-                {2, 1},
-                {1, 2},
-                {2, 2},
-                {3, 3},
-                resampleMode,
-                paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleBwdPlanBfp16, ExecutePlanNchw)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleBwdPlanExecuteVsCpuRef<bfloat16, bfloat16, float, int32_t>(
-                {2, 3, 14, 14},
-                TensorLayout::NCHW,
-                {2, 1},
-                {1, 2},
-                {2, 2},
-                {3, 3},
-                resampleMode,
-                paddingMode);
-        }
-    }
-}
-
-TEST(TestGpuResampleBwdPlanBfp16, ExecutePlanNhwc)
-{
-    SKIP_IF_NO_DEVICES();
-
-    for(const auto& resampleMode : {ResampleMode::MAXPOOL,
-                                    ResampleMode::AVGPOOL_EXCLUDE_PADDING,
-                                    ResampleMode::AVGPOOL_INCLUDE_PADDING})
-    {
-        for(const auto& paddingMode : {PaddingMode::ZERO_PAD, PaddingMode::NEG_INF_PAD})
-        {
-            runResampleBwdPlanExecuteVsCpuRef<bfloat16, bfloat16, float, int32_t>(
-                {2, 3, 14, 14},
-                TensorLayout::NHWC,
-                {2, 1},
-                {1, 2},
-                {2, 2},
-                {3, 3},
-                resampleMode,
-                paddingMode);
-        }
-    }
-}
+INSTANTIATE_TEST_SUITE_P(
+    DataTypeLayoutAndDirection,
+    GpuResamplePlanExecutionTest,
+    testing::Combine(testing::Values(DataType::FLOAT, DataType::HALF, DataType::BFLOAT16),
+                     testing::Bool(),
+                     testing::Bool()));
