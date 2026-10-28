@@ -269,7 +269,36 @@ _CONFIGS = {
         use_kv_lds_swizzle=True,
         use_wave_page_id_load=True,
     ),
+    16: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): bf16 D128 GQA.
+        head_size=128,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
+    17: dict(
+        # Reduce with emit_lse (see _REDUCE_LSE): fp16 D64.
+        head_size=64,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+    ),
 }
+
+# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
+_REDUCE_LSE = frozenset({16, 17})
 
 
 def _emit(idx: int) -> str:
@@ -287,6 +316,7 @@ def _emit(idx: int) -> str:
         num_kv_heads=cfg["num_kv_heads"],
         dtype=cfg["dtype"],
         num_segments=cfg["num_segments"],
+        emit_lse=idx in _REDUCE_LSE,
     )
     red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
     red_ll = _native_lower(red_kernel, arch="gfx950")
@@ -314,6 +344,7 @@ def main() -> int:
             num_kv_heads=cfg["num_kv_heads"],
             dtype=cfg["dtype"],
             num_segments=cfg["num_segments"],
+            emit_lse=idx in _REDUCE_LSE,
         )
         red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
         sys.stdout.write(serialize(seg_kernel))
@@ -330,6 +361,7 @@ def main() -> int:
             num_kv_heads=cfg["num_kv_heads"],
             dtype=cfg["dtype"],
             num_segments=cfg["num_segments"],
+            emit_lse=idx in _REDUCE_LSE,
         )
         red_kernel = build_unified_attention_reduce_tiled(red_spec, arch="gfx950")
         sys.stdout.write("".join(str(d) + "\n" for d in verify(seg_kernel)))
