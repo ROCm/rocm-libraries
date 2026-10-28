@@ -441,6 +441,16 @@ class OpDescriptors:
                     # A trained model takes its metric's place, as promote's rebinding does.
                     slot[:] = [entry for entry in slot if entry[0] != metric]
                     slot.append((metric, model_id))
+        # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
+        # an arch, it trains an estimate for that arch only if `predict_engine` binds the
+        # arch too. So each such arch gets the estimate's slot, which the loader disables
+        # just as it does under `default`. The ranker map is left alone: it is an input of
+        # the selector revision every trained estimate is checked against, and this role
+        # is not.
+        for arch in roles["sort_kernel_catalog"]:
+            roles["predict_engine"].setdefault(
+                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            )
         for role, by_arch in roles.items():
             engine[role] = {
                 arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]

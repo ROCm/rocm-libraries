@@ -52,8 +52,11 @@ def test_an_arch_model_binds_under_its_arch_and_keeps_the_default(
     _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker-942")
     ops = gen_descriptors.OpDescriptors(OP, FIELDS)
     ued = _ued(tmp_path)
+    # gfx942's ranker gives the estimate a gfx942 slot, so the pipeline can train one there;
+    # gfx950's estimate adds no ranker key, which would change the selector revision.
     assert ued["predict_engine"] == {
         "default": ops.estimate_uhd_id,
+        "gfx942": ops.estimate_uhd_id,
         "gfx950": "model-950",
     }
     assert ued["sort_kernel_catalog"] == {"default": ops.uhd_id, "gfx942": "ranker-942"}
