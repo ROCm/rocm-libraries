@@ -430,7 +430,9 @@ class OpDescriptors:
         # catalog on every arch, and the engine estimate's slot.
         roles: dict[str, dict[str, list[tuple[str | None, str]]]] = {
             "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
-            "predict_engine": {"default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]},
+            "predict_engine": {
+                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            },
         }
         for role, by_arch in self.installed.items():
             for arch, models in by_arch.items():
