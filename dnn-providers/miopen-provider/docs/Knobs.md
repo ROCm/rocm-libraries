@@ -79,6 +79,12 @@ When **enabled**:
   (the knob's maximum), so every solver can be benchmarked. This can be far larger than the
   default (hundreds of MB for large problems); set `global.workspace_size_limit` to cap it.
 
+**MIOpen environment variables**: these apply as they do under PyTorch.
+- `MIOPEN_FIND_MODE` sets the convolution find mode when benchmarking is disabled. Benchmarking
+  overrides it with Normal, as `torch.backends.cudnn.benchmark = True` does.
+- `MIOPEN_FIND_ENFORCE` applies with benchmarking enabled or disabled, for every operation.
+- `MIOPEN_FIND_MODE_FUSION` sets the find mode for fused convolution plans.
+
 **Caching**:
 - Benchmark results are cached in MIOpen's performance database
 - Default location: `~/.config/miopen/` on Linux

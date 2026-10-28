@@ -11,6 +11,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
@@ -53,6 +54,10 @@
 /// - Search (3): Uses cached results if available, searches only on cache miss
 /// - SearchDbUpdate (4): Always re-searches, ignoring cached results
 ///
+/// If MIOPEN_FIND_ENFORCE is set in the environment, the guard sets
+/// miopenTuningPolicyNone so MIOpen applies the environment value instead, as it does
+/// for PyTorch.
+///
 /// Batchnorm and fused convolution plans use this guard. Plain convolution plans do
 /// not: they request tuning through Find's exhaustiveSearch argument, as PyTorch does,
 /// so an MIOPEN_FIND_ENFORCE environment setting still applies to them.
@@ -62,8 +67,8 @@ class ScopedTuningPolicy
 public:
     /// @brief Construct and set the tuning policy on the handle.
     /// @param handle The MIOpen handle to set the policy on.
-    /// @param benchmarkingEnabled If true, sets policy to miopenTuningPolicySearch.
-    ///                           If false, sets policy to miopenTuningPolicyNone.
+    /// @param benchmarkingEnabled If true and MIOPEN_FIND_ENFORCE is unset, sets policy to
+    ///                           miopenTuningPolicySearch. Otherwise sets miopenTuningPolicyNone.
     ScopedTuningPolicy(miopenHandle_t handle, bool benchmarkingEnabled)
         : _handle(handle)
     {
@@ -76,8 +81,11 @@ public:
             _originalPolicy = miopenTuningPolicyNone; // Fallback
         }
 
-        // Set new policy: Search (3) for benchmarking, None (1) otherwise
-        auto policy = benchmarkingEnabled ? miopenTuningPolicySearch : miopenTuningPolicyNone;
+        // Search (3) for benchmarking, None (1) otherwise. None defers to MIOPEN_FIND_ENFORCE.
+        const bool envEnforceSet
+            = !hipdnn_data_sdk::utilities::getEnv("MIOPEN_FIND_ENFORCE").empty();
+        auto policy = benchmarkingEnabled && !envEnforceSet ? miopenTuningPolicySearch
+                                                            : miopenTuningPolicyNone;
         status = miopenSetTuningPolicy(_handle, policy);
         if(status != miopenStatusSuccess)
         {
