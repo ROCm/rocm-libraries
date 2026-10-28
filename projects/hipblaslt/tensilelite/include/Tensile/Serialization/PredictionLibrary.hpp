@@ -51,7 +51,6 @@ namespace TensileLite
             using Library = ProblemPredictionLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
 
-#if ORIGAMI_ENABLE_NN
             static std::string logic_stem_from_path(const std::string& path)
             {
                 std::string stem     = path;
@@ -71,7 +70,6 @@ namespace TensileLite
                     return ".";
                 return path.substr(0, slashPos);
             }
-#endif
 
             static void mapping(IO& io, Library& lib)
             {
@@ -201,6 +199,8 @@ namespace TensileLite
                     }
                     // Once per library load. rank_configs reads the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
+                    if(auto const* observe = Library::deserializeObserver)
+                        (*observe)(lib);
 
 #if ORIGAMI_ENABLE_NN
                     const std::string logicStem = logic_stem_from_path(ctx->filename);
@@ -220,6 +220,11 @@ namespace TensileLite
                         }
                     }
 #endif
+                    // Not while a library manifest is collected (OrigamiBoost::libraryManifest).
+                    if(OrigamiBoost::enabled() && !Library::deserializeObserver)
+                        lib.nn_models.boost
+                            = OrigamiBoost::loadForLogic(logic_stem_from_path(ctx->filename),
+                                                         directory_from_path(ctx->filename));
                 }
             }
             const static bool flow = false;
