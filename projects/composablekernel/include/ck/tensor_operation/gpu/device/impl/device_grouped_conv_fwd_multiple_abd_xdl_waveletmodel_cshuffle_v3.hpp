@@ -364,12 +364,17 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     static constexpr auto I4 = Number<4>{};
     static constexpr auto I5 = Number<5>{};
 
+    static constexpr bool UseCustomTransform = DirectLoad;
+
     using ConvToGemmFwdTransformer = TransformConvFwdToGemm<NDimSpatial,
                                                             ConvForwardSpecialization,
                                                             true /*SplitN*/,
                                                             ADataType,
                                                             EDataType,
-                                                            NumGroupsToMerge>;
+                                                            NumGroupsToMerge,
+                                                            index_t,
+                                                            false, // CTranspose
+                                                            UseCustomTransform>;
 
     using ComputePtrOffset = ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>;
 
