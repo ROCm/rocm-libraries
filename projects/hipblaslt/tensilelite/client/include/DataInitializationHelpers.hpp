@@ -6,6 +6,7 @@
 
 #include "DataInitialization.hpp"
 #include <mxDataGen.hpp>                          // hipDataType, generateMXInput
+#include <mxDataGenerator/PreSwizzle.hpp>         // DGen::preSwizzleScalesGFX950 / GFX1250
 #include <mxDataGenerator/dataTypeInfo.hpp>       // DGen::toFloat / toFloatPacked
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>     // DGen::ocp_e2m1_mxfp4
 #include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>     // DGen::ocp_e2m3_mxfp6
@@ -182,6 +183,58 @@ namespace TensileLite
                 if(b == 0x00) return 0.0f;
                 if(b == 0xFF) return std::numeric_limits<float>::quiet_NaN();
                 return std::ldexp(1.0f, static_cast<int>(b) - 127);
+            }
+            // ----------------------------------------------------------------
+            //  naturalMXScaleFromCanonical : inverse of restrideMXScaleBufferKFast.
+            //                Recovers the scales generateMXInput emits for one
+            //                batch (unpadded, pre-swizzle) from the canonical copy.
+            //  swizzleNaturalMXScale : the swizzle generateMXInput applies to
+            //                those scales for `layout`; rows/cols are the data
+            //                tensor's sizes()[0] / sizes()[1].
+            // ----------------------------------------------------------------
+            inline std::vector<uint8_t> naturalMXScaleFromCanonical(uint8_t const* canonical,
+                                                                    size_t         naturalBytes,
+                                                                    bool           kFast,
+                                                                    size_t         compactFree,
+                                                                    size_t         compactKBlocks,
+                                                                    size_t         paddedKBlocks,
+                                                                    size_t         elemBytes)
+            {
+                std::vector<uint8_t> natural(naturalBytes);
+                if(kFast && compactKBlocks != paddedKBlocks)
+                {
+                    size_t const compactRow = compactKBlocks * elemBytes;
+                    size_t const paddedRow  = paddedKBlocks * elemBytes;
+                    for(size_t f = 0; f < compactFree; f++)
+                        std::memcpy(
+                            natural.data() + f * compactRow, canonical + f * paddedRow, compactRow);
+                }
+                else
+                {
+                    std::memcpy(natural.data(), canonical, naturalBytes);
+                }
+                return natural;
+            }
+            inline std::vector<uint8_t> swizzleNaturalMXScale(std::vector<uint8_t> const& natural,
+                                                              MXScaleLayout               layout,
+                                                              size_t                      rows,
+                                                              size_t                      cols,
+                                                              size_t                      mxBlock,
+                                                              bool                        kIsRows)
+            {
+                if(layout == MXScaleLayout::GFX950)
+                {
+                    size_t const kExtent  = kIsRows ? rows : cols;
+                    size_t const kBlocks  = mxBlock > 0 ? (kExtent + mxBlock - 1) / mxBlock : 0;
+                    size_t const mnExtent = (kBlocks > 0 && natural.size() % kBlocks == 0)
+                                                ? natural.size() / kBlocks
+                                                : (kIsRows ? cols : rows);
+                    return DGen::preSwizzleScalesGFX950(natural, {mnExtent, kBlocks});
+                }
+                if(layout == MXScaleLayout::GFX1250 && mxBlock > 0)
+                    return DGen::preSwizzleScalesGFX1250(
+                        natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
+                return natural;
             }
             inline float decodeMXElement(rocisa::DataType dataType,
                                          uint8_t const*   scalePtr,
