@@ -131,3 +131,11 @@ HIP_VISIBLE_DEVICES=0 python -m pytest tests
 # Fixed-length bias tests
 HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_fixedlen.py -k bias
 ```
+
+To run the suite manually in Jenkins, enable `RUN_FMHA_PYTHON_TESTS` in
+**Build with Parameters**. It defaults to off for PR and scheduled builds.
+This builds `Dockerfile.fmha_python` from the current checkout and publishes
+JUnit results and the pytest log. A physical `gfx1250` GPU runner is required;
+the existing gfx1250 simulator CI does not run this suite.
+Before merging changes to `groovy/vars/ck.groovy`, also enable
+`USE_CURRENT_BRANCH_FOR_CK_GROOVY`.
