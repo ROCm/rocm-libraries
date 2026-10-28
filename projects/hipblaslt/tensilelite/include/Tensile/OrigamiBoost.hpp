@@ -26,9 +26,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -143,6 +146,20 @@ namespace TensileLite
                                              ContractionProblemGemm const& problem,
                                              Hardware const&               hardware);
 
+        /// Per entry of a prediction row's solution list, the position of the first entry with
+        /// the same solutionName.
+        template <typename SolutionList>
+        std::vector<std::uint32_t> solutionNameIds(SolutionList const& solutions)
+        {
+            std::unordered_map<std::string_view, std::uint32_t> first;
+            std::vector<std::uint32_t>                          ids(solutions.size());
+            for(std::size_t i = 0; i < solutions.size(); ++i)
+                ids[i] = first.emplace(solutions[i].second->solutionName,
+                                       static_cast<std::uint32_t>(i))
+                             .first->second;
+            return ids;
+        }
+
         /// Sinks for model loads (accepted, refused) and per-call outcomes; empty disables them.
         TENSILELITEHOST_EXPORT void          setLoadLoggers(Logger accepted, Logger refused);
         TENSILELITEHOST_EXPORT void          setCallLogger(Logger logger);
@@ -163,14 +180,16 @@ namespace TensileLite
         public:
             using SolutionList = std::vector<std::pair<int, std::shared_ptr<MySolution>>>;
 
-            RerankSource(MyProblem const&    problem,
-                         Hardware const&     hardware,
-                         SolutionList const& solutions,
-                         Matches const&      matches,
-                         Adjust const&       adjust)
+            RerankSource(MyProblem const&                  problem,
+                         Hardware const&                   hardware,
+                         SolutionList const&               solutions,
+                         std::vector<std::uint32_t> const& nameIds,
+                         Matches const&                    matches,
+                         Adjust const&                     adjust)
                 : m_problem(problem)
                 , m_hardware(hardware)
                 , m_solutions(solutions)
+                , m_nameIds(nameIds)
                 , m_matches(matches)
                 , m_adjust(adjust)
             {
@@ -183,6 +202,7 @@ namespace TensileLite
                 m_origamiProblem = &origamiProblem;
                 verdicts().clear();
                 accepted().clear();
+                acceptedNames().clear();
             }
 
             void prepare(std::vector<origami::prediction_result_t>& results) override
@@ -207,10 +227,15 @@ namespace TensileLite
                 verdicts().emplace_back(solution.get(), passed);
                 if(!passed)
                     return false;
-                for(MySolution const* a : accepted())
-                    if(a->solutionName == solution->solutionName)
+                // By the row's name ids when it has them (solutionNameIds), else by name.
+                const bool          byId = m_nameIds.size() == m_solutions.size();
+                const std::uint32_t name = byId ? m_nameIds[config.index] : 0;
+                for(std::size_t i = 0; i < accepted().size(); ++i)
+                    if(byId ? acceptedNames()[i] == name
+                            : accepted()[i]->solutionName == solution->solutionName)
                         return false;
                 accepted().push_back(solution.get());
+                acceptedNames().push_back(name);
                 fields.num_loads_coalesced_a = solution->sizeMapping.NumLoadsCoalescedA;
                 fields.num_loads_coalesced_b = solution->sizeMapping.NumLoadsCoalescedB;
                 fields.streamk               = streamKLaunch(*solution, m_problem, m_hardware);
@@ -280,14 +305,20 @@ namespace TensileLite
                 thread_local std::vector<MySolution const*> a;
                 return a;
             }
+            static std::vector<std::uint32_t>& acceptedNames()
+            {
+                thread_local std::vector<std::uint32_t> n;
+                return n;
+            }
 
-            MyProblem const&          m_problem;
-            Hardware const&           m_hardware;
-            SolutionList const&       m_solutions;
-            Matches const&            m_matches;
-            Adjust const&             m_adjust;
-            origami::problem_t const* m_origamiProblem = nullptr;
-            bool                      m_prepared       = false;
+            MyProblem const&                  m_problem;
+            Hardware const&                   m_hardware;
+            SolutionList const&               m_solutions;
+            std::vector<std::uint32_t> const& m_nameIds;
+            Matches const&                    m_matches;
+            Adjust const&                     m_adjust;
+            origami::problem_t const*         m_origamiProblem = nullptr;
+            bool                              m_prepared       = false;
         };
     } // namespace OrigamiBoost
 } // namespace TensileLite
