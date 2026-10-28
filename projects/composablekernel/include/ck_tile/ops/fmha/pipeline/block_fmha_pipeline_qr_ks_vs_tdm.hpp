@@ -101,6 +101,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     // reads first, so the V-ready barrier also frees the K buffer gemm0 read, and the K-ready
     // barrier frees the V buffer gemm1 read. The separate WAR barriers go.
     static constexpr bool kMergedWarBarriers = is_any_of<KDataType, fp8_t, bf8_t>::value;
+    // fp8 double-buffer K/V loads pack their TDM descriptor in SGPRs (load_tile_tdm_uniform):
+    // the strides are taken once before the loop instead of riding a VGPR through it.
+    static constexpr bool kUniformTdmLoad = is_any_of<KDataType, fp8_t, bf8_t>::value;
 
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
@@ -544,10 +547,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         !kHasSink && !Problem::kSkipMinSeqlenQ &&
         (!FmhaMask::IsMasking || std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>);
 
-    template <bool AllowDenseFullBox = false, typename LdsWindow, typename DramWindow>
+    template <bool AllowDenseFullBox = false,
+              typename LdsWindow,
+              typename DramWindow,
+              typename Strides>
     CK_TILE_DEVICE static void LoadTdmFullTileOrPadded(const TDMConfig& config,
                                                        LdsWindow& lds_window,
-                                                       const DramWindow& dram_window)
+                                                       const DramWindow& dram_window,
+                                                       const Strides& uniform_strides)
     {
         if constexpr(kTdmBoxesAlwaysInBounds && (FmhaMask::IsMasking || AllowDenseFullBox))
         {
@@ -556,6 +563,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             // and tail prefetches repeat the final valid tile. Each warp's
             // box is therefore full, even on the final loop iteration.
             load_tile_tdm_full_tile(config, lds_window, dram_window);
+        }
+        else if constexpr(kUniformTdmLoad)
+        {
+            load_tile_tdm_uniform(config, lds_window, dram_window, uniform_strides);
         }
         else
         {
@@ -1755,9 +1766,12 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
+        const auto k_tdm_strides = make_tdm_uniform_strides(k_dram_window);
+        const auto v_tdm_strides = make_tdm_uniform_strides(v_dram_window);
         block_sync_lds<0>();
-        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
-        LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
+        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
+        LoadTdmFullTileOrPadded<true>(
+            tdm_config_v, v_lds_write_window, v_dram_window, v_tdm_strides);
 
         move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
         // The prologue issues two K prefetches: the first into ptrk0, which
@@ -1779,7 +1793,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
 
         // These feed block_sync_lds<N>, whose N lands in the hardware lgkmcnt field: 6 bits
         // on gfx12, so 63 is the maximum and also the "do not wait" sentinel that
@@ -1860,7 +1874,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
                 move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
                 k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+                LoadTdmFullTileOrPadded(
+                    tdm_config_k, k_lds_write_window, k_dram_window, k_tdm_strides);
             };
 
             // move V tile windows
@@ -1881,7 +1896,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             // valid tile instead of forming an unused out-of-allocation address.
             move_tile_window(v_dram_window, {i_total_loops + 1 < num_total_loop ? kN0 : 0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
+            LoadTdmFullTileOrPadded<true>(
+                tdm_config_v, v_lds_write_window, v_dram_window, v_tdm_strides);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C

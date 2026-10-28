@@ -1124,6 +1124,78 @@ struct tile_window_with_static_distribution
         static_for<0, NumCoord, 1>{}(process_coord);
     }
 
+    // Global strides for tdm_load_to_lds_uniform, read-first-laned once. Take them before a
+    // loop: a stride is loop-invariant, and passing it to every TDM issue through
+    // readfirstlane keeps a VGPR copy of it live across the loop.
+    CK_TILE_DEVICE auto get_tdm_uniform_strides() const
+    {
+        return amd_wave_read_first_lane(get_cached_global_strides());
+    }
+
+    // tdm_load_to_lds (no gather, bounds-checked) that read-first-lanes only the words of this
+    // issue -- LDS address, global offset, remaining extents -- and takes the strides from
+    // get_tdm_uniform_strides(), so the descriptor is packed in SGPRs.
+    template <typename TDMConfig_, typename LdsTileWindow_, typename Strides_>
+    CK_TILE_DEVICE void tdm_load_to_lds_uniform(const TDMConfig_& tdm_config,
+                                                LdsTileWindow_&& lds_tile,
+                                                const Strides_& uniform_strides) const
+    {
+        using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
+        using LdsDataType   = typename LdsTileWindow::DataType;
+        static_assert(std::is_same_v<LdsDataType, typename Base::DataType>,
+                      "LdsDataType must match tile window's DataType");
+
+        using Traits             = typename Base::Traits;
+        constexpr auto tile_dstr = typename Base::TileDstr{};
+
+        static constexpr index_t num_tensor_dims = BottomTensorView_::get_num_of_dimension();
+
+        const auto lds_window_origin = lds_tile.get_window_origin();
+        const auto& lds_tensor_descriptor =
+            lds_tile.get_bottom_tensor_view().get_tensor_descriptor();
+        auto smem_base_ptr = lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_;
+        const auto& glb_tensor_descriptor = this->get_bottom_tensor_view().get_tensor_descriptor();
+
+        // tdm's box dim is reversed from tile distribution
+        constexpr auto raw_box_dim =
+            to_sequence(tile_dstr.get_ys_to_d_descriptor().get_lengths()).reverse();
+        constexpr auto box_dim = raw_box_dim.modify(
+            number<0>{}, number<raw_box_dim.at(number<0>{}) / Traits::PackedSize>{});
+
+        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
+            const auto& window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
+            const auto& bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+
+            const auto lds_coord = make_tensor_coordinate(
+                lds_tensor_descriptor,
+                lds_window_origin + window_adaptor_thread_coord.get_bottom_index());
+            CK_TILE_LDS_ADDR LdsDataType* smem = amd_wave_read_first_lane(
+                smem_base_ptr + lds_coord.get_offset() / Traits::PackedSize);
+
+            // Clamp remaining dimensions so out-of-bounds boxes load zeros (as tdm_load_to_lds).
+            auto tensor_dims =
+                to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
+                    [](auto x) { return max(index_t{0}, x); },
+                    detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
+                        window_adaptor_thread_coord.get_bottom_index())));
+            tensor_dims[0] /= Traits::PackedSize;
+
+            this->get_bottom_tensor_view()
+                .get_buffer_view()
+                .template tdm_get_uniform<TDMConfig_,
+                                          remove_cvref_t<decltype(tensor_dims)>,
+                                          remove_cvref_t<decltype(box_dim)>,
+                                          num_tensor_dims>(
+                    tdm_config,
+                    smem,
+                    amd_wave_read_first_lane(bottom_tensor_thread_coord.get_offset() /
+                                             Traits::PackedSize),
+                    amd_wave_read_first_lane(tensor_dims),
+                    uniform_strides,
+                    number<num_tensor_dims>{});
+        });
+    }
+
 #if defined(__gfx125__)
     template <DataCachePrefetchKind PrefetchKind = DataCachePrefetchKind::None>
     static constexpr index_t getCachelineSize()

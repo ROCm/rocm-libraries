@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -461,6 +461,27 @@ class TDMDescriptor
                               amd_wave_read_first_lane(group3.bitfield),
                               v8i_zeros);
         }
+    }
+
+    // getResourceDescriptorGroup() without its readfirstlane. Every input must already be
+    // wave-uniform: a read-first-laned word that is already in an SGPR would otherwise be
+    // copied into a VGPR to feed v_readfirstlane, and a loop-invariant copy stays live.
+    CK_TILE_DEVICE auto getUniformResourceDescriptorGroup() const
+        -> tuple<int32x4_t, int32x8_t, int32x4_t, int32x4_t, int32x8_t>
+    {
+        static_assert(TensorRank <= 2 && !IsGatherMode,
+                      "the uniform descriptor covers rank <= 2 loads without gather");
+        TDM_GROUP0 group0{reinterpret_cast<uintptr_t>(m_localAddress),
+                          reinterpret_cast<uintptr_t>(m_globalAddress),
+                          static_cast<uint32_t>(m_rowIdxSize),
+                          0u};
+
+        TDM_GROUP1 group1;
+        configureGroup1(group1);
+
+        int32x4_t v4i_zeros = {};
+        int32x8_t v8i_zeros = {};
+        return make_tuple(group0.bitfield, group1.bitfield, v4i_zeros, v4i_zeros, v8i_zeros);
     }
 
     private:

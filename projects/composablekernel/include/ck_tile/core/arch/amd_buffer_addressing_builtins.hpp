@@ -3449,6 +3449,30 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
 
 template <amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           typename DataType,
+          index_t TensorRank>
+CK_TILE_DEVICE void amd_tdm_load_uniform(const TDMDescriptor<DataType, TensorRank>& descriptor)
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    static constexpr auto I0 = number<0>{};
+    static constexpr auto I1 = number<1>{};
+    static constexpr auto I2 = number<2>{};
+    static constexpr auto I3 = number<3>{};
+    static constexpr auto I4 = number<4>{};
+
+    auto tdm_desc_grp = descriptor.getUniformResourceDescriptorGroup();
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
+                                        tdm_desc_grp.get(I1),
+                                        tdm_desc_grp.get(I2),
+                                        tdm_desc_grp.get(I3),
+                                        tdm_desc_grp.get(I4),
+                                        static_cast<index_t>(coherence));
+#else
+    ignore = descriptor;
+#endif
+}
+
+template <amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
+          typename DataType,
           index_t TensorRank,
           bool IsGatherMode = false>
 CK_TILE_DEVICE void
