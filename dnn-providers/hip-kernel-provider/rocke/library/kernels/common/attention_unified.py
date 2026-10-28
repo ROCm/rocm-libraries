@@ -555,24 +555,28 @@ def _reject_mask_on_arch(
     return None
 
 
-_LSE_SPLIT_KV_ARCHES = ("gfx942", "gfx950")
+_LSE_ARCHES = ("gfx942", "gfx950")
+_LSE_PATHS = {"3d": "split-KV", "tiled 2D": "tiled 2D"}
 
 
 def _reject_lse(
     problem: UnifiedAttentionProblem, arch: str, path: str
 ) -> Optional[Tuple[bool, str]]:
-    """The LSE output exists only in the gfx942/gfx950 split-KV reduce.
+    """The LSE output exists in the gfx942/gfx950 split-KV reduce and tiled 2D
+    kernels only.
 
-    ``path`` is ``"3d"`` for split-KV, else a label for the refused path."""
+    ``path`` is ``"3d"`` (split-KV) or ``"tiled 2D"``; any other label names a
+    path that writes no LSE and is refused."""
     if not problem.emit_lse:
         return None
-    if path != "3d":
+    label = _LSE_PATHS.get(path)
+    if label is None:
         return False, f"LSE output is not implemented on the {path} attention path"
-    if arch not in _LSE_SPLIT_KV_ARCHES:
-        return False, f"LSE output is not implemented on {arch} split-KV attention"
+    if arch not in _LSE_ARCHES:
+        return False, f"LSE output is not implemented on {arch} {label} attention"
     if problem.use_sinks:
         return False, (
-            "LSE output with attention sinks is not implemented on split-KV "
+            "LSE output with attention sinks is not implemented on unified "
             "attention (keyless rows would drop the sink)"
         )
     return None
@@ -602,6 +606,11 @@ def supports_native_unified_attention(
     - softcap: yes
     """
     arch = _canonical_arch_for_selection(arch)
+    # The scalar kernel writes no LSE; refusing here keeps the auto tail from
+    # ever launching it for an LSE request.
+    rejected = _reject_lse(problem, arch, "scalar 2D")
+    if rejected is not None:
+        return rejected
     if problem.head_size not in UNIFIED_HEAD_SIZES:
         return False, f"unsupported head_size {problem.head_size}"
     if problem.block_size not in UNIFIED_BLOCK_SIZES:
@@ -1091,7 +1100,7 @@ class _TiledRoute:
 
 
 def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> bool:
-    """Shared eligibility gate for the gfx942 4-warp GQA cohorts -- the eight
+    """Shared eligibility gate for the gfx942 4-warp GQA cohorts -- the
     clauses common to ``_d256_gfx942_fast`` and ``_d128_gfx942_swa_fast``.
     Extracting them here dedupes the two AND-walls; each cohort predicate adds
     only its distinctive clauses (head_size / dtype / sliding_window /
@@ -1107,6 +1116,10 @@ def _gfx942_4warp_eligible(problem: "UnifiedAttentionProblem", arch: str) -> boo
         # shipped default builder). Exclude caches > 2 GiB, which need the i64
         # path -- they fall back to the correct default builder.
         and not _enable_i64_kv_addr(problem)
+        # The 4-warp GQA bodies write no LSE (finite -1e30 max sentinel, no
+        # l == 0 guard, fixed 17-argument ABI): an LSE request takes the
+        # default gfx942 builder, which does.
+        and not problem.emit_lse
     )
 
 
@@ -4957,7 +4970,8 @@ def _explicit_path_supported(
     """
     # LSE eligibility is an output contract, not a coverage gate: the
     # allow_unsupported escape hatch must not skip it (a keyless row would
-    # silently drop an attention sink, or a 2D path would write no LSE at all).
+    # silently drop an attention sink, or an arch without the store would
+    # write no LSE at all).
     rejected = _reject_lse(
         problem,
         _canonical_arch_for_selection(arch),

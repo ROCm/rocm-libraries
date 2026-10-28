@@ -17,6 +17,7 @@ from typing import Tuple
 from kernels.common.attention_unified import (
     supports_native_unified_attention,
     supports_native_unified_attention_3d_tiled,
+    supports_native_unified_attention_tiled,
 )
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import (
@@ -83,7 +84,15 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=req.arch)
+        # The scalar gate is the coverage check; it refuses LSE (the scalar
+        # kernel writes none), so ask it about the LSE-off problem and let the
+        # path's own gate rule on LSE below.
+        coverage = (
+            dataclasses.replace(problem, emit_lse=False)
+            if problem.emit_lse
+            else problem
+        )
+        ok, why = supports_native_unified_attention(coverage, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != path:
@@ -91,9 +100,13 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
                 f"problem routes to {problem.select_path()!r} path, not {path!r}"
             )
         if problem.emit_lse:
-            # The scalar coverage check above knows nothing about LSE; the
-            # split-KV gate owns which arches and features can write it.
-            ok, why = supports_native_unified_attention_3d_tiled(problem, arch=req.arch)
+            # The path's own gate owns which arches and features can write LSE.
+            gate = (
+                supports_native_unified_attention_3d_tiled
+                if path == "3d"
+                else supports_native_unified_attention_tiled
+            )
+            ok, why = gate(problem, arch=req.arch)
             if not ok:
                 return False, why
         return True, "ok"
