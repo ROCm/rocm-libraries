@@ -3496,7 +3496,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
              dsReadCreditLifetime() - 1) /
             std::max(1, dsReadCreditLifetime()));
         dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows,
-                       maxPerBatch);
+                       maxPerBatch, effectiveDsCyclesPerLoad(dsTotalThisRegion_), windowCycles);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
