@@ -67,10 +67,6 @@ common = [
 
     # Workflows that are not TheRock CI. Changing one of these cannot affect a
     # TheRock build or test, so there is no reason to burn runners on it.
-    #
-    # fnmatch has no negation operator, so this list must be maintained by hand.
-    # IMPORTANT: never add ".github/workflows/therock-*" here -- those workflows
-    # define TheRock CI itself and must always re-run it to validate the change.
     ".github/workflows/auto-retry-failed.yml",
     ".github/workflows/clang-tidy.yml",
     ".github/workflows/close-stale-prs.yml",
