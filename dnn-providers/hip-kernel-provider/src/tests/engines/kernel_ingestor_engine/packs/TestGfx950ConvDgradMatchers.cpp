@@ -31,7 +31,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestVectors.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestCatalog.hpp"
 
 /**
  * @file TestGfx950ConvDgradMatchers.cpp
@@ -51,6 +51,7 @@ using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad;
 namespace vectors = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_vectors;
+namespace catalog = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog;
 using hip_kernel_provider::kernel_ingestor_engine::registerNativeIngestorSymbols;
 
 constexpr PackSymbols GFX950_CONV_DGRAD_AOT{"hipkernel:Gfx950ConvDgradAot",
@@ -238,66 +239,34 @@ DescriptorId idOf(uint32_t value, uint8_t tag)
     return id;
 }
 
-/// A kpack kernel carrying @p instance's complete metadata, as the descriptor loader
-/// delivers it (every field present, omitted ones completed from the KMD defaults).
-KernelDefinition
-    kernelOf(const vectors::Instance& instance, const std::string& dtype = "fp16", uint8_t pack = 1)
+/// A kpack kernel carrying @p entry's complete metadata, as the descriptor loader delivers
+/// it (every field present, omitted ones completed from the KMD defaults), in pack @p pack.
+KernelDefinition kernelOf(const catalog::Entry& entry, uint8_t pack = 1)
 {
     KernelDefinition kernel;
-    kernel.kernelId = idOf(
-        static_cast<uint32_t>(std::hash<std::string>{}(std::string(instance.instanceId) + dtype)),
-        pack);
+    const auto& id = entry.text("instance_id");
+    kernel.kernelId = idOf(static_cast<uint32_t>(std::hash<std::string>{}(id + entry.dtype)), pack);
     kernel.packId = idOf(0, pack);
     kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.name = std::string("gfx950_conv_dgrad_aot_") + dtype + "_" + instance.instanceId;
-    kernel.metadata = {{"dtype", dtype},
-                       {"tile_m", instance.tile_m},
-                       {"tile_n", instance.tile_n},
-                       {"tile_k", instance.tile_k},
-                       {"warp_m", instance.warp_m},
-                       {"warp_n", instance.warp_n},
-                       {"warp_tile_m", instance.warp_tile_m},
-                       {"warp_tile_n", instance.warp_tile_n},
-                       {"warp_tile_k", instance.warp_tile_k},
-                       {"wave_size", int64_t{64}},
-                       {"pipeline", std::string(instance.pipeline)},
-                       {"epilogue", std::string(instance.epilogue)},
-                       {"vector_size_a", instance.vector_size_a},
-                       {"vector_size_b", instance.vector_size_b},
-                       {"vector_size_c", instance.vector_size_c},
-                       {"lds_k_outer", instance.lds_k_outer},
-                       {"max_sub_gemms", instance.max_sub_gemms},
-                       {"grouped", instance.grouped},
-                       {"instance_id", std::string(instance.instanceId)},
-                       {"layout", std::string("NHWC")},
-                       {"kernel_family", instance.kernel_family},
-                       {"direct_variant", std::string(instance.direct_variant)},
-                       {"filter_h", instance.filter_h},
-                       {"filter_w", instance.filter_w},
-                       {"stride_h", instance.stride_h},
-                       {"stride_w", instance.stride_w},
-                       {"pad_h", instance.pad_h},
-                       {"pad_w", instance.pad_w},
-                       {"dilation_h", instance.dilation_h},
-                       {"dilation_w", instance.dilation_w},
-                       {"cpg", instance.cpg},
-                       {"kpg", instance.kpg},
-                       {"block_w", instance.block_w},
-                       {"block_waves", instance.block_waves},
-                       {"block_h", instance.block_h},
-                       {"block_q", instance.block_q},
-                       {"block_groups", instance.block_groups},
-                       {"fold_k32", instance.fold_k32},
-                       {"waves_k", instance.waves_k},
-                       {"waves_q", instance.waves_q},
-                       {"persistent_grid", instance.persistent_grid},
-                       {"runtime_k_loop", instance.runtime_k_loop}};
+    kernel.name
+        = "gfx950_conv_dgrad_aot_" + entry.dtype + "_" + entry.text("direct_variant") + "_" + id;
+    for(const auto& [name, value] : entry.fields)
+    {
+        if(const auto* integer = std::get_if<int64_t>(&value))
+        {
+            kernel.metadata[name] = *integer;
+        }
+        else
+        {
+            kernel.metadata[name] = std::get<std::string>(value);
+        }
+    }
     return kernel;
 }
 
 /// Runs the pack's KernelPrepareFn over @p kernels as the engine's shared state does at
 /// load: each carries its prepared payload, and each helper is filed for the MFMA
-/// pipeline of its own pack.
+/// pipelines of its own pack.
 void prepare(std::vector<KernelDefinition>& kernels)
 {
     registerNativeIngestorSymbols();
@@ -311,61 +280,60 @@ void prepare(std::vector<KernelDefinition>& kernels)
     }
 }
 
-/// The fp16 catalog as one pack (or the bf16 one, relabeled), prepared.
-std::vector<KernelDefinition> catalogPack(const std::string& dtype = "fp16", uint8_t pack = 1)
+/// The @p dtype catalog as one pack, prepared, in catalog order.
+std::vector<KernelDefinition> catalogPack(const std::string& dtype, uint8_t pack)
 {
     std::vector<KernelDefinition> kernels;
-    for(const auto& instance : vectors::catalogInstances())
+    for(const auto& entry : catalog::catalog(dtype))
     {
-        kernels.push_back(kernelOf(instance, dtype, pack));
+        kernels.push_back(kernelOf(entry, pack));
     }
     prepare(kernels);
     return kernels;
 }
 
-const vectors::Instance& firstInstance(const std::function<bool(const vectors::Instance&)>& pick)
+const catalog::Entry& variantEntry(
+    const std::string& variant,
+    const std::function<bool(const catalog::Entry&)>& pick
+    = [](const catalog::Entry&) { return true; },
+    const std::string& dtype = "fp16")
 {
-    const auto& instances = vectors::catalogInstances();
-    const auto it = std::find_if(instances.begin(), instances.end(), pick);
-    if(it == instances.end())
+    return catalog::firstEntry(dtype, [&](const catalog::Entry& e) {
+        return e.text("direct_variant") == variant && pick(e);
+    });
+}
+
+const catalog::Entry& implicitEntry()
+{
+    return variantEntry("none", [](const catalog::Entry& e) {
+        return e.integer("vector_size_a") == 8 && e.integer("vector_size_b") == 8
+               && e.integer("vector_size_c") == 8 && e.text("pipeline") == "mem"
+               && e.integer("dy_halo") == 0 && e.integer("patch") == 0
+               && e.integer("tap_outer_k") == 0 && e.integer("filter_h") == 0;
+    });
+}
+
+const catalog::Entry& depthwiseEntry(int64_t filter, int64_t stride)
+{
+    return variantEntry("depthwise_dgrad", [=](const catalog::Entry& e) {
+        return e.integer("filter_h") == filter && e.integer("stride_h") == stride;
+    });
+}
+
+const catalog::Entry& fusedEntry(int64_t cpg)
+{
+    return variantEntry("grouped_dgrad_fused",
+                        [=](const catalog::Entry& e) { return e.integer("cpg") == cpg; });
+}
+
+std::vector<const catalog::Entry*> helperEntries(const std::string& dtype = "fp16")
+{
+    std::vector<const catalog::Entry*> helpers;
+    for(const auto& entry : catalog::catalog(dtype))
     {
-        throw std::runtime_error("no catalog instance matches");
-    }
-    return *it;
-}
-
-const vectors::Instance& implicitInstance()
-{
-    return firstInstance([](const auto& i) {
-        return i.kernel_family == 0 && i.vector_size_a == 8 && i.vector_size_b == 8
-               && i.vector_size_c == 8 && std::string_view(i.pipeline) == "mem";
-    });
-}
-
-const vectors::Instance& depthwiseInstance(int64_t filter, int64_t stride)
-{
-    return firstInstance([=](const auto& i) {
-        return std::string_view(i.direct_variant) == "depthwise_dgrad" && i.filter_h == filter
-               && i.stride_h == stride;
-    });
-}
-
-const vectors::Instance& mfmaInstance(int64_t cpg, int64_t kpg, bool coalesced)
-{
-    return firstInstance([=](const auto& i) {
-        return std::string_view(i.direct_variant) == "grouped_dgrad_mfma" && i.cpg == cpg
-               && i.kpg == kpg && (i.waves_k > 1 || i.runtime_k_loop != 0) == coalesced;
-    });
-}
-
-std::vector<const vectors::Instance*> helperInstances()
-{
-    std::vector<const vectors::Instance*> helpers;
-    for(const auto& instance : vectors::catalogInstances())
-    {
-        if(instance.kernel_family == 2)
+        if(entry.isHelper())
         {
-            helpers.push_back(&instance);
+            helpers.push_back(&entry);
         }
     }
     return helpers;
@@ -568,238 +536,233 @@ TEST(TestGfx950ConvDgradGraphMatcher, AcceptsGroupedDepthwiseStridedAndDilatedPr
     }
 }
 
+bool matchesShape(const DgradShape& shape,
+                  const KernelDefinition& kernel,
+                  data_objects::DataType dtype = data_objects::DataType::HALF)
+{
+    const auto fixture = fixtureOf(shape, dtype);
+    const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
+    EXPECT_TRUE(bound);
+    return bound && matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), kernel, *bound);
+}
+
+DgradShape depthwiseShape(int64_t channels = 96)
+{
+    DgradShape shape;
+    shape.c = shape.k = shape.groups = channels;
+    return shape;
+}
+
+/// A grouped problem tall enough for every fused row: an xcd_tiles row needs eight image
+/// row bands.
+DgradShape groupedShape(int64_t cpg, int64_t groups)
+{
+    DgradShape shape;
+    shape.n = 16;
+    shape.h = shape.w = 28;
+    shape.c = shape.k = cpg * groups;
+    shape.groups = groups;
+    return shape;
+}
+
+/// The dense c4k320 problem the MFMA rows serve.
+DgradShape mfmaShape()
+{
+    DgradShape shape;
+    shape.n = 1;
+    shape.c = 4;
+    shape.k = 320;
+    shape.h = shape.w = 32;
+    return shape;
+}
+
 TEST(TestGfx950ConvDgradKernelMatcher, EachFamilyServesItsOwnProblemsInItsOwnDtype)
 {
-    auto kernels = std::vector<KernelDefinition>{kernelOf(implicitInstance()),
-                                                 kernelOf(depthwiseInstance(3, 1)),
-                                                 kernelOf(mfmaInstance(16, 16, false))};
-    for(const auto* helper : helperInstances())
+    auto kernels = std::vector<KernelDefinition>{kernelOf(implicitEntry()),
+                                                 kernelOf(depthwiseEntry(3, 1)),
+                                                 kernelOf(fusedEntry(16)),
+                                                 kernelOf(variantEntry("grouped_dgrad_mfma"))};
+    for(const auto* helper : helperEntries())
     {
         kernels.push_back(kernelOf(*helper));
     }
     prepare(kernels);
     const auto& implicit = kernels[0];
     const auto& depthwise = kernels[1];
-    const auto& mfma = kernels[2];
-    const auto matches = [](const DgradShape& shape,
-                            const KernelDefinition& kernel,
-                            data_objects::DataType dtype = data_objects::DataType::HALF) {
-        const auto fixture = fixtureOf(shape, dtype);
-        const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
-        EXPECT_TRUE(bound);
-        return bound && matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), kernel, *bound);
-    };
-    DgradShape dense;
-    DgradShape depthwiseShape;
-    depthwiseShape.c = depthwiseShape.k = depthwiseShape.groups = 96;
-    DgradShape grouped;
-    grouped.c = grouped.k = 128;
-    grouped.groups = 8;
-    EXPECT_TRUE(matches(dense, implicit));
-    EXPECT_FALSE(matches(dense, depthwise));
-    EXPECT_FALSE(matches(dense, mfma));
-    EXPECT_FALSE(matches(depthwiseShape, implicit));
-    EXPECT_TRUE(matches(depthwiseShape, depthwise));
-    EXPECT_FALSE(matches(depthwiseShape, mfma));
-    EXPECT_TRUE(matches(grouped, implicit));
-    EXPECT_FALSE(matches(grouped, depthwise));
-    EXPECT_TRUE(matches(grouped, mfma));
+    const auto& fused = kernels[2];
+    const auto& mfma = kernels[3];
+    const DgradShape dense;
+    const auto grouped = groupedShape(16, 8);
+    EXPECT_TRUE(matchesShape(dense, implicit));
+    EXPECT_FALSE(matchesShape(dense, depthwise));
+    EXPECT_FALSE(matchesShape(dense, fused));
+    EXPECT_FALSE(matchesShape(depthwiseShape(), implicit));
+    EXPECT_TRUE(matchesShape(depthwiseShape(), depthwise));
+    EXPECT_FALSE(matchesShape(depthwiseShape(), fused));
+    EXPECT_TRUE(matchesShape(grouped, implicit));
+    EXPECT_FALSE(matchesShape(grouped, depthwise));
+    EXPECT_TRUE(matchesShape(grouped, fused));
+    EXPECT_TRUE(matchesShape(mfmaShape(), mfma));
+    EXPECT_FALSE(matchesShape(grouped, mfma));
     // The dtype is pinned: an fp16 kernel never serves a bf16 graph.
-    EXPECT_FALSE(matches(dense, implicit, data_objects::DataType::BFLOAT16));
-    EXPECT_FALSE(matches(depthwiseShape, depthwise, data_objects::DataType::BFLOAT16));
-    EXPECT_FALSE(matches(grouped, mfma, data_objects::DataType::BFLOAT16));
+    EXPECT_FALSE(matchesShape(dense, implicit, data_objects::DataType::BFLOAT16));
+    EXPECT_FALSE(matchesShape(depthwiseShape(), depthwise, data_objects::DataType::BFLOAT16));
+    EXPECT_FALSE(matchesShape(grouped, fused, data_objects::DataType::BFLOAT16));
     // Without the bound token the matcher matches the graph itself, with the same answer.
     const auto fixture = fixtureOf(grouped);
-    EXPECT_TRUE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), mfma));
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), fused));
     // The helpers are never admitted, whatever the graph.
-    for(size_t i = 3; i < kernels.size(); ++i)
+    for(size_t i = 4; i < kernels.size(); ++i)
     {
-        const auto cpg = std::get<int64_t>(kernels[i].metadata.at("cpg"));
-        const auto kpg = std::get<int64_t>(kernels[i].metadata.at("kpg"));
-        for(const auto groups : {int64_t{1}, int64_t{2}})
-        {
-            DgradShape own;
-            own.groups = groups;
-            own.c = cpg * groups;
-            own.k = kpg * groups;
-            EXPECT_FALSE(matches(own, kernels[i])) << kernels[i].name;
-        }
-        EXPECT_FALSE(matches(dense, kernels[i])) << kernels[i].name;
+        EXPECT_FALSE(matchesShape(mfmaShape(), kernels[i])) << kernels[i].name;
+        EXPECT_FALSE(matchesShape(dense, kernels[i])) << kernels[i].name;
     }
 }
 
 TEST(TestGfx950ConvDgradKernelMatcher, AnMfmaInstanceNeedsItsHelpersInItsOwnPack)
 {
-    DgradShape dense;
-    dense.n = 1;
-    dense.c = 48;
-    dense.k = 192;
-    const auto fixture = fixtureOf(dense);
+    const auto fixture = fixtureOf(mfmaShape());
     const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
     ASSERT_TRUE(bound);
-    const auto& coalesced = mfmaInstance(48, 192, true);
-    // Pack 7 holds the instance and no helper.
-    std::vector<KernelDefinition> lonely{kernelOf(coalesced, "fp16", 7)};
-    prepare(lonely);
+    // The c4k320 rows split K over two waves: they read the reorganized weights, so the
+    // pipeline runs the transpose and the reorganize of its fold_k32.
+    const auto& coalesced = variantEntry(
+        "grouped_dgrad_mfma", [](const catalog::Entry& e) { return e.integer("waves_k") > 1; });
+    const auto fold = coalesced.integer("fold_k32");
+    const auto helpersOf
+        = [&](uint8_t pack, bool transpose, bool reorganize, int64_t reorganizeFold) {
+              std::vector<KernelDefinition> kernels{kernelOf(coalesced, pack)};
+              for(const auto* helper : helperEntries())
+              {
+                  const auto& variant = helper->text("direct_variant");
+                  if((variant == "transpose" && transpose)
+                     || (variant == "reorganize" && reorganize
+                         && helper->integer("fold_k32") == reorganizeFold))
+                  {
+                      kernels.push_back(kernelOf(*helper, pack));
+                  }
+                  // A bf16 helper in the same pack is not this fp16 instance's.
+                  for(const auto* other : helperEntries("bf16"))
+                  {
+                      if(other->text("direct_variant") == variant)
+                      {
+                          kernels.push_back(kernelOf(*other, pack));
+                      }
+                  }
+              }
+              prepare(kernels);
+              return kernels;
+          };
+    const auto lonely = helpersOf(7, false, false, fold);
     EXPECT_FALSE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), lonely[0], *bound));
-    // Pack 8 holds only the transpose; this instance reorganizes too.
-    std::vector<KernelDefinition> half{kernelOf(coalesced, "fp16", 8)};
-    std::vector<KernelDefinition> fullPack{kernelOf(coalesced, "fp16", 9)};
-    for(const auto* helper : helperInstances())
-    {
-        if(helper->cpg != 48 || helper->kpg != 192)
-        {
-            continue;
-        }
-        if(std::string_view(helper->direct_variant) == "transpose")
-        {
-            half.push_back(kernelOf(*helper, "fp16", 8));
-        }
-        fullPack.push_back(kernelOf(*helper, "fp16", 9));
-        // A bf16 helper in the same pack is not this fp16 instance's.
-        half.push_back(kernelOf(*helper, "bf16", 8));
-    }
-    prepare(half);
-    prepare(fullPack);
+    const auto half = helpersOf(8, true, false, fold);
     EXPECT_FALSE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), half[0], *bound));
-    EXPECT_TRUE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), fullPack[0], *bound));
-    // A reorganize helper keyed on another fold_k32 does not stand in. c4k320 ships a
-    // reorganize helper for each fold: one pack holds the instance's transpose and only the
-    // other fold's reorganize, another both of the instance's.
-    DgradShape wide;
-    wide.n = 1;
-    wide.c = 4;
-    wide.k = 320;
-    const auto wideFixture = fixtureOf(wide);
-    const auto wideBound = matchesGraph(GFX950_CONV_DGRAD_AOT, wideFixture.context());
-    ASSERT_TRUE(wideBound);
-    for(const auto fold : {int64_t{0}, int64_t{1}})
+    const auto wrongFold = helpersOf(9, true, true, 1 - fold);
+    EXPECT_FALSE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), wrongFold[0], *bound));
+    const auto full = helpersOf(10, true, true, fold);
+    EXPECT_TRUE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), full[0], *bound));
+    // The runtime-channel pipeline takes the runtime-channel transforms.
+    const auto& rtc = variantEntry("dgrad_mfma_rtc");
+    std::vector<KernelDefinition> rtcPack{kernelOf(rtc, 11)};
+    for(const auto* helper : helperEntries())
     {
-        SCOPED_TRACE(fold);
-        const auto& instance = firstInstance([=](const auto& i) {
-            return std::string_view(i.direct_variant) == "grouped_dgrad_mfma" && i.cpg == 4
-                   && i.kpg == 320 && i.waves_k > 1 && i.fold_k32 == fold;
-        });
-        const auto wrongPack = static_cast<uint8_t>(10 + 2 * fold);
-        const auto rightPack = static_cast<uint8_t>(11 + 2 * fold);
-        std::vector<KernelDefinition> wrongFold{kernelOf(instance, "fp16", wrongPack)};
-        std::vector<KernelDefinition> rightFold{kernelOf(instance, "fp16", rightPack)};
-        for(const auto* helper : helperInstances())
-        {
-            if(helper->cpg != 4 || helper->kpg != 320)
-            {
-                continue;
-            }
-            const bool transpose = std::string_view(helper->direct_variant) == "transpose";
-            if(transpose || helper->fold_k32 != fold)
-            {
-                wrongFold.push_back(kernelOf(*helper, "fp16", wrongPack));
-            }
-            if(transpose || helper->fold_k32 == fold)
-            {
-                rightFold.push_back(kernelOf(*helper, "fp16", rightPack));
-            }
-        }
-        ASSERT_EQ(wrongFold.size(), 3U);
-        ASSERT_EQ(rightFold.size(), 3U);
-        prepare(wrongFold);
-        prepare(rightFold);
-        EXPECT_FALSE(
-            matchesKernel(GFX950_CONV_DGRAD_AOT, wideFixture.context(), wrongFold[0], *wideBound));
-        EXPECT_TRUE(
-            matchesKernel(GFX950_CONV_DGRAD_AOT, wideFixture.context(), rightFold[0], *wideBound));
+        rtcPack.push_back(kernelOf(*helper, 11));
     }
+    prepare(rtcPack);
+    DgradShape rtcShape = mfmaShape();
+    rtcShape.c = 12;
+    EXPECT_TRUE(matchesShape(rtcShape, rtcPack[0]));
+    std::vector<KernelDefinition> plainHelpers{kernelOf(rtc, 12)};
+    for(const auto* helper : helperEntries())
+    {
+        if(helper->text("direct_variant").find("_rtc") == std::string::npos)
+        {
+            plainHelpers.push_back(kernelOf(*helper, 12));
+        }
+    }
+    prepare(plainHelpers);
+    EXPECT_FALSE(matchesShape(rtcShape, plainHelpers[0]));
 }
 
-/// Every served-matrix row a graph can state (dY extents positive), both dtypes.
+/// Every served-matrix row a graph can state, in its own dtype: the matcher admits exactly
+/// the adapter's instances, scores exactly those, and the other dtype's catalog admits none.
 TEST(TestGfx950ConvDgradKernelMatcher, ServesExactlyWhatTheAdapterServesOverTheCatalog)
 {
-    const auto fp16 = catalogPack("fp16", 1);
-    const auto bf16 = catalogPack("bf16", 2);
-    const auto& instances = vectors::catalogInstances();
-    ASSERT_EQ(fp16.size(), instances.size());
+    const std::map<std::string, std::vector<KernelDefinition>> packs{
+        {"fp16", catalogPack("fp16", 1)}, {"bf16", catalogPack("bf16", 2)}};
     size_t rows = 0;
     size_t served = 0;
     for(const auto& row : vectors::servedMatrix())
     {
-        const auto shape = shapeOf(row.problem);
-        const dgrad::Problem problem{row.problem[0],
-                                     row.problem[1],
-                                     row.problem[2],
-                                     row.problem[3],
-                                     row.problem[4],
-                                     row.problem[5],
-                                     row.problem[6],
-                                     row.problem[7],
-                                     row.problem[8],
-                                     row.problem[9],
-                                     row.problem[10],
-                                     row.problem[11],
-                                     row.problem[12],
-                                     row.problem[13]};
+        const auto problem = catalog::toProblem(row.problem);
         if(!dgrad::deriveGeometry(problem))
         {
             // No graph states this problem; GraphMatcher tests cover its refusal.
             EXPECT_EQ(std::string_view(row.served).find('1'), std::string_view::npos);
             continue;
         }
-        ++rows;
-        for(const auto dtype : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
+        // Graphs past 2^31 elements take seconds to build here; the geometry test covers them.
+        if(dgrad::deriveGeometry(problem)->tensorBytes[2] > dgrad::I32_MAX)
         {
-            const auto fixture = fixtureOf(shape, dtype);
-            const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
-            ASSERT_TRUE(bound);
-            const auto& own = dtype == data_objects::DataType::HALF ? fp16 : bf16;
-            const auto& other = dtype == data_objects::DataType::HALF ? bf16 : fp16;
-            for(size_t i = 0; i < instances.size(); ++i)
-            {
-                const bool expected = row.served[i] == '1';
-                const bool actual
-                    = matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), own[i], *bound);
-                EXPECT_EQ(actual, expected)
-                    << own[i].name << " on N" << shape.n << " C" << shape.c << " K" << shape.k
-                    << " G" << shape.groups << " " << shape.h << "x" << shape.w << " f" << shape.y
-                    << "x" << shape.x << " s" << shape.sH << "x" << shape.sW << " p" << shape.pH
-                    << "x" << shape.pW << " d" << shape.dH << "x" << shape.dW;
-                EXPECT_FALSE(
-                    matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), other[i], *bound));
-                // A served kernel scores, a refused one ranks last.
-                const auto score
-                    = scoreKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), own[i], *bound);
-                EXPECT_EQ(score >= 0.0, expected) << own[i].name << " score " << score;
-                served += actual ? 1 : 0;
-            }
+            continue;
+        }
+        ++rows;
+        const std::string dtypeName = row.dtype;
+        const auto dtype
+            = dtypeName == "fp16" ? data_objects::DataType::HALF : data_objects::DataType::BFLOAT16;
+        const auto shape = shapeOf(row.problem);
+        const auto fixture = fixtureOf(shape, dtype);
+        const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
+        ASSERT_TRUE(bound);
+        const auto& own = packs.at(dtypeName);
+        const auto& other = packs.at(dtypeName == "fp16" ? "bf16" : "fp16");
+        for(size_t i = 0; i < own.size(); ++i)
+        {
+            const bool expected = row.served[i] == '1';
+            const bool actual
+                = matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), own[i], *bound);
+            EXPECT_EQ(actual, expected)
+                << own[i].name << " on N" << shape.n << " C" << shape.c << " K" << shape.k << " G"
+                << shape.groups << " " << shape.h << "x" << shape.w << " f" << shape.y << "x"
+                << shape.x << " s" << shape.sH << "x" << shape.sW << " p" << shape.pH << "x"
+                << shape.pW << " d" << shape.dH << "x" << shape.dW;
+            // A served kernel scores, a refused one ranks last.
+            const auto score
+                = scoreKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), own[i], *bound);
+            EXPECT_EQ(score >= 0.0, expected) << own[i].name << " score " << score;
+            served += actual ? 1 : 0;
+        }
+        for(const auto& kernel : other)
+        {
+            EXPECT_FALSE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), kernel, *bound))
+                << kernel.name;
         }
     }
-    EXPECT_GT(rows, 200U);
-    EXPECT_GT(served, 2000U);
+    EXPECT_GT(rows, 300U);
+    EXPECT_GT(served, 20000U);
 }
 
 TEST(TestGfx950ConvDgradKernelMatcher, RefusesOutOfContractOrIncompleteMetadata)
 {
-    DgradShape grouped;
-    grouped.c = grouped.k = 128;
-    grouped.groups = 8;
-    DgradShape depthwiseShape;
-    depthwiseShape.c = depthwiseShape.k = depthwiseShape.groups = 96;
-    const std::vector<std::pair<DgradShape, const vectors::Instance*>> cases{
-        {DgradShape{}, &implicitInstance()},
-        {depthwiseShape, &depthwiseInstance(3, 1)},
-        {grouped, &mfmaInstance(16, 16, false)}};
-    for(const auto& [shape, instance] : cases)
+    const std::vector<std::pair<DgradShape, const catalog::Entry*>> cases{
+        {DgradShape{}, &implicitEntry()},
+        {depthwiseShape(), &depthwiseEntry(3, 1)},
+        {groupedShape(16, 8), &fusedEntry(16)},
+        {mfmaShape(), &variantEntry("grouped_dgrad_mfma")}};
+    for(const auto& [shape, entry] : cases)
     {
-        SCOPED_TRACE(instance->direct_variant);
+        SCOPED_TRACE(entry->text("direct_variant"));
         const auto fixture = fixtureOf(shape);
         const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
         ASSERT_TRUE(bound);
-        std::vector<KernelDefinition> base{kernelOf(*instance, "fp16", 20)};
-        for(const auto* helper : helperInstances())
+        std::vector<KernelDefinition> base{kernelOf(*entry, 20)};
+        for(const auto* helper : helperEntries())
         {
-            base.push_back(kernelOf(*helper, "fp16", 20));
+            base.push_back(kernelOf(*helper, 20));
         }
         prepare(base);
         ASSERT_TRUE(matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), base[0], *bound));
-        const bool direct = instance->kernel_family == 1;
+        const bool direct = entry->integer("kernel_family") == 1;
         const std::vector<std::pair<const char*, MetadataValue>> outOfContract{
             {"layout", std::string("NCHW")},
             {"wave_size", int64_t{32}},
@@ -820,10 +783,10 @@ TEST(TestGfx950ConvDgradKernelMatcher, RefusesOutOfContractOrIncompleteMetadata)
             {"filter_h", int64_t{direct ? 5 : 3}},
             {"dilation_w", int64_t{2}},
             {"stride_w", int64_t{direct ? 2 : 1}},
-            {"block_w", int64_t{direct && instance->block_w != 0 ? 0 : 5}},
+            {"halo_max_wo", int64_t{17}},
             {"fold_k32", int64_t{2}},
-            {"persistent_grid", int64_t{direct ? 2 : 1}},
-            {"waves_k", int64_t{direct && instance->waves_k != 0 ? 0 : 1}}};
+            {"persistent_grid", int64_t{2}},
+            {"stage_rows", int64_t{2}}};
         for(const auto& [field, value] : outOfContract)
         {
             SCOPED_TRACE(field);
@@ -855,61 +818,64 @@ TEST(TestGfx950ConvDgradKernelMatcher, RefusesOutOfContractOrIncompleteMetadata)
     }
 }
 
-TEST(TestGfx950ConvDgradScore, DepthwiseThenMfmaThenImplicitGemmAndRefusalsLast)
+TEST(TestGfx950ConvDgradScore, DirectPipelinesThenMfmaThenImplicitGemmAndRefusalsLast)
 {
     auto kernels = catalogPack("fp16", 30);
-    const auto& instances = vectors::catalogInstances();
+    const auto& entries = catalog::catalog("fp16");
+    // Per family (0 implicit GEMM, 1 a single-kernel direct pipeline, 2 an MFMA pipeline),
+    // the (min, max) score of the kernels serving the shape.
     const auto scores = [&](const DgradShape& shape) {
         const auto fixture = fixtureOf(shape);
         const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
         EXPECT_TRUE(bound);
-        std::map<int64_t, std::pair<double, double>> range; // family -> (min, max) served
+        std::map<int64_t, std::pair<double, double>> range;
         for(size_t i = 0; i < kernels.size(); ++i)
         {
             const auto score
                 = scoreKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), kernels[i], *bound);
-            const bool served
-                = matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), kernels[i], *bound);
-            if(!served)
+            if(!matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), kernels[i], *bound))
             {
                 EXPECT_EQ(score, -1.0) << kernels[i].name;
                 continue;
             }
-            const auto family
-                = std::string_view(instances[i].direct_variant) == "grouped_dgrad_mfma"
-                      ? int64_t{2}
-                      : instances[i].kernel_family;
+            const auto& variant = entries[i].text("direct_variant");
+            const int64_t family = variant == "none"                           ? 0
+                                   : variant.find("mfma") != std::string::npos ? 2
+                                                                               : 1;
             auto [it, inserted] = range.emplace(family, std::make_pair(score, score));
             it->second.first = std::min(it->second.first, score);
             it->second.second = std::max(it->second.second, score);
         }
         return range;
     };
-    DgradShape depthwise;
-    depthwise.c = depthwise.k = depthwise.groups = 96;
-    const auto dw = scores(depthwise);
-    ASSERT_TRUE(dw.count(1));
-    EXPECT_GE(dw.at(1).first, 3.0);
-    DgradShape grouped;
-    grouped.c = grouped.k = 128;
-    grouped.groups = 8;
-    const auto mixed = scores(grouped);
-    ASSERT_TRUE(mixed.count(0));
-    ASSERT_TRUE(mixed.count(2));
-    EXPECT_GT(mixed.at(2).first, mixed.at(0).second);
-    EXPECT_LT(mixed.at(2).second, 3.0);
-    EXPECT_GE(mixed.at(0).first, 0.0);
-    EXPECT_LT(mixed.at(0).second, 1.01);
+    const auto depthwise = scores(depthwiseShape());
+    ASSERT_TRUE(depthwise.count(1));
+    EXPECT_GE(depthwise.at(1).first, 3.0);
+    const auto grouped = scores(groupedShape(16, 8));
+    ASSERT_TRUE(grouped.count(0));
+    ASSERT_TRUE(grouped.count(1));
+    EXPECT_GT(grouped.at(1).first, grouped.at(0).second);
+    EXPECT_GE(grouped.at(0).first, 0.0);
+    EXPECT_LT(grouped.at(0).second, 1.01);
+    const auto mfma = scores(mfmaShape());
+    ASSERT_TRUE(mfma.count(2));
+    EXPECT_GE(mfma.at(2).first, 2.0);
+    EXPECT_LT(mfma.at(2).second, 3.0);
+    EXPECT_GT(mfma.at(2).first, mfma.at(0).second);
 }
 
-TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsTheFamilyAndPrepareReachesCodeLoading)
+TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsThePlanAndPrepareReachesCodeLoading)
 {
-    auto kernels = std::vector<KernelDefinition>{kernelOf(implicitInstance(), "fp16", 40),
-                                                 kernelOf(depthwiseInstance(3, 2), "fp16", 40),
-                                                 kernelOf(mfmaInstance(48, 192, true), "fp16", 40)};
-    for(const auto* helper : helperInstances())
+    auto kernels = std::vector<KernelDefinition>{
+        kernelOf(implicitEntry(), 40),
+        kernelOf(depthwiseEntry(3, 2), 40),
+        kernelOf(variantEntry("grouped_dgrad_mfma",
+                              [](const catalog::Entry& e) { return e.integer("waves_k") > 1; }),
+                 40),
+        kernelOf(fusedEntry(16), 40)};
+    for(const auto* helper : helperEntries())
     {
-        kernels.push_back(kernelOf(*helper, "fp16", 40));
+        kernels.push_back(kernelOf(*helper, 40));
     }
     prepare(kernels);
     const auto& handler = dispatchHandler(GFX950_CONV_DGRAD_AOT);
@@ -943,12 +909,11 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsTheFamilyAndPrepareReachesCode
     EXPECT_EQ(handler.workspaceBytes(stridedFixture.context(), *stridedBound, kernels[1]), 0U);
     EXPECT_THROW(handler.prepare(stridedFixture.context(), *stridedBound, kernels[1]),
                  hipdnn_plugin_sdk::HipdnnPluginException);
-    EXPECT_THROW(handler.prepare(stridedFixture.context(), *stridedBound, kernels[3]),
+    EXPECT_THROW(handler.prepare(stridedFixture.context(), *stridedBound, kernels[4]),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 
-    // Depthwise: no workspace.
-    DgradShape depthwise;
-    depthwise.c = depthwise.k = depthwise.groups = 64;
+    // Depthwise and fused: no workspace.
+    DgradShape depthwise = depthwiseShape(64);
     depthwise.h = 29;
     depthwise.w = 27;
     depthwise.sH = depthwise.sW = 2;
@@ -957,18 +922,21 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsTheFamilyAndPrepareReachesCode
     ASSERT_TRUE(depthwiseBound);
     EXPECT_EQ(handler.workspaceBytes(depthwiseFixture.context(), *depthwiseBound, kernels[1]), 0U);
     reachesLoading(depthwiseFixture, *depthwiseBound, kernels[1]);
+    const auto fusedFixture = fixtureOf(groupedShape(16, 8));
+    const auto fusedBound = matchesGraph(GFX950_CONV_DGRAD_AOT, fusedFixture.context());
+    ASSERT_TRUE(fusedBound);
+    EXPECT_EQ(handler.workspaceBytes(fusedFixture.context(), *fusedBound, kernels[3]), 0U);
+    reachesLoading(fusedFixture, *fusedBound, kernels[3]);
 
     // MFMA with the reorganize step: ws_t, then ws_coa at ws_t rounded up to 256.
-    DgradShape dense;
-    dense.c = 48;
-    dense.k = 192;
-    const auto mfmaFixture = fixtureOf(dense);
+    const auto mfmaFixture = fixtureOf(mfmaShape());
     const auto mfmaBound = matchesGraph(GFX950_CONV_DGRAD_AOT, mfmaFixture.context());
     ASSERT_TRUE(mfmaBound);
-    EXPECT_EQ(handler.workspaceBytes(mfmaFixture.context(), *mfmaBound, kernels[2]), 331776U);
+    EXPECT_EQ(handler.workspaceBytes(mfmaFixture.context(), *mfmaBound, kernels[2]),
+              23040U + 92160U);
     reachesLoading(mfmaFixture, *mfmaBound, kernels[2]);
     // The same instance on a grouped graph is refused (the reorganize helper's group bug).
-    DgradShape grouped = dense;
+    auto grouped = mfmaShape();
     grouped.c *= 2;
     grouped.k *= 2;
     grouped.groups = 2;
@@ -1044,65 +1012,51 @@ TEST(TestGfx950ConvDgradCatalog, EveryGraphsCandidatesHaveDistinctKnobTuples)
     {
         GTEST_SKIP() << NOT_STAGED;
     }
-    ASSERT_EQ(knobs.size(), 26U);
+    ASSERT_EQ(knobs.size(), 49U);
 
-    // The fp16 and bf16 catalogs, each run against every served-matrix problem a graph can
-    // state: the candidate set is what the real matchers, the shipped metadata (with its
-    // KMD defaults) and the helper lookup admit, and its size is the adapter's count.
+    // Each served-matrix problem a graph can state, in its own dtype: the candidate set is
+    // what the real matchers, the shipped metadata (with its KMD defaults) and the helper
+    // lookup admit, and its size is the adapter's count.
     size_t graphs = 0;
     size_t candidates = 0;
     for(const auto& row : vectors::servedMatrix())
     {
         const auto shape = shapeOf(row.problem);
-        const dgrad::Problem problem{shape.n,
-                                     shape.c,
-                                     shape.k,
-                                     shape.h,
-                                     shape.w,
-                                     shape.y,
-                                     shape.x,
-                                     shape.sH,
-                                     shape.sW,
-                                     shape.pH,
-                                     shape.pW,
-                                     shape.dH,
-                                     shape.dW,
-                                     shape.groups};
-        if(!dgrad::deriveGeometry(problem))
+        const auto geometry = dgrad::deriveGeometry(catalog::toProblem(row.problem));
+        if(!geometry || geometry->tensorBytes[2] > dgrad::I32_MAX)
         {
             continue;
         }
         const auto expected = static_cast<size_t>(
             std::count(row.served, row.served + std::string_view(row.served).size(), '1'));
-        for(const auto dtype : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
+        const std::string dtypeName = row.dtype;
+        const auto dtype
+            = dtypeName == "fp16" ? data_objects::DataType::HALF : data_objects::DataType::BFLOAT16;
+        const auto fixture = fixtureOf(shape, dtype);
+        const auto shipped = manager->unsortedCatalog(fixture.context());
+        EXPECT_EQ(shipped.entries.size(), expected)
+            << "N" << shape.n << " C" << shape.c << " K" << shape.k << " G" << shape.groups << " "
+            << shape.h << "x" << shape.w << " f" << shape.y << "x" << shape.x;
+        std::set<std::vector<int64_t>> tuples;
+        for(const auto& kernel : shipped.entries)
         {
-            const auto fixture = fixtureOf(shape, dtype);
-            const auto catalog = manager->unsortedCatalog(fixture.context());
-            EXPECT_EQ(catalog.entries.size(), expected)
-                << "N" << shape.n << " C" << shape.c << " K" << shape.k << " G" << shape.groups
-                << " " << shape.h << "x" << shape.w << " f" << shape.y << "x" << shape.x;
-            std::set<std::vector<int64_t>> tuples;
-            for(const auto& kernel : catalog.entries)
+            EXPECT_EQ(std::get<std::string>(kernel->metadata.at("dtype")), dtypeName);
+            EXPECT_NE(std::get<int64_t>(kernel->metadata.at("kernel_family")), 2) << kernel->name;
+            std::vector<int64_t> tuple;
+            for(const auto& knob : knobs)
             {
-                EXPECT_EQ(std::get<std::string>(kernel.metadata.at("dtype")),
-                          dtype == data_objects::DataType::HALF ? "fp16" : "bf16");
-                EXPECT_NE(std::get<int64_t>(kernel.metadata.at("kernel_family")), 2) << kernel.name;
-                std::vector<int64_t> tuple;
-                for(const auto& knob : knobs)
-                {
-                    const auto ordinal = manager->knobOrdinal(knob, kernel.metadata.at(knob));
-                    ASSERT_TRUE(ordinal) << knob;
-                    tuple.push_back(*ordinal);
-                }
-                EXPECT_TRUE(tuples.insert(tuple).second)
-                    << kernel.name << " repeats another candidate's knob tuple";
+                const auto ordinal = manager->knobOrdinal(knob, kernel->metadata.at(knob));
+                ASSERT_TRUE(ordinal) << knob;
+                tuple.push_back(*ordinal);
             }
-            ++graphs;
-            candidates += catalog.entries.size();
+            EXPECT_TRUE(tuples.insert(tuple).second)
+                << kernel->name << " repeats another candidate's knob tuple";
         }
+        ++graphs;
+        candidates += shipped.entries.size();
     }
-    EXPECT_GT(graphs, 400U);
-    EXPECT_GT(candidates, 4000U);
+    EXPECT_GT(graphs, 300U);
+    EXPECT_GT(candidates, 20000U);
 }
 
 TEST(TestGfx950ConvDgradCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
@@ -1119,18 +1073,17 @@ TEST(TestGfx950ConvDgradCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
     DgradShape strided;
     strided.h = strided.w = 15;
     strided.sH = strided.sW = 2;
-    DgradShape depthwise;
-    depthwise.c = depthwise.k = depthwise.groups = 96;
-    DgradShape reorganizing;
-    reorganizing.c = 48;
-    reorganizing.k = 192;
+    DgradShape windowed = depthwiseShape(96);
     const auto device = currentDeviceProperties();
     const bool loadable = device.gcnArchName.rfind("gfx950", 0) == 0;
     const auto& handler = dispatchHandler(GFX950_CONV_DGRAD_AOT);
     for(const auto& row : std::vector<std::tuple<DgradShape, int64_t, std::string>>{
             {strided, 0, "none"},
-            {depthwise, 1, "depthwise_dgrad"},
-            {reorganizing, 1, "grouped_dgrad_mfma"}})
+            {depthwiseShape(96), 1, "depthwise_dgrad"},
+            {windowed, 1, "depthwise_dgrad_win"},
+            {groupedShape(16, 8), 1, "grouped_dgrad_fused"},
+            {groupedShape(4, 64), 1, "grouped_dgrad_4c"},
+            {mfmaShape(), 1, "grouped_dgrad_mfma"}})
     {
         const auto& shape = std::get<0>(row);
         const auto family = std::get<1>(row);
@@ -1141,17 +1094,16 @@ TEST(TestGfx950ConvDgradCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
         const auto catalog = manager->unsortedCatalog(fixture.context());
         const auto kernel = std::find_if(
             catalog.entries.begin(), catalog.entries.end(), [&](const auto& candidate) {
-                return std::get<int64_t>(candidate.metadata.at("kernel_family")) == family
-                       && std::get<std::string>(candidate.metadata.at("direct_variant")) == variant
-                       && (variant != "grouped_dgrad_mfma"
-                           || std::get<int64_t>(candidate.metadata.at("waves_k")) > 1);
+                return std::get<int64_t>(candidate->metadata.at("kernel_family")) == family
+                       && std::get<std::string>(candidate->metadata.at("direct_variant"))
+                              == variant;
             });
         ASSERT_NE(kernel, catalog.entries.end());
         try
         {
             const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
             ASSERT_TRUE(bound);
-            EXPECT_NE(handler.prepare(fixture.context(), *bound, *kernel), nullptr);
+            EXPECT_NE(handler.prepare(fixture.context(), *bound, **kernel), nullptr);
             EXPECT_TRUE(loadable) << "loaded a gfx950 code object without a gfx950 device";
         }
         catch(const std::exception& error)
