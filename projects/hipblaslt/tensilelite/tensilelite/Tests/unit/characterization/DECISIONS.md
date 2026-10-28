@@ -716,9 +716,9 @@ one byte in four survives and the result is silently wrong.
 **Why:** the four-way dot is the path AMD's own shipped rocBLAS gfx1030 int8 kernel uses, and
 without a parameter to select it there is no way to ask TensileLite for that kernel.
 
-**Verification:** 17 golden nodes are re-recorded, one at a time
+**Verification:** 18 golden nodes are re-recorded, one at a time
 (`pytest <node-id> --snapshot-update`) — twelve in
-`LibraryIO/__snapshots__/test_logiccontract_char.ambr`, three in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr`, four in
 `SolutionClass/__snapshots__/test_solution_class_char.ambr` and two in
 `ValidParameters/__snapshots__/test_builders_char.ambr`. Each affected node gains exactly one
 entry (`'LocalDotLayout': 1`) and nothing else moves, except the solution name, which gains an
