@@ -267,17 +267,6 @@ class Tensor {
 
     Tensor deepCopy() const;
 
-    // Elementwise activation conveniences. The named free functions remain
-    // available for callers that prefer functional composition.
-    [[nodiscard]] Tensor absolute() const;
-    [[nodiscard]] Tensor relu() const;
-    [[nodiscard]] Tensor gelu() const;
-    [[nodiscard]] Tensor sigmoid() const;
-    [[nodiscard]] Tensor tanh(double inputScale, double outputScale) const;
-    [[nodiscard]] Tensor silu() const;
-    [[nodiscard]] Tensor swish(double beta) const;
-    [[nodiscard]] Tensor clip(double minimum, double maximum) const;
-
     // Copies only logical tensor elements into their encoded destination
     // locations. Bytes and bits used only for layout gaps remain unchanged.
     void copyLogicalElementsToEncodedStorage(std::span<std::byte> destination) const;

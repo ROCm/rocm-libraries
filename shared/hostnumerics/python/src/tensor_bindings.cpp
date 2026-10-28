@@ -514,14 +514,6 @@ void registerTensorBindings(nb::module_& module) {
         .def("clone", [](const Tensor& tensor) { return tensor.deepCopy(); })
         .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::copyConvertedTo),
              "type"_a)
-        .def("absolute", &Tensor::absolute)
-        .def("relu", &Tensor::relu)
-        .def("gelu", &Tensor::gelu)
-        .def("sigmoid", &Tensor::sigmoid)
-        .def("tanh", &Tensor::tanh, "input_scale"_a, "output_scale"_a)
-        .def("silu", &Tensor::silu)
-        .def("swish", &Tensor::swish, "beta"_a)
-        .def("clip", &Tensor::clip, "minimum"_a, "maximum"_a)
         .def(
             "__add__",
             [](const Tensor& tensor, nb::handle value) {

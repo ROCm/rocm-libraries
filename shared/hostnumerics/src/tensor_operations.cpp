@@ -140,36 +140,4 @@ void activateInto(const Tensor& input, Tensor output, ActivationFunction functio
     detail::runActivation(invocation);
 }
 
-Tensor Tensor::absolute() const {
-    return activate(*this, AbsoluteActivation{});
-}
-
-Tensor Tensor::relu() const {
-    return activate(*this, ReluActivation{});
-}
-
-Tensor Tensor::gelu() const {
-    return activate(*this, GeluActivation{});
-}
-
-Tensor Tensor::sigmoid() const {
-    return activate(*this, SigmoidActivation{});
-}
-
-Tensor Tensor::tanh(double inputScale, double outputScale) const {
-    return activate(*this, TanhActivation{inputScale, outputScale});
-}
-
-Tensor Tensor::silu() const {
-    return activate(*this, SiluActivation{});
-}
-
-Tensor Tensor::swish(double beta) const {
-    return activate(*this, SwishActivation{beta});
-}
-
-Tensor Tensor::clip(double minimum, double maximum) const {
-    return activate(*this, ClampActivation{minimum, maximum});
-}
-
 }  // namespace roc::hostnumerics

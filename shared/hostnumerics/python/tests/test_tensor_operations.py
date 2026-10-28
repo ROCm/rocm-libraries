@@ -171,14 +171,42 @@ class TensorOperationsTests(unittest.TestCase):  # noqa: F405
             hv.to_numpy(hv.clip(activation_input, -1.0, 1.0), dtype=None),
             np.clip(activation_values, -1.0, 1.0),
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(activation_input.relu(), dtype=None),
-            np.maximum(activation_values, 0.0),
+
+    def test_named_activations_match_numpy(self):
+        values = np.asarray([-2.0, -0.5, 0.0, 2.0], dtype=np.float64)
+        input_tensor = hv.from_numpy(values)
+        sigmoid = 1.0 / (1.0 + np.exp(-values))
+        cases = (
+            ("absolute", {}, np.abs(values)),
+            ("relu", {}, np.maximum(values, 0.0)),
+            (
+                "gelu",
+                {},
+                0.5
+                * values
+                * (
+                    1.0
+                    + np.tanh(np.sqrt(2.0 / np.pi) * (values + 0.044715 * values**3))
+                ),
+            ),
+            ("sigmoid", {}, sigmoid),
+            (
+                "tanh",
+                {"input_scale": 0.75, "output_scale": 1.25},
+                np.tanh(values * 0.75) * 1.25,
+            ),
+            ("silu", {}, values * sigmoid),
+            ("swish", {"beta": 1.5}, values / (1.0 + np.exp(-1.5 * values))),
+            ("clip", {"minimum": -1.0, "maximum": 1.0}, np.clip(values, -1.0, 1.0)),
         )
-        np.testing.assert_array_equal(
-            hv.to_numpy(activation_input.clip(-1.0, 1.0), dtype=None),
-            np.clip(activation_values, -1.0, 1.0),
-        )
+        for name, parameters, expected in cases:
+            with self.subTest(operation=name):
+                self.assertNotIn(name, vars(hv.Tensor))
+                output = getattr(hv, name)(input_tensor, **parameters)
+                self.assertEqual(output.type, hv.ScalarType.Float64)
+                np.testing.assert_allclose(
+                    hv.to_numpy(output, dtype=None), expected, rtol=1e-14, atol=1e-14
+                )
 
     def test_native_operation_direct_bindings(self):
         values = np.arange(6, dtype=np.float32).reshape(2, 3)
