@@ -3135,20 +3135,30 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
                                              (wDesc.GetType() == miopenFloat ? 4 : 2) +
                                          (li - 1) * drop_rsv_size;
 
-                miopen::deref(dropoutDesc)
-                    .Dropout(handle,
-                             drop_in_desc,
-                             drop_in_desc,
-                             reserveSpace,
-                             drop_out_desc,
-                             reserveSpace,
-                             reserveSpace,
-                             drop_rsv_size,
-                             drop_in_offset,
-                             drop_out_offset,
-                             drop_rsv_offset,
-                             false /* is_backward */,
-                             true /* evolve_state: each layer must draw an independent mask */);
+                // reserveSpace was zero-filled at the top of this function, so a mask saved by
+                // the caller cannot exist here: with use_mask the kernel would read an all-zero
+                // ("drop everything") mask. Always generate the mask in training forward, and
+                // advance the PRNG state so every layer (and every call) draws a new mask.
+                auto drop_desc = miopen::deref(dropoutDesc);
+                if(drop_desc.use_mask)
+                {
+                    MIOPEN_LOG_I("RNN forward training ignores the dropout descriptor's use_mask "
+                                 "flag; the dropout mask is always generated.");
+                    drop_desc.use_mask = false;
+                }
+                drop_desc.Dropout(handle,
+                                  drop_in_desc,
+                                  drop_in_desc,
+                                  reserveSpace,
+                                  drop_out_desc,
+                                  reserveSpace,
+                                  reserveSpace,
+                                  drop_rsv_size,
+                                  drop_in_offset,
+                                  drop_out_offset,
+                                  drop_rsv_offset,
+                                  false /* is_backward */,
+                                  true /* evolve_state */);
                 // Update time
                 profileRNNkernels(handle, 1, ctime);
                 prelayer_shift = drop_out_offset;
