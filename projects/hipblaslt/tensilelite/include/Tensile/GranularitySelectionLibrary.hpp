@@ -235,7 +235,7 @@ namespace TensileLite
                             auto problem = problems[idx];
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
-                            problem.setGroupedGemmCount(problems.size());
+                            problem.noteGroupedGemmCount(static_cast<int>(problems.size()));
                             // setGroupedGemm(true) re-aims GroupedGemmEqual,
                             // SynchronizerSizeCheck and the free-size-B clause on
                             // this local copy, so it is USO-gated like the widened

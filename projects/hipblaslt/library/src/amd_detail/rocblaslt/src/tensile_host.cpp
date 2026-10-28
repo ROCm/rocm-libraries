@@ -7986,6 +7986,24 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
     return rocblaslt_status_not_implemented;
 }
 
+bool groupedGemmHasOutputTiles(rocblaslt::RocGemmType       gemmType,
+                               const std::shared_ptr<void>& gemmData)
+{
+    if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM || !gemmData)
+        return true;
+
+    auto data = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+    if(!data)
+        return true;
+
+    for(auto const& gemm : data->problem.gemms)
+    {
+        if(gemm.hasOutputTiles())
+            return true;
+    }
+    return false;
+}
+
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
@@ -8070,8 +8088,19 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                 data->problem.gemms[i].setGroupedGemm(true);
         }
 
-        auto solutions = library->findTopSolutionsGroupedGemm(
-            data->problem.gemms, *hardware, requestedAlgoCount);
+        // Rank only members that have output tiles. An empty M or N is legal in
+        // a group and still launches (zero tiles), but feeding it to the distance
+        // search walks the whole gfx942 logic library (ROCM-33326). The count
+        // set above stays the full group, so synchronizer checks still see it.
+        auto ranked = TensileLite::groupedGemmMembersToRank(data->problem.gemms);
+        if(ranked.empty())
+        {
+            heuristicResults.clear();
+            return rocblaslt_status_success;
+        }
+
+        auto solutions
+            = library->findTopSolutionsGroupedGemm(ranked, *hardware, requestedAlgoCount);
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;
@@ -8083,7 +8112,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                        heuristicResults.data(),
                                        &returnAlgoCount,
                                        workspaceBytes,
-                                       data->problem.gemms[0],
+                                       ranked[0],
                                        *hardware);
     }
 

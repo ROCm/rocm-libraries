@@ -1106,6 +1106,16 @@ namespace TensileLite
             m_groupedGemmCount = value;
         }
 
+        // Records the group size the launch will use, once. Ranking may later
+        // see fewer members than that (an empty M or N is not ranked,
+        // ROCM-33326) and must not shrink a count already set to the full
+        // group. The unset value is numeric_limits<int>::max().
+        void noteGroupedGemmCount(int groupSize)
+        {
+            if(m_groupedGemmCount == std::numeric_limits<int>::max())
+                m_groupedGemmCount = groupSize;
+        }
+
         int groupedGemmCount() const
         {
             return m_groupedGemmCount;
@@ -1115,6 +1125,9 @@ namespace TensileLite
         {
             return m_groupedGemm;
         }
+
+        // False when an M or N product is 0. K = 0 still has work: D = beta * C.
+        bool hasOutputTiles() const;
 
         void setHighPrecisionAccumulate(bool value)
         {
@@ -1678,8 +1691,24 @@ namespace TensileLite
 
         std::string getOperationIdentifier() const;
         std::string getOperationDescription() const;
-        ContractionProblemGemm::BATCHMODE batch_Mode = ContractionProblemGemm::BATCHMODE::STRIDED;        
+        ContractionProblemGemm::BATCHMODE batch_Mode = ContractionProblemGemm::BATCHMODE::STRIDED;
     };
+
+    // Members a grouped heuristic should rank. An empty M or N launches with zero
+    // tiles and must not be part of the distance search: with no kernel that
+    // accepts it, that search evaluates every row (ROCM-33326).
+    inline std::vector<ContractionProblemGemm>
+        groupedGemmMembersToRank(std::vector<ContractionProblemGemm> const& gemms)
+    {
+        std::vector<ContractionProblemGemm> ranked;
+        ranked.reserve(gemms.size());
+        for(auto const& gemm : gemms)
+        {
+            if(gemm.hasOutputTiles())
+                ranked.push_back(gemm);
+        }
+        return ranked;
+    }
 
     class ContractionProblemGroupedGemm : public ContractionProblem
     {
