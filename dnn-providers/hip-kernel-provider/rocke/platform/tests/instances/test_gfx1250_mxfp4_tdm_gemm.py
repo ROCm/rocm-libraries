@@ -364,19 +364,25 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         )
         self.assertIn("llvm.amdgcn.tensor.load.to.lds", llvm)
 
-    def test_step6_7_segment_interleave_variant(self):
+    def test_step6_7_and_8_segment_layout_variants(self):
         self.assertIn("step6_7_mxfp4_gemm", variant_names())
-        spec = variant_spec("step6_7_mxfp4_gemm", 128, 64, 512, tile_k=512)
-        self.assertTrue(spec.lds_segment_interleave)
-        self.assertFalse(spec.lds_segment_b_rotate)
-        self.assertEqual(is_valid_spec(spec), (True, "ok"))
-        self.assertGreaterEqual(spec.lds_bytes, 2 * 65536)
-        llvm = _lower_kernel_to_llvm_python(
-            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
-            arch="gfx1250",
-            llvm_flavor="llvm23",
-        )
-        self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
+        self.assertIn("step6_8_mxfp4_gemm", variant_names())
+        for name, rotate in (
+            ("step6_7_mxfp4_gemm", False),
+            ("step6_8_mxfp4_gemm", True),
+        ):
+            with self.subTest(name=name):
+                spec = variant_spec(name, 128, 64, 512, tile_k=512)
+                self.assertTrue(spec.lds_segment_interleave)
+                self.assertEqual(spec.lds_segment_b_rotate, rotate)
+                self.assertEqual(is_valid_spec(spec), (True, "ok"))
+                self.assertGreaterEqual(spec.lds_bytes, 2 * 65536)
+                llvm = _lower_kernel_to_llvm_python(
+                    build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+                    arch="gfx1250",
+                    llvm_flavor="llvm23",
+                )
+                self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
         yaml7 = variant_spec(
             "step6_7_mxfp4_gemm",
             256,
