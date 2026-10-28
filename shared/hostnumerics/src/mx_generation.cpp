@@ -39,6 +39,11 @@ struct MxGenerationInvocation : MxGenerationOptions {
           shape(std::move(inputShape)),
           data(std::move(dataGeneration)) {}
 
+    // Valid after validateInvocation.
+    size_t physicalLeadingDimension() const {
+        return leadingDimension ? static_cast<size_t>(*leadingDimension) : shape.dimensions()[0];
+    }
+
     Shape shape;
     MxDataGeneration data;
 };
@@ -238,8 +243,7 @@ void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlockin
         fixedScale ? std::vector<ScaleCandidate>{}
                    : finiteNonzeroScaleCandidates(problem.scaleType);
     const size_t rows = problem.shape.dimensions()[0];
-    const size_t leadingDimension =
-        problem.leadingDimension == 0 ? rows : static_cast<size_t>(problem.leadingDimension);
+    const size_t leadingDimension = problem.physicalLeadingDimension();
     const detail::PreparedRawGenerator generator =
         detail::prepareRawGenerator(problem.data.recipe(), problem.dataType, problem.shape);
 
@@ -281,8 +285,7 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
                        int threadCount) {
     (void)threadCount;
     const size_t rows = problem.shape.dimensions()[0];
-    const size_t leadingDimension =
-        problem.leadingDimension == 0 ? rows : static_cast<size_t>(problem.leadingDimension);
+    const size_t leadingDimension = problem.physicalLeadingDimension();
 
     const std::optional<uint8_t> fixedScale = explicitScaleRaw(problem);
     const std::vector<ScaleCandidate> scaleCandidates =
@@ -402,9 +405,8 @@ void validateInvocation(const MxGenerationInvocation& problem) {
     if (problem.blockSize == 0) throw std::runtime_error("MX block size must be nonzero.");
     if (problem.shape.dimensions()[0] > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
         throw std::runtime_error("MX first tensor dimension exceeds ptrdiff_t.");
-    const ptrdiff_t leadingDimension = problem.leadingDimension == 0
-                                           ? static_cast<ptrdiff_t>(problem.shape.dimensions()[0])
-                                           : problem.leadingDimension;
+    const ptrdiff_t leadingDimension =
+        problem.leadingDimension.value_or(static_cast<ptrdiff_t>(problem.shape.dimensions()[0]));
     if (leadingDimension < static_cast<ptrdiff_t>(problem.shape.dimensions()[0]))
         throw std::runtime_error(
             "MX leading dimension is smaller than the first tensor dimension.");
@@ -427,8 +429,7 @@ MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGeneration
                                       problem.data.recipe().indexOrder(problem.shape.rank()));
     const size_t rows = problem.shape.dimensions()[0];
     const size_t columns = problem.shape.dimensions()[1];
-    const size_t leadingDimension =
-        problem.leadingDimension == 0 ? rows : static_cast<size_t>(problem.leadingDimension);
+    const size_t leadingDimension = problem.physicalLeadingDimension();
     const size_t physicalElementCount =
         detail::checkedMultiply(leadingDimension, columns, "MX physical element count overflow.");
     const size_t logicalElementCount =

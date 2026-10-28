@@ -6,7 +6,7 @@ from _mx_generation_types import *  # noqa: F403
 
 def expected_mx(case):
     rows, columns = case.shape
-    leading_dimension = case.leading_dimension or rows
+    leading_dimension = case.leading_dimension
     format_spec = DATA_FORMATS[case.data_type]
     blocked_extent = case.shape[case.block_axis]
     free_extent = case.shape[1 - case.block_axis]

@@ -67,9 +67,9 @@ struct MxGenerationOptions {
     ScalarType dataType = ScalarType::Float4E2M1;
     ScalarType scaleType = ScalarType::E8M0;
 
-    // A zero leading dimension selects shape[0]; otherwise data uses strides
-    // {1, leadingDimension}.
-    ptrdiff_t leadingDimension = 0;
+    // Data uses strides {1, leadingDimension}, which must be at least shape[0].
+    // Without a value, columns are contiguous: leadingDimension is shape[0].
+    std::optional<ptrdiff_t> leadingDimension;
 
     // Scales group blockSize consecutive elements along blockAxis. The other
     // axis is the free coordinate identifying independent block sequences.
