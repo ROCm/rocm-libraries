@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # Host-side verifier for the Windows VERSIONINFO resource embedded by
-# miopen_embed_version_resource() (ROCM-20937). Lives under tools/ rather than test/ for two
+# miopen_embed_version_resource(). Lives under tools/ rather than test/ for two
 # reasons: it must be configured before add_subdirectory(src) so the POST_BUILD rules in that
 # function can reference it, and it must stay available when BUILD_TESTING is OFF -- a release
 # build is exactly where shipping DLLs without metadata matters most.

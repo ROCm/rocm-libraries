@@ -152,7 +152,7 @@ option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 option(MIOPEN_CK_BUILDER_EXPERIMENTAL "Enable experimental support for CK Builder" OFF)
-# Windows-only (ROCM-20937). Verifies the embedded VERSIONINFO resource after each DLL links, so a
+# Windows-only. Verifies the embedded VERSIONINFO resource after each DLL links, so a
 # DLL that loses its metadata fails the build rather than shipping. Turn OFF to bypass if the
 # check ever misfires on an unusual toolchain.
 option(MIOPEN_VALIDATE_VERSIONINFO

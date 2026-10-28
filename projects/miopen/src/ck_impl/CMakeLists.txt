@@ -170,7 +170,7 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # behind a public wrapper that exports only the C API.
     target_link_libraries(${lib_name} PRIVATE ${_MIOPEN_IMPL_TARGET})
 
-    # Embed a Windows VERSIONINFO resource (ROCM-20937); see miopen_embed_version_resource() in
+    # Embed a Windows VERSIONINFO resource; see miopen_embed_version_resource() in
     # src/CMakeLists.txt, defined before this subdirectory is added and so visible here.
     miopen_embed_version_resource(${lib_name} "MIOpen CK Grouped-Conv Plugin (${arch_base})" ${lib_name})
 

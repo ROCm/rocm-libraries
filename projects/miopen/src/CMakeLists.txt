@@ -41,7 +41,7 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
-# Embed a Windows VERSIONINFO resource into a DLL target (ROCM-20937). No resource-compiler
+# Embed a Windows VERSIONINFO resource into a DLL target. No resource-compiler
 # availability guard is needed here: cmake/ResourceCompiler.cmake already fails configuration if no
 # usable resource compiler was found, so by the time this runs CMAKE_RC_COMPILER is guaranteed good.
 #

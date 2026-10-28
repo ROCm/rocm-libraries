@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Windows-only build-time check (ROCM-20937): verifies that each DLL named on the command line
+// Windows-only build-time check: verifies that each DLL named on the command line
 // has an embedded PE VERSIONINFO resource whose FILEVERSION matches the configured project
 // version, whose PRODUCTVERSION agrees with it, and whose descriptive string fields are non-empty.
 // Standalone (no gtest) since it has no HIP/GPU dependency and only needs to run once per link.
