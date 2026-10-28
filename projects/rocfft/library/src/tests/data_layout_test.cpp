@@ -570,6 +570,13 @@ TEST_F(data_layout_test, inplace_real_round_trip)
             // operator== ignores the embedding map, so compare it separately
             EXPECT_TRUE(back->get_embedding_layout() == full) << back->str();
 
+            // a Hermitian innermost length of 1 only comes from a real one of 1
+            if(L[0] == 1)
+            {
+                EXPECT_THROW(herm->get_other_inplace_layout_for(real_io, fft_type, !odd),
+                             std::invalid_argument);
+                continue;
+            }
             const auto wrong = herm->get_other_inplace_layout_for(real_io, fft_type, !odd);
             ASSERT_TRUE(wrong.has_value());
             EXPECT_FALSE(*wrong == real) << wrong->str();
@@ -652,6 +659,13 @@ TEST_F(data_layout_test, inplace_real_counterpart_rules)
         const data_layout_t expected(
             std::vector<size_t>(rank, 0), other_spans, other_strides, batch_rank);
 
+        // a Hermitian innermost length of 1 only comes from a real one of 1
+        if(!from_real && n == 1 && !odd)
+        {
+            EXPECT_THROW(layout.get_other_inplace_layout_for(other_io, fft_type, odd),
+                         std::invalid_argument);
+            continue;
+        }
         const auto counterpart = layout.get_other_inplace_layout_for(other_io, fft_type, odd);
         ASSERT_EQ(counterpart.has_value(), follows_rules);
         if(counterpart)
@@ -674,6 +688,17 @@ TEST_F(data_layout_test, inplace_query_rejects_bad_arguments)
     EXPECT_THROW(empty.get_other_inplace_layout_for(io_data_label::OUTPUT,
                                                     rocfft_transform_type_real_forward),
                  std::logic_error);
+
+    // a Hermitian innermost length of 1 only comes from a real innermost length of 1, so
+    // the real side cannot be requested as even (it would have a length of 0)
+    const auto herm_of_one = data_layout_t::default_full_layout({1}, 3);
+    EXPECT_THROW(herm_of_one.get_other_inplace_layout_for(
+                     io_data_label::INPUT, rocfft_transform_type_real_forward, false),
+                 std::invalid_argument);
+    const auto real_of_one = herm_of_one.get_other_inplace_layout_for(
+        io_data_label::INPUT, rocfft_transform_type_real_forward, true);
+    ASSERT_TRUE(real_of_one.has_value());
+    EXPECT_EQ(real_of_one->lengths(), (std::vector<size_t>{1}));
 
     // length axes must be full, batch axes need not be
     for(auto fft_type : {rocfft_transform_type_complex_forward, rocfft_transform_type_real_forward})
