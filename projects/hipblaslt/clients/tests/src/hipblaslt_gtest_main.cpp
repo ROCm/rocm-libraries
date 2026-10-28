@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "d_vector.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_parse_data.hpp"
@@ -182,6 +183,7 @@ static void hipblaslt_set_listener()
     }
 
     listeners.Append(listener);
+    listeners.Append(new HostPoolReleaseListener);
 }
 
 static void hipblaslt_print_usage_warning()
