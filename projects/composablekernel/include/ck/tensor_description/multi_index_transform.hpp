@@ -1945,6 +1945,124 @@ struct ConvFwdDataImplicitGemmInTransform
     }
 };
 
+struct ConvBwdWeightImplicitGemmInTransform
+{
+    using LowerIndex = MultiIndex<4>;
+    using UpperIndex = MultiIndex<3>;
+    using UpLengths  = Tuple<index_t, index_t, index_t>;
+
+    ConvFwdDataImplicitGemmInTransform input_transform_;
+    UpLengths up_lengths_;
+
+    __host__ __device__ constexpr ConvBwdWeightImplicitGemmInTransform() = default;
+
+    __host__ __device__ constexpr ConvBwdWeightImplicitGemmInTransform(index_t N,
+                                                                       index_t Hi,
+                                                                       index_t Wi,
+                                                                       index_t C,
+                                                                       index_t Y,
+                                                                       index_t X,
+                                                                       index_t Ho,
+                                                                       index_t Wo,
+                                                                       index_t ConvStrideH,
+                                                                       index_t ConvStrideW,
+                                                                       index_t ConvDilationH,
+                                                                       index_t ConvDilationW,
+                                                                       index_t InLeftPadH,
+                                                                       index_t InLeftPadW,
+                                                                       index_t K0,
+                                                                       index_t NPadded,
+                                                                       index_t K1)
+        : input_transform_{N,
+                           Hi,
+                           Wi,
+                           C,
+                           Y,
+                           X,
+                           Ho,
+                           Wo,
+                           ConvStrideH,
+                           ConvStrideW,
+                           ConvDilationH,
+                           ConvDilationW,
+                           InLeftPadH,
+                           InLeftPadW},
+          up_lengths_{make_tuple(K0, NPadded, K1)}
+    {
+    }
+
+    __host__ __device__ static constexpr index_t GetNumOfLowerDimension() { return 4; }
+
+    __host__ __device__ static constexpr index_t GetNumOfUpperDimension() { return 3; }
+
+    __host__ __device__ constexpr const auto& GetUpperLengths() const [[clang::lifetimebound]]
+    {
+        return up_lengths_;
+    }
+
+    template <typename UpIdx>
+    __host__ __device__ constexpr auto GetFlattenedIndex(const UpIdx& idx_up) const
+    {
+        return make_tuple(idx_up[Number<0>{}] * up_lengths_[Number<2>{}] + idx_up[Number<2>{}],
+                          idx_up[Number<1>{}]);
+    }
+
+    template <typename LowIdx, typename UpIdx>
+    __host__ __device__ constexpr void CalculateLowerIndex(LowIdx& idx_low,
+                                                           const UpIdx& idx_up) const
+    {
+        static_assert(LowIdx::Size() == 4 && UpIdx::Size() == 3,
+                      "wrong! inconsistent # of dimensions");
+
+        input_transform_.CalculateLowerIndex(idx_low, GetFlattenedIndex(idx_up));
+    }
+
+    template <typename LowIdxDiff,
+              typename UpIdxDiff,
+              typename LowIdx,
+              typename UpIdx,
+              index_t Hack>
+    __host__ __device__ void UpdateLowerIndex(LowIdxDiff& idx_diff_low,
+                                              const UpIdxDiff&,
+                                              LowIdx& idx_low,
+                                              const UpIdx& idx_up_new,
+                                              Number<Hack>) const
+    {
+        const LowIdx old_idx = idx_low;
+        CalculateLowerIndex(idx_low, idx_up_new);
+        idx_diff_low = idx_low - old_idx;
+    }
+
+    __host__ __device__ static constexpr bool IsLinearTransform() { return false; }
+
+    __host__ __device__ static constexpr bool IsValidUpperIndexAlwaysMappedToValidLowerIndex()
+    {
+        return false;
+    }
+
+    template <typename UpIdx>
+    __host__ __device__ constexpr bool
+    IsValidUpperIndexMappedToValidLowerIndex(const UpIdx& idx_up) const
+    {
+        const auto flattened_idx = GetFlattenedIndex(idx_up);
+        bool valid               = static_cast<uint32_t>(flattened_idx[Number<0>{}]) <
+                     static_cast<uint32_t>(input_transform_.GetUpperLengths()[Number<0>{}]);
+        valid &= static_cast<uint32_t>(flattened_idx[Number<1>{}]) <
+                 static_cast<uint32_t>(input_transform_.GetUpperLengths()[Number<1>{}]);
+        valid &= input_transform_.IsValidUpperIndexMappedToValidLowerIndex(flattened_idx);
+        return valid;
+    }
+
+    __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }
+
+    __host__ __device__ void Print() const
+    {
+        printf("{ConvBwdWeightImplicitGemmInTransform, up_lengths_");
+        print_multi_index(up_lengths_);
+        printf("}");
+    }
+};
+
 template <typename LowerIndex>
 struct Freeze
 {
