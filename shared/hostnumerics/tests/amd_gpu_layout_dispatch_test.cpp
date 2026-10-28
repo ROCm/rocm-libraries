@@ -110,13 +110,24 @@ TEST(MxScaleStorageLayoutTest, PlansExactPhysicalByteCounts) {
             << test.shape[0] << "x" << test.shape[1] << " block " << test.blockSize;
 }
 
-TEST(MxScaleStorageLayoutTest, OnlyGfx1250ConstrainsBlockSize) {
-    for (const size_t blockSize : {0, 1, 8, 64, 128})
+TEST(MxScaleStorageLayoutTest, BlockSizeIsRequired) {
+    for (const MxScaleStorageLayout layout :
+         {MxScaleStorageLayout::Natural, MxScaleStorageLayout::Gfx950,
+          MxScaleStorageLayout::Gfx1250})
+        EXPECT_THROW(planMxScaleStorage({1, 4}, 0, layout), std::runtime_error);
+    for (const size_t blockSize : {1, 8, 64, 128})
         EXPECT_THROW(planMxScaleStorage({1, 4}, blockSize, MxScaleStorageLayout::Gfx1250),
                      std::runtime_error)
             << blockSize;
-    EXPECT_EQ(planMxScaleStorage({17, 8}, 0, MxScaleStorageLayout::Natural).physicalByteCount, 136);
-    EXPECT_EQ(planMxScaleStorage({17, 8}, 0, MxScaleStorageLayout::Gfx950).physicalByteCount, 256);
+    // The natural and gfx950 byte layouts do not depend on the block size.
+    for (const size_t blockSize : {8, 16, 32, 64}) {
+        EXPECT_EQ(
+            planMxScaleStorage({17, 8}, blockSize, MxScaleStorageLayout::Natural).physicalByteCount,
+            136);
+        EXPECT_EQ(
+            planMxScaleStorage({17, 8}, blockSize, MxScaleStorageLayout::Gfx950).physicalByteCount,
+            256);
+    }
 }
 
 TEST(MxScaleStorageLayoutTest, MapsArchitectureNames) {
