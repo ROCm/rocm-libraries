@@ -79,7 +79,7 @@ add_library(hostnumerics-amd-gpu-layout STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/gfx950_mx_layout.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx_layout_common.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/pre_swizzle.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/operand.cpp"
 )
 add_library(
     roc::hostnumerics-amd-gpu-layout
@@ -170,6 +170,7 @@ target_sources(hostnumerics-amd-gpu-layout
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/amd_gpu_layout/mx.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/amd_gpu_layout/operand.hpp"
 )
 set_target_properties(hostnumerics-amd-gpu-layout
     PROPERTIES

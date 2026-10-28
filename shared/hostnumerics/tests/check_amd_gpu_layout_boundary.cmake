@@ -5,9 +5,12 @@ if(NOT DEFINED HOSTNUMERICS_SOURCE_DIR)
     message(FATAL_ERROR "HOSTNUMERICS_SOURCE_DIR is required.")
 endif()
 
-set(layout_header
-    "${HOSTNUMERICS_SOURCE_DIR}/include/roc/hostnumerics/amd_gpu_layout/mx.hpp"
+file(GLOB layout_headers
+    "${HOSTNUMERICS_SOURCE_DIR}/include/roc/hostnumerics/amd_gpu_layout/*.hpp"
 )
+if(NOT layout_headers)
+    message(FATAL_ERROR "No AMD GPU layout public headers were found.")
+endif()
 set(layout_source
     "${HOSTNUMERICS_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
 )
@@ -48,14 +51,16 @@ set(forbidden_layout_patterns
     "void[ \t]*\\*"
 )
 
-file(READ "${layout_header}" layout_contents)
-foreach(pattern IN LISTS forbidden_layout_patterns)
-    if(layout_contents MATCHES "${pattern}")
-        message(
-            FATAL_ERROR
-            "Forbidden dependency pattern '${pattern}' found in ${layout_header}"
-        )
-    endif()
+foreach(layout_header IN LISTS layout_headers)
+    file(READ "${layout_header}" layout_contents)
+    foreach(pattern IN LISTS forbidden_layout_patterns)
+        if(layout_contents MATCHES "${pattern}")
+            message(
+                FATAL_ERROR
+                "Forbidden dependency pattern '${pattern}' found in ${layout_header}"
+            )
+        endif()
+    endforeach()
 endforeach()
 
 if(NOT EXISTS "${layout_source}")
