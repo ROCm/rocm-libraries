@@ -6,29 +6,8 @@ import math
 
 import pytest
 
-from tests.test_strided_kv_decode_numeric import gpu
-
-
-def reference(torch, q, k, v, table, lengths, page, window):
-    """Independent CPU FP32 softmax from the rounded input tensors."""
-    batch, heads, dim = q.shape
-    ratio = heads // k.shape[2]
-    output = torch.zeros((batch, heads, dim), dtype=torch.float32)
-    lse = torch.full((batch, heads, 1), float("-inf"), dtype=torch.float32)
-    for seq, length in enumerate(lengths):
-        begin = max(0, length - window) if window else 0
-        if begin == length:
-            continue
-        keys = k[table[seq].long()].reshape(-1, k.shape[2], dim)[begin:length].float()
-        values = v[table[seq].long()].reshape(-1, v.shape[2], dim)[begin:length].float()
-        for head in range(heads):
-            scores = (keys[:, head // ratio] @ q[seq, head].float()) / math.sqrt(dim)
-            normalizer = torch.logsumexp(scores, 0)
-            output[seq, head] = (
-                torch.exp(scores - normalizer) @ values[:, head // ratio]
-            )
-            lse[seq, head, 0] = normalizer
-    return output, lse
+from tests._decode_numeric_support import gpu
+from tests._decode_reference import reference
 
 
 @pytest.mark.gpu

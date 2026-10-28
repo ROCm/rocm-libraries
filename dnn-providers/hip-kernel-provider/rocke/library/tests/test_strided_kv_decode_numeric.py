@@ -11,49 +11,13 @@ KV tensors, after rounding inputs to the tested fp16/bf16 dtype.
 """
 
 import math
-import os
 from collections import OrderedDict
 from dataclasses import replace
 
 import pytest
 
-
-@pytest.fixture(scope="module")
-def gpu():
-    required = os.environ.get("ROCKE_REQUIRE_DECODE_GPU")
-    if required:
-        import torch
-    else:
-        torch = pytest.importorskip("torch")
-    from rocke.runtime.hip_module import get_device_arch
-
-    if not torch.cuda.is_available():
-        if required:
-            pytest.fail("required decode GPU is unavailable")
-        pytest.skip("requires a ROCm GPU")
-    arch = get_device_arch()
-    if required and arch != required:
-        pytest.fail(f"requested {required}, found {arch}")
-    if arch not in ("gfx942", "gfx950", "gfx1250"):
-        if required:
-            pytest.fail(f"unsupported required decode target {arch}")
-        pytest.skip("decode validation targets gfx942/gfx950/gfx1250")
-    return torch, arch
-
-
-def _reference(torch, q, k, v, lengths, window):
-    output = torch.zeros_like(q, dtype=torch.float32)
-    ratio = q.shape[1] // k.shape[1]
-    for batch, length in enumerate(lengths):
-        if length == 0:
-            continue
-        begin = max(0, length - window) if window else 0
-        for head in range(q.shape[1]):
-            keys = k[batch, head // ratio, begin:length].float()
-            values = v[batch, head // ratio, begin:length].float()
-            scores = (keys @ q[batch, head].float()) / math.sqrt(q.shape[2])
-            output[batch, head] = scores.softmax(0) @ values
-    return output
+from tests._decode_numeric_support import gpu
+from tests._decode_reference import _reference
 
 
 def _cache(torch, logical, layout):

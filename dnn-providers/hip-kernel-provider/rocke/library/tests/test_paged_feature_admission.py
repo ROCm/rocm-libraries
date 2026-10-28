@@ -7,15 +7,19 @@ from importlib import import_module
 
 import pytest
 
-from tests import test_paged_kv_decode as paged
+from tests._paged_decode_support import (
+    Tensor,
+    _paged_runtime_kwargs,
+    _retarget_binding_case,
+    _structural_paged_spec,
+    paged_binding_case,
+)
 from kernels.common import attention_unified as au
 from dispatch.attention import dispatch_attention
 from dispatch.attention.common import _problem
 
-paged_binding_case = paged.paged_binding_case
 
-
-class FeatureTensor(paged.Tensor):
+class FeatureTensor(Tensor):
     def __init__(self, shape, dtype, strides=None, pointer=4096, device="cuda:0"):
         super().__init__(shape, dtype)
         self.strides, self.pointer, self.device = strides, pointer, device
@@ -44,7 +48,7 @@ def feature_tensor(feature, compute_dtype="fp16", **kwargs):
 
 
 def enabled_call(arch, page, dtype, feature):
-    arguments = paged._paged_runtime_kwargs(arch, page)
+    arguments = _paged_runtime_kwargs(arch, page)
     flag = {
         "sinks": "use_sinks",
         "alibi_slopes": "use_alibi",
@@ -58,7 +62,7 @@ def enabled_call(arch, page, dtype, feature):
         reduce_spec=replace(spec.reduce_spec, dtype=dtype),
     )
     for name in ("q", "k", "v", "out"):
-        arguments[name] = paged.Tensor(
+        arguments[name] = Tensor(
             arguments[name].shape,
             "torch.bfloat16" if dtype == "bf16" else "torch.float16",
         )
@@ -122,7 +126,7 @@ def test_direct_rejects_feature_metadata_before_retarget(
     calls = intercept(monkeypatch, arch)
     args = enabled_call(arch, page, dtype, feature)
     args[feature] = malformed(feature, dtype, defect)
-    args["tuning_spec"] = paged._structural_paged_spec(
+    args["tuning_spec"] = _structural_paged_spec(
         replace(args["tuning_spec"], allow_unsupported=True),
         retarget=lambda count: pytest.fail("invalid input reached retarget"),
     )
@@ -161,7 +165,7 @@ def test_default_and_prepared_reject_replaced_features(
 def test_binding_validates_effective_feature_replacements(
     paged_binding_case, monkeypatch, arch, page, feature, stage
 ):
-    req, _, tensors = paged._retarget_binding_case(paged_binding_case, arch, page)
+    req, _, tensors = _retarget_binding_case(paged_binding_case, arch, page)
     flag = {
         "sinks": "use_sinks",
         "alibi_slopes": "use_alibi",
@@ -205,7 +209,7 @@ def test_all_paged_loaders_reject_window_mismatch(
     monkeypatch, arch, page, window, compiled, retargeted
 ):
     calls = intercept(monkeypatch, arch)
-    args = paged._paged_runtime_kwargs(arch, page)
+    args = _paged_runtime_kwargs(arch, page)
     args["problem"] = replace(args["problem"], sliding_window=window)
     original = replace(
         args["tuning_spec"],
@@ -216,7 +220,7 @@ def test_all_paged_loaders_reject_window_mismatch(
         original, kernel_spec=replace(original.kernel_spec, sliding_window=compiled)
     )
     args["tuning_spec"] = (
-        paged._structural_paged_spec(original, retarget=lambda count: bad)
+        _structural_paged_spec(original, retarget=lambda count: bad)
         if retargeted
         else bad
     )
@@ -255,7 +259,7 @@ def test_binding_defers_stride_only_until_launch(
     paged_binding_case, monkeypatch, arch, page
 ):
     calls = intercept(monkeypatch, arch)
-    req, _, tensors = paged._retarget_binding_case(paged_binding_case, arch, page)
+    req, _, tensors = _retarget_binding_case(paged_binding_case, arch, page)
     req = replace(req, use_qq_bias=True)
     result = dispatch_attention(req)
     tensors["problem"] = _problem(req)

@@ -48,7 +48,9 @@ if _NATIVE_ROOT.is_dir():
 # pytest rewrites asserts only in test modules and conftest files. Every
 # operation's pinned GPU tests come from this helper, so register it before a
 # test module imports it; otherwise a failed assert shows none of its values.
-pytest.register_assert_rewrite("reference_common.pinned_tests")
+pytest.register_assert_rewrite(
+    "reference_common.pinned_tests", "tests._paged_decode_support"
+)
 
 
 def pytest_addoption(parser):

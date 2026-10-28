@@ -13,7 +13,7 @@ from dispatch.attention import bindings
 from dispatch.attention.common import _problem
 from kernels.common import attention_unified as au
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
-from tests.test_paged_kv_decode import Tensor, inputs
+from tests._paged_decode_support import Tensor, inputs
 
 
 def request(arch, page=1, **kwargs):

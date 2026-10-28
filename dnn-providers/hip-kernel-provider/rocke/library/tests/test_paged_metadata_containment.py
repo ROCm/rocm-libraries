@@ -7,11 +7,16 @@ from importlib import import_module
 
 import pytest
 
-from tests import test_paged_kv_decode as paged
+from tests._paged_decode_support import (
+    AddressInterpreter,
+    Tensor,
+    _structural_paged_spec,
+    inputs,
+)
 from kernels.common._attention_paged_bounds import PagedBounds
 
 
-class Interpreter(paged.AddressInterpreter):
+class Interpreter(AddressInterpreter):
     sub = staticmethod(lambda a, b: a - b)
     smax = staticmethod(max)
     cmp_ge = staticmethod(lambda a, b: a >= b)
@@ -165,7 +170,7 @@ def test_candidate_pair_bounds_and_signature(arch, page):
     assert selected.candidate.abi_version == "rocke-attention-paged/v2"
     assert selected.spec.kernel_spec.metadata_containment
     assert selected.spec.reduce_spec.metadata_containment
-    problem, tensors = paged.inputs(page)
+    problem, tensors = inputs(page)
     problem = replace(problem, clamp_arch=arch)
     bounds = paged_metadata_bounds(problem, tensors, selected.spec)
     assert bounds["physical_pages"] == tensors[1].shape[0]
@@ -224,9 +229,9 @@ def test_mismatched_pair_and_real_pool_rejected(arch):
         has_paged_metadata_containment(spec)
     red = replace(red, metadata_containment=True)
     spec = replace(spec, reduce_spec=red)
-    problem, tensors = paged.inputs()
-    tensors[1] = paged.Tensor((1 << 24, 1, 2, 64))
-    tensors[2] = paged.Tensor(tensors[1].shape)
+    problem, tensors = inputs()
+    tensors[1] = Tensor((1 << 24, 1, 2, 64))
+    tensors[2] = Tensor(tensors[1].shape)
     with pytest.raises(ValueError, match="pool exceeds"):
         paged_metadata_bounds(problem, tensors, spec)
 
@@ -248,7 +253,7 @@ def test_bounded_rejects_overlapping_views():
         algorithm="paged_decode_t32",
     )
     spec = dispatch_attention(req).spec
-    problem, tensors = paged.inputs()
+    problem, tensors = inputs()
     tensors[3].pointer = tensors[0].pointer
     with pytest.raises(ValueError, match="must not overlap"):
         paged_metadata_bounds(problem, tensors, spec)
@@ -339,9 +344,9 @@ def test_retarget_cannot_strip_bounded_pair(stage, monkeypatch):
         kernel_spec=replace(bounded.kernel_spec, metadata_containment=False),
         reduce_spec=replace(bounded.reduce_spec, metadata_containment=False),
     )
-    adapted = paged._structural_paged_spec(bounded, retarget=lambda count: legacy)
+    adapted = _structural_paged_spec(bounded, retarget=lambda count: legacy)
     adapted.fp8_fnuz = bounded.fp8_fnuz
-    problem, ts = paged.inputs()
+    problem, ts = inputs()
     tensors = dict(
         zip(("q", "k", "v", "out", "cu_seqlens_q", "seqused_k", "block_table"), ts)
     )

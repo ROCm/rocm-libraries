@@ -6,7 +6,8 @@ import math
 
 import pytest
 
-from tests.test_strided_kv_decode_numeric import gpu, _reference
+from tests._decode_numeric_support import gpu
+from tests._decode_reference import _reference, _feature_reference
 
 
 @pytest.mark.parametrize(
@@ -182,7 +183,6 @@ def test_window_excluded_metadata_and_recovery(
     )
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
-    from tests.test_paged_kv_decode_numeric import _feature_reference
 
     monkeypatch.setenv(f"HIPDNN_{arch.upper()}_3D_GRAPH", "1")
     dtype = torch.float16 if dtype_name == "fp16" else torch.bfloat16

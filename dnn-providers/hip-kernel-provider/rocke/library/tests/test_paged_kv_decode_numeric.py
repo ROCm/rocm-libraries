@@ -6,10 +6,8 @@ import math
 
 import pytest
 
-from tests import test_strided_kv_decode_numeric as decode_numeric
-
-gpu = decode_numeric.gpu
-_reference = decode_numeric._reference
+from tests._decode_numeric_support import gpu
+from tests._decode_reference import _reference, _feature_reference
 
 
 def _shuffled_cache(torch, logical, page, *, poison_tail=True):
@@ -275,38 +273,6 @@ def test_paged_binding_metadata_replay(gpu, monkeypatch, page):
         expected = _reference(torch, qh, keys, values, [length], 0)
         torch.testing.assert_close(out.cpu().float(), expected, atol=0.01, rtol=0.02)
     au.clear_attention_3d_graph_cache()
-
-
-def _feature_reference(torch, q, k, v, lengths, window, features):
-    """CPU FP32 SDPA from rounded logical inputs, including a zero-valued sink."""
-    output = torch.zeros_like(q, dtype=torch.float32)
-    ratio = q.shape[1] // k.shape[1]
-    for batch, length in enumerate(lengths):
-        if length == 0:
-            continue
-        begin = max(0, length - window) if window else 0
-        for head in range(q.shape[1]):
-            scores = (
-                k[batch, head // ratio, begin:length].float() @ q[batch, head].float()
-            ) / math.sqrt(q.shape[2])
-            if features["softcap"]:
-                scores = features["softcap"] * torch.tanh(scores / features["softcap"])
-            if features["alibi_slopes"] is not None:
-                positions = torch.arange(begin, length) - (length - 1)
-                scores += features["alibi_slopes"][head] * positions
-            if features["qq_bias"] is not None:
-                # Decode has one query: only the last KV position is query-to-query.
-                scores[-1] += features["qq_bias"][0, 0]
-            if features["sinks"] is not None:
-                weights = torch.cat(
-                    (scores, features["sinks"][head].float().reshape(1))
-                ).softmax(0)[:-1]
-            else:
-                weights = scores.softmax(0)
-            output[batch, head] = (
-                weights @ v[batch, head // ratio, begin:length].float()
-            )
-    return output
 
 
 @pytest.mark.parametrize("page", [1, 16, 32, 64])
