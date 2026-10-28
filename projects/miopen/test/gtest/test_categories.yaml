@@ -62,13 +62,6 @@ positive_patterns: &positive_patterns
   - "*/GPU_Dropout*"
   - "*/GPU_MIOpenDriver*"
   - "*/GPU_HipGraphExist*"
-  # --- Suites no pattern above selected, but Jenkins runs via its *FP32*/*FP16*/... filter.
-  # Tier placement follows measured time per test (median ms; Jenkins build #1034 and
-  # TheRock gfx942 logs):
-  #   Smoke/ and unprefixed : cheap and already run in quick -> also run in standard.
-  #   Full/, <= 200 s serial per suite : excluded from standard, kept in comprehensive.
-  #   Full/, > 200 s serial or untimed : excluded from standard and comprehensive (full only).
-  # The per-tier Full/ exclusions are in the standard and comprehensive exclude lists.
   # Optimizers
   - "*/GPU_Adam_*"
   - "*/GPU_AmpAdam_*"
@@ -228,9 +221,6 @@ test_categories:
       - "Full/GPU_BNFWDTrainLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLBWDLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLInferLargeFusedActivation2D_*"
-      # Families added for Jenkins parity. Their Smoke and unprefixed instantiations run
-      # here (~3.5 min serial, <1 min per shard on 4 shards); the Full cross product
-      # (~80 min serial) runs in comprehensive/full only.
       - "Full/GPU_Adam_*"
       - "Full/GPU_AmpAdam_*"
       - "Full/GPU_AddLayerNorm_*"
