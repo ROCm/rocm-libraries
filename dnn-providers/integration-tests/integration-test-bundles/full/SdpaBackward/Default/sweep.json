@@ -2496,6 +2496,1153 @@
       }
     },
     {
+      "id": "m20n_b1h16k2v2_256x256_d64_bfp16_cm_tlw128rinf_bshd_tolp",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.125,
+          "parameters__causal_mask": true,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": 127,
+          "parameters__right_bound": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              256,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              256,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              256,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              256,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              256,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              256,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              256,
+              64
+            ],
+            "strides": [
+              32768,
+              64,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              256,
+              64
+            ],
+            "strides": [
+              262144,
+              64,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              256,
+              1
+            ],
+            "strides": [
+              4096,
+              256,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "A4",
+          "A6",
+          "AW7",
+          "DT3",
+          "G2",
+          "G3",
+          "G8",
+          "M20",
+          "M20.n",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "P",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: heads; hdim"
+      }
+    },
+    {
+      "id": "m12n_b1h24k2v2_128x128_d128_bfp16_tlcausal_bshd_tolu",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.08838834764831843,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": 0
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              24,
+              128,
+              128
+            ],
+            "strides": [
+              393216,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              24,
+              128,
+              128
+            ],
+            "strides": [
+              393216,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              24,
+              128,
+              128
+            ],
+            "strides": [
+              393216,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              24,
+              128,
+              128
+            ],
+            "strides": [
+              393216,
+              128,
+              3072,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              24,
+              128,
+              1
+            ],
+            "strides": [
+              3072,
+              128,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "DT3",
+          "G2",
+          "G3",
+          "M12",
+          "M12.n",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "U",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: heads"
+      }
+    },
+    {
+      "id": "m36n_b1h8k1v1_256x128_d128_bfp16_none_bshd_dom2to2_tolp",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.08838834764831843,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              128,
+              128
+            ],
+            "strides": [
+              16384,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              8,
+              256,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              8,
+              256,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              128,
+              128
+            ],
+            "strides": [
+              16384,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              8,
+              256,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              1,
+              128,
+              128
+            ],
+            "strides": [
+              16384,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              1,
+              128,
+              128
+            ],
+            "strides": [
+              16384,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              8,
+              256,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              1024,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              8,
+              256,
+              1
+            ],
+            "strides": [
+              2048,
+              256,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "DT3",
+          "G2",
+          "G3",
+          "G7",
+          "M36",
+          "M36.n",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "P",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -2.0,
+            "hi": 2.0
+          }
+        },
+        "notes": "probe: heads"
+      }
+    },
+    {
+      "id": "m43n_b1h16k2v2_128x128_d128_bfp16_none_bshd_told",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.08838834764831843,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              128,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              128,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              128,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              128,
+              128
+            ],
+            "strides": [
+              32768,
+              128,
+              256,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              128,
+              128
+            ],
+            "strides": [
+              262144,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              128,
+              1
+            ],
+            "strides": [
+              2048,
+              128,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "DT3",
+          "G2",
+          "G3",
+          "M43",
+          "M43.n",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "D",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: heads"
+      }
+    },
+    {
+      "id": "m03n_b1h16k1v1_32x512_d128_bfp16_brcausal_bshd_told",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.08838834764831843,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "BOTTOM_RIGHT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": 0
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              512,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              32,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              32,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              1,
+              512,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              32,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              1,
+              512,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              1,
+              512,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              128,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              32,
+              128
+            ],
+            "strides": [
+              65536,
+              128,
+              2048,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              32,
+              1
+            ],
+            "strides": [
+              512,
+              32,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "A2",
+          "DT3",
+          "G2",
+          "G3",
+          "G7",
+          "M03",
+          "M03.n",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "D",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: heads"
+      }
+    },
+    {
       "id": "s24_b2h3k3v3_72x120_d512_bfp16_none_told",
       "values": {
         "io_data_type": "bfloat16",
