@@ -428,8 +428,7 @@ namespace rocsparse
                     const T x_interface_left  = B_spike[num_spikes * rhs + row_left];
                     const T x_interface_right = B_spike[num_spikes * rhs + row_right];
 
-                    x_final = (d_mod - (a_mod * x_interface_left)
-                               - (c_mod * x_interface_right))
+                    x_final = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right))
                               / b_mod;
                 }
 
