@@ -10,6 +10,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -331,32 +332,72 @@ TEST(TestGpuSdpaBwdPlanBuilder, ApplicabilityMirrorsCpuPlan)
     }
 }
 
-// The same bf16 graph through the GPU and CPU reference executors gives the same gradients.
-TEST(TestGpuSdpaBwdPlan, ExecutorMatchesCpuExecutor)
+// A bf16 graph through the GPU and CPU reference executors gives the same gradients. The spec
+// sets the graph; the inputs, forward options and bindings follow from it.
+namespace
+{
+
+struct BwdExecutorCase
+{
+    const char* name;
+    RawBwdSpec spec;
+    // Seeds for Q, K, V, bias and dO are seedBase + 0 .. 4.
+    unsigned int seedBase;
+};
+
+RawBwdSpec alibiTopLeftSpec()
+{
+    // Four heads over 8 x 8 give head 0 the slope 1/4, which moves the farthest scores by 1.75.
+    RawBwdSpec spec;
+    spec.heads = 4;
+    spec.seqQ = 8;
+    spec.seqKv = 8;
+    spec.statsDims = {1, 4, 8};
+    spec.bias = false;
+    spec.dBias = false;
+    spec.alibi = true;
+    spec.topLeft = true;
+    return spec;
+}
+
+} // namespace
+
+class TestGpuSdpaBwdPlanExecutor : public ::testing::TestWithParam<BwdExecutorCase>
+{
+};
+
+// The GPU plan must bind the node's bias and dBias, and apply its band and ALiBi terms, exactly
+// as the CPU plan does.
+TEST_P(TestGpuSdpaBwdPlanExecutor, MatchesCpuExecutor)
 {
     SKIP_IF_NO_DEVICES();
-    auto graph = makeRawSdpaBwdGraph({});
+    const RawBwdSpec& spec = GetParam().spec;
+    const unsigned int seed = GetParam().seedBase;
+    auto graph = makeRawSdpaBwdGraph(spec);
 
-    Tensor<float> qF({1, 2, 5, 8});
-    Tensor<float> kF({1, 2, 9, 8});
-    Tensor<float> vF({1, 2, 9, 8});
-    Tensor<float> oF({1, 2, 5, 8});
-    Tensor<float> biasF({5, 9});
-    Tensor<float> lse4({1, 2, 5, 1});
-    qF.fillWithRandomValues(-1.0F, 1.0F, 301);
-    kF.fillWithRandomValues(-1.0F, 1.0F, 302);
-    vF.fillWithRandomValues(-1.0F, 1.0F, 303);
-    biasF.fillWithRandomValues(-1.0F, 1.0F, 304);
-    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(
-        qF,
-        kF,
-        vF,
-        oF,
-        hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}
-            .setScale(0.35F)
-            .setMask(&biasF)
-            .setBand(-1, 0, false)
-            .setLse(&lse4));
+    constexpr int64_t HEAD_DIM = 8;
+    const std::vector<int64_t> qDims = {1, spec.heads, spec.seqQ, HEAD_DIM};
+    const std::vector<int64_t> kvDims = {1, spec.heads, spec.seqKv, HEAD_DIM};
+    Tensor<float> qF(qDims);
+    Tensor<float> kF(kvDims);
+    Tensor<float> vF(kvDims);
+    Tensor<float> oF(qDims);
+    Tensor<float> biasF({spec.seqQ, spec.seqKv});
+    Tensor<float> lse4({1, spec.heads, spec.seqQ, 1});
+    qF.fillWithRandomValues(-1.0F, 1.0F, seed);
+    kF.fillWithRandomValues(-1.0F, 1.0F, seed + 1);
+    vF.fillWithRandomValues(-1.0F, 1.0F, seed + 2);
+    biasF.fillWithRandomValues(-1.0F, 1.0F, seed + 3);
+    auto forwardOptions = hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}
+                              .setScale(0.35F)
+                              .setBand(-1, 0, spec.topLeft)
+                              .setAlibi(spec.alibi)
+                              .setLse(&lse4);
+    if(spec.bias)
+    {
+        forwardOptions.setMask(&biasF);
+    }
+    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(qF, kF, vF, oF, forwardOptions);
 
     const auto toBf16 = [](const Tensor<float>& src) {
         Tensor<bfloat16> dst(src.dims());
@@ -371,9 +412,9 @@ TEST(TestGpuSdpaBwdPlan, ExecutorMatchesCpuExecutor)
     auto v = toBf16(vF);
     auto o = toBf16(oF);
     auto bias = toBf16(biasF);
-    Tensor<bfloat16> dO({1, 2, 5, 8});
-    dO.fillWithRandomValues(bfloat16(-1.0F), bfloat16(1.0F), 305);
-    Tensor<float> stats({1, 2, 5});
+    Tensor<bfloat16> dO(qDims);
+    dO.fillWithRandomValues(bfloat16(-1.0F), bfloat16(1.0F), seed + 4);
+    Tensor<float> stats(spec.statsDims);
     for(size_t i = 0; i < stats.elementCount(); ++i)
     {
         stats.memory().hostData()[i] = lse4.memory().hostData()[i];
@@ -381,117 +422,23 @@ TEST(TestGpuSdpaBwdPlan, ExecutorMatchesCpuExecutor)
 
     struct Outputs
     {
-        Tensor<bfloat16> dQ{{1, 2, 5, 8}};
-        Tensor<bfloat16> dK{{1, 2, 9, 8}};
-        Tensor<bfloat16> dV{{1, 2, 9, 8}};
-        Tensor<bfloat16> dBias{{5, 9}};
-    };
-    Outputs cpu;
-    Outputs gpu;
-    for(auto* t : {&gpu.dQ, &gpu.dK, &gpu.dV, &gpu.dBias})
-    {
-        t->fillWithValue(bfloat16(std::numeric_limits<float>::quiet_NaN()));
-    }
-
-    const auto pack = [&](Outputs& out, bool device) {
-        const auto ptr = [device](auto& t) -> void* {
-            return device ? t.memory().deviceData() : t.memory().hostData();
-        };
-        return std::unordered_map<int64_t, void*>{{1, ptr(q)},
-                                                  {2, ptr(k)},
-                                                  {3, ptr(v)},
-                                                  {4, ptr(o)},
-                                                  {5, ptr(dO)},
-                                                  {6, ptr(stats)},
-                                                  {7, ptr(out.dQ)},
-                                                  {8, ptr(out.dK)},
-                                                  {9, ptr(out.dV)},
-                                                  {10, ptr(bias)},
-                                                  {11, ptr(out.dBias)}};
-    };
-
-    hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
-    cpuExecutor.execute(graph.GetBufferPointer(), graph.GetSize(), pack(cpu, false));
-    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpuExecutor;
-    gpuExecutor.execute(graph.GetBufferPointer(), graph.GetSize(), pack(gpu, true));
-    for(auto* t : {&gpu.dQ, &gpu.dK, &gpu.dV, &gpu.dBias})
-    {
-        t->memory().markDeviceModified();
-    }
-
-    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<bfloat16> validation(2e-2F, 2e-2F);
-    EXPECT_TRUE(validation.allClose(cpu.dQ, gpu.dQ));
-    EXPECT_TRUE(validation.allClose(cpu.dK, gpu.dK));
-    EXPECT_TRUE(validation.allClose(cpu.dV, gpu.dV));
-    EXPECT_TRUE(validation.allClose(cpu.dBias, gpu.dBias));
-}
-
-// An ALiBi graph (top-left causal) through the GPU and CPU reference executors gives the same
-// gradients, so the GPU plan applies the node's ALiBi term. Four heads over 8 x 8 give head 0 the
-// slope 1/4, which moves the farthest scores by 1.75.
-TEST(TestGpuSdpaBwdPlan, AlibiExecutorMatchesCpuExecutor)
-{
-    SKIP_IF_NO_DEVICES();
-    RawBwdSpec spec;
-    spec.heads = 4;
-    spec.seqQ = 8;
-    spec.seqKv = 8;
-    spec.statsDims = {1, 4, 8};
-    spec.bias = false;
-    spec.dBias = false;
-    spec.alibi = true;
-    spec.topLeft = true;
-    auto graph = makeRawSdpaBwdGraph(spec);
-
-    const std::vector<int64_t> dims = {1, 4, 8, 8};
-    Tensor<float> qF(dims);
-    Tensor<float> kF(dims);
-    Tensor<float> vF(dims);
-    Tensor<float> oF(dims);
-    Tensor<float> lse4({1, 4, 8, 1});
-    qF.fillWithRandomValues(-1.0F, 1.0F, 311);
-    kF.fillWithRandomValues(-1.0F, 1.0F, 312);
-    vF.fillWithRandomValues(-1.0F, 1.0F, 313);
-    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(
-        qF,
-        kF,
-        vF,
-        oF,
-        hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}
-            .setScale(0.35F)
-            .setBand(-1, 0, true)
-            .setAlibi(true)
-            .setLse(&lse4));
-
-    const auto toBf16 = [](const Tensor<float>& src) {
-        Tensor<bfloat16> dst(src.dims());
-        for(size_t i = 0; i < src.elementCount(); ++i)
+        Outputs(const std::vector<int64_t>& qDims,
+                const std::vector<int64_t>& kvDims,
+                const std::vector<int64_t>& biasDims)
+            : dQ(qDims)
+            , dK(kvDims)
+            , dV(kvDims)
+            , dBias(biasDims)
         {
-            dst.memory().hostData()[i] = bfloat16(src.memory().hostData()[i]);
         }
-        return dst;
+        Tensor<bfloat16> dQ;
+        Tensor<bfloat16> dK;
+        Tensor<bfloat16> dV;
+        Tensor<bfloat16> dBias;
     };
-    auto q = toBf16(qF);
-    auto k = toBf16(kF);
-    auto v = toBf16(vF);
-    auto o = toBf16(oF);
-    Tensor<bfloat16> dO(dims);
-    dO.fillWithRandomValues(bfloat16(-1.0F), bfloat16(1.0F), 315);
-    Tensor<float> stats({1, 4, 8});
-    for(size_t i = 0; i < stats.elementCount(); ++i)
-    {
-        stats.memory().hostData()[i] = lse4.memory().hostData()[i];
-    }
-
-    struct Outputs
-    {
-        Tensor<bfloat16> dQ{{1, 4, 8, 8}};
-        Tensor<bfloat16> dK{{1, 4, 8, 8}};
-        Tensor<bfloat16> dV{{1, 4, 8, 8}};
-    };
-    Outputs cpu;
-    Outputs gpu;
-    for(auto* t : {&gpu.dQ, &gpu.dK, &gpu.dV})
+    Outputs cpu(qDims, kvDims, biasF.dims());
+    Outputs gpu(qDims, kvDims, biasF.dims());
+    for(auto* t : {&gpu.dQ, &gpu.dK, &gpu.dV, &gpu.dBias})
     {
         t->fillWithValue(bfloat16(std::numeric_limits<float>::quiet_NaN()));
     }
@@ -500,22 +447,31 @@ TEST(TestGpuSdpaBwdPlan, AlibiExecutorMatchesCpuExecutor)
         const auto ptr = [device](auto& t) -> void* {
             return device ? t.memory().deviceData() : t.memory().hostData();
         };
-        return std::unordered_map<int64_t, void*>{{1, ptr(q)},
-                                                  {2, ptr(k)},
-                                                  {3, ptr(v)},
-                                                  {4, ptr(o)},
-                                                  {5, ptr(dO)},
-                                                  {6, ptr(stats)},
-                                                  {7, ptr(out.dQ)},
-                                                  {8, ptr(out.dK)},
-                                                  {9, ptr(out.dV)}};
+        std::unordered_map<int64_t, void*> variantPack{{1, ptr(q)},
+                                                       {2, ptr(k)},
+                                                       {3, ptr(v)},
+                                                       {4, ptr(o)},
+                                                       {5, ptr(dO)},
+                                                       {6, ptr(stats)},
+                                                       {7, ptr(out.dQ)},
+                                                       {8, ptr(out.dK)},
+                                                       {9, ptr(out.dV)}};
+        if(spec.bias)
+        {
+            variantPack[10] = ptr(bias);
+        }
+        if(spec.dBias)
+        {
+            variantPack[11] = ptr(out.dBias);
+        }
+        return variantPack;
     };
 
     hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
     cpuExecutor.execute(graph.GetBufferPointer(), graph.GetSize(), pack(cpu, false));
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor gpuExecutor;
     gpuExecutor.execute(graph.GetBufferPointer(), graph.GetSize(), pack(gpu, true));
-    for(auto* t : {&gpu.dQ, &gpu.dK, &gpu.dV})
+    for(auto* t : {&gpu.dQ, &gpu.dK, &gpu.dV, &gpu.dBias})
     {
         t->memory().markDeviceModified();
     }
@@ -525,4 +481,19 @@ TEST(TestGpuSdpaBwdPlan, AlibiExecutorMatchesCpuExecutor)
     EXPECT_TRUE(validation.allClose(cpu.dQ, gpu.dQ));
     EXPECT_TRUE(validation.allClose(cpu.dK, gpu.dK));
     EXPECT_TRUE(validation.allClose(cpu.dV, gpu.dV));
+    if(spec.dBias)
+    {
+        EXPECT_TRUE(validation.allClose(cpu.dBias, gpu.dBias));
+    }
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuSdpaBwdPlanExecutor,
+                         ::testing::Values(
+                             // Bias and dBias with a bottom-right causal band.
+                             BwdExecutorCase{"BiasBottomRightCausal", RawBwdSpec{}, 301},
+                             // ALiBi with a top-left causal band, so the GPU plan applies ALiBi.
+                             BwdExecutorCase{"AlibiTopLeftCausal", alibiTopLeftSpec(), 311}),
+                         [](const ::testing::TestParamInfo<BwdExecutorCase>& info) {
+                             return std::string(info.param.name);
+                         });
