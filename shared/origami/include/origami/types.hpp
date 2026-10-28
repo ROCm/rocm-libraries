@@ -345,6 +345,30 @@ struct ORIGAMI_EXPORT runtime_options {
   /// Heuristics variance threshold (reads from ANALYTICAL_GEMM_HEURISTICS_VARIANCE env var)
   double heuristics_variance;
 
+  /// Strength of the batch-saturated residency penalty
+  /// (reads from ANALYTICAL_GEMM_BATCHED_RESIDENCY_ALPHA).
+  double batched_residency_alpha{0.0};
+
+  /// Resident WGs/CU needed to hide latency in a saturated batch
+  /// (reads from ANALYTICAL_GEMM_BATCHED_RESIDENCY_TARGET_WGS).
+  double batched_residency_target_wgs{4.0};
+
+  /// Grid waves/CU at which a batch is treated as saturated
+  /// (reads from ANALYTICAL_GEMM_BATCHED_SATURATION_WAVES).
+  double batched_saturation_waves{4.0};
+
+  /// Strength of bookkeeping overlap in a saturated batch
+  /// (reads from ANALYTICAL_GEMM_BATCHED_BOOKKEEPING_OVERLAP).
+  double batched_bookkeeping_overlap{0.0};
+
+  /// K iterations needed to fully amortize batch bookkeeping
+  /// (reads from ANALYTICAL_GEMM_BATCHED_K_AMORTIZATION_ITERS).
+  double batched_k_amortization_iters{4.0};
+
+  /// Strength of additional scalar edge-store traffic in a saturated batch
+  /// (reads from ANALYTICAL_GEMM_BATCHED_EDGE_STORE_GAMMA).
+  double batched_edge_store_gamma{0.0};
+
   /// Force a specific MT size for solution selection (reads from ANALYTICAL_GEMM_PICK env var).
   /// Format: "MxNxK" e.g. "128x128x64". When set, non-matching configs get max latency.
   dim3_t gemm_pick{0, 0, 0};
@@ -449,7 +473,7 @@ struct tensile_params_t {
   int prefetch_global_read = 2;
 
   /// Buffer load/store flags - use buffer instructions for global memory access
-  bool buffer_load = true;
+  bool buffer_load  = true;
   bool buffer_store = true;
 
   /// Math clocks per unrolled loop iteration (0 = auto-calculate)
@@ -464,8 +488,8 @@ struct tensile_params_t {
   int workgroup_mapping_xcc_group     = 0;
   bool global_split_u_coalesced       = false;
   bool global_split_u_wgm_round_robin = false;
-  bool one_lds_buffer = false;
-  bool source_swap = false;
+  bool one_lds_buffer                 = false;
+  bool source_swap                    = false;
 
   /// LDS layout per operand (TensileLite UnrollMajorLDS): 1 = K contiguous,
   /// 0 = M/N contiguous, -1 = unknown (derived from the problem's transpose using
@@ -648,11 +672,11 @@ struct config_t {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
            cache_hints_b == o.cache_hints_b && cache_hints_d == o.cache_hints_d &&
-           stream_k == o.stream_k &&
-           workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
-           prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
-           grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
-           vector_width_b == o.vector_width_b && cluster_dim == o.cluster_dim && backend == o.backend;
+           stream_k == o.stream_k && workgroup_mapping == o.workgroup_mapping &&
+           reduction_strategy == o.reduction_strategy && prediction_mode == o.prediction_mode &&
+           target == o.target && grvw_a == o.grvw_a && grvw_b == o.grvw_b && gwvw_d == o.gwvw_d &&
+           vector_width_a == o.vector_width_a && vector_width_b == o.vector_width_b &&
+           cluster_dim == o.cluster_dim && backend == o.backend;
   }
 
   std::size_t hash() const {
@@ -698,7 +722,8 @@ struct config_t {
   }
 
   bool is_valid() const {
-    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0 && cluster_dim.m > 0 && cluster_dim.n > 0 && cluster_dim.k > 0;
+    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0 &&
+           cluster_dim.m > 0 && cluster_dim.n > 0 && cluster_dim.k > 0;
   }
 };
 

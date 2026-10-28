@@ -10,6 +10,27 @@
 
 namespace origami {
 
+namespace {
+
+double read_nonnegative_double_from_env(const char* name, double default_value) {
+  if (const char* env = std::getenv(name)) {
+    try {
+      const double value = std::stod(env);
+      if (std::isfinite(value) && value >= 0.0) return value;
+    } catch (...) {
+      // Fall through to the default.
+    }
+  }
+  return default_value;
+}
+
+double read_positive_double_from_env(const char* name, double default_value) {
+  const double value = read_nonnegative_double_from_env(name, default_value);
+  return value > 0.0 ? value : default_value;
+}
+
+}  // namespace
+
 runtime_options::runtime_options() { update_from_env(); }
 
 runtime_options::runtime_options(bool debug, bool heuristics, double variance)
@@ -51,7 +72,19 @@ void runtime_options::update_from_env() {
   debug_enabled       = read_debug_from_env();
   heuristics_enabled  = read_heuristics_from_env();
   heuristics_variance = read_heuristics_variance_from_env();
-  gemm_pick           = read_gemm_pick_from_env();
+  batched_residency_alpha =
+      read_nonnegative_double_from_env("ANALYTICAL_GEMM_BATCHED_RESIDENCY_ALPHA", 0.0);
+  batched_residency_target_wgs =
+      read_positive_double_from_env("ANALYTICAL_GEMM_BATCHED_RESIDENCY_TARGET_WGS", 4.0);
+  batched_saturation_waves =
+      read_positive_double_from_env("ANALYTICAL_GEMM_BATCHED_SATURATION_WAVES", 4.0);
+  batched_bookkeeping_overlap =
+      read_nonnegative_double_from_env("ANALYTICAL_GEMM_BATCHED_BOOKKEEPING_OVERLAP", 0.0);
+  batched_k_amortization_iters =
+      read_positive_double_from_env("ANALYTICAL_GEMM_BATCHED_K_AMORTIZATION_ITERS", 4.0);
+  batched_edge_store_gamma =
+      read_nonnegative_double_from_env("ANALYTICAL_GEMM_BATCHED_EDGE_STORE_GAMMA", 0.0);
+  gemm_pick = read_gemm_pick_from_env();
 }
 
 int datatype_to_bits(data_type_t type) {
