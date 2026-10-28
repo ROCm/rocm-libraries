@@ -28,6 +28,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   filters up to 7x7 and is selected through Find mode.
 
 ### Changed
+* [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
+  never uses split-K, so these solvers are deterministic; previously, deterministic forward
+  convolutions could only use the GEMM and naive solvers.
 * [Conv] The AI performance-config picker again selects `ConvHipConv` configs on gfx950, using a
   model retrained on hipconv v0.4 configurations. On gfx1250 the solver keeps its default config
   until the model is validated on gfx1250 hardware.
