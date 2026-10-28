@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    lds_segment_interleave=True,
+                    tdm_plus_lds_buf=True,
                 ),
                 "not implemented yet",
             ),
@@ -162,6 +162,16 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     scale_tdm=True,
                 ),
                 "scale_tdm requires scale_double_buffer",
+            ),
+            (
+                MxFp4TdmGemmSpec(
+                    name="bad",
+                    M=128,
+                    N=64,
+                    K=256,
+                    lds_segment_b_rotate=True,
+                ),
+                "lds_segment_b_rotate requires lds_segment_interleave",
             ),
         )
         for spec, message in cases:
@@ -353,6 +363,32 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             llvm_flavor="llvm23",
         )
         self.assertIn("llvm.amdgcn.tensor.load.to.lds", llvm)
+
+    def test_step6_7_segment_interleave_variant(self):
+        self.assertIn("step6_7_mxfp4_gemm", variant_names())
+        spec = variant_spec("step6_7_mxfp4_gemm", 128, 64, 512, tile_k=512)
+        self.assertTrue(spec.lds_segment_interleave)
+        self.assertFalse(spec.lds_segment_b_rotate)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        self.assertGreaterEqual(spec.lds_bytes, 2 * 65536)
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
+        yaml7 = variant_spec(
+            "step6_7_mxfp4_gemm",
+            256,
+            256,
+            512,
+            tile_m=256,
+            tile_n=256,
+            tile_k=512,
+        )
+        ok, reason = is_valid_spec(yaml7)
+        self.assertFalse(ok)
+        self.assertIn("64KiB segment", reason)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

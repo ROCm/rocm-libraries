@@ -109,6 +109,7 @@ silicon bench harness (timings outside the repo).
 | `step6_4_mxfp4_gemm` | + `wave_separated_tdm` | `bad=0` |
 | `step6_5_mxfp4_gemm` | + `scale_tdm` (row-major rocKE LDS staging, not Tensile swizzle) | `bad=0` (YAML LDS 278528, `vgpr=768`, spill=0) |
 | `step6_6_mxfp4_gemm` | + `lds_pad` (+16 B A/B row stride) | `bad=0` |
+| `step6_7_mxfp4_gemm` | + `lds_segment_interleave` (parity→64KiB segment) | `bad=0` (YAML MacroTile rejected: slot >64KiB) |
 
 ## Deferred controls
 

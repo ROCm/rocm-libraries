@@ -112,12 +112,19 @@ class MxFp4TdmGemmSpec:
         return self.tdm_prefetch_depth
 
     @property
+    def _bytes_per_prefetch_slot(self) -> int:
+        total = self.a_tile_bytes + self.b_tile_bytes
+        if self.scale_tdm:
+            total += self.a_scale_tile_bytes + self.b_scale_tile_bytes
+        return total
+
+    @property
     def lds_bytes(self) -> int:
         depth = self.effective_prefetch_depth
-        ab = depth * (self.a_tile_bytes + self.b_tile_bytes)
-        if self.scale_tdm:
-            ab += depth * (self.a_scale_tile_bytes + self.b_scale_tile_bytes)
-        return ab
+        if self.lds_segment_interleave:
+            # Parity maps to a 64 KiB LDS segment; scales share the same slot.
+            return max(depth * _LDS_SEGMENT_BYTES, depth * self._bytes_per_prefetch_slot)
+        return depth * self._bytes_per_prefetch_slot
 
     @property
     def a_lds_row_stride_bytes(self) -> int:
@@ -158,10 +165,10 @@ class MxFp4TdmGemmSpec:
 
 # Step 6 flags that are declared but not yet wired into the builder.
 # Each landed substep removes its flag from this frozenset.
+_LDS_SEGMENT_BYTES = 65536
+
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "lds_segment_interleave",
-        "lds_segment_b_rotate",
         "tdm_plus_lds_buf",
         "init_c_wmma",
         "cluster_dim",
@@ -213,6 +220,15 @@ def is_valid_spec(spec: MxFp4TdmGemmSpec, arch: str = "gfx1250") -> tuple[bool, 
         return False, f"Step 6 flag not implemented yet: {unimplemented}"
     if spec.lds_segment_b_rotate and not spec.lds_segment_interleave:
         return False, "lds_segment_b_rotate requires lds_segment_interleave"
+    if spec.lds_segment_interleave:
+        if spec.effective_prefetch_depth > 2:
+            return False, "lds_segment_interleave currently supports depth 2 only"
+        per_slot = spec._bytes_per_prefetch_slot
+        if per_slot > _LDS_SEGMENT_BYTES:
+            return False, (
+                "lds_segment_interleave needs each prefetch slot to fit one "
+                f"64KiB segment ({per_slot} B > {_LDS_SEGMENT_BYTES})"
+            )
     if spec.scale_tdm and not spec.scale_double_buffer:
         return False, "scale_tdm requires scale_double_buffer"
     if spec.wave_separated_tdm:
@@ -337,6 +353,20 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
     b_scale_region = scale_region + depth * spec.a_scale_tile_bytes
 
     def _buffer_offsets(parity):
+        if spec.lds_segment_interleave:
+            # Buffer parity → 64 KiB segment: A, B, [A_scale, B_scale].
+            seg = b.mul(parity, b.const_i32(_LDS_SEGMENT_BYTES))
+            a_offset = seg
+            b_offset = b.add(seg, b.const_i32(spec.a_tile_bytes))
+            if not spec.scale_tdm:
+                return a_offset, b_offset, None, None
+            a_scale_offset = b.add(
+                b_offset, b.const_i32(spec.b_tile_bytes)
+            )
+            b_scale_offset = b.add(
+                a_scale_offset, b.const_i32(spec.a_scale_tile_bytes)
+            )
+            return a_offset, b_offset, a_scale_offset, b_scale_offset
         a_offset = b.mul(parity, b.const_i32(spec.a_tile_bytes))
         b_offset = b.add(
             b.const_i32(b_region),
@@ -518,8 +548,16 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
 
         return b.vec_concat(row_fragment(row0), row_fragment(row1))
 
+    def _b_local_col(atom_col):
+        """B LDS / store column; odd waves rotate by half the N atom when enabled."""
+        col = b.add(atom_col, lane_col)
+        if not spec.lds_segment_b_rotate:
+            return col
+        rotated = b.add(atom_col, b.mod(b.add(lane_col, b.const_i32(_ATOM_N // 2)), c16))
+        return b.select(b.cmp_eq(b.mod(wave, b.const_i32(2)), c1), rotated, col)
+
     def _load_b_fragment(b_buffer, atom_col, inner_k):
-        row = b.add(atom_col, lane_col)
+        row = _b_local_col(atom_col)
         row_base = b.add(
             b_buffer,
             b.mul(row, b.const_i32(spec.b_lds_row_stride_bytes)),
@@ -672,18 +710,13 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 for rn, atom_col in enumerate(atom_cols):
                     index = rm * spec.wave_repeat_n + rn
                     b_frag = _load_b_fragment(b_buffer, atom_col, inner_k)
-                    if b_scales is not None:
+                    b_col = _b_local_col(atom_col)
+                    if b_scales is not None and not spec.lds_segment_b_rotate:
                         b_scale = b_scales[rn]
                     elif spec.scale_tdm:
-                        b_scale = _pack_b_scale_lds(
-                            b_scale_buf,
-                            b.add(atom_col, lane_col),
-                            inner_k,
-                        )
+                        b_scale = _pack_b_scale_lds(b_scale_buf, b_col, inner_k)
                     else:
-                        b_scale = _pack_b_scale_global(
-                            b.add(block_n, b.add(atom_col, lane_col)), group0
-                        )
+                        b_scale = _pack_b_scale_global(b.add(block_n, b_col), group0)
                     out[index] = b.mma(
                         _WmmaScaleF4Atom(),
                         a_frag,
@@ -744,7 +777,8 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                         ),
                     ),
                 )
-                col = b.add(block_n, b.add(atom_col, lane_col))
+                # Un-rotate B's odd-wave N mapping so stores land on logical cols.
+                col = b.add(block_n, _b_local_col(atom_col))
                 index = b.add(b.mul(row, N), col)
                 value = b.fmul(alpha, b.vec_extract(acc, slot))
                 c_value = b.cvt_fp8_to_f32(b.global_load(C, index, FP8E4M3, align=1))
