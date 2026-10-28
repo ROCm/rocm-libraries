@@ -98,17 +98,13 @@ const static std::vector<std::vector<size_t>> stride_range = {{1}};
 const static std::vector<std::vector<size_t>> ioffset_range_zero = {{0, 0}};
 const static std::vector<std::vector<size_t>> ooffset_range_zero = {{0, 0}};
 
-const static std::vector<std::vector<size_t>> ioffset_range = {{0, 0}, {1, 1}};
-const static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
-
 // It's hard to imagine callbacks breaking specifically on batch-1,
 // so just test batch > 1
 const static std::vector<size_t> callback_batch_range = {2};
 
 auto transform_types = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
-#ifdef __HIP__
-INSTANTIATE_TEST_SUITE_P(callback_no_offset,
+INSTANTIATE_TEST_SUITE_P(callback,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,
                                                                   transform_types,
@@ -124,26 +120,6 @@ INSTANTIATE_TEST_SUITE_P(callback_no_offset,
                                                                   false,
                                                                   callbacks_full)),
                          accuracy_test::TestName);
-
-// function pointer callbacks need -fgpu-rdc, but that causes build
-// nondeterminism in kpack
-INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator_base(test_prob,
-                                                                  transform_types,
-                                                                  callback_sizes,
-                                                                  precision_range_sp_dp,
-                                                                  callback_batch_range,
-                                                                  generate_types,
-                                                                  stride_range,
-                                                                  stride_range,
-                                                                  ioffset_range,
-                                                                  ooffset_range,
-                                                                  place_range,
-                                                                  false,
-                                                                  callbacks_full)),
-                         accuracy_test::TestName);
-#endif
 
 // one of the obvious use cases for callbacks is to implement result
 // scaling manually, so use the same sizes to test rocFFT's own

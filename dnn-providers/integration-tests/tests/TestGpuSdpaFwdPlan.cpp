@@ -3,25 +3,34 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "RaggedGraphTestUtils.hpp"
 #include "SdpaFwdGraphTestUtils.hpp"
+#include "harness/ReferenceCapabilityError.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/gpu-graph-executor/detail/GpuSdpaFwdPlan.hpp"
+#include "harness/gpu-graph-executor/detail/GpuSdpaFwdSignatureKey.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 namespace
 {
@@ -38,14 +47,53 @@ constexpr int64_t UNUSED_UID = 99;
 // A valid stats/LSE output uid, distinct from the q/k/v/o uids.
 constexpr int64_t STATS_UID = 14;
 
+// A valid additive mask uid, distinct from the other uids.
+constexpr int64_t MASK_UID = 15;
+
 // Plain [B=1, H=2, Sq=8, D=16] SDPA shape (head_dim_v = 16).
 const std::vector<int64_t> DIMS = {1, 2, 8, 16};
+
+// Mask [1, 1, Sq=8, Skv=8], right-aligned and broadcast over batch and head.
+const std::vector<int64_t> MASK_DIMS = {1, 1, 8, 8};
 
 flatbuffers::FlatBufferBuilder makeGraph(SdpaAttributesT attrs = {},
                                          std::optional<int64_t> statsUid = std::nullopt)
 {
     return createSdpaFwdGraph(
         Q_UID, K_UID, V_UID, O_UID, DIMS, DIMS, DIMS, DIMS, DataType::FLOAT, attrs, statsUid);
+}
+
+// FLOAT Q/K/V/O graph whose mask tensor (MASK_UID) has dtype `maskDataType`.
+flatbuffers::FlatBufferBuilder makeGraphWithMask(DataType maskDataType)
+{
+    return createSdpaFwdGraph(Q_UID,
+                              K_UID,
+                              V_UID,
+                              O_UID,
+                              DIMS,
+                              DIMS,
+                              DIMS,
+                              DIMS,
+                              DataType::FLOAT,
+                              {},
+                              std::nullopt,
+                              /*scale=*/std::nullopt,
+                              MASK_UID,
+                              MASK_DIMS,
+                              maskDataType);
+}
+
+// Non-uniform values exactly representable in float, half and bfloat16: a uniform mask would
+// pass by coincidence because softmax is shift-invariant.
+template <typename MaskT>
+void fillExactlyRepresentableMask(hipdnn_data_sdk::utilities::Tensor<MaskT>& mask)
+{
+    constexpr std::array<float, 8> VALUES = {-2.0f, -1.0f, -0.5f, -0.25f, 0.0f, 0.25f, 0.5f, 1.0f};
+    auto* data = mask.memory().hostData();
+    for(size_t i = 0; i < mask.elementCount(); ++i)
+    {
+        data[i] = static_cast<MaskT>(VALUES[(i * 3 + i / 8) % VALUES.size()]);
+    }
 }
 
 } // namespace
@@ -86,6 +134,24 @@ TEST(TestGpuSdpaFwdPlanBuilder, IsApplicable)
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(K_UID);
     EXPECT_FALSE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
+}
+
+// Ragged tensors are not yet supported by the GPU SDPA reference.
+// TODO: remove once supported.
+TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForRaggedTensors)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+
+    auto graphBuilder = makeGraph();
+    auto denseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(denseWrap.getNode(0), denseWrap.getTensorMap()));
+
+    auto ragged = markFirstTensorRagged(graphBuilder.GetBufferPointer());
+    auto raggedWrap
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(ragged.data(), ragged.size());
+    EXPECT_FALSE(floatPlanBuilder.isApplicable(raggedWrap.getNode(0), raggedWrap.getTensorMap()));
 }
 
 TEST(TestGpuSdpaFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
@@ -196,9 +262,9 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
     Tensor<float> v(DIMS);
-    q.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/11);
-    k.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/22);
-    v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
 
     Tensor<float> oPlan(DIMS);
     Tensor<float> lsePlan(lseDims);
@@ -314,6 +380,124 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
               static_cast<float>(oPlan.memory().hostData()[0]));
 }
 
+// A pass-by-value scale lives in the variant pack as a host scalar. The plan must apply it, not
+// fall back to the unscaled default: with random inputs in [-1, 1] a scale of 2.0 and a scale of
+// 1.0 give outputs that differ far beyond the comparison tolerance.
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+
+    constexpr int64_t SCALE_UID = 15;
+    constexpr float SCALE_VALUE = 2.0f;
+
+    FloatOperandSpec scaleSpec;
+    scaleSpec.uid = SCALE_UID;
+    scaleSpec.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
+
+    auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                           K_UID,
+                                           V_UID,
+                                           O_UID,
+                                           DIMS,
+                                           DIMS,
+                                           DIMS,
+                                           DIMS,
+                                           DataType::FLOAT,
+                                           /*attrs=*/{},
+                                           /*statsUid=*/std::nullopt,
+                                           scaleSpec);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
+
+    Tensor<float> oPlan(DIMS);
+    float hostScale = SCALE_VALUE;
+
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+        {SCALE_UID, &hostScale},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+
+    Tensor<float> oRef(DIMS);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float>(q,
+                                                                 k,
+                                                                 v,
+                                                                 oRef,
+                                                                 SCALE_VALUE,
+                                                                 /*attnMask=*/nullptr,
+                                                                 /*leftBound=*/-1,
+                                                                 /*rightBound=*/-1,
+                                                                 /*topLeftAlignment=*/true,
+                                                                 /*lse=*/nullptr);
+
+    const float tolerance = 1e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oRef, oPlan))
+        << "Plan ignored the runtime pass-by-value scale tensor";
+}
+
+// The scale may be baked, pass-by-value or device-resident. It must be a single element, and a
+// device-resident scale must be FLOAT because it is read back as one float.
+TEST(TestGpuSdpaFwdPlanBuilder, IsApplicableOnlyForSingleElementScaleOperands)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
+    constexpr int64_t SCALE_UID = 15;
+
+    const auto isApplicableWith = [&](const FloatOperandSpec& scale) {
+        auto graphBuilder = createSdpaFwdGraph(Q_UID,
+                                               K_UID,
+                                               V_UID,
+                                               O_UID,
+                                               DIMS,
+                                               DIMS,
+                                               DIMS,
+                                               DIMS,
+                                               DataType::FLOAT,
+                                               /*attrs=*/{},
+                                               /*statsUid=*/std::nullopt,
+                                               scale);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+
+    FloatOperandSpec scale;
+    scale.uid = SCALE_UID;
+
+    scale.storage = OperandStorage::BAKED;
+    scale.bakedValue = 2.0f;
+    EXPECT_TRUE(isApplicableWith(scale));
+
+    scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
+    EXPECT_TRUE(isApplicableWith(scale));
+
+    scale.storage = OperandStorage::DEVICE;
+    EXPECT_TRUE(isApplicableWith(scale));
+
+    scale.dims = {2};
+    EXPECT_FALSE(isApplicableWith(scale)) << "a multi-element device scale must be declined";
+}
+
 // Regression guard for the provider P->bf16 rounding gate. The cast is a property
 // of the P@V matmul inputs (Q/K/V), not the output dtype, so the registered
 // bf16-in/fp32-out config must still round P before P@V. Compile-time because
@@ -376,4 +560,240 @@ TEST(TestGpuSdpaFwdPlanBuilder, ThrowsOnInvalidBounds)
             graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
         EXPECT_THROW(patient.buildNodePlan(graphWrap, graphWrap.getNode(0)), std::invalid_argument);
     }
+}
+
+// A mask builder takes exactly the graphs whose mask tensor has its dtype; the UNSET builder
+// takes exactly the graphs without a mask.
+TEST(TestGpuSdpaFwdPlanBuilder, MaskDataTypeSelectsApplicableBuilder)
+{
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::UNSET>
+        noMaskBuilder;
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT>
+        floatMaskBuilder;
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::HALF>
+        halfMaskBuilder;
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::BFLOAT16>
+        bfloat16MaskBuilder;
+
+    const auto applicability = [&](flatbuffers::FlatBufferBuilder& graphBuilder) {
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        const auto& node = graphWrap.getNode(0);
+        const auto& tensorMap = graphWrap.getTensorMap();
+        return std::array<bool, 4>{noMaskBuilder.isApplicable(node, tensorMap),
+                                   floatMaskBuilder.isApplicable(node, tensorMap),
+                                   halfMaskBuilder.isApplicable(node, tensorMap),
+                                   bfloat16MaskBuilder.isApplicable(node, tensorMap)};
+    };
+    using Applicability = std::array<bool, 4>;
+
+    auto noMask = makeGraph();
+    EXPECT_EQ(applicability(noMask), (Applicability{true, false, false, false}));
+
+    auto floatMask = makeGraphWithMask(DataType::FLOAT);
+    EXPECT_EQ(applicability(floatMask), (Applicability{false, true, false, false}));
+
+    auto halfMask = makeGraphWithMask(DataType::HALF);
+    EXPECT_EQ(applicability(halfMask), (Applicability{false, false, true, false}));
+
+    auto bfloat16Mask = makeGraphWithMask(DataType::BFLOAT16);
+    EXPECT_EQ(applicability(bfloat16Mask), (Applicability{false, false, false, true}));
+
+    // A mask tensor with dtype UNSET matches no builder's dtype rule.
+    auto unsetMask = makeGraphWithMask(DataType::UNSET);
+    EXPECT_EQ(applicability(unsetMask), (Applicability{false, false, false, false}));
+}
+
+// Registry and applicability through the executor, which is what the verification harness
+// calls. None of these cases reach the GPU: plan selection fails or succeeds before execution.
+class TestGpuSdpaFwdMaskGraphExecutor : public ::testing::Test
+{
+protected:
+    hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor _executor;
+};
+
+TEST_F(TestGpuSdpaFwdMaskGraphExecutor, NoMaskAndSupportedMaskDataTypesAreApplicable)
+{
+    auto noMask = makeGraph();
+    EXPECT_TRUE(_executor.isApplicable(noMask.GetBufferPointer(), noMask.GetSize()));
+
+    for(const auto maskType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto graph = makeGraphWithMask(maskType);
+        EXPECT_TRUE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+    }
+}
+
+// INT32 maps to no registered key: the registry throws, and the graph is not applicable.
+TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsupportedMaskDataTypeHasNoPlan)
+{
+    auto graph = makeGraphWithMask(DataType::INT32);
+    EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+
+    const std::unordered_map<int64_t, void*> emptyVariantPack;
+    try
+    {
+        _executor.execute(graph.GetBufferPointer(), graph.GetSize(), emptyVariantPack);
+        FAIL() << "expected a registry error for an INT32 mask";
+    }
+    catch(const hipdnn_integration_tests::ReferenceCapabilityError&)
+    {
+        FAIL() << "an unregistered mask dtype must be the registry error, not a capability error";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("mask=INT32"), std::string::npos) << e.what();
+    }
+}
+
+// An UNSET-dtype mask maps to the registered no-mask key, whose builder rejects it.
+TEST_F(TestGpuSdpaFwdMaskGraphExecutor, UnsetMaskDataTypeIsCapabilityError)
+{
+    auto graph = makeGraphWithMask(DataType::UNSET);
+    EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+
+    const std::unordered_map<int64_t, void*> emptyVariantPack;
+    EXPECT_THROW(_executor.execute(graph.GetBufferPointer(), graph.GetSize(), emptyVariantPack),
+                 hipdnn_integration_tests::ReferenceCapabilityError);
+}
+
+TEST_F(TestGpuSdpaFwdMaskGraphExecutor, DanglingMaskUidIsNotApplicable)
+{
+    auto graph = createSdpaFwdGraph(Q_UID,
+                                    K_UID,
+                                    V_UID,
+                                    O_UID,
+                                    DIMS,
+                                    DIMS,
+                                    DIMS,
+                                    DIMS,
+                                    DataType::FLOAT,
+                                    {},
+                                    std::nullopt,
+                                    /*scale=*/std::nullopt,
+                                    MASK_UID,
+                                    MASK_DIMS,
+                                    std::nullopt);
+    EXPECT_FALSE(_executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
+}
+
+namespace
+{
+
+// Runs the half/bfloat16-mask plan and compares it with CpuFpReferenceSdpa::forward on a mask of
+// the same dtype and with the FLOAT-mask plan holding the same values. The latter runs the same
+// kernel on identical inputs, so it must be bitwise equal: a mask read with the wrong dtype
+// diverges.
+template <DataType MaskEnum>
+void expectMaskedPlanMatchesReferences()
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::Tensor;
+    using MaskT = hipdnn_test_sdk::utilities::MaskDataTypeToNative<MaskEnum>;
+
+    auto graph = makeGraphWithMask(MaskEnum);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graph.GetBufferPointer(), graph.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                MaskEnum>
+        builder;
+    auto plan = builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    auto floatGraph = makeGraphWithMask(DataType::FLOAT);
+    auto floatGraphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        floatGraph.GetBufferPointer(), floatGraph.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT,
+                                DataType::FLOAT>
+        floatBuilder;
+    auto floatPlan = floatBuilder.buildNodePlan(floatGraphWrap, floatGraphWrap.getNode(0));
+
+    Tensor<float> q(DIMS);
+    Tensor<float> k(DIMS);
+    Tensor<float> v(DIMS);
+    fillWithRandomValues(q, -1.0f, 1.0f, /*seed=*/11);
+    fillWithRandomValues(k, -1.0f, 1.0f, /*seed=*/22);
+    fillWithRandomValues(v, -1.0f, 1.0f, /*seed=*/33);
+
+    Tensor<MaskT> mask(MASK_DIMS);
+    fillExactlyRepresentableMask(mask);
+    Tensor<float> floatMask(MASK_DIMS);
+    for(size_t i = 0; i < mask.elementCount(); ++i)
+    {
+        floatMask.memory().hostData()[i] = static_cast<float>(mask.memory().hostData()[i]);
+    }
+
+    // The CPU oracle reads host data, so it runs before any device upload.
+    Tensor<float> oCpu(DIMS);
+    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::
+        forward<float, float, float, float, float, MaskT>(q, k, v, oCpu, std::nullopt, &mask);
+
+    Tensor<float> oPlan(DIMS);
+    Tensor<float> oFloatPlan(DIMS);
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+        {MASK_UID, mask.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+
+    const std::unordered_map<int64_t, void*> floatVariantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oFloatPlan.memory().deviceData()},
+        {MASK_UID, floatMask.memory().deviceData()},
+    };
+    floatPlan->execute(floatVariantPack);
+    oFloatPlan.markDeviceModified();
+
+    const float tolerance = 2e-5f;
+    const hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float> validation(tolerance,
+                                                                                 tolerance);
+    EXPECT_TRUE(validation.allClose(oCpu, oPlan))
+        << "Plan output differs from CpuFpReferenceSdpa::forward with a matching typed mask";
+
+    const auto* actual = oPlan.memory().hostData();
+    const auto* expected = oFloatPlan.memory().hostData();
+    for(size_t i = 0; i < oPlan.elementCount(); ++i)
+    {
+        ASSERT_EQ(actual[i], expected[i]) << "at flat index " << i;
+    }
+}
+
+} // namespace
+
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithHalfMask)
+{
+    expectMaskedPlanMatchesReferences<DataType::HALF>();
+}
+
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWithBfloat16Mask)
+{
+    expectMaskedPlanMatchesReferences<DataType::BFLOAT16>();
 }

@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_AUXILIARY_H_
-#define _ROCBLASLT_AUXILIARY_H_
 
 #include "rocblaslt-types.h"
 #include <filesystem>
@@ -160,6 +158,18 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
                                                 uint64_t                 rows,
                                                 uint64_t                 cols,
                                                 int64_t                  ld);
+
+/*! \ingroup aux_module
+ *  \brief Create a grouped matrix descriptor (HIPBLASLT_BATCH_MODE_GROUPED).
+ *  The arrays are device pointers with groupCount elements, or null to use the
+ *  ROWS, COLS, or LD attribute for every group.
+ */
+rocblaslt_status rocblaslt_grouped_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
+                                                        hipDataType              valueType,
+                                                        int                      groupCount,
+                                                        const void*              rowsArray,
+                                                        const void*              colsArray,
+                                                        const void*              ldArray);
 
 /*! \ingroup aux_module
  *  \brief Destroy a matrix descriptor
@@ -467,12 +477,11 @@ rocblaslt_status
 rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matmul_desc dst);
 
 // for internal use during testing, fetch arch name
+// The name the runtime reports for the current device. This is also the compiler
+// target its kernels were built for -- including a silicon-revision variant such
+// as gfx1250-strict, which ROCr reports for gfx1250 A0 parts -- so it names both
+// the device-library subtree and the files inside it.
 std::string rocblaslt_internal_get_arch_name();
-
-// The library subtree the current device loads: "gfx1250v0" for a v0 part (its
-// own tree only, no fallback), otherwise the base name. Filenames inside the
-// subtree keep the revision-agnostic rocblaslt_internal_get_arch_name().
-std::string rocblaslt_internal_get_library_arch_name();
 
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
@@ -505,5 +514,3 @@ std::optional<std::filesystem::path>
 
 void rocblaslt_log_error(const char* func, const char* var, const char* msg);
 #endif
-
-#endif /* _ROCBLASLT_AUXILIARY_H_ */

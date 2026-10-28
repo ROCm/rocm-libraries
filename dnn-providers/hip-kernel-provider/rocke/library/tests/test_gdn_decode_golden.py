@@ -27,6 +27,7 @@ Lowering needs no GPU and no comgr, so this runs anywhere.
 from __future__ import annotations
 
 import dataclasses as dc
+import functools
 import hashlib
 import json
 import sys
@@ -35,7 +36,6 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "gdn_decode_gfx950_ir_sha256.json"
 )
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx950"
 
 # Pin the library root ahead of everything on sys.path so that running this file
@@ -48,28 +48,310 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 def _cases():
     """case id -> zero-arg builder returning a KernelDef.
 
-    Covers the default spec, the reference path, and every tile the dispatcher
-    can select, so a change to any shipped configuration is visible.
+    Covers the default spec, the reference path, and every legal registered
+    tile, so a change to any selectable configuration is visible.
     """
-    from dispatch.gdn.gfx950 import _TUNED_TILES
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+    from dispatch.gdn.gfx950 import (
+        _TUNED_TILES_KDA,
+        FUSED_DEFAULT_TILE,
+        KDA_FUSED_SPEC_ID,
+    )
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
         spec = dc.replace(GdnDecodeSpec(), **overrides)
-        return lambda: build_gdn_decode(spec, arch=_ARCH)
+        fn = lambda: build_gdn_decode(spec, arch=_ARCH)  # noqa: E731
+        fn.spec = spec
+        return fn
 
     cases = {
         "default": build(),
         "simple": build(simple=True),
         "no_l2norm": build(use_qk_l2norm=False),
+        # KDA gate kind. Pinned for the same reason the GDN cases are: the
+        # per-channel gate is emitted code, and a refactor that changed it
+        # without breaking it would pass every other test in the tree.
+        "kda_default": build(gate_kind="kda"),
+        "kda_simple": build(gate_kind="kda", simple=True),
+        "kda_raw_gate": build(gate_kind="kda", fuse_gate=False),
+        # f32 recurrent state, on both emitters and both gate kinds. Only the
+        # state loads and stores differ from the 16-bit twins above.
+        "default_stf32": build(state_dtype="f32"),
+        "simple_stf32": build(simple=True, state_dtype="f32"),
+        "kda_default_stf32": build(gate_kind="kda", state_dtype="f32"),
+        "kda_simple_stf32": build(gate_kind="kda", simple=True, state_dtype="f32"),
     }
-    for _, tile, spec_id in _TUNED_TILES:
+    # Fused conv1d / gated-RMSNorm modes, each flag alone and both, per gate
+    # kind and state width, at one explicit BPV=1 tile.
+    fused_tile = dict(
+        num_k_heads=16,
+        num_v_heads=16,
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+    )
+    for gate in ("gdn", "kda"):
+        for state_dtype in ("bf16", "f32"):
+            for conv, norm in ((True, False), (False, True), (True, True)):
+                tag = ("_cv" if conv else "") + ("_rn" if norm else "")
+                cases[f"fused_{gate}_st{state_dtype}{tag}"] = build(
+                    **fused_tile,
+                    gate_kind=gate,
+                    state_dtype=state_dtype,
+                    fuse_conv=conv,
+                    fuse_out_norm=norm,
+                )
+        # The conv state, the packed row and the out gate carry the I/O dtype,
+        # so f16 I/O is its own load/store path; f16 state is the third state
+        # width. Both flags on covers every fused access.
+        for dtype, state_dtype in (("bf16", "f16"), ("f16", "f16"), ("f16", "f32")):
+            io = "" if dtype == "bf16" else f"_io{dtype}"
+            cases[f"fused_{gate}{io}_st{state_dtype}_cv_rn"] = build(
+                **fused_tile,
+                gate_kind=gate,
+                dtype=dtype,
+                state_dtype=state_dtype,
+                fuse_conv=True,
+                fuse_out_norm=True,
+            )
+    # One wave: no cross-wave LDS reduction and no barrier before the tap shift.
+    cases["fused_kda_stf32_cv_rn_w1"] = build(
+        **{**fused_tile, "num_warps": 1},
+        gate_kind="kda",
+        state_dtype="f32",
+        fuse_conv=True,
+        fuse_out_norm=True,
+    )
+    # Performance knobs, one flag-on case each at a tile where it changes the
+    # code, plus the fused-knob combinations. Every knob-off case above keeps
+    # its hash: the knobs default to the code emitted before they existed.
+    fused_bpv1 = dict(
+        num_k_heads=16,
+        num_v_heads=16,
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+    )
+    cases.update(
+        {
+            "knob_state_load_hint": build(state_load_hint="streaming"),
+            "knob_state_store_hint": build(state_store_hint="streaming"),
+            "knob_dpp_reduce": build(dpp_reduce=True),
+            "knob_xcd_remap": build(xcd_remap=True),
+            "knob_stream_rows": build(stream_rows=True),
+            "knob_interleave_cols_stf32": build(
+                state_dtype="f32", interleave_cols=True
+            ),
+            "knob_waves_per_eu": build(waves_per_eu=4),
+            "knob_conv_once": build(**fused_bpv1, fuse_conv=True, conv_once=True),
+            "knob_conv_once_kda_stf32": build(
+                **fused_bpv1,
+                gate_kind="kda",
+                state_dtype="f32",
+                fuse_conv=True,
+                conv_once=True,
+            ),
+            "knob_conv_once_norm_gate_once": build(
+                **fused_bpv1,
+                fuse_conv=True,
+                fuse_out_norm=True,
+                conv_once=True,
+                norm_gate_once=True,
+            ),
+            "knob_out_lds": build(**fused_bpv1, fuse_out_norm=True, out_lds=True),
+            "knob_out_lds_norm_gate_once_kda": build(
+                **fused_bpv1,
+                gate_kind="kda",
+                fuse_conv=True,
+                fuse_out_norm=True,
+                conv_once=True,
+                norm_gate_once=True,
+                out_lds=True,
+            ),
+        }
+    )
+    # one wave: out_lds adds its own LDS barrier (no cross-wave reduction)
+    cases["knob_out_lds_w1"] = build(
+        **{**fused_bpv1, "num_warps": 1}, fuse_out_norm=True, out_lds=True
+    )
+    # one wave with conv_once at WTK 8: it loads first (late_row_inputs)
+    cases["knob_conv_once_kda_stf32_cv_rn_w1k8"] = build(
+        **{**fused_bpv1, "num_warps": 1, "warp_threads_k": 8},
+        gate_kind="kda",
+        state_dtype="f32",
+        fuse_conv=True,
+        fuse_out_norm=True,
+        conv_once=True,
+    )
+    # Every knob on every path it changes (below), and at other head dims.
+    named = {fn.spec.kernel_name() for fn in cases.values()}
+    for cid, overrides in [*_knob_class_cases(), *_knob_head_dim_cases()]:
+        fn = build(**overrides)
+        if fn.spec.kernel_name() not in named:
+            named.add(fn.spec.kernel_name())
+            cases[cid] = fn
+    request = GdnDecodeRequest(batch=16, arch=_ARCH)
+    for result in dispatch_gdn_decode_all(request):
+        cases[f"registered_{result.candidate.spec_id}"] = (
+            lambda spec=result.spec: build_gdn_decode(spec, arch=_ARCH)
+        )
+    # Every KDA candidate: the work table's bands plus the fused default, which
+    # an unfused KDA request can also pin.
+    kda_candidates = [(tile, spec_id) for _, tile, spec_id in _TUNED_TILES_KDA]
+    kda_candidates.append((FUSED_DEFAULT_TILE, KDA_FUSED_SPEC_ID))
+    for tile, spec_id in kda_candidates:
         cases[f"tuned_{spec_id}"] = build(
+            gate_kind="kda",
             num_warps=tile[0],
             warp_threads_k=tile[1],
             blocks_per_v_dim=tile[2],
         )
     return cases
+
+
+# knob -> the overrides that switch it on (norm_gate_once needs conv_once)
+_KNOB_ON = {
+    "state_load_hint": dict(state_load_hint="streaming"),
+    "state_store_hint": dict(state_store_hint="streaming"),
+    "dpp_reduce": dict(dpp_reduce=True),
+    "xcd_remap": dict(xcd_remap=True),
+    "stream_rows": dict(stream_rows=True),
+    "interleave_cols": dict(interleave_cols=True),
+    "conv_once": dict(conv_once=True),
+    "norm_gate_once": dict(conv_once=True, norm_gate_once=True),
+    "out_lds": dict(out_lds=True),
+    "waves_per_eu": dict(waves_per_eu=4),
+}
+_CV_RN = dict(fuse_conv=True, fuse_out_norm=True)
+# The fused paths each knob runs on: every fusion mode a fused-only knob
+# accepts (and out_lds over norm_gate_once's LDS products), interleave_cols
+# with and without conv_once's LDS operands; any other knob on both fusions.
+_FUSED_PATHS = {
+    "conv_once": {"cv": dict(fuse_conv=True), "cv_rn": _CV_RN},
+    "out_lds": {
+        "rn": dict(fuse_out_norm=True),
+        "cv_rn": _CV_RN,
+        "cv_rn_ngo": dict(_CV_RN, conv_once=True, norm_gate_once=True),
+    },
+    "interleave_cols": {"cv_rn": _CV_RN, "cv_rn_co": dict(_CV_RN, conv_once=True)},
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _ir_modulo_name(spec):
+    """The spec's llvm20 IR with its kernel name replaced by ``K``."""
+    from kernels.gfx950.gdn_decode import build_gdn_decode
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+    llvm = _lower_kernel_to_llvm_python(
+        build_gdn_decode(spec, arch=_ARCH), arch=_ARCH, llvm_flavor="llvm20"
+    )
+    return llvm.replace(spec.kernel_name(), "K")
+
+
+def _knob_changes_code(overrides, knob):
+    """True if the knob-on spec is legal and emits code other than the
+    knob-off kernel. The IR is compared with the kernel name normalized out,
+    and the name must follow it: a knob that changes nothing here keeps the
+    name (one name per distinct kernel), and a predicate that names a knob
+    whose emitter adds nothing fails here instead of pinning a renamed copy
+    of the knob-off kernel."""
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
+
+    spec = dc.replace(GdnDecodeSpec(), **overrides)
+    off = dc.replace(spec, **{knob: GdnDecodeSpec.__dataclass_fields__[knob].default})
+    if not is_valid_spec(spec, arch=_ARCH)[0]:
+        return False
+    same_ir = _ir_modulo_name(spec) == _ir_modulo_name(off)
+    same_name = spec.kernel_name() == off.kernel_name()
+    assert same_ir is same_name, (
+        f"{knob} on {overrides}: IR {'un' if same_ir else ''}changed but name "
+        f"{'un' if same_name else ''}changed ({spec.kernel_name()})"
+    )
+    return not same_ir
+
+
+def _knob_class_cases():
+    """Every knob alone on every path where it changes code: gate kind x
+    state dtype x reference / warp-tiled / fused (default heads, the default
+    tile and the fused (4,16,1) tile)."""
+    fused_tile = dict(
+        num_k_heads=16,
+        num_v_heads=16,
+        num_warps=4,
+        warp_threads_k=16,
+        blocks_per_v_dim=1,
+    )
+    for knob, on in _KNOB_ON.items():
+        paths = {"simple": dict(simple=True), "plain": {}}
+        for tag, fused in _FUSED_PATHS.get(knob, {"cv_rn": _CV_RN}).items():
+            paths[f"fused_{tag}"] = dict(fused_tile, **fused)
+        for gate in ("gdn", "kda"):
+            for state_dtype in ("bf16", "f32"):
+                for tag, path in paths.items():
+                    ov = dict(path, **on, gate_kind=gate, state_dtype=state_dtype)
+                    if _knob_changes_code(ov, knob):
+                        yield f"knob_{knob}_{gate}_st{state_dtype}_{tag}", ov
+
+
+def _knob_head_dim_cases():
+    """Every knob at DK = DV = 64 and 256 (KDA, f32 state: every per-column
+    operand and every knob applies), warp-tiled and fused; and out_lds at
+    DV = 256 / 512 (4 / 8 rows per storing lane) and with two store rounds
+    (DV / 8 storing lanes > one wave)."""
+    tiles = {
+        64: ((2, 8, 2), (2, 8, 1)),
+        256: ((2, 16, 8), (8, 16, 1)),
+    }
+    kda32 = dict(gate_kind="kda", state_dtype="f32")
+    for d, ((pw, pk, pb), (fw, fk, fb)) in tiles.items():
+        dims = dict(kda32, head_k_dim=d, head_v_dim=d)
+        plain = dict(dims, num_warps=pw, warp_threads_k=pk, blocks_per_v_dim=pb)
+        fused = dict(
+            dims,
+            **_CV_RN,
+            num_k_heads=16,
+            num_v_heads=16,
+            num_warps=fw,
+            warp_threads_k=fk,
+            blocks_per_v_dim=fb,
+        )
+        for knob, on in _KNOB_ON.items():
+            for tag, path in (("plain", plain), ("fused_cv_rn", fused)):
+                ov = dict(path, **on)
+                if _knob_changes_code(ov, knob):
+                    yield f"knob_{knob}_dk{d}dv{d}_{tag}", ov
+    for dv, (nw, wtk) in ((256, (8, 16)), (512, (16, 16))):
+        tile = dict(
+            kda32,
+            head_v_dim=dv,
+            num_k_heads=16,
+            num_v_heads=16,
+            num_warps=nw,
+            warp_threads_k=wtk,
+            blocks_per_v_dim=1,
+            out_lds=True,
+        )
+        yield f"knob_out_lds_dv{dv}_rn", dict(tile, fuse_out_norm=True)
+        yield f"knob_out_lds_dv{dv}_cv_rn_ngo", dict(
+            tile, **_CV_RN, conv_once=True, norm_gate_once=True
+        )
+    rounds = dict(
+        kda32,
+        head_k_dim=8,
+        head_v_dim=576,
+        num_k_heads=4,
+        num_v_heads=4,
+        num_warps=1,
+        warp_threads_k=1,
+        blocks_per_v_dim=1,
+        out_lds=True,
+    )
+    yield "knob_out_lds_2rounds_rn", dict(rounds, fuse_out_norm=True)
+    yield "knob_out_lds_2rounds_cv_rn_ngo", dict(
+        rounds, **_CV_RN, conv_once=True, norm_gate_once=True
+    )
 
 
 def _current_flavor():
@@ -86,10 +368,22 @@ def _sha_for(build, flavor):
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
+def _run(flavor):
+    """One flavor's golden sub-document, for ``check_golden``. A lowering error
+    propagates with its traceback."""
+    cases = {}
+    for cid, build in _cases().items():
+        sha, nbytes = _sha_for(build, flavor)
+        cases[cid] = {"sha256": sha, "bytes": nbytes}
+    return {"cases": cases}
+
+
 def _build_doc():
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
+
     doc = {"schema": "gdn_decode_gfx950.ir_golden_sha256/v1", "flavors": {}}
     failures = []
-    for flavor in _FLAVORS:
+    for flavor in GOLDEN_FLAVORS:
         cases = {}
         for cid, build in _cases().items():
             try:
@@ -109,24 +403,22 @@ def _build_doc():
 
 def test_gdn_decode_ir_matches_golden():
     import pytest
+    from rocke.core.ir_golden import check_golden
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    recorded = golden.get("flavors", {}).get(flavor)
-    if not recorded:
-        pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
-    drift = []
-    for cid, build in _cases().items():
-        entry = recorded["cases"].get(cid, {})
-        want = entry.get("sha256")
-        if not want:
-            drift.append(f"{cid}: no sha256 recorded ({entry})")
-            continue
-        got, _ = _sha_for(build, flavor)
-        if got != want:
-            drift.append(f"{cid}: {want} -> {got}")
+    # An entry without a hash would otherwise surface as a sha mismatch; name it.
+    unrecorded = [
+        f"{flavor}/{cid}: no sha256 recorded ({entry})"
+        for flavor, sub in golden.get("flavors", {}).items()
+        for cid, entry in sub.get("cases", {}).items()
+        if not entry.get("sha256")
+    ]
+    assert not unrecorded, "\n  ".join(unrecorded)
+    # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
+    # change for a flavor this host does not run still fails here.
+    drift = check_golden(_GOLDEN, _run)
     assert not drift, (
         "gdn_decode IR drift vs golden (re-record with --write if intended):\n  "
         + "\n  ".join(drift)
@@ -136,16 +428,18 @@ def test_gdn_decode_ir_matches_golden():
 def test_every_shipped_configuration_is_recorded():
     """A new tuned tile must arrive with a golden entry, not silently uncovered."""
     import pytest
+    from rocke.core.ir_golden import GOLDEN_FLAVORS
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    flavor = _current_flavor()
-    recorded = golden.get("flavors", {}).get(flavor)
-    if not recorded:
-        pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
+    flavors = golden.get("flavors", {})
+    # A flavor with no sub-document leaves every configuration unrecorded.
     missing = sorted(
-        cid for cid in _cases() if not recorded["cases"].get(cid, {}).get("sha256")
+        f"{flavor}/{cid}"
+        for flavor in GOLDEN_FLAVORS
+        for cid in _cases()
+        if not flavors.get(flavor, {}).get("cases", {}).get(cid, {}).get("sha256")
     )
     assert not missing, f"configurations without a SHA-256: {missing}"
 
@@ -212,6 +506,54 @@ def test_build_doc_refuses_lowering_failure(monkeypatch):
 
     with pytest.raises(RuntimeError, match="refusing to write"):
         _build_doc()
+
+
+def test_gate_kind_actually_moves_the_ir():
+    """A mutation check: the golden gate must be able to detect this change.
+
+    "Golden untouched" only means something if the golden *could* have moved.
+    Flipping gate_kind changes emitted code, so it must change both the IR hash
+    and the kernel name -- otherwise the KDA cases above are pinning nothing and
+    two different kernels would share one compile-cache entry.
+    """
+    import dataclasses as _dc
+
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
+
+    flavor = _current_flavor()
+    gdn = GdnDecodeSpec()
+    kda = _dc.replace(gdn, gate_kind="kda")
+
+    gdn_sha, _ = _sha_for(lambda: build_gdn_decode(gdn, arch=_ARCH), flavor)
+    kda_sha, _ = _sha_for(lambda: build_gdn_decode(kda, arch=_ARCH), flavor)
+
+    assert gdn_sha != kda_sha, "gate_kind did not change the emitted IR"
+    assert gdn.kernel_name() != kda.kernel_name(), "gate_kind did not change the name"
+
+
+def test_gdn_cases_carry_no_kda_marker():
+    """Every pre-existing GDN entry must stay a GDN entry.
+
+    Guards the additive claim from the fixture side: if a GDN case id ever
+    starts resolving to a KDA spec, the "GDN goldens unchanged" evidence is
+    quietly measuring the wrong kernel.
+
+    KDA appears in an id two ways -- as a prefix for the hand-written cases
+    (``kda_default``) and as an infix for the tuned ones (``tuned_kda_w128``,
+    which inherits its gate kind from the spec id in the KDA table) -- so the
+    split is on containment, not prefix.
+    """
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    assert GdnDecodeSpec().gate_kind == "gdn"
+    ids = list(_cases())
+    gdn_ids = [cid for cid in ids if "kda" not in cid]
+    kda_ids = [cid for cid in ids if "kda" in cid]
+
+    # The original GDN set: default, simple, no_l2norm + one per GDN tuned tile.
+    assert len(gdn_ids) >= 7, f"expected the original GDN case set, got {gdn_ids}"
+    assert kda_ids, "the KDA gate kind is unpinned"
+    assert not set(gdn_ids) & set(kda_ids)
 
 
 if __name__ == "__main__":

@@ -72,15 +72,16 @@ Infer from the user request:
    core is roughly 554 translation units and takes minutes, so say so before
    starting one, and prefer changed-file scope when a branch is the subject.
 
-2. Run the script from the repository root:
+2. Run the script from the repository root, where `<skill-directory>` is the
+   directory holding this `SKILL.md`:
 
    ```bash
    python <skill-directory>/scripts/tidy_changed.py --build-dir <build-dir> [options]
    ```
 
-   Use the scripts bundled with the skill you were invoked from. Keep full
-   output in a log when the run is large, and show the diagnostics rather than
-   the progress lines.
+   `<skill-directory>` is the directory of the skill you were invoked from;
+   use the scripts bundled there. Keep full output in a log when the run is
+   large, and show the diagnostics rather than the progress lines.
 
 3. Report the selected translation unit count against the database total, then
    the diagnostics. Group repeated header diagnostics: a defect in a header is

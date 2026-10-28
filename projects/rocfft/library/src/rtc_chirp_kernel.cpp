@@ -26,7 +26,7 @@ std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelChirp::generate(const st
                                                                         const size_t&      N,
                                                                         rocfft_precision precision)
 {
-    auto itype = RTCKernelChirp::itype(gpu_arch, N);
+    auto itype = RTCKernelChirp::itype(N);
 
     RTCGenerator generator;
     generator.generate_name = [=]() { return chirp_rtc_kernel_name(precision, itype); };

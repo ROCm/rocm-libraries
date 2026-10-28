@@ -48,6 +48,8 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     {
         cmd.push_back(o);
     }
+    // Assemble only: linking writes a.out into the working directory, which may be read-only.
+    cmd.insert(cmd.end(), {"-c", "-o", nullDevicePath()});
     cmd.push_back("-");
     std::vector<char*> args(cmd.size());
     std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
@@ -350,6 +352,10 @@ inline std::map<std::string, int>
                                               assemblerPath,
                                               "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0",
                                               isDebug);
+    rv["HasVMaximumMinimumF32"] = tryAssembler(isaVersion,
+                                               assemblerPath,
+                                               "v_maximumminimum_f32 v0, v1, v2, v3",
+                                               isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
@@ -582,6 +588,10 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["LdsGranularity"]     = isaVersion[0] == 11 ? 1024 : 256;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
+    // GFX12.5 always uses wave32 and reserves the descriptor's wave-size selector.
+    // Keep HasWave32 for solution selection and validation.
+    rv["HasWavefrontSize32Directive"]
+        = rv["HasWave32"] && !(isaVersion[0] == 12 && isaVersion[1] == 5);
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
@@ -596,15 +606,45 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
-    rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
+    rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
-    rv["VOP3ByteSel"]        = isaVersion[0] == 12;
-    rv["HasFP8_OCP"]         = isaVersion[0] == 12;
+    rv["VOP3ByteSel"]        = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
+    rv["HasFP8_OCP"]         = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
+    // Bit position of DISABLE_XDL_ARB_STALL within SCHED_MODE (HWREG 26).
+    // -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+    int arbStallBit = -1;
+    if(checkInList(isaVersion, {{12, 5, 0}}))
+        arbStallBit = 2;
+    rv["WmmaArbStallBitOffset"] = arbStallBit;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    // F32X (xf32/TF32) emulation Inf handling. The 3xBF16 split makes an Inf
+    // input produce Inf - Inf = NaN in the low-bits residual, so an extra
+    // v_cmp_class Inf guard is required to keep Inf inputs producing Inf. This is
+    // a hardware/platform behavior decision (not a perf-tuning knob), so it lives
+    // in the arch caps: enabled only on archs that require correct Inf handling
+    // under emulation. gfx950's MFMA emulation path leaves it off (the guard adds
+    // VALU ops in the pack path and regresses perf ~10%+).
+    rv["F32XEmulationInfSupport"] = checkInList(isaVersion, {{12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
+    // Separation a consumer must leave after an MFMA before reading its ACC.
+    //
+    // This is the *result* latency, not the issue latency: issue latency says
+    // when the next instruction may issue (miIssueLatency, 1 quad-cycle here),
+    // while this says when the result becomes readable. getMFMAIssueLatency
+    // returns both; its first element, matrixInstM / mi_divisor, is this one,
+    // in quad-cycles -- 16/4 = 4 for the gfx950 16x16 MFMA, so 16 cycles. The
+    // value below is in cycles rather than quad-cycles.
+    //
+    // 17, not 16, because the result is readable strictly *after* those 16
+    // cycles elapse; against a >= comparison that threshold is 17.
+    //
+    // Keyed on the architecture, but derived for matrixInstM == 16. The 32x32
+    // shapes have a longer result latency, so a consumer that can see them
+    // must not use this as-is.
+    rv["MfmaToAccReadLatency"] = checkInList(isaVersion, {{9, 5, 0}}) ? 17 : 0;
 
     // True on archs whose MFMA-scale path can consume a swizzled MX scale
     // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250
@@ -673,7 +713,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     {
         // Code path for gfx11XX (RDNA3, two SIMDs per CU, wave32).
         // gfx1100, gfx1101 and gfx1151 have a 1536-VGPR file per SIMD; every
-        // other gfx11 part has 1024.
+        // other gfx11 part (e.g. gfx1102, gfx1103, gfx115X, gfx117X) has 1024.
         const bool has1536Vgpr = (isaVersion[1] == 0 && (isaVersion[2] == 0 || isaVersion[2] == 1))
                                  || (isaVersion[1] == 5 && isaVersion[2] == 1);
         const int vgprPerSimd = has1536Vgpr ? 1536 : 1024;

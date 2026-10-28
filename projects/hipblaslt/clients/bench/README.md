@@ -86,11 +86,34 @@ cd hipBLASLt; cd build/release
 --wgm <value>              [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
 --flush                    Flush icache
 --sm_count_target <value>  Target compute-unit (CU) count for the matmul kernel selection and persistent-grid sizing. 0 (default) means use all CUs the device exposes. Negative values are rejected. (Default value is: 0)
---streamk_tile_scheduling <value>  Select the StreamK=5 tile scheduling sub-path via the HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. Accepts off|0 (SK3 static; default when unset), on|1 (force SK4 dynamic), auto|2 (always run origami heuristic), case-insensitive. Omit to leave the attribute unset so the library default (off) applies; combine with `--sm_count_target` > 0 to engage the heuristic without setting auto|2.  (Default value is: unset)
+--hybrid_assignment_policy <value>  Select the assignment policy for a Hybrid kernel: Default, DynamicWorkQueue, or Auto (case-sensitive). (Default value is: unset)
+--streamk_tile_scheduling <value>  Legacy alias for hybrid_assignment_policy: off|0, on|1, or auto|2 (case-insensitive). (Default value is: unset)
 --uniform_summation_order <value>  off|0 or on|1. Omit to leave unset.
 --help |-h                 produces this help message
 --version <value>          Prints the version number
 ```
+
+`--hybrid_assignment_policy` controls the mode of an already selected Hybrid kernel:
+
+| Policy | Legacy value | Behavior |
+| --- | --- | --- |
+| `Default` | `off` or `0` | Preserve the library default, including heuristic mode selection when `--sm_count_target` is positive. |
+| `DynamicWorkQueue` | `on` or `1` | Force dynamic work-queue assignment. |
+| `Auto` | `auto` or `2` | Always use the Origami heuristic to select static or dynamic assignment. |
+
+Omitting both options leaves `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` unset.
+Matching old and new options are accepted; conflicting values are rejected.
+These options do not select the kernel family or change the public C API names.
+For debugging, `TENSILE_PERSISTENT_HYBRID_FORCE_MODE` overrides the policy: `-1` respects it,
+`0` forces static assignment, and `1` forces dynamic assignment. Invalid values are ignored.
+The legacy environment alias `TENSILE_STREAMK5_FORCE_MODE` remains supported;
+the preferred environment name takes precedence when present.
+
+`hipblaslt-bench`, `hipblaslt-sequence`, and `hipblaslt-api-overhead` exit with an error when
+`HIPBLASLT_ADAPTIVE_SM_COUNT` is enabled without `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE`, because the
+adaptive hint can change the timed solution during a run. Set `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE=<cus>`
+to time the solution adaptive mode picks at that CU count, and add
+`HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE=1` to include the probe cost.
 
 # demo
 Run fp32 GEMM with validation
@@ -99,6 +122,21 @@ Run fp32 GEMM with validation
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,hipblaslt-Gflops,hipblaslt-GB/s,us,CPU-Gflops,CPU-us,norm_error,atol,rtol
     N,N,0,1,128,128,128,1,128,16384,0,128,16384,128,16384,128,16384,f32_r,f32_r,f32_r,f32_r,f32_r,0,0,0,0,0,none,0,non-supported type,403.298,17.6063,10.4,0.0960059,43688,2.44879e-07,1e-05,1e-05
 ```
+
+### What `-v` checks
+
+`-v` (`--verify`) compares the GPU result D with a CPU reference computed from the same inputs, and adds three columns to the output.
+
+- `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
+- `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
+
+When the element-wise check fails, the bench also prints one line per failing gemm to stderr:
+```
+allclose check failed for D of gemm 0: 3 of 18 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 1, column 1: result 9, reference 4
+```
+
+The exit code is 0 whether or not a check fails. Only the first launch of each solution is compared with the reference; the launches timed by `--iters` and `--cold_iters` are not checked.
+
 Show the frequency with environment variable
 ```
 HIPBLASLT_BENCH_FREQ=1 ./clients/hipblaslt-bench -m 16 -n 16 -k 4096 --transA T --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --activation_type none --compute_type f32_r

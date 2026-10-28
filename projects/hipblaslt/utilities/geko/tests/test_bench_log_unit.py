@@ -204,8 +204,8 @@ def _probe_row(**overrides):
 
 def test_realign_rows_reorders_to_match_original_order() -> None:
     rows = [
-        _row(M=16, N=32, K=64, compute_type="c_f32_r"),
-        _row(M=8, N=8, K=8, compute_type="c_f32_r"),
+        _row(M=16, N=32, K=64, compute_type="c_f32_r", scaleA=0, scaleB=0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", scaleA=0, scaleB=0),
     ]
     # probe results arrive in the opposite order to rows (simulating a
     # multi-device run where chunks complete out of dispatch order)
@@ -220,8 +220,8 @@ def test_realign_rows_reorders_to_match_original_order() -> None:
 
 def test_realign_rows_disambiguates_using_extra_field() -> None:
     rows = [
-        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0),
-        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=1.0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0, scaleA=0, scaleB=0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=1.0, scaleA=0, scaleB=0),
     ]
     # same GEMM_LOG_FIELDS for both rows; only beta differs, and probe results
     # are also scrambled relative to rows
@@ -295,6 +295,61 @@ def test_summarize_keep_thr_zero_skips_benchmark(monkeypatch: pytest.MonkeyPatch
     assert len(uniq) == 2
     assert called["run"] is False
     assert called["std"] is False
+
+
+def test_summarize_force_benchmark_runs_even_when_keep_thr_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    (hip / "build/release/device-library").mkdir(parents=True)
+    workload = tmp_path / "w.yaml"
+    workload.write_text("[]\n")
+
+    rows = [_row(call_count=2)]
+    monkeypatch.setattr(blog, "parse", lambda *_a, **_k: rows)
+    monkeypatch.setattr(blog, "update", lambda data, **_k: (data,))
+    monkeypatch.setattr(blog, "update_lib_source", lambda df, _mt: df)
+
+    called = {"run": False}
+
+    def _run(*_a, **_k):
+        called["run"] = True
+        return pd.DataFrame(
+            [
+                {
+                    "transA": "N",
+                    "transB": "N",
+                    "batch_count": 1,
+                    "m": 16,
+                    "n": 16,
+                    "k": 16,
+                    "a_type": "f16_r",
+                    "b_type": "f16_r",
+                    "c_type": "f16_r",
+                    "d_type": "f16_r",
+                    "compute_type": "c_f32_r",
+                    "scaleA": 1,
+                    "scaleB": 1,
+                    "us": 2.0,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(blog.bench, "run", _run)
+
+    summary, uniq = blog.summarize(
+        hip,
+        workload,
+        output_dir=tmp_path / "o",
+        keep_thr=0.0,
+        devices=[0],
+        force_benchmark=True,
+    )
+    assert called["run"] is True
+    assert not summary.empty
+    assert len(uniq) == 1
+    # with keep_thr=0.0, nothing should be filtered out even though the benchmark path ran
+    assert summary["% of total"].iloc[0] == pytest.approx(100.0)
 
 
 def test_summarize_keep_thr_positive_uses_standard_benchmark(
