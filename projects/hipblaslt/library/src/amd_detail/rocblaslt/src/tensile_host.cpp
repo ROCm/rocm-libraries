@@ -6284,11 +6284,13 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
         auto data          = std::static_pointer_cast<TensileDataGemm>(gemmData);
         data->jitRequest   = std::move(request);
         data->selectedAlgo = {};
-        data->kernels.clear();
 #else
         setTensileGemmProblem(problem, gemmData);
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
 #endif
+        // setProblem drops kernels prepared for the previous problem. run then
+        // returns not-initialized until initialize, on a JIT build and without.
+        data->kernels.clear();
         data->scaleAType = problem.scaleAType;
         data->scaleBType = problem.scaleBType;
         // Building the key queries the device, and this runs on every gemm
