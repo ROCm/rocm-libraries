@@ -3208,6 +3208,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hScaleD.emplace_back(Talpha, 1);
         }
 
+        // A failed pinned allocation leaves a null buffer that the initialization below would
+        // write through.
+        CHECK_HOST_ALLOCATION(host_allocation_failure({&hA,
+                                                       &hB,
+                                                       &hC,
+                                                       &hD_gold,
+                                                       &hD_1,
+                                                       &hBias,
+                                                       &hBias_gold,
+                                                       &hE,
+                                                       &hE_gold,
+                                                       &hScaleAlphaVec,
+                                                       &hScaleA,
+                                                       &hScaleB,
+                                                       &hScaleC,
+                                                       &hScaleD,
+                                                       &hScaleE,
+                                                       &hAmaxD_gold,
+                                                       &hAmaxD,
+                                                       &hD_gold_epl,
+                                                       &hD_gold_ScaleAlpha,
+                                                       &hBias_gold_epl}));
+
         hipblaslt_seedrand();
 
         // For ULP validation, force hpl / trig_float A/B/C inputs to be
