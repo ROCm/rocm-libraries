@@ -181,6 +181,25 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
     }
+    if(strcmp(op_id, "wmma_scale_f32_32x16x128_f4") == 0)
+    {
+        if(strcmp(lw->arch.gfx, "gfx1250") != 0)
+            return rocke_h_fail(
+                lw, ROCKE_ERR_NOTIMPL, "wmma_scale_f32_32x16x128_f4 requires gfx1250");
+        if(op->num_operands != 5 || op->num_results != 1)
+            return rocke_h_fail(
+                lw, ROCKE_ERR_VALUE, "wmma_scale_f32_32x16x128_f4 expects 5 operands and 1 result");
+        rocke_h_emitf(lw,
+                      "f32x16 %s = __builtin_amdgcn_wmma_scale_f32_32x16x128_f4("
+                      "%s, %s, (short)0, %s, 1, 0, %s, 0, 0, %s, false, false);",
+                      rocke_h_name(lw, op->results[0]),
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]),
+                      rocke_h_name(lw, op->operands[3]),
+                      rocke_h_name(lw, op->operands[4]));
+        return lw->status;
+    }
     if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
     {
         if(strcmp(lw->arch.gfx, "gfx950") != 0)

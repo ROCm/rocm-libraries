@@ -1,0 +1,419 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Configurable gfx1250 MX FP4 GEMM with double-buffered TDM/LDS staging."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Tuple
+
+from ...core.arch import ArchTarget
+from ...core.ir import (
+    F32,
+    FP8E4M3,
+    I8,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+)
+from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+
+_ATOM_M = 32
+_ATOM_N = 16
+_ATOM_K = 128
+_WAVE = 32
+_ACCUMULATORS_PER_ATOM = 16
+_OP_ID = "wmma_scale_f32_32x16x128_f4"
+
+
+class _WmmaScaleF4Atom:
+    op_id = _OP_ID
+    c_frag_len = _ACCUMULATORS_PER_ATOM
+    c_dtype = "fp32"
+
+
+@dataclass(frozen=True)
+class MxFp4TdmGemmSpec:
+    """RCR MX FP4 GEMM: ``D = alpha * A @ B.T + beta * C``."""
+
+    name: str
+    M: int
+    N: int
+    K: int
+    tile_m: int = 128
+    tile_n: int = 64
+    tile_k: int = 128
+    warp_m: int = 2
+    warp_n: int = 2
+    warp_k: int = 1
+    warp_tile_m: int = _ATOM_M
+    warp_tile_n: int = _ATOM_N
+    warp_tile_k: int = _ATOM_K
+    block_k: int = 32
+    tdm_lds: bool = True
+    tdm_prefetch: bool = True
+    tdm_prefetch_depth: int = 2
+
+    @property
+    def wave_repeat_m(self) -> int:
+        return self.tile_m // (self.warp_m * self.warp_tile_m)
+
+    @property
+    def wave_repeat_n(self) -> int:
+        return self.tile_n // (self.warp_n * self.warp_tile_n)
+
+    @property
+    def block_size(self) -> int:
+        return _WAVE * self.warp_m * self.warp_n * self.warp_k
+
+    @property
+    def accumulator_values_per_lane(self) -> int:
+        return (
+            self.wave_repeat_m
+            * self.wave_repeat_n
+            * _ACCUMULATORS_PER_ATOM
+        )
+
+    @property
+    def packed_k(self) -> int:
+        return self.K // 2
+
+    @property
+    def a_tile_bytes(self) -> int:
+        return self.tile_m * (self.tile_k // 2)
+
+    @property
+    def b_tile_bytes(self) -> int:
+        return self.tile_n * (self.tile_k // 2)
+
+    @property
+    def lds_bytes(self) -> int:
+        return self.tdm_prefetch_depth * (self.a_tile_bytes + self.b_tile_bytes)
+
+    def kernel_name(self) -> str:
+        return kernel_name_join(
+            self.name,
+            "mxfp4_tdm",
+            f"M{self.M}N{self.N}K{self.K}",
+            f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
+            f"w{self.warp_m}x{self.warp_n}x{self.warp_k}",
+            f"r{self.wave_repeat_m}x{self.wave_repeat_n}",
+            flags={"db": self.tdm_prefetch_depth == 2},
+        )
+
+
+def is_valid_spec(
+    spec: MxFp4TdmGemmSpec, arch: str = "gfx1250"
+) -> Tuple[bool, str]:
+    if arch != "gfx1250":
+        return False, f"mxfp4_tdm_gemm is gfx1250-only (got {arch!r})"
+    if min(spec.M, spec.N, spec.K) <= 0:
+        return False, "M, N, and K must be positive"
+    if not spec.tdm_lds or not spec.tdm_prefetch:
+        return False, "Step 4 requires TDM/LDS staging with prefetch enabled"
+    if spec.tdm_prefetch_depth != 2:
+        return False, "Step 4 supports exactly two alternating LDS buffers"
+    if spec.warp_k != 1:
+        return False, "K-split waves are not supported (warp_k must be 1)"
+    if (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (
+        _ATOM_M,
+        _ATOM_N,
+        _ATOM_K,
+    ):
+        return False, "the WMMA atom is fixed at 32x16x128"
+    if spec.block_k != 32:
+        return False, "E8M0 scales require block_k=32"
+    if min(spec.tile_m, spec.tile_n, spec.tile_k) <= 0:
+        return False, "tile dimensions must be positive"
+    if spec.tile_m % (spec.warp_m * _ATOM_M):
+        return False, "tile_m must be divisible by warp_m * 32"
+    if spec.tile_n % (spec.warp_n * _ATOM_N):
+        return False, "tile_n must be divisible by warp_n * 16"
+    if spec.tile_k % _ATOM_K:
+        return False, "tile_k must be divisible by 128"
+    if spec.M % spec.tile_m or spec.N % spec.tile_n or spec.K % spec.tile_k:
+        return False, "M/N/K must divide their selected workgroup tile"
+    if spec.block_size > 1024:
+        return False, f"workgroup has too many threads ({spec.block_size})"
+    target = ArchTarget.from_gfx("gfx1250")
+    vgpr_cap = target.limits.vgprs
+    # Accumulators alone must fit the arch VGPR file (gfx1250 MaxVgpr=1024).
+    if spec.accumulator_values_per_lane > vgpr_cap:
+        return False, (
+            "accumulator tile exceeds gfx1250 VGPR budget: "
+            f"{spec.accumulator_values_per_lane} FP32 values per lane "
+            f"> {vgpr_cap} MaxVgpr"
+        )
+    lds_cap = target.lds_capacity_bytes
+    if spec.lds_bytes > lds_cap:
+        return False, (
+            f"double-buffered A/B tiles need too much LDS "
+            f"({spec.lds_bytes} B > {lds_cap} cap)"
+        )
+    return True, "ok"
+
+
+def mxfp4_tdm_gemm_signature(spec: MxFp4TdmGemmSpec) -> List[dict]:
+    return (
+        SignatureBuilder()
+        .ptr("A", "i8")
+        .ptr("B", "i8")
+        .ptr("A_scale", "i8")
+        .ptr("B_scale", "i8")
+        .ptr("C", "fp8e4m3")
+        .ptr("D", "fp8e4m3")
+        .scalar("M", "i32")
+        .scalar("N", "i32")
+        .scalar("K", "i32")
+        .scalar("alpha", "f32")
+        .scalar("beta", "f32")
+        .build()
+    )
+
+
+def mxfp4_tdm_gemm_grid(spec: MxFp4TdmGemmSpec) -> Tuple[int, int, int]:
+    return ceil_div_grid((spec.N, spec.tile_n), (spec.M, spec.tile_m))
+
+
+def build_mxfp4_tdm_gemm(
+    spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250"
+) -> KernelDef:
+    """Build the double-buffered TDM/LDS MX FP4 GEMM."""
+    ok, reason = is_valid_spec(spec, arch)
+    if not ok:
+        raise ValueError(f"invalid mxfp4_tdm_gemm spec: {reason}")
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = spec.block_size
+
+    A = b.param("A", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
+    B = b.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
+    AS = b.param(
+        "A_scale", PtrType(I8, "global"), noalias=True, readonly=True, align=4
+    )
+    BS = b.param(
+        "B_scale", PtrType(I8, "global"), noalias=True, readonly=True, align=4
+    )
+    C = b.param(
+        "C", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=1
+    )
+    D = b.param(
+        "D", PtrType(FP8E4M3, "global"), noalias=True, writeonly=True, align=1
+    )
+    M = b.param("M", I32)
+    N = b.param("N", I32)
+    K = b.param("K", I32)
+    alpha = b.param("alpha", F32)
+    beta = b.param("beta", F32)
+
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    c16 = b.const_i32(16)
+    c32 = b.const_i32(32)
+    packed_k = b.div(K, b.const_i32(2))
+    scale_groups = b.div(K, c32)
+
+    tid = b.thread_id_x()
+    lane = b.mod(tid, c32)
+    lane_col = b.mod(lane, c16)
+    lane_half = b.div(lane, c16)
+    wave = b.div(tid, c32)
+    wave_n = b.mod(wave, b.const_i32(spec.warp_n))
+    wave_m = b.div(wave, b.const_i32(spec.warp_n))
+
+    block_m = b.mul(b.block_id_y(), b.const_i32(spec.tile_m))
+    block_n = b.mul(b.block_id_x(), b.const_i32(spec.tile_n))
+
+    shared = b.smem_alloc(I8, [spec.lds_bytes], name_hint="ab_tdm")
+    shared_addr = b.smem_addr_of(shared)
+    b_region = spec.tdm_prefetch_depth * spec.a_tile_bytes
+
+    def _buffer_offsets(parity):
+        a_offset = b.mul(parity, b.const_i32(spec.a_tile_bytes))
+        b_offset = b.add(
+            b.const_i32(b_region),
+            b.mul(parity, b.const_i32(spec.b_tile_bytes)),
+        )
+        return a_offset, b_offset
+
+    def _issue_tdm(k0, parity) -> None:
+        a_lds_offset, b_lds_offset = _buffer_offsets(parity)
+        a_lds = b.smem_ptr_add(shared_addr, b.zext(a_lds_offset, shared_addr.type))
+        b_lds = b.smem_ptr_add(shared_addr, b.zext(b_lds_offset, shared_addr.type))
+        k_byte = b.div(k0, b.const_i32(2))
+        a_element = b.add(b.mul(block_m, packed_k), k_byte)
+        b_element = b.add(b.mul(block_n, packed_k), k_byte)
+        remaining_k = b.sub(packed_k, k_byte)
+        with b.scf_if(b.cmp_eq(wave, c0)):
+            b.tensor_load_to_lds(
+                *b.tdm_descriptor_2d(
+                    b.global_ptr_add(A, a_element),
+                    a_lds,
+                    elem_bytes=1,
+                    tensor_dim0=remaining_k,
+                    tensor_dim1=b.sub(M, block_m),
+                    row_stride=packed_k,
+                    tile_dim0=spec.tile_k // 2,
+                    tile_dim1=spec.tile_m,
+                )
+            )
+            b.tensor_load_to_lds(
+                *b.tdm_descriptor_2d(
+                    b.global_ptr_add(B, b_element),
+                    b_lds,
+                    elem_bytes=1,
+                    tensor_dim0=remaining_k,
+                    tensor_dim1=b.sub(N, block_n),
+                    row_stride=packed_k,
+                    tile_dim0=spec.tile_k // 2,
+                    tile_dim1=spec.tile_n,
+                )
+            )
+
+    def _load_i32x4(byte_offset):
+        return b.smem_load_vN(shared, byte_offset, dtype=I32, n=4)
+
+    def _load_a_fragment(a_buffer, atom_row, inner_k):
+        row0 = b.add(atom_row, lane_col)
+        row1 = b.add(row0, c16)
+        lane_k = b.mul(lane_half, c16)
+
+        def row_fragment(row):
+            row_base = b.add(
+                a_buffer,
+                b.mul(row, b.const_i32(spec.tile_k // 2)),
+            )
+            first = b.add(row_base, b.add(b.const_i32(inner_k // 2), lane_k))
+            second = b.add(first, c32)
+            return b.vec_concat(_load_i32x4(first), _load_i32x4(second))
+
+        return b.vec_concat(row_fragment(row0), row_fragment(row1))
+
+    def _load_b_fragment(b_buffer, atom_col, inner_k):
+        row = b.add(atom_col, lane_col)
+        row_base = b.add(
+            b_buffer,
+            b.mul(row, b.const_i32(spec.tile_k // 2)),
+        )
+        lane_k = b.mul(lane_half, c16)
+        first = b.add(row_base, b.add(b.const_i32(inner_k // 2), lane_k))
+        return b.vec_concat(_load_i32x4(first), _load_i32x4(b.add(first, c32)))
+
+    def _pack_a_scale(global_row, group0):
+        index = b.add(b.mul(global_row, scale_groups), group0)
+        raw = b.global_load_vN(AS, index, I8, 4, align=1)
+        return b.bitcast(raw, I32)
+
+    def _pack_b_scale(global_col, group0):
+        values = []
+        for group in range(4):
+            index = b.add(
+                b.mul(b.add(group0, b.const_i32(group)), N),
+                global_col,
+            )
+            values.append(b.global_load(BS, index, I8, align=1))
+        return b.bitcast(b.vec_pack(values, I8), I32)
+
+    atom_rows = [
+        b.add(
+            b.mul(wave_m, b.const_i32(spec.wave_repeat_m * _ATOM_M)),
+            b.const_i32(repeat * _ATOM_M),
+        )
+        for repeat in range(spec.wave_repeat_m)
+    ]
+    atom_cols = [
+        b.add(
+            b.mul(wave_n, b.const_i32(spec.wave_repeat_n * _ATOM_N)),
+            b.const_i32(repeat * _ATOM_N),
+        )
+        for repeat in range(spec.wave_repeat_n)
+    ]
+
+    def _compute_tile(k0, parity, accumulators):
+        a_buffer, b_buffer = _buffer_offsets(parity)
+        out = list(accumulators)
+        for inner_k in range(0, spec.tile_k, _ATOM_K):
+            group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
+            for rm, atom_row in enumerate(atom_rows):
+                a_frag = _load_a_fragment(a_buffer, atom_row, inner_k)
+                a_scale = _pack_a_scale(
+                    b.add(block_m, b.add(atom_row, lane)), group0
+                )
+                for rn, atom_col in enumerate(atom_cols):
+                    index = rm * spec.wave_repeat_n + rn
+                    b_frag = _load_b_fragment(b_buffer, atom_col, inner_k)
+                    b_scale = _pack_b_scale(
+                        b.add(block_n, b.add(atom_col, lane_col)), group0
+                    )
+                    out[index] = b.mma(
+                        _WmmaScaleF4Atom(),
+                        a_frag,
+                        b_frag,
+                        out[index],
+                        a_scale,
+                        b_scale,
+                    )
+        return out
+
+    accumulators = [
+        b.zero_vec_f32(_ACCUMULATORS_PER_ATOM)
+        for _ in range(spec.wave_repeat_m * spec.wave_repeat_n)
+    ]
+
+    _issue_tdm(c0, c0)
+    upper = b.sub(K, b.const_i32(spec.tile_k))
+    loop_args = [("parity", c0)] + [
+        (f"acc{i}", value) for i, value in enumerate(accumulators)
+    ]
+    loop = b.scf_for_iter(
+        c0,
+        upper,
+        b.const_i32(spec.tile_k),
+        loop_args,
+        iv_name="k0",
+        elide_trailing_barrier=False,
+    )
+    with loop as (k0, carried):
+        parity = carried[0]
+        next_parity = b.sub(c1, parity)
+        b.s_wait_tensorcnt(0)
+        b.s_waitcnt(lgkmcnt=0)
+        b.s_barrier_bare()
+        _issue_tdm(b.add(k0, b.const_i32(spec.tile_k)), next_parity)
+        updated = _compute_tile(k0, parity, carried[1:])
+        b.scf_yield(next_parity, *updated)
+
+    final_parity = loop.results[0]
+    b.s_wait_tensorcnt(0)
+    b.s_waitcnt(lgkmcnt=0)
+    b.s_barrier_bare()
+    final_accumulators = _compute_tile(
+        upper, final_parity, loop.results[1:]
+    )
+
+    for rm, atom_row in enumerate(atom_rows):
+        for rn, atom_col in enumerate(atom_cols):
+            acc = final_accumulators[rm * spec.wave_repeat_n + rn]
+            for slot in range(_ACCUMULATORS_PER_ATOM):
+                row = b.add(
+                    block_m,
+                    b.add(
+                        atom_row,
+                        b.add(
+                            b.const_i32((slot // 8) * 16 + slot % 8),
+                            b.mul(lane_half, b.const_i32(8)),
+                        ),
+                    ),
+                )
+                col = b.add(block_n, b.add(atom_col, lane_col))
+                index = b.add(b.mul(row, N), col)
+                value = b.fmul(alpha, b.vec_extract(acc, slot))
+                c_value = b.cvt_fp8_to_f32(
+                    b.global_load(C, index, FP8E4M3, align=1)
+                )
+                value = b.fadd(value, b.fmul(beta, c_value))
+                b.global_store(D, index, b.cvt_f32_to_fp8(value), align=1)
+
+    b.ret()
+    return b.kernel

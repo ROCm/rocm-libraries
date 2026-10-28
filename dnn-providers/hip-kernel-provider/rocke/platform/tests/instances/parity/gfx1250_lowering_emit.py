@@ -238,6 +238,19 @@ def build_tensor_transfers(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_wmma_scale_f4_32x16(b: IRBuilder) -> None:
+    scale = b.const_i32(0x7F7F7F7F)
+    b.mma(
+        "wmma_scale_f32_32x16x128_f4",
+        b.zero_vec(I32, 16),
+        b.zero_vec(I32, 8),
+        b.zero_vec_f32(16),
+        scale,
+        scale,
+    )
+    b.ret()
+
+
 # (builder, arch). Each gfx1250 config that tests a *choice* of encoding is
 # followed by its gfx950 twin, so the pair pins both branches.
 CONFIGS = [
@@ -263,6 +276,7 @@ CONFIGS = [
     (_global_tr16(BF16), "gfx1250"),
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
+    (build_wmma_scale_f4_32x16, "gfx1250"),
 ]
 
 

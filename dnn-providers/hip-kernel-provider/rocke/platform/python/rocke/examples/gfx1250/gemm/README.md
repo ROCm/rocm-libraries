@@ -17,6 +17,11 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 | [`mixed_scaled_gemm`](mixed_scaled_gemm.py) | Different A/B formats from FP8, BF8, FP6, BF6, and FP4 | E8M0 |
 | [`scale_formats_gemm`](scale_formats_gemm.py) | Any A/B pair drawn from FP8/BF8/FP6/BF6/FP4 | E8M0 for non-FP4; E8M0/E4M3/E5M3 for FP4; matching scales for FP4 × FP4 |
 
+The separate `mxfp4_tdm_gemm` example exercises a configurable, double-buffered
+TDM/LDS path with the `32x16x128` FP4 WMMA atom and FP8 E4M3 output. Its
+contract, current scheduling choices, validation scope, and deferred controls
+are recorded in [MXFP4_TDM_CASE_STUDY.md](MXFP4_TDM_CASE_STUDY.md).
+
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6

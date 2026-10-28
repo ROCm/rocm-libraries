@@ -42,6 +42,7 @@ static void _op_tile_wmma_f32_16x16x16_f16(rocke_lower_t* L, const rocke_op_t* o
 static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* op);
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id);
 static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op);
+static void _emit_wmma_scale_f32_32x16x128_f4(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op);
@@ -559,6 +560,10 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
          * reject (Python ISABackend.emit_wmma raises NotImplementedError). The
          * gfx12-specific op_ids ("wmma_gfx12_*") can only occur on RDNA4. */
     }
+    else if(strcmp(op_id, "wmma_scale_f32_32x16x128_f4") == 0)
+    {
+        _emit_wmma_scale_f32_32x16x128_f4(L, op);
+    }
     else if(rocke_gfx1250_scaled_wmma(op_id))
     {
         _emit_wmma_scale(L, op);
@@ -592,6 +597,48 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "tile.mma: unsupported op_id '%s'", op_id);
     }
+}
+
+static void _emit_wmma_scale_f32_32x16x128_f4(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* op_name = "tile.wmma_scale_f32_32x16x128_f4";
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s requires llvm23 (ROCm 7.13+), got %s",
+                      op_name,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    if(!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "%s requires gfx1250", op_name);
+    }
+    if(op->num_operands != 5 || op->num_results != 1)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_name);
+    }
+    if(strcmp(op->operands[0]->type->name, "vec<i32x16>") != 0
+       || strcmp(op->operands[1]->type->name, "vec<i32x8>") != 0
+       || strcmp(op->operands[2]->type->name, "vec<f32x16>") != 0
+       || strcmp(op->operands[3]->type->name, "i32") != 0
+       || strcmp(op->operands[4]->type->name, "i32") != 0
+       || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s has invalid operand or result types", op_name);
+    }
+    rocke_ll_need(L, "wmma.scale.f32.32x16x128.f4");
+    rocke_ll_emitf(L,
+                   "  %s = call <16 x float> "
+                   "@llvm.amdgcn.wmma.scale.f32.32x16x128.f4.v16f32.v16i32.v8i32("
+                   "<16 x i32> %s, <8 x i32> %s, i16 0, <16 x float> %s, "
+                   "i32 1, i32 0, i32 %s, i32 0, i32 0, i32 %s, i1 false, i1 false)",
+                   mma_result_name(L, op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]),
+                   rocke_ll_operand(L, op->operands[3]),
+                   rocke_ll_operand(L, op->operands[4]));
 }
 
 /* Emit the scaled-WMMA intrinsic using the resolved operand contract.

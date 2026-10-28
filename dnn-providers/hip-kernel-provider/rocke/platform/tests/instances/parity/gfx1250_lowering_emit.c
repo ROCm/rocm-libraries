@@ -365,6 +365,17 @@ static void build_tensor_transfers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_wmma_scale_f4_32x16(rocke_ir_builder_t* b)
+{
+    rocke_value_t* a = rocke_b_zero_vec(b, rocke_i32(), 16);
+    rocke_value_t* bb = rocke_b_zero_vec(b, rocke_i32(), 8);
+    rocke_value_t* c = rocke_b_zero_vec(b, rocke_f32(), 16);
+    rocke_value_t* scale = rocke_b_const_i32(b, 0x7F7F7F7F);
+    rocke_value_t* scales[] = {scale, scale};
+    rocke_b_mma(b, "wmma_scale_f32_32x16x128_f4", a, bb, c, scales, 2);
+    rocke_b_ret(b);
+}
+
 static void build_scale_coordinates(rocke_ir_builder_t* b, rocke_mma_scale_block_k_t block)
 {
     const auto* arch = rocke_arch_target_from_gfx("gfx1250");
@@ -594,6 +605,7 @@ static const config_t BASE_CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {build_wmma_scale_f4_32x16, "gfx1250"},
     {NULL, "gfx1250", "fp6", false},
     {NULL, "gfx1250", "bf6", false},
     {NULL, "gfx1250", "fp6", true},

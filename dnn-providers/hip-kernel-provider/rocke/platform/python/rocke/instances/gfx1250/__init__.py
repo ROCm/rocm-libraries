@@ -22,6 +22,13 @@ from .block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec as is_valid_block_scaled_gemm_spec,
 )
+from .mxfp4_tdm_gemm import (
+    MxFp4TdmGemmSpec,
+    build_mxfp4_tdm_gemm,
+    is_valid_spec as is_valid_mxfp4_tdm_gemm_spec,
+    mxfp4_tdm_gemm_grid,
+    mxfp4_tdm_gemm_signature,
+)
 from .fused_moe_fp8 import Gfx1250Fp8Moe, Gfx1250Fp8MoeSpec
 from .fused_moe_mega_wmma import (
     FusedMegaWmmaSpec,
@@ -60,6 +67,11 @@ __all__ = [
     "block_scaled_gemm_signature",
     "build_block_scaled_gemm",
     "is_valid_block_scaled_gemm_spec",
+    "MxFp4TdmGemmSpec",
+    "build_mxfp4_tdm_gemm",
+    "is_valid_mxfp4_tdm_gemm_spec",
+    "mxfp4_tdm_gemm_grid",
+    "mxfp4_tdm_gemm_signature",
     "Gfx1250Fp8Moe",
     "Gfx1250Fp8MoeSpec",
     "FusedMegaWmmaSpec",

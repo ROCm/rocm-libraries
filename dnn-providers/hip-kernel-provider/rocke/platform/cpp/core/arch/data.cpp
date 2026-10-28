@@ -1070,6 +1070,7 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
+    {"wmma_scale_f32_32x16x128_f4", 16},
 };
 
 /* The frag-table row registered for op_id itself, or NULL. */
