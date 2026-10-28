@@ -96,6 +96,44 @@ TEST(TestGpuResampleFwdSignatureKey, HashFunction)
     }
 }
 
+TEST(TestGpuResampleFwdSignatureKey, RegistersPlanBuildersForSupportedTypes)
+{
+    const auto builders = GpuResampleFwdSignatureKey::getPlanBuilders();
+    EXPECT_EQ(builders.size(), 6U);
+
+    for(const auto index : {DataType::UNSET, DataType::INT32})
+    {
+        EXPECT_NE(builders.find({DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::HALF, DataType::HALF, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, index}),
+                  builders.end());
+    }
+    EXPECT_EQ(
+        builders.find({DataType::DOUBLE, DataType::DOUBLE, DataType::DOUBLE, DataType::UNSET}),
+        builders.end());
+}
+
+TEST(TestGpuResampleBwdSignatureKey, RegistersPlanBuildersForSupportedTypes)
+{
+    const auto builders = GpuResampleBwdSignatureKey::getPlanBuilders();
+    EXPECT_EQ(builders.size(), 6U);
+
+    for(const auto index : {DataType::UNSET, DataType::INT32})
+    {
+        EXPECT_NE(builders.find({DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::HALF, DataType::HALF, DataType::FLOAT, index}),
+                  builders.end());
+        EXPECT_NE(builders.find({DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, index}),
+                  builders.end());
+    }
+    EXPECT_EQ(
+        builders.find({DataType::DOUBLE, DataType::DOUBLE, DataType::DOUBLE, DataType::UNSET}),
+        builders.end());
+}
+
 TEST(TestGpuResampleFwdSignatureKey, Copy)
 {
     const GpuResampleFwdSignatureKey original{
