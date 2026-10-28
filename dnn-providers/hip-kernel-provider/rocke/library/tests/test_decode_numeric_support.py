@@ -1,13 +1,78 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Host checks for decode launch ordering and cleanup when a test scope fails."""
+"""Host checks for decode prerequisites, launch ordering and scoped cleanup."""
 
+import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 
-from tests._decode_numeric_support import decode_launch_session
+from tests._decode_numeric_support import decode_launch_session, gpu
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1250"])
+def test_decode_gpu_uses_detected_supported_target(arch, monkeypatch):
+    from rocke.runtime import hip_module
+
+    torch = SimpleNamespace(
+        version=SimpleNamespace(hip="7.0"),
+        cuda=SimpleNamespace(is_available=lambda: True),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setattr(hip_module, "get_device_arch", lambda: arch)
+    assert gpu.__wrapped__() == (torch, arch)
+
+
+@pytest.mark.parametrize(
+    "hip,available,arch,reason",
+    [
+        (None, True, "gfx950", "ROCm torch"),
+        ("7.0", False, None, "ROCm GPU"),
+        ("7.0", True, "gfx1151", "decode validation targets"),
+    ],
+)
+def test_decode_gpu_skips_only_missing_prerequisites(
+    hip, available, arch, reason, monkeypatch
+):
+    from rocke.runtime import hip_module
+
+    torch = SimpleNamespace(
+        version=SimpleNamespace(hip=hip),
+        cuda=SimpleNamespace(is_available=lambda: available),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+
+    def detect_arch():
+        assert hip and available
+        return arch
+
+    monkeypatch.setattr(hip_module, "get_device_arch", detect_arch)
+    with pytest.raises(pytest.skip.Exception, match=reason):
+        gpu.__wrapped__()
+
+
+def test_decode_gpu_skips_missing_torch(monkeypatch):
+    monkeypatch.setitem(sys.modules, "torch", None)
+    with pytest.raises(pytest.skip.Exception, match="ROCm torch required"):
+        gpu.__wrapped__()
+
+
+def test_decode_gpu_does_not_hide_device_probe_errors(monkeypatch):
+    from rocke.runtime import hip_module
+
+    torch = SimpleNamespace(
+        version=SimpleNamespace(hip="7.0"),
+        cuda=SimpleNamespace(is_available=lambda: True),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+
+    def detect_arch():
+        raise RuntimeError("device probe failed")
+
+    monkeypatch.setattr(hip_module, "get_device_arch", detect_arch)
+    with pytest.raises(RuntimeError, match="device probe failed"):
+        gpu.__wrapped__()
 
 
 def _runtime(events, args, fault=None):

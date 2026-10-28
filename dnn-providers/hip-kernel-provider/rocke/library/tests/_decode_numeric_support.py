@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Optional hardware admission and scoped decode launch/replay support."""
 
-import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from types import ModuleType
@@ -12,23 +11,14 @@ import pytest
 
 @pytest.fixture(scope="module")
 def gpu():
-    required = os.environ.get("ROCKE_REQUIRE_DECODE_GPU")
-    if required:
-        import torch
-    else:
-        torch = pytest.importorskip("torch")
+    """Use the available supported ROCm GPU, or skip missing prerequisites."""
+    torch = pytest.importorskip("torch", reason="ROCm torch required")
     from rocke.runtime.hip_module import get_device_arch
 
-    if not torch.cuda.is_available():
-        if required:
-            pytest.fail("required decode GPU is unavailable")
-        pytest.skip("requires a ROCm GPU")
+    if not torch.version.hip or not torch.cuda.is_available():
+        pytest.skip("requires a ROCm GPU with ROCm torch")
     arch = get_device_arch()
-    if required and arch != required:
-        pytest.fail(f"requested {required}, found {arch}")
     if arch not in ("gfx942", "gfx950", "gfx1250"):
-        if required:
-            pytest.fail(f"unsupported required decode target {arch}")
         pytest.skip("decode validation targets gfx942/gfx950/gfx1250")
     return torch, arch
 

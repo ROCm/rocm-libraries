@@ -147,6 +147,7 @@ K/V strides, padding, unpadded capacity tails, changing valid lengths, empty
 sequences, windows, paged regressions, and graph replay. Concurrency tests cover
 eager calls, internal graphs, and separate external graphs captured on one
 stream and replayed on different streams. They check scratch isolation and
-replay after temporary launch references are drained. Set
-`ROCKE_REQUIRE_DECODE_GPU=gfx942` or `gfx950` to require the target GPU rather
-than skip. No performance claim follows from this correctness coverage.
+replay after temporary launch references are drained. Tests detect the available
+GPU and skip when ROCm torch or a supported target is unavailable. Native parity
+tests run when `rocke_engine` is importable and otherwise skip.
+No performance claim follows from this correctness coverage.

@@ -3,8 +3,8 @@
 
 """Actual tiled split-KV launches on contiguous and padded non-paged caches.
 
-Set ROCKE_REQUIRE_DECODE_GPU=gfx942/gfx950 to require hardware (no skips).
-For shared paged graph coverage on gfx1250, set that target and select
+Tests use the detected supported ROCm GPU and skip missing prerequisites.
+For shared paged graph coverage on gfx1250, run on that target and select
 ``-k 'graph_replay and paged and bf16'`` (D64, GQA-8).
 Reference attention is computed independently in FP32 on the CPU from logical
 KV tensors, after rounding inputs to the tested fp16/bf16 dtype.
