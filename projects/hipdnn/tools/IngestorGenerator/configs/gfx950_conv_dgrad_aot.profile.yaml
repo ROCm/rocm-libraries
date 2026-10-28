@@ -23,7 +23,7 @@ delegates_to_existing_plan: false
 engine:
   name: hipkernel:Gfx950ConvDgradAot
   sdk_version: "1.0.0"
-  # make_conv_dgrad_aot_config.ENGINE_KNOBS
+  # make_conv_dgrad_aot_config.engine_knobs()
   knobs:
     - kernel_family
     - direct_variant
@@ -41,6 +41,14 @@ engine:
     - vector_size_b
     - vector_size_c
     - lds_k_outer
+    - grouped
+    - dy_halo
+    - dy_halo_setprio
+    - dy_halo_kouter_pad
+    - halo_max_wo
+    - patch
+    - tap_outer_k
+    - uniform_k_decode
     - block_w
     - block_waves
     - block_h
@@ -51,6 +59,21 @@ engine:
     - waves_q
     - persistent_grid
     - runtime_k_loop
+    - ch_per_lane
+    - dot2
+    - mfma
+    - prefetch_rows
+    - w_fold
+    - k_atoms
+    - m_tiles
+    - dgrad_weights_lds
+    - lds_only_sync
+    - lds_pad
+    - row_exit
+    - stage_out
+    - waves_per_eu
+    - xcd_tiles
+    - stage_rows
   heuristic: native
 
 # Instances are matched per problem by capability, so "dispatch" resolves the dgrad
@@ -94,6 +117,13 @@ kmd_fields:
   - {name: lds_k_outer, type: int}
   - {name: max_sub_gemms, type: int}
   - {name: grouped, type: int}
+  - {name: dy_halo, type: int}
+  - {name: dy_halo_setprio, type: int}
+  - {name: dy_halo_kouter_pad, type: int}
+  - {name: halo_max_wo, type: int}
+  - {name: patch, type: int}
+  - {name: tap_outer_k, type: int}
+  - {name: uniform_k_decode, type: int}
   - {name: instance_id, type: string}
   - {name: layout, type: string}
   # Direct and helper instances; implicit-GEMM descriptors leave them to the builder default.
@@ -119,68 +149,76 @@ kmd_fields:
   - {name: waves_q, type: int, default_value: 0, builder_default: true}
   - {name: persistent_grid, type: int, default_value: 0, builder_default: true}
   - {name: runtime_k_loop, type: int, default_value: 0, builder_default: true}
+  - {name: ch_per_lane, type: int, default_value: 0, builder_default: true}
+  - {name: dot2, type: int, default_value: 0, builder_default: true}
+  - {name: mfma, type: int, default_value: 0, builder_default: true}
+  - {name: prefetch_rows, type: int, default_value: 0, builder_default: true}
+  - {name: w_fold, type: int, default_value: 0, builder_default: true}
+  - {name: k_atoms, type: int, default_value: 0, builder_default: true}
+  - {name: m_tiles, type: int, default_value: 0, builder_default: true}
+  - {name: dgrad_weights_lds, type: int, default_value: 0, builder_default: true}
+  - {name: lds_only_sync, type: int, default_value: 0, builder_default: true}
+  - {name: lds_pad, type: int, default_value: 0, builder_default: true}
+  - {name: row_exit, type: int, default_value: 0, builder_default: true}
+  - {name: stage_out, type: int, default_value: 0, builder_default: true}
+  - {name: waves_per_eu, type: int, default_value: 0, builder_default: true}
+  - {name: xcd_tiles, type: int, default_value: 0, builder_default: true}
+  - {name: stage_rows, type: int, default_value: 0, builder_default: true}
 
 vocabulary:
   dtype: {fp16: fp16, bf16: bf16}
   layout: {NHWC: NHWC}
   pipeline: {mem: mem, compv3: compv3, compv4: compv4, direct: direct}
   epilogue: {cshuffle: cshuffle, default: default, direct: direct}
-  direct_variant: {none: none, depthwise_dgrad: depthwise_dgrad, grouped_dgrad_mfma: grouped_dgrad_mfma, transpose: transpose, reorganize: reorganize}
+  direct_variant: {none: none, depthwise_dgrad: depthwise_dgrad, depthwise_dgrad_win: depthwise_dgrad_win, grouped_dgrad_fused: grouped_dgrad_fused, grouped_dgrad_4c: grouped_dgrad_4c, grouped_dgrad_mfma: grouped_dgrad_mfma, dgrad_mfma_rtc: dgrad_mfma_rtc, transpose: transpose, reorganize: reorganize, transpose_rtc: transpose_rtc, reorganize_rtc: reorganize_rtc}
 
 # The cpp_mirror names below are the native pack's: packs/Gfx950ConvDgradNative.cpp and
-# packs/Gfx950ConvDgradGeometry.hpp.
+# packs/Gfx950ConvDgradGeometry.hpp. Both sides build one launch plan per (instance,
+# problem) -- the ordered kernel steps with their grids, buffers, scalar values and
+# sub-GEMM tables, the workspace regions and the dX zero-fill -- and serialize it the same
+# way (Gfx950ConvDgradPlan.serialize / serializePlan). The golden vectors of
+# make_conv_dgrad_aot_test_vectors.py pin the C++ plan digest of every catalog instance on
+# every problem of the vector set to the Python plan.
 launch_surface:
   - name: instance_contract
     python_source: builders/common/convolution_backward_data.py:supports_gfx950_conv_dgrad_aot
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradNative.cpp:aotInstance
-    kmd_fields: [dtype, layout, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, vector_size_a, vector_size_b, vector_size_c, lds_k_outer, max_sub_gemms, grouped, instance_id]
-    guard: aotInstance admits only a kpack kernel with NHWC layout, wave64, an mem/compv3/compv4 pipeline, a default or cshuffle epilogue, positive tile/warp fields, widths in {1,2,4,8}, 0/1 lds_k_outer and grouped, and a positive max_sub_gemms; any missing or malformed field refuses the kernel.
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:parseAotInstance
+    kmd_fields: [dtype, layout, kernel_family, direct_variant, tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n, warp_tile_k, wave_size, pipeline, epilogue, vector_size_a, vector_size_b, vector_size_c, lds_k_outer, max_sub_gemms, grouped, dy_halo, halo_max_wo, patch, tap_outer_k, uniform_k_decode, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, cpg, kpg, instance_id]
+    guard: parseAotInstance reads kernel_family first. Implicit GEMM (0) needs NHWC, wave64, an mem/compv3/compv4 pipeline, a default or cshuffle epilogue, positive tile/warp fields, widths in {1,2,4,8} and 0/1 flags; its filter/stride/dilation are baked when non-zero. Direct (1) and helper (2) instances need the direct placeholders, a variant of their family, the baked geometry and the knobs their variant uses (directVariantUses). Missing or malformed fields refuse the kernel; the kernel matcher never admits a helper.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradMatchers.cpp
-  - name: served_problems
-    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_serves
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:implicitInstanceLaunch
-    kmd_fields: [vector_size_a, vector_size_b, vector_size_c, grouped, max_sub_gemms, tile_m, tile_n, tile_k, warp_m, warp_n]
-    guard: The dgrad subset of rocKE's KernelCache.supports_problem. The A (dY) width divides K/groups, the B (W) and D (dX) widths divide C/groups, a grouped graph needs a grouped binary, depthwise (groups > 1, C/groups == 1) is refused, the non-empty tilde sub-GEMM count is at most max_sub_gemms, groups fits grid y, the flat tile grid fits one dispatch and N*Hi*Wi stays below 2^31; a sub-GEMM table packing failure refuses. library/tests/test_convolution_backward_data_aot_packaging.py checks the Python predicate against supports_problem.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradGeometry.cpp
-  - name: direct_instance_contract
-    python_source: builders/common/convolution_backward_data.py:supports_gfx950_conv_dgrad_aot
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradNative.cpp:aotInstance
-    kmd_fields: [kernel_family, direct_variant, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, cpg, kpg, block_w, block_waves, block_h, block_q, block_groups, fold_k32, waves_k, waves_q, persistent_grid, runtime_k_loop]
-    guard: aotInstance reads kernel_family first. A direct (1) or helper (2) instance must hold the direct identity's placeholders (0 tuning, vector, lds_k_outer, max_sub_gemms and grouped; "direct" pipeline and epilogue), a variant of its family, a square undilated filter, and leave the knobs its variant does not use at 0; the kernel matcher never admits a helper. Unknown families or variants and missing fields refuse the kernel.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradMatchers.cpp
-  - name: direct_served_problems
-    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_serves
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:directInstanceLaunch
-    kmd_fields: [direct_variant, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, cpg, kpg, block_w, block_waves, block_h, block_q, block_groups, fold_k32, waves_k, waves_q]
-    guard: Exact capability equality (filter, one stride, one padding, dilation 1, C/groups and K/groups), then for MFMA _mfma_knobs_reason and groups % block_groups == 0, then every launch fits (grid y/z 65535, the MFMA compute grid's x too, the transforms' x a 32-bit dispatch, each workspace a 32-bit size). library/tests/test_convolution_backward_data_aot_packaging.py checks it against supports_problem plus plan_for's re-validation.
+  - name: launch_plan
+    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_plan
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:instancePlan
+    kmd_fields: [kernel_family, direct_variant, tile_m, tile_n, tile_k, vector_size_a, vector_size_b, vector_size_c, grouped, max_sub_gemms, dy_halo, halo_max_wo, patch, tap_outer_k, uniform_k_decode, filter_h, filter_w, stride_h, stride_w, pad_h, pad_w, cpg, kpg]
+    guard: The instance serves the problem exactly when a plan exists. Implicit GEMM follows rocKE's KernelCache.supports_problem and the benchmark launch (width fold, batch chunks over 2^31-byte images, patch sub-GEMMs, the dY halo's Wo bound, tile grid within one dispatch) and zero-fills dX only when the sub-GEMMs leave part of it unwritten. Direct kernels follow direct_kernel_sweep.plan_for (capability equality, MFMA knob fit, block groups, LDS budget, persistent cells, transposed-problem fwd launches). library/tests/test_convolution_backward_data_aot_packaging.py checks the plan against rocKE's own offer and launch values.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradGeometry.cpp
   - name: kernargs_and_execution
-    python_source: kernels/common/conv_abi.py:conv_arg_names
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:implicitGemmKernargs
-    kmd_fields: [dtype, tile_m, tile_n, tile_k]
-    guard: The 44-argument dgrad AOT ABI (sub_gemm_buf a device pointer at position 43, num_sub_gemms last) computed from the graph, with num_pid_m/num_pid_n from the instance's own tile; the 20-argument direct dgrad ABI for depthwise; the forward direct ABI on the transposed problem for the MFMA compute pass. Strided implicit GEMM zero-fills dX first. The GPU suite poisons dX and compares every family with the CPU reference.
+    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_step_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradNative.cpp:stepSignature
+    kmd_fields: [dtype, kernel_family, direct_variant]
+    guard: One kernarg signature per step ABI -- the implicit GEMM ABI (sub-GEMM table pointer, then its scalar values), the direct dgrad ABI, the forward direct ABI on the transposed problem, and the transpose/reorganize helpers (static and runtime-C). The GPU suite poisons dX and compares every catalog instance with the CPU reference.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvDgrad.cpp
   - name: sub_gemm_table
     python_source: kernels/common/conv_implicit_gemm_dgrad.py:pack_sub_gemm_buffer
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:packSubGemmBuffer
-    kmd_fields: [tile_m, tile_n, tile_k]
-    guard: 22 i32 per non-empty tilde sub-GEMM record (fields 1 and 2 the instance's tile counts), then 8 i32 of (mult, shift) magic pairs per record for kpg, x_dot_slice, h_tilde_slice*w_tilde_slice and w_tilde_slice; a non-positive divisor or an overflow refuses. The unit test compares it with golden vectors from sub_gemm_buffer_for.
+    kmd_fields: [tile_m, tile_n, tile_k, patch]
+    guard: 22 i32 per non-empty tilde (or patch) sub-GEMM record, then 8 i32 of (mult, shift) magic pairs per record; a non-positive divisor or an overflow refuses. Each implicit step carries its table and its offset in the SUB_GEMM workspace region; launch uploads it before the step.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradGeometry.cpp
-  - name: mfma_pipeline
-    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_mfma_plan
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:mfmaLaunchPlan
-    kmd_fields: [cpg, kpg, filter_h, filter_w, block_h, block_q, block_groups, fold_k32, waves_k, waves_q, runtime_k_loop, persistent_grid]
-    guard: direct_kernel_sweep.plan_for's steps. Transpose (W -> ws_t), reorganize (ws_t -> ws_coa) when waves_k > 1 or runtime_k_loop, then the compute kernel on (dY, ws, dX); the helpers are found in the same kpack by kernel_family 2, direct_variant, dtype, filter, cpg, kpg and fold_k32. A missing helper refuses the instance.
-    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradGeometry.cpp
+  - name: helpers
+    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_helper_fields
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradNative.cpp:aotKernelPlan
+    kmd_fields: [kernel_family, direct_variant, dtype, filter_h, cpg, kpg, fold_k32]
+    guard: MFMA plans name transpose/reorganize helper steps (static or runtime-C); the native pack resolves each in the same kpack by kernel_family 2 and its helper fields. A missing helper refuses the instance.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradMatchers.cpp
   - name: fallback_selection
-    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_serves
-    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:aotInstanceScore
-    kmd_fields: [tile_m, tile_n, vector_size_a, vector_size_b, vector_size_c]
-    guard: Unbenchmarked order only, until a trained ranker ships. Less tile padding and a fuller grid rank higher, with wider vectors breaking ties; BenchmarkPlan replaces it with measurements of every serving instance.
+    python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_runtime_candidates
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:planScore
+    kmd_fields: [kernel_family, direct_variant, tile_m, tile_n]
+    guard: Unbenchmarked order only, until a trained ranker ships. Single-kernel direct plans rank first, then MFMA, then implicit GEMM by tile fill; BenchmarkPlan replaces it with measurements of every serving instance.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradMatchers.cpp
   - name: workspace
-    python_source: builders/common/convolution_backward_data.py:build_gfx950_conv_dgrad_aot
+    python_source: builders/common/convolution_backward_data.py:Gfx950ConvDgradPlan
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradNative.cpp:workspaceBytes
     kmd_fields: [kernel_family, direct_variant, tile_m, tile_n, tile_k, fold_k32, waves_k, runtime_k_loop]
-    guard: Implicit GEMM takes (22+8)*num_sub_gemms*4 bytes for the record table, uploaded in launch; MFMA takes ws_t plus ws_coa (at ws_t rounded up to 256) when it reorganizes; depthwise takes none. Every kernel uses static LDS only; prepare requests zero dynamic shared memory.
+    guard: The plan's workspace regions (SUB_GEMM tables, WS_T, WS_COA), each 256-byte aligned. Every kernel uses static LDS only; prepare requests zero dynamic shared memory.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvDgrad.cpp
