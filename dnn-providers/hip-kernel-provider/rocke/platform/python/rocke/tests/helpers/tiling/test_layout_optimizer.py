@@ -128,12 +128,12 @@ def test_pairwise_k_match_gate():
     # per-operand soundness alone can pass while the PAIR is K-mismatched -> k_partner must catch it
     mma = _mma()
     a, b = mma.a_layout, mma.b_layout
-    ok = evaluate_transform(a, a, canon=a, k_partner=b)
+    ok = evaluate_transform(a, a, canon=a, k_partner=b, k_partner_canon=b)
     assert ok.k_match == "ok" and ok.works
     b_bad = {
         k: (c[0], 0) for k, c in as_forward_map(b).items()
     }  # scramble B's K -> mismatch
-    bad = evaluate_transform(a, a, canon=a, k_partner=b_bad)
+    bad = evaluate_transform(a, a, canon=a, k_partner=b_bad, k_partner_canon=b)
     assert bad.k_match != "ok" and not bad.works
 
 

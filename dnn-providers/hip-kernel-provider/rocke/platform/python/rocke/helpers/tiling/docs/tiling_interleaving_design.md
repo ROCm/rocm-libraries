@@ -216,8 +216,9 @@ is valid provided A holds `A[m, σ(s)]` and B holds `B[σ(s), n]` in the same sl
 - A's M-register order and B's N-register order are free; together they **determine the C output
   layout** (§7).
 
-`mma_pair_k_aligned(a_layout, b_layout)` enforces exactly this: `k_distribution(a) == k_distribution(b)`
-positionally, **compared per atom** — not across the concatenated whole-fragment K-list (§8 for the
+`mma_pair_k_aligned(a_layout, b_layout, a_canon=, b_canon=)` enforces exactly this: `k_distribution(a) ==
+k_distribution(b)` positionally (at the positions the canonicals couple -- slot for slot on every same-format
+atom; see `mma_is_machinery.md` condition 3 for mixed-width `f8f6f4`), **compared per atom** — not across the concatenated whole-fragment K-list (§8 for the
 rectangular-tile rationale). Lane ownership
 is guaranteed valid by construction (fragments come from atom-derived descs), so a positional per-atom
 K-match is sufficient.
@@ -401,7 +402,8 @@ There is no "this fragment is MMA-ready" in isolation. The hardware's only requi
 (M on A / N on B are free) — worked in full at §2's slot tables.
 
 So "make this fragment acceptable" always means "reorder it until its K-row matches its **partner's**".
-`mma_pair_k_aligned(a, b)` compares the two fragments; it never checks either against a canonical.
+`mma_pair_k_aligned(a, b, a_canon=, b_canon=)` compares the two fragments; the canonicals only say which
+positions are coupled, and neither fragment is checked against them.
 
 ### A, B, C have different roles
 
@@ -734,7 +736,7 @@ multi-patch (`P>1`) and novel-atom cases are discovered.) These change with ever
 error-prone to transcribe; construct the two states and ask the solver. The optimizer
 (`helpers/tiling/layout_optimizer.py`) wraps this into the two questions a designer actually asks:
 
-- **`evaluate_transform(source, target, *, canon=…, k_partner=…, dtype_bits=…)`** — is there a VALID path
+- **`evaluate_transform(source, target, *, canon=…, k_partner=…, k_partner_canon=…, dtype_bits=…)`** — is there a VALID path
   (an MMA-sound target via `mma_operand_layout_sound` + a transform via `classify_transform`), and what
   does the cheapest edge cost?
 - **`optimize_layout(source, candidates: dict, …)`** — the MINIMIZATION: sweep candidate distributions

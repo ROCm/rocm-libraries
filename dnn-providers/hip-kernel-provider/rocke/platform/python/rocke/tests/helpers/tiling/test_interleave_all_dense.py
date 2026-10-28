@@ -5,7 +5,8 @@ traits row and PROVE, for the rows the construction can drive, that
 
   * the operand K-contiguous <-> free-dim-contiguous transpose is cross-lane-free (``reorder`` tier),
   * the C-shuffle (native accumulator -> store order) is cross-lane-free, and
-  * the MMA soundness (positional per-atom K-match) holds,
+  * the MMA soundness (per-atom K-match at the positions the instruction couples) holds -- except on the
+    mixed-width ``f8f6f4`` rows, where it is PROVEN to fail (see ``_operand_k_maps_differ``),
 
 for a single atom AND a 2x2-atom tile (``free_sub>1`` / multi-patch, e.g. the 32x32 atom's ``P=4``).
 
@@ -27,7 +28,10 @@ import pytest
 from rocke.helpers.tiling.traits import load_mma_traits
 from rocke.helpers.tiling.layouts import make_tile_desc
 from rocke.helpers.tiling.mma.styles import AtomNumbers, InterleavedStyle
-from rocke.helpers.tiling.mma.warp_encoding import encoder_supports_layout
+from rocke.helpers.tiling.mma.warp_encoding import (
+    canonical_layouts,
+    encoder_supports_layout,
+)
 from rocke.helpers.tiling.transforms import (
     as_forward_map,
     classify_transform,
@@ -69,6 +73,15 @@ def _operand_gate(t) -> bool:
         and t.wave_size % (free_lanes * k_lanes) == 0
         for free_lanes in (t.m, t.n)  # A's free = M, B's free = N
     )
+
+
+def _operand_k_maps_differ(t) -> bool:
+    """A mixed-width ``f8f6f4`` row: its 8-bit operand holds K in two runs of 16 per lane, its 6/4-bit
+    operand in one run of 32 (per-operand ``k_num_access`` differ). The interleaved construction lays A and
+    B out with ONE K map, so on such a row A and B hold different K at the positions the instruction
+    couples -- the pair would multiply the wrong K, and the K check rejects it."""
+    lp = t.layout_params
+    return lp.a_k_num_access != lp.b_k_num_access
 
 
 def _accum_gate(t) -> bool:
@@ -159,12 +172,16 @@ def test_dense_mma_interleavable(t):
             ok
         ), f"{t.op_id}: operand K<->free is {tier} at (free_atoms={free_atoms}, k_sub={k_sub})"
 
-    # MMA soundness (positional per-atom K-match) for the base single-atom operands. Per-operand free
-    # lanes: A's free axis is M (free_lanes=a.m), B's is N (free_lanes=a.n) -- equal for a square atom.
+    # MMA soundness (per-atom K-match at coupled positions) for the base single-atom operands. Per-operand
+    # free lanes: A's free axis is M (free_lanes=a.m), B's is N (free_lanes=a.n) -- equal for a square atom.
     _, a_mma = _STYLE.operand_descs(t, free_sub=1, k_sub=1, free_lanes=a.m)
     _, b_mma = _STYLE.operand_descs(t, free_sub=1, k_sub=1, free_lanes=a.n)
-    d = mma_pair_k_aligned(a_mma.layout, b_mma.layout)
-    assert d.severity == "ok", f"{t.op_id}: MMA soundness failed -- {d.message}"
+    a_canon, b_canon, _ = canonical_layouts(t, (1, 1, 1))
+    d = mma_pair_k_aligned(a_mma.layout, b_mma.layout, a_canon=a_canon, b_canon=b_canon)
+    if _operand_k_maps_differ(t):
+        assert d.severity == "error", f"{t.op_id}: one K map passed a mixed-width pair"
+    else:
+        assert d.severity == "ok", f"{t.op_id}: MMA soundness failed -- {d.message}"
 
     # C-shuffle (native accumulator -> store), single atom AND 2x2-atom tile (free_sub>1 / multi-patch).
     for m_sub, n_sub in [(1, 1), (2, 2)]:
@@ -197,3 +214,6 @@ def test_proof_population():
         if not (_operand_gate(t) and _accum_gate(t) and t.m == t.n)
     }
     assert measured_cannot == _CANNOT_INTERLEAVE, measured_cannot ^ _CANNOT_INTERLEAVE
+    # The mixed-width f8f6f4 rows whose interleaved pair is K-misaligned: gfx950 16x16x128 and 32x32x64
+    # (12 each) and gfx1250 16x16x128 (12).
+    assert sum(map(_operand_k_maps_differ, _DENSE)) == 36

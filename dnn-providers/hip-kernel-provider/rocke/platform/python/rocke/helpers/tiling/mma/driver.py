@@ -42,6 +42,7 @@ def _assert_atom_contiguous(
     atom_k: int,
     free_sub: int,
     k_sub: int,
+    free_blocks: int,
     role: str,
     op_id: str,
 ) -> None:
@@ -58,6 +59,13 @@ def _assert_atom_contiguous(
     stride (canonical strides atoms by ``atom_free``, interleaved by 1) and does not assume lane 0
     distinguishes atoms (some interleavings share a lane-0 coordinate across atoms), so it must sweep
     all lanes -- AOS (atom-iteration inner) then shows a block whose atom identity varies at some lane.
+
+    ``free_blocks`` is the number of free rows one lane holds per atom (``a_m_register_blocks`` for A, 1
+    for B). Such a lane's atom block is ``free_blocks`` equal runs, one free row each, all in one K-atom::
+
+        gfx1250 32x16x128 fp4 A, lane 0, one atom of 128 registers:
+          registers 0-63   (M 0,  K 0-31 and 64-95)
+          registers 64-127 (M 16, K 0-31 and 64-95)
     """
     rm = RegisterMapper(tile_desc.layout)
     nregs = rm.num_vector_items
@@ -68,12 +76,20 @@ def _assert_atom_contiguous(
             f"free_sub*k_sub = {free_sub}*{k_sub} for {op_id!r}"
         )
     atom_len = nregs // denom
+    if atom_len % free_blocks:
+        raise ValueError(
+            f"MMA {role} operand atom of {atom_len} registers does not split into the "
+            f"{free_blocks} free rows a lane holds per atom for {op_id!r}"
+        )
+    run_len = atom_len // free_blocks
     for blk in range(denom):
         for lane in range(rm.num_lanes):
             key: tuple[int, int] | None = None
             for j in range(atom_len):
                 free_c, k_c = rm.matrix_coordinates(lane, blk * atom_len + j)
                 here = (free_c, k_c // atom_k)
+                if j % run_len == 0 and key is not None and here[1] == key[1]:
+                    key = here  # the next free row of this atom, in the same K-atom
                 if key is None:
                     key = here
                 elif here != key:
@@ -93,8 +109,9 @@ def _validate_mma_issue(a_fragment, b_fragment, accumulator, plan: TileMmaPlan) 
     - ``mma_operand_layout_sound`` on A and B -- each a well-formed MMA operand (one M/N per output row,
       well-formed K). Run FIRST and short-circuited, because the accumulator check below flows the operands
       through the machine and is undefined on an unsound operand.
-    - ``mma_pair_k_aligned`` -- A and B agree on which K sits in each paired slot, compared per atom (the
-      free-dim atom counts come from ``plan.subtiles``).
+    - ``mma_pair_k_aligned`` -- A and B agree on which K sits at each pair of positions the instruction
+      couples (read off the canonical layouts; slot for slot on a same-format instruction), compared per
+      atom (the free-dim atom counts come from ``plan.subtiles``).
     - ``mma_accumulator_flow_consistent`` -- the passed accumulator C carries the exact labels the machine
       produces from these operands, so the store writes the right coordinates. The absence of this check is
       what let a mislabeled C store to the wrong place.
@@ -117,7 +134,14 @@ def _validate_mma_issue(a_fragment, b_fragment, accumulator, plan: TileMmaPlan) 
                 f"MMA {role} operand not sound for {plan.op_id!r} -- {d.message}"
             )
 
-    d = mma_pair_k_aligned(a_lay, b_lay, a_free_atoms=m_sub, b_free_atoms=n_sub)
+    d = mma_pair_k_aligned(
+        a_lay,
+        b_lay,
+        a_canon=a_canon,
+        b_canon=b_canon,
+        a_free_atoms=m_sub,
+        b_free_atoms=n_sub,
+    )
     if d.severity != "ok":
         raise ValueError(
             f"MMA operands not K-aligned for {plan.op_id!r} -- {d.message}"
@@ -142,6 +166,7 @@ def _validate_mma_issue(a_fragment, b_fragment, accumulator, plan: TileMmaPlan) 
         atom_k=atom_k,
         free_sub=m_sub,
         k_sub=k_sub,
+        free_blocks=plan.traits.layout_params.a_m_register_blocks,
         role="A",
         op_id=plan.op_id,
     )
@@ -150,6 +175,7 @@ def _validate_mma_issue(a_fragment, b_fragment, accumulator, plan: TileMmaPlan) 
         atom_k=atom_k,
         free_sub=n_sub,
         k_sub=k_sub,
+        free_blocks=1,
         role="B",
         op_id=plan.op_id,
     )
