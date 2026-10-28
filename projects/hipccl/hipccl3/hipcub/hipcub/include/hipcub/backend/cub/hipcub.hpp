@@ -67,6 +67,7 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
+#include "device/device_topk.hpp"
 #include "device/device_transform.hpp"
 
 // Grid
