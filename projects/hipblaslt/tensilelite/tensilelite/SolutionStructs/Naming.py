@@ -26,7 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
-from ..Common.Utilities import printWarning
+from ..Common.Utilities import isMxf4SubtilePath, printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -236,6 +236,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if state.get("TileProcessingStrategy", "None") == "None":
       requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
 
+
+    # PostLoopStoreInNll only ever applies on the MXF4 subtile path, where
+    # assignPostLoopStoreInNll auto-disables it for everything else. Naming it
+    # unconditionally would append PLSIN0 to every kernel in the library and change
+    # its name hash, so drop it where it cannot be set.
+    if not isMxf4SubtilePath(state):
+      requiredParametersTemp.discard("PostLoopStoreInNll")
 
     if ignoreInternalArgs:
       # In split mode, GSU>1 and auto GSU use the distinct GSUM kernel name.
