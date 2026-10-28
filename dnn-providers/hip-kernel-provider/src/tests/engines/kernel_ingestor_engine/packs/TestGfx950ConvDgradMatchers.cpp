@@ -895,15 +895,15 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsThePlanAndPrepareReachesCodeLo
             }
         };
 
-    // Implicit GEMM, strided: (22 + 8) * 4 bytes per sub-GEMM.
+    // Implicit GEMM, strided: no caller workspace; the prepared plan owns the record tables
+    // ((22 + 8) * 4 bytes per sub-GEMM).
     DgradShape strided;
     strided.h = strided.w = 15;
     strided.sH = strided.sW = 2;
     const auto stridedFixture = fixtureOf(strided);
     const auto stridedBound = matchesGraph(GFX950_CONV_DGRAD_AOT, stridedFixture.context());
     ASSERT_TRUE(stridedBound);
-    EXPECT_EQ(handler.workspaceBytes(stridedFixture.context(), *stridedBound, kernels[0]),
-              4U * 30U * 4U);
+    EXPECT_EQ(handler.workspaceBytes(stridedFixture.context(), *stridedBound, kernels[0]), 0U);
     reachesLoading(stridedFixture, *stridedBound, kernels[0]);
     // Refused before any code loads.
     EXPECT_EQ(handler.workspaceBytes(stridedFixture.context(), *stridedBound, kernels[1]), 0U);

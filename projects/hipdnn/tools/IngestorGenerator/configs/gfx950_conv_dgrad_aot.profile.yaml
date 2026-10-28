@@ -202,7 +202,7 @@ launch_surface:
     python_source: kernels/common/conv_implicit_gemm_dgrad.py:pack_sub_gemm_buffer
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp:packSubGemmBuffer
     kmd_fields: [tile_m, tile_n, tile_k, patch]
-    guard: 22 i32 per non-empty tilde (or patch) sub-GEMM record, then 8 i32 of (mult, shift) magic pairs per record; a non-positive divisor or an overflow refuses. Each implicit step carries its table and its offset in the SUB_GEMM workspace region; launch uploads it before the step.
+    guard: 22 i32 per non-empty tilde (or patch) sub-GEMM record, then 8 i32 of (mult, shift) magic pairs per record; a non-positive divisor or an overflow refuses. Each implicit step carries its table and its offset in the SUB_GEMM region; prepare uploads every table once to device memory the prepared plan owns, so no launch copies it.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvDgradGeometry.cpp
   - name: helpers
     python_source: builders/common/convolution_backward_data.py:gfx950_conv_dgrad_aot_helper_fields
@@ -220,5 +220,5 @@ launch_surface:
     python_source: builders/common/convolution_backward_data.py:Gfx950ConvDgradPlan
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradNative.cpp:workspaceBytes
     kmd_fields: [kernel_family, direct_variant, tile_m, tile_n, tile_k, fold_k32, waves_k, runtime_k_loop]
-    guard: The plan's workspace regions (SUB_GEMM tables, WS_T, WS_COA), each 256-byte aligned. Every kernel uses static LDS only; prepare requests zero dynamic shared memory.
+    guard: The plan's workspace regions (SUB_GEMM tables, WS_T, WS_COA), each 256-byte aligned. The caller provides every region but SUB_GEMM, which the prepared plan owns, so implicit GEMM asks for no workspace. Every kernel uses static LDS only; prepare requests zero dynamic shared memory.
     test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvDgrad.cpp
