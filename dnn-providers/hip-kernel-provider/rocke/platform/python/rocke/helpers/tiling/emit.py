@@ -21,7 +21,8 @@ from __future__ import annotations
 import math
 from typing import Any, Callable
 
-from ...core.ir import Type
+from ...core.dtypes import dtype_info
+from ...core.ir import I8, Type, VectorType
 from ...core.passes import constant_int
 from ...core.storage import (
     element_bytes,
@@ -447,12 +448,17 @@ def _zero_scalar(b: Any, dtype: Any) -> Any:
     return b.vec_extract(b.zero_vec(storage_element_type(dtype), 1), 0)
 
 
+# Storage elements moved with vector accesses: global loads, LDS loads and LDS stores
+# (global_load_vN, smem_load_vN, smem_store_vN). tf32 is held and moved as i32.
 _WIDE_OK = {
     "f16",
     "bf16",
     "f32",
     "i32",
-}  # storage elements global_load_vN / smem_load_vN vectorize (tf32 is held and moved as i32)
+    "fp8e4m3",
+    "bf8e5m2",
+    "i8",
+}
 
 
 def _register_run(tile_desc: TileDesc, window: TensorWindow) -> tuple[int, int] | None:
@@ -719,6 +725,14 @@ def _is_lds(source: Any) -> bool:
     return isinstance(name, str) and name.startswith("smem")
 
 
+# The built-in swizzle (``lds_swizzle=True``) XORs block bits [3:6) of the last position: it moves
+# blocks of 8 elements, 8 blocks per 64-element group, and never splits a block.
+_SWIZZLE_BLOCK_BITS = 3
+_SWIZZLE_BLOCK = 1 << _SWIZZLE_BLOCK_BITS
+_SWIZZLE_BLOCKS = 8
+_SWIZZLE_GROUP = _SWIZZLE_BLOCK * _SWIZZLE_BLOCKS
+
+
 def _swizzle_lds_positions(b: Any, positions: list) -> list:
     """XOR-swizzle the last LDS position by the one before it, at b128-block (8-f16) granularity:
     ``m -> ((m>>3) ^ (outer & 7)) << 3 | (m & 7)``. Keeps every 8-f16 (b128) run contiguous while
@@ -734,13 +748,14 @@ def _swizzle_lds_positions(b: Any, positions: list) -> list:
     outer, m = positions[-2], positions[-1]
     # m ^ ((outer & 7) << 3): flips m's block bits [3:6] by (K&7), leaving the low-3 (8-f16 b128 run)
     # intact -> identical bank mapping to a block XOR, in 3 VALU ops (mod, shl, xor) not 6.
-    m_swz = b.xor(m, b.shl(b.mod(outer, b.const_i32(8)), b.const_i32(3)))
+    m_swz = b.xor(
+        m,
+        b.shl(
+            b.mod(outer, b.const_i32(_SWIZZLE_BLOCKS)),
+            b.const_i32(_SWIZZLE_BLOCK_BITS),
+        ),
+    )
     return positions[:-1] + [m_swz]
-
-
-# The built-in swizzle flips bits [3:6) of the last position (8-element blocks, 8 of them), so an
-# element moves only within its aligned group of 64 elements.
-_SWIZZLE_GROUP = 64
 
 
 def _swizzled_row_length(tensor: TensorDesc) -> int:
@@ -877,11 +892,17 @@ def _checked_lds_base_index(
 def _swizzle_vw(lds_swizzle: Any, dist_vw: int, align: int) -> int:
     """Resolve the LDS access width when a swizzle is active, with a fail-fast range check.
 
-    A callable swizzle relocates whole units of its granularity, so the access must not span wider than
-    that unit. The callable declares its granularity via a ``vw_elems`` attribute (default = one dword);
-    the built-in bool swizzle preserves the natural run. The chosen width is checked to satisfy
-    ``1 <= vw <= dist_vw`` (the distribution's natural contiguous run) -- wider is unrepresentable.
+    A swizzle relocates whole units of its granularity, so the access must not span wider than that
+    unit. The built-in swizzle (``lds_swizzle=True``) keeps blocks of :data:`_SWIZZLE_BLOCK`
+    elements contiguous, so its access is at most one block: a 16-wide 8-bit run would cross into
+    the next block, which the swizzle moves elsewhere. A packed sub-byte dtype is refused under any
+    swizzle (:func:`_check_lds_buffer`), so every width counted here is in elements. A callable
+    declares its granularity via a ``vw_elems`` attribute (default = one dword). The chosen width is
+    checked to satisfy ``1 <= vw <= dist_vw`` (the distribution's natural contiguous run) -- wider is
+    unrepresentable.
     """
+    if lds_swizzle is True:
+        return min(dist_vw, _SWIZZLE_BLOCK)
     if not callable(lds_swizzle):
         return dist_vw
     want = getattr(lds_swizzle, "vw_elems", max(1, 4 // align))
@@ -918,6 +939,20 @@ def lds_access_units(
         packed_runs_aligned=packed_runs_aligned,
     )
     return _swizzle_vw(lds_swizzle, vw, _unit_bytes(dtype))
+
+
+def _lds_load_units(b: Any, buffer: Any, index: Any, unit: Any, count: int) -> Any:
+    """Load `count` consecutive `unit` storage elements from the LDS `buffer` at `index`.
+
+    A run of 8-bit elements is read as ``<count x i8>`` and, for any other 8-bit `unit` (fp8, bf8,
+    u8), bitcast back to it, so the read claims the alignment of a byte run (``align 8`` for 8
+    bytes), the alignment ``store_fragment`` writes it with, whatever width the lowering assumes
+    for an 8-bit float element; core's LDS loads have no u8 form. The bitcast changes no bits.
+    """
+    if dtype_info(unit.name).encoded_bits != 8:
+        return b.smem_load_vN(buffer, index, dtype=unit, n=count)
+    loaded = b.smem_load_vN(buffer, index, dtype=I8, n=count)
+    return loaded if unit == I8 else b.vec_bitcast(loaded, VectorType(unit, count))
 
 
 def load_fragment(
@@ -996,7 +1031,7 @@ def load_fragment(
             index = _lds_index(
                 b, window, tile_desc, thread, register, lds_swizzle, base_index, dtype
             )
-            loaded = b.smem_load_vN(ptr, index, dtype=unit, n=vw)
+            loaded = _lds_load_units(b, ptr, index, unit, vw)
             slots = storage_slots(dtype, tile_desc.register_count, register, step)
             value = move_registers_into(b, value, loaded, enumerate(slots))
         return Fragment(tile_desc, dtype, value)
