@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -656,6 +657,13 @@ class TestModeRejection(unittest.TestCase):
 
 class TestMainReturnsTheGateVerdict(unittest.TestCase):
     """The pure rule is only a gate if main() actually returns it."""
+
+    def setUp(self):
+        # The CLI pins its flavor in os.environ for child emitters. Restore it
+        # after in-process calls so later runtime tests retain their compiler.
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def drive_main(self, family_record, tmp):
         archive = tmp / "librocke_core.a"

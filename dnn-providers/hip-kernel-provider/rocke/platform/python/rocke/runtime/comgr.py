@@ -224,8 +224,8 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
       * in a torch package's ``lib`` directory (torch not imported, e.g. an
         explicit ``ROCKE_COMGR_LIB``) -> the ``hip`` entry of that package's
         ``version.py`` (read, never imported);
-      * a path under TheRock's ``_rocm_sdk_core`` wheel -> the wheel's ROCm
-        release (``rocm_sdk.__version__`` or ``rocm-sdk-core`` metadata);
+      * a RECORD-owned path under TheRock's SDK payload -> the wheel's ROCm
+        release from ``rocm-sdk-core`` distribution metadata;
       * a ROCm install tree (``<root>/lib/libamd_comgr.so`` or, on a packaged
         install, ``<root>/core-<X>/lib/libamd_comgr.so``) -> its root
         ``.info/version``, with ``/opt/rocm/.info/version`` as a final fallback.
@@ -240,8 +240,7 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
         rp = os.path.realpath(path)
     except Exception:
         rp = path
-    # torch-bundled comgr -> torch's ROCm vintage (matches what _load_lib picks
-    # when torch is in the process).
+    # An explicit torch-bundled COMGR -> torch's informational ROCm vintage.
     torch_mod = sys.modules.get("torch")
     if torch_mod is not None:
         tfile = getattr(torch_mod, "__file__", None)
