@@ -583,6 +583,11 @@ class TestTuneCommands:
         logic = yaml.safe_load((tmp_path / "a.logic.yaml").read_text())
         assert len(logic["ExactLogic"]) == 2 + len(pool)
 
+    def test_default_rows_regenerate_the_committed_logic(self, tmp_path):
+        output = tmp_path / "x.yaml"
+        SkinnyGEMMLogic.main(["--output", str(output)])
+        assert output.read_bytes() == SkinnyGEMMLogic.OUTPUT_LOGIC.read_bytes()
+
 
 class TestValidation:
     def setup(self, tmp_path, pool):

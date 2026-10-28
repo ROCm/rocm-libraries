@@ -223,6 +223,17 @@ class TestRows:
 
 
 class TestMain:
+    def test_committed_file_is_current(self, pool):
+        header = SkinnyGEMMLogic.headerLines(SkinnyGEMMLogic.ORIGAMI_LOGIC)
+        rows = SkinnyGEMMLogic.readRoutingRows(SkinnyGEMMLogic.DEFAULT_ROWS, pool)
+        expected = SkinnyGEMMLogic.renderLogic(header, pool, rows)
+        assert SkinnyGEMMLogic.OUTPUT_LOGIC.read_text(encoding="utf-8") == expected
+
+    def test_writes_the_output(self, tmp_path, pool):
+        output = tmp_path / "x.yaml"
+        SkinnyGEMMLogic.main(["--output", str(output)])
+        assert output.read_bytes() == SkinnyGEMMLogic.OUTPUT_LOGIC.read_bytes()
+
     def test_regeneration_is_deterministic(self, tmp_path):
         first, second = tmp_path / "a.yaml", tmp_path / "b.yaml"
         SkinnyGEMMLogic.main(["--output", str(first)])

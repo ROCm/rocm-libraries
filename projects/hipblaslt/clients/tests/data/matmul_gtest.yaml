@@ -142,6 +142,186 @@ Tests:
   batch_mode: [0, 1]
   batch_count: 1
 
+# MXFP8 (preswizzled scales, scaleA/B 1001) skinny GEMMs that library logic also serves with the
+# generated SkinnyGEMM solutions (logic Range/*_SkinnyGEMM.yaml). requested_solution_num -1 runs and
+# checks every solution the library offers, Origami and generated, so each case covers all generated
+# kernels that match its shape. The generated solutions come in two variants: useBeta=0 asserts
+# beta == 0 and ignores C, useBeta=1 reads C and computes alpha * A * B + beta * C. So with beta 0
+# every matching generated solution runs, and with beta != 0 only the useBeta=1 ones do (plus
+# Origami's), which is why beta != 0 is covered through the -1 enumeration only. Their other
+# conditions: batch 1, unit strides, lda and ldb multiples of 4 (ldc and ldd may be anything, so
+# the default ldc and ldd of the m skinny shapes, M, is fine, odd included), and a K window per solution: the up-front scale kernels
+# take only K in ((U - 1) * KI, U * KI] with K % KI == 0, the ring kernels any K (K % KI == 0 for the
+# whole-step variants), where KI = 64 * lanesK.
+- name: matmul_skinny_mxfp8
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    # n skinny.
+    - { M: 5120, N: 1, K: 8192 }
+    - { M: 5120, N: 2, K: 8192 }
+    - { M: 5120, N: 3, K: 8192 }
+    - { M: 5120, N: 4, K: 8192 }
+    # m skinny.
+    - { M: 1, N: 5120, K: 8192, ldc: 4, ldd: 4 }
+    - { M: 2, N: 5120, K: 5120, ldc: 4, ldd: 4 }
+    - { M: 4, N: 5120, K: 8192 }
+    # M and N tails.
+    - { M: 5000, N: 3, K: 8192 }
+    - { M: 4100, N: 2, K: 5120 }
+    - { M: 3, N: 4100, K: 5120, ldc: 4, ldd: 4 }
+    # m skinny with the default ldc and ldd (M, odd for M 1 and 3).
+    - { M: 1, N: 5120, K: 8192 }
+    - { M: 2, N: 5120, K: 5120 }
+    - { M: 3, N: 4100, K: 5120 }
+    # Odd ldc and ldd.
+    - { M: 3, N: 4096, K: 4096, ldc: 5, ldd: 5 }
+    - { M: 5120, N: 2, K: 5120, ldc: 5123, ldd: 5121 }
+    # Padded ldc and ldd. A padded lda or ldb is left out: every MX 1001 solution, Origami's
+    # included, fails the norm check there (norm_error about 100 instead of 5e-4 to 4e-3).
+    - { M: 5120, N: 2, K: 5120, ldc: 5128, ldd: 5136 }
+    - { M: 1, N: 4096, K: 4096, ldc: 8, ldd: 8 }
+    # K around the up-front windows: 4096 is just below the UP5 (LK16) and UP2 (LK64) windows, 6144
+    # is inside the UP2 and UP8 windows but is no multiple of their KI, 25600 is a ring K.
+    - { M: 5120, N: 1, K: 4096 }
+    - { M: 5120, N: 2, K: 4096 }
+    - { M: 5120, N: 1, K: 5120 }
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 5120, N: 1, K: 6144 }
+    - { M: 5120, N: 2, K: 6144 }
+    - { M: 5120, N: 2, K: 25600 }
+    - { M: 5120, N: 1, K: 25600 }
+    # A partial last K step: only the ring kernels without whole-step K match. Origami takes K % 32
+    # == 0 (5152); K % 4 == 0 (5124) has only generated solutions.
+    - { M: 5120, N: 2, K: 5152 }
+    - { M: 5120, N: 2, K: 5124 }
+    # K shorter than the prefetch depth of the ring kernels.
+    - { M: 5120, N: 2, K: 256 }
+    - { M: 5120, N: 2, K: 512 }
+  transA: T
+  transB: N
+  alpha: [1, 0.5]
+  beta: [0, 2]
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: -1
+  gpu_arch: '950'
+
+# Shapes inside the benched routing cells (KernelGenerators/data/SkinnyGEMMRows.yaml): the default
+# pick (requested_solution_num 1, the first heuristic result) is a generated SkinnyGEMM kernel
+# here, so these cases check the routed solution rather than the list of all solutions. They
+# include lattice points of the benching grid, off-lattice points inside cells, ldc and ldd 4 or 8
+# and the default (M, odd for M 1) or odd ones for the m skinny shapes, and K % 32 != 0 (4100) where Origami has no solution. Routing targets
+# the useBeta=0 solutions, which assert beta == 0, so beta is 0 here; the next entry checks that
+# beta != 0 falls back to Origami.
+- name: matmul_skinny_mxfp8_routed
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    # n skinny.
+    - { M: 5120, N: 1, K: 8192 }
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 5120, N: 4, K: 5120 }
+    # n skinny, off the lattice and K % 32 != 0.
+    - { M: 1024, N: 7, K: 3072 }
+    - { M: 4096, N: 1, K: 4100 }
+    # m skinny with padded ldc and ldd.
+    - { M: 1, N: 5120, K: 8192, ldc: 4, ldd: 4 }
+    - { M: 2, N: 5120, K: 5120, ldc: 4, ldd: 4 }
+    - { M: 1, N: 2132, K: 7168, ldc: 4, ldd: 4 }
+    - { M: 4, N: 4096, K: 4100, ldc: 4, ldd: 4 }
+    # m skinny with the default (M, odd for M 1) and with odd ldc and ldd.
+    - { M: 1, N: 5120, K: 8192 }
+    - { M: 2, N: 5120, K: 5120 }
+    - { M: 1, N: 2132, K: 7168 }
+    - { M: 1, N: 5120, K: 8192, ldc: 5, ldd: 5 }
+    # n skinny with odd ldc and ldd.
+    - { M: 5120, N: 2, K: 5120, ldc: 5123, ldd: 5121 }
+  transA: T
+  transB: N
+  alpha: [1, 0.5]
+  beta: 0
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# The routed shapes with beta != 0, without the K % 32 != 0 ones that only generated solutions
+# serve. The routed useBeta=0 solution rejects beta != 0, so the default pick falls back to
+# Origami, which must still compute alpha * A * B + beta * C.
+- name: matmul_skinny_mxfp8_routed_beta
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    - { M: 5120, N: 1, K: 8192 }
+    - { M: 5120, N: 2, K: 5120 }
+    - { M: 5120, N: 4, K: 5120 }
+    - { M: 1024, N: 7, K: 3072 }
+    - { M: 1, N: 5120, K: 8192, ldc: 4, ldd: 4 }
+    - { M: 2, N: 5120, K: 5120, ldc: 4, ldd: 4 }
+    - { M: 1, N: 2132, K: 7168, ldc: 4, ldd: 4 }
+    - { M: 1, N: 5120, K: 8192 }
+    - { M: 1, N: 5120, K: 8192, ldc: 5, ldd: 5 }
+    - { M: 5120, N: 2, K: 5120, ldc: 5123, ldd: 5121 }
+  transA: T
+  transB: N
+  alpha: [1, 0.5]
+  beta: 2
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# The generated skinny solutions do not take a bias or an activation; these problems must still get
+# an answer from the Origami solutions, with the generated ones left out of the -1 list.
+- name: matmul_skinny_mxfp8_fallback
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    - { M: 5120, N: 2, K: 8192 }
+    - { M: 1, N: 5120, K: 8192, ldc: 4, ldd: 4 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  bias_vector: 1
+  bias_type: [f32_r, bf16_r]
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: -1
+  gpu_arch: '950'
+
+- name: matmul_skinny_mxfp8_fallback
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  matrix_size:
+    - { M: 5120, N: 2, K: 8192 }
+    - { M: 1, N: 5120, K: 8192, ldc: 4, ldd: 4 }
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  activation_type: [relu, gelu]
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: -1
+  gpu_arch: '950'
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }

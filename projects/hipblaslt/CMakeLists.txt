@@ -90,6 +90,13 @@ option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
+# TensileCreateLibrary emits generator custom kernels (CustomKernel.generator) through the
+# tensilelite_codegen module, which TENSILELITE_ENABLE_JIT_PYTHON builds.
+if(HIPBLASLT_ENABLE_DEVICE)
+    set(TENSILELITE_ENABLE_JIT_PYTHON ON CACHE BOOL
+        "Build the nanobind Python module for the TensileLite JIT library.")
+endif()
+
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
