@@ -10,7 +10,9 @@
   flag (block_lds_reduce_with_index);
 - b.param(name, t, noalias=..., align=...) into rocke_param_opts_t;
 - any IR scalar type constant of rocke.core.ir with a C singleton (FP8E4M3);
-- float arithmetic with an int operand, and true division."""
+- float arithmetic with an int operand, and true division;
+- a platform struct's documented C getter / predicate for a member it has
+  no field for (ArchTarget.max_threads_per_block, ArchTarget.fits_lds)."""
 
 from __future__ import annotations
 
@@ -39,6 +41,15 @@ def probe_fp8(spec: BatchedTranspose2DSpec) -> int:
 
 def probe_float(spec: BatchedTranspose2DSpec) -> float:
     return 1.0 / spec.tile_m + spec.vec * 0.5 - 2
+
+
+def probe_arch(spec: BatchedTranspose2DSpec, arch: str = "gfx950") -> int:
+    from ...core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    if target.fits_lds(spec.tile_m * 2):
+        return target.max_threads_per_block
+    return 0
 """
 
 # qwen3_sampler imports block_lds_reduce_with_index (the maps list a helper
@@ -114,6 +125,7 @@ def _body(cpp: str, fn: str) -> str:
         "probe_params",
         "probe_fp8",
         "probe_float",
+        "probe_arch",
     ],
 )
 def test_translates(probe, name):
@@ -170,6 +182,16 @@ def test_float_arithmetic(probe):
     body = _body(probe[1], "py_probe_float")
     assert "py::truediv(1.0, (double)spec->tile_m)" in body, body
     assert "((double)spec->vec * 0.5)" in body, body
+
+
+def test_documented_getter_and_predicate(probe):
+    """target.max_threads_per_block (a property) and target.fits_lds(n) (a
+    method annotated -> bool) of a platform struct with no such field: the C
+    functions rocke_arch_target.h documents as ArchTarget.<name>, found
+    through its "rocke_arch_target_t + rocke_arch_* () getters" row."""
+    body = _body(probe[1], "py_probe_arch")
+    assert re.search(r"rocke_arch_fits_lds\(target, \(long\)", body), body
+    assert "return rocke_arch_max_threads_per_block(target);" in body, body
 
 
 def test_source_compiles(probe, tmp_path):

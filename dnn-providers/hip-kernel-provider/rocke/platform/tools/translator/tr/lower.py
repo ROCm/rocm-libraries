@@ -2882,6 +2882,9 @@ class Fn:
                 const = self.class_constant(name, attr, obj)
                 if const is not None:
                     return const
+                get = self.platform_getter(obj, name, is_p, attr)
+                if get is not None:
+                    return get
                 raise Refuse(node, f"{name} has no field {attr}")
             ft = s.fields[cf]
             fst = T.struct_of(ft)
@@ -5128,6 +5131,48 @@ class Fn:
                 raise Refuse(node, f"missing argument {pname} to {cls}.{attr}")
         return self.bind(CE(f"{sig.name}({', '.join(args)})", sig.ret, False), attr)
 
+    def platform_py_member(self, cf, attr: str):
+        """The Python member a documented C twin mirrors: its doc names the
+        class ("ArchTarget.fits_lds"), which this module imports (at module
+        or function level). None when the class cannot be found."""
+        import importlib
+        import inspect
+
+        m_ = re.search(r"\b([A-Z]\w*)\." + re.escape(attr) + r"\b", c_doc(self.env, cf))
+        if m_ is None:
+            return None
+        cls = m_.group(1)
+        pycls = None
+        if cls in self.mod.imports:
+            src, name = self.mod.imports[cls]
+            try:
+                pycls = getattr(importlib.import_module(src), name, None)
+            except ImportError:
+                pycls = None
+        if pycls is None:
+            pycls = getattr(self.mod.pymod, cls, None)
+        if not inspect.isclass(pycls):
+            return None
+        return next(
+            (k.__dict__[attr] for k in pycls.__mro__ if attr in k.__dict__), None
+        )
+
+    def platform_getter(self, obj: CE, sname: str, is_p: bool, attr: str):
+        """obj.attr of a platform struct with no such field: the documented C
+        getter (PM-R1 naming, "ArchTarget.max_threads_per_block property.")
+        when the Python member is a property, self its only parameter."""
+        import functools
+
+        cf = platform_c_method(self.env, sname, attr)
+        if cf is None or len(cf.params) != 1 or cf.ret == "void":
+            return None
+        if not isinstance(
+            self.platform_py_member(cf, attr), (property, functools.cached_property)
+        ):
+            return None
+        arg = obj.code if is_p else f"&{paren(obj.code)}"
+        return CE(f"{cf.name}({arg})", cf.ret, obj.pure)
+
     def call_platform_method(self, recv: CE, st, attr, node):
         """PM-R1: obj.method(...) on a platform struct with no twin_map class.
 
@@ -5164,7 +5209,18 @@ class Fn:
             return None
         takes_b = any(t == T.B for t, _ in ins)
         if cf.ret == "bool" and not takes_b:
-            return None
+            # no builder: the bool is the result only when the Python method
+            # returns one (ArchTarget.fits_lds), else an unreported failure
+            import inspect
+
+            fn_ = self.platform_py_member(cf, attr)
+            ra = inspect.signature(fn_).return_annotation if callable(fn_) else None
+            if outs or ra not in (bool, "bool"):
+                return None
+            args = [recv.code if st[1] else f"&{paren(recv.code)}"]
+            for (cty, _cn), a in zip(ins, node.args):
+                args.append(self.coerce(self.bind(self.expr(a), "a"), cty, node))
+            return self.bind(CE(f"{cf.name}({', '.join(args)})", "bool", False), attr)
         if outs and cf.ret not in ("void", "bool", "rocke_status_t"):
             return None
         if not st[1] and not cf.params[0][0].startswith("const "):
@@ -7897,19 +7953,34 @@ def decl_type(t: str) -> str:
     return t
 
 
+def c_doc(env: Env, cf) -> str:
+    """The doc comment right above C function cf's declaration, on one line."""
+    path = env.headers.paths.get(cf.file)
+    doc = (
+        " ".join(open(path).read().splitlines()[max(0, cf.line - 12) : cf.line - 1])
+        if path
+        else ""
+    )
+    return doc[doc.rfind("/*") :] if "/*" in doc else ""
+
+
 def platform_c_method(env: Env, sname: str, attr: str):
     """PM-R1: the C twin of method attr on platform struct sname by the
     header's naming convention (rocke_<stem>_<attr>, or <prefix>_<attr> when
-    the header says "Class -> sname and <prefix>_*"), its first parameter a
-    pointer to sname, confirmed by the doc comment above it ("Mirrors
-    <Class>.<attr>" or starting "<attr>("). None if there is none."""
+    the header says "Class -> sname and <prefix>_*" or, in its Python -> C
+    table, "sname + <prefix>_* () getters"), its first parameter a pointer to
+    sname, confirmed by the doc comment above it ("Mirrors <Class>.<attr>",
+    starting "<attr>(" or starting "<Class>.<attr>"). None if there is none."""
     hdr = env.headers
     sfile = hdr.typedef_file.get(sname)
     prefixes = [sname[:-2]]
     if sfile and hdr.paths.get(sfile):
+        text = open(hdr.paths[sfile]).read()
         prefixes += re.findall(
-            r"->\s*" + re.escape(sname) + r"\s+and\s+(\w+?)_\*",
-            open(hdr.paths[sfile]).read(),
+            r"->\s*" + re.escape(sname) + r"\s+and\s+(\w+?)_\*", text
+        )
+        prefixes += re.findall(
+            r"\b" + re.escape(sname) + r"\s*\+\s*(\w+?)_\*\s*\(\)", text
         )
     for pre in prefixes:
         cf = env.c_func(f"{pre}_{attr}")
@@ -7921,16 +7992,11 @@ def platform_c_method(env: Env, sname: str, attr: str):
             break
     else:
         return None
-    path = hdr.paths.get(cf.file)
-    doc = (
-        " ".join(open(path).read().splitlines()[max(0, cf.line - 12) : cf.line - 1])
-        if path
-        else ""
-    )
-    doc = doc[doc.rfind("/*") :] if "/*" in doc else ""
+    doc = c_doc(env, cf)
     if not (
         re.search(r"Mirrors\s+\w+\." + re.escape(attr) + r"\b", doc)
         or re.match(r"/\*+\s*" + re.escape(attr) + r"\(", doc)
+        or re.match(r"/\*+\s*[A-Z]\w*\." + re.escape(attr) + r"\b", doc)
     ):
         return None
     return cf
