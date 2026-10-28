@@ -63,6 +63,42 @@ common = [
     "projects/composablekernel/tutorial/*",
     "projects/composablekernel/vars/*",
     "projects/composablekernel/groovy/*",
+
+    # Workflows that are not TheRock CI. Changing one of these cannot affect a
+    # TheRock build or test, so there is no reason to burn runners on it.
+    #
+    # fnmatch has no negation operator, so this list must be maintained by hand.
+    # IMPORTANT: never add ".github/workflows/therock-*" here -- those workflows
+    # define TheRock CI itself and must always re-run it to validate the change.
+    ".github/workflows/auto-retry-failed.yml",
+    ".github/workflows/clang-tidy.yml",
+    ".github/workflows/close-stale-prs.yml",
+    ".github/workflows/codeql.yml",
+    ".github/workflows/component-ci*.yml",
+    ".github/workflows/docs-pr-preview*.yml",
+    ".github/workflows/gfx1250_hipblaslt_tensilelite_test.yml",
+    ".github/workflows/hipblaslt-asan-ci.yml",
+    ".github/workflows/hipblaslt-drop-build.yml",
+    ".github/workflows/hipblaslt-local-kernels-ci.yml",
+    ".github/workflows/hipdnn-superbuild-ci.yml",
+    ".github/workflows/hostnumerics-ci.yml",
+    ".github/workflows/initial-setup.yml",
+    ".github/workflows/issue-import.yml",
+    ".github/workflows/labeler.yml",
+    ".github/workflows/libraries-pr-bot.yml",
+    ".github/workflows/merge-submodules.yml",
+    ".github/workflows/miopen-wrapper-flag-on.yml",
+    ".github/workflows/multiple_pr_import.yml",
+    ".github/workflows/pr-base-freshness.yml",
+    ".github/workflows/pr-import.yml",
+    ".github/workflows/pr-merge-sync-patches.yml",
+    ".github/workflows/pr-merge-sync-patches-manual.yml",
+    ".github/workflows/pr-org-label.yml",
+    ".github/workflows/pre-commit.yml",
+    ".github/workflows/shared-ctest-ci.yml",
+    ".github/workflows/update-docs.yml",
+    ".github/workflows/update-release-staging-subtree.yml",
+    ".github/workflows/update-subtrees.yml",
 ]
 
 # Patterns that skip CI only on Linux (e.g., Windows-only projects)
