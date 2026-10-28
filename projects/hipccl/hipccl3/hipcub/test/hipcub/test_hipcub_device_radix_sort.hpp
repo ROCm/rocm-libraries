@@ -81,29 +81,6 @@ public:
 
 TYPED_TEST_SUITE_P(HipcubDeviceRadixSort);
 
-template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
-{
-    auto result = test_utils::get_random_data<T>(size,
-                                                 test_utils::numeric_limits<T>::min(),
-                                                 test_utils::numeric_limits<T>::max(),
-                                                 seed_value);
-    test_utils::add_special_values(result, seed_value);
-    return result;
-}
-
-template<class T>
-auto generate_key_input(size_t size, unsigned int seed_value)
-    -> std::enable_if_t<!_HIPCUB_STD::is_floating_point_v<T>, std::vector<T>>
-{
-    using inner_t = typename test_utils::inner_type<T>::type;
-    return test_utils::get_random_data<T>(size,
-                                          test_utils::numeric_limits<inner_t>::min(),
-                                          test_utils::numeric_limits<inner_t>::max(),
-                                          seed_value);
-}
-
 template<bool Descending, class Key>
 auto invoke_sort_keys(void*       d_temporary_storage,
                       size_t&     temporary_storage_bytes,
@@ -253,7 +230,8 @@ void sort_keys()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
 
             key_type* d_keys_input;
             key_type* d_keys_output;
@@ -515,7 +493,8 @@ void sort_pairs()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
             std::vector<value_type>     values_input;
             try
             {
@@ -813,7 +792,8 @@ void sort_keys_double_buffer()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
             key_type*                   d_keys_input;
             key_type*                   d_keys_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
@@ -1054,7 +1034,8 @@ void sort_pairs_double_buffer()
             }
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             // Generate data
-            const std::vector<key_type> keys_input = generate_key_input<key_type>(size, seed_value);
+            const std::vector<key_type> keys_input
+                = test_utils::generate_key_input<key_type>(size, seed_value);
             std::vector<value_type>     values_input;
 
             try

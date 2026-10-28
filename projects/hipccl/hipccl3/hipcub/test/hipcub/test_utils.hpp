@@ -791,6 +791,28 @@ struct segments_index_to_offset_op
     }
 };
 
+template<class...>
+struct merge_sequence
+{};
+
+template<class... Args>
+struct merge_sequence<::testing::Types<Args...>>
+{
+    using type = ::testing::Types<Args...>;
+};
+
+template<class... Args1, class... Args2>
+struct merge_sequence<::testing::Types<Args1...>, ::testing::Types<Args2...>>
+{
+    using type = ::testing::Types<Args1..., Args2...>;
+};
+
+template<class T1, class T2, class... Ts>
+struct merge_sequence<T1, T2, Ts...>
+{
+    using type = typename merge_sequence<typename merge_sequence<T1, T2>::type, Ts...>::type;
+};
+
 } // namespace test_utils
 
 // Need for hipcub::DeviceReduce::Min/Max etc.
