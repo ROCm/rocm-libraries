@@ -12,7 +12,7 @@ never instance state -- so the same driver drives every wave-tile call. The fron
 
 from __future__ import annotations
 
-from ..fragments import Fragment, TileDesc, fragment_length
+from ..fragments import Fragment, TileDesc, _fragment_storage_type, fragment_length
 from ..register_mapper import RegisterMapper
 from ..transforms import (
     mma_accumulator_flow_consistent,
@@ -21,6 +21,10 @@ from ..transforms import (
 )
 from .plan import TileMmaPlan
 from .warp_encoding import canonical_layouts
+
+# The catalog row families whose operands the driver supplies: it feeds A, B and C, so a scaled row
+# (which also takes scale operands) or a sparse row (which also takes a sparsity index) is not driven.
+_DRIVEN_FAMILIES = frozenset({"dense"})
 
 
 def _assert_atom_contiguous(
@@ -189,17 +193,35 @@ class TileMmaDriver:
                     triples.append((axis["M"], axis["N"], axis["K"]))
         return triples
 
+    @staticmethod
+    def _result_base(b, accumulator: Fragment, d_dtype):
+        """The vector the grid walk assembles the per-subtile results into: the accumulator's own
+        vector when the result has its dtype (each result replaces the subtile it was computed
+        from), else a zero vector of the result dtype's storage type, which every subtile then
+        fills."""
+        if d_dtype == accumulator.dtype:
+            return accumulator.value
+        storage = _fragment_storage_type(d_dtype, accumulator.tile_desc.register_count)
+        return b.zero_vec(storage.elem, storage.count)
+
     def __call__(self, b, a_fragment, b_fragment, accumulator):
         """Walk the M x N x K atom grid for the wave tile (in ``tiling.order``), issuing one
         ``b.mma`` per atom and accumulating each C subtile. The fragments are
         subtile-contiguous (from the wave layouts), so every atom is a register slice.
-        Checks operand dtypes, then runs the single validation (:func:`_validate_mma_issue` --
-        operand soundness, pairwise K-match, accumulator consistency, atom contiguity) before
-        issuing. Each fragment's register vector type is guaranteed by :class:`Fragment` itself,
-        not re-checked here.
 
-        Returns the updated accumulator as a new :class:`Fragment`; the `accumulator` argument is
-        not mutated, so the result must be assigned (``acc = driver(b, a_frag, b_frag, acc)``).
+        Before any IR it checks, in order: the operand dtypes; that the instruction's family is
+        one the driver feeds (A, B and C only); that a result of another dtype than the
+        accumulator is never fed back as the next K step's accumulator; that rocke issues the
+        instruction on the target (:meth:`TileMmaPlan.emit_op`); then the single layout validation
+        (:func:`_validate_mma_issue` -- operand soundness, pairwise K-match, accumulator
+        consistency, atom contiguity). A reason the instruction cannot be issued is thus never
+        hidden behind a layout error. Each fragment's register vector type is guaranteed by
+        :class:`Fragment` itself, not re-checked here.
+
+        Returns the result as a new :class:`Fragment` on the accumulator's tile, of the
+        instruction's result dtype (``plan.d_dtype``, the accumulator dtype for every
+        accumulate-in-place instruction); the `accumulator` argument is not mutated, so the result
+        must be assigned (``acc = driver(b, a_frag, b_frag, acc)``).
         """
         plan = self._plan
         for name, fragment in (
@@ -214,15 +236,31 @@ class TileMmaDriver:
                     f"fragment={fragment.dtype.name!r}, expected {want.name!r}"
                 )
 
-        # One validation call before issuing (operand soundness, pairwise K-match, accumulator
-        # consistency, atom contiguity), with atom counts from plan.subtiles and the canonical reference
-        # from the canonical_layouts helper. Kept as ONE call so the issue point can't check a subset -- a
-        # missing accumulator check is exactly what let a mislabeled C through before. dtype agreement
-        # (above) and emit_op resolution (below) are the other issue-time checks.
-        _validate_mma_issue(a_fragment, b_fragment, accumulator, plan)
+        traits = plan.traits
+        if traits.family not in _DRIVEN_FAMILIES:
+            raise NotImplementedError(
+                f"{plan.op_id!r} is a {traits.family} instruction; the TileMma driver supplies "
+                f"only A, B and C operands -- the plan can be visualised, and emit_op() returns "
+                f"the backend op for a hand-written b.mma call wherever rocke issues it -- TODO: "
+                f"not implemented yet"
+            )
+        m_sub, n_sub, k_sub = plan.subtiles
+        if plan.d_dtype != plan.c_dtype and k_sub > 1:
+            raise ValueError(
+                f"{plan.op_id!r} returns {plan.d_dtype.name} from an {plan.c_dtype.name} "
+                f"accumulator, so its result cannot be the next K step's accumulator -- this "
+                f"tile issues {k_sub} instructions along K per C subtile; use a tile whose K is "
+                f"the instruction's K ({plan.atom_shape[2]}), or the {plan.c_dtype.name}-result "
+                f"instruction (omit d) and convert the finished tile"
+            )
 
+        # Issue is decided before the layouts are validated (emit_op emits no IR), then ONE
+        # validation call (operand soundness, pairwise K-match, accumulator consistency, atom
+        # contiguity), with atom counts from plan.subtiles and the canonical reference from the
+        # canonical_layouts helper. Kept as ONE call so the issue point can't check a subset -- a
+        # missing accumulator check is exactly what let a mislabeled C through before.
         op = plan.emit_op()
-        m_sub, n_sub, k_sub = plan._m_subtiles, plan._n_subtiles, plan._k_subtiles
+        _validate_mma_issue(a_fragment, b_fragment, accumulator, plan)
 
         # Single C subtile: accumulate in-register over K (byte-identical to the atom path).
         if m_sub == 1 and n_sub == 1:
@@ -230,7 +268,7 @@ class TileMmaDriver:
             if k_sub == 1:
                 return Fragment(
                     accumulator.tile_desc,
-                    accumulator.dtype,
+                    plan.d_dtype,
                     b.mma(op, a_fragment.value, b_fragment.value, acc_value),
                 )
             a_atom = fragment_length(a_fragment.tile_desc.layout) // k_sub
@@ -250,7 +288,7 @@ class TileMmaDriver:
                     b.s_setprio(mac_prio)
             if mac_prio:
                 b.s_setprio(0)
-            return Fragment(accumulator.tile_desc, accumulator.dtype, acc_value)
+            return Fragment(accumulator.tile_desc, plan.d_dtype, acc_value)
 
         # Subtiled M/N grid. Carry a PER-ATOM accumulator SSA for each (mi, nj) C subtile so
         # that across K every C subtile is touched ONLY by `b.mma` (an MFMA def->use chain) --
@@ -296,10 +334,10 @@ class TileMmaDriver:
                 b.s_setprio(mac_prio)
         if mac_prio:
             b.s_setprio(0)
-        result = accumulator.value
+        result = self._result_base(b, accumulator, plan.d_dtype)
         for idx in range(m_sub * n_sub):
             result = self._write_subvector(b, result, accs[idx], idx * c_atom, c_atom)
-        return Fragment(accumulator.tile_desc, accumulator.dtype, result)
+        return Fragment(accumulator.tile_desc, plan.d_dtype, result)
 
     def __repr__(self) -> str:
         return f"TileMmaDriver(plan={self._plan!r})"
