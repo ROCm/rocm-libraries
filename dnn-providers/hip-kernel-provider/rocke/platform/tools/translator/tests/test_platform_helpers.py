@@ -9,7 +9,8 @@
 - such a helper that returns a tuple through out parameters and its success
   flag (block_lds_reduce_with_index);
 - b.param(name, t, noalias=..., align=...) into rocke_param_opts_t;
-- any IR scalar type constant of rocke.core.ir with a C singleton (FP8E4M3)."""
+- any IR scalar type constant of rocke.core.ir with a C singleton (FP8E4M3);
+- float arithmetic with an int operand, and true division."""
 
 from __future__ import annotations
 
@@ -35,6 +36,9 @@ def probe_fp8(spec: BatchedTranspose2DSpec) -> int:
     t = FP8E4M3
     return 1 if t == FP8E4M3 else 0
 
+
+def probe_float(spec: BatchedTranspose2DSpec) -> float:
+    return 1.0 / spec.tile_m + spec.vec * 0.5 - 2
 """
 
 # qwen3_sampler imports block_lds_reduce_with_index (the maps list a helper
@@ -109,6 +113,7 @@ def _body(cpp: str, fn: str) -> str:
         "BatchedTranspose2DSpec.kernel_name",
         "probe_params",
         "probe_fp8",
+        "probe_float",
     ],
 )
 def test_translates(probe, name):
@@ -161,6 +166,12 @@ def test_ir_scalar_constant(probe):
     assert "rocke_fp8e4m3()" in _body(probe[1], "py_probe_fp8")
 
 
+def test_float_arithmetic(probe):
+    body = _body(probe[1], "py_probe_float")
+    assert "py::truediv(1.0, (double)spec->tile_m)" in body, body
+    assert "((double)spec->vec * 0.5)" in body, body
+
+
 def test_source_compiles(probe, tmp_path):
     exe = shutil.which("g++")
     if exe is None:
@@ -175,3 +186,27 @@ def test_source_compiles(probe, tmp_path):
     cmd += ["-I", str(TR / "tr" / "prelude"), str(src)]
     p = subprocess.run(cmd, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
+
+
+def test_truediv_by_zero_raises(tmp_path):
+    """py::truediv: Python's ZeroDivisionError text (raised as ValueError)."""
+    exe = shutil.which("g++")
+    if exe is None:
+        pytest.skip("no g++")
+    src = tmp_path / "t.cpp"
+    src.write_text(
+        '#include "rocke_py.hpp"\n#include <cstdio>\n'
+        "int main() {\n"
+        "  if (py::truediv(1.0, 4.0) != 0.25) return 1;\n"
+        "  try { py::truediv(1.0, 0.0); } catch (const ckc::ValueError& e) {\n"
+        "    std::puts(e.what()); return 0; }\n"
+        "  return 2;\n}\n"
+    )
+    exe_out = tmp_path / "t"
+    cmd = [exe, "-std=c++20", "-Wall", "-Werror", "-I", str(TR / "tr" / "prelude")]
+    cmd += ["-I", str(ROCKE / "platform" / "cpp" / "include"), str(src), "-o"]
+    cmd += [str(exe_out)]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    r = subprocess.run([str(exe_out)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == "float division by zero", r

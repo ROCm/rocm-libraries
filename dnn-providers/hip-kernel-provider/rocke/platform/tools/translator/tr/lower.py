@@ -3481,6 +3481,21 @@ class Fn:
                 return CE(f"py::floordiv({a.code}, {b.code})", T.I64, pure)
             if isinstance(op, ast.Mod):
                 return CE(f"py::mod({a.code}, {b.code})", T.I64, pure)
+        if (
+            T.F64 in (a.t, b.t)
+            and all(x.t == T.F64 or (T.is_int(x.t) and x.t != T.BOOL) for x in (a, b))
+            and type(op) in (ast.Add, ast.Sub, ast.Mult, ast.Div)
+        ):
+            # float arithmetic: the int operand converts to float first, as in
+            # Python (both are IEEE doubles); / by zero raises
+            pure = a.pure and b.pure
+            x, y = (
+                c.code if c.t == T.F64 else f"(double){paren(c.code)}" for c in (a, b)
+            )
+            if isinstance(op, ast.Div):
+                return CE(f"py::truediv({x}, {y})", T.F64, pure)
+            sym = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*"}[type(op)]
+            return CE(f"({x} {sym} {y})", T.F64, pure)
         if isinstance(op, ast.Mod) and T.is_str(a.t) and a.lit is not None:
             # "...%d..." % (x, y): %d / %s / %x / %% only
             if re.search(r"%[^dsx%]", a.lit.replace("%%", "")):

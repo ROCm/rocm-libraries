@@ -54,6 +54,14 @@ inline int64_t mod(int64_t a, int64_t b)
     return a - floordiv(a, b) * b;
 }
 
+/* a / b of floats (an int operand converted first); b == 0 raises. */
+inline double truediv(double a, double b)
+{
+    if(b == 0.0)
+        throw ckc::ValueError("float division by zero");
+    return a / b;
+}
+
 /* range(start, stop, step): iterable like Python's; step 0 raises. */
 class range
 {
