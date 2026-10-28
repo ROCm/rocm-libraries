@@ -90,10 +90,24 @@ class TestArchTarget(unittest.TestCase):
         self.assertEqual(t942.wave_size, 64)
         self.assertEqual(t942.lds_capacity_bytes, 65536)
         self.assertEqual(t950.lds_capacity_bytes, 163840)
-        self.assertEqual(t942.vmcnt_bits, 4)
-        self.assertEqual(t950.vmcnt_bits, 6)
         self.assertFalse(t942.memory.has_ds_read_tr)
         self.assertTrue(t950.memory.has_ds_read_tr)
+
+    def test_vmcnt_field_width(self):
+        # Pins the s_waitcnt VMCNT field width of each target whose width was
+        # measured with the assembler (how: "_comment_vmcnt_bits" in
+        # arch_specs.json). case_vmcnt_bits in future_intrinsic_lowering.cpp
+        # checks the C++ engine's copy against the same table.
+        measured = {
+            "gfx90a": 6,
+            "gfx942": 6,
+            "gfx950": 6,
+            "gfx1151": 6,
+            "gfx11-generic": 6,
+        }
+        for gfx, bits in measured.items():
+            with self.subTest(gfx=gfx):
+                self.assertEqual(ArchTarget.from_gfx(gfx).vmcnt_bits, bits)
 
     def test_predicates(self):
         t942 = ArchTarget.from_gfx("gfx942")
@@ -102,12 +116,17 @@ class TestArchTarget(unittest.TestCase):
         self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
         # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
         # supported on it. The fp4/MX MFMA family is the gfx950-only
-        # combo, so use it for the negative case.
+        # combo, so use it for the negative case. The catalog has no
+        # unscaled fp4 row. It lists fp4 in the scaled family only.
         self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
-        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
-        self.assertTrue(
-            ArchTarget.from_gfx("gfx950").supports_dtype_combo("fp4", "fp4", "fp32")
+        self.assertFalse(
+            t942.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
         )
+        t950 = ArchTarget.from_gfx("gfx950")
+        self.assertTrue(
+            t950.supports_dtype_combo("fp4", "fp4", "fp32", family="mfma_scaled")
+        )
+        self.assertFalse(t950.supports_dtype_combo("fp4", "fp4", "fp32"))
         self.assertEqual(t942.max_threads_per_block, 1024)
 
     def test_dtype_normalization(self):

@@ -49,7 +49,7 @@ dispatcher) from `cpg = C / groups`:
 | cpg | Spec class           | MFMA atom                    | Requirement       |
 |-----|----------------------|------------------------------|-------------------|
 | 1   | `DirectDepthwiseSpec`| scalar FMA (no MFMA)         | stride = 1        |
-| 4   | `DirectConv4cSpec`   | `mfma_f32_4x4x4_f16`        | cpg = kpg = 4     |
+| 4   | `DirectConv4cSpec`   | `mfma_f32_4x4x4_{f16,bf16}` | cpg = kpg = 4     |
 | 8   | `DirectConv8cSpec`   | `mfma_f32_16x16x16_f16`     | cpg = kpg = 8     |
 | 16  | `DirectConv16cSpec`  | `mfma_f32_16x16x16_f16`/`32`| cpg = kpg = 16    |
 | 32  | `DirectConv32cSpec`  | `mfma_f32_32x32x8_f16`      | cpg = kpg = 32    |
@@ -108,13 +108,49 @@ Launch grid: `(ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_
 
 Uses sixteen independent `mfma_f32_4x4x4_f16` calls per `(y, x)` step to
 cover all 4 input channels in one atom.  Each wave computes 4 output channels
-for 4 output positions simultaneously.
+for 4 output positions simultaneously.  bf16 I/O selects the
+`mfma_f32_4x4x4_bf16` twin (the `_1k` intrinsic, same lane layout); fp16 is
+unchanged.
 
 Tunable parameters:
 - `block_q` — output W positions per block (must be a multiple of 4; default 4).
 - `block_groups` — groups per workgroup (must be a multiple of 16; default 16).
 
 Launch grid: `(ceil(W / block_q), groups // block_groups, N)`.
+
+**Backward data (4c dgrad).** At stride 1 with "same" padding and a 1x1 or
+3x3 filter, dgrad of a `cpg = kpg = 4` problem runs on the same kernel as a
+forward conv over the transposed problem
+(`dgrad_4c_transposed_problem`: `dX = conv(dY, W_T)` with
+`W_T[c, r', s', k] = W[k, KH-1-r', KW-1-s', c]`), launched with the forward
+direct ABI over that problem and the buffers `A = dY`, `B = W`, `D = dX`.
+
+- `dgrad_fused_weights=True`: the kernel takes the original weight and
+  gathers each lane's flipped, k<->c transposed fragment in its prologue
+  (four scalar loads per tap): no transpose pre-pass, no workspace. With
+  `dgrad_weights_lds=True` (needs `ds_read_b64_tr_b16`, gfx950) the
+  workgroup's contiguous weight slice is copied to LDS with 16-byte loads and
+  each tap's fragment is one transpose read.
+- `stage_rows=True` (with LDS weights; `waves_q` waves split `block_q`,
+  `block_q == 4 * waves_q`): in the 4x4x4 B layout consecutive lanes read
+  pixels a whole channel row apart, so the direct-load kernel's global loads
+  touch many cache lines per instruction. Here every thread copies 16-byte
+  vectors of the workgroup's input row into a double-buffered, padded LDS row,
+  one row ahead through registers, and each wave reads its fragments with
+  `ds_read_b64`. The rows stream through a runtime loop bounded by the `p_Hi`
+  kernarg (unrolled `lcm(KH, 2)` rows so buffer parity and accumulator slots
+  stay build-time constants); rows outside the image load zeros and drop their
+  stores. Kernel names carry `sr<waves_q>`; the forward 4c spec never takes it.
+- Helpers: `make_dgrad_4c_spec`, `build_direct_4c_dgrad` (`(None, main)` for
+  the fused form), `direct_4c_dgrad_launch`, and the kernel-level default
+  `dgrad_4c_spec_for_problem`.
+- Validation (`DirectConv4cSpec.validate`, `is_valid_spec_4c` and the C++
+  mirrors, same reason text) rejects every other combination, LDS forms on
+  targets without transpose reads, and staging past `DCONV4C_MAX_WL_PASSES`,
+  `DCONV4C_MAX_ROW_PASSES`, `DCONV4C_MAX_THREADS` or the target's LDS.
+
+AOT cache variant `direct_grouped_dgrad_4c` (see
+[Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950)).
 
 ### cpg = 8 — `DirectConv8cSpec`
 
@@ -212,7 +248,55 @@ Tunable parameters common to all grouped specs:
 | `block_groups`  | 8       | Groups per workgroup; `groups % block_groups == 0` required |
 | `double_buffer` | True    | Double-buffer the B (weight) tile in LDS |
 
-For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`:
+`DirectConvSpec` only: the dgrad (fused-weight) and row-stream knobs. All
+default off, so every forward kernel is unchanged; the C++ engine's
+`rocke_build_direct_conv` mirrors each one (byte-identity gated).
+
+| Parameter             | Default | Notes |
+|-----------------------|---------|-------|
+| `preload_weights`     | False   | `waves_k == 1`: load every weight fragment once in the prologue |
+| `dgrad_fused_weights` | False   | Dgrad spec from `make_dgrad_fprop_spec` (transposed problem): `B` is the original `W` and the prologue reads it flipped / k<->c transposed, so there is no pre-pass and no workspace. Implies the preload; bounded by `PRELOAD_WEIGHT_VGPR_BUDGET` (`preload_weight_vgprs`) |
+| `dgrad_weights_lds`   | False   | With fused weights: stage the raw `W` slice in LDS and read fragments with `ds_read_b64_tr_b16` (gfx950; slice <= `DGRAD_WEIGHTS_LDS_BUDGET`); the row buffers are allocated after it so the pool packer overlays them |
+| `waves_per_eu`        | 0       | > 0 emits the `amdgpu-waves-per-eu` hint |
+| `row_guard`           | False   | Preloaded weights: a row of the `block_h` tile past `p_Hi` runs its MFMAs in a block-uniform one-trip loop, so a tile taller than the image does not multiply zeros |
+| `row_exit`            | False   | The workgroup leaves once the next output row to flush is past `p_Hi`, skipping loads, staging, barriers and flushes of dead rows too |
+| `prefetch_rows`       | 0       | Input row `y + prefetch_rows` is loaded while row `y` is computed (0 and 1 = one row ahead); needs `double_buffer`, no persistent grid |
+| `lds_only_sync`       | False   | The row barrier drains LDS only, so prefetched loads and output stores stay in flight across it |
+| `waves_m`             | 1       | Waves per group along the 16-wide output tiles (preloaded or fused weights); each keeps its share of weights and accumulators |
+| `lds_pad`             | 0       | Extra elements per staged input column (multiple of 8) to spread a fragment read over the LDS banks |
+| `stage_out`           | False   | `kpg % 16 == 0`: finished output rows go through a double-buffered LDS tile and out as 16-byte lanes |
+| `xcd_tiles`           | False   | gfx950: all workgroups of one image row band run on one XCD (`chiplet_transform_chunked_runtime`, chunk from the kernargs); needs `XCD_TILES_MIN_ROW_BANDS` row bands, re-checked by `plan_for` on the real problem |
+
+`block_h` must be > 0 on every AOT binary: the image height is a kernarg, and
+the "whole image" of a JIT build is a cached tile height
+(`dgrad_fused_block_h`) with `row_guard` / `row_exit`. Full semantics:
+`platform/dsl_docs/instances/convolution.md` ("Generic Kernel dgrad: fused
+weights").
+
+### Dgrad AOT cache variants (gfx950)
+
+The single-kernel direct dgrad forms are AOT cache variants
+(`library/kernels/conv/direct_aot_jobs.py`); each cached binary is a variant
+plus a knob dict, and `make_direct_spec` in
+`library/kernels/conv/direct_variants.py` builds its spec. They are not
+dispatched yet (the grouped-convolution dispatcher is being reworked
+separately); `benchmark_direct_conv --run-from-cache <cache> --direction
+dgrad --variants <variant> --verify` runs them on a shape.
+
+| Cache variant | Kernel | Knob image | ABI |
+|---------------|--------|------------|-----|
+| `direct_grouped_dgrad_4c` | `build_direct_conv_4c` (fused weights) | `DGRAD_4C_*` | forward, over the transposed problem |
+| `direct_grouped_dgrad_fused` | `build_direct_conv` (fused weights) | `DGRAD_FUSED_*`, filtered by `_dgrad_fused_policy_reason` | forward, over the transposed problem |
+| `direct_depthwise_dgrad_win` | `build_direct_depthwise_dgrad_windowed` | `DW_WIN_*`, filtered by `_dw_win_policy_reason` | dgrad |
+
+The weight pre-pass pipeline (`direct_grouped_dgrad_mfma`) stays in the
+cache next to them. The case studies are in
+`platform/python/rocke/examples/gfx950/conv_dgrad/`.
+
+For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`
+(backward data: `DirectDepthwiseDgradWindowedSpec` /
+`build_direct_depthwise_dgrad_windowed` at stride 1, see
+`platform/dsl_docs/instances/convolution.md`):
 
 ```python
 from kernels.common.conv_direct_grouped import (
@@ -447,6 +531,8 @@ are computed in-kernel from the `p_Wo` kernarg, with the same ceilings
 | cpg=16 (`fold_k32=True`)  | — | ✓ | — |
 | cpg=32 | ✓ | ✓ | — |
 | wgrad (`DirectConvWgradSpec`) | — | ✓ | — |
+| depthwise dgrad, windowed (`dot2`, `mfma` forms gfx950 only) | ✓ | ✓ | — |
+| 4c / generic dgrad, fused weights (LDS-staged weights, `stage_rows`, `xcd_tiles` gfx950 only) | ✓ | ✓ | — |
 
 gfx1250 (WMMA/RDNA) is not supported by any direct-conv variant.  Use the
 implicit-GEMM kernel with `pipeline="wavelet"` on that target.
@@ -469,6 +555,7 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | Grouped with arbitrary `groups` | Implicit-GEMM |
 | gfx1250 target | Implicit-GEMM (`pipeline="wavelet"`) |
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
+| Backward-data, gfx950 | Run the cached candidates ([Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950)): windowed depthwise, 4c / fused generic direct, and implicit GEMM; keep the faster |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |
 | Backward-weights, anything else | Implicit-GEMM wgrad |
 | Non-grouped (`groups = 1`), `stride ≤ 2` | Sweep `conv_direct_nongrouped` and implicit-GEMM, keep the faster ([`README_conv_direct_nongrouped.md`](README_conv_direct_nongrouped.md)) |
@@ -487,6 +574,10 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 
 - `DirectConv4cSpec` and `build_direct_conv_4c`: sixteen independent
   `mfma_f32_4x4x4_f16` calls per `(y, x)` step.
+- bf16 I/O via `mfma_f32_4x4x4_bf16`; the 4c dgrad entry
+  (`make_dgrad_4c_spec`, `build_direct_4c_dgrad`), single-kernel with the
+  fused weight transform, LDS-staged weights and the row-staged runtime row
+  stream (`stage_rows`); AOT variant `direct_grouped_dgrad_4c`.
 
 ### cpg=8 variant
 
@@ -527,6 +618,28 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
   fixed-`cpg` variants (4/8/16/32) are unchanged and still require `kpg == cpg`.
 - `DirectConvProblem` gained the `Ho` / `Wo` output-geometry properties.
 
+### Single-kernel direct dgrad (fused weights, row stream)
+
+- `DirectConvSpec.preload_weights`, `dgrad_fused_weights`,
+  `dgrad_weights_lds`, `waves_per_eu`, `row_guard`, `row_exit` and the
+  row-stream knobs `prefetch_rows`, `lds_only_sync`, `waves_m`, `lds_pad`,
+  `stage_out`, `xcd_tiles` (`make_dgrad_fprop_spec` forwards them), with the
+  C++ mirror in `rocke_build_direct_conv`; AOT variant
+  `direct_grouped_dgrad_fused`.
+- `make_direct_spec` / `validate_direct_spec`
+  (`library/kernels/conv/direct_variants.py`): the cache's spec constructor
+  and validator.
+- Kernel-level helpers `direct_dgrad_spec_for_problem`,
+  `direct_dgrad_launch`, `build_direct_dgrad`.
+
+### Windowed depthwise dgrad
+
+- `DirectDepthwiseDgradWindowedSpec` / `build_direct_depthwise_dgrad_windowed`
+  (C++ `rocke_build_direct_depthwise_dgrad_win`): one dY window load per row,
+  split lane/row sentinel addressing, next-row prefetch, `dot2` tap pairing
+  (`arith.fdot2`) and the Toeplitz MFMA form; AOT variant
+  `direct_depthwise_dgrad_win`.
+
 ### Backward-weights variant
 
 - `DirectConvWgradSpec`, `is_valid_wgrad_spec` and `build_direct_conv_wgrad`:
@@ -555,8 +668,12 @@ The gate drives the sampled spec configs in
 `tests/instances/parity/conv_direct_grouped_emit.{py,c}` — configs 0-24 are the
 existing direct-conv variants, 25-31 the wgrad variant (25 `mfma_k=32`, 26
 `mfma_k=16`, 27 multi-wave K/C/Q, 28-29 the two gfx942 rejection paths, 30-31
-bf16 at `mfma_k=32` / `16`).  Add a config to **both** emitters when you add a
-variant.
+bf16 at `mfma_k=32` / `16`), 148-150 the bf16 4c kernel.  The dgrad kernels
+added on top run under the separate `conv_direct_dgrad_ext` family
+(`tests/parity/conv_direct_dgrad_ext_emit.{py,c}`): 0-19 the windowed
+depthwise dgrad (VALU, `dot2` and MFMA forms), 20-29 the 4c dgrad, 30-44 the
+generic `DirectConvSpec` with the fused-weight and row-stream knobs.  Add a
+config to **both** emitters when you add a variant.
 
 | Python | C++ |
 |--------|-----|
