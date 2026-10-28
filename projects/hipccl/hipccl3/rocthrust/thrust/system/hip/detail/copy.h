@@ -78,7 +78,6 @@ THRUST_NAMESPACE_END
 
 #include <thrust/system/hip/detail/internal/copy_cross_system.h>
 #include <thrust/system/hip/detail/internal/copy_device_to_device.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim

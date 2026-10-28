@@ -49,9 +49,9 @@
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/pair.h>
+#  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD

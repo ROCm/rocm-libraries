@@ -37,8 +37,9 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/execution_policy.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/hip/detail/execution_policy.h>
 
 #if !THRUST_COMPILER(NVRTC)
 #  include <thrust/system/hip/error.h>
@@ -67,6 +68,8 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+template <class>
+struct execution_policy;
 
 inline THRUST_HOST_DEVICE hipStream_t default_stream()
 {
@@ -324,3 +327,6 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END
+
+// util.h only forward-declares execution_policy; bring in the full definitions (and par) for includers relying on it.
+#include <thrust/system/hip/detail/execution_policy.h>

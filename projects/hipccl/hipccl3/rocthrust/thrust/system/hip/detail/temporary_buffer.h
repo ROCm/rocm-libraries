@@ -29,7 +29,7 @@
 
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/system/detail/bad_alloc.h>
-#include <thrust/system/hip/detail/par.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <cstddef>
