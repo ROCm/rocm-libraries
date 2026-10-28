@@ -416,7 +416,7 @@ class TestTensileBenchmarkCluster:
     @patch("tensilelite.TensileBenchmarkCluster.BenchmarkImplSLURM.initializeConfig")
     @patch("tensilelite.TensileBenchmarkCluster.ProjectConfig")
     def test_root_tensile_dir_returns_root_directory(self, mock_project_config, mock_init):
-        """TensileBenchmarkCluster.rootTensileDir returns root Tensile directory."""
+        """TensileBenchmarkCluster.rootTensileDir returns root TensileLite directory."""
         args = ["logic.yaml", "/deploy/path"]
 
         mock_config_instance = MagicMock()

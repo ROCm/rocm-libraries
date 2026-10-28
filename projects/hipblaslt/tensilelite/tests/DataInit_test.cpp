@@ -13,6 +13,7 @@
 #include <Tensile/PerformanceMetricTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
+#include <Tensile/hip/HipUtils.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -696,4 +698,20 @@ TEST(Maf1_0Init, NameRoundTrips)
     std::istringstream num("30");
     num >> mode;
     EXPECT_EQ(mode, InitMode::Maf1_0);
+}
+
+// =============================================================================
+//   Section 5 — TensileLite::hip::CopyTensorVoid
+// =============================================================================
+TEST(CopyTensorVoid, CopiesSource)
+{
+    TensorDescriptor   desc("t", rocisa::DataType::Float, {3, 2});
+    std::vector<float> src(desc.totalAllocatedElements());
+    std::iota(src.begin(), src.end(), 1.0f);
+    std::vector<float> dst(src.size(), 0.0f);
+
+    TensileLite::hip::CopyTensorVoid(dst.data(), src.data(), desc, hipMemcpyHostToHost);
+    ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
+    EXPECT_EQ(dst, src);
 }

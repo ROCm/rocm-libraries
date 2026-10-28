@@ -13,13 +13,16 @@ lowerer's `_need` chokepoint consults and `tools/check_arch_domain.py` gates.
 
 # Two stages, because the two axes need different tools
 
-Stage A -- the flavor axis -- asks whether this LLVM knows the name. Arch-free,
-so it runs once per key, and it uses `opt -S`: LLVM resolves a recognised
-`llvm.*` declare on parse (attaching attributes, remangling overloads) while an
-unrecognised name round-trips verbatim. See `_name_exists`.
+Stage A -- the flavor axis -- asks whether this LLVM knows each name. Arch-free,
+so all declarations share one `opt -S` module (recursively split only on
+failure): LLVM resolves a recognised `llvm.*` declare on parse (attaching
+attributes, remangling overloads) while an unrecognised name round-trips
+verbatim. See `_name_exists_many`.
 
-Stage B -- the arch axis -- compiles AND LINKS a probe module per (key, arch)
-for names that survived stage A. It must link for the same reason
+Stage B -- the arch axis -- preflights each target once, then compiles AND LINKS
+expected-positive calls in one module per architecture. A failed batch is
+recursively split until changed cells receive individual diagnostics. Expected
+negative cells remain individual. It must link for the same reason
 `check_ir_validity.py` does: a declare for a nonexistent intrinsic passes both
 `opt -passes=verify` and `clang -S`, since to the backend it is an ordinary
 external call. It runs in a subprocess because an unsupported intrinsic reaches
@@ -32,9 +35,20 @@ external call. It runs in a subprocess because an unsupported intrinsic reaches
                                              text; the question was never
                                              answered, so nothing is recorded
                                              about the name (see NameVerdict)
-    link OK               -> "ok"            available here
+    link OK, assembles    -> "ok"            available here
     Cannot select / fatal -> "arch_absent"   the name is real, this target
                                              cannot lower it (arch axis)
+    link OK, the assembler -> "arch_absent"  the backend emitted an
+      rejects the text                       instruction this target does not
+                                             have
+
+The last row exists because a link is not proof. The backend can select an
+intrinsic for a target that lacks its instruction and write the encoding into
+the object without complaint (llvm.amdgcn.cvt.scalef32.pk.f32.fp8 on gfx942
+links, and the object holds a gfx950 instruction). The text assembler,
+`llvm-mc` for the same target, checks every instruction against the target's
+feature set, so each probe that links is also compiled to assembly and
+assembled.
 
 Three more buckets exist so that a non-answer is never recorded as a negative:
 
@@ -67,14 +81,17 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import contextlib
 import json
 import re
 import subprocess
 import sys
 import tempfile
+from importlib.resources import files as resource_files
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, Iterator, NamedTuple
 
+from _bounded_run import run_bounded, stop_all
 from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
@@ -83,12 +100,18 @@ ROCKE = HERE.parent  # tools -> rocke/platform
 
 
 def _bootstrap_sys_path() -> None:
-    """Import rocke from the checkout without an external PYTHONPATH, matching
-    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
-    the decl table lives entirely in platform."""
-    path = ROCKE / "python"
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+    """Import rocke from a checkout or a relocated provider test artifact.
+
+    Source execution finds ``python/`` beside ``tools/``. Installed provider
+    tests stage this script below ``tests/arch_domain`` and the package at the
+    artifact root. A standalone install supplies its site-packages directory
+    through the CTest environment. Only existing layouts are added, so normal
+    package resolution remains authoritative everywhere else.
+    """
+    candidates = (ROCKE / "python", HERE.parents[1])
+    for path in candidates:
+        if (path / "rocke").is_dir() and str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 
 # At import time, not in main(): the status vocabulary and the schema string
@@ -99,7 +122,10 @@ _bootstrap_sys_path()
 from rocke.core.arch import domain as _domain
 
 SCHEMA = _domain.SCHEMA
-DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+# The committed columns are package data, not source-tree data. Resolving them
+# through the imported package makes ``--check`` compare the exact payload CI
+# tests after relocation while retaining the same path in a source checkout.
+DATA_DIR = Path(str(resource_files("rocke.core.arch") / "data"))
 
 
 def default_out(flavor: str) -> Path:
@@ -151,6 +177,12 @@ PROBE_CFLAGS = ("-O0", "-nogpulib")
 # call, so a healthy probe is quick. Without a budget a single non-terminating
 # probe hangs the run and `--check` never returns.
 PROBE_TIMEOUT_S = 60
+
+# Each worker owns an external compiler process, and successful probes briefly
+# spawn the linker or assembler too. Respect the host/cgroup CPU allowance but
+# stop at a bounded fan-out so large bare-metal hosts do not turn one CTest into
+# an unbounded process burst. ``--jobs`` remains the explicit operator override.
+MAX_PROBE_JOBS = 32
 
 
 # --------------------------------------------------------------------------
@@ -277,37 +309,37 @@ _DAG_BARE_OPERAND_ADDRESS_RE = re.compile(r"\b0x[0-9a-fA-F]+\b(?=\s*(?:,|$))")
 # resource as long as the *integer* operands are real values.
 _FAT_PTR = "ptr addrspace(8)"
 
-# Literal values the immediate-operand rescue tries, in order. See
-# `_probe_module`'s `literal_ints` and `_wants_literals`.
-_LITERAL_PROBE_VALUES = (0, 4)
+# Intrinsics with integer operands that must be concrete even though LLVM does
+# not mark them ``immarg``.  The value is a known-valid transfer size.
+_LITERAL_WITNESSES = {
+    "raw.ptr.buffer.load.async.lds": 4,
+    "raw.ptr.buffer.load.lds": 4,
+}
 
-# Values the `immarg` sweep tries, in order, when the default 0 produced a
-# negative. See `_probe_module`'s `imm_int` and the sweep in `run`.
-#
-# Not exhaustive: these are the byte counts a load-to-LDS transfer size
-# accepts, as llvm23's verifier enumerates them. A selector operand (MFMA
-# cbsz/blgp) is legal at 0 and never reaches the sweep. Smallest-first, so the
-# recorded winner is the least surprising legal value.
-_IMMARG_PROBE_VALUES = (1, 2, 4, 12, 16)
-
-# The ways LLVM says "that operand had to be an immediate". Same complaint,
-# three vintages: llvm22 rejects it in the verifier, llvm20 has no such check
-# and dies during type legalisation, llvm23 added a load-to-LDS size check that
-# names the legal values outright.
-_IMMEDIATE_OPERAND_DIAGS = (
-    "immarg operand has non-immediate parameter",
-    "do not know how to expand this operator's operand",
-    "invalid data size for load-to-lds intrinsic",
-)
+# Intrinsics whose zero immediate is not semantically valid. These witnesses
+# are part of the probe specification rather than values discovered by trying
+# a generic sweep after a failure.
+_IMMARG_WITNESSES = {
+    "global.load.lds": 1,
+    "raw.ptr.buffer.load.async.lds": 1,
+    "raw.ptr.buffer.load.lds": 1,
+}
 
 
-def _wants_literals(status: str, evidence: str) -> bool:
-    """True when a failure looks like our probe passed a variable where the
-    intrinsic demands a constant, rather than a real arch answer."""
-    if status not in (STATUS_ARCH_ABSENT, STATUS_PROBE_ERROR):
-        return False
-    low = evidence.lower()
-    return any(d in low for d in _IMMEDIATE_OPERAND_DIAGS)
+class ProbeSpec(NamedTuple):
+    """A declaration and its semantically valid operand witnesses."""
+
+    decl: str
+    literal_ints: int | None
+    imm_int: int | None
+
+
+def _probe_spec(key: str, decl: str) -> ProbeSpec:
+    return ProbeSpec(
+        decl=decl,
+        literal_ints=_LITERAL_WITNESSES.get(key),
+        imm_int=_IMMARG_WITNESSES.get(key),
+    )
 
 
 def _probe_module(
@@ -315,6 +347,9 @@ def _probe_module(
     datalayout: str,
     literal_ints: int | None = None,
     imm_int: int | None = None,
+    *,
+    probe_name: str = "probe",
+    metadata_id: int = 0,
 ) -> tuple[str, str]:
     """Build a minimal module that declares an intrinsic and calls it.
 
@@ -344,14 +379,11 @@ def _probe_module(
     targets lower them; the hand-written row omits `immarg` on three `i1`
     operands and `opt` supplies it.
 
-    `literal_ints`, when set, replaces every integer kernel argument with that
-    literal value. With the resolved declare in hand this is a backstop rather
-    than the main line: it still covers an operand LLVM does not mark `immarg`
-    but cannot legalise as a variable either (`raw.ptr.buffer.load.lds`'s size
-    operand), and it stays scoped to the diagnostics that say so -- a blanket
-    retry could constant-fold a genuinely unsupported intrinsic away and
-    manufacture an `ok`, which is the one error direction that would make the
-    artifact worse than no artifact.
+    `literal_ints`, when set by :class:`ProbeSpec`, replaces every integer
+    kernel argument with a known-valid literal. This covers an operand LLVM
+    does not mark `immarg` but cannot legalise as a variable either
+    (`raw.ptr.buffer.load.lds`'s size operand). Keeping the witness explicit
+    avoids speculative retries that could constant-fold an unsupported call.
 
     `imm_int`, when set, is the value given to every `immarg` operand in place
     of the default 0. A parameter that is already marked `immarg` is never
@@ -361,8 +393,7 @@ def _probe_module(
     from the diagnostic alone: both say `Cannot select`. `global.load.lds`
     takes a per-lane transfer size whose legal values are 1, 2 and 4, so 0
     recorded every CDNA target as incapable of an instruction they run in
-    production. The only way to tell the two apart is to ask again with a
-    different value.
+    production. Its :class:`ProbeSpec` therefore starts with value 1.
 
     All `immarg` operands move together, as `literal_ints` does. A declare
     whose immediates have disjoint legal domains would need a cross product,
@@ -387,7 +418,7 @@ def _probe_module(
         if ty == "metadata":
             # Not a first-class type. rocke's only metadata operands are the
             # av.* scope lists, which want a real scope node, not an empty one.
-            args.append("metadata !0")
+            args.append(f"metadata !{metadata_id}")
         elif is_imm:
             imm = 0 if imm_int is None else imm_int
             args.append(f"{ty} {('true' if imm else 'false') if ty == 'i1' else imm}")
@@ -416,12 +447,45 @@ def _probe_module(
         f'target datalayout = "{datalayout}"\n'
         'target triple = "amdgcn-amd-amdhsa"\n\n'
         f"{decl.strip()}\n\n"
-        f"define amdgpu_kernel void @probe({signature}) {{\n"
+        f"define amdgpu_kernel void @{probe_name}({signature}) {{\n"
         "entry:\n" + "".join(f"{line}\n" for line in prologue) + tail + "  ret void\n"
         "}\n\n"
-        '!0 = !{!"agent"}\n'
+        f'!{metadata_id} = !{{!"agent"}}\n'
     )
     return text, ""
+
+
+def _batch_probe_module(specs: list[ProbeSpec], datalayout: str) -> tuple[str, str]:
+    """Build one module whose distinct kernels exercise every declaration."""
+    headers: list[str] = []
+    declarations: list[str] = []
+    functions: list[str] = []
+    metadata: list[str] = []
+    for index, spec in enumerate(specs):
+        text, why = _probe_module(
+            spec.decl,
+            datalayout,
+            literal_ints=spec.literal_ints,
+            imm_int=spec.imm_int,
+            probe_name=f"probe_{index}",
+            metadata_id=index,
+        )
+        if why:
+            return "", why
+        header, declaration, function, node = text.strip().split("\n\n")
+        if not headers:
+            headers.append(header)
+        if declaration not in declarations:
+            declarations.append(declaration)
+        functions.append(function)
+        metadata.append(node)
+    return (
+        "\n\n".join(
+            [*headers, "\n".join(declarations), *functions, "\n".join(metadata)]
+        )
+        + "\n",
+        "",
+    )
 
 
 class NameVerdict(NamedTuple):
@@ -448,6 +512,113 @@ class NameVerdict(NamedTuple):
     resolved: str
     status: str = ""
     evidence: str = ""
+
+
+def _verdict_from_opt_output(decl: str, output_decls: list[str]) -> NameVerdict:
+    """Classify one input declaration from a successful ``opt -S`` output.
+
+    Batched discovery can contain aliases for the same declaration and
+    overloaded intrinsics that LLVM remangles.  Prefer an exact name, then a
+    remangled name with the input name as its prefix.  If neither survives,
+    AutoUpgrade consumed the declaration, which is still a positive result.
+    """
+    original = _DECL_RE.match(decl.strip())
+    if not original:
+        return NameVerdict(
+            None, "", "", STATUS_PROBE_ERROR, f"cannot parse declare: {decl!r}"
+        )
+    original_name = original.group(2)
+
+    parsed: list[tuple[str, str, bool]] = []
+    for line in output_decls:
+        attributed = re.search(r"#\d+\s*$", line) is not None
+        resolved = re.sub(r"\s*#\d+\s*$", "", line)
+        match = _DECL_RE.match(resolved)
+        if match:
+            parsed.append((match.group(2), resolved, attributed))
+
+    exact = next((item for item in parsed if item[0] == original_name), None)
+    if exact is not None:
+        canonical, resolved, attributed = exact
+        if attributed:
+            return NameVerdict(True, canonical, resolved)
+        return NameVerdict(False, "", "")
+
+    remangled = [item for item in parsed if item[0].startswith(original_name + ".")]
+    if len(remangled) == 1:
+        canonical, resolved, _attributed = remangled[0]
+        return NameVerdict(True, canonical, resolved)
+    if len(remangled) > 1:
+        return NameVerdict(
+            None,
+            "",
+            "",
+            STATUS_PROBE_ERROR,
+            f"opt produced multiple canonical declarations for {original_name}",
+        )
+
+    # An unrecognised llvm.* declaration survives verbatim.  A declaration
+    # that vanished was consumed by AutoUpgrade and therefore is recognised.
+    return NameVerdict(True, "(auto-upgraded)", "")
+
+
+def _name_exists_many(
+    opt: str, items: list[tuple[str, str]], scratch: Path
+) -> dict[str, NameVerdict]:
+    """Resolve declarations in one ``opt`` process, bisecting failed batches.
+
+    A healthy flavor normally needs one process for the entire declaration
+    table.  If one declaration or a transient tool failure poisons that module,
+    recursive splitting isolates it without losing answers for its neighbors.
+    Singleton leaves retain :func:`_name_exists`'s retry and diagnostics.
+    """
+    if not items:
+        return {}
+
+    # Alias keys can carry the exact same declaration. Repeating it in one
+    # module makes opt reject a harmless redefinition and forces recursive
+    # splitting. Resolve one representative and fan its verdict back out.
+    keys_by_decl: dict[str, list[str]] = {}
+    for key, decl in items:
+        keys_by_decl.setdefault(decl, []).append(key)
+    if len(keys_by_decl) != len(items):
+        representatives = [(keys[0], decl) for decl, keys in keys_by_decl.items()]
+        unique_verdicts = _name_exists_many(opt, representatives, scratch)
+        return {
+            key: unique_verdicts[keys[0]]
+            for keys in keys_by_decl.values()
+            for key in keys
+        }
+
+    if len(items) == 1:
+        key, decl = items[0]
+        return {key: _name_exists(opt, decl, scratch)}
+
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", items[0][0])
+    src = scratch / f"names.{stem}.{len(items)}.ll"
+    src.write_text(
+        "\n".join(decl.strip() for _key, decl in items) + "\n", encoding="utf-8"
+    )
+    try:
+        proc = run_bounded(
+            [opt, "-S", "-o", "-", str(src)],
+            timeout=PROBE_TIMEOUT_S,
+            cwd=scratch,
+        )
+    except subprocess.TimeoutExpired:
+        proc = None
+
+    if proc is None or proc.returncode != 0:
+        middle = len(items) // 2
+        return {
+            **_name_exists_many(opt, items[:middle], scratch),
+            **_name_exists_many(opt, items[middle:], scratch),
+        }
+
+    output_decls = [
+        line for line in proc.stdout.splitlines() if line.startswith("declare ")
+    ]
+    return {key: _verdict_from_opt_output(decl, output_decls) for key, decl in items}
 
 
 def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
@@ -487,13 +658,10 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
     proc = None
     for attempt in (1, 2):
         try:
-            proc = subprocess.run(
+            proc = run_bounded(
                 [opt, "-S", "-o", "-", str(src)],
-                capture_output=True,
-                text=True,
-                check=False,
                 timeout=PROBE_TIMEOUT_S,
-                cwd=str(scratch),
+                cwd=scratch,
             )
         except subprocess.TimeoutExpired:
             if attempt == 1:
@@ -531,28 +699,10 @@ def _name_exists(opt: str, decl: str, scratch: Path) -> NameVerdict:
             status,
             f"opt exited {proc.returncode} on the declare: {_first_error(diag)}",
         )
-    for line in proc.stdout.splitlines():
-        if line.startswith("declare "):
-            attributed = re.search(r"#\d+\s*$", line) is not None
-            # The trailing `#N` references an attribute group this probe module
-            # will not carry, so it is dropped rather than propagated.
-            resolved = re.sub(r"\s*#\d+\s*$", "", line)
-            m = _DECL_RE.match(resolved)
-            canonical = m.group(2) if m else ""
-            if attributed:
-                return NameVerdict(True, canonical, resolved if m else "")
-            # Remangled but attribute-free: still a resolved intrinsic.
-            original = _DECL_RE.match(decl.strip())
-            if original and canonical and canonical != original.group(2):
-                return NameVerdict(True, canonical, resolved if m else "")
-            return NameVerdict(False, "", "")
-    # The declare did not survive the round-trip at all. An unrecognised
-    # `llvm.*` name is an ordinary external function and is printed back
-    # verbatim even when unused, so a vanished declare means AutoUpgrade
-    # consumed it -- `amdgcn.global.atomic.fadd` becoming a plain `atomicrmw`
-    # is the live example. That still links, so the name counts as present.
-    # There is no resolved declare to build from; the hand-written row stands.
-    return NameVerdict(True, "(auto-upgraded)", "")
+    output_decls = [
+        line for line in proc.stdout.splitlines() if line.startswith("declare ")
+    ]
+    return _verdict_from_opt_output(decl, output_decls)
 
 
 # --------------------------------------------------------------------------
@@ -665,12 +815,31 @@ def _first_error(text: str) -> str:
     return _normalize_dag_node_addresses(first)[:200]
 
 
+def _target_preflight_module(datalayout: str) -> str:
+    """A target-only module used once per compiler/architecture pair."""
+    return (
+        f'target datalayout = "{datalayout}"\n'
+        'target triple = "amdgcn-amd-amdhsa"\n\n'
+        "define amdgpu_kernel void @target_preflight() {\n"
+        "entry:\n"
+        "  ret void\n"
+        "}\n"
+    )
+
+
+def _target_preflight(clang: str, path: Path, arch: str, out: Path) -> tuple[str, str]:
+    """Probe target support once; the scheduler owns any serial retry."""
+    return _probe(clang, path, arch, out, verify_assembly=False)
+
+
 def _probe(
     clang: str,
     path: Path,
     arch: str,
     out: Path,
     timeout: float = PROBE_TIMEOUT_S,
+    *,
+    verify_assembly: bool = True,
 ) -> tuple[str, str]:
     """Compile AND LINK one probe module for one arch.
 
@@ -710,25 +879,95 @@ def _probe(
         str(path),
     ]
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             argv,
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
             # Run from the scratch directory, not from wherever the sweep was
             # invoked. Probing is *expected* to crash clang -- that is what
             # `toolchain_crash` records -- and a crash on a host with core dumps
             # enabled drops a multi-megabyte `core` next to the caller. Run the
             # sweep from a checkout and those land in the worktree.
-            cwd=str(out.parent),
+            cwd=out.parent,
         )
     except subprocess.TimeoutExpired:
         return (
             STATUS_TOOLCHAIN_TIMEOUT,
             f"clang did not terminate within {timeout:g}s",
         )
-    return _classify(proc.returncode, (proc.stderr or proc.stdout).strip())
+    status, evidence = _classify(proc.returncode, (proc.stderr or proc.stdout).strip())
+    if status != STATUS_OK or not verify_assembly:
+        return status, evidence
+    return _assemble(clang, path, arch, out, timeout)
+
+
+def _llvm_mc_beside(clang: str) -> Path:
+    """The `llvm-mc` of the same install as `clang`: the assembler must judge
+    the instructions the measured backend emits, not another LLVM's."""
+    return Path(clang).with_name("llvm-mc")
+
+
+def _assembler_rejection(diag: str) -> str:
+    """`llvm-mc`'s rejection without the scratch path: the message and the
+    rejected mnemonic (the source line it echoes after the error)."""
+    lines = diag.splitlines()
+    for i, line in enumerate(lines):
+        if "error:" in line:
+            message = line.split("error:", 1)[1].strip()
+            echoed = next((l.split() for l in lines[i + 1 :] if l.strip()), [])
+            mnemonic = f" ({echoed[0]})" if echoed else ""
+            return f"assembler: {message}{mnemonic}"
+    return "assembler: " + _first_error(diag)
+
+
+def _assemble(
+    clang: str,
+    path: Path,
+    arch: str,
+    out: Path,
+    timeout: float = PROBE_TIMEOUT_S,
+) -> tuple[str, str]:
+    """Compile a probe that linked to assembly text and assemble it for `arch`.
+
+    `ok` only if the target's assembler accepts every instruction. Its
+    "instruction not supported on this GPU" is a real arch answer
+    (`arch_absent`); any other assembler failure is ours to explain
+    (`probe_error`), never a silent `ok`.
+    """
+    asm = out.with_suffix(".s")
+    argv = [
+        clang,
+        "-x",
+        "ir",
+        *PROBE_CFLAGS,
+        "-target",
+        "amdgcn-amd-amdhsa",
+        f"-mcpu={arch}",
+        "-S",
+        "-o",
+        str(asm),
+        str(path),
+    ]
+    mc = [
+        str(_llvm_mc_beside(clang)),
+        "-triple=amdgcn-amd-amdhsa",
+        f"-mcpu={arch}",
+        "-filetype=null",
+        str(asm),
+    ]
+    for step in (argv, mc):
+        try:
+            proc = run_bounded(step, timeout=timeout, cwd=out.parent)
+        except subprocess.TimeoutExpired:
+            return (
+                STATUS_TOOLCHAIN_TIMEOUT,
+                f"{Path(step[0]).name} did not terminate within {timeout:g}s",
+            )
+        if proc.returncode:
+            diag = (proc.stderr or proc.stdout).strip()
+            if step is mc and "instruction not supported on this gpu" in diag.lower():
+                return STATUS_ARCH_ABSENT, _assembler_rejection(diag)
+            return STATUS_PROBE_ERROR, f"{Path(step[0]).name}: " + _first_error(diag)
+    return STATUS_OK, ""
 
 
 # --------------------------------------------------------------------------
@@ -845,6 +1084,197 @@ def _prune() -> int:
     return 0
 
 
+def _nonnegative_jobs(raw: str) -> int:
+    """Parse ``--jobs`` while preserving zero as the automatic sentinel."""
+    value = int(raw)
+    if value < 0:
+        raise argparse.ArgumentTypeError("--jobs must be zero or greater")
+    return value
+
+
+def _probe_jobs(requested: int) -> int:
+    """Resolve the quota-aware default while preserving an explicit override."""
+    return requested or min(MAX_PROBE_JOBS, available_cpus())
+
+
+@contextlib.contextmanager
+def _probe_pool(max_workers: int) -> Iterator[cf.ThreadPoolExecutor]:
+    """A thread pool for probes that stops promptly on Ctrl-C.
+
+    Ctrl-C reaches only the main thread, and every probe runs in its own
+    session, so the terminal's interrupt reaches neither the workers nor their
+    compilers. Leaving a plain pool would then wait out each running probe's
+    timeout. On `KeyboardInterrupt` this cancels the queued probes and ends the
+    running ones before the pool waits for its workers.
+    """
+    with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        try:
+            yield ex
+        except KeyboardInterrupt:
+            ex.shutdown(wait=False, cancel_futures=True)
+            stop_all()
+            raise
+
+
+def _schedule_probes(
+    keys: list[str],
+    arches: list[str],
+    absent: set[str],
+    unmeasured: dict[str, tuple[str, str]],
+    unsupported_arches: set[str],
+    expected_cells: dict[str, dict[str, dict[str, str]]],
+) -> tuple[dict[str, list[str]], list[tuple[str, str]]]:
+    """Partition every measurable cell into a positive batch or singleton."""
+    positive_batches: dict[str, list[str]] = {arch: [] for arch in arches}
+    individual_work: list[tuple[str, str]] = []
+    for key in keys:
+        if key in absent or key in unmeasured:
+            continue
+        for arch in arches:
+            if arch in unsupported_arches:
+                continue
+            if expected_cells.get(key, {}).get(arch, {}).get("status") == STATUS_OK:
+                positive_batches[arch].append(key)
+            else:
+                individual_work.append((key, arch))
+    return positive_batches, individual_work
+
+
+def _localize_expected_positive(
+    keys: list[str],
+    batch_status: Callable[[list[str]], str],
+    single_result: Callable[[str], tuple[str, str, int | None]],
+) -> dict[str, tuple[str, str, int | None]]:
+    """Prove a positive batch or recursively isolate every changed cell."""
+    if not keys:
+        return {}
+    if len(keys) == 1:
+        status, evidence, imm = single_result(keys[0])
+        return {keys[0]: (status, evidence, imm)}
+    if batch_status(keys) == STATUS_OK:
+        return {key: (STATUS_OK, "", None) for key in keys}
+    middle = len(keys) // 2
+    return {
+        **_localize_expected_positive(keys[:middle], batch_status, single_result),
+        **_localize_expected_positive(keys[middle:], batch_status, single_result),
+    }
+
+
+def _needs_serial_retry(
+    status: str,
+    expected_status: str | None,
+    *,
+    evidence: str = "",
+    expected_evidence: str = "",
+) -> bool:
+    """Whether a result needs a contention-free confirmation attempt.
+
+    Any changed committed verdict is unexpected and gets confirmed. Matching
+    crash and timeout statuses are deterministic only when their normalized
+    evidence also matches. Without a committed expectation (generation and
+    target preflight), only a non-answer is plausibly transient. ``probe_error``
+    always retries because it is the generator admitting it did not classify
+    the result.
+    """
+    if status == STATUS_PROBE_ERROR:
+        return True
+    if expected_status is not None:
+        if status != expected_status:
+            return True
+        if status in (STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT):
+            return evidence != expected_evidence
+        return False
+    return status in (STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT)
+
+
+def _expected_preflight_statuses(
+    arches: list[str], expected_cells: dict[str, dict[str, dict[str, str]]]
+) -> dict[str, str]:
+    """Derive the committed target-support answer without using it as verdict."""
+    expected: dict[str, str] = {}
+    for arch in arches:
+        statuses = {
+            cell["status"]
+            for row in expected_cells.values()
+            if (cell := row.get(arch)) is not None
+        }
+        if STATUS_TARGET_UNSUPPORTED in statuses:
+            expected[arch] = STATUS_TARGET_UNSUPPORTED
+        elif statuses:
+            expected[arch] = STATUS_OK
+    return expected
+
+
+def _retry_target_preflights(
+    clang: str,
+    path: Path,
+    ir_dir: Path,
+    preflight: dict[str, tuple[str, str]],
+    expected_statuses: dict[str, str],
+) -> list[str]:
+    """Confirm transient or changed preflights after their worker pool drains."""
+    retry = [
+        arch
+        for arch, (status, _evidence) in preflight.items()
+        if _needs_serial_retry(status, expected_statuses.get(arch))
+    ]
+    for arch in retry:
+        preflight[arch] = _target_preflight(
+            clang, path, arch, ir_dir / f"target_preflight.{arch}.hsaco"
+        )
+    return retry
+
+
+def _terminal_cell(
+    key: str,
+    arch: str,
+    flavor: str,
+    absent: set[str],
+    unmeasured: dict[str, tuple[str, str]],
+    unsupported_arches: set[str],
+    preflight: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    """Return a non-Stage-B verdict, preserving flavor-axis precedence."""
+    if key in absent:
+        return STATUS_NAME_ABSENT, f"not an intrinsic in {flavor}"
+    if key in unmeasured:
+        return unmeasured[key]
+    if arch in unsupported_arches:
+        _status, evidence = preflight[arch]
+        return STATUS_TARGET_UNSUPPORTED, evidence
+    return None
+
+
+def _serial_retry_items(
+    work: list[tuple[str, str]],
+    results: dict[str, dict[str, dict[str, object]]],
+    expected_cells: dict[str, dict[str, dict[str, str]]],
+) -> list[tuple[str, str]]:
+    """Select every transient or expectation-mismatched cell for confirmation."""
+    retry: list[tuple[str, str]] = []
+    for key, arch in work:
+        result = results[key][arch]
+        expected = expected_cells.get(key, {}).get(arch, {})
+        if _needs_serial_retry(
+            str(result["status"]),
+            expected.get("status"),
+            evidence=str(result.get("evidence", "")),
+            expected_evidence=str(expected.get("evidence", "")),
+        ):
+            retry.append((key, arch))
+    return retry
+
+
+def _unvalidated_exit(requested: int | None, legacy: int) -> int:
+    """Map an existing unvalidated result to a scheduler-requested skip code.
+
+    The generator's legacy CLI uses different exits for different conditions.
+    The source CTest asks only that those same conditions be distinguishable
+    from green; it does not redefine which conditions are unvalidated.
+    """
+    return requested if requested is not None else legacy
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -868,9 +1298,23 @@ def main() -> int:
         action="store_true",
         help="drop rows whose decl key is gone, on every column; needs no toolchain",
     )
-    ap.add_argument("--jobs", type=int, default=0)
+    ap.add_argument("--jobs", type=_nonnegative_jobs, default=0)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--unvalidated-exit-code",
+        type=int,
+        default=None,
+        help=(
+            "exit with this code when --check cannot validate on this host "
+            "(CTest uses 77 to report a skip; defaults preserve legacy exits)"
+        ),
+    )
     args = ap.parse_args()
+    if args.unvalidated_exit_code is not None:
+        if not args.check:
+            ap.error("--unvalidated-exit-code requires --check")
+        if not 1 <= args.unvalidated_exit_code <= 255:
+            ap.error("--unvalidated-exit-code must be between 1 and 255")
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
@@ -930,7 +1374,7 @@ def main() -> int:
             "\nRESULT: UNVALIDATED - no clang found under the resolved ROCm "
             "install or on PATH; nothing was probed. Set ROCKE_LLVM_BIN."
         )
-        return 0
+        return _unvalidated_exit(args.unvalidated_exit_code, 0)
 
     # `opt` is not optional: it owns the flavor axis, and without it nothing
     # separates "this LLVM has no such intrinsic" from "this target cannot
@@ -965,7 +1409,7 @@ def main() -> int:
             "Set ROCKE_LLVM_BIN to the matching toolchain, or ROCKE_LLVM_FLAVOR "
             "if the override is intended."
         )
-        return 2
+        return _unvalidated_exit(args.unvalidated_exit_code, 2)
 
     # `opt` and `clang` are found by independent searches, so a prefix that
     # ships clang but not `opt` lets `opt` fall through to another install.
@@ -987,17 +1431,84 @@ def main() -> int:
         )
         return 2
 
+    # The assembler is not optional either: a probe that links is only `ok`
+    # once the target's assembler accepts it (see `_assemble`).
+    if not _llvm_mc_beside(clang).is_file():
+        print(
+            f"\nFAIL: no llvm-mc beside {clang}; every probe that links is "
+            "assembled for its target before it is recorded as ok. Nothing was "
+            "probed. Set ROCKE_LLVM_BIN to a complete LLVM install."
+        )
+        return 1
+
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)
     keys = sorted(k for k in decls if not args.only or args.only in k)
     print(f"   arches : {', '.join(arches)}")
     print(f"   keys   : {len(keys)}")
 
+    out = args.out or default_out(flavor)
+    expected_cells: dict[str, dict[str, dict[str, str]]] = {}
+    if args.check and out.is_file():
+        try:
+            expected_cells = json.loads(out.read_text()).get("keys", {})
+        except json.JSONDecodeError:
+            # The final drift check owns the actionable malformed-JSON error.
+            # Until then, schedule conservatively as though no baseline exists.
+            pass
+
     tmp = tempfile.TemporaryDirectory(prefix="rocke_arch_domain_")
     ir_dir = args.keep_ir if args.keep_ir else Path(tmp.name)
     ir_dir.mkdir(parents=True, exist_ok=True)
 
     datalayout = L._datalayout_for_flavor(flavor)
+    jobs = _probe_jobs(args.jobs)
+
+    # Target support is an axis of the compiler/architecture pair, not of an
+    # intrinsic.  Ask it once so a bad target ID cannot be rediscovered and
+    # recorded independently for every declaration.
+    preflight_path = Path(ir_dir) / "target_preflight.ll"
+    preflight_path.write_text(_target_preflight_module(datalayout))
+
+    def preflight_one(arch: str) -> tuple[str, tuple[str, str]]:
+        return arch, _target_preflight(
+            clang,
+            preflight_path,
+            arch,
+            Path(ir_dir) / f"target_preflight.{arch}.hsaco",
+        )
+
+    preflight: dict[str, tuple[str, str]] = {}
+    with _probe_pool(min(jobs, len(arches))) as ex:
+        for arch, answer in ex.map(preflight_one, arches):
+            preflight[arch] = answer
+    preflight_retry = _retry_target_preflights(
+        clang,
+        preflight_path,
+        Path(ir_dir),
+        preflight,
+        _expected_preflight_statuses(arches, expected_cells),
+    )
+    if preflight_retry:
+        print(
+            f"   retried {len(preflight_retry)} non-definitive target preflight(s) "
+            "serially"
+        )
+    unsupported_arches = {
+        arch
+        for arch, (status, _evidence) in preflight.items()
+        if status == STATUS_TARGET_UNSUPPORTED
+    }
+    broken_preflight = {
+        arch: answer
+        for arch, answer in preflight.items()
+        if answer[0] not in (STATUS_OK, STATUS_TARGET_UNSUPPORTED)
+    }
+    if broken_preflight:
+        print("\nFAIL: target preflight did not produce a support verdict:")
+        for arch, (status, evidence) in broken_preflight.items():
+            print(f"  {arch:14s} {status}: {evidence}")
+        return 1
 
     # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
     # `opt` run instead of one link per arch, and it is the only stage that can
@@ -1010,12 +1521,11 @@ def main() -> int:
     # Keys whose flavor-axis probe did not produce an answer, with the no-data
     # status and the diagnostic that explains it.
     unmeasured: dict[str, tuple[str, str]] = {}
+    name_verdicts = _name_exists_many(
+        opt, [(key, decls[key]) for key in keys], Path(ir_dir)
+    )
     for key in keys:
-        v = (
-            _name_exists(opt, decls[key], Path(ir_dir))
-            if opt
-            else NameVerdict(True, "", "")
-        )
+        v = name_verdicts[key]
         if v.exists is None:
             unmeasured[key] = (v.status, v.evidence)
         elif v.exists:
@@ -1043,50 +1553,43 @@ def main() -> int:
     # hand-written row covers the two cases that have none (no `opt` on this
     # host, and a declare AutoUpgrade consumed entirely).
     modules: dict[str, tuple[Path | None, str]] = {}
-    literal_modules: dict[str, list[Path]] = {}
-    imm_modules: dict[str, list[tuple[int, Path]]] = {}
+    specs: dict[str, ProbeSpec] = {}
     for key in keys:
-        decl = resolved.get(key, decls[key])
+        spec = _probe_spec(key, resolved.get(key, decls[key]))
+        specs[key] = spec
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
-        text, why = _probe_module(decl, datalayout)
+        text, why = _probe_module(
+            spec.decl,
+            datalayout,
+            literal_ints=spec.literal_ints,
+            imm_int=spec.imm_int,
+        )
         if why:
             modules[key] = (None, why)
             continue
         path = ir_dir / f"{stem}.ll"
         path.write_text(text)
         modules[key] = (path, "")
-        # Two literal values, because neither is safe alone: 0 is rejected
-        # where the operand is a byte count, and a nonzero value is out of
-        # range where it is a small enum (an MFMA cbsz/blgp selector).
-        variants = []
-        for lit in _LITERAL_PROBE_VALUES:
-            lit_text, why_lit = _probe_module(decl, datalayout, literal_ints=lit)
-            if not why_lit and lit_text != text:
-                lit_path = ir_dir / f"{stem}.lit{lit}.ll"
-                lit_path.write_text(lit_text)
-                variants.append(lit_path)
-        if variants:
-            literal_modules[key] = variants
-        # The immarg sweep, built the same way. A declare with no integer
-        # immarg yields a module identical to the base one, so the `!=` test
-        # is what decides sweepability -- no separate signature analysis to
-        # keep in step with `_probe_module`.
-        imm_variants = []
-        for imm in _IMMARG_PROBE_VALUES:
-            imm_text, why_imm = _probe_module(decl, datalayout, imm_int=imm)
-            if not why_imm and imm_text != text:
-                imm_path = ir_dir / f"{stem}.imm{imm}.ll"
-                imm_path.write_text(imm_text)
-                imm_variants.append((imm, imm_path))
-        if imm_variants:
-            imm_modules[key] = imm_variants
 
     # Stage B -- the arch axis, only for names that exist. A key stage A could
     # not measure is held out too: its probe would have to be built from the
     # hand-written row, which is the generator-4 construction that produced
     # false `arch_absent` cells.
+    positive_batches, individual_work = _schedule_probes(
+        keys,
+        arches,
+        absent,
+        unmeasured,
+        unsupported_arches,
+        expected_cells,
+    )
     work = [
-        (k, a) for k in keys if k not in absent and k not in unmeasured for a in arches
+        *individual_work,
+        *(
+            (key, arch)
+            for arch, batch_keys in positive_batches.items()
+            for key in batch_keys
+        ),
     ]
 
     def run(item: tuple[str, str]) -> tuple[str, str, str, str, int | None]:
@@ -1096,80 +1599,56 @@ def main() -> int:
             return key, arch, STATUS_PROBE_ERROR, why, None
         out = Path(ir_dir) / f"{path.stem}.{arch}.hsaco"
         status, evidence = _probe(clang, path, arch, out)
-        # Rescue a suspected false negative: both diagnostics mean "this
-        # operand had to be an immediate", so a literal re-probe that lowers
-        # cleanly means our first probe was malformed, not the arch.
-        #
-        # Scoped to those two diagnostics: literals give the backend more
-        # information, so a blanket retry could constant-fold a genuinely
-        # unsupported intrinsic away and manufacture an `ok`.
-        if _wants_literals(status, evidence) and key in literal_modules:
-            # Try every literal before giving up -- a value out of range for
-            # one operand kind is in range for another, and stopping at the
-            # first non-OK answer would let an unlucky choice pass as the
-            # arch's verdict.
-            settled: tuple[str, str] | None = None
-            last: tuple[str, str] | None = None
-            for i, lit_path in enumerate(literal_modules[key]):
-                lit_out = Path(ir_dir) / f"{path.stem}.lit{i}.{arch}.hsaco"
-                lit_status, lit_evidence = _probe(clang, lit_path, arch, lit_out)
-                if lit_status == STATUS_OK:
-                    return key, arch, STATUS_OK, "", None
-                last = (lit_status, lit_evidence)
-                if settled is None and not _wants_literals(lit_status, lit_evidence):
-                    settled = last
-            # Every variant failed to legalise, and with no variable integer
-            # operands left that is the target speaking, not our probe --
-            # gfx942 takes this call with a literal size and gfx1201 does not.
-            # The verifier's immarg complaint is excluded: surviving the sweep
-            # means the non-immediate operand is not an integer, which is our
-            # module's fault.
-            if settled is None and last and last[0] == STATUS_ARCH_ABSENT:
-                settled = last
-            status, evidence = settled or (status, evidence)
+        return (
+            key,
+            arch,
+            status,
+            evidence,
+            specs[key].imm_int if status == STATUS_OK else None,
+        )
 
-        # Sweep the immediates. Only on a negative, and only on the ~1 key in
-        # 6 whose declare has an integer immarg, so the common case still
-        # costs one probe.
-        #
-        # These two statuses only: `arch_absent` (ISel failed, and the operand
-        # value is one reason why) and `probe_error` (llvm23's verifier
-        # rejects an illegal transfer size before codegen -- a malformed
-        # module is what the sweep repairs). A crash, timeout or unsupported
-        # target says nothing about the operand value.
-        #
-        # Any legal value wins: the artifact answers "can this target lower
-        # this intrinsic", not "with the operand our probe happened to pick".
-        if status in (STATUS_ARCH_ABSENT, STATUS_PROBE_ERROR) and key in imm_modules:
-            settled_imm: tuple[str, str] | None = None
-            for imm, imm_path in imm_modules[key]:
-                imm_out = Path(ir_dir) / f"{path.stem}.imm{imm}.{arch}.hsaco"
-                imm_status, imm_evidence = _probe(clang, imm_path, arch, imm_out)
-                if imm_status == STATUS_OK:
-                    return key, arch, STATUS_OK, "", imm
-                if settled_imm is None and imm_status != STATUS_PROBE_ERROR:
-                    settled_imm = (imm_status, imm_evidence)
-            # Every candidate failed, so the operand value was not the
-            # obstacle. Where we started from `arch_absent` the original
-            # evidence already says so and is kept -- the cell should describe
-            # the probe as posed by default.
-            #
-            # Where we started from `probe_error` it does not: a legal value
-            # failed too, so leaving it would commit "the generator is broken"
-            # for a target that simply cannot lower the intrinsic. The first
-            # candidate with a real classification speaks instead.
-            if status == STATUS_PROBE_ERROR and settled_imm is not None:
-                status, evidence = settled_imm
+    def run_positive_batch(
+        item: tuple[str, list[str]],
+    ) -> list[tuple[str, str, str, str, int | None]]:
+        """Validate expected-positive cells together, splitting on failure."""
+        arch, batch_keys = item
 
-        return key, arch, status, evidence, None
+        def batch_status(part: list[str]) -> str:
+            text, why = _batch_probe_module([specs[key] for key in part], datalayout)
+            if why:
+                return STATUS_PROBE_ERROR
+            first = re.sub(r"[^A-Za-z0-9_.-]", "_", part[0])
+            path = Path(ir_dir) / f"batch.{arch}.{first}.{len(part)}.ll"
+            path.write_text(text)
+            status, _evidence = _probe(clang, path, arch, path.with_suffix(".hsaco"))
+            return status
+
+        def single_result(key: str) -> tuple[str, str, int | None]:
+            _key, _arch, status, evidence, imm = run((key, arch))
+            return status, evidence, imm
+
+        # The committed positives schedule batches but never decide verdicts.
+        # A failed batch is split until ordinary single-probe classification
+        # identifies every changed cell.
+        answers = _localize_expected_positive(batch_keys, batch_status, single_result)
+        return [
+            (
+                key,
+                arch,
+                status,
+                evidence,
+                (
+                    imm
+                    if imm is not None
+                    else specs[key].imm_int if status == STATUS_OK else None
+                ),
+            )
+            for key, (status, evidence, imm) in answers.items()
+        ]
 
     # Threads, not processes: each unit of work is already its own subprocess.
-    #
-    # The cap sits well under the core count: each probe is a clang that
-    # spawns ld.lld, so fan-out is ~2x the worker count and saturating a big
-    # host hits RLIMIT_NPROC. That surfaces as probe_error, and a probe_error
-    # that depends on machine load makes `--check` flaky.
-    jobs = args.jobs or min(8, available_cpus())
+    # ``jobs`` is quota-aware and bounded above; successful probes can briefly
+    # add a linker or assembler child to each compiler worker.
     results: dict[str, dict[str, dict[str, str]]] = {k: {} for k in keys}
 
     def record(
@@ -1178,43 +1657,63 @@ def main() -> int:
         cell: dict[str, object] = {"status": status, "verified_on": flavor}
         if evidence and status != STATUS_OK:
             cell["evidence"] = evidence
-        # Only on a cell the sweep rescued, so its absence means "the default
-        # 0 answered" -- the common case, not worth a field on 1100 cells.
-        # Present, it names the value that made the intrinsic lower, which is
-        # what distinguishes a first-try `ok` from a rescued one.
+        # Only on a cell whose ProbeSpec declares a non-default immediate.
+        # Present, it records the semantically valid witness used to establish
+        # the positive result.
         if imm is not None:
             cell["probe_imm"] = imm
         results[key][arch] = cell
 
-    for key in absent:
+    # Stage A answers precede target support: a spelling absent from this LLVM
+    # remains name_absent even where the compiler cannot target the requested
+    # architecture. Only declarations eligible for Stage B inherit the target
+    # preflight verdict. The same precedence preserves an opt failure's real
+    # diagnostic instead of laundering it into target_unsupported.
+    for key in keys:
         for arch in arches:
-            record(key, arch, STATUS_NAME_ABSENT, f"not an intrinsic in {flavor}")
+            terminal = _terminal_cell(
+                key,
+                arch,
+                flavor,
+                absent,
+                unmeasured,
+                unsupported_arches,
+                preflight,
+            )
+            if terminal is not None:
+                status, evidence = terminal
+                record(key, arch, status, evidence)
 
-    # The diagnostic `opt` actually produced, not a generic reason: "not an
-    # intrinsic in llvm20" written over an out-of-memory reads exactly like a
-    # real negative and cannot be falsified from inside the data.
-    for key, (status, evidence) in unmeasured.items():
-        for arch in arches:
-            record(key, arch, status, evidence)
+    with _probe_pool(jobs) as ex:
+        futures: dict[cf.Future, str] = {}
+        for arch, batch in positive_batches.items():
+            if batch:
+                futures[ex.submit(run_positive_batch, (arch, batch))] = "batch"
+        for item in individual_work:
+            futures[ex.submit(run, item)] = "single"
 
-    with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
-        for key, arch, status, evidence, imm in ex.map(run, work):
+        for future in cf.as_completed(futures):
+            if futures[future] == "batch":
+                for key, arch, status, evidence, imm in future.result():
+                    record(key, arch, status, evidence, imm)
+                continue
+            key, arch, status, evidence, imm = future.result()
             record(key, arch, status, evidence, imm)
             if args.verbose and status != STATUS_OK:
                 print(f"     {key:44s} {arch:14s} {status}")
 
-    # Second pass, serial: unclassified and crashed probes get one more chance
-    # with no contention. A real result is stable under retry, a resource
-    # failure is not -- llvm.fabs.f32 on gfx11-generic aborted on the process
-    # limit once in three runs, while permlane64 on the wave64 targets
-    # reproduces serially. The retry separates the two.
+    # Second pass, serial: unclassified, transient, and expectation-mismatched
+    # probes get one more chance with no contention. A real result is stable
+    # under retry, while a resource failure is not -- llvm.fabs.f32 on
+    # gfx11-generic aborted on the process limit once in three runs, while
+    # permlane64 on the wave64 targets reproduces serially. The retry separates
+    # the two and confirms any changed definitive verdict before reporting drift.
     #
     # A timeout retries on the same budget: the point is to remove contention,
     # not to grant more time to a module this small.
-    unstable = (STATUS_PROBE_ERROR, STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT)
-    retry = [(k, a) for k, a in work if results[k][a]["status"] in unstable]
+    retry = _serial_retry_items(work, results, expected_cells)
     if retry:
-        print(f"   retrying {len(retry)} unclassified/crashed probe(s) serially...")
+        print(f"   retrying {len(retry)} unexpected/transient probe(s) serially...")
         for key, arch in retry:
             _k, _a, status, evidence, imm = run((key, arch))
             record(key, arch, status, evidence, imm)
@@ -1286,8 +1785,6 @@ def main() -> int:
             counts[s] = counts.get(s, 0) + 1
     print("\n   " + "  ".join(f"{s}={n}" for s, n in sorted(counts.items())))
 
-    out = args.out or default_out(flavor)
-
     if args.check:
         if not out.is_file():
             # Not a failure: a host can only measure its own flavor, so
@@ -1296,7 +1793,7 @@ def main() -> int:
                 f"\nUNVALIDATED: no committed column for {flavor} "
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
-            return 0
+            return _unvalidated_exit(args.unvalidated_exit_code, 0)
         committed = out.read_text()
         if committed == text:
             print(f"\nOK: {out.name} is up to date.")

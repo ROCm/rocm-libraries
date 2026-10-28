@@ -32,6 +32,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
+#include "DeviceContext.hpp"
 #include "Rotating.hpp"
 
 #include <mxDataGen.hpp>
@@ -528,6 +529,7 @@ namespace TensileLite
                 case rocisa::DataType::ComplexDouble:
                     initArray<std::complex<double>>(initMode, static_cast<std::complex<double>*>(array), descriptor, tensorIndex);
                     break;
+                case rocisa::DataType::Int4:
                 case rocisa::DataType::Int8x4:
                 case rocisa::DataType::Count:
                 case rocisa::DataType::Float8BFloat8:
@@ -1065,6 +1067,7 @@ namespace TensileLite
                    && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
                                                          m_currentSolution))
                 {
+                    ScopedDevice device(m_deviceId);
                     initializeMXData(*m_currentGemmProblem);
                     copyValidToGPUBuffer(*m_currentGemmProblem);
                     copyInputs(m_gpuPtrs,
@@ -1117,13 +1120,12 @@ namespace TensileLite
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
             {
                 m_numRunsInSolution++;
             }
@@ -1141,15 +1143,14 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
             }
 
@@ -1333,6 +1334,8 @@ namespace TensileLite
             int64_t                         m_rotatingBuffer = 0;
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
+
+            int m_deviceId = 0;
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
