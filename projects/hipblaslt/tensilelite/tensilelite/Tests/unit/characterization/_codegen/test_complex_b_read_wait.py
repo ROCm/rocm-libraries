@@ -44,11 +44,13 @@ def test_complex_b_reads_complete_before_use(
     problem["ComplexConjugateB"] = conjugate_b
     for key in ("DataType", "DestDataType", "ComputeDataType"):
         problem[key] = dtype
+    wave_tile = [7, 4] if dtype == "C" else [7 if arch == "gfx950" else 3, 2]
     if dtype == "Z":
-        # Use a smaller tile and wider LDS padding for double-complex operands.
+        # The larger gfx950 tile exposes the late double-complex wait; gfx942
+        # needs a smaller tile to fit its LDS capacity.
         for param in params["ForkParameters"]:
             if "MatrixInstruction" in param:
-                param["MatrixInstruction"][0][5:7] = [3, 2]
+                param["MatrixInstruction"][0][5:7] = wave_tile
             if "GlobalReadVectorWidthB" in param:
                 param["GlobalReadVectorWidthB"] = [1]
             for key in ("LdsBlockSizePerPadA", "LdsBlockSizePerPadB"):
@@ -61,7 +63,7 @@ def test_complex_b_reads_complete_before_use(
     assert len(states) == 1
     state = states[0]
     assert state["UnrollMajorLDSB"]
-    assert state["MIWaveTile"] == ([7, 4] if dtype == "C" else [3, 2])
+    assert state["MIWaveTile"] == wave_tile
     assert state["PrefetchLocalRead"] == 1
     assert state["ClusterLocalRead"] == 1
 
