@@ -34,7 +34,6 @@ from ..register_mapper import RegisterMapper
 from ..transforms import (
     as_forward_map,
     derive_c_distribution,
-    mma_pair_k_aligned,
     mma_pair_compatible,
     classify_transform,
     describe_edge,
@@ -2941,7 +2940,7 @@ class MmaTee:
         None  # (n, k): matched-K B element -> lights the chain -> C[m, n]
     )
     show_diagnostics: bool = (
-        True  # run the K-match DIAGNOSTIC (observer) and annotate warn/error
+        True  # run the pairing DIAGNOSTIC (observer; needs a_canon/b_canon) and annotate warn/error
     )
     show_legend: bool = (
         True  # draw the shade legend (hue=thread, shade=vectorized-load order)
@@ -3153,6 +3152,30 @@ class MmaTee:
             a_canon=self.a_canon,
             b_canon=self.b_canon,
             c_canon=self.c_canon,
+        )
+
+    def pairing_diagnostic(self):
+        """The A x B diagnostic the tee banner shows: both operands sound against the canonical machine
+        and K-matched at the positions it couples (:func:`mma_pair_compatible`). ``None`` when the tee has
+        no ``a_canon``/``b_canon``: the canonicals define which A and B positions the instruction pairs,
+        so without them there is no pairing to judge. Observes labels only, never mutates C.
+
+        The per-atom K-match needs the free-dim atom counts (m_sub/n_sub); they come from the wave shape
+        when present, so a rectangular wave tile is not false-flagged."""
+        if self.a_canon is None or self.b_canon is None:
+            return None
+        if self.wave_shape is None:
+            am = bn = 1
+        else:
+            am = self.wave_shape[0] // self.atom_shape[0]
+            bn = self.wave_shape[1] // self.atom_shape[1]
+        return mma_pair_compatible(
+            self.a_enc,
+            self.b_enc,
+            a_canon=self.a_canon,
+            b_canon=self.b_canon,
+            a_free_atoms=am,
+            b_free_atoms=bn,
         )
 
     def _build_core(self):
@@ -3508,50 +3531,20 @@ class MmaTee:
             )
         for tx, ty, lab in titles:
             ax.text(tx, ty, lab, ha="center", va="bottom", fontsize=pt, weight="bold")
-        if self.show_diagnostics:  # DIAGNOSTIC only -- observes labels, never mutates C
-            # full soundness + K-match when the machine refs are present; else K-match alone.
-            # per-atom K-match needs the free-dim atom counts (m_sub/n_sub) -- derive from the wave shape
-            # when present, so a rectangular wave tile isn't false-flagged on EITHER branch.
-            am = (
-                self.wave_shape[0] // self.atom_shape[0]
-                if self.wave_shape is not None
-                else 1
+        diag = self.pairing_diagnostic() if self.show_diagnostics else None
+        if diag is not None and diag.severity != "ok":
+            col = "#c00000" if diag.severity == "error" else "#c07000"
+            ax.text(
+                x0 + cw / 2,
+                ymax + 2.2,
+                f"{diag.severity.upper()} (MMA-compatible): {diag.message}",
+                ha="center",
+                va="top",
+                fontsize=pt,
+                weight="bold",
+                color=col,
+                bbox=dict(boxstyle="round", facecolor="white", edgecolor=col, lw=1.5),
             )
-            bn = (
-                self.wave_shape[1] // self.atom_shape[1]
-                if self.wave_shape is not None
-                else 1
-            )
-            if self.a_canon is not None and self.b_canon is not None:
-                diag = mma_pair_compatible(
-                    self.a_enc,
-                    self.b_enc,
-                    a_canon=self.a_canon,
-                    b_canon=self.b_canon,
-                    a_free_atoms=am,
-                    b_free_atoms=bn,
-                )
-                tag = "MMA-compatible"
-            else:
-                diag = mma_pair_k_aligned(
-                    self.a_enc, self.b_enc, a_free_atoms=am, b_free_atoms=bn
-                )
-                tag = "K-match"
-            if diag.severity != "ok":
-                col = "#c00000" if diag.severity == "error" else "#c07000"
-                ax.text(
-                    x0 + cw / 2,
-                    ymax + 2.2,
-                    f"{diag.severity.upper()} ({tag}): {diag.message}",
-                    ha="center",
-                    va="top",
-                    fontsize=pt,
-                    weight="bold",
-                    color=col,
-                    bbox=dict(
-                        boxstyle="round", facecolor="white", edgecolor=col, lw=1.5
-                    ),
-                )
         # INFO PANEL (top-left corner): atom/wave/tile/dtype/issue/vec/C-out kept IN VIEW when zoomed into the
         # data flow. Box is sized to the ACTUAL rendered text extent (measured, not estimated) so it always
         # fits; the shade legend sits below it.

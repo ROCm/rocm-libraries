@@ -158,7 +158,7 @@ def test_rejects_reorderable_k_misorder():
     mma = _mma(shape=(16, 16, 32))  # k_sub = 2 gives K register buckets to permute
     a_reordered = mma.a_desc.reorder_registers((1, 2, 0))
     m_sub, n_sub, _ = mma.subtiles
-    a_canon = mma.a_desc.layout
+    a_canon, b_canon, _ = canonical_layouts(mma.plan.traits, mma.subtiles)
     # Self-check the construction: A is still SOUND, and the pair is genuinely a reorder-fixable WARNING --
     # so this test cannot pass for the wrong reason if the layout math shifts.
     assert (
@@ -168,6 +168,8 @@ def test_rejects_reorderable_k_misorder():
         mma_pair_k_aligned(
             a_reordered.layout,
             mma.b_desc.layout,
+            a_canon=a_canon,
+            b_canon=b_canon,
             a_free_atoms=m_sub,
             b_free_atoms=n_sub,
         ).severity
