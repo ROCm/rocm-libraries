@@ -750,6 +750,16 @@ M_EDIT = {
     "M44.n": {"level": "full"},  # the model layer, in full for the nightly budget
     "M40.n": {"Hq": 2},          # inside the nightly ceiling once its gate opens
     "M26.f": {"B": 32},          # 127 s instead of 254 s; the real batch is register R-M4
+    # The trim rule (plan §4.4, register R-M6): probes move up a level, largest first,
+    # until PR and nightly are inside their 5 % reserve.
+    "M09.pr": {"level": "nightly"},
+    "M28.pr": {"level": "nightly"},
+    "M31.pr": {"level": "nightly"},
+    "M03.n": {"level": "full"},
+    "M12.n": {"level": "full"},
+    "M20.n": {"level": "full"},
+    "M36.n": {"level": "full"},
+    "M43.n": {"level": "full"},
 }
 
 # Not-run items: the level each enters when its gate opens (default: pr; M
