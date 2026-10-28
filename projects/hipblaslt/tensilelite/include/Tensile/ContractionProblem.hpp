@@ -412,6 +412,15 @@ namespace TensileLite
             POINTER_ARRAY = 1,
             BATCHMODE_COUNT
         };
+
+        // Runtime MX scale-layout request. Separate from a kernel's
+        // ProblemType::mxScaleFormat, which stays 0, 1, or 2.
+        static constexpr int MXScaleRequestUnspecified    = -1;
+        static constexpr int MXScaleRequestUnsupported    = -2;
+        static constexpr int MXScaleFormatNoSwizzle       = 0;
+        static constexpr int MXScaleFormatHostPreSwizzle  = 1;
+        static constexpr int MXScaleFormatInMemorySwizzle = 2;
+
         using Solution = ContractionSolution;
         using Inputs   = ContractionInputs;
 
@@ -1367,6 +1376,16 @@ namespace TensileLite
             return m_mxBlockB;
         }
 
+        void setMXScaleFormat(int format)
+        {
+            m_mxScaleFormat = format;
+        }
+
+        int mxScaleFormat() const
+        {
+            return m_mxScaleFormat;
+        }
+
         /// Allocated elements excluding batch dimensions
         /// Used in assembly kernels to determine buffer limits, if batch dimes not
         /// packed
@@ -1645,6 +1664,7 @@ namespace TensileLite
         int              m_mxBlockB                = 0;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
+        int              m_mxScaleFormat           = MXScaleRequestUnspecified;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;
@@ -1708,6 +1728,15 @@ namespace TensileLite
         std::string getOperationDescription() const;
         ContractionProblemGemm::BATCHMODE batch_Mode = ContractionProblemGemm::BATCHMODE::STRIDED;        
     };
+
+    // -1 accepts every kernel layout. Any other request matches only that
+    // layout, so -2 matches none.
+    inline bool mxScaleRequestMatchesKernel(int requested, int kernelFormat)
+    {
+        if(requested == ContractionProblemGemm::MXScaleRequestUnspecified)
+            return true;
+        return requested == kernelFormat;
+    }
 
     class ContractionProblemGroupedGemm : public ContractionProblem
     {

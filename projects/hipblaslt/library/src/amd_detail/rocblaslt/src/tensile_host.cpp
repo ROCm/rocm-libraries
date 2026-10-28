@@ -37,6 +37,7 @@
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_arch_revision.hpp"
+#include "mx_scale_format.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "rocblaslt_mat_utils.hpp"
@@ -67,6 +68,23 @@
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+
+static_assert(static_cast<int>(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0)
+                  == kRocblasltScaleBlock32UE8M0,
+              "Block_32_UE8M0 ordinal drifted from mx_scale_format.hpp");
+static_assert(
+    static_cast<int>(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+        == kRocblasltScaleBlock32UE8M0Ext,
+    "Block_32_UE8M0_32_8_EXT ordinal drifted from mx_scale_format.hpp");
+static_assert(TensileLite::ContractionProblemGemm::MXScaleRequestUnspecified
+                  == kMxScaleRequestUnspecified,
+              "unspecified MX scale request drifted from mx_scale_format.hpp");
+static_assert(TensileLite::ContractionProblemGemm::MXScaleRequestUnsupported
+                  == kMxScaleRequestUnsupported,
+              "unsupported MX scale request drifted from mx_scale_format.hpp");
+static_assert(TensileLite::ContractionProblemGemm::MXScaleFormatHostPreSwizzle
+                  == kMxScaleRequestHostPreSwizzle,
+              "HostPreSwizzle MX scale request drifted from mx_scale_format.hpp");
 
 #include <algorithm>
 #include <atomic>
@@ -2400,6 +2418,11 @@ namespace
             prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
           tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
 
+        tensileProblem.setMXScaleFormat(rocblaslt_mx_scale_format_request(
+            rocblaslt_internal_get_arch_name(),
+            static_cast<int>(prob.scaleAType),
+            static_cast<int>(prob.scaleBType)));
+
         return tensileProblem;
     }
 
@@ -2709,6 +2732,11 @@ namespace
 	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
 	    tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
+
+        tensileProblem.setMXScaleFormat(rocblaslt_mx_scale_format_request(
+            rocblaslt_internal_get_arch_name(),
+            static_cast<int>(prob.scaleAType),
+            static_cast<int>(prob.scaleBType)));
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)
