@@ -612,6 +612,8 @@ class LoadPolicyTests(unittest.TestCase):
         cases = [
             "projects/rocsparse/clients/unittests/unit_test_host_internal_branches.cpp",
             "projects/rocsparse/clients/unittests/rocsparse_unit_test_main.cpp",
+            # Outside clients/unittests/, so only the unit_test_* basename matches.
+            "projects/rocwmma/test/unit/unit_test_macros.hpp",
         ]
         for test_path in cases:
             with self.subTest(test_path=test_path):
@@ -620,6 +622,19 @@ class LoadPolicyTests(unittest.TestCase):
                     policy, [make_file(library), make_file(test_path)], errs
                 )
                 self.assertEqual(errs, [])
+        # Near misses for the directory glob. None of these is a test file.
+        misses = [
+            "projects/rocsparse/clients/unittests_old/foo.cpp",
+            "projects/hipsparse/clients/unittests/foo.cpp",
+            "projects/rocsparse/clients/tests/foo.cpp",
+        ]
+        for test_path in misses:
+            with self.subTest(test_path=test_path):
+                errs = []
+                pc.ensure_unit_tests(
+                    policy, [make_file(library), make_file(test_path)], errs
+                )
+                self.assertTrue(errs)
         errs = []
         pc.ensure_unit_tests(policy, [make_file(library)], errs)
         self.assertTrue(errs)
