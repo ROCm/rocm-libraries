@@ -330,6 +330,7 @@ hipError_t topk_impl(void*                      temporary_storage,
 /// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input pointer to the first element in the input range.
 /// \param [out] keys_output pointer to the first element in the output range.
+/// \note Behaviour is undefined when input and output ranges overlap.
 /// \param [in] size number of elements in the input range.
 /// \param [in] K number of elements to be selected from the input.
 /// \param [in] decomposer decomposer functor that produces a tuple of references from the
@@ -459,6 +460,7 @@ hipError_t topk(void*                    temporary_storage,
 /// \param [out] keys_output pointer to the first key in the output range.
 /// \param [in] values_input pointer to the first value in the output range.
 /// \param [out] values_output pointer to the first value in the output range.
+/// \note Behaviour is undefined when input and output key ranges overlap.
 /// \param [in] size number of elements in the input range.
 /// \param [in] K number of elements to be selected from the input.
 /// \param [in] decomposer decomposer functor that produces a tuple of references from the
