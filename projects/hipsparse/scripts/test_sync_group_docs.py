@@ -161,6 +161,96 @@ class SynchronizeFileTest(unittest.TestCase):
         ):
             self.check()
 
+    def assert_refused(self, text, message):
+        self.write(text)
+        for write in (False, True):
+            with self.assertRaisesRegex(sync_group_docs.SyncError, message):
+                sync_group_docs.synchronize_file(self.header, write=write)
+        self.assertEqual(self.text(), text)
+
+    def test_doc_on_first_declaration_is_refused(self):
+        self.assert_refused(
+            SYNCED.replace("/**@{*/\n", "/**@{*/\n/*! \\brief Old. */\n", 1),
+            "hipsparseSaxpyi has its own documentation block",
+        )
+
+    def test_doxygen_style_copy_is_refused(self):
+        self.assert_refused(
+            SYNCED.replace(
+                DOC + "\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+                "/** \\brief Old. */\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+            ),
+            r"unexpected '/\*\* \\brief Old. \*/' before hipsparseDaxpyi",
+        )
+
+    def test_copy_above_preprocessor_line_is_refused(self):
+        self.assert_refused(
+            SYNCED.replace(
+                DOC + "\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+                DOC
+                + "\n#if(!defined(CUDART_VERSION))\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+            ).replace("int x);\n/**@}*/", "int x);\n#endif\n/**@}*/"),
+            "separated from its declaration by '#if",
+        )
+
+    def test_stacked_copies_are_refused(self):
+        self.assert_refused(
+            SYNCED.replace(
+                DOC + "\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+                DOC
+                + "\n"
+                + DOC
+                + "\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+            ),
+            r"unexpected '/\*! \\brief Scale.' before hipsparseDaxpyi",
+        )
+
+    def test_line_comment_between_copy_and_declaration_is_refused(self):
+        self.assert_refused(
+            SYNCED.replace(
+                DOC + "\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+                DOC
+                + "\n// note\nHIPSPARSE_EXPORT\nhipsparseStatus_t hipsparseD",
+            ),
+            "before hipsparseDaxpyi",
+        )
+
+    def test_member_with_other_return_type_is_refused(self):
+        self.assert_refused(
+            SYNCED.replace(
+                "/**@}*/",
+                "HIPSPARSE_EXPORT\nconst char* hipsparseGetName(int x);\n/**@}*/",
+            ),
+            "unexpected 'HIPSPARSE_EXPORT' after hipsparseDaxpyi",
+        )
+
+    def test_doc_above_conditional_outside_group_is_refused(self):
+        self.assert_refused(
+            DOC
+            + "\n// clang-format off\n#if(!defined(CUDART_VERSION))\n"
+            + declaration("hipsparseAxpby")
+            + "#endif\n",
+            "line 1: documentation block is separated from its declaration by "
+            r"'#if\(!defined\(CUDART_VERSION\)\)'",
+        )
+
+    def test_doc_below_conditional_passes(self):
+        text = (
+            "/*! \\file */\n#ifndef HIPSPARSE_TEST_H\n"
+            "#if(!defined(CUDART_VERSION))\n"
+            + DOC
+            + "\n"
+            + declaration("hipsparseAxpby")
+            + "#endif\n"
+            "/*! \\brief A macro. */\n#define HIPSPARSE_TEST 1\n"
+            "typedef enum {\n    A = 0, /**< first */\n#if 1\n    B = 1\n#endif\n} e;\n"
+            "#endif\n"
+        )
+        self.write(text)
+        self.assertEqual(self.check(), [])
+        self.assertEqual(self.fix(), [])
+        self.assertEqual(self.text(), text)
+
     def test_write_uses_lf_line_endings(self):
         self.write(
             group(

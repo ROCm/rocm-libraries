@@ -28,9 +28,10 @@
 This is the same diagnostic used in AISPARSE-550: a function is documented
 when Clang attaches a FullComment to its declaration. hipsparse.h is parsed
 as a single translation unit, the way a user or binding generator includes
-it, and the results are filtered to the requested headers. The
-implementation shells out to clang so a Python libclang package is not
-required.
+it, and the results are filtered to the requested headers. CUDART_VERSION
+is left undefined, as in the AMD build, so declarations that exist only for
+older CUDA versions are not audited. The implementation shells out to clang
+so a Python libclang package is not required.
 """
 
 from __future__ import annotations
@@ -189,8 +190,8 @@ def main() -> int:
         "paths",
         nargs="*",
         type=Path,
-        default=[include_root / "internal"],
-        help="header file or directory to report (defaults to library/include/internal)",
+        default=[include_root],
+        help="header file or directory to report (defaults to library/include)",
     )
     parser.add_argument(
         "--umbrella",
