@@ -88,10 +88,8 @@ Common threads and streams: &common_threads_streams
   - { threads: 3, streams: 3 }
   # - { threads: 5, streams: 5 }
 
-# gfx1030 (RDNA2) has no bf16, no fp8, no fp4, no fp64 and no fp16
-# accumulate hardware.  The precision variants that
-# need one of those carry gpu_arch_exclude and do not run there; the variants
-# RDNA2 does have keep running.
+# The precision variants that need hardware RDNA2 does not have carry
+# gpu_arch_exclude; the variants RDNA2 does have keep running.
 Real precisions: &real_precisions
   - &hpa_half_precision
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r}
@@ -321,10 +319,8 @@ Real precisions xf32: &real_precisions_intermeddiate
     { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: c_xf32_r , scale_type: f32_r, gpu_arch_exclude: '1030'}
 
 Real precisions i8: &integer_precisions_i8
-  # The int8 logic trees come in two kinds: one writes an int8 output and one
-  # writes an int32 output.  gfx1030 ships both, and both were measured on a
-  # Radeon PRO V620, so neither variant is excluded here.  Which architectures
-  # a variant runs on is decided by the case that uses it, not by the anchor.
+  # Which architectures a variant runs on is decided by the case that uses it,
+  # not by the anchor.
   - &i8_precision_dst_i32
     { a_type: i8_r, b_type: i8_r, c_type: i32_r, d_type: i32_r, compute_type: c_i32_r , scale_type: i32_r}
   - &i8_precision_dst_i8
