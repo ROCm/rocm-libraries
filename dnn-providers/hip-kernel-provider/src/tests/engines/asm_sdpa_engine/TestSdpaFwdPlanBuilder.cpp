@@ -26,6 +26,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <optional>
+#include <utility>
 
 namespace asm_sdpa_engine
 {
@@ -879,7 +880,11 @@ INSTANTIATE_TEST_SUITE_P(,
 // included); the band the kernels take is FlashAttention's window_size_left, L - 1.
 TEST(TestSdpaFwdResolveDiagonalBand, ConvertsCudnnLeftBoundToWindowLeft)
 {
-    for(const int64_t leftBound : {int64_t{-1}, int64_t{1}, int64_t{2}, int64_t{64}})
+    // Literal expectations, so the test does not restate the conversion it checks.
+    for(const auto& [leftBound, expectedWindowLeft] : {std::pair<int64_t, int64_t>{-1, -1},
+                                                       std::pair<int64_t, int64_t>{1, 0},
+                                                       std::pair<int64_t, int64_t>{2, 1},
+                                                       std::pair<int64_t, int64_t>{64, 63}})
     {
         auto builder = createSdpaFwdGraphWithMask(
             /*causalMask=*/false,
@@ -895,7 +900,7 @@ TEST(TestSdpaFwdResolveDiagonalBand, ConvertsCudnnLeftBoundToWindowLeft)
                   ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes>();
 
         const auto band = plan_utils::resolveDiagonalBand(attrs);
-        EXPECT_EQ(band.leftBound, leftBound > 0 ? leftBound - 1 : -1) << "left_bound=" << leftBound;
+        EXPECT_EQ(band.leftBound, expectedWindowLeft) << "left_bound=" << leftBound;
         EXPECT_EQ(band.rightBound, 0);
     }
 }
