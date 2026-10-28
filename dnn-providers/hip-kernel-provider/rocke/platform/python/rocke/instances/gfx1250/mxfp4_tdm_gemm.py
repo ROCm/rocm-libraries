@@ -160,7 +160,6 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "lds_pad",
         "lds_segment_interleave",
         "lds_segment_b_rotate",
         "tdm_plus_lds_buf",
@@ -168,6 +167,18 @@ _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
         "cluster_dim",
     }
 )
+
+
+def _tdm_lds_pad_fields(row_bytes: int) -> dict[str, int]:
+    """Encode 16 B of LDS pad after every ``row_bytes`` of contiguous data.
+
+    Matches CK Tile ``EncodedTdmPadding``: ``pad_interval = log2(row/4)-1``,
+    ``pad_amount = 16/4-1``.
+    """
+    if row_bytes < 4 or row_bytes & (row_bytes - 1):
+        raise ValueError(f"LDS pad row_bytes must be a power of two >= 4, got {row_bytes}")
+    pad_interval = (row_bytes // 4).bit_length() - 2
+    return {"pad_interval": pad_interval, "pad_amount": 16 // 4 - 1}
 
 
 def _unimplemented_step6_flags(spec: MxFp4TdmGemmSpec) -> str | None:
@@ -348,9 +359,13 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         k_byte = b.div(k0, b.const_i32(2))
         remaining_k = b.sub(packed_k, k_byte)
         a_row_stride = b.const_i32(spec.a_lds_row_stride_bytes)
+        b_row_stride = b.const_i32(spec.b_lds_row_stride_bytes)
         scale_k_groups = spec.tile_k // 32
         group0 = b.div(k0, c32)
         remaining_groups = b.sub(scale_groups, group0)
+        ab_pad = (
+            _tdm_lds_pad_fields(spec.tile_k // 2) if spec.lds_pad else {}
+        )
 
         def _issue_ab_strip(a_row0, a_rows, b_row0, b_rows) -> None:
             a_lds = b.smem_ptr_add(
@@ -363,7 +378,7 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
             b_lds = b.smem_ptr_add(
                 shared_addr,
                 b.zext(
-                    b.add(b_lds_offset, b.mul(b_row0, a_row_stride)),
+                    b.add(b_lds_offset, b.mul(b_row0, b_row_stride)),
                     shared_addr.type,
                 ),
             )
@@ -385,6 +400,7 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                     row_stride=packed_k,
                     tile_dim0=spec.tile_k // 2,
                     tile_dim1=a_rows,
+                    **ab_pad,
                 )
             )
             b.tensor_load_to_lds(
@@ -397,6 +413,7 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                     row_stride=packed_k,
                     tile_dim0=spec.tile_k // 2,
                     tile_dim1=b_rows,
+                    **ab_pad,
                 )
             )
 
@@ -491,12 +508,10 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         row0 = b.add(atom_row, lane_col)
         row1 = b.add(row0, c16)
         lane_k = b.mul(lane_half, c16)
+        a_stride = b.const_i32(spec.a_lds_row_stride_bytes)
 
         def row_fragment(row):
-            row_base = b.add(
-                a_buffer,
-                b.mul(row, b.const_i32(spec.tile_k // 2)),
-            )
+            row_base = b.add(a_buffer, b.mul(row, a_stride))
             first = b.add(row_base, b.add(b.const_i32(inner_k // 2), lane_k))
             second = b.add(first, c32)
             return b.vec_concat(_load_i32x4(first), _load_i32x4(second))
@@ -507,7 +522,7 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         row = b.add(atom_col, lane_col)
         row_base = b.add(
             b_buffer,
-            b.mul(row, b.const_i32(spec.tile_k // 2)),
+            b.mul(row, b.const_i32(spec.b_lds_row_stride_bytes)),
         )
         lane_k = b.mul(lane_half, c16)
         first = b.add(row_base, b.add(b.const_i32(inner_k // 2), lane_k))

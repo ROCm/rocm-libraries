@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    lds_pad=True,
+                    lds_segment_interleave=True,
                 ),
                 "not implemented yet",
             ),
@@ -314,6 +314,45 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         # A/B data + A/B scale tiles: at least 8 TDM issues across prefill+loop.
         self.assertGreaterEqual(llvm.count("llvm.amdgcn.tensor.load.to.lds"), 8)
         self.assertIn("load <4 x i8>, ptr addrspace(3)", llvm)
+
+    def test_step6_6_lds_pad_grows_stride_and_validates(self):
+        self.assertIn("step6_6_mxfp4_gemm", variant_names())
+        spec = variant_spec(
+            "step6_6_mxfp4_gemm",
+            128,
+            64,
+            512,
+            tile_k=512,
+        )
+        self.assertTrue(spec.lds_pad)
+        self.assertEqual(spec.a_lds_row_stride_bytes, spec.tile_k // 2 + 16)
+        self.assertEqual(spec.b_lds_row_stride_bytes, spec.tile_k // 2 + 16)
+        prior = variant_spec(
+            "step6_5_mxfp4_gemm",
+            128,
+            64,
+            512,
+            tile_k=512,
+        )
+        self.assertGreater(spec.lds_bytes, prior.lds_bytes)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        yaml = variant_spec(
+            "step6_6_mxfp4_gemm",
+            256,
+            256,
+            512,
+            tile_m=256,
+            tile_n=256,
+            tile_k=512,
+        )
+        self.assertLessEqual(yaml.lds_bytes, 327680)
+        self.assertEqual(is_valid_spec(yaml), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("llvm.amdgcn.tensor.load.to.lds", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)
