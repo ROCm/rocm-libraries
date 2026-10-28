@@ -647,6 +647,40 @@ TEST(Maf1_0Init, LogicalIndexOverPaddedLayout)
     }
 }
 
+// A zero-stride batch dimension shares one matrix across batches. Maf1_0 must write it once, with
+// batch 0's values, rather than racing batches with different values into the same storage.
+TEST(Maf1_0Init, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 3, 0};
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<double> array(12, 42.0);
+        DataInitialization::initArrayMaf1_0(
+            array.data(), sizes, strides, ContractionProblemGemm::TENSOR::A);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], std::sin(double(k))) << "rep " << rep << ", element " << k;
+    }
+}
+
+// The Trig* modes share the zero-stride hazard: element idx gets sin/cos(idx), so a broadcast
+// batch dimension must keep batch 0's values.
+TEST(TrigInit, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    TensorDescriptor desc("a", rocisa::DataType::Float, {3, 4, 2}, {1, 3, 0});
+    ASSERT_EQ(desc.totalAllocatedElements(), 12u);
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<float> array(12, 42.0f);
+        DataInitialization::initArrayTrig<float, false, false>(array.data(), desc);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], static_cast<float>(std::sin(double(k))))
+                << "rep " << rep << ", element " << k;
+    }
+}
+
 // Each value is rounded once from double. sin(11446) = -0.923828140... lies just past the BF16
 // midpoint -0.923828125, which is where rounding to float first lands (and would then tie to
 // even, -0.921875).

@@ -863,7 +863,9 @@ namespace TensileLite
             // idx = coord[0] + coord[1]*sizes[0] + coord[2]*sizes[0]*sizes[1] + ... (the logical
             // index, so i + j*rows + b*rows*cols for a matrix; stride padding is skipped and left
             // untouched) and is stored at sum(coord[d] * strides[d]). A gets sin(idx), ScaleA and
-            // ScaleB get the MAF1.0 scale factor 0.5, and every other tensor gets cos(idx).
+            // ScaleB get the MAF1.0 scale factor 0.5, and every other tensor gets cos(idx). A
+            // zero-stride (broadcast) dimension is filled from its coordinate 0 only, so shared
+            // storage is written once, with the first batch's values, as in hipBLASLt's maf1_0.
             template <typename T>
             static void initArrayMaf1_0(T*                         array,
                                                  std::vector<size_t> const& sizes,
@@ -882,13 +884,18 @@ namespace TensileLite
 #pragma omp parallel for schedule(static)
                     for(size_t idx = 0; idx < count; idx++)
                     {
-                        size_t offset = 0;
-                        size_t rest   = idx;
+                        size_t offset    = 0;
+                        size_t rest      = idx;
+                        bool   broadcast = false;
                         for(size_t d = 0; d < sizes.size(); d++)
                         {
-                            offset += (rest % sizes[d]) * strides[d];
+                            size_t const c = rest % sizes[d];
+                            broadcast      = broadcast || (strides[d] == 0 && c != 0);
+                            offset += c * strides[d];
                             rest /= sizes[d];
                         }
+                        if(broadcast)
+                            continue;
                         double const x = static_cast<double>(idx);
                         array[offset]  = roundMaf1_0<T>(isScale  ? 0.5
                                                        : useCos ? std::cos(x)
@@ -1009,23 +1016,31 @@ namespace TensileLite
                 }
             }
 
+            // A zero-stride (broadcast) dimension is filled from its coordinate 0 only, so shared
+            // storage is written once rather than raced by elements with different values.
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, TensorDescriptor const& tensor)
+            static void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                const auto& sizes = tensor.sizes();
-                const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count)
+                const auto& sizes   = tensor.sizes();
+                const auto& strides = tensor.strides();
+                const auto  count   = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, strides, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+                    bool broadcast = false;
+                    for(size_t d = 0; d < coord.size(); d++)
+                        broadcast = broadcast || (strides[d] == 0 && coord[d] != 0);
+                    if(broadcast)
+                        continue;
                     size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
                     array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
                 }
             }
 
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, size_t elements)
+            static void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
