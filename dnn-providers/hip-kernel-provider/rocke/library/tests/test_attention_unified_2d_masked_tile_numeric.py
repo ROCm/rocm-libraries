@@ -6,9 +6,12 @@ window) must still get the right O.
 
 The CTA's tile range starts at the window start of its first row, so later rows
 can see a fully masked first tile. The running max must not be pinned at 0 by
-that tile: with every visible score negative, exp2(s - 0) rounds P to 0 (fp16
-at about -17, bf16 at about -103 natural) and O collapses although the row sees
-keys. Each epilogue branch is pinned so all three clamp sites are covered.
+that tile: with every visible score negative, exp2(s - 0) rounds P to 0 and O
+collapses although the row sees keys. P underflows near -17 natural for fp16 and
+near -92 for bf16 (P is cast to bf16 before PV); the scalar kernels keep P in
+fp32, which underflows near -87 to -103 depending on denormal flush. Each
+epilogue branch is pinned so all three clamp sites are covered, at KV page
+sizes 16 and 64.
 
 Blind spots: gfx942 D128 sliding-window shapes normally route to the 4-warp
 GQA kernel (finite -1e30 sentinel, not affected), so these cases pin tuning
@@ -40,35 +43,49 @@ requires_cdna3_or_4 = pytest.mark.skipif(
     _arch() is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
 )
 
-# One dispatcher geometry per epilogue branch of build_unified_attention_2d_tiled.
+# One dispatcher geometry per epilogue branch of build_unified_attention_2d_tiled,
+# keyed by (arch, KV page size). On gfx942 the 2x-block tiles of the 32-row
+# variants exceed the 64 KiB LDS budget at page size 64, so the 1x-block
+# variants of the same branches stand in there.
 _BRANCH_VARIANT = {
-    "gfx942": {
+    ("gfx942", 16): {
         "transposed32": "transposed_x8_nw1_mw32_t2xb_llvm",
         "mfma32": "wide32x8_nw1_mw32_t2xb_llvm",
         "striped16": "narrow_nw1_mw16_t1xb_llvm",
     },
-    "gfx950": {
+    ("gfx942", 64): {
+        "transposed32": "transposed_x8_nw1_mw32_t1xb_llvm",
+        "mfma32": "wide32x8_nw1_mw32_t1xb_llvm",
+        "striped16": "narrow_nw1_mw16_t1xb_llvm",
+    },
+    ("gfx950", 16): {
+        "transposed32": "transposed32_nw1_mw32_t2xb_llvm",
+        "mfma32": "wide32_nw1_mw32_t2xb_llvm",
+        "striped16": "narrow_nw1_mw16_t1xb_llvm",
+    },
+    ("gfx950", 64): {
         "transposed32": "transposed32_nw1_mw32_t2xb_llvm",
         "mfma32": "wide32_nw1_mw32_t2xb_llvm",
         "striped16": "narrow_nw1_mw16_t1xb_llvm",
     },
 }
 
-# (dtype, natural-log score of every visible key). fp16 P underflows to 0 at
-# about -17 when m is pinned at 0; bf16 needs a far lower score.
+# (dtype, natural-log score of every visible key), below the P underflow point
+# when m is pinned at 0: about -17 for fp16 and -92 for bf16.
 _SCORES = [("fp16", -20.0), ("bf16", -200.0)]
 _WINDOW = 64
-_HQ, _HKV, _D, _BS = 32, 8, 128, 16
+_HQ, _HKV, _D = 32, 8, 128
+_PAGE_SIZES = [16, 64]
 
 
-def _problem(dtype, q_len, kv_len, num_blocks):
+def _problem(dtype, q_len, kv_len, num_blocks, bs):
     return UnifiedAttentionProblem(
         total_q=q_len,
         num_seqs=1,
         num_query_heads=_HQ,
         num_kv_heads=_HKV,
         head_size=_D,
-        block_size=_BS,
+        block_size=bs,
         max_seqlen_q=q_len,
         max_seqlen_k=kv_len,
         dtype=dtype,
@@ -77,7 +94,7 @@ def _problem(dtype, q_len, kv_len, num_blocks):
     )
 
 
-def _branch_spec(problem, branch):
+def _branch_spec(problem, branch, bs):
     from dispatch.attention.unified_rules import canonicalize_tuning_spec
 
     arch = _arch()
@@ -90,7 +107,7 @@ def _branch_spec(problem, branch):
             GFX950_TUNING_VARIANTS as variants,
         )
     base = branch.removesuffix("_s1")
-    spec_id = f"{arch}_u2d_{_BRANCH_VARIANT[arch][base]}"
+    spec_id = f"{arch}_u2d_{_BRANCH_VARIANT[(arch, bs)][base]}"
     variant = next(v for v in variants if v.spec_id == spec_id)
     knobs = {"use_transposed_scalar_state": True} if branch.endswith("_s1") else {}
     spec, why = canonicalize_tuning_spec(problem, variant, knobs)
@@ -98,10 +115,27 @@ def _branch_spec(problem, branch):
     return spec
 
 
-def _reference(q, k_cache, v_cache, kv_len, block_table, scale):
+def _rows_with_masked_leading_tile(kernel_spec, q_len):
+    """Query rows whose CTA's first KV tile lies wholly before their window."""
+    tile = kernel_spec.tile_size
+    tokens = kernel_spec.block_m_per_warp * kernel_spec.num_warps // (_HQ // _HKV)
+    rows = []
+    for q0 in range(0, q_len, tokens):
+        if q0 < _WINDOW - 1:
+            continue
+        first_tile_end = ((q0 - _WINDOW + 1) // tile + 1) * tile
+        rows += [
+            q0 + k
+            for k in range(tokens)
+            if q0 + k < q_len and q0 + k - _WINDOW + 1 >= first_tile_end
+        ]
+    return rows
+
+
+def _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs):
     """FP32 O for one sequence, bottom-right causal + sliding window."""
     q_len = q.shape[0]
-    nblk = (kv_len + _BS - 1) // _BS
+    nblk = (kv_len + bs - 1) // bs
     blocks = block_table[0, :nblk].long()
     k = k_cache[blocks].reshape(-1, _HKV, _D)[:kv_len].float()
     v = v_cache[blocks].reshape(-1, _HKV, _D)[:kv_len].float()
@@ -118,31 +152,36 @@ def _reference(q, k_cache, v_cache, kv_len, block_table, scale):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@pytest.mark.parametrize("bs", _PAGE_SIZES)
 @pytest.mark.parametrize("dtype,score", _SCORES)
 @pytest.mark.parametrize(
     "branch", ["transposed32", "transposed32_s1", "mfma32", "striped16"]
 )
-def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score):
+def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score, bs):
     q_len = kv_len = 256
     tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
     g = torch.Generator(device="cuda").manual_seed(0)
-    max_blocks = (kv_len + _BS - 1) // _BS
+    max_blocks = (kv_len + bs - 1) // bs
     num_blocks = max_blocks + 3
     scale = 1.0 / math.sqrt(_D)
     # Every visible score equals `score`: q = a, k = b with a * b * D * scale = score.
     a = 1.0 if dtype == "fp16" else 4.0
     b = score / (a * _D * scale)
     q = torch.full((q_len, _HQ, _D), a, device="cuda", dtype=tdt)
-    k_cache = torch.full((num_blocks, _BS, _HKV, _D), b, device="cuda", dtype=tdt)
+    k_cache = torch.full((num_blocks, bs, _HKV, _D), b, device="cuda", dtype=tdt)
     v_cache = torch.randn(
-        num_blocks, _BS, _HKV, _D, device="cuda", dtype=tdt, generator=g
+        num_blocks, bs, _HKV, _D, device="cuda", dtype=tdt, generator=g
     )
     perm = torch.randperm(num_blocks, device="cuda", generator=g)[:max_blocks]
     block_table = perm.view(1, max_blocks).to(torch.int32).contiguous()
     cu = torch.tensor([0, q_len], dtype=torch.int32, device="cuda")
     seqused = torch.tensor([kv_len], dtype=torch.int32, device="cuda")
 
-    problem = _problem(dtype, q_len, kv_len, num_blocks)
+    problem = _problem(dtype, q_len, kv_len, num_blocks, bs)
+    spec = _branch_spec(problem, branch, bs)
+    assert _rows_with_masked_leading_tile(
+        spec.kernel_spec, q_len
+    ), "geometry no longer gives any row a fully masked leading tile"
     out = torch.empty_like(q)
     run_unified_attention_torch(
         problem=problem,
@@ -156,10 +195,10 @@ def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score):
         block_table=block_table,
         softcap=0.0,
         backend="tiled",
-        tuning_spec=_branch_spec(problem, branch),
+        tuning_spec=spec,
     )
     torch.cuda.synchronize()
-    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
+    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
 
     assert torch.isfinite(out).all(), "non-finite O"
     err = (out.float() - o_ref).abs()
