@@ -33,7 +33,7 @@ MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t
             break;
         case MxScaleStorageLayout::Gfx950:
             physicalByteCount = detail::copyGfx950ScaleStorageBytes(
-                nullptr, naturalByteCount, 1, {naturalShape[0], naturalShape[1]}, nullptr);
+                nullptr, naturalByteCount, 1, naturalShape[0], naturalShape[1], nullptr);
             break;
         case MxScaleStorageLayout::Gfx1250:
             physicalByteCount = detail::copyGfx1250ScaleStorageBytes(
@@ -67,9 +67,9 @@ std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* natur
     std::vector<std::byte> output(expected.physicalByteCount, std::byte{0});
     switch (plan.layout) {
         case MxScaleStorageLayout::Gfx950: {
-            const std::vector<size_t> dimensions{plan.naturalShape[0], plan.naturalShape[1]};
             detail::copyGfx950ScaleStorageBytes(naturalScaleStorage, naturalScaleByteCount, 1,
-                                                dimensions, output.data());
+                                                plan.naturalShape[0], plan.naturalShape[1],
+                                                output.data());
             return output;
         }
         case MxScaleStorageLayout::Gfx1250: {
