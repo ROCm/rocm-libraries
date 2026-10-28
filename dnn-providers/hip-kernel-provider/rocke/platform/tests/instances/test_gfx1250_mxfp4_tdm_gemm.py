@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    prefetch_gl2=True,
+                    scale_double_buffer=True,
                 ),
                 "not implemented yet",
             ),
@@ -202,6 +202,23 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         )
         self.assertIn("load <4 x i32>, ptr addrspace(3)", llvm)
         self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
+
+    def test_step6_2_prefetch_gl2_emits_intrinsic(self):
+        spec = variant_spec(
+            "step6_2_mxfp4_gemm",
+            128,
+            64,
+            512,
+            tile_k=128,
+        )
+        self.assertTrue(spec.prefetch_gl2)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("llvm.amdgcn.global.prefetch", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

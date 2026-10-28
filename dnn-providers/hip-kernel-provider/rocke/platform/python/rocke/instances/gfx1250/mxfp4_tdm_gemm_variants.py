@@ -21,6 +21,10 @@ BASE_VARIANT = "base_kernel_mxfp4_gemm"
 MXFP4_GEMM_VARIANTS: list[tuple[str, dict[str, Any]]] = [
     (BASE_VARIANT, {}),
     ("step6_1_mxfp4_gemm", {"local_read_prefetch": True}),
+    (
+        "step6_2_mxfp4_gemm",
+        {"local_read_prefetch": True, "prefetch_gl2": True},
+    ),
 ]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []

@@ -149,7 +149,6 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "prefetch_gl2",
         "scale_double_buffer",
         "wave_separated_tdm",
         "scale_tdm",
@@ -350,6 +349,21 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 )
             )
 
+    def _prefetch_gl2(k0) -> None:
+        """PrefetchGL2=2: hint A/B rows two DepthU tiles ahead into GL2."""
+        if not spec.prefetch_gl2:
+            return
+        ahead = b.add(k0, b.const_i32(2 * spec.tile_k))
+        with b.scf_if(b.cmp_lt(ahead, K)):
+            k_byte = b.div(ahead, b.const_i32(2))
+            # One lane of each wave prefetches its local A/B row head.
+            a_row = b.add(block_m, b.add(atom_rows[0], lane))
+            b_row = b.add(block_n, b.add(atom_cols[0], lane_col))
+            a_elem = b.add(b.mul(a_row, packed_k), k_byte)
+            b_elem = b.add(b.mul(b_row, packed_k), k_byte)
+            b.global_prefetch(b.global_ptr_add(A, a_elem))
+            b.global_prefetch(b.global_ptr_add(B, b_elem))
+
     def _load_i32x4(byte_offset):
         return b.smem_load_vN(shared, byte_offset, dtype=I32, n=4)
 
@@ -462,6 +476,7 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
     ]
 
     _issue_tdm(c0, c0)
+    _prefetch_gl2(c0)
     upper = b.sub(K, b.const_i32(spec.tile_k))
     loop_args = [("parity", c0)] + [
         (f"acc{i}", value) for i, value in enumerate(accumulators)
@@ -481,6 +496,7 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         b.s_waitcnt(lgkmcnt=0)
         b.s_barrier_bare()
         _issue_tdm(b.add(k0, b.const_i32(spec.tile_k)), next_parity)
+        _prefetch_gl2(b.add(k0, b.const_i32(spec.tile_k)))
         updated = _compute_tile(k0, parity, carried[1:])
         b.scf_yield(next_parity, *updated)
 
