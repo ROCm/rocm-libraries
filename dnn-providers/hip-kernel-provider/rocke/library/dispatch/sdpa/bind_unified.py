@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""SDPA admission for the unified attention candidates.
+"""SDPA admission and binding for the unified attention candidates.
 
 Translates a :class:`~dispatch.sdpa.common.SdpaRequest` into the
 ``dispatch/attention/`` request the unified candidates already consume and
@@ -16,17 +16,19 @@ either carried (:data:`SDPA_UNIFIED_FEATURES`) or declined with a reason, a
 request is declined when the band the unified kernels would compute is not
 the band it asked for, and a request that pins a dispatch choice is declined.
 
-Binding request tensors to a kernel launch is not here yet; it needs on-GPU
-validation against ``sdpa_reference`` and lands separately.
+:func:`sdpa_unified_bind` binds an admitted request's tensors to a launch on
+the production route (``run_unified_attention_torch`` with no tuning spec).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from itertools import pairwise
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-
 from rocke.core.arch import known_arches
+from rocke.dispatch.core import TorchBinding
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -34,16 +36,22 @@ from dispatch.attention import (
     AttentionMaskType,
     AttentionRequest,
 )
-from dispatch.attention.common import Alignment, AttentionBand, _attention_band
+from dispatch.attention.common import (
+    Alignment,
+    AttentionBand,
+    _attention_band,
+    _problem,
+)
 
 if TYPE_CHECKING:
     from rocke.dispatch.core import KernelCandidate
 
-    from .common import SdpaRequest
+    from .common import SdpaRequest, SdpaTensor
 
 __all__ = [
     "SDPA_UNIFIED_FEATURES",
     "sdpa_unified_admits",
+    "sdpa_unified_bind",
     "sdpa_unified_candidates",
 ]
 
@@ -106,7 +114,7 @@ _DECLINED = {
 }
 
 
-def _to_attention_request(req: "SdpaRequest") -> AttentionRequest:
+def _to_attention_request(req: SdpaRequest) -> AttentionRequest:
     """The ``AttentionRequest`` the unified candidates admit for ``req``.
 
     ``SdpaRequest.left_bound`` / ``right_bound`` / ``diagonal`` are in the
@@ -163,7 +171,7 @@ def _kept_keys(s_q: int, s_kv: int, top_left: bool, left: int, right: int):
     return np.where(empty, 0, first), np.where(empty, -1, last)
 
 
-def _computed_band(req: "SdpaRequest") -> AttentionBand:
+def _computed_band(req: SdpaRequest) -> AttentionBand:
     """The band the unified kernels compute for ``req``.
 
     Read from ``_attention_band``, which is what ``_problem`` hands every
@@ -181,7 +189,7 @@ def _computed_band(req: "SdpaRequest") -> AttentionBand:
     )
 
 
-def _band_reject(req: "SdpaRequest") -> "tuple[bool, str] | None":
+def _band_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     """Decline when the unified kernels would compute a different band.
 
     Bands that differ in form but keep the same keys are equal: full vs
@@ -245,7 +253,7 @@ def _band_text(b: AttentionBand) -> str:
     return f"left={b.left_bound} right={b.right_bound} " f"{b.alignment.name.lower()}"
 
 
-def _sdpa_unified_rejects(req: "SdpaRequest") -> "tuple[bool, str] | None":
+def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
     """Return ``(False, reason)`` if this request cannot be served, else ``None``.
 
     The single gate shared by :func:`sdpa_unified_admits` and
@@ -292,7 +300,7 @@ def _sdpa_unified_rejects(req: "SdpaRequest") -> "tuple[bool, str] | None":
     return _band_reject(req)
 
 
-def _unified_supported(req: "SdpaRequest") -> "tuple[KernelCandidate, ...]":
+def _unified_supported(req: SdpaRequest) -> tuple[KernelCandidate, ...]:
     """Unified route candidates that admit the translated request."""
     supported = tuple(
         c
@@ -304,7 +312,7 @@ def _unified_supported(req: "SdpaRequest") -> "tuple[KernelCandidate, ...]":
     return supported
 
 
-def sdpa_unified_admits(req: "SdpaRequest") -> "tuple[bool, str]":
+def sdpa_unified_admits(req: SdpaRequest) -> tuple[bool, str]:
     """Top-level SDPA admission check for the unified family.
 
     Returns ``(True, "ok")`` only when nothing in
@@ -324,7 +332,7 @@ def sdpa_unified_admits(req: "SdpaRequest") -> "tuple[bool, str]":
     )
 
 
-def sdpa_unified_candidates(req: "SdpaRequest") -> "tuple[str, ...]":
+def sdpa_unified_candidates(req: SdpaRequest) -> tuple[str, ...]:
     """Names of the unified candidates that serve ``req``, for tests and triage.
 
     In registry priority order; empty whenever :func:`sdpa_unified_admits`
@@ -333,3 +341,287 @@ def sdpa_unified_candidates(req: "SdpaRequest") -> "tuple[str, ...]":
     if _sdpa_unified_rejects(req) is not None:
         return ()
     return tuple(c.name for c in _unified_supported(req))
+
+
+# --- binding -------------------------------------------------------------------
+
+_TORCH_DTYPES = {"fp16": "float16", "bf16": "bfloat16"}
+
+
+def _host_ints(tensor) -> list[int]:
+    return [int(x) for x in tensor.detach().reshape(-1).cpu().tolist()]
+
+
+class _Operand:
+    """Per-batch ``(rows, heads, d)`` views of one operand.
+
+    A dense operand is its logical BHSD tensor, with the request's strides. A
+    ragged operand is its packed buffer plus ``B + 1`` offsets: batch ``b``
+    starts at element ``offsets[b] * ragged_offset_multiplier``, as hipDNN
+    reads it, and the batch stride is unused.
+    """
+
+    def __init__(self, name: str, desc: SdpaTensor, tensor, offsets=None) -> None:
+        batch, heads, extent, width = desc.dims
+        self.name, self.desc, self.tensor = name, desc, tensor
+        self.heads, self.extent, self.width = heads, extent, width
+        self.starts: list[int] | None = None
+        self.lengths: list[int] | None = None
+        if not desc.ragged:
+            if tuple(tensor.shape) != tuple(desc.dims):
+                raise ValueError(
+                    f"{name}: tensor shape {tuple(tensor.shape)} is not the "
+                    f"request's dims {desc.dims}"
+                )
+            for n, got, want in zip(desc.dims, tensor.stride(), desc.strides):
+                if n > 1 and got != want:
+                    raise ValueError(
+                        f"{name}: tensor strides {tuple(tensor.stride())} are not "
+                        f"the request's strides {desc.strides}"
+                    )
+            return
+        if offsets is None:
+            raise ValueError(f"ragged operand {name!r} needs its ragged offsets")
+        if not tensor.is_contiguous():
+            raise ValueError(f"{name}: a ragged buffer must be contiguous")
+        _, s_h, s_s, s_d = desc.strides
+        mult = int(desc.ragged_offset_multiplier)
+        self.flat = tensor.reshape(-1)
+        self.starts = [o * mult for o in _host_ints(offsets)]
+        self.row_strides = (s_s, s_h, s_d)
+        if len(self.starts) != batch + 1 or any(x % s_s for x in self.starts):
+            raise ValueError(
+                f"{name}: ragged offsets must be B + 1 = {batch + 1} whole sequence "
+                f"rows, got element starts {self.starts}"
+            )
+        self.lengths = [(e - s) // s_s for s, e in pairwise(self.starts)]
+        if any(n < 0 or n > extent for n in self.lengths):
+            raise ValueError(
+                f"{name}: ragged lengths {self.lengths} must be in [0, {extent}]"
+            )
+
+    def rows(self, b: int, n: int):
+        """Batch ``b``'s first ``n`` rows as ``(n, heads, d)``."""
+        if self.starts is None:
+            return self.tensor[b, :, :n, :].transpose(0, 1)
+        import torch
+
+        return torch.as_strided(
+            self.flat,
+            (n, self.heads, self.width),
+            self.row_strides,
+            self.flat.storage_offset() + self.starts[b],
+        )
+
+    def packed_view(self, cu: list[int]):
+        """A ``(total, heads, d)`` view when the rows already sit packed in
+        token order (packed BSHD at full length, or contiguous ragged), else
+        ``None``."""
+        total, h, d = cu[-1], self.heads, self.width
+        if self.starts is None:
+            if any(b - a != self.extent for a, b in pairwise(cu)):
+                return None
+            bshd = self.tensor.transpose(1, 2)
+            return bshd.reshape(total, h, d) if bshd.is_contiguous() else None
+        if self.row_strides != (h * d, d, 1) or any(
+            s != c * h * d for s, c in zip(self.starts, cu)
+        ):
+            return None
+        return self.flat[: total * h * d].view(total, h, d)
+
+
+def _lengths(req_tensor, tensors, key: str, operand: _Operand, batch: int, extent: int):
+    """Per-batch lengths: ``seq_len_*`` when set, else ragged, else the extent."""
+    if req_tensor is None:
+        return list(operand.lengths) if operand.lengths else [extent] * batch
+    values = _host_ints(tensors[key])
+    if len(values) != batch or any(n < 0 or n > extent for n in values):
+        raise ValueError(f"{key}: need {batch} lengths in [0, {extent}], got {values}")
+    if operand.lengths and any(n > r for n, r in zip(values, operand.lengths)):
+        raise ValueError(f"{key} {values} exceeds the ragged lengths {operand.lengths}")
+    return values
+
+
+class _LaunchPlan:
+    """The unified paged ABI for one bound request.
+
+    Lengths are snapshotted and buffers allocated once, at bind time, so the
+    kernel sees the same tensors on every launch (the 2D path replays graphs
+    keyed on them). Each launch copies the caller's current data in and the
+    outputs back.
+    """
+
+    def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
+        import dataclasses
+
+        import torch
+
+        dtype = getattr(torch, _TORCH_DTYPES[req.dtype])
+        device = tensors["q"].device
+        for name in ("q", "k", "v", "o"):
+            t = tensors[name]
+            if t.dtype != dtype or t.device != device:
+                raise ValueError(
+                    f"{name}: expected {dtype} on {device}, got {t.dtype} on {t.device}"
+                )
+
+        def offsets(name: str, fallback: str | None = None):
+            key = f"ragged_offset_{name}"
+            if key in tensors:
+                return tensors[key]
+            return tensors.get(f"ragged_offset_{fallback}") if fallback else None
+
+        self.q = _Operand("q", req.q, tensors["q"], offsets("q"))
+        self.k = _Operand("k", req.k, tensors["k"], offsets("k"))
+        self.v = _Operand("v", req.v, tensors["v"], offsets("v", "k"))
+        self.o = _Operand("o", req.o, tensors["o"], offsets("o", "q"))
+        self.stats = (
+            None
+            if req.stats is None
+            else _Operand("stats", req.stats, tensors["stats"], offsets("stats", "q"))
+        )
+        if self.k.lengths and self.v.lengths and self.k.lengths != self.v.lengths:
+            raise ValueError(
+                f"ragged K lengths {self.k.lengths} and V lengths {self.v.lengths} differ"
+            )
+
+        batch = req.batch
+        self.q_len = _lengths(
+            req.seq_len_q, tensors, "seq_len_q", self.q, batch, req.s_q
+        )
+        self.kv_len = _lengths(
+            req.seq_len_kv, tensors, "seq_len_kv", self.k, batch, req.s_kv
+        )
+        cu = [0]
+        for n in self.q_len:
+            cu.append(cu[-1] + n)
+        self.cu = cu
+
+        attn = _to_attention_request(req)
+        self.block = int(attn.kv_block_size)
+        self.pages = max(1, -(-req.s_kv // self.block))
+        self.problem = dataclasses.replace(_problem(attn), total_q=cu[-1])
+
+        self.q_packed = self.q.packed_view(cu)
+        self.q_inplace = self.q_packed is not None
+        if not self.q_inplace:
+            self.q_packed = torch.empty(
+                (cu[-1], req.h_q, req.d_qk), dtype=dtype, device=device
+            )
+        self.o_packed = self.o.packed_view(cu)
+        self.o_inplace = self.o_packed is not None
+        if not self.o_inplace:
+            self.o_packed = torch.empty(
+                (cu[-1], req.h_q, req.d_v), dtype=dtype, device=device
+            )
+
+        # Identity page table, exactly ceil(S_kv / block) wide: the scalar
+        # fallback indexes it with that row stride.
+        slots = batch * self.pages
+        self.k_cache = torch.zeros(
+            (slots, self.block, req.h_k, req.d_qk), dtype=dtype, device=device
+        )
+        self.v_cache = torch.zeros(
+            (slots, self.block, req.h_v, req.d_v), dtype=dtype, device=device
+        )
+        self.block_table = (
+            torch.arange(slots, dtype=torch.int32, device=device)
+            .view(batch, self.pages)
+            .contiguous()
+        )
+        self.cu_seqlens_q = torch.tensor(cu, dtype=torch.int32, device=device)
+        self.seqused_k = torch.tensor(self.kv_len, dtype=torch.int32, device=device)
+        self.lse = (
+            None
+            if self.stats is None
+            else torch.empty((cu[-1], req.h_q, 1), dtype=torch.float32, device=device)
+        )
+
+    def kernel_tensors(self) -> dict[str, Any]:
+        return {
+            "q": self.q_packed,
+            "k": self.k_cache,
+            "v": self.v_cache,
+            "out": self.o_packed,
+            "cu_seqlens_q": self.cu_seqlens_q,
+            "seqused_k": self.seqused_k,
+            "block_table": self.block_table,
+        }
+
+    def pack(self) -> None:
+        cu = self.cu
+        if not self.q_inplace:
+            for b, n in enumerate(self.q_len):
+                if n:
+                    self.q_packed[cu[b] : cu[b] + n].copy_(self.q.rows(b, n))
+        span = self.pages * self.block
+        k_rows = self.k_cache.view(-1, span, *self.k_cache.shape[2:])
+        v_rows = self.v_cache.view(-1, span, *self.v_cache.shape[2:])
+        for b, n in enumerate(self.kv_len):
+            if n:
+                k_rows[b, :n].copy_(self.k.rows(b, n))
+                v_rows[b, :n].copy_(self.v.rows(b, n))
+
+    def unpack(self) -> None:
+        """Scatter O and LSE back. Rows past a batch's query length are O = 0
+        and LSE = -inf, as hipDNN's reference writes them."""
+        cu = self.cu
+        for b, n in enumerate(self.q_len):
+            if n and not self.o_inplace:
+                self.o.rows(b, n).copy_(self.o_packed[cu[b] : cu[b] + n])
+            if n < self.o.extent and not self.o.desc.ragged:
+                self.o.tensor[b, :, n:, :].zero_()
+            if self.stats is None:
+                continue
+            if n:
+                self.stats.rows(b, n).copy_(self.lse[cu[b] : cu[b] + n])
+            if n < self.stats.extent and not self.stats.desc.ragged:
+                self.stats.tensor[b, :, n:, :].fill_(float("-inf"))
+
+
+def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBinding:
+    """Bind an admitted request and its device tensors to a unified launch.
+
+    ``tensors`` holds ``q``, ``k``, ``v``, ``o`` and, when the request sets
+    them, ``stats``, ``seq_len_q`` / ``seq_len_kv`` and
+    ``ragged_offset_<operand>`` (V, O and stats fall back to K's, Q's and Q's
+    offsets). A dense operand is its logical BHSD tensor with the request's
+    strides; a ragged one is its contiguous packed buffer. The launch runs on
+    Torch's current stream through the production route
+    (``run_unified_attention_torch`` with no tuning spec; ``backend="3d"``
+    when LSE is requested, the only path that writes it).
+
+    Lengths and offsets are read once, here; rebind after changing them.
+    Raises ``ValueError`` with the admission reason for a declined request.
+    """
+    ok, reason = sdpa_unified_admits(req)
+    if not ok:
+        raise ValueError(reason)
+
+    import torch
+
+    from dispatch.attention.bindings import validate_tuning_attention_tensors
+    from kernels.common.attention_unified import run_unified_attention_torch
+
+    plan = _LaunchPlan(req, tensors)
+    if plan.problem.total_q:
+        validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
+    backend = "3d" if req.stats is not None else "auto"
+    scale = float(req.scale)
+
+    def launch(**_kw: Any) -> None:
+        plan.pack()
+        if plan.problem.total_q:
+            device = plan.q_packed.device
+            run_unified_attention_torch(
+                problem=plan.problem,
+                **plan.kernel_tensors(),
+                softmax_scale=scale,
+                softcap=0.0,
+                backend=backend,
+                stream=int(torch.cuda.current_stream(device).cuda_stream),
+                lse=plan.lse,
+            )
+        plan.unpack()
+
+    return TorchBinding(launch=launch, grid=(0, 0, 0), block=(0, 0, 0))
