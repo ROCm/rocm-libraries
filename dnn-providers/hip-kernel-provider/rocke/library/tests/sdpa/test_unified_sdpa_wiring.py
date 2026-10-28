@@ -3,11 +3,8 @@
 
 """``dispatch.sdpa.bind_unified``: routing onto the unified attention candidates.
 
-Every case here uses a real ``SdpaRequest`` built from ``request_cases.py`` --
-no probe shapes. Decline-reason assertions check stable substrings never a
-tracking ID (PR #13115 review: a ticket ID in a caller-visible string means
-nothing to hipDNN, and pins the test to the tracker label instead of the
-behavior).
+Every case uses a real ``SdpaRequest`` built from ``request_cases.py``.
+Decline-reason assertions check the feature name the caller can act on.
 """
 
 from __future__ import annotations
@@ -34,8 +31,8 @@ def _unified_request(arch="gfx950", d=128, dtype="fp16", **overrides):
 # --- head_dim / arch validity --------------------------------------------------
 
 
-def test_unsupported_head_dim_declines_before_any_policy_rule():
-    req = _unified_request(d=32)
+def test_unsupported_head_dim_reports_head_dim_before_a_feature_gap():
+    req = replace(_unified_request(d=32), paged=SdpaPaged(max_seq_len_kv=8))
     ok, reason = sdpa_unified_admits(req)
     assert not ok
     assert "head_dim" in reason
@@ -49,40 +46,45 @@ def test_unknown_arch_declines():
     assert "arch" in reason
 
 
-# --- fp16 d=256 policy (ATT-34 origin; reason must not name the ticket) --------
+# --- d=256 -------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("arch", ARCHES)
-def test_fp16_d256_is_declined(arch):
-    ok, reason = sdpa_unified_admits(_unified_request(arch=arch, d=256, dtype="fp16"))
-    assert not ok
-    assert "fp16 d=256" in reason
-    assert "ATT-34" not in reason
-    assert "ATT34" not in reason
+def test_d256_decode_reaches_the_dedicated_decode_candidate(arch):
+    """``attention_d256_decode`` serves gfx942 decode as well as gfx950."""
+    req = _unified_request(arch=arch, d=256, dtype="bf16", s_q=1, s_kv=4096)
+    ok, _ = sdpa_unified_admits(req)
+    assert ok
+    assert "attention_d256_decode" in sdpa_unified_candidates(req)
 
 
-@pytest.mark.parametrize("arch", ARCHES)
-def test_bf16_d256_prefill_is_admitted(arch):
-    ok, reason = sdpa_unified_admits(_unified_request(arch=arch, d=256, dtype="bf16"))
+def _gfx942_d256_fast(req) -> bool:
+    from dispatch.attention.common import _problem
+    from dispatch.sdpa.bind_unified import _to_attention_request
+    from kernels.common.attention_unified import _d256_gfx942_fast
+
+    return _d256_gfx942_fast(_problem(_to_attention_request(req)), "gfx942")
+
+
+def test_gfx942_bf16_d256_prefill_lands_in_the_fast_cohort():
+    """gfx942 has no dedicated d=256 prefill candidate; its fast path is the
+    ``_d256_gfx942_fast`` cohort inside ``attention_unified_2d``, so assert
+    the cohort itself rather than the generic candidate's name."""
+    req = _unified_request(arch="gfx942", d=256, dtype="bf16")
+    assert sdpa_unified_admits(req)[0]
+    assert _gfx942_d256_fast(req)
+
+
+def test_gfx942_d256_outside_the_fast_cohort_is_still_admitted():
+    """Sinks drop the request out of the fast cohort onto the default builder.
+    The binding defers to the registry, which still serves it."""
+    req = replace(
+        _unified_request(arch="gfx942", d=256, dtype="bf16"),
+        sink_token=packed((1, 4, 1, 1)),
+    )
+    assert not _gfx942_d256_fast(req)
+    ok, reason = sdpa_unified_admits(req)
     assert ok, reason
-
-
-def test_gfx942_bf16_d256_decode_reaches_the_decode_candidate():
-    """dlangbe (PR #13115 review): attention_d256_decode serves gfx942 decode
-    too, not just gfx950 -- generic.py defines it for both from one
-    definition. The old probe-shape binding could not see this because its
-    decode probe used nhead_q=1, which this exact decode shape does not."""
-    req = _unified_request(arch="gfx942", d=256, dtype="bf16", s_q=1, s_kv=4096)
-    ok, _ = sdpa_unified_admits(req)
-    assert ok
-    assert "attention_d256_decode" in sdpa_unified_candidates(req)
-
-
-def test_gfx950_bf16_d256_decode_reaches_the_decode_candidate():
-    req = _unified_request(arch="gfx950", d=256, dtype="bf16", s_q=1, s_kv=4096)
-    ok, _ = sdpa_unified_admits(req)
-    assert ok
-    assert "attention_d256_decode" in sdpa_unified_candidates(req)
 
 
 # --- admitted features ---------------------------------------------------------
@@ -91,12 +93,9 @@ def test_gfx950_bf16_d256_decode_reaches_the_decode_candidate():
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("d", UNIFIED_HEAD_SIZES)
 @pytest.mark.parametrize("dtype", ("fp16", "bf16"))
-def test_plain_dense_request_is_admitted_except_the_fp16_d256_decline(arch, d, dtype):
+def test_plain_dense_request_is_admitted(arch, d, dtype):
     ok, reason = sdpa_unified_admits(_unified_request(arch=arch, d=d, dtype=dtype))
-    if dtype == "fp16" and d == 256:
-        assert not ok
-    else:
-        assert ok, reason
+    assert ok, reason
 
 
 def test_sinks_is_admitted():
@@ -211,8 +210,8 @@ def test_alibi_declines():
 def test_candidates_is_empty_exactly_when_admits_is_false():
     cases = [
         _unified_request(d=32),  # invalid head_dim
-        _unified_request(dtype="fp16", d=256),  # policy decline
         replace(_unified_request(), paged=SdpaPaged(max_seq_len_kv=8)),  # feature gap
+        replace(_unified_request(), stats=packed((2, 4, 8, 1))),  # registry refuses
         _unified_request(),  # admitted
     ]
     for req in cases:
@@ -222,10 +221,6 @@ def test_candidates_is_empty_exactly_when_admits_is_false():
 
 
 def test_candidates_are_in_registry_priority_order():
-    """Copilot review (PR #13115): the old probe-merge could surface a
-    lower-priority candidate before a higher-priority one discovered by a
-    later probe. There is only one exact request now, so this falls out of
-    ATTENTION_ROUTE_REGISTRY.supported's own ordering with no extra sort."""
     from dispatch.attention import ATTENTION_ROUTE_REGISTRY
 
     req = _unified_request(arch="gfx942", d=256, dtype="bf16", s_q=1, s_kv=4096)

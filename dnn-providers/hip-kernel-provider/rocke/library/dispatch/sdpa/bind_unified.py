@@ -1,14 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""SDPA binding for the unified attention candidates (AICK-2613).
+"""SDPA binding for the unified attention candidates.
 
-Translates a real :class:`~dispatch.sdpa.common.SdpaRequest` into the
+Translates a :class:`~dispatch.sdpa.common.SdpaRequest` into the
 ``dispatch/attention/`` request the unified candidates already consume, and
 binds the request's tensor-shaped fields (Q/K/V/O strides, scale, band
 bounds, LSE, sequence lengths, ragged offsets) to a launchable kernel call.
-The existing ``dispatch/attention/`` candidates are not edited; this module
-only translates and adds the handful of declines a ``SdpaRequest`` needs that
-an ``AttentionRequest`` cannot express.
+The existing ``dispatch/attention/`` candidates are not edited. This module
+adds no shape, dtype or head-size rule of its own: "can it run" is the
+candidates' own ``admits()``, so new kernel coverage reaches SDPA routing
+without touching this file. Its only declines are ``SdpaRequest`` features
+the unified request or binding cannot carry.
 
 Two entry points, both built from one shared translation
 (:func:`_to_attention_request`), so they cannot disagree on what a request
@@ -47,14 +49,6 @@ __all__ = [
     "sdpa_unified_bind",
     "sdpa_unified_candidates",
 ]
-
-# fp16 d=256 declined pending accuracy validation on the unified candidates.
-# No tracking ID here: the reason is what a caller can act on, not where the
-# policy came from (see PR #13115 review).
-_FP16_D256_REASON = (
-    "fp16 d=256 is declined pending accuracy validation on the unified "
-    "candidates; use bf16 at d=256, or fp16 at d in {64, 128}"
-)
 
 
 def _to_attention_request(req: "SdpaRequest") -> AttentionRequest:
@@ -105,9 +99,9 @@ def _sdpa_unified_rejects(req: "SdpaRequest") -> "tuple[bool, str] | None":
     """Return ``(False, reason)`` if this request cannot be served, else ``None``.
 
     The single gate shared by every entry point in this module. Order
-    matters: the request is *validated* (head_dim, arch) before any SDPA
-    policy or capability-gap rule runs, so a malformed request reports its
-    own cause instead of borrowing a policy rule's reason.
+    matters: the request is *validated* (head_dim, arch) before any
+    capability-gap rule runs, so a malformed request reports its own cause
+    instead of borrowing a gap's reason.
 
     Rules here are in addition to, not instead of, the per-candidate
     Capability and support-closure checks in ``dispatch/attention/``.
@@ -149,10 +143,6 @@ def _sdpa_unified_rejects(req: "SdpaRequest") -> "tuple[bool, str] | None":
         )
     if req.alibi:
         return False, "alibi: no unified candidate declares alibi support yet"
-
-    # 3. SDPA policy declines, applied only to requests that are otherwise sane.
-    if req.dtype == "fp16" and req.d_qk == 256:
-        return False, _FP16_D256_REASON
 
     return None
 

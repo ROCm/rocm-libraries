@@ -151,8 +151,8 @@ class TestGfx1250CoverageIsImportedNotCopied(unittest.TestCase):
 
 
 class TestSdpaUnifiedBindingNeverOverclaimsCoverage(unittest.TestCase):
-    """AICK-2613 acceptance: the SDPA layer must not admit what the attention
-    layer it delegates to would refuse.
+    """The SDPA layer must not admit what the attention layer it delegates to
+    would refuse.
 
     ``dispatch.sdpa.bind_unified.sdpa_unified_admits`` restates no shape/dtype
     rule of its own (see that module's docstring); it only translates and
