@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -18,7 +19,11 @@
 namespace
 {
     template <typename T>
-    bool productValuesClose(rocisa::DataType type, T observed, T expected, double threshold = -1.0)
+    bool productValuesClose(rocisa::DataType type,
+                            T                observed,
+                            T                expected,
+                            double           threshold = -1.0,
+                            bool             detailed  = false)
     {
         using roc::hostnumerics::ComparisonOptions;
         using roc::hostnumerics::Layout;
@@ -29,8 +34,8 @@ namespace
         const std::array<T, 1> expectedStorage{expected};
         ComparisonOptions      options
             = TensileLite::Client::validationComparisonOptions(type, threshold);
-        options.computeElementwiseStatistics = false;
-        options.computeFrobenius             = false;
+        options.computeElementwiseStatistics = detailed;
+        options.computeFrobenius             = detailed;
         const auto scalarType                = TensileLite::Client::toHostNumericsScalarType(type);
         const auto layout                    = Layout::contiguousLastDimensionFastest(Shape{1});
         return roc::hostnumerics::compare(
@@ -50,6 +55,123 @@ namespace
         std::memcpy(&value, &byte, sizeof(byte));
         return value;
     }
+}
+
+TEST(HostNumericsComparisonAdapter, FloatingTypesRetainThresholdAndNonfiniteRules)
+{
+    using namespace TensileLite;
+    const auto check = []<typename T>(rocisa::DataType type, T close, T far) {
+        const T zero(0.0f), one(1.0f);
+        const T nan(std::numeric_limits<float>::quiet_NaN());
+        for(bool detailed : {false, true})
+        {
+            SCOPED_TRACE(static_cast<int>(type));
+            SCOPED_TRACE(detailed);
+            for(double threshold : {-1.0, 0.0, 0.5})
+            {
+                const bool floatOverride = type == rocisa::DataType::Float && threshold > 0.0;
+                EXPECT_TRUE(productValuesClose(type, one, close, threshold, detailed));
+                EXPECT_TRUE(productValuesClose(type, close, one, threshold, detailed));
+                EXPECT_EQ(productValuesClose(type, one, far, threshold, detailed), floatOverride);
+                EXPECT_EQ(productValuesClose(type, far, one, threshold, detailed), floatOverride);
+                EXPECT_FALSE(productValuesClose(type, nan, nan, threshold, detailed));
+                EXPECT_FALSE(productValuesClose(type, nan, one, threshold, detailed));
+                EXPECT_FALSE(productValuesClose(type, one, nan, threshold, detailed));
+                EXPECT_TRUE(productValuesClose(type, zero, T(-0.0f), threshold, detailed));
+            }
+        }
+    };
+    check(rocisa::DataType::Float, 1.0002f, 1.001f);
+    check(rocisa::DataType::Double, 1.0 + 2e-12, 1.0 + 1e-9);
+    check(rocisa::DataType::Half, Half(1.02f), Half(1.1f));
+    check(rocisa::DataType::BFloat16, BFloat16(1.125f), BFloat16(2.0f));
+    check(rocisa::DataType::Float8, Float8(1.125f), Float8(2.0f));
+    check(rocisa::DataType::BFloat8, BFloat8(1.5f), BFloat8(3.0f));
+    check(rocisa::DataType::Float8_fnuz, Float8_fnuz(1.125f), Float8_fnuz(2.0f));
+    check(rocisa::DataType::BFloat8_fnuz, BFloat8_fnuz(1.5f), BFloat8_fnuz(3.0f));
+
+    const auto infinities = []<typename T>(rocisa::DataType type, T positive, T negative) {
+        for(bool detailed : {false, true})
+        {
+            EXPECT_TRUE(productValuesClose(type, positive, positive, -1.0, detailed));
+            EXPECT_TRUE(productValuesClose(type, negative, negative, -1.0, detailed));
+            EXPECT_FALSE(productValuesClose(type, positive, negative, -1.0, detailed));
+            EXPECT_FALSE(productValuesClose(type, positive, T(1.0f), -1.0, detailed));
+            EXPECT_FALSE(productValuesClose(type, T(1.0f), positive, -1.0, detailed));
+        }
+    };
+    const float inf = std::numeric_limits<float>::infinity();
+    infinities(rocisa::DataType::Float, inf, -inf);
+    infinities(rocisa::DataType::Double, double(inf), -double(inf));
+    infinities(rocisa::DataType::Half, Half(inf), Half(-inf));
+    infinities(rocisa::DataType::BFloat16, BFloat16(inf), BFloat16(-inf));
+    infinities(rocisa::DataType::BFloat8, fromRawByte<BFloat8>(0x7c), fromRawByte<BFloat8>(0xfc));
+}
+
+TEST(HostNumericsComparisonAdapter, StrictBoundaryAndFloatWorkingPrecision)
+{
+    for(bool detailed : {false, true})
+    {
+        for(bool swapped : {false, true})
+        {
+            const float a = swapped ? 1.0f : 0.0f;
+            const float b = swapped ? 0.0f : 1.0f;
+            EXPECT_FALSE(productValuesClose(rocisa::DataType::Float, a, b, 0.5, detailed));
+            EXPECT_TRUE(productValuesClose(
+                rocisa::DataType::Float, a, b, std::nextafter(0.5f, 1.0f), detailed));
+            // The positive double threshold rounds to float before the strict comparison.
+            EXPECT_FALSE(productValuesClose(
+                rocisa::DataType::Float, a, b, std::nextafter(0.5, 1.0), detailed));
+        }
+    }
+}
+
+TEST(HostNumericsComparisonAdapter, ComplexComponentsIgnoreThresholdOverride)
+{
+    const auto check = []<typename T>(rocisa::DataType type, T delta, T outside) {
+        using C     = std::complex<T>;
+        const T nan = std::numeric_limits<T>::quiet_NaN();
+        const T inf = std::numeric_limits<T>::infinity();
+        for(bool detailed : {false, true})
+            for(double threshold : {-1.0, 0.0, 0.5})
+            {
+                EXPECT_TRUE(productValuesClose(
+                    type, C(1, 1), C(1 + delta, 1 + delta), threshold, detailed));
+                EXPECT_TRUE(productValuesClose(
+                    type, C(1 + delta, 1 + delta), C(1, 1), threshold, detailed));
+                EXPECT_FALSE(productValuesClose(
+                    type, C(1, 1), C(1 + delta, 1 + outside), threshold, detailed));
+                EXPECT_FALSE(productValuesClose(
+                    type, C(1, 1), C(1 + outside, 1 + delta), threshold, detailed));
+                EXPECT_FALSE(productValuesClose(type, C(nan, 0), C(1, 0), threshold, detailed));
+                EXPECT_FALSE(productValuesClose(type, C(0, nan), C(0, 1), threshold, detailed));
+                EXPECT_FALSE(
+                    productValuesClose(type, C(nan, nan), C(nan, nan), threshold, detailed));
+                EXPECT_TRUE(productValuesClose(type, C(inf, 0), C(inf, 0), threshold, detailed));
+                EXPECT_TRUE(productValuesClose(type, C(0, inf), C(0, inf), threshold, detailed));
+            }
+    };
+    check(rocisa::DataType::ComplexFloat, 0.0002f, 0.001f);
+    check(rocisa::DataType::ComplexDouble, 2e-12, 1e-9);
+}
+
+TEST(HostNumericsComparisonAdapter, IntegerTypesKeepExactEqualityWithAnyThreshold)
+{
+    const auto check = []<typename T>(rocisa::DataType type, T value) {
+        for(bool detailed : {false, true})
+            for(double threshold : {-1.0, 0.0, 1.0})
+            {
+                EXPECT_TRUE(productValuesClose(type, value, value, threshold, detailed));
+                EXPECT_FALSE(productValuesClose(type, T(0), T(1), threshold, detailed));
+                EXPECT_FALSE(productValuesClose(type,
+                                                std::numeric_limits<T>::lowest(),
+                                                std::numeric_limits<T>::max(),
+                                                threshold,
+                                                detailed));
+            }
+    };
+    check(rocisa::DataType::Int8, int8_t(42));
+    check(rocisa::DataType::Int32, int32_t(42));
 }
 
 TEST(HostNumericsComparisonAdapter, PreservesFloatOnlyPositiveThresholdOverride)
