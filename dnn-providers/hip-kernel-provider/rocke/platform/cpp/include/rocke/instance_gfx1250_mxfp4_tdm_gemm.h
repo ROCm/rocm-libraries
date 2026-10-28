@@ -37,6 +37,22 @@ typedef struct rocke_mxfp4_tdm_gemm_spec
     bool tdm_lds;
     bool tdm_prefetch;
     int tdm_prefetch_depth;
+    /* Step 6 flags (default off). Non-default values are rejected until the
+     * matching Python substep is mirrored. */
+    bool local_read_prefetch;
+    bool prefetch_gl2;
+    bool scale_double_buffer;
+    bool wave_separated_tdm;
+    bool scale_tdm;
+    bool lds_pad;
+    bool lds_segment_interleave;
+    bool lds_segment_b_rotate;
+    bool tdm_plus_lds_buf;
+    bool init_c_wmma;
+    bool cluster_dim_set;
+    int cluster_dim_x;
+    int cluster_dim_y;
+    int cluster_dim_z;
 } rocke_mxfp4_tdm_gemm_spec_t;
 
 rocke_mxfp4_tdm_gemm_spec_t rocke_mxfp4_tdm_gemm_spec_default(void);

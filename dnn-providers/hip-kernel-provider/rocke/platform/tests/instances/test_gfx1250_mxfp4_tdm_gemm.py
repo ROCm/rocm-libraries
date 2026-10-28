@@ -13,6 +13,13 @@ from rocke.instances.gfx1250.mxfp4_tdm_gemm import (
     build_mxfp4_tdm_gemm,
     is_valid_spec,
 )
+from rocke.instances.gfx1250.mxfp4_tdm_gemm_variants import (
+    BASE_VARIANT,
+    MXFP4_GEMM_VARIANTS,
+    assert_variants_cumulative,
+    variant_names,
+    variant_spec,
+)
 from rocke.runtime.hip_module import get_device_arch
 
 
@@ -119,15 +126,11 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
     def test_invalid_geometry_is_rejected(self):
         cases = (
             (
-                MxFp4TdmGemmSpec(
-                    name="bad", M=128, N=64, K=256, warp_k=2
-                ),
+                MxFp4TdmGemmSpec(name="bad", M=128, N=64, K=256, warp_k=2),
                 "warp_k must be 1",
             ),
             (
-                MxFp4TdmGemmSpec(
-                    name="bad", M=128, N=64, K=384, tile_k=256
-                ),
+                MxFp4TdmGemmSpec(name="bad", M=128, N=64, K=384, tile_k=256),
                 "M/N/K must divide",
             ),
             (
@@ -138,7 +141,17 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     K=256,
                     tdm_prefetch_depth=3,
                 ),
-                "exactly two",
+                "tdm_plus_lds_buf",
+            ),
+            (
+                MxFp4TdmGemmSpec(
+                    name="bad",
+                    M=128,
+                    N=64,
+                    K=256,
+                    local_read_prefetch=True,
+                ),
+                "not implemented yet",
             ),
         )
         for spec, message in cases:
@@ -146,6 +159,30 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                 ok, reason = is_valid_spec(spec)
                 self.assertFalse(ok)
                 self.assertIn(message, reason)
+
+    def test_variant_registry_base_only_and_cumulative(self):
+        assert_variants_cumulative()
+        self.assertEqual(variant_names(), [BASE_VARIANT])
+        self.assertEqual(MXFP4_GEMM_VARIANTS[0][1], {})
+        base = variant_spec(BASE_VARIANT, 128, 64, 256)
+        self.assertEqual(base.name, BASE_VARIANT)
+        self.assertFalse(base.local_read_prefetch)
+        self.assertEqual(is_valid_spec(base), (True, "ok"))
+        default = MxFp4TdmGemmSpec(name="mxfp4_tdm_gemm", M=128, N=64, K=256)
+        base_llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(base, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        default_llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(default, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertEqual(
+            base_llvm.replace(BASE_VARIANT, "mxfp4_tdm_gemm"),
+            default_llvm,
+        )
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

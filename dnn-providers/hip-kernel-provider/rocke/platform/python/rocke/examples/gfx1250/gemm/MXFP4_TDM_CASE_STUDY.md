@@ -80,10 +80,36 @@ With `SourceSwap=True`, the YAML MacroTile is `256x256x512` (TensileLite client
 confirmed). It now passes the resource gate and matches the FP8 reference under
 FFM (`bad=0`). No Step 4 defect was found on the accepted geometries.
 
+HSACO resource check (`compile_kernel` + `analyze_hsaco`, llvm23) before Step 6:
+
+| Workgroup tile | `vgpr_count` | `vgpr_spill_count` | `sgpr_spill_count` | `private_segment_fixed_size` | LDS |
+| --- | --- | --- | --- | --- | --- |
+| `128x64x128` | 130 | 0 | 0 | 0 | 24576 |
+| `256x64x512` | 408 | 0 | 0 | 0 | 163840 |
+| YAML `256x256x512` | 735 | 0 | 0 | 0 | 262144 |
+
+The YAML tile uses 735 of 1024 VGPRs with no VGPR/SGPR spill and no scratch.
+
+## Cumulative variants (Step 6)
+
+Named presets over the same builder live in
+`rocke.instances.gfx1250.mxfp4_tdm_gemm_variants`. Each landed substep adds a
+cumulative `step6_N_mxfp4_gemm` entry. Use
+`python -m rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm --variant all` for FFM
+checks and
+`python -m rocke.examples.gfx1250.gemm.mxfp4_tdm_gemm_variants_bench` for the
+silicon bench harness (timings outside the repo).
+
+| Variant | Flags on | FFM |
+| --- | --- | --- |
+| `base_kernel_mxfp4_gemm` | (none) | `bad=0` (Step 4/5) |
+
 ## Deferred controls
 
-This baseline does not implement TDM transport or in-memory swizzling for
-scales, LDS segment interleave, B-segment rotation, GL2 prefetch, local-read
-prefetch, a third LDS buffer, cluster launch controls, or a specialized
-instruction scheduler. Those are separate, default-off increments that require
-their own numerical and IR checks.
+Step 6 lands hipBLASLt SIA0 features one default-off flag at a time (HalfPLR,
+PrefetchGL2, scale buffering/TDM, wave-separated TDM, LDS layout, third buffer,
+InitC WMMA, cluster). StinkyTofu / SIA4 schedule fidelity stays out of scope.
+
+A four-way feature comparison against CK Tile `comp_tdm` / `comp_tdm_v2` and
+the hipBLASLt YAML lives in `my_experiment/MXFP4_PIPELINE_COMPARISON.md`
+(repo root).

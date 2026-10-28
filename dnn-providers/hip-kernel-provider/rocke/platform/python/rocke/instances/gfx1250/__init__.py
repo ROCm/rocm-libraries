@@ -29,6 +29,15 @@ from .mxfp4_tdm_gemm import (
     mxfp4_tdm_gemm_grid,
     mxfp4_tdm_gemm_signature,
 )
+from .mxfp4_tdm_gemm_variants import (
+    BASE_VARIANT as MXFP4_BASE_VARIANT,
+    MXFP4_GEMM_BLOCKED_VARIANTS,
+    MXFP4_GEMM_VARIANTS,
+    assert_variants_cumulative,
+    variant_flags as mxfp4_variant_flags,
+    variant_names as mxfp4_variant_names,
+    variant_spec as mxfp4_variant_spec,
+)
 from .fused_moe_fp8 import Gfx1250Fp8Moe, Gfx1250Fp8MoeSpec
 from .fused_moe_mega_wmma import (
     FusedMegaWmmaSpec,
@@ -72,6 +81,13 @@ __all__ = [
     "is_valid_mxfp4_tdm_gemm_spec",
     "mxfp4_tdm_gemm_grid",
     "mxfp4_tdm_gemm_signature",
+    "MXFP4_BASE_VARIANT",
+    "MXFP4_GEMM_BLOCKED_VARIANTS",
+    "MXFP4_GEMM_VARIANTS",
+    "assert_variants_cumulative",
+    "mxfp4_variant_flags",
+    "mxfp4_variant_names",
+    "mxfp4_variant_spec",
     "Gfx1250Fp8Moe",
     "Gfx1250Fp8MoeSpec",
     "FusedMegaWmmaSpec",

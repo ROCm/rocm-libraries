@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
 
 from ...core.arch import ArchTarget
 from ...core.ir import (
@@ -54,6 +53,19 @@ class MxFp4TdmGemmSpec:
     tdm_lds: bool = True
     tdm_prefetch: bool = True
     tdm_prefetch_depth: int = 2
+    # Step 6 hipBLASLt scheduling flags (default off). Each lands in its own
+    # substep; see mxfp4_tdm_gemm_variants.MXFP4_GEMM_VARIANTS.
+    local_read_prefetch: bool = False
+    prefetch_gl2: bool = False
+    scale_double_buffer: bool = False
+    wave_separated_tdm: bool = False
+    scale_tdm: bool = False
+    lds_pad: bool = False
+    lds_segment_interleave: bool = False
+    lds_segment_b_rotate: bool = False
+    tdm_plus_lds_buf: bool = False
+    init_c_wmma: bool = False
+    cluster_dim: tuple[int, int, int] | None = None
 
     @property
     def wave_repeat_m(self) -> int:
@@ -69,11 +81,7 @@ class MxFp4TdmGemmSpec:
 
     @property
     def accumulator_values_per_lane(self) -> int:
-        return (
-            self.wave_repeat_m
-            * self.wave_repeat_n
-            * _ACCUMULATORS_PER_ATOM
-        )
+        return self.wave_repeat_m * self.wave_repeat_n * _ACCUMULATORS_PER_ATOM
 
     @property
     def packed_k(self) -> int:
@@ -88,10 +96,31 @@ class MxFp4TdmGemmSpec:
         return self.tile_n * (self.tile_k // 2)
 
     @property
+    def effective_prefetch_depth(self) -> int:
+        if self.tdm_plus_lds_buf and self.tdm_prefetch_depth < 3:
+            return 3
+        return self.tdm_prefetch_depth
+
+    @property
     def lds_bytes(self) -> int:
-        return self.tdm_prefetch_depth * (self.a_tile_bytes + self.b_tile_bytes)
+        depth = self.effective_prefetch_depth
+        a_stride = self.a_lds_row_stride_bytes
+        b_stride = self.b_lds_row_stride_bytes
+        return depth * (self.tile_m * a_stride + self.tile_n * b_stride)
+
+    @property
+    def a_lds_row_stride_bytes(self) -> int:
+        """Packed-K bytes per A row in LDS, including optional pad."""
+        base = self.tile_k // 2
+        return base + (16 if self.lds_pad else 0)
+
+    @property
+    def b_lds_row_stride_bytes(self) -> int:
+        base = self.tile_k // 2
+        return base + (16 if self.lds_pad else 0)
 
     def kernel_name(self) -> str:
+        cluster_on = self.cluster_dim is not None
         return kernel_name_join(
             self.name,
             "mxfp4_tdm",
@@ -99,21 +128,82 @@ class MxFp4TdmGemmSpec:
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
             f"w{self.warp_m}x{self.warp_n}x{self.warp_k}",
             f"r{self.wave_repeat_m}x{self.wave_repeat_n}",
-            flags={"db": self.tdm_prefetch_depth == 2},
+            flags={
+                "db": self.effective_prefetch_depth == 2,
+                "db3": self.effective_prefetch_depth == 3,
+                "lrp": self.local_read_prefetch,
+                "pgl2": self.prefetch_gl2,
+                "sdb": self.scale_double_buffer,
+                "wstdm": self.wave_separated_tdm,
+                "stdm": self.scale_tdm,
+                "ldsp": self.lds_pad,
+                "ldssi": self.lds_segment_interleave,
+                "ldsbr": self.lds_segment_b_rotate,
+                "initc": self.init_c_wmma,
+                "clu": cluster_on,
+            },
         )
 
 
-def is_valid_spec(
-    spec: MxFp4TdmGemmSpec, arch: str = "gfx1250"
-) -> Tuple[bool, str]:
+# Step 6 flags that are declared but not yet wired into the builder.
+# Each landed substep removes its flag from this frozenset.
+_UNIMPLEMENTED_STEP6_FLAGS = frozenset(
+    {
+        "local_read_prefetch",
+        "prefetch_gl2",
+        "scale_double_buffer",
+        "wave_separated_tdm",
+        "scale_tdm",
+        "lds_pad",
+        "lds_segment_interleave",
+        "lds_segment_b_rotate",
+        "tdm_plus_lds_buf",
+        "init_c_wmma",
+        "cluster_dim",
+    }
+)
+
+
+def _unimplemented_step6_flags(spec: MxFp4TdmGemmSpec) -> str | None:
+    active: list[str] = []
+    for name in sorted(_UNIMPLEMENTED_STEP6_FLAGS):
+        value = getattr(spec, name)
+        if name == "cluster_dim":
+            if value is not None:
+                active.append(name)
+        elif value:
+            active.append(name)
+    if not active:
+        return None
+    return ", ".join(active)
+
+
+def is_valid_spec(spec: MxFp4TdmGemmSpec, arch: str = "gfx1250") -> tuple[bool, str]:
     if arch != "gfx1250":
         return False, f"mxfp4_tdm_gemm is gfx1250-only (got {arch!r})"
     if min(spec.M, spec.N, spec.K) <= 0:
         return False, "M, N, and K must be positive"
     if not spec.tdm_lds or not spec.tdm_prefetch:
         return False, "Step 4 requires TDM/LDS staging with prefetch enabled"
-    if spec.tdm_prefetch_depth != 2:
-        return False, "Step 4 supports exactly two alternating LDS buffers"
+    if spec.tdm_prefetch_depth not in (2, 3):
+        return False, "tdm_prefetch_depth must be 2 or 3"
+    if spec.tdm_prefetch_depth == 3 and not spec.tdm_plus_lds_buf:
+        return False, "depth 3 requires tdm_plus_lds_buf"
+    if spec.tdm_plus_lds_buf and spec.tdm_prefetch_depth not in (2, 3):
+        return False, "tdm_plus_lds_buf expects depth 2 (auto-escalates) or 3"
+    unimplemented = _unimplemented_step6_flags(spec)
+    if unimplemented:
+        return False, f"Step 6 flag not implemented yet: {unimplemented}"
+    if spec.lds_segment_b_rotate and not spec.lds_segment_interleave:
+        return False, "lds_segment_b_rotate requires lds_segment_interleave"
+    if spec.scale_tdm and not spec.scale_double_buffer:
+        return False, "scale_tdm requires scale_double_buffer"
+    if spec.cluster_dim is not None:
+        if len(spec.cluster_dim) != 3 or any(d < 1 for d in spec.cluster_dim):
+            return False, "cluster_dim must be a positive (x, y, z) triple"
+        target_probe = ArchTarget.from_gfx("gfx1250")
+        if not target_probe.memory.has_cluster_launch:
+            return False, "gfx1250 reports no cluster launch support"
     if spec.warp_k != 1:
         return False, "K-split waves are not supported (warp_k must be 1)"
     if (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (
@@ -154,7 +244,7 @@ def is_valid_spec(
     return True, "ok"
 
 
-def mxfp4_tdm_gemm_signature(spec: MxFp4TdmGemmSpec) -> List[dict]:
+def mxfp4_tdm_gemm_signature(spec: MxFp4TdmGemmSpec) -> list[dict]:
     return (
         SignatureBuilder()
         .ptr("A", "i8")
@@ -172,13 +262,11 @@ def mxfp4_tdm_gemm_signature(spec: MxFp4TdmGemmSpec) -> List[dict]:
     )
 
 
-def mxfp4_tdm_gemm_grid(spec: MxFp4TdmGemmSpec) -> Tuple[int, int, int]:
+def mxfp4_tdm_gemm_grid(spec: MxFp4TdmGemmSpec) -> tuple[int, int, int]:
     return ceil_div_grid((spec.N, spec.tile_n), (spec.M, spec.tile_m))
 
 
-def build_mxfp4_tdm_gemm(
-    spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250"
-) -> KernelDef:
+def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
     """Build the double-buffered TDM/LDS MX FP4 GEMM."""
     ok, reason = is_valid_spec(spec, arch)
     if not ok:
@@ -189,18 +277,10 @@ def build_mxfp4_tdm_gemm(
 
     A = b.param("A", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
     B = b.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
-    AS = b.param(
-        "A_scale", PtrType(I8, "global"), noalias=True, readonly=True, align=4
-    )
-    BS = b.param(
-        "B_scale", PtrType(I8, "global"), noalias=True, readonly=True, align=4
-    )
-    C = b.param(
-        "C", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=1
-    )
-    D = b.param(
-        "D", PtrType(FP8E4M3, "global"), noalias=True, writeonly=True, align=1
-    )
+    AS = b.param("A_scale", PtrType(I8, "global"), noalias=True, readonly=True, align=4)
+    BS = b.param("B_scale", PtrType(I8, "global"), noalias=True, readonly=True, align=4)
+    C = b.param("C", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=1)
+    D = b.param("D", PtrType(FP8E4M3, "global"), noalias=True, writeonly=True, align=1)
     M = b.param("M", I32)
     N = b.param("N", I32)
     K = b.param("K", I32)
@@ -337,9 +417,7 @@ def build_mxfp4_tdm_gemm(
             group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
             for rm, atom_row in enumerate(atom_rows):
                 a_frag = _load_a_fragment(a_buffer, atom_row, inner_k)
-                a_scale = _pack_a_scale(
-                    b.add(block_m, b.add(atom_row, lane)), group0
-                )
+                a_scale = _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
                 for rn, atom_col in enumerate(atom_cols):
                     index = rm * spec.wave_repeat_n + rn
                     b_frag = _load_b_fragment(b_buffer, atom_col, inner_k)
@@ -388,9 +466,7 @@ def build_mxfp4_tdm_gemm(
     b.s_wait_tensorcnt(0)
     b.s_waitcnt(lgkmcnt=0)
     b.s_barrier_bare()
-    final_accumulators = _compute_tile(
-        upper, final_parity, loop.results[1:]
-    )
+    final_accumulators = _compute_tile(upper, final_parity, loop.results[1:])
 
     for rm, atom_row in enumerate(atom_rows):
         for rn, atom_col in enumerate(atom_cols):
@@ -409,9 +485,7 @@ def build_mxfp4_tdm_gemm(
                 col = b.add(block_n, b.add(atom_col, lane_col))
                 index = b.add(b.mul(row, N), col)
                 value = b.fmul(alpha, b.vec_extract(acc, slot))
-                c_value = b.cvt_fp8_to_f32(
-                    b.global_load(C, index, FP8E4M3, align=1)
-                )
+                c_value = b.cvt_fp8_to_f32(b.global_load(C, index, FP8E4M3, align=1))
                 value = b.fadd(value, b.fmul(beta, c_value))
                 b.global_store(D, index, b.cvt_f32_to_fp8(value), align=1)
 

@@ -18,6 +18,11 @@ from ....instances.gfx1250.mxfp4_tdm_gemm import (
     is_valid_spec,
     mxfp4_tdm_gemm_grid,
 )
+from ....instances.gfx1250.mxfp4_tdm_gemm_variants import (
+    BASE_VARIANT,
+    variant_names,
+    variant_spec,
+)
 from ....runtime.hip_module import Runtime, get_device_arch
 
 
@@ -28,15 +33,9 @@ def make_inputs(spec: MxFp4TdmGemmSpec, seed: int = 0x32F4):
     rng = np.random.default_rng(seed)
     a_codes = rng.integers(0, 2, (spec.M, spec.K), dtype=np.uint8) * 2
     b_codes = rng.integers(0, 2, (spec.N, spec.K), dtype=np.uint8) * 2
-    a_scale = rng.integers(
-        125, 129, (spec.M, spec.K // spec.block_k), dtype=np.uint8
-    )
-    b_scale = rng.integers(
-        125, 129, (spec.K // spec.block_k, spec.N), dtype=np.uint8
-    )
-    c_values = rng.integers(0, 3, (spec.M, spec.N), dtype=np.uint8).astype(
-        np.float32
-    )
+    a_scale = rng.integers(125, 129, (spec.M, spec.K // spec.block_k), dtype=np.uint8)
+    b_scale = rng.integers(125, 129, (spec.K // spec.block_k, spec.N), dtype=np.uint8)
+    c_values = rng.integers(0, 3, (spec.M, spec.N), dtype=np.uint8).astype(np.float32)
     c = c_values.astype(ml_dtypes.float8_e4m3fn)
     return (
         pack_fp4_codes(a_codes),
@@ -125,11 +124,13 @@ def run_case(
             float(alpha32),
             float(beta32),
         )
+        cluster = spec.cluster_dim
         runtime.launch(
             function,
             mxfp4_tdm_gemm_grid(spec),
             (spec.block_size, 1, 1),
             arguments,
+            cluster=cluster,
         )
         runtime.sync()
         host = (ctypes.c_uint8 * int(out.nbytes))()
@@ -154,6 +155,16 @@ def run_case(
     )
 
 
+def _geometry_kwargs(args: argparse.Namespace) -> dict:
+    return {
+        "tile_m": args.tile_m,
+        "tile_n": args.tile_n,
+        "tile_k": args.tile_k,
+        "warp_m": args.warp_m,
+        "warp_n": args.warp_n,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--m", type=int, default=128)
@@ -166,19 +177,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warp-n", type=int, default=2)
     parser.add_argument("--alpha", type=float, default=None)
     parser.add_argument("--beta", type=float, default=0.5)
-    args = parser.parse_args(argv)
-    spec = MxFp4TdmGemmSpec(
-        name="mxfp4_tdm_gemm",
-        M=args.m,
-        N=args.n,
-        K=args.k,
-        tile_m=args.tile_m,
-        tile_n=args.tile_n,
-        tile_k=args.tile_k,
-        warp_m=args.warp_m,
-        warp_n=args.warp_n,
+    parser.add_argument(
+        "--variant",
+        default=BASE_VARIANT,
+        help=(
+            f"named cumulative kernel variant ({', '.join(variant_names())}) "
+            "or 'all'"
+        ),
     )
-    run_case(spec, alpha=args.alpha, beta=args.beta)
+    args = parser.parse_args(argv)
+    geo = _geometry_kwargs(args)
+    names = variant_names() if args.variant == "all" else [args.variant]
+    for name in names:
+        spec = variant_spec(name, args.m, args.n, args.k, **geo)
+        run_case(spec, alpha=args.alpha, beta=args.beta)
     return 0
 
 
