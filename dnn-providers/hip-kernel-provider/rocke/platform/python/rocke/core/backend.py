@@ -1102,6 +1102,9 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         prefetch=spec.prefetch,
         sched=spec.sched,
         wave_size=spec.wave_size,
+        pack_groups=spec.pack_groups,
+        split_barrier=spec.split_barrier,
+        wave_epilogue=spec.wave_epilogue,
     )
 
 
