@@ -37,7 +37,7 @@ from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
 from .Utilities import locateExe, versionIsCompatible, print1, print2, printExit, printWarning, \
      getVerbosity
-from .ValidParameters import validParameters
+from .ValidParameters import validISA, validParameters
 
 startTime = time.time()
 
@@ -653,6 +653,7 @@ defaultBenchmarkCommonParameters = [
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
+    {"PostLoopStoreInNll": [True]},
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
@@ -737,6 +738,10 @@ libraryLogicTypeOverrides = {
 def restoreDefaultGlobalParameters():
     """
     Restores `globalParameters` back to defaults.
+
+    ``assignGlobalParameters`` also rebinds ``validParameters["ISA"]`` to the
+    isa map it was given. Put the static ``validISA`` list back; callers that
+    narrowed the build targets must not leave that list in place.
     """
     global globalParameters
     global defaultGlobalParameters
@@ -745,6 +750,7 @@ def restoreDefaultGlobalParameters():
     globalParameters.clear()
     for key, value in deepcopy(defaultGlobalParameters).items():
         globalParameters[key] = value
+    validParameters["ISA"] = validISA
 
 
 # hopefully the isaInfoMap keys only contain isas we plan to build and not all
