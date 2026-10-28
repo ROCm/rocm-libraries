@@ -783,15 +783,17 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+#   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
+#   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 
-    # Tensile Python package
+    # TensileLite Python package
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/"
         DESTINATION "${_tensilelite_install_dest}/tensilelite"
@@ -866,6 +868,37 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
                 )
             endif()
         endif()
+    endif()
+
+    # FFM runs with PYTHONPATH=share/hipblaslt/tensilelite. The lib/hipblaslt
+    # install in rocisa/CMakeLists.txt is a different root, and TheRock's lib
+    # component keeps lib/hipblaslt/rocisa plus every *.so. Put the package
+    # here so gfx1250 codegen can import it. The *.so is claimed by the lib
+    # artifact; these Python files stay in the test artifact; flattening
+    # puts them back next to each other. The target exists for every GPU
+    # family (see STINKYTOFU_BUILD_PYTHON in rocisa/CMakeLists.txt).
+    if(TARGET stinkytofu_python)
+        set(_stinkytofu_py_src "${ROCM_LIBRARIES_ROOT}/shared/stinkytofu")
+        install(TARGETS stinkytofu_python
+            LIBRARY DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+            COMPONENT tests
+        )
+        install(FILES "${_stinkytofu_py_src}/python_module/stinkytofu/__init__.py"
+            DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+            COMPONENT tests
+        )
+        if(TARGET intrinsics_compiled)
+            install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+                DESTINATION "${_tensilelite_install_dest}/stinkytofu"
+                COMPONENT tests
+            )
+        endif()
+        install(DIRECTORY
+            "${_tensilelite_src}/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
+            DESTINATION "${_tensilelite_install_dest}/rocisa_stinkytofu_adaptor"
+            COMPONENT tests
+            FILES_MATCHING PATTERN "*.py"
+        )
     endif()
 
     # rocisa tests
