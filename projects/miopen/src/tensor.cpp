@@ -1117,7 +1117,7 @@ void SetTensor(const Handle& handle,
         std::stringstream ss;
         // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
         ss << "-DSUBTENSOR_OP_WITH_SCALAR=0";
-        ss << GetDataTypeKernelParams(dataType);
+        ss << GetDataTypeKernelParams(dataType, handle.GetDeviceName());
         ss << " -DLOCAL_SIZE=" << std::to_string(wld);
         ss << " -DMIOPEN_USE_64BIT_INDEX=" << static_cast<int>(use_64bit_index);
 
@@ -1267,7 +1267,8 @@ void ScaleTensor(const Handle& handle,
         std::size_t wld = 256 < wgd ? 256 : wgd;
 
         // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
-        std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=1" + GetDataTypeKernelParams(dataType);
+        std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=1" +
+                            GetDataTypeKernelParams(dataType, handle.GetDeviceName());
         parms += " -DLOCAL_SIZE=" + std::to_string(wld);
         parms += " -DMIOPEN_USE_64BIT_INDEX=" + std::to_string(static_cast<int>(use_64bit_index));
 
@@ -1432,7 +1433,8 @@ void CopyTensor(const Handle& handle,
 
             std::size_t wld = 256 < wgd ? 256 : wgd;
 
-            std::string parms = GetDataTypeKernelParams(srcDesc_flat.GetType());
+            std::string parms =
+                GetDataTypeKernelParams(srcDesc_flat.GetType(), handle.GetDeviceName());
 
             parms += " -DLOCAL_SIZE=" + std::to_string(wld);
             parms +=
@@ -2142,7 +2144,7 @@ void TransformTensor(const Handle& handle,
             std::size_t wld = 256 < wgd ? 256 : wgd;
 
             std::string parms =
-                GetDataTypeKernelParams(dataTypey) +
+                GetDataTypeKernelParams(dataTypey, handle.GetDeviceName()) +
                 " -DMIOPEN_BETA_IS_ZERO=" + std::to_string(static_cast<int>(is_beta_zero)) +
                 " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
             parms += " -DLOCAL_SIZE=" + std::to_string(wld);

@@ -79,6 +79,8 @@ struct ConvFwdSolverTestF8
 protected:
     void SetUp() override
     {
+        miopen_f8::set_hip_f8_ieee_exponent_bias(
+            miopen::UsesIeeeExponentBias(get_handle().GetDeviceName()));
         test_skipped                = false;
         std::tie(algo, conv_config) = GetParam();
         input   = tensor<T>{conv_config.N, conv_config.C, conv_config.H, conv_config.W};
