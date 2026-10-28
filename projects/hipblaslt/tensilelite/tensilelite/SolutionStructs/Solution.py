@@ -64,7 +64,8 @@ from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, g
                                                get_fp16_valid_blocks, get_fp32_valid_blocks, \
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from ..Common.GlobalParameters import defaultSolution, \
-                                            defaultInternalSupportParams
+                                            defaultInternalSupportParams, \
+                                            globalParameters
 from ..Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -86,7 +87,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -289,6 +290,20 @@ def _supportStreamKPerTileExtraIters(state):
   key from defaultSolution; indexing it here KeyErrors on ordinary GFA states.
   """
   return isStreamK(state) and not hasDynamicAssignment(state) and not isCustomKernelConfig(state)
+
+
+def _supportOccupancyProbe(state):
+  """Whether this solution's asm takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args.
+
+  Opt-in at build time (EmitOccupancyProbe); generated non-grouped StreamK kernels
+  with hybrid work assignment on gfx95x only, the arch the slot layout (SH == 0,
+  SE < 4, XCC < 8) is verified on.
+  """
+  return bool(globalParameters.get("EmitOccupancyProbe", False)) \
+      and tuple(state["ISA"])[:2] == (9, 5) \
+      and hasHybridAssignment(state) \
+      and not state["ProblemType"]["GroupedGemm"] \
+      and not isCustomKernelConfig(state)
 
 
 def _validateStreamKForceDPOnly(state, printRejectionReason):
@@ -2443,6 +2458,7 @@ class Solution(collections.abc.Mapping):
          and (not isStreamKSpatialCluster(state)
               or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
                   and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
+    state["InternalSupportParams"]["SupportOccupancyProbe"] = _supportOccupancyProbe(state)
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -4999,26 +5015,44 @@ class Solution(collections.abc.Mapping):
             state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["_DepthUMXSB"])
           state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], 16)
 
+      # The DepthU ceiling belongs to the subtile pre-shuffled global read, whose K
+      # step rides in the MUBUF immediate. The classic swizzle path builds its step
+      # differently and ships above the ceiling -- gfx942 F8 swizzle-A logic carries
+      # DepthU 1024 -- so only ask on the subtile path.
+      subtileSwizzled = isSubtileSwizzledTensor(state)
+
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
         if state["ProblemType"][f"SwizzleTensor{tc}"]:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
+          if subtileSwizzled:
+            rowsPerBlock = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
+            maxDepthU = swizzleTensorMaxDepthU(rowsPerBlock, state["ProblemType"][f"DataType{tc}"].numBytes())
+            if state["DepthU"] > maxDepthU:
+              reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {maxDepthU}")
+              continue
           laneSize = swizzleGeometry(state, tc)["laneSize"]
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
-        if not state["DirectToVgprA"]:
-          reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+        # The subtile global-read emitter walks the swizzled A layout itself, so it
+        # does not need A staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprA"]:
+            reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        if not state["DirectToVgprB"]:
-          reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+        # The subtile global-read emitter walks the swizzled B layout itself, so it
+        # does not need B staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprB"]:
+            reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
 
