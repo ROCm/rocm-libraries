@@ -98,6 +98,7 @@ target_sources(origami-headers
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/attention.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm_intermediates.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp"
@@ -146,6 +147,7 @@ target_sources(
     origami
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/attention.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm_intermediates.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/logger.cpp"

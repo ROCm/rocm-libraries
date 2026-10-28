@@ -111,6 +111,40 @@ struct ORIGAMI_EXPORT context_t {
 ORIGAMI_EXPORT double calculate_work_utilization(const problem_t& problem, const config_t& config);
 
 /**
+ * @brief calculate_work_utilization for the compute terms of compute_tile_latency: an M or N
+ * narrower than one MFMA counts as one MFMA wide, since every kernel using that MFMA pays it.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param config Kernel configuration.
+ * @return double ratio of the useful compute volume to the launched volume.
+ */
+ORIGAMI_EXPORT double calculate_compute_utilization(const problem_t& problem, const config_t& config);
+
+/**
+ * @brief The part of one DepthU iteration a single wave works on: MT_M/wave_group_m x
+ * MT_N/wave_group_n x MT_K/local_split_u.
+ *
+ * @param config Kernel configuration.
+ * @return dim3_t per-wave share of the macro tile.
+ */
+ORIGAMI_EXPORT dim3_t compute_wave_share(const config_t& config);
+
+/**
+ * @brief LocalSplitU reduction cost: the lsu waves' partial MT_M x MT_N tiles reduced through
+ * LDS (write, barrier, read and accumulate), charged once per output tile. Zero when lsu <= 1.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Precomputed context; context.wave_group.k is the LocalSplitU factor.
+ * @return double Latency in cycles.
+ */
+ORIGAMI_EXPORT double compute_lsu_reduction_latency(const problem_t& problem,
+                                                    const hardware_t& hardware,
+                                                    const config_t& config,
+                                                    const context_t& context);
+
+/**
  * @brief calculate the output utilization which is the ratio of the useful problem volume to the
  * total scheduled volume.
  *
@@ -430,6 +464,23 @@ ORIGAMI_EXPORT double compute_l2_hit_rate_global(const problem_t& problem,
                                   size_t l2_capacity_bytes);
 
 /**
+ * @brief Total A+B bytes loaded for one K-window of an MT_M x MT_N tile, with rows rounded up
+ * to whole memory transactions on the contiguous axis.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @param k_window K extent of the window (elements).
+ * @param transaction_bytes transaction granularity in bytes (e.g. 64 for a DRAM sector).
+ * @return double Bytes.
+ */
+ORIGAMI_EXPORT double compute_operand_window_bytes(const problem_t& problem,
+                                                   const config_t& config,
+                                                   const context_t& context,
+                                                   size_t k_window,
+                                                   size_t transaction_bytes);
+
+/**
  * @brief Determine the memory latency per MT_M x MT_N x MT_K Macro Tile (L_MT).
  *
  * @param problem Problem description (M, N, K, etc.)
@@ -442,6 +493,37 @@ ORIGAMI_EXPORT double compute_memory_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
                               const context_t& context);
+
+/**
+ * @brief The terms compute_memory_latency combines, as it computes them.
+ *
+ * Latencies are cycles per K-iteration of one tile on every active CU; L_mem is the largest of
+ * the three level latencies and equals compute_memory_latency.
+ */
+struct ORIGAMI_EXPORT memory_latency_terms_t {
+  double H_mem_l2_A   = 0.0;  ///< L2 hit rate of A (estimate_cache_hit_rates)
+  double H_mem_l2_B   = 0.0;  ///< L2 hit rate of B
+  double H_mem_mall_A = 0.0;  ///< MALL hit rate of A
+  double H_mem_mall_B = 0.0;  ///< MALL hit rate of B
+  double L_mem_l2     = 0.0;  ///< temporal A/B loads at the occupancy-scaled L2 bandwidth
+  double L_mem_mall   = 0.0;  ///< L2 misses at MALL bandwidth (0 without a MALL)
+  double L_mem_dram   = 0.0;  ///< MALL misses and non-temporal loads at DRAM bandwidth
+  double L_mem        = 0.0;  ///< max(L_mem_l2, L_mem_mall, L_mem_dram)
+};
+
+/**
+ * @brief compute_memory_latency with its terms.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return memory_latency_terms_t; L_mem is bit-identical to compute_memory_latency.
+ */
+ORIGAMI_EXPORT memory_latency_terms_t compute_memory_latency_terms(const problem_t& problem,
+                                                                  const hardware_t& hardware,
+                                                                  const config_t& config,
+                                                                  const context_t& context);
 
 /**
  * @brief Compute the epilogue latency for a single tile.
@@ -495,6 +577,76 @@ ORIGAMI_EXPORT double compute_tile_latency(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config,
                             const context_t& context);
+
+/**
+ * @brief The terms compute_tile_latency combines, as it computes them.
+ *
+ * Cycles unless noted. L_tile_total = (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) *
+ * weight_tile_total, and L_mainloop is the sum of its eight terms (L_main ... L_du_waste).
+ */
+struct ORIGAMI_EXPORT tile_latency_terms_t {
+  memory_latency_terms_t memory{};  ///< L_mem of one K-iteration and its terms
+
+  /// Per-K-iteration compute.
+  double L_mt_compute = 0.0;  ///< MFMA time of one MT_M x MT_N x MT_K step (compute_mt_compute_latency)
+  double L_lds_read   = 0.0;  ///< compute_local_read_latency(full_width = false)
+  double L_lds_floor  = 0.0;  ///< compute_local_read_latency(full_width = true)
+  double L_local_read = 0.0;  ///< exposed LDS read: max(0, L_lds_read - max(L_mt_compute, L_lds_floor))
+  double wgs_per_cu   = 0.0;  ///< workgroups resident on one CU (occupancy- and grid-capped)
+  double L_compute    = 0.0;  ///< L_mt_compute after co-residency scaling, plus L_local_read
+  double L_cvt        = 0.0;  ///< TF32 / f32-to-BF16 conversion per main-loop iteration
+
+  /// K-loop structure.
+  long   k_iters        = 0;    ///< full MT_K iterations per workgroup (split-K sharded)
+  long   num_main_iters = 0;    ///< max(k_iters - PGR, 0)
+  long   num_ngll_iters = 0;    ///< drain iterations
+  size_t tail_k         = 0;    ///< K % MT_K
+  double tail_fraction  = 0.0;  ///< tail_k / MT_K
+  double eff_scale      = 1.0;  ///< main-loop issue efficiency (1 when splitting_factor > 4)
+  double utilization         = 1.0;  ///< calculate_work_utilization
+  double compute_utilization = 1.0;  ///< calculate_compute_utilization
+
+  /// Prologue and main loop.
+  double L_prologue          = 0.0;  ///< L_mem when k_iters > 0
+  double L_main              = 0.0;  ///< steady-state iterations
+  double L_ngll              = 0.0;  ///< drain iterations
+  double L_nll               = 0.0;  ///< terminal compute iteration
+  double L_main_per_iter     = 0.0;  ///< one full MT_K iteration (DepthU-waste unit)
+  double L_tail              = 0.0;  ///< partial-K window
+  double L_pgr_stall         = 0.0;  ///< PGR fill/drain exposure
+  double L_loop_overhead     = 0.0;  ///< per-iteration bookkeeping
+  double L_single_lds_buffer = 0.0;  ///< exposed tile writes with one LDS buffer
+  double depth_waste_ratio   = 0.0;  ///< unused DepthU depth, in K-iterations
+  double batched_fill_ratio  = 0.0;  ///< batched few-iteration fill/drain
+  double m_edge_ratio        = 0.0;  ///< single-tile M overshoot
+  double L_du_waste          = 0.0;  ///< the three waste ratios charged at L_main_per_iter
+  double L_mainloop          = 0.0;  ///< sum of the eight main-loop terms
+
+  /// Epilogue and total.
+  double epi_occ_exposure      = 1.0;  ///< max(1, EPILOGUE_OCC_SATURATION / wgs_per_cu)
+  double scalar_store_fraction = 0.0;  ///< from compute_epilogue_latency
+  double store_exposure        = 0.0;  ///< epilogue share of main loop + epilogue
+  double scalar_store_mult     = 1.0;  ///< exposed scalar-store penalty
+  double L_epilogue            = 0.0;  ///< final epilogue (occupancy exposure and scalar stores)
+  double L_lsu_reduce          = 0.0;  ///< compute_lsu_reduction_latency
+  double weight_tile_total     = 1.0;  ///< hand-opt discount after the XCD-alignment rule
+  double L_tile_total          = 0.0;  ///< compute_tile_latency
+};
+
+/**
+ * @brief compute_tile_latency with its terms, in one evaluation.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return tile_latency_terms_t; L_tile_total is bit-identical to compute_tile_latency and
+ *         memory.L_mem to compute_memory_latency.
+ */
+ORIGAMI_EXPORT tile_latency_terms_t compute_tile_latency_terms(const problem_t& problem,
+                                                              const hardware_t& hardware,
+                                                              const config_t& config,
+                                                              const context_t& context);
 
 /**
  * @brief Computes the latency per K-complete macro-tile timestep.
