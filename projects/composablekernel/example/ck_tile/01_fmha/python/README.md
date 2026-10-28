@@ -5,7 +5,7 @@ It supports FP16/BF16 fixed-length and variable-length attention, packed inputs,
 forward/backward, MHA/GQA/MQA, causal/local masks, ALiBi, dropout, deterministic
 backward, and KV-cache operations, subject to CK backend restrictions.
 
-Validated on **gfx1250**. Nonzero `softcap`, attention sinks, and unequal Q/V
+Validated on **gfx950 and gfx1250**. Nonzero `softcap`, attention sinks, and unequal Q/V
 head dimensions are unsupported. The package can coexist with `flash_attn` and
 does not fall back to other backends.
 
@@ -18,10 +18,10 @@ first; `--no-build-isolation` builds against that installation.
 From this directory:
 
 ```bash
-GPU_ARCHS=gfx1250 MAX_JOBS=64 python -m pip install --no-build-isolation '.[test]'
+MAX_JOBS=64 python -m pip install --no-build-isolation '.[test]'
 ```
 
-`GPU_ARCHS` defaults to the detected GPU; set it for cross-compilation.
+`GPU_ARCHS` defaults to the detected GPU; set `gfx950` or `gfx1250` for cross-compilation.
 `CK_ROOT` selects an alternate CK checkout. The build uses the C++ example's
 architecture-specific kernels with receipt 5, which generates only the variants
 needed by the current Python API, including bias and deterministic backward.
@@ -29,9 +29,9 @@ needed by the current Python API, including bias and deterministic backward.
 ## Development and incremental builds
 
 ```bash
-GPU_ARCHS=gfx1250 MAX_JOBS=64 python -m pip install --no-build-isolation -e '.[test]'
+MAX_JOBS=64 python -m pip install --no-build-isolation -e '.[test]'
 # After editing a kernel, code generator, or binding:
-GPU_ARCHS=gfx1250 MAX_JOBS=64 python setup.py build_ext --inplace
+MAX_JOBS=64 python setup.py build_ext --inplace
 ```
 
 Keep `python/build/` to reuse compiled objects, or set `CK_TILE_FMHA_BUILD_DIR`
@@ -86,23 +86,25 @@ Descales are FP32 tensors on the same GPU; dequantization is `input.float() * de
 ```python
 from ck_tile_fmha import fmha_fp8_func
 
-# Quantize each tensor independently; reduce over sequence/features for per-head.
-def quantize_perhead(x):
-    descale = x.float().abs().amax(dim=(1, 3)).clamp_min(1e-12) / 448.0
-    quantized = (x.float() / descale[:, None, :, None]).to(torch.float8_e4m3fn)
+def quantize_pertensor(x):
+    descale = x.float().abs().amax().clamp_min(1e-12) / 448.0
+    quantized = (x.float() / descale).to(torch.float8_e4m3fn)
     return quantized, descale
 
-q8, qs = quantize_perhead(q.detach())
-k8, ks = quantize_perhead(k.detach())
-v8, vs = quantize_perhead(v.detach())
-out, lse = fmha_fp8_func(q8, k8, v8, qs, ks, vs, qscale="perhead", return_lse=True)
+q8, qs = quantize_pertensor(q.detach())
+k8, ks = quantize_pertensor(k.detach())
+v8, vs = quantize_pertensor(v.detach())
+out = fmha_fp8_func(q8, k8, v8, qs, ks, vs)
 ```
 
 Supports MHA/GQA/MQA and causal/local masks. FP8 backward, dropout, bias and ALiBi
-are not exposed. On gfx1250, FP8 head dimensions must be <= 128. Per-head is
-currently available only on gfx1250; other modes and LSE availability depend on
-CK's target kernels. `return_lse=True` returns
-`(out, lse)` with FP32 LSE `[batch, nheads, seqlen_q]`.
+are not exposed. `return_lse=True` returns `(out, lse)` with FP32 LSE
+`[batch, nheads, seqlen_q]`.
+
+- **gfx1250:** all four modes and LSE, head dimensions <= 128.
+- **gfx950:** no-scale, per-tensor and block-scale, head dimensions <= 256.
+  LSE requires no-scale/per-tensor, head dimension 128 and no/causal mask.
+  Per-head is unsupported.
 
 Block sizes default to 128 and must satisfy the kernel's tile alignment. Block
 scales require a contiguous last dimension. On gfx1250, **blockscale V descales

@@ -175,6 +175,8 @@ def fmha_fp8_func(
     MHA/GQA/MQA and causal/local masks. LSE has shape [batch, nheads, seqlen_q].
     Use float8_e4m3fnuz on gfx94x and float8_e4m3fn on gfx950/gfx12. Per-head
     requires gfx1250. All FP8 modes on gfx1250 require head dimension <= 128.
+    On gfx950, no_scale/pertensor/blockscale support head dimensions <= 256;
+    LSE requires no_scale/pertensor, head dimension 128 and no/causal mask.
     Other modes, block sizes and LSE availability depend on the target's CK kernels.
     """
     if q.dtype not in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):

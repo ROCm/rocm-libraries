@@ -672,9 +672,10 @@ def test_fmha_deterministic(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dt
 @pytest.mark.parametrize("mask", ["none", "causal", "local"])
 @pytest.mark.parametrize("dropout_p", [0.0, 0.17])
 @pytest.mark.parametrize("bias_grad", [False, True])
-def test_bias_forward_backward(dtype, api, mask, dropout_p, bias_grad):
+@pytest.mark.parametrize("sq,sk", [(97, 113), (16, 33), (32, 65)])
+def test_bias_forward_backward(dtype, api, mask, dropout_p, bias_grad, sq, sk):
     torch.manual_seed(0)
-    sq, sk, h, hk, d = 97, 113, 4, 2, 64
+    h, hk, d = 4, 2, 64
     if api == "qkvpacked":
         sk, hk = sq, h
     q = torch.randn(2, sq, h, d, device="cuda", dtype=dtype, requires_grad=True)
@@ -739,19 +740,31 @@ def test_bias_forward_backward(dtype, api, mask, dropout_p, bias_grad):
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("sq,sk,d,hk", [(1, 113, 64, 1), (113, 97, 59, 2), (64, 64, 128, 4)])
+@pytest.mark.parametrize(
+    "sq,sk,d,hk",
+    [
+        (1, 113, 64, 1),
+        (113, 97, 59, 2),
+        (64, 64, 128, 4),
+        (32, 16, 64, 2),
+        (32, 33, 64, 2),
+        (32, 129, 64, 2),
+        (16, 33, 128, 2),
+    ],
+)
 @pytest.mark.parametrize("deterministic", [False, True])
-def test_bias_shapes_and_determinism(dtype, sq, sk, d, hk, deterministic):
+@pytest.mark.parametrize("causal", [False, True])
+def test_bias_shapes_and_determinism(dtype, sq, sk, d, hk, deterministic, causal):
     torch.manual_seed(1)
     q = torch.randn(2, sq, 4, d, device="cuda", dtype=dtype, requires_grad=True)
     k = torch.randn(2, sk, hk, d, device="cuda", dtype=dtype, requires_grad=True)
     v = torch.randn_like(k, requires_grad=True)
     bias = torch.randn(sq, sk, device="cuda", dtype=dtype, requires_grad=True)
     out, lse, randval = fmha_func(
-        q, k, v, bias=bias, causal=True, deterministic=deterministic, return_attn_probs=True
+        q, k, v, bias=bias, causal=causal, deterministic=deterministic, return_attn_probs=True
     )
     ref, _, lse_ref = attention_ref(
-        q.float(), k.float(), v.float(), attn_bias=bias.float(), causal=True, return_lse=True
+        q.float(), k.float(), v.float(), attn_bias=bias.float(), causal=causal, return_lse=True
     )
     tol = 3e-3 if dtype == torch.float16 else 2e-2
     torch.testing.assert_close(out.float(), ref, atol=tol, rtol=tol)
@@ -770,6 +783,7 @@ def test_bias_shapes_and_determinism(dtype, sq, sk, d, hk, deterministic):
 
 @pytest.mark.parametrize("api", ["separate", "kvpacked", "qkvpacked"])
 def test_only_bias_requires_grad(api):
+    torch.manual_seed(0)
     q, k, v = (torch.randn(2, 32, 2, 64, device="cuda", dtype=torch.float16) for _ in range(3))
     bias = torch.randn(32, 32, device="cuda", dtype=q.dtype, requires_grad=True)
     if api == "separate":

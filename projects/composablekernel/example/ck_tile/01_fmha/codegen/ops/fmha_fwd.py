@@ -1332,7 +1332,12 @@ class KernelComponentFactoryGfx950(
                 ["no", "causal"],
                 ["t", "f"],
             ):
-                pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
+                mask_constraint = (
+                    CppConstraint("a.window_size_left < 0 && a.window_size_right == 0")
+                    if mask == "causal"
+                    else CppConstraint()
+                )
+                pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f", F_constraint=mask_constraint))  # fmt: skip
 
         elif dtype in cls._DT_MXFP8 or dtype in cls._DT_MXFP4:
             # no need dropout kernels

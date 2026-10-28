@@ -7,6 +7,22 @@ import torch
 from ck_tile_fmha import fmha_fp8_func, fmha_func
 
 
+def fp8_unsupported_reason(qscale, d, return_lse=False, mask="none"):
+    arch = torch.cuda.get_device_properties(torch.cuda.current_device()).gcnArchName
+    if arch.startswith("gfx1250"):
+        return "gfx1250 FP8 requires head dimension <= 128" if d > 128 else None
+    if qscale == "perhead":
+        return "FP8 per-head kernels require gfx1250"
+    if return_lse and not (
+        arch.startswith("gfx950")
+        and d == 128
+        and qscale in ("no_scale", "pertensor")
+        and mask in ("none", "causal")
+    ):
+        return "FP8 LSE requires gfx950, head dimension 128, no/per-tensor scale and no/causal mask"
+    return None
+
+
 def make_fp8_input(shape, qscale, block_size=128, is_value=False):
     """Quantized input, FP32 descale, and dequantized reference with varying scales."""
     arch = torch.cuda.get_device_properties(torch.cuda.current_device()).gcnArchName
@@ -65,18 +81,21 @@ def check_fp8_output(out, q, k, v, scale, causal=False, window=(-1, -1)):
 
 @pytest.mark.parametrize("qscale", ["no_scale", "pertensor", "perhead", "blockscale"])
 @pytest.mark.parametrize("d", [32, 59, 64, 111, 128])
-@pytest.mark.parametrize("mask", ["none", "causal", "local"])
-@pytest.mark.parametrize("sq,sk,h,hk", [(97, 203, 4, 4), (1, 257, 6, 2), (193, 113, 6, 1)])
+@pytest.mark.parametrize("mask", ["none", "causal", "local", "local_causal"])
+@pytest.mark.parametrize(
+    "sq,sk,h,hk", [(97, 203, 4, 4), (1, 257, 6, 2), (193, 113, 6, 1), (256, 256, 4, 4)]
+)
 @pytest.mark.parametrize("return_lse", [False, True])
 def test_fp8_fixedlen(qscale, d, mask, sq, sk, h, hk, return_lse):
-    if not torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250"):
-        pytest.skip("This FP8 mode/head-dimension matrix requires gfx1250")
+    reason = fp8_unsupported_reason(qscale, d, return_lse, mask)
+    if reason:
+        pytest.skip(reason)
     torch.manual_seed(0)
     q, qs, qref = make_fp8_input((2, sq, h, d), qscale)
     k, ks, kref = make_fp8_input((2, sk, hk, d), qscale)
     v, vs, vref = make_fp8_input((2, sk, hk, d), qscale, is_value=True)
-    causal = mask == "causal"
-    window = (37, 11) if mask == "local" else (-1, -1)
+    causal = mask in ("causal", "local_causal")
+    window = (37, 11) if mask.startswith("local") else (-1, -1)
     scale = 0.7 / d**0.5
     actual = fmha_fp8_func(
         q,
@@ -103,12 +122,17 @@ def test_fp8_fixedlen(qscale, d, mask, sq, sk, h, hk, return_lse):
         assert torch.isneginf(lse[~valid]).all()
 
 
-@pytest.mark.parametrize("block_size_q,block_size_kv", [(128, 32), (128, 64), (256, 128)])
+@pytest.mark.parametrize(
+    "block_size_q,block_size_kv", [(128, 32), (128, 64), (128, 128), (256, 128), (256, 256)]
+)
 def test_fp8_block_sizes(block_size_q, block_size_kv):
     qscale = "blockscale"
 
-    if not torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250"):
-        pytest.skip("Fine KV block scales require gfx1250")
+    if (
+        not torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250")
+        and block_size_kv % 128
+    ):
+        pytest.skip("The gfx9 FP8 head-dimension 128 kernel requires KV blocks divisible by 128")
     torch.manual_seed(1)
     q, qs, qr = make_fp8_input((2, 273, 6, 128), qscale, block_size_q)
     k, ks, kr = make_fp8_input((2, 397, 2, 128), qscale, block_size_kv)
@@ -119,7 +143,7 @@ def test_fp8_block_sizes(block_size_q, block_size_kv):
     check_fp8_output(out, qr, kr, vr, 128**-0.5)
 
 
-@pytest.mark.parametrize("qscale", ["no_scale", "pertensor"])
+@pytest.mark.parametrize("qscale", ["no_scale", "pertensor", "blockscale"])
 @pytest.mark.parametrize("d", [160, 192, 256])
 def test_fp8_large_head(qscale, d):
     torch.manual_seed(2)
@@ -136,12 +160,14 @@ def test_fp8_large_head(qscale, d):
 
 @pytest.mark.parametrize("qscale", ["no_scale", "pertensor", "perhead", "blockscale"])
 @pytest.mark.parametrize("return_lse", [False, True])
-def test_fp8_operator_and_compile(qscale, return_lse):
-    if not torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250"):
-        pytest.skip("All FP8 modes require gfx1250")
-    q, qs, _ = make_fp8_input((2, 32, 4, 64), qscale)
-    k, ks, _ = make_fp8_input((2, 67, 2, 64), qscale)
-    v, vs, _ = make_fp8_input((2, 67, 2, 64), qscale, is_value=True)
+@pytest.mark.parametrize("d", [64, 128])
+def test_fp8_operator_and_compile(qscale, return_lse, d):
+    reason = fp8_unsupported_reason(qscale, d, return_lse)
+    if reason:
+        pytest.skip(reason)
+    q, qs, _ = make_fp8_input((2, 32, 4, d), qscale)
+    k, ks, _ = make_fp8_input((2, 67, 2, d), qscale)
+    v, vs, _ = make_fp8_input((2, 67, 2, d), qscale, is_value=True)
     args = (
         q,
         k,
@@ -177,6 +203,28 @@ def test_fp8_operator_and_compile(qscale, return_lse):
     )
     for x, saved in zip(inputs, before):
         assert torch.equal(x.float(), saved)
+
+
+@pytest.mark.parametrize(
+    "qscale,d,return_lse,window",
+    [
+        ("perhead", 128, False, (-1, -1)),
+        ("pertensor", 64, True, (-1, -1)),
+        ("blockscale", 128, True, (-1, -1)),
+        ("pertensor", 128, True, (3, 2)),
+    ],
+)
+def test_fp8_gfx950_unsupported(qscale, d, return_lse, window):
+    if not torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx950"):
+        pytest.skip("gfx950 kernel restrictions")
+    q, qs, _ = make_fp8_input((1, 32, 4, d), qscale)
+    k, ks, _ = make_fp8_input((1, 67, 2, d), qscale)
+    v, vs, _ = make_fp8_input((1, 67, 2, d), qscale)
+    message = (
+        "per-head attention requires gfx1250" if qscale == "perhead" else "No FMHA forward kernel"
+    )
+    with pytest.raises(RuntimeError, match=message):
+        fmha_fp8_func(q, k, v, qs, ks, vs, qscale=qscale, return_lse=return_lse, window_size=window)
 
 
 @pytest.mark.parametrize(
