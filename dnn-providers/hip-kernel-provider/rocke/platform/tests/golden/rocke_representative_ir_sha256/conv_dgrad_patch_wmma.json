@@ -31,18 +31,18 @@
       "cases": {
         "conv_dgrad_patch_wmma/gfx1250/bf16_p16_rb8": {
           "arch": "gfx1250",
-          "bytes": 90535,
+          "bytes": 92832,
           "family": "conv_dgrad_patch_wmma",
           "kernel_name": "dgrad_patch_wmma_p16_c3_wc4_wp2_tc6_tp4_tw16_rb8_ck32_st2_bf16",
-          "sha256": "4c44fa6f73bdcc3c7b1fffac2736911f95d09860e5a632e215d17bcb754aaaee",
+          "sha256": "596d7dbc6462623672f89e772c80f6cc0102681bc9539179a74f52909fd06724",
           "status": "ok"
         },
         "conv_dgrad_patch_wmma/gfx1250/fp16_p4_pf": {
           "arch": "gfx1250",
-          "bytes": 107732,
+          "bytes": 110810,
           "family": "conv_dgrad_patch_wmma",
           "kernel_name": "dgrad_patch_wmma_p4_c3_wc3_wp1_tc1_tp8_tw16_rb4_ck32_st2_pf_siterative-ilp",
-          "sha256": "34f91562335625e2b85372c98282a9c613a3a972a323cefa55d8cfdc47063972",
+          "sha256": "3394edb84019d9c69e88c95b14412772386c2ababa54b60b6abe10acc5225302",
           "status": "ok"
         }
       },
@@ -52,18 +52,18 @@
       "cases": {
         "conv_dgrad_patch_wmma/gfx1250/bf16_p16_rb8": {
           "arch": "gfx1250",
-          "bytes": 90535,
+          "bytes": 92832,
           "family": "conv_dgrad_patch_wmma",
           "kernel_name": "dgrad_patch_wmma_p16_c3_wc4_wp2_tc6_tp4_tw16_rb8_ck32_st2_bf16",
-          "sha256": "4c44fa6f73bdcc3c7b1fffac2736911f95d09860e5a632e215d17bcb754aaaee",
+          "sha256": "596d7dbc6462623672f89e772c80f6cc0102681bc9539179a74f52909fd06724",
           "status": "ok"
         },
         "conv_dgrad_patch_wmma/gfx1250/fp16_p4_pf": {
           "arch": "gfx1250",
-          "bytes": 107732,
+          "bytes": 110810,
           "family": "conv_dgrad_patch_wmma",
           "kernel_name": "dgrad_patch_wmma_p4_c3_wc3_wp1_tc1_tp8_tw16_rb4_ck32_st2_pf_siterative-ilp",
-          "sha256": "34f91562335625e2b85372c98282a9c613a3a972a323cefa55d8cfdc47063972",
+          "sha256": "3394edb84019d9c69e88c95b14412772386c2ababa54b60b6abe10acc5225302",
           "status": "ok"
         }
       },

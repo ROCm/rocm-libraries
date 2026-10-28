@@ -86,6 +86,8 @@ Kernel attributes consumed by lowering:
 
 `IRBuilder("name")` owns the SSA counter, region stack, parameter list, and `KernelDef`. The full method surface below is verified against `core/ir.py`; entries link to op name and a one-line semantic. Numeric methods accept matching dtypes unless noted.
 
+The builder names each value it makes `%<hint>_<n>`: the op's name hint, `_`, then the SSA counter, so `%cz16_5` and `%cz1_65` can never be the same name. Names you choose (kernel parameters, `iv_name`, loop-carried value names) must be identifiers and must not end in `_` and digits; the builder refuses them otherwise.
+
 ### Constants
 
 ```text

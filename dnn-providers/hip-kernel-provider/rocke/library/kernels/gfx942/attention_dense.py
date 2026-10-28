@@ -2195,7 +2195,7 @@ def _build_attention_dense_single_buffer(
                     trips,
                     b.const_i32(1),
                     [(f"wm{tag}", m_i), (f"wl{tag}", l_i)]
-                    + [(f"wo{dt}_{tag}", o_acc[dt]) for dt in range(D_TILES)],
+                    + [(f"wo{dt}_t{tag}", o_acc[dt]) for dt in range(D_TILES)],
                     iv_name=f"ws{tag}",
                 )
                 with sk as (_iv, sc):

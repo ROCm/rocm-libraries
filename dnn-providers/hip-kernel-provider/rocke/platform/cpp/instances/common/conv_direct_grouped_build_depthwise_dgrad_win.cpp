@@ -395,7 +395,7 @@ static void dw_win_guarded(rocke_ir_builder_t* b,
     std::vector<rocke_iter_arg_t> iargs(accs.size());
     for(size_t i = 0; i < accs.size(); ++i)
     {
-        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_" + std::to_string(i);
+        names[i] = std::string(prefix) + "_y" + std::to_string(y) + "_i" + std::to_string(i);
         iargs[i].name = names[i].c_str();
         iargs[i].init = accs[i];
     }

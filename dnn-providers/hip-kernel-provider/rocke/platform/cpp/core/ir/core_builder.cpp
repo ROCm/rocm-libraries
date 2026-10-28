@@ -208,6 +208,68 @@ rocke_region_t* rocke_b_current_region(rocke_ir_builder_t* b)
 
 /* ------------------------------------------------------------- naming */
 
+/* Value names: the twin of the "Value names" note in core/ir.py. The builder
+ * names every value it makes "%<hint>_<n>", so the counter is always the digits
+ * after the last '_' and two builder names are equal only when their hints and
+ * counters are both equal. Author-chosen names (kernel parameters, loop
+ * induction variables, loop-carried values) must be identifiers and must not
+ * end in '_' and digits, or one could spell a builder name. */
+
+static bool is_ascii_digit(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+static bool is_identifier(const char* name)
+{
+    if(name[0] == '\0' || is_ascii_digit(name[0]))
+    {
+        return false;
+    }
+    for(const char* c = name; *c != '\0'; ++c)
+    {
+        if(!(*c == '_' || is_ascii_digit(*c) || (*c >= 'a' && *c <= 'z')
+             || (*c >= 'A' && *c <= 'Z')))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool ends_in_counter(const char* name)
+{
+    size_t end = strlen(name);
+    size_t stem = end;
+    while(stem > 0 && is_ascii_digit(name[stem - 1]))
+    {
+        --stem;
+    }
+    return stem < end && stem > 0 && name[stem - 1] == '_';
+}
+
+void rocke_i_refuse_declared_name(rocke_ir_builder_t* b, const char* what, const char* name)
+{
+    if(!is_identifier(name))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s name '%s' is not an identifier: use letters, digits and '_', not "
+                        "starting with a digit",
+                        what,
+                        name);
+    }
+    if(ends_in_counter(name))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s name '%s' ends in '_' and digits, the form the builder gives the "
+                        "values it names; choose a name that does not end in '_<digits>'",
+                        what,
+                        name);
+    }
+}
+
 const char* rocke_b_fresh(rocke_ir_builder_t* b, const char* prefix)
 {
     char* out;
@@ -215,8 +277,20 @@ const char* rocke_b_fresh(rocke_ir_builder_t* b, const char* prefix)
     {
         return NULL;
     }
+    if(prefix == NULL)
+    {
+        prefix = "v";
+    }
+    if(prefix[0] == '\0' || is_ascii_digit(prefix[0]))
+    {
+        return (const char*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "value name hint '%s' must be non-empty and must not start with a digit",
+            prefix);
+    }
     b->counter += 1;
-    out = rocke_arena_printf(&b->arena, "%%%s%d", prefix ? prefix : "v", b->counter);
+    out = rocke_arena_printf(&b->arena, "%%%s_%d", prefix, b->counter);
     if(!out)
     {
         return (const char*)rocke_i_set_err(b, ROCKE_ERR_OOM, "fresh: OOM");
@@ -875,6 +949,8 @@ rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
     {
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "param: NULL name");
     }
+
+    rocke_i_refuse_declared_name(b, "kernel parameter", name);
 
     /* duplicate kernel parameter check (Python ValueError) */
     for(i = 0; i < b->num_param_lookup; i++)

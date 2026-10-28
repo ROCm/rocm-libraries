@@ -338,14 +338,14 @@ class GemmEpilogueLowerer:
                 else:
                     residual_names.append(other)
                     ops_list.append(
-                        ResidualAdd(param_name=f"residual_{len(residual_names) - 1}")
+                        ResidualAdd(param_name=f"residual{len(residual_names) - 1}")
                     )
             elif op.kind == "mul":
                 # ``mul`` with a 2D placeholder -> ResidualMul.
                 other = next(i for i in op.inputs if graph.tensors[i].is_input)
                 residual_names.append(other)
                 ops_list.append(
-                    ResidualMul(param_name=f"residual_mul_{len(residual_names) - 1}")
+                    ResidualMul(param_name=f"residual_mul{len(residual_names) - 1}")
                 )
             else:
                 raise ValueError(
@@ -555,13 +555,11 @@ class GemmEpilogueLowerer:
                     continue
                 if pname == "bias" and bias_name is not None:
                     args["bias"] = runtime_args[bias_name]
-                elif pname.startswith("residual_") and not pname.startswith(
-                    "residual_mul_"
-                ):
-                    idx = int(pname.split("_")[-1])
-                    args[pname] = runtime_args[residual_names[idx]]
-                elif pname.startswith("residual_mul_"):
-                    idx = int(pname.split("_")[-1])
+                elif pname.startswith("residual"):
+                    # residual<i> / residual_mul<i>: <i> indexes residual_names.
+                    idx = int(
+                        pname.removeprefix("residual_mul").removeprefix("residual")
+                    )
                     args[pname] = runtime_args[residual_names[idx]]
         grid = (
             (N + spec.tile.tile_n - 1) // spec.tile.tile_n,

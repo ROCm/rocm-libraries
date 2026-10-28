@@ -531,7 +531,7 @@ def emit_dense_bwd_dq(spec: AttentionDenseBwdDqSpec, arch: str, *, sentinel=True
         step.prologue(b, k_slab, v_slab, b.mul(kt_start, c(kn)), b.cmp_lt(zero, n_kt))
     dq = step.zero_dq(b)  # after the range: the accumulators start here
     fm, fn = geom.g4t.frags_m, geom.g4t.frags_n
-    names = ("k", "ki_", "ke_") if len(ranges) == 3 else ("k",)
+    names = ("k", "ki", "ke") if len(ranges) == 3 else ("k",)
     for (s0, _e, edge), trip, name in zip(ranges, trips, names):
         flat = [v for row in dq for v in row]
         loop = b.scf_for_iter(

@@ -4310,7 +4310,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                 trip,
                 c1,
                 [
-                    (f"rg_y{y_local}_{i}", acc_tiles[qt][m][slot])
+                    (f"rg_y{y_local}_i{i}", acc_tiles[qt][m][slot])
                     for i, (qt, m, slot) in enumerate(guard_keys)
                 ],
                 iv_name=f"rg_y{y_local}",
@@ -7473,7 +7473,7 @@ def build_direct_depthwise_dgrad_streaming(
         n_fma_groups_v,
         n_groups_v,
         c1,
-        [(f"dgs_tail_acc_{i}", fma_loop.results[i]) for i in range(n_acc)],
+        [(f"dgs_tail_acc_i{i}", fma_loop.results[i]) for i in range(n_acc)],
         iv_name="dgs_tail",
     )
     with flush_loop as (grp_iv, loop_vals):
@@ -7636,7 +7636,7 @@ def _build_direct_depthwise_dgrad_streaming_packed(
 
     PF = min(p.KH, -(-16 // n_cols))
     n_flat = n_slots * BLOCK_W
-    slot_args = [(f"dgp_acc_{f}_{k}", zero2) for f in range(n_flat) for k in range(NP)]
+    slot_args = [(f"dgp_acc_{f}_k{k}", zero2) for f in range(n_flat) for k in range(NP)]
     row_args = []
     for k in range(PF):
         for d, v in zip(range(n_cols), load_row(b.const_i32(k))):
@@ -7679,7 +7679,7 @@ def _build_direct_depthwise_dgrad_streaming_packed(
         n_fma_groups_v,
         n_groups_v,
         c1,
-        [(f"dgp_tail_{i}", fma_loop.results[i]) for i in range(n_acc)],
+        [(f"dgp_tail_i{i}", fma_loop.results[i]) for i in range(n_acc)],
         iv_name="dgp_tail",
     )
     with flush_loop as (grp_iv, loop_vals):
@@ -8288,7 +8288,7 @@ def build_direct_depthwise_dgrad_windowed(
                 c0,
                 trip,
                 c1,
-                [(f"dww_y{y}_{i}", v) for i, v in enumerate(accs)],
+                [(f"dww_y{y}_i{i}", v) for i, v in enumerate(accs)],
                 iv_name=f"dww_y{y}",
             )
             with loop as (_, carried):
@@ -8593,7 +8593,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
                 c0,
                 trip,
                 c1,
-                [(f"dwm_y{y}_{i}", acc[sl]) for i, sl in enumerate(slots)],
+                [(f"dwm_y{y}_i{i}", acc[sl]) for i, sl in enumerate(slots)],
                 iv_name=f"dwm_y{y}",
             )
             with loop as (_, accs):
@@ -9247,7 +9247,7 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
 
     PF = min(p.KH, -(-16 // n_cols))
     n_flat = p.KH * BLOCK_W
-    slot_args = [(f"dwp_acc_{f}_{k}", zero2) for f in range(n_flat) for k in range(NP)]
+    slot_args = [(f"dwp_acc_{f}_k{k}", zero2) for f in range(n_flat) for k in range(NP)]
     row_args = []
     for k in range(PF):
         for col, v in zip(row_cols, load_row(b.const_i32(p.PAD + k))):
@@ -9294,7 +9294,7 @@ def _build_direct_depthwise_packed(spec: "DirectDepthwiseSpec", arch: str) -> Ke
         n_fma_groups_v,
         n_groups_v,
         c1,
-        [(f"dwp_tail_{i}", fma_loop.results[i]) for i in range(n_acc)],
+        [(f"dwp_tail_i{i}", fma_loop.results[i]) for i in range(n_acc)],
         iv_name="dwp_tail",
         elide_trailing_barrier=False,
     )
@@ -9717,7 +9717,7 @@ def build_direct_depthwise_tiled(
         # phase per iteration.
         n_r = -(-(KH - ph) // S)
         phase_base = b.add(hi_tile, b.const_i32(ph))
-        iter_args = [(f"dwt_acc{ph}_{i}", a) for i, a in enumerate(accs)]
+        iter_args = [(f"dwt_acc{ph}_i{i}", a) for i, a in enumerate(accs)]
         for t in range(TH - 1):
             row = to_f32(load_row(b.add(phase_base, b.const_i32(S * t))))
             iter_args += [(f"dwt_x{ph}_r{t}_c{c}", v) for c, v in enumerate(row)]
@@ -9899,12 +9899,12 @@ def _build_direct_depthwise_tiled_packed(
     for ph in range(S):
         n_r = -(-(KH - ph) // S)
         phase_base = b.add(hi_tile, b.const_i32(ph))
-        iter_args = [(f"dwtp_acc{ph}_{i}", a) for i, a in enumerate(accs)]
+        iter_args = [(f"dwtp_acc{ph}_i{i}", a) for i, a in enumerate(accs)]
         for t in range(TH - 1):
             row = pairs_of(load_row(b.add(phase_base, b.const_i32(S * t))))
-            iter_args += [(f"dwtp_x{ph}_r{t}_{c}", v) for c, v in enumerate(row)]
+            iter_args += [(f"dwtp_x{ph}_r{t}_c{c}", v) for c, v in enumerate(row)]
         w0 = load_w_row(b.const_i32(ph))
-        iter_args += [(f"dwtp_w{ph}_{i}", v) for i, v in enumerate(w0)]
+        iter_args += [(f"dwtp_w{ph}_i{i}", v) for i, v in enumerate(w0)]
         n_win = (TH - 1) * n_row
 
         loop = b.scf_for_iter(
@@ -10703,7 +10703,7 @@ def build_direct_depthwise_spatial(
     # latency before the next one issues. PF keeps ~16 loads in flight
     # without carrying a whole KH x KW window for the large filters.
     PF = min(p.KH, -(-16 // p.KW))
-    iter_args = [(f"sp_acc_{kh}", zero_f32) for kh in range(p.KH)]
+    iter_args = [(f"sp_acc_kh{kh}", zero_f32) for kh in range(p.KH)]
     for k in range(PF):
         for s_const, a_h in enumerate(load_row(b.const_i32(k))):
             iter_args.append((f"sp_a_r{k}_s{s_const}", a_h))

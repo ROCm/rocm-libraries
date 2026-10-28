@@ -458,7 +458,7 @@ rocke_kernel_def_t* dgs_build_scalar(rocke_ir_builder_t* b,
     /* The windows past the last dY row: no tap, only dX rows to complete. */
     dgs_iargs tail_args;
     for(int i = 0; i < n_acc; ++i)
-        tail_args.add("dgs_tail_acc_" + std::to_string(i), fma_loop.op->results[i]);
+        tail_args.add("dgs_tail_acc_i" + std::to_string(i), fma_loop.op->results[i]);
     rocke_for_t flush_loop = tail_args.open(b, n_fma_groups_v, n_groups_v, c1, "dgs_tail");
     rocke_b_region_enter(b, flush_loop.body);
     {
@@ -648,7 +648,7 @@ rocke_kernel_def_t* dgs_build_packed(rocke_ir_builder_t* b,
     dgs_iargs fma_args;
     for(int f = 0; f < n_flat; ++f)
         for(int k = 0; k < NP; ++k)
-            fma_args.add("dgp_acc_" + std::to_string(f) + "_" + std::to_string(k), zero2);
+            fma_args.add("dgp_acc_" + std::to_string(f) + "_k" + std::to_string(k), zero2);
     for(int k = 0; k < PF; ++k)
     {
         vals_t row;
@@ -717,7 +717,7 @@ rocke_kernel_def_t* dgs_build_packed(rocke_ir_builder_t* b,
 
     dgs_iargs tail_args;
     for(int i = 0; i < n_acc; ++i)
-        tail_args.add("dgp_tail_" + std::to_string(i), fma_loop.op->results[i]);
+        tail_args.add("dgp_tail_i" + std::to_string(i), fma_loop.op->results[i]);
     rocke_for_t flush_loop = tail_args.open(b, n_fma_groups_v, n_groups_v, c1, "dgp_tail");
     rocke_b_region_enter(b, flush_loop.body);
     {

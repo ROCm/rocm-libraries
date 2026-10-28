@@ -290,12 +290,12 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
     iter_args = []
     for mr in range(MR):
         for r in range(c_frag):
-            iter_args.append((f"m{mr}_{r}", neg_inf))
+            iter_args.append((f"m{mr}_r{r}", neg_inf))
         for r in range(c_frag):
-            iter_args.append((f"l{mr}_{r}", zero_f))
+            iter_args.append((f"l{mr}_r{r}", zero_f))
         for d in range(n_dk):
             iter_args.append(
-                (f"acc{mr}_{d}", WmmaTensor.zero_acc(b, atom, arch=arch).value)
+                (f"acc{mr}_d{d}", WmmaTensor.zero_acc(b, atom, arch=arch).value)
             )
 
     per_mr = 2 * c_frag + n_dk

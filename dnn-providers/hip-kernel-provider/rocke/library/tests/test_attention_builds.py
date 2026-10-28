@@ -965,8 +965,8 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.ds.swizzle", ll)
         # NaN-guard select on neg_inf row max.
         self.assertIn("0xFFF0000000000000", ll)
-        # `qq_bias_stride_0` is the very last kernel param.
-        self.assertIn("i32 %qq_bias_stride_0", ll)
+        # `qq_bias_stride0` is the very last kernel param.
+        self.assertIn("i32 %qq_bias_stride0", ll)
 
     def test_gfx942_bf16_swa_decode_no_fp8_loader_assert(self):
         """Regression: bf16 windowed-decode must not trip the fp8-loader assert.
@@ -1374,8 +1374,8 @@ class TestAttentionHelpers(unittest.TestCase):
         ll = lower_kernel_to_llvm(seg, arch="gfx950")
         self.assertIn("sitofp i32", ll)
         self.assertIn("select i1", ll)
-        # `qq_bias_stride_0` is the last kernel param.
-        self.assertIn("i32 %qq_bias_stride_0", ll)
+        # `qq_bias_stride0` is the last kernel param.
+        self.assertIn("i32 %qq_bias_stride0", ll)
         # Both ALiBi and QQ-bias kernel-name suffixes show up.
         self.assertIn("_alibi", ll)
         self.assertIn("_qqb", ll)
