@@ -19,8 +19,8 @@ a logic file that does not set it is unaffected in behavior.
 Adding a solution parameter is visible in the serialized data rather than only in the selection.
 It appears in every solution's dictionary, in the logic contract that `LibraryIO` reads and
 writes, and in the full solution name, which gains an `LDL1` token. The characterization goldens
-pin all three, so 17 golden nodes across three files moved: twelve in
-`LibraryIO/__snapshots__/test_logiccontract_char.ambr`, three in
+pin all three, so 18 golden nodes across three files moved: twelve in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr`, four in
 `SolutionClass/__snapshots__/test_solution_class_char.ambr`, and two in
 `ValidParameters/__snapshots__/test_builders_char.ambr`.
 
@@ -30,7 +30,7 @@ this branch starts from is one higher than the 354 the re-record was first made 
 
 ## Decision
 
-Re-record the 17 affected golden nodes one node at a time (`pytest <node-id> --snapshot-update`)
+Re-record the 18 affected golden nodes one node at a time (`pytest <node-id> --snapshot-update`)
 rather than regenerating the suite, and record the parameter's addition in the decision log. The
 change is an intended behavior change, so no golden pins a defect and no `Defect:` link is
 carried.
@@ -45,6 +45,7 @@ The kernel identity does not change. `LocalDotLayout` is not in the required (mi
 parameter set, so no kernel basename or hash moves: the `_codegen` goldens that pin the emitted
 assembly and the basename hashes are byte-identical, and the emitted code objects are unchanged.
 
-Each affected golden node gains exactly one entry and nothing else moves. A future change to the
+Each affected golden node gains exactly one entry and nothing else moves, apart from the nodes
+that record the solution's key count, which goes from 355 to 356. A future change to the
 parameter's name, its default or its set of values re-breaks the same nodes; if the parameter is
 ever removed, flip the goldens back and supersede this ADR.
