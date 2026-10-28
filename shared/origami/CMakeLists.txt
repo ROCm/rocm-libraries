@@ -112,6 +112,7 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/olc/loaded_model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/olc/sha256.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/olc/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_olc.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
@@ -153,6 +154,7 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/olc/library_stamp.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/olc/orr_loader.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/olc/sha256.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_olc.cpp"
 )
 
 target_link_libraries(origami PRIVATE hip::host)
