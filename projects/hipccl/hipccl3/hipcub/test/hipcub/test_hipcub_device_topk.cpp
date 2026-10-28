@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCUB_TEST_HIPCUB_DEVICE_TOPK_HPP_
-#define HIPCUB_TEST_HIPCUB_DEVICE_TOPK_HPP_
+#ifndef HIPCUB_test_hipcub_device_TOPK_HPP_
+#define HIPCUB_test_hipcub_device_TOPK_HPP_
 
 #include "common_test_header.hpp"
 
@@ -713,4 +713,4 @@ TEST(HipcubDeviceTopkTests, TopkPairsLargeSizesMax)
     topk_pairs_large_sizes_test<true>();
 }
 
-#endif // HIPCUB_TEST_HIPCUB_DEVICE_TOPK_HPP_
+#endif // HIPCUB_test_hipcub_device_TOPK_HPP_

@@ -115,32 +115,34 @@ class BlockLoad
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockLoad() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockLoad()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockLoad(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockLoad(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
     template<class InputIteratorT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Load(InputIteratorT block_iter, T (&items)[ItemsPerThread])
     {
         base_type::load(block_iter, items, temp_storage_);
     }
 
     template<class InputIteratorT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Load(InputIteratorT block_iter, T (&items)[ItemsPerThread], int valid_items)
     {
         base_type::load(block_iter, items, valid_items, temp_storage_);
     }
 
     template<class InputIteratorT, class Default>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void Load(InputIteratorT block_iter,
                      T (&items)[ItemsPerThread],
                      int     valid_items,
@@ -150,8 +152,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

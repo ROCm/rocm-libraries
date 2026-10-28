@@ -59,8 +59,8 @@ using ReduceByKeyScanTileState = cub::ReduceByKeyScanTileState<ValueT, KeyT, SIN
 template<typename T, bool SINGLE_WORD = cub::detail::is_primitive<T>::value>
 struct ScanTileState : cub::ScanTileState<T, SINGLE_WORD>
 {
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE
         hipError_t Init(int num_tiles, void* d_temp_storage, size_t temp_storage_bytes)
     {
         // This function *technically* is supported on both host and device, but
@@ -78,8 +78,8 @@ struct ScanTileState : cub::ScanTileState<T, SINGLE_WORD>
 #endif
     }
 
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE static hipError_t AllocationSize(int num_tiles, size_t& temp_storage_bytes)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE static hipError_t AllocationSize(int num_tiles, size_t& temp_storage_bytes)
     {
         // This function *technically* is supported on both host and device, but
         // hipCUDAErrorTohipError only works on host. While the CUB implementation

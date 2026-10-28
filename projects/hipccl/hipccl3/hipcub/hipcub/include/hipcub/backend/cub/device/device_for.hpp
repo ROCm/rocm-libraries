@@ -187,8 +187,8 @@ HIPCUB_RUNTIME_FUNCTION
         return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInExtents(extents, op, stream));
     }
 
-    HIPCUB_TEMPLATE(class LayoutMapping, typename OpType)
-    HIPCUB_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
+    _CCCL_TEMPLATE(class LayoutMapping, typename OpType)
+    _CCCL_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
     [[nodiscard]]
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t
@@ -197,8 +197,8 @@ HIPCUB_RUNTIME_FUNCTION
         return hipCUDAErrorTohipError(cub::DeviceFor::ForEachInLayout(layout_mapping, op, stream));
     }
 
-    HIPCUB_TEMPLATE(class LayoutMapping, typename OpType)
-    HIPCUB_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
+    _CCCL_TEMPLATE(class LayoutMapping, typename OpType)
+    _CCCL_REQUIRES(_HIPCUB_STD::__is_cuda_std_layout_left_or_right_mapping_v<LayoutMapping>)
     [[nodiscard]]
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInLayout(void*                d_temp_storage,

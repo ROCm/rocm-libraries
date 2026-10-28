@@ -74,21 +74,18 @@ BEGIN_HIPCUB_NAMESPACE
  *   Comparison function object which returns true if the first argument is
  *   ordered before the second
  */
-template <typename KeyT,
-          typename ValueT,
-          typename CompareOp,
-          int ITEMS_PER_THREAD>
-HIPCUB_DEVICE __forceinline__ void
-StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
-                  ValueT (&items)[ITEMS_PER_THREAD],
-                  CompareOp compare_op)
+template<typename KeyT, typename ValueT, typename CompareOp, int ITEMS_PER_THREAD>
+_CCCL_DEVICE __forceinline__
+void StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
+                       ValueT (&items)[ITEMS_PER_THREAD],
+                       CompareOp compare_op)
 {
   constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
 
-  HIPCUB_SORT_MAYBE_UNROLL()
+  _CCCL_SORT_MAYBE_UNROLL()
   for(int i = 0; i < ITEMS_PER_THREAD; ++i)
   {
-      HIPCUB_SORT_MAYBE_UNROLL()
+      _CCCL_SORT_MAYBE_UNROLL()
       for(int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
       {
           if(compare_op(keys[j + 1], keys[j]))

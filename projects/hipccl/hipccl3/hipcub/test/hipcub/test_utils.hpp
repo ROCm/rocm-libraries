@@ -486,55 +486,55 @@ OutputIt host_inclusive_scan_by_key(InputIt  first,
 }
 
 template<class T, class U = T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr std::common_type_t<T, U> max(const T& t, const U& u)
 {
     using common_type = std::common_type_t<T, U>;
     return static_cast<common_type>(t) < static_cast<common_type>(u) ? u : t;
 }
 
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline test_utils::half max(const test_utils::half& a, const test_utils::half& b)
 {
     return test_utils::half_maximum{}(a, b);
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T max(const T& t, const test_utils::half& u)
 {
     return test_utils::max(t, static_cast<T>(u));
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T max(const test_utils::half& t, const T& u)
 {
     return test_utils::max(static_cast<T>(t), u);
 }
 
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline test_utils::bfloat16 max(const test_utils::bfloat16& a, const test_utils::bfloat16& b)
 {
     return test_utils::bfloat16_maximum{}(a, b);
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T max(const T& t, const test_utils::bfloat16& u)
 {
     return test_utils::max(t, static_cast<T>(u));
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T max(const test_utils::bfloat16& t, const T& u)
 {
     return test_utils::max(static_cast<T>(t), u);
 }
 
 template<class T, class U>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr std::common_type_t<test_utils::custom_test_type<T>,
                                     test_utils::custom_test_type<U>>
     min(const test_utils::custom_test_type<T>& t, const test_utils::custom_test_type<U>& u)
@@ -548,7 +548,7 @@ inline constexpr std::common_type_t<test_utils::custom_test_type<T>,
 }
 
 template<class T, class U = T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr std::common_type_t<T, U> min(const T& t, const U& u)
 {
     using common_type = std::common_type_t<T, U>;
@@ -556,47 +556,47 @@ inline constexpr std::common_type_t<T, U> min(const T& t, const U& u)
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T min(const T& t, const test_utils::half& u)
 {
     return test_utils::min(t, static_cast<T>(u));
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T min(const test_utils::half& t, const T& u)
 {
     return test_utils::min(static_cast<T>(t), u);
 }
 
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline test_utils::half min(const test_utils::half& a, const test_utils::half& b)
 {
     return test_utils::half_minimum{}(a, b);
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T min(const T& t, const test_utils::bfloat16& u)
 {
     return test_utils::min(t, static_cast<T>(u));
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T min(const test_utils::bfloat16& t, const T& u)
 {
     return test_utils::min(static_cast<T>(t), u);
 }
 
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline test_utils::bfloat16 min(const test_utils::bfloat16& a, const test_utils::bfloat16& b)
 {
     return test_utils::bfloat16_minimum{}(a, b);
 }
 
 template<class T, class U>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr typename std::common_type<test_utils::custom_test_type<T>,
                                            test_utils::custom_test_type<U>>::type
     max(const test_utils::custom_test_type<T>& t, const test_utils::custom_test_type<U>& u)
@@ -610,7 +610,7 @@ inline constexpr typename std::common_type<test_utils::custom_test_type<T>,
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr bool is_power_of_two(const T x)
 {
     static_assert(std::is_integral<T>::value, "T must be integer type");
@@ -618,7 +618,7 @@ inline constexpr bool is_power_of_two(const T x)
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T next_power_of_two(const T x, const T acc = 1)
 {
     static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
@@ -626,8 +626,8 @@ inline constexpr T next_power_of_two(const T x, const T acc = 1)
 }
 
 // Return id of "logical warp" in a block
-template<unsigned int LogicalWarpSize = HIPCUB_DEVICE_WARP_THREADS>
-HIPCUB_DEVICE
+template<unsigned int LogicalWarpSize = _CCCL_DEVICE_WARP_THREADS>
+_CCCL_DEVICE
 inline unsigned int logical_warp_id()
 {
     return hipcub::RowMajorTid(1, 1, 1) / LogicalWarpSize;
@@ -649,7 +649,7 @@ inline size_t get_max_block_size()
 // Select the minimal warp size for block of size block_size, it's
 // useful for blocks smaller than maximal warp size.
 template<class T>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
 {
     static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
@@ -658,7 +658,7 @@ inline constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
 
 #define SKIP_IF_UNSUPPORTED_WARP_SIZE(test_warp_size)                           \
     {                                                                           \
-        const auto host_warp_size = HIPCUB_HOST_WARP_THREADS;                   \
+        const auto host_warp_size = _CCCL_HOST_WARP_THREADS;                   \
         if(host_warp_size < (test_warp_size))                                   \
         {                                                                       \
             GTEST_SKIP() << "Cannot run test of warp size " << (test_warp_size) \
@@ -668,7 +668,7 @@ inline constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
 
 template<unsigned int LogicalWarpSize>
 constexpr bool device_test_enabled_for_warp_size_v
-    = (HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize);
+    = (_CCCL_DEVICE_WARP_THREADS >= LogicalWarpSize);
 
 template<typename T,
          typename U,
@@ -699,9 +699,9 @@ template<typename It, typename UnaryOp, typename ValueType = ::hipcub::detail::i
 using transform_iterator = ::rocprim::transform_iterator<It, UnaryOp, ValueType>;
 
 template<class It, class UnaryOp>
-HIPCUB_HOST_DEVICE
-inline auto make_transform_iterator(It iterator, UnaryOp transform)
-    -> transform_iterator<It, UnaryOp>
+_CCCL_HOST_DEVICE
+inline auto make_transform_iterator(It      iterator,
+                                    UnaryOp transform) -> transform_iterator<It, UnaryOp>
 {
     return transform_iterator<It, UnaryOp>(iterator, transform);
 }
@@ -742,7 +742,7 @@ using transform_output_iterator
     = ::rocprim::transform_output_iterator<OutputIterator, UnaryFunction>;
 
 template<typename UnaryFunction, typename OutputIterator>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline auto make_transform_output_iterator(OutputIterator out, UnaryFunction func)
     -> transform_output_iterator<UnaryFunction, OutputIterator>
 {
@@ -773,9 +773,9 @@ template<typename It, typename UnaryOp, typename ValueType = ::hipcub::detail::i
 using transform_iterator = ::thrust::transform_iterator<UnaryOp, It>;
 
 template<class It, class UnaryOp>
-HIPCUB_HOST_DEVICE
-inline auto make_transform_iterator(It iterator, UnaryOp transform)
-    -> transform_iterator<It, UnaryOp>
+_CCCL_HOST_DEVICE
+inline auto make_transform_iterator(It      iterator,
+                                    UnaryOp transform) -> transform_iterator<It, UnaryOp>
 {
     return transform_iterator<It, UnaryOp>(iterator, transform);
 }
@@ -809,7 +809,7 @@ using transform_output_iterator
     = ::thrust::transform_output_iterator<UnaryFunction, OutputIterator>;
 
 template<typename UnaryFunction, typename OutputIterator>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 inline auto make_transform_output_iterator(OutputIterator out, UnaryFunction func)
     -> transform_output_iterator<UnaryFunction, OutputIterator>
 {
@@ -826,8 +826,8 @@ struct segments_index_to_offset_op
     offset_type                    segment_length;
     offset_type                    size;
 
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE offset_type operator()(segment_index_type i) const
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE offset_type  operator()(segment_index_type i) const
     {
         if(i < empty_segments_count)
         {

@@ -50,12 +50,12 @@ enum WarpStoreAlgorithm
 template<class T,
          int                ITEMS_PER_THREAD,
          WarpStoreAlgorithm ALGORITHM            = WARP_STORE_DIRECT,
-         int                LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS>
+         int                LOGICAL_WARP_THREADS = _CCCL_DEVICE_WARP_THREADS>
 class WarpStore
 {
 private:
     constexpr static bool IS_ARCH_WARP 
-        = static_cast<unsigned>(LOGICAL_WARP_THREADS) == HIPCUB_DEVICE_WARP_THREADS;
+        = static_cast<unsigned>(LOGICAL_WARP_THREADS) == _CCCL_DEVICE_WARP_THREADS;
 
     template <WarpStoreAlgorithm _POLICY>
     struct StoreInternal;
@@ -66,17 +66,15 @@ private:
         using TempStorage = NullType;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__ StoreInternal(
-            TempStorage & /*temp_storage*/,
-            int linear_tid)
+        _CCCL_DEVICE __forceinline__
+        StoreInternal(TempStorage& /*temp_storage*/, int linear_tid)
             : linear_tid(linear_tid)
         {
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD])
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_store_direct_blocked(
                 static_cast<unsigned>(linear_tid),
@@ -85,11 +83,9 @@ private:
             );
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             ::rocprim::block_store_direct_blocked(
                 static_cast<unsigned>(linear_tid),
@@ -106,17 +102,15 @@ private:
         using TempStorage = NullType;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__ StoreInternal(
-            TempStorage & /*temp_storage*/,
-            int linear_tid)
+        _CCCL_DEVICE __forceinline__
+        StoreInternal(TempStorage& /*temp_storage*/, int linear_tid)
             : linear_tid(linear_tid)
         {
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD])
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_store_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -125,11 +119,9 @@ private:
             );
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             ::rocprim::block_store_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -146,17 +138,15 @@ private:
         using TempStorage = NullType;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__ StoreInternal(
-            TempStorage & /*temp_storage*/,
-            int linear_tid)
+        _CCCL_DEVICE __forceinline__
+        StoreInternal(TempStorage& /*temp_storage*/, int linear_tid)
             : linear_tid(linear_tid)
         {
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            T *block_ptr,
-            T (&items)[ITEMS_PER_THREAD])
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(T* block_ptr, T (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_store_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -165,10 +155,9 @@ private:
             );
         }
 
-        template <typename _OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            _OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD])
+        template<typename _OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(_OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_store_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -177,11 +166,9 @@ private:
             );
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             // vectorized overload does not exist
             // fall back to direct blocked
@@ -202,18 +189,15 @@ private:
         TempStorage& temp_storage;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__ StoreInternal(
-            TempStorage &temp_storage,
-            int linear_tid) :
-            temp_storage(temp_storage),
-            linear_tid(linear_tid)
+        _CCCL_DEVICE __forceinline__
+        StoreInternal(TempStorage& temp_storage, int linear_tid)
+            : temp_storage(temp_storage), linear_tid(linear_tid)
         {
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-            OutputIteratorT block_itr,
-            T (&items)[ITEMS_PER_THREAD])
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD])
         {
             WarpExchangeT(temp_storage).BlockedToStriped(items, items);
             ::rocprim::block_store_direct_warp_striped<LOGICAL_WARP_THREADS>(
@@ -223,11 +207,9 @@ private:
             );
         }
 
-        template <typename OutputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Store(
-        OutputIteratorT block_itr,
-        T (&items)[ITEMS_PER_THREAD],
-        int valid_items)
+        template<typename OutputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             WarpExchangeT(temp_storage).BlockedToStriped(items, items);
             ::rocprim::block_store_direct_warp_striped<LOGICAL_WARP_THREADS>(
@@ -244,7 +226,8 @@ private:
 
     using _TempStorage = typename InternalStore::TempStorage;
 
-    HIPCUB_DEVICE __forceinline__ _TempStorage &PrivateStorage()
+    _CCCL_DEVICE __forceinline__
+    _TempStorage& PrivateStorage()
     {
         __shared__ _TempStorage private_storage;
         return private_storage;
@@ -258,46 +241,44 @@ public:
     {
     };
 
-    HIPCUB_DEVICE __forceinline__
-    WarpStore() :
-        temp_storage(PrivateStorage()),
-        linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id() : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
+    _CCCL_DEVICE __forceinline__
+    WarpStore()
+        : temp_storage(PrivateStorage())
+        , linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id()
+                                  : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
     {
     }
 
-    HIPCUB_DEVICE __forceinline__
-    WarpStore(TempStorage &temp_storage) :
-        temp_storage(temp_storage.Alias()),
-        linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id() : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
+    _CCCL_DEVICE __forceinline__
+    WarpStore(TempStorage& temp_storage)
+        : temp_storage(temp_storage.Alias())
+        , linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id()
+                                  : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
     {
     }
 
-    template <typename OutputIteratorT>
-    HIPCUB_DEVICE __forceinline__ void Store(
-        OutputIteratorT block_itr,
-        T (&items)[ITEMS_PER_THREAD])
+    template<typename OutputIteratorT>
+    _CCCL_DEVICE __forceinline__
+    void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD])
     {
         InternalStore(temp_storage, linear_tid)
             .Store(block_itr, items);
     }
 
-    template <typename OutputIteratorT>
-    HIPCUB_DEVICE __forceinline__ void Store(
-        OutputIteratorT block_itr,
-        T (&items)[ITEMS_PER_THREAD],
-        int valid_items)
+    template<typename OutputIteratorT>
+    _CCCL_DEVICE __forceinline__
+    void Store(OutputIteratorT block_itr, T (&items)[ITEMS_PER_THREAD], int valid_items)
     {
         InternalStore(temp_storage, linear_tid)
             .Store(block_itr, items, valid_items);
     }
 
-    template <typename OutputIteratorT,
-              typename DefaultT>
-    HIPCUB_DEVICE __forceinline__ void Store(
-        OutputIteratorT block_itr,
-        T (&items)[ITEMS_PER_THREAD],
-        int valid_items,
-        DefaultT oob_default)
+    template<typename OutputIteratorT, typename DefaultT>
+    _CCCL_DEVICE __forceinline__
+    void Store(OutputIteratorT block_itr,
+               T (&items)[ITEMS_PER_THREAD],
+               int      valid_items,
+               DefaultT oob_default)
     {
         InternalStore(temp_storage, linear_tid)
             .Store(block_itr, items, valid_items, oob_default);

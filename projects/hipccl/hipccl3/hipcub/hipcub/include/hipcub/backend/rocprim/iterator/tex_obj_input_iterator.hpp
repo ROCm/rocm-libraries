@@ -66,15 +66,17 @@ public:
         return ::rocprim::texture_cache_iterator<T, OffsetT>::unbind_texture();
     }
 
-    HIPCUB_HOST_DEVICE inline
-    ~TexObjInputIterator() = default;
+    _CCCL_HOST_DEVICE
+    inline ~TexObjInputIterator()
+        = default;
 
-    HIPCUB_HOST_DEVICE inline TexObjInputIterator()
+    _CCCL_HOST_DEVICE
+    inline TexObjInputIterator()
         : ::rocprim::texture_cache_iterator<T, OffsetT>()
     {}
 
-    HIPCUB_HOST_DEVICE inline TexObjInputIterator(
-        const ::rocprim::texture_cache_iterator<T, OffsetT> other)
+    _CCCL_HOST_DEVICE
+    inline TexObjInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
         : ::rocprim::texture_cache_iterator<T, OffsetT>(other)
     {}
 };

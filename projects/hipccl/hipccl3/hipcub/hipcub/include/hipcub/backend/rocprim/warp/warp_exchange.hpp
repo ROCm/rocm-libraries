@@ -62,7 +62,7 @@ using InternalWarpExchangeImpl
 
 template<typename InputT,
          int                   ITEMS_PER_THREAD,
-         int                   LOGICAL_WARP_THREADS    = HIPCUB_DEVICE_WARP_THREADS,
+         int                   LOGICAL_WARP_THREADS    = _CCCL_DEVICE_WARP_THREADS,
          WarpExchangeAlgorithm WARP_EXCHANGE_ALGORITHM = WARP_EXCHANGE_SMEM>
 class WarpExchange
     : private detail::InternalWarpExchangeImpl<InputT,
@@ -81,45 +81,40 @@ public:
 public:
     WarpExchange() = delete;
 
-    explicit HIPCUB_DEVICE __forceinline__ WarpExchange(TempStorage& temp_storage)
+    explicit _CCCL_DEVICE __forceinline__
+    WarpExchange(TempStorage& temp_storage)
         : base_type(temp_storage)
     {
     }
 
-    template <typename OutputT>
-    HIPCUB_DEVICE __forceinline__
-    void BlockedToStriped(
-        const InputT (&input_items)[ITEMS_PER_THREAD],
-        OutputT (&output_items)[ITEMS_PER_THREAD])
+    template<typename OutputT>
+    _CCCL_DEVICE __forceinline__
+    void BlockedToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         base_type::BlockedToStriped(input_items, output_items);
     }
 
-    template <typename OutputT>
-    HIPCUB_DEVICE __forceinline__
-    void StripedToBlocked(
-        const InputT (&input_items)[ITEMS_PER_THREAD],
-        OutputT (&output_items)[ITEMS_PER_THREAD])
+    template<typename OutputT>
+    _CCCL_DEVICE __forceinline__
+    void StripedToBlocked(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         base_type::StripedToBlocked(input_items, output_items);
     }
 
-    template <typename OffsetT>
-    HIPCUB_DEVICE __forceinline__
-    void ScatterToStriped(
-        InputT (&items)[ITEMS_PER_THREAD],
-        OffsetT (&ranks)[ITEMS_PER_THREAD])
+    template<typename OffsetT>
+    _CCCL_DEVICE __forceinline__
+    void ScatterToStriped(InputT (&items)[ITEMS_PER_THREAD], OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
         base_type::ScatterToStriped(items, ranks);
     }
 
-    template <typename OutputT,
-              typename OffsetT>
-    HIPCUB_DEVICE __forceinline__
-    void ScatterToStriped(
-        const InputT (&input_items)[ITEMS_PER_THREAD],
-        OutputT (&output_items)[ITEMS_PER_THREAD],
-        OffsetT (&ranks)[ITEMS_PER_THREAD])
+    template<typename OutputT, typename OffsetT>
+    _CCCL_DEVICE __forceinline__
+    void ScatterToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD],
+                          OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
         base_type::ScatterToStriped(input_items, output_items, ranks);
     }

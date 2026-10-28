@@ -784,7 +784,7 @@ OutputIterator transform_nary(Functor f, size_t size, OutputIterator out, Inputs
 template<typename T, typename U>
 struct binary_to_ternary_transform
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     auto operator()(T a, T b) const
     {
         return hipcub::tuple<U, U, U>{a + b, a * b, -a};
@@ -794,7 +794,7 @@ struct binary_to_ternary_transform
 template<typename T, typename U>
 struct binary_to_ternary_host_transform
 {
-    HIPCUB_HOST
+    _CCCL_HOST
     auto operator()(T a, T b) const
     {
         return std::tuple<U, U, U>{a + b, a * b, -a};
@@ -1201,7 +1201,7 @@ struct flag_expected_op_t
     T     expected;
     T     expected_above_limit;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     auto  operator()(const T& value) -> int
     {
         if(value == expected)

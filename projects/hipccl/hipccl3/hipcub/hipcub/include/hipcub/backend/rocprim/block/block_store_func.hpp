@@ -37,7 +37,7 @@
 BEGIN_HIPCUB_NAMESPACE
 
 template<typename T, int ItemsPerThread, typename OutputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void
     StoreDirectBlocked(int linear_id, OutputIteratorT block_iter, T (&items)[ItemsPerThread])
 {
@@ -47,7 +47,7 @@ inline void
 }
 
 template<typename T, int ItemsPerThread, typename OutputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void StoreDirectBlocked(int             linear_id,
                                OutputIteratorT block_iter,
                                T (&items)[ItemsPerThread],
@@ -59,7 +59,7 @@ inline void StoreDirectBlocked(int             linear_id,
 }
 
 template<typename T, int ItemsPerThread>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void StoreDirectBlockedVectorized(int linear_id, T* block_iter, T (&items)[ItemsPerThread])
 {
     ::rocprim::block_store_direct_blocked_vectorized(
@@ -68,7 +68,7 @@ inline void StoreDirectBlockedVectorized(int linear_id, T* block_iter, T (&items
 }
 
 template<int BlockThreads, typename T, int ItemsPerThread, typename OutputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void
     StoreDirectStriped(int linear_id, OutputIteratorT block_iter, T (&items)[ItemsPerThread])
 {
@@ -76,7 +76,7 @@ inline void
 }
 
 template<int BlockThreads, typename T, int ItemsPerThread, typename OutputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void StoreDirectStriped(int             linear_id,
                                OutputIteratorT block_iter,
                                T (&items)[ItemsPerThread],
@@ -86,7 +86,7 @@ inline void StoreDirectStriped(int             linear_id,
 }
 
 template<typename T, int ItemsPerThread, typename OutputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void
     StoreDirectWarpStriped(int linear_id, OutputIteratorT block_iter, T (&items)[ItemsPerThread])
 {
@@ -96,7 +96,7 @@ inline void
 }
 
 template<typename T, int ItemsPerThread, typename OutputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void StoreDirectWarpStriped(int             linear_id,
                                    OutputIteratorT block_iter,
                                    T (&items)[ItemsPerThread],

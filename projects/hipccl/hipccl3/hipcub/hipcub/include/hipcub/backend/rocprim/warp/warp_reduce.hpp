@@ -51,11 +51,11 @@ constexpr auto max_reduce_op = _HIPCUB_LIBCXX::maximum<>{};
 constexpr auto min_reduce_op = _HIPCUB_LIBCXX::minimum<>{};
 } // namespace detail
 
-template<typename T, int LogicalWarpThreads = HIPCUB_DEVICE_WARP_THREADS>
+template<typename T, int LogicalWarpThreads = _CCCL_DEVICE_WARP_THREADS>
 class WarpReduce : private ::rocprim::warp_reduce<T, LogicalWarpThreads>
 {
-    static_assert(LogicalWarpThreads >= 1 && LogicalWarpThreads <= HIPCUB_DEVICE_WARP_THREADS,
-                  "LogicalWarpThreads must be in the range [1, HIPCUB_DEVICE_WARP_THREADS]");
+    static_assert(LogicalWarpThreads >= 1 && LogicalWarpThreads <= _CCCL_DEVICE_WARP_THREADS,
+                  "LogicalWarpThreads must be in the range [1, _CCCL_DEVICE_WARP_THREADS]");
     using base_type = typename ::rocprim::warp_reduce<T, LogicalWarpThreads>;
 
     typename base_type::storage_type &temp_storage_;
@@ -63,21 +63,22 @@ class WarpReduce : private ::rocprim::warp_reduce<T, LogicalWarpThreads>
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    WarpReduce(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline WarpReduce(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
-    HIPCUB_DEVICE inline
-    T Sum(T input)
+    _CCCL_DEVICE
+    inline T Sum(T input)
     {
         base_type::reduce(input, input, temp_storage_);
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Sum(const InputT& input)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, detail::sum_reduce_op);
@@ -85,23 +86,23 @@ public:
         return thread_reduction;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Sum(T input, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_);
         return input;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Max(T input)
     {
         base_type::reduce(input, input, temp_storage_, detail::max_reduce_op);
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Max(const InputT& input)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, detail::max_reduce_op);
@@ -109,23 +110,23 @@ public:
         return thread_reduction;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Max(T input, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_, detail::max_reduce_op);
         return input;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Min(T input)
     {
         base_type::reduce(input, input, temp_storage_, detail::min_reduce_op);
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Min(const InputT& input)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, detail::min_reduce_op);
@@ -133,7 +134,7 @@ public:
         return thread_reduction;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Min(T input, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_, detail::min_reduce_op);
@@ -141,24 +142,24 @@ public:
     }
 
     template<typename FlagT>
-    HIPCUB_DEVICE inline
-    T HeadSegmentedSum(T input, FlagT head_flag)
+    _CCCL_DEVICE
+    inline T HeadSegmentedSum(T input, FlagT head_flag)
     {
         base_type::head_segmented_reduce(input, input, head_flag, temp_storage_);
         return input;
     }
 
     template<typename FlagT>
-    HIPCUB_DEVICE inline
-    T TailSegmentedSum(T input, FlagT tail_flag)
+    _CCCL_DEVICE
+    inline T TailSegmentedSum(T input, FlagT tail_flag)
     {
         base_type::tail_segmented_reduce(input, input, tail_flag, temp_storage_);
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT, typename ReduceOp)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT, typename ReduceOp)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Reduce(const InputT& input, ReduceOp reduce_op)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, reduce_op);
@@ -167,24 +168,24 @@ public:
     }
 
     template<typename ReduceOp>
-    HIPCUB_DEVICE inline
-    T Reduce(T input, ReduceOp reduce_op)
+    _CCCL_DEVICE
+    inline T Reduce(T input, ReduceOp reduce_op)
     {
         base_type::reduce(input, input, temp_storage_, reduce_op);
         return input;
     }
 
     template<typename ReduceOp>
-    HIPCUB_DEVICE inline
-    T Reduce(T input, ReduceOp reduce_op, int valid_items)
+    _CCCL_DEVICE
+    inline T Reduce(T input, ReduceOp reduce_op, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_, reduce_op);
         return input;
     }
 
     template<typename ReduceOp, typename FlagT>
-    HIPCUB_DEVICE inline
-    T HeadSegmentedReduce(T input, FlagT head_flag, ReduceOp reduce_op)
+    _CCCL_DEVICE
+    inline T HeadSegmentedReduce(T input, FlagT head_flag, ReduceOp reduce_op)
     {
         base_type::head_segmented_reduce(
             input, input, head_flag, temp_storage_, reduce_op
@@ -193,8 +194,8 @@ public:
     }
 
     template<typename ReduceOp, typename FlagT>
-    HIPCUB_DEVICE inline
-    T TailSegmentedReduce(T input, FlagT tail_flag, ReduceOp reduce_op)
+    _CCCL_DEVICE
+    inline T TailSegmentedReduce(T input, FlagT tail_flag, ReduceOp reduce_op)
     {
         base_type::tail_segmented_reduce(
             input, input, tail_flag, temp_storage_, reduce_op
@@ -214,90 +215,90 @@ public:
     struct TempStorage : Uninitialized<_TempStorage>
     {};
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline WarpReduce(TempStorage& /*temp_storage*/)
     {}
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Sum(T input)
     {
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Sum(const InputT& input)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, detail::sum_reduce_op);
         return thread_reduction;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Sum(T input, int /*valid_items*/)
     {
         return input;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Max(T input)
     {
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Max(const InputT& input)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, detail::max_reduce_op);
         return thread_reduction;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Max(T input, int /*valid_items*/)
     {
         return input;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Min(T input)
     {
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Min(const InputT& input)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, detail::min_reduce_op);
         return thread_reduction;
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Min(T input, int /*valid_items*/)
     {
         return input;
     }
 
     template<typename FlagT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T HeadSegmentedSum(T input, FlagT /*head_flag*/)
     {
         return input;
     }
 
     template<typename FlagT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T TailSegmentedSum(T input, FlagT /*tail_flag*/)
     {
         return input;
     }
 
-    HIPCUB_TEMPLATE(typename InputT, typename ReduceOp)
-    HIPCUB_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
-    HIPCUB_DEVICE
+    _CCCL_TEMPLATE(typename InputT, typename ReduceOp)
+    _CCCL_REQUIRES(detail::is_fixed_size_random_access_range_v<InputT>)
+    _CCCL_DEVICE
     inline T Reduce(const InputT& input, ReduceOp reduce_op)
     {
         auto thread_reduction = HIPCUB_NAMESPACE::ThreadReduce(input, reduce_op);
@@ -305,28 +306,28 @@ public:
     }
 
     template<typename ReduceOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Reduce(T input, ReduceOp /*reduce_op*/)
     {
         return input;
     }
 
     template<typename ReduceOp>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T Reduce(T input, ReduceOp /*reduce_op*/, int /*valid_items*/)
     {
         return input;
     }
 
     template<typename ReduceOp, typename FlagT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T HeadSegmentedReduce(T input, FlagT /*head_flag*/, ReduceOp /*reduce_op*/)
     {
         return input;
     }
 
     template<typename ReduceOp, typename FlagT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline T TailSegmentedReduce(T input, FlagT /*tail_flag*/, ReduceOp /*reduce_op*/)
     {
         return input;
