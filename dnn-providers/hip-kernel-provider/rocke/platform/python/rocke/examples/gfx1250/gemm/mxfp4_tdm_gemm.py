@@ -20,6 +20,7 @@ from ....instances.gfx1250.mxfp4_tdm_gemm import (
 )
 from ....instances.gfx1250.mxfp4_tdm_gemm_variants import (
     BASE_VARIANT,
+    variant_flags,
     variant_names,
     variant_spec,
 )
@@ -189,7 +190,19 @@ def main(argv: list[str] | None = None) -> int:
     geo = _geometry_kwargs(args)
     names = variant_names() if args.variant == "all" else [args.variant]
     for name in names:
-        spec = variant_spec(name, args.m, args.n, args.k, **geo)
+        m, n, k = args.m, args.n, args.k
+        flags = variant_flags(name)
+        cluster = flags.get("cluster_dim")
+        if cluster is not None:
+            # Grid is (N/tile_n, M/tile_m, 1); grow so it divides the cluster.
+            cx, cy, _cz = cluster
+            tile_m = geo["tile_m"]
+            tile_n = geo["tile_n"]
+            m = max(m, tile_m * cy)
+            n = max(n, tile_n * cx)
+            m = ((m + tile_m * cy - 1) // (tile_m * cy)) * (tile_m * cy)
+            n = ((n + tile_n * cx - 1) // (tile_n * cx)) * (tile_n * cx)
+        spec = variant_spec(name, m, n, k, **geo)
         run_case(spec, alpha=args.alpha, beta=args.beta)
     return 0
 

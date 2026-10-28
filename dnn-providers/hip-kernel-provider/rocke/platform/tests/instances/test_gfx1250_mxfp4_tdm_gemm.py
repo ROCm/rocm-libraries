@@ -151,7 +151,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     K=256,
                     cluster_dim=(4, 4, 1),
                 ),
-                "not implemented yet",
+                "must be divisible by cluster_dim",
             ),
             (
                 MxFp4TdmGemmSpec(
@@ -449,6 +449,32 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         self.assertIn("undef", llvm)
         self.assertIn("initc", spec.kernel_name())
         self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
+
+    def test_step6_11_cluster_dim_requires_grid_and_emits(self):
+        self.assertIn("step6_11_mxfp4_gemm", variant_names())
+        # Default smoke geometry yields grid (1,1); cluster 4x4 needs M=N=512.
+        too_small = variant_spec("step6_11_mxfp4_gemm", 128, 64, 256)
+        ok, reason = is_valid_spec(too_small)
+        self.assertFalse(ok)
+        self.assertIn("cluster_dim", reason)
+        spec = variant_spec(
+            "step6_11_mxfp4_gemm",
+            512,
+            512,
+            128,
+            tile_m=128,
+            tile_n=64,
+            tile_k=128,
+        )
+        self.assertEqual(spec.cluster_dim, (4, 4, 1))
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn('amdgpu-cluster-dims"="4,4,1"', llvm)
+        self.assertIn("clu", spec.kernel_name())
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

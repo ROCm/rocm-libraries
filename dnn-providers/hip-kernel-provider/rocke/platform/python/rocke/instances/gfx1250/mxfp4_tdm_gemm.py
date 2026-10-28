@@ -181,11 +181,7 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _LDS_SEGMENT_BYTES = 65536
 
-_UNIMPLEMENTED_STEP6_FLAGS = frozenset(
-    {
-        "cluster_dim",
-    }
-)
+_UNIMPLEMENTED_STEP6_FLAGS: frozenset[str] = frozenset()
 
 
 def _tdm_lds_pad_fields(row_bytes: int) -> dict[str, int]:
@@ -254,6 +250,13 @@ def is_valid_spec(spec: MxFp4TdmGemmSpec, arch: str = "gfx1250") -> tuple[bool, 
         target_probe = ArchTarget.from_gfx("gfx1250")
         if not target_probe.memory.has_cluster_launch:
             return False, "gfx1250 reports no cluster launch support"
+        cx, cy, cz = spec.cluster_dim
+        gx, gy, gz = mxfp4_tdm_gemm_grid(spec)
+        if gx % cx or gy % cy or gz % cz:
+            return False, (
+                f"grid {gx}x{gy}x{gz} must be divisible by cluster_dim "
+                f"{cx}x{cy}x{cz}"
+            )
     if spec.warp_k != 1:
         return False, "K-split waves are not supported (warp_k must be 1)"
     if (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (
@@ -324,6 +327,8 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
+    if spec.cluster_dim is not None:
+        b.set_cluster_dims(*spec.cluster_dim)
 
     A = b.param("A", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
     B = b.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
