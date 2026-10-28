@@ -33,14 +33,7 @@
 #include <thrust/system/detail/sequential/execution_policy.h>
 #include <thrust/system/detail/sequential/insertion_sort.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <thrust/detail/algorithm_wrapper.h>
-#endif
-
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-#  include _THRUST_STD_INCLUDE(iterator)
-#endif
+#include _THRUST_STD_INCLUDE(__algorithm/min.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
