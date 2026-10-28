@@ -968,7 +968,6 @@ def _apply_mubuf(inst: Any, item: Any) -> None:
         scope=scope,
         th=th,
         nv=nv,
-        has_mubuf_const=bool(caps.get("HasMUBUFConst", 0)),
         has_glc_modifier=bool(caps.get("HasGLCModifier", 0)),
         has_sc0_modifier=bool(caps.get("HasSC0Modifier", 0)),
     )

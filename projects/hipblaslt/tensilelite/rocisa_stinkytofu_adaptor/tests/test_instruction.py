@@ -3561,7 +3561,7 @@ class TestMubufForwarding(AdaptorTestCase):
         self.assertEqual(kwargs["scope"], 0)
         self.assertEqual(kwargs["th"], -1)
         self.assertEqual(kwargs["nv"], 0)
-        self.assertEqual(kwargs["has_mubuf_const"], False)
+        self.assertNotIn("has_mubuf_const", kwargs)
         self.assertEqual(kwargs["has_glc_modifier"], True)
         self.assertEqual(kwargs["has_sc0_modifier"], False)
 
