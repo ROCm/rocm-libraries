@@ -411,21 +411,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         dest="keep_lgbm",
         help="Keep intermediate .lgbm file",
     )
-    parser.add_argument(
-        "--model-encoding",
-        choices=ENCODINGS,
-        default=SPLIT_LEAF,
-        help="Tree encoding of model.bin (gbdt_model.fbs). split_leaf (default) stores each "
-        "array in the narrowest type that holds it; node_arrays is the original encoding, for "
-        "a runtime that predates split_leaf",
-    )
-    parser.add_argument(
-        "--leaf-precision",
-        choices=LEAF_PRECISIONS,
-        default="float32",
-        help="Storage of split_leaf leaf values: float32 (default; each within 2**-24 of "
-        "itself) or float64 (exact)",
-    )
+    add_model_encoding_arguments(parser)
     parser.add_argument(
         "--training-arches",
         nargs="+",
@@ -458,6 +444,35 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
             "the pair is simply overwritten in place."
         ),
     )
+
+
+def add_model_encoding_arguments(parser: argparse.ArgumentParser) -> None:
+    """How model.bin stores its trees: `train` and `generate` take the same two flags."""
+    parser.add_argument(
+        "--model-encoding",
+        choices=ENCODINGS,
+        default=SPLIT_LEAF,
+        help="Tree encoding of model.bin (gbdt_model.fbs). split_leaf (default) stores each "
+        "array in the narrowest type that holds it; node_arrays is the original encoding, for "
+        "a runtime that predates split_leaf",
+    )
+    parser.add_argument(
+        "--leaf-precision",
+        choices=LEAF_PRECISIONS,
+        default="float32",
+        help="Storage of split_leaf leaf values: float32 (default; each within 2**-24 of "
+        "itself) or float64 (exact)",
+    )
+
+
+def model_encoding_args(args: argparse.Namespace) -> list[str]:
+    """The `train` flags that write the encoding `args` asked for."""
+    return [
+        "--model-encoding",
+        args.model_encoding,
+        "--leaf-precision",
+        args.leaf_precision,
+    ]
 
 
 def _resolve_uhd_id(requested: str | None) -> str:

@@ -92,6 +92,7 @@ std::vector<Builder::TreeSpec> randomForest(uint32_t seed, int trees, int depth)
 {
     std::mt19937 rng(seed);
     std::vector<Builder::TreeSpec> forest;
+    forest.reserve(static_cast<size_t>(trees));
     for(int i = 0; i < trees; ++i)
     {
         forest.push_back(randomTree(rng, depth));
@@ -180,6 +181,40 @@ INSTANTIATE_TEST_SUITE_P(Widths,
                          [](const auto& info) {
                              return std::string(fb::EnumNameIntegerArray(info.param));
                          });
+
+/// The unsigned types hold features and threshold ids, never children. A table past 32767
+/// entries tells a UInt16 id from one misread as signed.
+TEST(TestTreeDataAdapterSplitLeaf, UnsignedFeaturesAndThresholdIdsReadAtEveryWidth)
+{
+    std::vector<double> table(40000);
+    for(size_t i = 0; i < table.size(); ++i)
+    {
+        table[i] = 0.5 + static_cast<double>(i);
+    }
+    for(const auto type : {fb::IntegerArray::UInt8Array, fb::IntegerArray::UInt16Array})
+    {
+        const bool wide = type == fb::IntegerArray::UInt16Array;
+        const auto top = wide ? 39999 : 255;
+        Builder::SplitLeafSpec tree;
+        tree.features = {0, 1};
+        tree.featuresType = type;
+        tree.thresholdIds = {0, top};
+        tree.thresholdIdsType = type;
+        tree.lefts = {1, ~0};
+        tree.rights = {~2, ~1};
+        tree.leaves = {1.0, 2.0, 3.0};
+
+        Builder builder;
+        builder.setNumFeatures(2).setFeaturesHash(HASH).setThresholdTable(table).addSplitLeafTree(
+            tree);
+        const auto adapter = load(builder.build());
+        ASSERT_NE(adapter, nullptr) << fb::EnumNameIntegerArray(type);
+        // f0 <= 0.5 ? (f1 <= table[top] ? leaf 0 : leaf 1) : leaf 2
+        EXPECT_EQ(adapter->score({0.0, top + 0.5}), 1.0) << fb::EnumNameIntegerArray(type);
+        EXPECT_EQ(adapter->score({0.0, top + 1.0}), 2.0) << fb::EnumNameIntegerArray(type);
+        EXPECT_EQ(adapter->score({1.0, 0.0}), 3.0) << fb::EnumNameIntegerArray(type);
+    }
+}
 
 /// float32 leaves move each leaf by at most 2^-24 of itself, and nothing else.
 TEST(TestTreeDataAdapterSplitLeaf, Float32LeavesStayWithinTheirRounding)
@@ -339,7 +374,7 @@ Builder::SplitLeafSpec twoSplits()
 
 /// The load's refusal for @p tree, or "" when it loads; asserts the refusal was an ERROR.
 std::string refusal(const Builder::SplitLeafSpec& tree,
-                    std::vector<double> table = {0.5, 1.5},
+                    const std::vector<double>& table = {0.5, 1.5},
                     std::optional<fb::RealArray> tableTag = std::nullopt)
 {
     auto recorder
@@ -401,8 +436,8 @@ TEST(TestTreeDataAdapterSplitLeaf, MalformedTreesAreRefusedWithTheirReason)
 {
     const auto expect = [](const Builder::SplitLeafSpec& tree,
                            const std::string& reason,
-                           std::vector<double> table = {0.5, 1.5}) {
-        const auto logged = refusal(tree, std::move(table));
+                           const std::vector<double>& table = {0.5, 1.5}) {
+        const auto logged = refusal(tree, table);
         EXPECT_NE(logged.find(reason), std::string::npos)
             << "expected '" << reason << "', logged:\n"
             << logged;
@@ -434,11 +469,31 @@ TEST(TestTreeDataAdapterSplitLeaf, MalformedTreesAreRefusedWithTheirReason)
     expect(tree, "split feature outside the declared feature count");
 
     tree = twoSplits();
+    tree.features = {0, -1};
+    expect(tree, "split feature outside the declared feature count");
+
+    tree = twoSplits();
     tree.leaves = {1.0, std::numeric_limits<double>::quiet_NaN(), 3.0};
     expect(tree, "leaf prediction is not finite");
 
     tree = twoSplits();
     tree.features = {0};
+    expect(tree, "split arrays do not hold one entry per split");
+
+    tree = twoSplits();
+    tree.thresholdIds = {0};
+    expect(tree, "split arrays do not hold one entry per split");
+
+    tree = twoSplits();
+    tree.lefts = {1};
+    expect(tree, "split arrays do not hold one entry per split");
+
+    tree = twoSplits();
+    tree.rights = {~2};
+    expect(tree, "split arrays do not hold one entry per split");
+
+    tree = twoSplits();
+    tree.decisionLte = std::vector<uint8_t>{1};
     expect(tree, "split arrays do not hold one entry per split");
 
     tree = twoSplits();

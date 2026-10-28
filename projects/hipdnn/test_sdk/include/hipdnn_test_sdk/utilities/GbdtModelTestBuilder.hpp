@@ -211,6 +211,7 @@ public:
         }
 
         std::vector<flatbuffers::Offset<fb::GbdtTree>> treeOffsets;
+        treeOffsets.reserve(_trees.size());
         for(const auto& tree : _trees)
         {
             treeOffsets.push_back(std::holds_alternative<TreeSpec>(tree)

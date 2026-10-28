@@ -16,6 +16,7 @@ from uhd_gen.generate import (
 )
 from uhd_gen.provenance import snapshot_provenance
 from uhd_gen.tests.bench_stub import find_any_bench
+from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of
 
 
 def _cli():
@@ -609,6 +610,20 @@ def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(
     assert [model["metric"] for model in manifest["models"]] == ["tflops", "time"]
     ued = json.loads((tree / "engine.ued.json").read_text(encoding="utf-8"))
     assert ued["predict_engine"] == {"gfx942": [emitted["tflops"], emitted["time"]]}
+
+
+@pytest.mark.parametrize(("flags", "written"), ENCODING_FLAGS)
+def test_generate_writes_the_encoding_its_flags_ask_for(
+    monkeypatch, tmp_path, evaluator, flags, written
+):
+    """generate trains through `train`, so it takes and passes on the same flags."""
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main([*common, "--metric", "tflops", *flags]) == 0
+    assert encoding_of(output / "model" / "model.bin") == written
 
 
 TFLOPS_ID = "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"

@@ -1156,7 +1156,8 @@ sha256sum model.bin   # equals tree_data.hash, and equals it again on the next c
   leaves as `float32` (`--leaf-precision float64` keeps them exact); and the per-split
   routing flags only when they are not all the default.
 - **`node_arrays`** is the original encoding: seven node-parallel arrays of `int32`,
-  `double` and `bool`.
+  `double` and `bool`. A runtime built before `split_leaf` reads only this one: `train` and
+  `generate` write it with `--model-encoding node_arrays`.
 
 The runtime reads both. It decodes either one, at load, into the same in-memory nodes the
 tree walk reads, so scoring speed does not depend on the encoding. A tag it does not know (a
