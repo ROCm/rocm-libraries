@@ -37,7 +37,7 @@
     {#- sizeof(key_type) < ... -#}
     {{ mk_type_sz_check(config.key_type) }}
     {{- ' && ' -}}
-    {%- if config.value_type.type == 'empty_type' -%}
+    {%- if config.value_type.type == 'empty_type' or config.value_type.type == 'rocprim::empty_type' -%}
         {#- std::is_same_v<..., rocprim::empty_type> -#}
         ({{ mk_is_empty_type_check(config.value_type) }})
     {%- else -%}
@@ -55,7 +55,7 @@
 {%- block tparams -%}class key_type, class value_type{%- endblock -%}
 {%- endmacro -%}
 
-{#- Generates the symbol name of the function that return the config 
+{#- Generates the symbol name of the function that return the config
     for a target. -#}
 {%- macro mk_target_symbol() -%}
 {{ alg_short_name }}_config_picker
@@ -157,7 +157,7 @@ namespace detail
         {{- '>();' -}}
 {% endcall %}
 
-{# We need to declare what the default target is if the current target is unknown. 
+{# We need to declare what the default target is if the current target is unknown.
    Generates: using ..._targets = comp_targets<comp_target<...>, ...>; -#}
 // All the existing configs should be auto generated
 using {{ alg_short_name }}_targets = comp_targets
