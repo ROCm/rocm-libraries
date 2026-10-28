@@ -1,4 +1,3 @@
----
 ArchitectureName: gfx1250
 CUCount: null
 DefaultSolution:
@@ -42633,236 +42632,6 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - ActivationFuncCall: false
-  AdaptiveGemm: 1
-  AssertFree1ElementMultiple: 8
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: false
-  ClusterLocalRead: 0
-  CodeObjectVersion: '4'
-  DepthU: 128
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalWriteVectorWidth: 2
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLRA: false
-  HalfPLRB: false
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 128
-  LSCB: 128
-  LSPA: 160
-  LSPB: 512
-  LVCA: 128
-  LVCB: 128
-  LVPA: 160
-  LVPB: 512
-  LdsBlockSizePerPadA: 512
-  LdsBlockSizePerPadB: 2048
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 306432
-  LdsInitCVgprs: false
-  LdsNumBytes: 306432
-  LdsNumElementsAlignedA: 42240
-  LdsNumElementsAlignedB: 132096
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 132096
-  LdsOffsetB: 42240
-  LdsOffsetB_Blk: 174336
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetBlkA: 42240
-  LdsOffsetBlkB: 132096
-  LdsOffsetMXSA: 42240
-  LdsOffsetMXSB: 42240
-  LdsOffsetMXSB_Blk: 174336
-  LdsOffsetMetadata_Blk: 0
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 4
-  LoopUnroll: 128
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [1, 4]
-  MIWaveTile: [10, 8]
-  MIWaveTileA: 10
-  MIWaveTileB: 8
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 160
-  MacroTile1: 512
-  MacroTileA: 160
-  MacroTileB: 512
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: false
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 640
-  NumGlobalWriteVectorsPerThread: 320
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 2
-  PrefetchGlobalReadA: 1
-  PrefetchGlobalReadB: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 186
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: true
-  StoreVectorWidth: 2
-  SubGroup0: 2
-  SubGroup1: 64
-  SubGroupA: 2
-  SubGroupB: 64
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  TDMIterateMode: 2
-  TemporalHintA: 1
-  TemporalHintB: 1
-  ThreadTile: [1, 1]
-  ThreadTile0: 80
-  ThreadTile1: 8
-  ThreadTileA: 80
-  ThreadTileB: 8
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 2
-  VectorWidthB: 8
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [16, 8, 1]
-  WorkGroupMapping: -8
-  WorkGroupMappingXCC: 2
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 128
-  _DepthUA: 128
-  _DepthUB: 128
-  _DepthUMetadata: 128
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _TDMIterateModeB: true
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 42240
-  ldsNumBytesB: 132096
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
   CUCount: null
   CUOccupancy: -1
   ClusterBarrier: true
@@ -43006,7 +42775,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 187
+  SolutionIndex: 186
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -43231,7 +43000,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 188
+  SolutionIndex: 187
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -43454,7 +43223,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 189
+  SolutionIndex: 188
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -43683,7 +43452,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 190
+  SolutionIndex: 189
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -43905,7 +43674,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 191
+  SolutionIndex: 190
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -44131,7 +43900,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 192
+  SolutionIndex: 191
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -44355,7 +44124,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 193
+  SolutionIndex: 192
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -44579,7 +44348,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 194
+  SolutionIndex: 193
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -44804,7 +44573,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 195
+  SolutionIndex: 194
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -45027,7 +44796,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 196
+  SolutionIndex: 195
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -45253,7 +45022,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 197
+  SolutionIndex: 196
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -45477,7 +45246,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 198
+  SolutionIndex: 197
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -45703,7 +45472,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 199
+  SolutionIndex: 198
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -45926,7 +45695,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 200
+  SolutionIndex: 199
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -46152,7 +45921,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 201
+  SolutionIndex: 200
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -46380,7 +46149,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 202
+  SolutionIndex: 201
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -46606,7 +46375,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 203
+  SolutionIndex: 202
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -46833,7 +46602,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 204
+  SolutionIndex: 203
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -47060,7 +46829,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 205
+  SolutionIndex: 204
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -47286,7 +47055,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 206
+  SolutionIndex: 205
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -47514,7 +47283,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 207
+  SolutionIndex: 206
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -47738,7 +47507,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 208
+  SolutionIndex: 207
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -47963,7 +47732,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 209
+  SolutionIndex: 208
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -48185,7 +47954,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 210
+  SolutionIndex: 209
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -48409,7 +48178,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 211
+  SolutionIndex: 210
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -48633,7 +48402,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 212
+  SolutionIndex: 211
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -48858,7 +48627,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 213
+  SolutionIndex: 212
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -49086,7 +48855,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 214
+  SolutionIndex: 213
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -49307,7 +49076,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 215
+  SolutionIndex: 214
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -49530,7 +49299,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 216
+  SolutionIndex: 215
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -49751,7 +49520,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 217
+  SolutionIndex: 216
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -49977,7 +49746,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 218
+  SolutionIndex: 217
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -50203,7 +49972,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 219
+  SolutionIndex: 218
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -50426,7 +50195,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 220
+  SolutionIndex: 219
   SourceSwap: true
   StaggerUStride: 512
   StoreSwapAddr: false
@@ -50650,7 +50419,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 221
+  SolutionIndex: 220
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -50875,7 +50644,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 222
+  SolutionIndex: 221
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -51099,7 +50868,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 223
+  SolutionIndex: 222
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -51325,7 +51094,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 224
+  SolutionIndex: 223
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -51548,7 +51317,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 225
+  SolutionIndex: 224
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -51774,7 +51543,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 226
+  SolutionIndex: 225
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -51999,7 +51768,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 227
+  SolutionIndex: 226
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -52221,7 +51990,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 228
+  SolutionIndex: 227
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -52446,7 +52215,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 229
+  SolutionIndex: 228
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -52672,7 +52441,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 230
+  SolutionIndex: 229
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -52895,7 +52664,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 231
+  SolutionIndex: 230
   SourceSwap: true
   StaggerU: 16
   StoreSwapAddr: false
@@ -53119,7 +52888,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 232
+  SolutionIndex: 231
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -53348,7 +53117,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 233
+  SolutionIndex: 232
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -53573,7 +53342,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 234
+  SolutionIndex: 233
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -53798,7 +53567,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 235
+  SolutionIndex: 234
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -54020,7 +53789,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 236
+  SolutionIndex: 235
   StaggerU: 8
   StaggerUStride: 1024
   StoreSwapAddr: true
@@ -54246,7 +54015,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 237
+  SolutionIndex: 236
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -54473,7 +54242,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 238
+  SolutionIndex: 237
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -54698,7 +54467,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 239
+  SolutionIndex: 238
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -54924,7 +54693,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 240
+  SolutionIndex: 239
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -54996,233 +54765,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 23936
   ldsNumBytesB: 60928
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  AdaptiveGemm: 1
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: true
-  ClusterDim: [4, 1]
-  ClusterLocalRead: 0
-  CodeObjectVersion: '4'
-  DepthU: 64
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalSplitUWorkGroupMappingRoundRobin: true
-  GlobalWriteVectorWidth: 1
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLRA: false
-  HalfPLRB: false
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 64
-  LSCB: 64
-  LSPA: 176
-  LSPB: 512
-  LVCA: 64
-  LVCB: 64
-  LVPA: 176
-  LVPB: 512
-  LdsBlockSizePerPadA: 256
-  LdsBlockSizePerPadB: 1024
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 221568
-  LdsInitCVgprs: false
-  LdsNumBytes: 221568
-  LdsNumElementsAlignedA: 23936
-  LdsNumElementsAlignedB: 66560
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 131072
-  LdsOffsetB: 23936
-  LdsOffsetB_Blk: 155008
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetMXSA: 23936
-  LdsOffsetMXSA_Blk: 155008
-  LdsOffsetMXSB: 23936
-  LdsOffsetMXSB_Blk: 155008
-  LdsOffsetMetadata: 23936
-  LdsOffsetMetadata_Blk: 155008
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 2
-  LoopUnroll: 64
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [1, 4]
-  MIWaveTile: [11, 8]
-  MIWaveTileA: 11
-  MIWaveTileB: 8
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 176
-  MacroTile1: 512
-  MacroTileA: 176
-  MacroTileB: 512
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: true
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 704
-  NumGlobalWriteVectorsPerThread: 704
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 1
-  PrefetchGlobalRead: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 241
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: false
-  StoreVectorWidth: 1
-  SubGroup0: 2
-  SubGroup1: 64
-  SubGroupA: 2
-  SubGroupB: 64
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  TemporalHintB: 1
-  ThreadTile: [1, 1]
-  ThreadTile0: 88
-  ThreadTile1: 8
-  ThreadTileA: 88
-  ThreadTileB: 8
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 1
-  VectorWidthB: 8
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [16, 8, 1]
-  WorkGroupMapping: 24
-  WorkGroupMappingXCC: 32
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 64
-  _DepthUA: 64
-  _DepthUB: 64
-  _DepthUMetadata: 64
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 23936
-  ldsNumBytesB: 66560
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -55378,7 +54920,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 242
+  SolutionIndex: 240
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -55608,7 +55150,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 243
+  SolutionIndex: 241
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -55837,7 +55379,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 244
+  SolutionIndex: 242
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -56063,7 +55605,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 245
+  SolutionIndex: 243
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -56293,7 +55835,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 246
+  SolutionIndex: 244
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -56520,7 +56062,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 247
+  SolutionIndex: 245
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -56747,7 +56289,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 248
+  SolutionIndex: 246
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -56975,7 +56517,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 249
+  SolutionIndex: 247
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -57201,7 +56743,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 250
+  SolutionIndex: 248
   SourceSwap: true
   StaggerU: 16
   StoreSwapAddr: false
@@ -57426,7 +56968,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 251
+  SolutionIndex: 249
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -57654,7 +57196,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 252
+  SolutionIndex: 250
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -57882,7 +57424,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 253
+  SolutionIndex: 251
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -58109,7 +57651,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 254
+  SolutionIndex: 252
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -58338,7 +57880,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 255
+  SolutionIndex: 253
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -58565,7 +58107,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 256
+  SolutionIndex: 254
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -58793,7 +58335,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 257
+  SolutionIndex: 255
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -59025,7 +58567,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 258
+  SolutionIndex: 256
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -59254,7 +58796,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 259
+  SolutionIndex: 257
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -59484,7 +59026,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 260
+  SolutionIndex: 258
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -59710,7 +59252,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 261
+  SolutionIndex: 259
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -59939,7 +59481,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 262
+  SolutionIndex: 260
   StaggerU: 4
   StaggerUStride: 512
   StoreSwapAddr: false
@@ -60168,7 +59710,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 263
+  SolutionIndex: 261
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -60395,7 +59937,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 264
+  SolutionIndex: 262
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -60625,7 +60167,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 265
+  SolutionIndex: 263
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -60857,7 +60399,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 266
+  SolutionIndex: 264
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -61084,7 +60626,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 267
+  SolutionIndex: 265
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -61312,7 +60854,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 268
+  SolutionIndex: 266
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -61541,7 +61083,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 269
+  SolutionIndex: 267
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -61767,7 +61309,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 270
+  SolutionIndex: 268
   SourceSwap: true
   StaggerU: 2
   StoreSwapAddr: false
@@ -61992,7 +61534,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 271
+  SolutionIndex: 269
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -62218,7 +61760,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 272
+  SolutionIndex: 270
   SourceSwap: true
   StoreSwapAddr: false
   StoreVectorWidth: 2
@@ -62443,7 +61985,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 273
+  SolutionIndex: 271
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -62675,7 +62217,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 274
+  SolutionIndex: 272
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -62900,7 +62442,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 275
+  SolutionIndex: 273
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -63123,7 +62665,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 276
+  SolutionIndex: 274
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -63350,7 +62892,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 277
+  SolutionIndex: 275
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -63574,7 +63116,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 278
+  SolutionIndex: 276
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -63803,7 +63345,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 279
+  SolutionIndex: 277
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -64032,7 +63574,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 280
+  SolutionIndex: 278
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -64260,7 +63802,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 281
+  SolutionIndex: 279
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -64489,7 +64031,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 282
+  SolutionIndex: 280
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -64718,7 +64260,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 283
+  SolutionIndex: 281
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -64947,7 +64489,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 284
+  SolutionIndex: 282
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -65174,7 +64716,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 285
+  SolutionIndex: 283
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -65402,7 +64944,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 286
+  SolutionIndex: 284
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -65630,7 +65172,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 287
+  SolutionIndex: 285
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -65854,7 +65396,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 288
+  SolutionIndex: 286
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -66078,7 +65620,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 289
+  SolutionIndex: 287
   SourceSwap: true
   StoreSwapAddr: true
   StoreVectorWidth: 4
@@ -66304,7 +65846,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 290
+  SolutionIndex: 288
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -66529,7 +66071,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 291
+  SolutionIndex: 289
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -66758,7 +66300,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 292
+  SolutionIndex: 290
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -66987,7 +66529,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 293
+  SolutionIndex: 291
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -67213,7 +66755,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 294
+  SolutionIndex: 292
   SourceSwap: true
   StaggerU: 8
   StoreSwapAddr: true
@@ -67439,7 +66981,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 295
+  SolutionIndex: 293
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -67668,7 +67210,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 296
+  SolutionIndex: 294
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -67896,7 +67438,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 297
+  SolutionIndex: 295
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -68124,7 +67666,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 298
+  SolutionIndex: 296
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -68350,7 +67892,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 299
+  SolutionIndex: 297
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -68577,7 +68119,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 300
+  SolutionIndex: 298
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -68805,7 +68347,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 301
+  SolutionIndex: 299
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -69034,7 +68576,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 302
+  SolutionIndex: 300
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -69263,7 +68805,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 303
+  SolutionIndex: 301
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -69490,7 +69032,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 304
+  SolutionIndex: 302
   SourceSwap: true
   StaggerU: 64
   StaggerUStride: 128
@@ -69714,7 +69256,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 305
+  SolutionIndex: 303
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -69940,7 +69482,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 306
+  SolutionIndex: 304
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -70165,7 +69707,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 307
+  SolutionIndex: 305
   SourceSwap: true
   StaggerU: 16
   StaggerUStride: 512
@@ -70391,7 +69933,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 308
+  SolutionIndex: 306
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -70616,7 +70158,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 309
+  SolutionIndex: 307
   SourceSwap: true
   StaggerU: 64
   StaggerUStride: 128
@@ -70843,7 +70385,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 310
+  SolutionIndex: 308
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -71069,7 +70611,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 311
+  SolutionIndex: 309
   SourceSwap: true
   StaggerU: 4
   StaggerUStride: 128
@@ -71298,7 +70840,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 312
+  SolutionIndex: 310
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -71526,7 +71068,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 313
+  SolutionIndex: 311
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -71751,7 +71293,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 314
+  SolutionIndex: 312
   SourceSwap: true
   StaggerU: 16
   StoreSwapAddr: false
@@ -71978,7 +71520,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 315
+  SolutionIndex: 313
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -72207,7 +71749,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 316
+  SolutionIndex: 314
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -72434,7 +71976,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 317
+  SolutionIndex: 315
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -72657,7 +72199,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 318
+  SolutionIndex: 316
   SourceSwap: true
   StaggerU: 8
   StoreSwapAddr: false
@@ -72884,7 +72426,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 319
+  SolutionIndex: 317
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -73109,7 +72651,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 320
+  SolutionIndex: 318
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -73334,7 +72876,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 321
+  SolutionIndex: 319
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -73561,7 +73103,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 322
+  SolutionIndex: 320
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -73787,7 +73329,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 323
+  SolutionIndex: 321
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -74013,7 +73555,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 324
+  SolutionIndex: 322
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -74240,7 +73782,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 325
+  SolutionIndex: 323
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -74466,7 +74008,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 326
+  SolutionIndex: 324
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -74693,7 +74235,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 327
+  SolutionIndex: 325
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -74923,7 +74465,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 328
+  SolutionIndex: 326
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -75151,7 +74693,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 329
+  SolutionIndex: 327
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -75381,7 +74923,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 330
+  SolutionIndex: 328
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -75613,7 +75155,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 331
+  SolutionIndex: 329
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -75842,7 +75384,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 332
+  SolutionIndex: 330
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -76070,7 +75612,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 333
+  SolutionIndex: 331
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -76298,7 +75840,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 334
+  SolutionIndex: 332
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -76527,7 +76069,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 335
+  SolutionIndex: 333
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -76755,7 +76297,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 336
+  SolutionIndex: 334
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -76983,7 +76525,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 337
+  SolutionIndex: 335
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -77212,7 +76754,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 338
+  SolutionIndex: 336
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -77440,7 +76982,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 339
+  SolutionIndex: 337
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -77668,7 +77210,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 340
+  SolutionIndex: 338
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -77895,7 +77437,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 341
+  SolutionIndex: 339
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -78122,7 +77664,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 342
+  SolutionIndex: 340
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -78349,7 +77891,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 343
+  SolutionIndex: 341
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -78576,7 +78118,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 344
+  SolutionIndex: 342
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -78806,7 +78348,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 345
+  SolutionIndex: 343
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -79033,7 +78575,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 346
+  SolutionIndex: 344
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -79261,7 +78803,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 347
+  SolutionIndex: 345
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -79488,7 +79030,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 348
+  SolutionIndex: 346
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -79718,7 +79260,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 349
+  SolutionIndex: 347
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -79946,7 +79488,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 350
+  SolutionIndex: 348
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -80175,7 +79717,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 351
+  SolutionIndex: 349
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -80403,7 +79945,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 352
+  SolutionIndex: 350
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -80631,7 +80173,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 353
+  SolutionIndex: 351
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -80860,7 +80402,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 354
+  SolutionIndex: 352
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -81086,7 +80628,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 355
+  SolutionIndex: 353
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -81317,7 +80859,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 356
+  SolutionIndex: 354
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -81550,7 +81092,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 357
+  SolutionIndex: 355
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -81780,7 +81322,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 358
+  SolutionIndex: 356
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -82009,7 +81551,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 359
+  SolutionIndex: 357
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -82239,7 +81781,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 360
+  SolutionIndex: 358
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -82471,7 +82013,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 361
+  SolutionIndex: 359
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -82699,7 +82241,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 362
+  SolutionIndex: 360
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -82931,7 +82473,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 363
+  SolutionIndex: 361
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -83162,7 +82704,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 364
+  SolutionIndex: 362
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -83391,7 +82933,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 365
+  SolutionIndex: 363
   StaggerU: 2
   StoreSwapAddr: false
   StoreVectorWidth: 8
@@ -83614,7 +83156,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 366
+  SolutionIndex: 364
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -83845,7 +83387,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 367
+  SolutionIndex: 365
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -84074,7 +83616,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 368
+  SolutionIndex: 366
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -84301,7 +83843,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 369
+  SolutionIndex: 367
   SourceSwap: true
   StaggerUStride: 1024
   StoreSwapAddr: false
@@ -84528,7 +84070,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 370
+  SolutionIndex: 368
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -84753,7 +84295,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 371
+  SolutionIndex: 369
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -84979,7 +84521,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 372
+  SolutionIndex: 370
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -85206,7 +84748,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 373
+  SolutionIndex: 371
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -85432,7 +84974,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 374
+  SolutionIndex: 372
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -85660,7 +85202,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 375
+  SolutionIndex: 373
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -85892,7 +85434,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 376
+  SolutionIndex: 374
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -86124,7 +85666,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 377
+  SolutionIndex: 375
   SourceSwap: true
   StaggerU: 2
   StoreSwapAddr: false
@@ -86353,7 +85895,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 378
+  SolutionIndex: 376
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -86583,7 +86125,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 379
+  SolutionIndex: 377
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -86813,7 +86355,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 380
+  SolutionIndex: 378
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -87045,7 +86587,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 381
+  SolutionIndex: 379
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -87272,7 +86814,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 382
+  SolutionIndex: 380
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -87498,7 +87040,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 383
+  SolutionIndex: 381
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -87727,7 +87269,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 384
+  SolutionIndex: 382
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -87952,7 +87494,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 385
+  SolutionIndex: 383
   SourceSwap: true
   StaggerU: 64
   StoreSwapAddr: false
@@ -88180,7 +87722,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 386
+  SolutionIndex: 384
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -88405,7 +87947,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 387
+  SolutionIndex: 385
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -88631,7 +88173,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 388
+  SolutionIndex: 386
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -88858,7 +88400,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 389
+  SolutionIndex: 387
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -89087,7 +88629,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 390
+  SolutionIndex: 388
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -89313,7 +88855,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 391
+  SolutionIndex: 389
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -89539,7 +89081,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 392
+  SolutionIndex: 390
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -89764,7 +89306,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 393
+  SolutionIndex: 391
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -89991,7 +89533,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 394
+  SolutionIndex: 392
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -90222,7 +89764,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 395
+  SolutionIndex: 393
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -90447,7 +89989,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 396
+  SolutionIndex: 394
   SourceSwap: true
   StaggerU: 4
   StoreSwapAddr: true
@@ -90675,7 +90217,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 397
+  SolutionIndex: 395
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -90906,7 +90448,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 398
+  SolutionIndex: 396
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -91139,7 +90681,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 399
+  SolutionIndex: 397
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -91371,7 +90913,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 400
+  SolutionIndex: 398
   SourceSwap: true
   StaggerU: 64
   StoreSwapAddr: true
@@ -91600,7 +91142,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 401
+  SolutionIndex: 399
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -91827,7 +91369,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 402
+  SolutionIndex: 400
   SourceSwap: true
   StoreSwapAddr: true
   StoreVectorWidth: 8
@@ -92057,7 +91599,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 403
+  SolutionIndex: 401
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -92287,7 +91829,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 404
+  SolutionIndex: 402
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -92519,7 +92061,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 405
+  SolutionIndex: 403
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -92746,7 +92288,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 406
+  SolutionIndex: 404
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -92976,7 +92518,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 407
+  SolutionIndex: 405
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -93208,7 +92750,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 408
+  SolutionIndex: 406
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -93437,7 +92979,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 409
+  SolutionIndex: 407
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -93663,7 +93205,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 410
+  SolutionIndex: 408
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -93888,7 +93430,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 411
+  SolutionIndex: 409
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -94117,7 +93659,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 412
+  SolutionIndex: 410
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -94346,7 +93888,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 413
+  SolutionIndex: 411
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -94576,7 +94118,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 414
+  SolutionIndex: 412
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -94802,7 +94344,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 415
+  SolutionIndex: 413
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -95034,7 +94576,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 416
+  SolutionIndex: 414
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -95262,7 +94804,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 417
+  SolutionIndex: 415
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -95490,7 +95032,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 418
+  SolutionIndex: 416
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -95720,7 +95262,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 419
+  SolutionIndex: 417
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -95951,7 +95493,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 420
+  SolutionIndex: 418
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -96175,7 +95717,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 421
+  SolutionIndex: 419
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -96402,7 +95944,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 422
+  SolutionIndex: 420
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -96633,7 +96175,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 423
+  SolutionIndex: 421
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -96861,7 +96403,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 424
+  SolutionIndex: 422
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -97088,7 +96630,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 425
+  SolutionIndex: 423
   StaggerU: 8
   StoreSwapAddr: true
   StoreVectorWidth: 8
@@ -97315,7 +96857,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 426
+  SolutionIndex: 424
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -97545,7 +97087,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 427
+  SolutionIndex: 425
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -97773,7 +97315,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 428
+  SolutionIndex: 426
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -98000,7 +97542,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 429
+  SolutionIndex: 427
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -98232,7 +97774,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 430
+  SolutionIndex: 428
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -98458,7 +98000,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 431
+  SolutionIndex: 429
   SourceSwap: true
   StaggerU: 64
   StoreSwapAddr: true
@@ -98682,7 +98224,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 432
+  SolutionIndex: 430
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -98911,7 +98453,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 433
+  SolutionIndex: 431
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -99140,7 +98682,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 434
+  SolutionIndex: 432
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -99366,7 +98908,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 435
+  SolutionIndex: 433
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -99594,7 +99136,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 436
+  SolutionIndex: 434
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -99818,7 +99360,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 437
+  SolutionIndex: 435
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -100042,7 +99584,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 438
+  SolutionIndex: 436
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -100268,7 +99810,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 439
+  SolutionIndex: 437
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -100341,237 +99883,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 33280
   ldsNumBytesB: 47872
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  AdaptiveGemm: 1
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: true
-  ClusterDim: [2, 1]
-  ClusterLocalRead: 0
-  CodeObjectVersion: '4'
-  DepthU: 64
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalSplitUWorkGroupMappingRoundRobin: true
-  GlobalWriteVectorWidth: 8
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLR: 3
-  HalfPLRA: true
-  HalfPLRB: true
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: {bBaseline: true, footprintPacked: true, ldsBaseB: 16640,
-    writeStrideBytes: 67328}
-  LDSSegmentInterleave: 1
-  LDSTrInst: true
-  LSCA: 64
-  LSCB: 64
-  LSPA: 256
-  LSPB: 384
-  LVCA: 64
-  LVCB: 64
-  LVPA: 256
-  LVPB: 384
-  LdsBlockSizePerPadA: 1024
-  LdsBlockSizePerPadB: 512
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 215040
-  LdsInitCVgprs: false
-  LdsNumBytes: 215040
-  LdsNumElementsAlignedA: 33280
-  LdsNumElementsAlignedB: 50688
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 131072
-  LdsOffsetB: 33280
-  LdsOffsetB_Blk: 164352
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetMXSA: 33280
-  LdsOffsetMXSA_Blk: 164352
-  LdsOffsetMXSB: 33280
-  LdsOffsetMXSB_Blk: 164352
-  LdsOffsetMetadata: 33280
-  LdsOffsetMetadata_Blk: 164352
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 2
-  LoopUnroll: 64
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [2, 2]
-  MIWaveTile: [8, 12]
-  MIWaveTileA: 8
-  MIWaveTileB: 12
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 256
-  MacroTile1: 384
-  MacroTileA: 256
-  MacroTileB: 384
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: true
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 768
-  NumGlobalWriteVectorsPerThread: 96
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 2
-  PrefetchGlobalRead: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 440
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: false
-  StoreVectorWidth: 8
-  SubGroup0: 4
-  SubGroup1: 32
-  SubGroupA: 4
-  SubGroupB: 32
-  SuppressNoLoadLoop: true
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  TemporalHintB: 1
-  ThreadTile: [1, 1]
-  ThreadTile0: 64
-  ThreadTile1: 12
-  ThreadTileA: 64
-  ThreadTileB: 12
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 8
-  VectorWidthB: 4
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [32, 4, 1]
-  WorkGroupMapping: -16
-  WorkGroupMappingXCC: 32
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 64
-  _DepthUA: 64
-  _DepthUB: 64
-  _DepthUMetadata: 64
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 33280
-  ldsNumBytesB: 50688
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -100725,7 +100036,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 441
+  SolutionIndex: 438
   SourceSwap: true
   StaggerU: 64
   StoreSwapAddr: false
@@ -100952,7 +100263,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 442
+  SolutionIndex: 439
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -101183,7 +100494,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 443
+  SolutionIndex: 440
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -101414,7 +100725,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 444
+  SolutionIndex: 441
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -101638,7 +100949,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 445
+  SolutionIndex: 442
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -101868,7 +101179,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 446
+  SolutionIndex: 443
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -102095,7 +101406,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 447
+  SolutionIndex: 444
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -102323,7 +101634,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 448
+  SolutionIndex: 445
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -102552,7 +101863,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 449
+  SolutionIndex: 446
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -102778,7 +102089,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 450
+  SolutionIndex: 447
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -103006,7 +102317,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 451
+  SolutionIndex: 448
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -103229,7 +102540,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 452
+  SolutionIndex: 449
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -103457,7 +102768,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 453
+  SolutionIndex: 450
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -103686,7 +102997,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 454
+  SolutionIndex: 451
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -103917,7 +103228,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 455
+  SolutionIndex: 452
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -104147,7 +103458,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 456
+  SolutionIndex: 453
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -104378,7 +103689,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 457
+  SolutionIndex: 454
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -104606,7 +103917,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 458
+  SolutionIndex: 455
   SourceSwap: true
   StaggerU: 2
   StaggerUStride: 512
@@ -104834,7 +104145,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 459
+  SolutionIndex: 456
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -105063,7 +104374,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 460
+  SolutionIndex: 457
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -105288,7 +104599,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 461
+  SolutionIndex: 458
   SourceSwap: true
   StaggerU: 4
   StaggerUStride: 1024
@@ -105511,7 +104822,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 462
+  SolutionIndex: 459
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -105737,7 +105048,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 463
+  SolutionIndex: 460
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -105965,7 +105276,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 464
+  SolutionIndex: 461
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -106193,7 +105504,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 465
+  SolutionIndex: 462
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -106422,7 +105733,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 466
+  SolutionIndex: 463
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -106651,7 +105962,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 467
+  SolutionIndex: 464
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -106880,7 +106191,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 468
+  SolutionIndex: 465
   SourceSwap: true
   StaggerU: 4
   StoreSwapAddr: true
@@ -107107,7 +106418,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 469
+  SolutionIndex: 466
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -107333,7 +106644,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 470
+  SolutionIndex: 467
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -107558,7 +106869,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 471
+  SolutionIndex: 468
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -107788,7 +107099,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 472
+  SolutionIndex: 469
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -108014,7 +107325,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 473
+  SolutionIndex: 470
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -108240,7 +107551,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 474
+  SolutionIndex: 471
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -108468,7 +107779,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 475
+  SolutionIndex: 472
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -108696,7 +108007,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 476
+  SolutionIndex: 473
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -108921,7 +108232,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 477
+  SolutionIndex: 474
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -109151,7 +108462,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 478
+  SolutionIndex: 475
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -109381,7 +108692,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 479
+  SolutionIndex: 476
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -109611,7 +108922,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 480
+  SolutionIndex: 477
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -109837,7 +109148,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 481
+  SolutionIndex: 478
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -110067,7 +109378,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 482
+  SolutionIndex: 479
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -110296,7 +109607,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 483
+  SolutionIndex: 480
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -110526,7 +109837,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 484
+  SolutionIndex: 481
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -110756,7 +110067,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 485
+  SolutionIndex: 482
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -110989,7 +110300,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 486
+  SolutionIndex: 483
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -111216,7 +110527,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 487
+  SolutionIndex: 484
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -111446,7 +110757,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 488
+  SolutionIndex: 485
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -111675,7 +110986,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 489
+  SolutionIndex: 486
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -111904,7 +111215,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 490
+  SolutionIndex: 487
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -111978,233 +111289,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 87040
   ldsNumBytesB: 66560
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: true
-  ClusterDim: [2, 1]
-  ClusterLocalRead: 0
-  CodeObjectVersion: '4'
-  DepthU: 64
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalSplitUWorkGroupMappingRoundRobin: true
-  GlobalWriteVectorWidth: 4
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLR: 2
-  HalfPLRA: false
-  HalfPLRB: true
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 64
-  LSCB: 64
-  LSPA: 320
-  LSPB: 256
-  LVCA: 64
-  LVCB: 64
-  LVPA: 320
-  LVPB: 256
-  LdsBlockSizePerPadA: 512
-  LdsBlockSizePerPadB: 512
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 207104
-  LdsInitCVgprs: false
-  LdsNumBytes: 207104
-  LdsNumElementsAlignedA: 42240
-  LdsNumElementsAlignedB: 33792
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 131072
-  LdsOffsetB: 42240
-  LdsOffsetB_Blk: 173312
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetMXSA: 42240
-  LdsOffsetMXSA_Blk: 173312
-  LdsOffsetMXSB: 42240
-  LdsOffsetMXSB_Blk: 173312
-  LdsOffsetMetadata: 42240
-  LdsOffsetMetadata_Blk: 173312
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 2
-  LoopUnroll: 64
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [1, 4]
-  MIWaveTile: [20, 4]
-  MIWaveTileA: 20
-  MIWaveTileB: 4
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 320
-  MacroTile1: 256
-  MacroTileA: 320
-  MacroTileB: 256
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: true
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 640
-  NumGlobalWriteVectorsPerThread: 160
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 1
-  PrefetchGlobalRead: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 491
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: false
-  StoreVectorWidth: 4
-  SubGroup0: 2
-  SubGroup1: 64
-  SubGroupA: 2
-  SubGroupB: 64
-  SuppressNoLoadLoop: true
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  ThreadTile: [1, 1]
-  ThreadTile0: 160
-  ThreadTile1: 4
-  ThreadTileA: 160
-  ThreadTileB: 4
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 4
-  VectorWidthB: 4
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [16, 8, 1]
-  WorkGroupMapping: 4
-  WorkGroupMappingXCC: 32
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 64
-  _DepthUA: 64
-  _DepthUB: 64
-  _DepthUMetadata: 64
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 42240
-  ldsNumBytesB: 33792
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -112361,7 +111445,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 492
+  SolutionIndex: 488
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -112590,7 +111674,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 493
+  SolutionIndex: 489
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -112817,7 +111901,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 494
+  SolutionIndex: 490
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -113044,7 +112128,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 495
+  SolutionIndex: 491
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -113272,7 +112356,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 496
+  SolutionIndex: 492
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -113499,7 +112583,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 497
+  SolutionIndex: 493
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -113725,7 +112809,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 498
+  SolutionIndex: 494
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -113799,228 +112883,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 84480
   ldsNumBytesB: 78336
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: false
-  CodeObjectVersion: '4'
-  DepthU: 256
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalWriteVectorWidth: 1
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLRA: false
-  HalfPLRB: false
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 256
-  LSCB: 256
-  LSPA: 320
-  LSPB: 64
-  LVCA: 256
-  LVCB: 256
-  LVPA: 320
-  LVPB: 64
-  LdsBlockSizePerPadA: 512
-  LdsBlockSizePerPadB: 1024
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 235520
-  LdsInitCVgprs: false
-  LdsNumBytes: 235520
-  LdsNumElementsAlignedA: 168960
-  LdsNumElementsAlignedB: 33280
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 33280
-  LdsOffsetB: 168960
-  LdsOffsetB_Blk: 202240
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetBlkA: 168960
-  LdsOffsetBlkB: 33280
-  LdsOffsetMXSA: 168960
-  LdsOffsetMXSB: 168960
-  LdsOffsetMXSB_Blk: 202240
-  LdsOffsetMetadata_Blk: 0
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 8
-  LoopUnroll: 256
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [4, 1]
-  MIWaveTile: [5, 4]
-  MIWaveTileA: 5
-  MIWaveTileB: 4
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 320
-  MacroTile1: 64
-  MacroTileA: 320
-  MacroTileB: 64
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: false
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 160
-  NumGlobalWriteVectorsPerThread: 160
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 2
-  PrefetchGlobalReadA: 1
-  PrefetchGlobalReadB: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 499
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: true
-  StoreVectorWidth: 8
-  SubGroup0: 8
-  SubGroup1: 16
-  SubGroupA: 8
-  SubGroupB: 16
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  ThreadTile: [1, 1]
-  ThreadTile0: 40
-  ThreadTile1: 4
-  ThreadTileA: 40
-  ThreadTileB: 4
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 1
-  VectorWidthB: 2
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [64, 2, 1]
-  WorkGroupMapping: -2
-  WorkGroupMappingXCC: 4
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 256
-  _DepthUA: 256
-  _DepthUB: 256
-  _DepthUMetadata: 256
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 168960
-  ldsNumBytesB: 33280
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -114173,7 +113035,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 500
+  SolutionIndex: 495
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -114397,7 +113259,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 501
+  SolutionIndex: 496
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -114627,7 +113489,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 502
+  SolutionIndex: 497
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -114856,7 +113718,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 503
+  SolutionIndex: 498
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -115083,7 +113945,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 504
+  SolutionIndex: 499
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -115310,7 +114172,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 505
+  SolutionIndex: 500
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -115537,7 +114399,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 506
+  SolutionIndex: 501
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -115764,7 +114626,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 507
+  SolutionIndex: 502
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -115992,7 +114854,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 508
+  SolutionIndex: 503
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -116218,7 +115080,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 509
+  SolutionIndex: 504
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -116443,7 +115305,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 510
+  SolutionIndex: 505
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -116666,7 +115528,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 511
+  SolutionIndex: 506
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -116894,7 +115756,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 512
+  SolutionIndex: 507
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -117120,7 +115982,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 513
+  SolutionIndex: 508
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -117346,7 +116208,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 514
+  SolutionIndex: 509
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -117569,7 +116431,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 515
+  SolutionIndex: 510
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -117797,7 +116659,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 516
+  SolutionIndex: 511
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -118023,7 +116885,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 517
+  SolutionIndex: 512
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -118252,7 +117114,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 518
+  SolutionIndex: 513
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -118480,7 +117342,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 519
+  SolutionIndex: 514
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -118705,7 +117567,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 520
+  SolutionIndex: 515
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 2048
@@ -118929,7 +117791,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 521
+  SolutionIndex: 516
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 512
@@ -119158,7 +118020,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 522
+  SolutionIndex: 517
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -119386,7 +118248,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 523
+  SolutionIndex: 518
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -119611,7 +118473,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 524
+  SolutionIndex: 519
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -119835,7 +118697,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 525
+  SolutionIndex: 520
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -120060,7 +118922,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 526
+  SolutionIndex: 521
   SourceSwap: true
   StaggerU: 16
   StaggerUStride: 1024
@@ -120286,7 +119148,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 527
+  SolutionIndex: 522
   SourceSwap: true
   StaggerU: 16
   StaggerUStride: 1024
@@ -120515,7 +119377,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 528
+  SolutionIndex: 523
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -120739,7 +119601,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 529
+  SolutionIndex: 524
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -120964,7 +119826,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 530
+  SolutionIndex: 525
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -121193,7 +120055,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 531
+  SolutionIndex: 526
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -121419,7 +120281,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 532
+  SolutionIndex: 527
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -121644,7 +120506,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 533
+  SolutionIndex: 528
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -121867,7 +120729,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 534
+  SolutionIndex: 529
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -122093,7 +120955,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 535
+  SolutionIndex: 530
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -122321,7 +121183,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 536
+  SolutionIndex: 531
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -122546,7 +121408,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 537
+  SolutionIndex: 532
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -122774,7 +121636,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 538
+  SolutionIndex: 533
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -123001,7 +121863,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 539
+  SolutionIndex: 534
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -123225,7 +122087,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 540
+  SolutionIndex: 535
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -123453,7 +122315,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 541
+  SolutionIndex: 536
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -123679,7 +122541,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 542
+  SolutionIndex: 537
   SourceSwap: true
   StaggerUStride: 1024
   StoreSwapAddr: false
@@ -123901,7 +122763,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 543
+  SolutionIndex: 538
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -124124,7 +122986,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 544
+  SolutionIndex: 539
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -124351,7 +123213,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 545
+  SolutionIndex: 540
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -124575,7 +123437,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 546
+  SolutionIndex: 541
   SourceSwap: true
   StaggerU: 64
   StaggerUStride: 1024
@@ -124804,7 +123666,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 547
+  SolutionIndex: 542
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -125028,7 +123890,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 548
+  SolutionIndex: 543
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -125254,7 +124116,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 549
+  SolutionIndex: 544
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -125480,7 +124342,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 550
+  SolutionIndex: 545
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -125708,7 +124570,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 551
+  SolutionIndex: 546
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -125934,7 +124796,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 552
+  SolutionIndex: 547
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -126161,7 +125023,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 553
+  SolutionIndex: 548
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -126392,7 +125254,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 554
+  SolutionIndex: 549
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -126620,7 +125482,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 555
+  SolutionIndex: 550
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -126847,7 +125709,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 556
+  SolutionIndex: 551
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -127074,7 +125936,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 557
+  SolutionIndex: 552
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -127300,7 +126162,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 558
+  SolutionIndex: 553
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -127528,7 +126390,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 559
+  SolutionIndex: 554
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -127756,7 +126618,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 560
+  SolutionIndex: 555
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -127986,7 +126848,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 561
+  SolutionIndex: 556
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -128214,7 +127076,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 562
+  SolutionIndex: 557
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -128441,7 +127303,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 563
+  SolutionIndex: 558
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -128670,7 +127532,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 564
+  SolutionIndex: 559
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -128900,7 +127762,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 565
+  SolutionIndex: 560
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -129129,7 +127991,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 566
+  SolutionIndex: 561
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -129358,7 +128220,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 567
+  SolutionIndex: 562
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -129587,7 +128449,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 568
+  SolutionIndex: 563
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -129816,7 +128678,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 569
+  SolutionIndex: 564
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -130040,7 +128902,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 570
+  SolutionIndex: 565
   StaggerU: 8
   StoreSwapAddr: true
   StoreVectorWidth: 8
@@ -130267,7 +129129,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 571
+  SolutionIndex: 566
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -130495,7 +129357,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 572
+  SolutionIndex: 567
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -130725,7 +129587,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 573
+  SolutionIndex: 568
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -130951,7 +129813,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 574
+  SolutionIndex: 569
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -131177,7 +130039,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 575
+  SolutionIndex: 570
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -131401,7 +130263,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 576
+  SolutionIndex: 571
   SourceSwap: true
   StaggerU: 4
   StaggerUStride: 512
@@ -131627,7 +130489,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 577
+  SolutionIndex: 572
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -131856,7 +130718,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 578
+  SolutionIndex: 573
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -132081,7 +130943,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 579
+  SolutionIndex: 574
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -132307,7 +131169,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 580
+  SolutionIndex: 575
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -132533,7 +131395,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 581
+  SolutionIndex: 576
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -132759,7 +131621,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 582
+  SolutionIndex: 577
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -132985,7 +131847,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 583
+  SolutionIndex: 578
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -133213,7 +132075,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 584
+  SolutionIndex: 579
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -133441,7 +132303,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 585
+  SolutionIndex: 580
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -133669,7 +132531,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 586
+  SolutionIndex: 581
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -133897,7 +132759,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 587
+  SolutionIndex: 582
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -134122,7 +132984,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 588
+  SolutionIndex: 583
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 512
@@ -134349,7 +133211,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 589
+  SolutionIndex: 584
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -134573,7 +133435,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 590
+  SolutionIndex: 585
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -134799,7 +133661,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 591
+  SolutionIndex: 586
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -135023,7 +133885,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 592
+  SolutionIndex: 587
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -135246,7 +134108,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 593
+  SolutionIndex: 588
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -135470,7 +134332,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 594
+  SolutionIndex: 589
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -135692,7 +134554,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 595
+  SolutionIndex: 590
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -135918,7 +134780,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 596
+  SolutionIndex: 591
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -136144,7 +135006,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 597
+  SolutionIndex: 592
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -136368,7 +135230,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 598
+  SolutionIndex: 593
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -136597,7 +135459,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 599
+  SolutionIndex: 594
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -136824,7 +135686,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 600
+  SolutionIndex: 595
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -137048,7 +135910,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 601
+  SolutionIndex: 596
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -137274,7 +136136,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 602
+  SolutionIndex: 597
   SourceSwap: true
   StaggerU: 2
   StaggerUStride: 128
@@ -137501,7 +136363,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 603
+  SolutionIndex: 598
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -137730,7 +136592,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 604
+  SolutionIndex: 599
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -137958,7 +136820,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 605
+  SolutionIndex: 600
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -138032,233 +136894,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 66560
   ldsNumBytesB: 13056
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  AdaptiveGemm: 1
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: false
-  ClusterLocalRead: 0
-  CodeObjectVersion: '4'
-  DepthU: 128
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalWriteVectorWidth: 4
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLR: 1
-  HalfPLRA: true
-  HalfPLRB: false
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 128
-  LSCB: 128
-  LSPA: 64
-  LSPB: 1024
-  LVCA: 128
-  LVCB: 128
-  LVPA: 64
-  LVPB: 1024
-  LdsBlockSizePerPadA: 1024
-  LdsBlockSizePerPadB: 1024
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 299520
-  LdsInitCVgprs: false
-  LdsNumBytes: 299520
-  LdsNumElementsAlignedA: 16640
-  LdsNumElementsAlignedB: 266240
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 16640
-  LdsOffsetB: 33280
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetBlkA: 16640
-  LdsOffsetBlkB: 266240
-  LdsOffsetMXSA: 16640
-  LdsOffsetMXSA_Blk: 33280
-  LdsOffsetMXSB: 33280
-  LdsOffsetMetadata_Blk: 0
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 4
-  LoopUnroll: 128
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [1, 4]
-  MIWaveTile: [4, 16]
-  MIWaveTileA: 4
-  MIWaveTileB: 16
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 64
-  MacroTile1: 1024
-  MacroTileA: 64
-  MacroTileB: 1024
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: false
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 512
-  NumGlobalWriteVectorsPerThread: 128
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 2
-  PrefetchGlobalReadA: 2
-  PrefetchGlobalReadB: 1
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 606
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: true
-  StoreVectorWidth: 4
-  SubGroup0: 2
-  SubGroup1: 64
-  SubGroupA: 2
-  SubGroupB: 64
-  SuppressNoLoadLoop: true
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  TemporalHintA: 1
-  ThreadTile: [1, 1]
-  ThreadTile0: 32
-  ThreadTile1: 16
-  ThreadTileA: 32
-  ThreadTileB: 16
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 4
-  VectorWidthB: 4
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [16, 8, 1]
-  WorkGroupMapping: -4
-  WorkGroupMappingXCC: 2
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 128
-  _DepthUA: 128
-  _DepthUB: 128
-  _DepthUMetadata: 128
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 16640
-  ldsNumBytesB: 266240
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -138414,7 +137049,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 607
+  SolutionIndex: 601
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -138642,7 +137277,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 608
+  SolutionIndex: 602
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -138870,7 +137505,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 609
+  SolutionIndex: 603
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -139099,7 +137734,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 610
+  SolutionIndex: 604
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -139327,7 +137962,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 611
+  SolutionIndex: 605
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -139556,7 +138191,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 612
+  SolutionIndex: 606
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -139785,7 +138420,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 613
+  SolutionIndex: 607
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -140014,7 +138649,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 614
+  SolutionIndex: 608
   SourceSwap: true
   StaggerU: 64
   StaggerUStride: 512
@@ -140242,7 +138877,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 615
+  SolutionIndex: 609
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -140473,7 +139108,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 616
+  SolutionIndex: 610
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -140703,7 +139338,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 617
+  SolutionIndex: 611
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -140927,7 +139562,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 618
+  SolutionIndex: 612
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -141152,7 +139787,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 619
+  SolutionIndex: 613
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -141376,7 +140011,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 620
+  SolutionIndex: 614
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -141602,7 +140237,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 621
+  SolutionIndex: 615
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -141828,7 +140463,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 622
+  SolutionIndex: 616
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -142059,7 +140694,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 623
+  SolutionIndex: 617
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -142288,7 +140923,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 624
+  SolutionIndex: 618
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -142514,7 +141149,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 625
+  SolutionIndex: 619
   SourceSwap: true
   StoreSwapAddr: false
   StoreVectorWidth: 4
@@ -142738,7 +141373,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 626
+  SolutionIndex: 620
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -142966,7 +141601,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 627
+  SolutionIndex: 621
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -143196,7 +141831,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 628
+  SolutionIndex: 622
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -143270,230 +141905,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 16640
   ldsNumBytesB: 66560
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: false
-  CodeObjectVersion: '4'
-  DepthU: 256
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalWriteVectorWidth: 2
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLRA: false
-  HalfPLRB: false
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 256
-  LSCB: 256
-  LSPA: 64
-  LSPB: 256
-  LVCA: 256
-  LVCB: 256
-  LVPA: 64
-  LVPB: 256
-  LdsBlockSizePerPadA: 1024
-  LdsBlockSizePerPadB: 1024
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 299520
-  LdsInitCVgprs: false
-  LdsNumBytes: 299520
-  LdsNumElementsAlignedA: 33280
-  LdsNumElementsAlignedB: 133120
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 133120
-  LdsOffsetB: 33280
-  LdsOffsetB_Blk: 166400
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetBlkA: 33280
-  LdsOffsetBlkB: 133120
-  LdsOffsetMXSA: 33280
-  LdsOffsetMXSB: 33280
-  LdsOffsetMXSB_Blk: 166400
-  LdsOffsetMetadata_Blk: 0
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 8
-  LoopUnroll: 256
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [1, 4]
-  MIWaveTile: [4, 4]
-  MIWaveTileA: 4
-  MIWaveTileB: 4
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 64
-  MacroTile1: 256
-  MacroTileA: 64
-  MacroTileB: 256
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: false
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 128
-  NumGlobalWriteVectorsPerThread: 64
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 2
-  PrefetchGlobalReadA: 1
-  PrefetchGlobalReadB: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 629
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: true
-  StoreVectorWidth: 2
-  SubGroup0: 2
-  SubGroup1: 64
-  SubGroupA: 2
-  SubGroupB: 64
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  TemporalHintB: 1
-  ThreadTile: [1, 1]
-  ThreadTile0: 32
-  ThreadTile1: 4
-  ThreadTileA: 32
-  ThreadTileB: 4
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 2
-  VectorWidthB: 2
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [16, 8, 1]
-  WorkGroupMapping: -48
-  WorkGroupMappingXCC: 4
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 256
-  _DepthUA: 256
-  _DepthUB: 256
-  _DepthUMetadata: 256
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 33280
-  ldsNumBytesB: 133120
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -143648,7 +142059,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 630
+  SolutionIndex: 623
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -143874,7 +142285,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 631
+  SolutionIndex: 624
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -144103,7 +142514,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 632
+  SolutionIndex: 625
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -144328,7 +142739,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 633
+  SolutionIndex: 626
   StaggerU: 2
   StoreSwapAddr: false
   StoreVectorWidth: 8
@@ -144549,7 +142960,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 634
+  SolutionIndex: 627
   SourceSwap: true
   StaggerU: 8
   StoreSwapAddr: false
@@ -144775,7 +143186,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 635
+  SolutionIndex: 628
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -145002,7 +143413,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 636
+  SolutionIndex: 629
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -145228,7 +143639,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 637
+  SolutionIndex: 630
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -145455,7 +143866,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 638
+  SolutionIndex: 631
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -145684,7 +144095,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 639
+  SolutionIndex: 632
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -145913,7 +144324,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 640
+  SolutionIndex: 633
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -146145,7 +144556,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 641
+  SolutionIndex: 634
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -146376,7 +144787,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 642
+  SolutionIndex: 635
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -146602,7 +145013,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 643
+  SolutionIndex: 636
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -146827,7 +145238,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 644
+  SolutionIndex: 637
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 512
@@ -147052,7 +145463,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 645
+  SolutionIndex: 638
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -147278,7 +145689,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 646
+  SolutionIndex: 639
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -147504,7 +145915,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 647
+  SolutionIndex: 640
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -147728,7 +146139,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 648
+  SolutionIndex: 641
   SourceSwap: true
   StaggerU: 4
   StaggerUStride: 1024
@@ -147950,7 +146361,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 649
+  SolutionIndex: 642
   SourceSwap: true
   StaggerU: 16
   StoreSwapAddr: true
@@ -148174,7 +146585,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 650
+  SolutionIndex: 643
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -148398,7 +146809,7 @@ Solutions:
   PrefetchLocalRead: 0
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 651
+  SolutionIndex: 644
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -148625,7 +147036,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 652
+  SolutionIndex: 645
   SourceSwap: true
   StaggerU: 4
   StaggerUStride: 512
@@ -148848,7 +147259,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 653
+  SolutionIndex: 646
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -149075,7 +147486,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 654
+  SolutionIndex: 647
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -149301,7 +147712,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 655
+  SolutionIndex: 648
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -149524,7 +147935,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 656
+  SolutionIndex: 649
   SourceSwap: true
   StaggerU: 64
   StaggerUStride: 1024
@@ -149747,7 +148158,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 657
+  SolutionIndex: 650
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -149973,7 +148384,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 658
+  SolutionIndex: 651
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -150198,7 +148609,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 659
+  SolutionIndex: 652
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -150422,7 +148833,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 660
+  SolutionIndex: 653
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -150649,7 +149060,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 661
+  SolutionIndex: 654
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 2048
@@ -150873,7 +149284,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 662
+  SolutionIndex: 655
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -151099,7 +149510,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 663
+  SolutionIndex: 656
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -151325,7 +149736,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 664
+  SolutionIndex: 657
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -151554,7 +149965,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 665
+  SolutionIndex: 658
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -151783,7 +150194,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 666
+  SolutionIndex: 659
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 512
@@ -152015,7 +150426,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 667
+  SolutionIndex: 660
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -152247,7 +150658,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 668
+  SolutionIndex: 661
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -152478,7 +150889,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 669
+  SolutionIndex: 662
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -152709,7 +151120,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 670
+  SolutionIndex: 663
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -152939,7 +151350,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 671
+  SolutionIndex: 664
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -153170,7 +151581,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 672
+  SolutionIndex: 665
   SourceSwap: true
   StaggerU: 8
   StaggerUStride: 512
@@ -153399,7 +151810,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 673
+  SolutionIndex: 666
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -153626,7 +152037,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 674
+  SolutionIndex: 667
   SourceSwap: true
   StaggerU: 4
   StaggerUStride: 1024
@@ -153854,7 +152265,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 675
+  SolutionIndex: 668
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -154084,7 +152495,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 676
+  SolutionIndex: 669
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -154312,7 +152723,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 677
+  SolutionIndex: 670
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -154540,7 +152951,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 678
+  SolutionIndex: 671
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -154766,7 +153177,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 679
+  SolutionIndex: 672
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -154991,7 +153402,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 680
+  SolutionIndex: 673
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -155214,7 +153625,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 681
+  SolutionIndex: 674
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -155440,7 +153851,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 682
+  SolutionIndex: 675
   SourceSwap: true
   StaggerUStride: 512
   StoreSwapAddr: false
@@ -155662,7 +154073,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 683
+  SolutionIndex: 676
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -155890,7 +154301,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 684
+  SolutionIndex: 677
   SourceSwap: true
   StaggerU: 2
   StoreSwapAddr: false
@@ -156118,7 +154529,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 685
+  SolutionIndex: 678
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -156344,7 +154755,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 686
+  SolutionIndex: 679
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -156415,232 +154826,6 @@ Solutions:
   enableTDMMetadata: false
   ldsNumBytesA: 21760
   ldsNumBytesB: 66560
-  ldsNumBytesMXSA: 0
-  ldsNumBytesMXSB: 0
-  ldsNumBytesMetadata: 0
-  numSubTiles: 1
-  reorderGRInstForDTVA: false
-  reorderGRInstForDTVB: false
-  tailLoopOptA: false
-  tailLoopOptB: false
-- ActivationFuncCall: false
-  CUCount: null
-  CUOccupancy: -1
-  ClusterBarrier: false
-  ClusterLocalRead: 0
-  CodeObjectVersion: '4'
-  DepthU: 256
-  DirectToLdsA: false
-  DirectToLdsB: false
-  DirectToLdsMetadata: 0
-  DisableXdlArbStall: true
-  DtlPlusLdsBuf: 0
-  ESMRuntimeGate: false
-  EdgeType: None
-  EnableESM2TrackValuVsrc: true
-  EnableF32XdlMathOp: false
-  EnableMatrixInstruction: true
-  EnableStinkyTofuESM2: true
-  ExpandPointerSwap: false
-  ExpertSchedulingMode: 0
-  ForceUnrollSubIter: false
-  GlobalReadVectorWidthA: 1
-  GlobalReadVectorWidthB: 1
-  GlobalSplitU: -1
-  GlobalWriteVectorWidth: 1
-  GuaranteeNoPartialA: true
-  GuaranteeNoPartialB: true
-  GuaranteeNoPartialMetadata: true
-  HalfPLR: 2
-  HalfPLRA: false
-  HalfPLRB: true
-  ISA: [12, 5, 0]
-  InitCIterWmma: 1
-  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
-    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
-    UseSFC: false, UseUniversalArgs: true}
-  Kernel: true
-  LDSSegInterleaveOffsets: null
-  LDSTrInst: true
-  LSCA: 256
-  LSCB: 256
-  LSPA: 80
-  LSPB: 256
-  LVCA: 256
-  LVCB: 256
-  LVPA: 80
-  LVPB: 256
-  LdsBlockSizePerPadA: 512
-  LdsBlockSizePerPadB: 1024
-  LdsBlockSizePerPadMXSA: 0
-  LdsBlockSizePerPadMXSB: 0
-  LdsBlockSizePerPadMetadata: 0
-  LdsBytesNoAmax: 308480
-  LdsInitCVgprs: false
-  LdsNumBytes: 308480
-  LdsNumElementsAlignedA: 42240
-  LdsNumElementsAlignedB: 133120
-  LdsNumElementsAlignedMXSA: 0
-  LdsNumElementsAlignedMXSB: 0
-  LdsNumElementsAlignedMetadata: 0
-  LdsOffsetA: 0
-  LdsOffsetA_Blk: 133120
-  LdsOffsetB: 42240
-  LdsOffsetB_Blk: 175360
-  LdsOffsetBias: 0
-  LdsOffsetBiasGSU: 0
-  LdsOffsetBiasNonGSU: 0
-  LdsOffsetBlkA: 42240
-  LdsOffsetBlkB: 133120
-  LdsOffsetMXSA: 42240
-  LdsOffsetMXSB: 42240
-  LdsOffsetMXSB_Blk: 175360
-  LdsOffsetMetadata_Blk: 0
-  LdsPadA: 8
-  LdsPadB: 8
-  LdsPadMXSA: 0
-  LdsPadMXSB: 0
-  LocalReadVectorWidthA: 8
-  LocalReadVectorWidthB: 8
-  LocalSplitU: 1
-  LocalSplitUReuseLDS: 1
-  LocalWriteUseSgprA: false
-  LocalWriteUseSgprB: false
-  LocalWriteUseSgprMetadata: false
-  LoopIters: 8
-  LoopUnroll: 256
-  MFMA_BF16_1K: 0
-  MIArchVgpr: true
-  MIBlock: [16, 16, 32, 1, 1, 1]
-  MIInputPerThread: 16
-  MIInputPerThreadA: 16
-  MIInputPerThreadB: 16
-  MIInputPerThreadMetadata: 16
-  MIOutputVectorWidth: 8
-  MIRegPerOut: 1
-  MIWaveGroup: [1, 4]
-  MIWaveTile: [5, 4]
-  MIWaveTileA: 5
-  MIWaveTileB: 4
-  MIWaveTileMetadata: 0
-  MXLoadInst: TDM
-  MXScaleFormat: InMemorySwizzle
-  MacroTile0: 80
-  MacroTile1: 256
-  MacroTileA: 80
-  MacroTileB: 256
-  MathClocksUnrolledLoop: 0
-  MatrixInstB: 1
-  MatrixInstBM: 1
-  MatrixInstBN: 1
-  MatrixInstK: 32
-  MatrixInstM: 16
-  MatrixInstN: 16
-  MatrixInstruction: [16, 16, 32, 1]
-  MaxLDS: 327680
-  MbskPrefetchMethod: 0
-  MfmaInitCVgprs: false
-  MinGRIncPerMfma: 1
-  Multicast: false
-  NoLdsWriteCode: true
-  NoTailLoop: false
-  NonDTLTailLoopA: false
-  NonDTLTailLoopB: false
-  NonDTLTailLoopMetadata: false
-  NumElementsPerThread: 160
-  NumGlobalWriteVectorsPerThread: 160
-  NumLdsBlk: 2
-  NumLoadsA: 1
-  NumLoadsB: 1
-  NumLoadsPerpendicularA: 1
-  NumLoadsPerpendicularB: 1
-  NumThreads: 128
-  NumTotalPackedLoadsA: -1
-  NumTotalPackedLoadsB: -1
-  NumWaveSplitK: 1
-  NumWaves: 4
-  PackedC0IdxChars: [I]
-  PackedC0IndicesX: [0]
-  PackedC1IdxChars: [J]
-  PackedC1IndicesX: [1]
-  PrefetchGL2: 1
-  PrefetchGlobalReadA: 1
-  PrefetchGlobalReadB: 2
-  ScheduleGROverBarrier: 0
-  ScheduleIterAlg: 4
-  SolutionIndex: 687
-  SourceSwap: true
-  StaggerU: 0
-  StaggerUMapping: 0
-  StaggerUStride: 0
-  StoreSwapAddr: true
-  StoreVectorWidth: 1
-  SubGroup0: 2
-  SubGroup1: 64
-  SubGroupA: 2
-  SubGroupB: 64
-  SuppressNoLoadLoop: true
-  SwInstructionPrefetch: -1
-  TDMInst: 3
-  TemporalHintA: 1
-  ThreadTile: [1, 1]
-  ThreadTile0: 40
-  ThreadTile1: 4
-  ThreadTileA: 40
-  ThreadTileB: 4
-  TileProcessingStrategy: StreamK
-  TransposeLDS: 1
-  ULSGRODoubleG2L: 0
-  UnrollMajorLDSA: true
-  UnrollMajorLDSB: true
-  UseCustomMainLoopSchedule: 0
-  UseDirect32XEmulation: false
-  UseDot2F32XEmulation: false
-  UseDotInstruction: false
-  UseF32XEmulation: false
-  UseGeneralizedNLCOneA: false
-  UseGeneralizedNLCOneB: false
-  UseGeneralizedNLCOneMXSA: false
-  UseGeneralizedNLCOneMXSB: false
-  UseGeneralizedNLCOneMetadata: false
-  UseMFMAF32XEmulation: false
-  Valid: true
-  VectorWidthA: 1
-  VectorWidthB: 2
-  WavefrontSize: 32
-  WorkAssignment: StaticGrid
-  WorkGroup: [16, 8, 1]
-  WorkGroupMappingXCC: 32
-  WorkspaceCheck: [4, 0, -1]
-  _DepthU: 256
-  _DepthUA: 256
-  _DepthUB: 256
-  _DepthUMetadata: 256
-  _GlobalAccumulation: MultipleBuffer
-  _HasTemporalHint: 1
-  _PersistentLoop: true
-  _PrefetchAcrossPersistentEnabled: false
-  _ScheduleIterAlg: 0
-  _StinkyTofuOptLevel: 3
-  _UseSgprForGRO: 1
-  _VectorStore: 1
-  _WorkspaceSizePerElemBias: 0
-  _WorkspaceSizePerElemC: 4
-  _inputVWA_was_auto: true
-  _inputVWB_was_auto: true
-  _staggerStrideShift: 0
-  enableGLTrA: false
-  enableGLTrB: false
-  enableLDSTrA: false
-  enableLDSTrB: false
-  enableLDSTrMXSA: false
-  enableLDSTrMXSB: false
-  enableLDSTrMetadata: 0
-  enableTDMA: true
-  enableTDMB: true
-  enableTDMMetadata: false
-  ldsNumBytesA: 42240
-  ldsNumBytesB: 133120
   ldsNumBytesMXSA: 0
   ldsNumBytesMXSB: 0
   ldsNumBytesMetadata: 0
@@ -156795,7 +154980,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 688
+  SolutionIndex: 680
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -157021,7 +155206,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 689
+  SolutionIndex: 681
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -157246,7 +155431,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 690
+  SolutionIndex: 682
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -157470,7 +155655,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 691
+  SolutionIndex: 683
   SourceSwap: true
   StaggerU: 8
   StoreSwapAddr: true
@@ -157697,7 +155882,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 692
+  SolutionIndex: 684
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -157921,7 +156106,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 693
+  SolutionIndex: 685
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -158150,7 +156335,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 694
+  SolutionIndex: 686
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -158378,7 +156563,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 695
+  SolutionIndex: 687
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -158603,7 +156788,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 696
+  SolutionIndex: 688
   SourceSwap: true
   StoreSwapAddr: false
   StoreVectorWidth: 2
@@ -158827,7 +157012,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 697
+  SolutionIndex: 689
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -159055,7 +157240,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 698
+  SolutionIndex: 690
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -159285,7 +157470,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 699
+  SolutionIndex: 691
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -159515,7 +157700,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 700
+  SolutionIndex: 692
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -159742,7 +157927,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 701
+  SolutionIndex: 693
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -159968,7 +158153,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 702
+  SolutionIndex: 694
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -160194,7 +158379,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 703
+  SolutionIndex: 695
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -160418,7 +158603,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 704
+  SolutionIndex: 696
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -160644,7 +158829,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 705
+  SolutionIndex: 697
   SourceSwap: true
   StoreSwapAddr: false
   StoreVectorWidth: 2
@@ -160867,7 +159052,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 706
+  SolutionIndex: 698
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -161092,7 +159277,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 707
+  SolutionIndex: 699
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -161320,7 +159505,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 708
+  SolutionIndex: 700
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -161547,7 +159732,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 709
+  SolutionIndex: 701
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -161772,7 +159957,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 710
+  SolutionIndex: 702
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -161999,7 +160184,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 711
+  SolutionIndex: 703
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -162226,7 +160411,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 712
+  SolutionIndex: 704
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
@@ -162454,7 +160639,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 713
+  SolutionIndex: 705
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -162679,7 +160864,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 714
+  SolutionIndex: 706
   StaggerU: 0
   StaggerUMapping: 0
   StaggerUStride: 0
@@ -162903,7 +161088,7 @@ Solutions:
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 4
-  SolutionIndex: 715
+  SolutionIndex: 707
   SourceSwap: true
   StaggerU: 0
   StaggerUMapping: 0
