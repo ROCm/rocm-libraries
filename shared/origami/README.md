@@ -17,6 +17,11 @@
   - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
   - [Neural Network (NN) Backend](#neural-network-nn-backend)
+    - [Supported Backends](#supported-backends)
+    - [Model Files](#model-files)
+    - [Runtime Configuration](#runtime-configuration)
+    - [hipBLASLt Integration](#hipblaslt-integration)
+    - [NN Tests](#nn-tests)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -316,11 +321,78 @@ python -m pytest tests/test_selector.py -v
 
 ## Neural Network (NN) Backend
 
-`origami::rank_configs` takes a `rank_options_t` that chooses how the candidates are ranked: `inference_mode_t::analytical` (the default), `nn` (an ML backend only; throws if no model resolves) or `nn_fallback` (an ML backend when a model resolves, else analytical). `nn_backend_t` picks the backend; `auto_select` resolves `nn_model`, then the caller's `library_models`, then the session default. No full-ranking ML backend is built into this tree yet, so `nn` throws and `nn_fallback` ranks analytically.
+`origami::rank_configs` takes a `rank_options_t` that chooses how the candidates are ranked: `inference_mode_t::analytical` (the default), `nn` (an ML backend only; throws if no model resolves), `nn_fallback` (an ML backend when a model resolves, else analytical) or `analytical_rerank` (analytical, then a re-rank backend re-orders its top candidates). `nn_backend_t` picks the backend: `auto_select` resolves `nn_model`, then the caller's `library_models`, then the session default.
 
-Models are registered by handle (`origami/nn/nn.hpp`: `load_model_by_index`, `load_models_for_logic`, `model_info`, `set_default_model`, `default_model`, `unload_model`) and found through `origami_nn_index` files, which map a hipBLASLt logic file to its model (`data/nn/README.md`). hipBLASLt colocates `data/nn/<backend>/<arch>/` next to its kernel library and passes each `PredictionMatching` row's models in `rank_options_t::library_models`.
+### Supported Backends
 
-The `[nn]` tests of `origami-tests` cover the options and the registry.
+| Backend | `nn_backend_t` / `backend_id_t` | Status | Model format |
+|---------|---------------------------------|--------|--------------|
+| **boost** (Origami Boost) | `boost` / `boost_v1` | Re-rank only (`analytical_rerank`) | ORIBOOST binary (`.orr`) |
+| **tilewright** | `tilewright` / `tilewright_v1` | Reserved, not in this tree | — |
+| **embedding_similarity** | `embedding_similarity` / `embedding_similarity_v1` | Reserved, not in this tree | — |
+
+No full-ranking backend is built in, so `nn` throws and `nn_fallback` ranks analytically. A full-ranking backend plugs in as an `IRecommender` (`nn/detail/recommender.hpp`, `src/nn/dispatch.cpp`) with its file loader in `src/nn/model_registry.cpp`, under its reserved `backend_id_t`, `nn_backend_t` and `library_models_t` slot.
+
+**boost** (Origami Boost) is a gradient-boosted tree ensemble that predicts each candidate's `log(measured / origami_latency)`. With `inference_mode_t::analytical_rerank`, `rank_configs` ranks analytically and hands the results to the caller's `rerank_source_t::prepare` (its own adjustment of the order, if any); the backend then takes the first `top_n` (10) results the caller accepts, orders them by `origami_latency * exp(yhat)` (the prepared order on ties) and moves them to the front; every other result keeps its prepared order. It never adds a candidate and never ranks by the correction alone. Its 161 features (`features/gemm_boost`, schema c6-4) are a name mapping of Origami's own intermediates (`compute_gemm_intermediates` in `origami/gemm_intermediates.hpp`, also in the Python bindings) plus kernel fields the caller supplies per candidate (`nn/boost/types.hpp`: `rerank_source_t`, `kernel_fields_t`, including the kernel's Stream-K launch). One model serves a dtype class on one arch, shared by the class's logic stems: bf16 (A/B BFloat16), tf32 (A/B/C/D f32 with xf32 math) or fp8 (F8BS: A/B Float8 into Float8 math, C/D BFloat16, no MX blocks).
+
+A boost model is checked when it loads (`nn/boost/load_validate.hpp`) and refused unless it matches: arch, dtype class, feature-schema hash and Origami source hash (sha256 of the analytical sources at configure time; the `nn/` tree is excluded), and the kernel library by manifest diff (`nn/boost/library_stamp.hpp`): kernels may be removed, and added when their gated structural values (DTL, MFMA, LDS mode, one LDS buffer, MT_K) were seen in training. Every call it declines (problem of another dtype class or outside the training M/N/K/batch ranges, fewer than two candidates, a feature it cannot compute) leaves the prepared order unchanged and reports why to the caller (`rerank_source_t::outcome`). A CU budget (`problem_t::num_cus`) is not a range: the features see it. A model's RNGE section holds exactly M, N, K and batch, each once; a file with any other range (for example `num_cus`) is refused at load.
+
+### Model Files
+
+Model files live under `shared/origami/data/nn/<backend>/<arch>/`, each directory with an `origami_nn_index` that maps a hipBLASLt logic file's stem to its model (`data/nn/README.md`). After a hipBLASLt build, every such directory is copied next to its arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding every backend's entries.
+
+Boost models live under `shared/origami/data/nn/boost/<arch>/` (`origami_nn_index` tracked, `origami_boost_<arch>_<dtype>.orr` released separately) with index lines
+
+```
+<logic_stem>  boost  origami_boost_<arch>_<dtype>.orr
+```
+
+A boost model is loaded for the library it serves, since its checks need that library's manifest:
+
+```cpp
+#include "origami/nn/nn.hpp"
+
+const std::string path =
+    origami::nn::index_weights_path(logic_stem, origami::nn::backend_id_t::boost_v1, library_dir);
+origami::nn::boost::deployment_t target{"gfx950", "bf16", &library_manifest};
+origami::nn::boost::status_t status;
+std::string detail;
+auto handle = origami::nn::load_boost_model(path, target, &status, &detail);
+// handle >= 0 on success; -1 with status / detail saying why the model was refused
+```
+
+### Runtime Configuration
+
+| Variable | Description |
+|----------|-------------|
+| `ORIGAMI_NN_DIAG` | Print a line when a boost model loads (`arch`, dtype, schema, columns, trees) |
+| `ORIGAMI_NN_WEIGHTS_DIR` | Directory of the `origami_nn_index` to read when the caller passes none |
+| `HIPBLASLT_ORIGAMI_BOOST=1` | hipBLASLt: load boost models with the prediction rows that use them and re-rank their candidates (default off) |
+| `TENSILE_PREDICTION_LIB=1` | hipBLASLt: skip the tuned `Equality`/`Range` rows so the `PredictionMatching` row decides (how the re-rank is measured) |
+
+### hipBLASLt Integration
+
+Example: hipblaslt-bench on gfx950, bf16 TN, with the boost re-rank:
+
+```bash
+export TENSILE_PREDICTION_LIB=1
+export HIPBLASLT_ORIGAMI_BOOST=1
+
+hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
+  --transA T --transB N --bias_vector
+```
+
+The models must sit next to the kernel library hipBLASLt loads (its build or install directory, or `HIPBLASLT_TENSILE_LIBPATH` if set); with the variable pointing at a copy of the library without them, every call keeps Origami's order.
+
+hipBLASLt loads a prediction row's boost model when it deserializes the row (`OrigamiBoost::loadForLogic`: once per model file, against the build and the library directory's prediction-row manifest) and passes `analytical_rerank` with a `rerank_source_t`: the re-rank sees Origami's order as is, and its candidates are the configs that pass the row's predicates, one per kernel name; their kernel fields are the solution's `NumLoadsCoalesced` and its Stream-K launch on the call (`ContractionSolution::computeStreamKDecisions`, including the `--sm_count_target` CU budget). FP8 re-ranks plain F8BS calls (Float8 compute input, A/B scales unset or scalar); vector-scaled (A/B or alpha), MX and swizzled calls keep Origami's order. Tuned `Equality`/`Range` rows still take precedence: only the `PredictionMatching` row's candidates are re-ranked. With `HIPBLASLT_LOG_MASK` including info, each call logs `Origami Boost ok ...` or `Origami Boost fallback (<reason>) ...`.
+
+### NN Tests
+
+```bash
+./build/tests/origami-tests "[nn]"
+```
+
+`[nn]` covers the options, the registry and the boost backend (`[nn][boost]`). The boost tests' models and feature-parity samples (bf16, tf32, fp8) are the small fixtures in `tests/data/boost/`.
 
 ## Debug Logging
 
