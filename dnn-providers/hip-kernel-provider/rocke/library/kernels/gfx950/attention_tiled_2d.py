@@ -46,6 +46,7 @@ from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
+from kernels.common._lse_store import lse_row_has_mass, lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -1308,6 +1309,17 @@ def build_unified_attention_2d_tiled(
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     kv_head_idx = b.block_id_x()
     q_block_global_idx = b.block_id_y()
@@ -4530,6 +4542,9 @@ def build_unified_attention_2d_tiled(
 
     final = kvloop.results
     l_final = [final[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
+    if spec.emit_lse:
+        # m is in log2 units (scores carry scale*log2e), reduced across lanes.
+        m_final = [final[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
     ml_count_final = 2 * SOFTMAX_STATE_SLOTS
     # acc_final indexed by (n * ACC_M_ATOMS + atom)
     acc_final = [
@@ -4580,6 +4595,21 @@ def build_unified_attention_2d_tiled(
             )
             inv_l_t = b.rcp(l_final[0])
             l_zero_t = b.fcmp("oeq", l_final[0], zero_f)
+            if spec.emit_lse:
+                # One row per lane; lanes l and l^32 hold the same (m, l), so
+                # only the low half writes. Emitted once, outside the n-loop.
+                with b.scf_if(b.land(op_mask_t, b.cmp_eq(lane_half32, b.const_i32(0)))):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(b.add(cu_q_start, op_pos_t), b.const_i32(NUM_QH)),
+                            op_qh_t,
+                        ),
+                        m_final[0],
+                        l_final[0],
+                        row_has_mass=lse_row_has_mass(b, l_final[0]),
+                    )
             for n in range(ACC_N_TILES):
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
@@ -4631,6 +4661,27 @@ def build_unified_attention_2d_tiled(
             head=op_qh32_base,
             dim=b.const_i32(0),
         )
+        if spec.emit_lse:
+            # State slot reg's row is wave_row_base + _mfma_32x32_c_row(lane, reg)
+            # (= hoist_row[reg]); all 32 lanes of a half agree, lane_col32 == 0
+            # (lanes 0 and 32) writes.
+            lse_writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
+            for reg in range(REGS_PER_LANE):
+                with b.scf_if(b.land(lse_writer32, hoist_row_ok[reg])):
+                    lse_store(
+                        b,
+                        lse,
+                        b.add(
+                            b.mul(
+                                b.add(cu_q_start, hoist_qp_r[reg]),
+                                b.const_i32(NUM_QH),
+                            ),
+                            hoist_qh_r[reg],
+                        ),
+                        m_final[reg],
+                        l_final[reg],
+                        row_has_mass=lse_row_has_mass(b, l_final[reg]),
+                    )
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
@@ -4730,6 +4781,26 @@ def build_unified_attention_2d_tiled(
         head=op_qh,
         dim=b.const_i32(0),
     )
+    if spec.emit_lse:
+        # Slot r's row is wave_row_base + _in_warp_row(r) (= hoist_row[r]); the
+        # 16 lanes of a row group agree, lane_col == 0 (one per lane_rg) writes.
+        lse_writer16 = b.cmp_eq(lane_col, b.const_i32(0))
+        for reg in range(REGS_PER_LANE):
+            with b.scf_if(b.land(lse_writer16, hoist_row_ok[reg])):
+                lse_store(
+                    b,
+                    lse,
+                    b.add(
+                        b.mul(
+                            b.add(cu_q_start, hoist_qp_r[reg]),
+                            b.const_i32(NUM_QH),
+                        ),
+                        hoist_qh_r[reg],
+                    ),
+                    m_final[reg],
+                    l_final[reg],
+                    row_has_mass=lse_row_has_mass(b, l_final[reg]),
+                )
 
     for stripe in range(OUT_STRIPES):
         n_start = stripe * N_TILES_PER_STRIPE

@@ -3,11 +3,13 @@
 """Host-only IR tests for opt-in LSE output on the tiled 2D unified-attention
 kernels (gfx942 + gfx950). No GPU: specs are built and lowered to LLVM text."""
 
+import hashlib
 import importlib
+import re
 
 import pytest
 
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import _resolve_llvm_flavor, lower_kernel_to_llvm
 
 _BASE = dict(
     head_size=128,
@@ -103,3 +105,41 @@ def test_2d_kernel_name_gains_lse_suffix_only_when_on(arch, branch):
     assert off.kernel_name() == default.kernel_name()
     assert not default.kernel_name().endswith("_lse")
     assert on.kernel_name() == default.kernel_name() + "_lse"
+
+
+@pytest.mark.parametrize("arch,branch", _CASES)
+def test_2d_lse_off_ir_is_byte_identical_to_pre_change(arch, branch):
+    """LSE off adds no param, no store, no instruction."""
+    default_ir = _lower(_spec(arch, branch), arch)
+    off_ir = _lower(_spec(arch, branch, emit_lse=False), arch)
+    assert off_ir == default_ir
+    assert "lse_ptr" not in off_ir
+    assert _lse_store_count(off_ir) == 0
+    pinned = _OFF_SHA256.get(_resolve_llvm_flavor(), {}).get(arch, {}).get(branch)
+    if pinned is not None:
+        assert hashlib.sha256(off_ir.encode()).hexdigest() == pinned
+
+
+@pytest.mark.parametrize("arch,branch", _CASES)
+def test_2d_lse_on_appends_lse_ptr_last_and_stores_once_per_slot(arch, branch):
+    on_ir = _lower(_spec(arch, branch, emit_lse=True), arch)
+    define = _define_line(on_ir)
+    assert re.search(
+        r"ptr addrspace\(1\) noalias writeonly nocapture align 4 %lse_ptr\) #\d+ \{$",
+        define,
+    ), define
+    assert _lse_store_count(on_ir) == _EXPECTED_LSE_STORES[arch][branch]
+    # natural_lse_from_log2_stats: (m + log2 l) * ln2
+    assert "@llvm.log2.f32" in on_ir
+
+
+# #13120: bias params are appended after qq_bias_stride_0; branch B rejects bias.
+@pytest.mark.parametrize(
+    "arch,branch", [("gfx950", "transposed32"), ("gfx950", "striped16")]
+)
+def test_2d_lse_ptr_stays_last_with_additive_bias(arch, branch):
+    define = _define_line(
+        _lower(_spec(arch, branch, emit_lse=True, use_additive_bias=True), arch)
+    )
+    assert "%additive_bias_sq_stride, ptr addrspace(1)" in define, define
+    assert re.search(r"%lse_ptr\) #\d+ \{$", define), define

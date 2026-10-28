@@ -61,6 +61,7 @@ __all__ = [
     "LSE_ROWS_PER_LANE",
     "dense_row_has_key",
     "lse_row_value",
+    "lse_row_has_mass",
     "lse_store",
     "make_lse_epilogue",
     "make_mfma_lse_epilogue",
@@ -88,6 +89,17 @@ def lse_store(
     value = natural_lse_from_log2_stats(b, safe_m, safe_l)
     value = b.select(row_has_mass, value, b.const_f32(float("-inf")))
     b.global_store(dst, element_offset, value, align=4)
+
+
+def lse_row_has_mass(b: IRBuilder, l: Value) -> Value:
+    """``!(l == 0)``, NaN included: the exact inverse of the tiled 2D O guard
+    ``fcmp("oeq", l, 0)``. A keyless row (l == 0) gets -inf; a NaN row keeps NaN.
+
+    Built as ``one OR uno`` instead of ``lnot(oeq)``: the HIP lowerer maps i1 to
+    ``bool`` and lowers ``arith.not`` to ``~x``, which is true for both inputs.
+    """
+    zero = b.const_f32(0.0)
+    return b.lor(b.fcmp("one", l, zero), b.fcmp("uno", l, zero))
 
 
 def dense_row_has_key(
