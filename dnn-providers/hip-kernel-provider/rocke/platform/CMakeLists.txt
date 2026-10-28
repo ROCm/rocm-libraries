@@ -464,6 +464,7 @@ if(ROCKE_INSTALL_TESTS)
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
@@ -738,6 +739,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gdn_decode_tune.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
+        "tests/library/tests/dispatch/gdn/test_tuning_contract.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
     set(_ROCKE_LIBRARY_GDN_TESTS "")
     foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})

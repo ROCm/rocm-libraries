@@ -202,11 +202,16 @@ For **pointwise convolutions** (`Y=X=1`, `sH=sW=1`, `pH=pW=0` — and for 3-D: `
 
 | Operand | Formula | Replaces |
 |---------|---------|---------|
-| A (input)  | `offset = m * C + k`     | `unmerge(m)` + `embed(ho,y→hi)` + `embed(wo,x→wi)` + `unmerge(k→y,x,c)` + `pad(y)` + `pad(x)` |
-| B (weight) | `offset = k_out * C + k_gemm` | `unmerge(k_gemm→y,x,c)` + `pad(y)` + `pad(x)` |
+| A (input)  | `offset = m * C + g * cpg + k` | `unmerge(m)` + `embed(ho,y→hi)` + `embed(wo,x→wi)` + `unmerge(k→y,x,c)` + `pad(y)` + `pad(x)` |
+| B (weight) | `offset = k_out * cpg + k_gemm`, `k_out = g * kpg + n` | `unmerge(k_gemm→y,x,c)` + `pad(y)` + `pad(x)` |
 | D (output) | `offset = m * K + k_out` | `unmerge(m→n,ho,wo)` |
 
-**Why this is faster:** With `Y=X=1`, `sH=sW=1`, `pH=pW=0` the embed transforms reduce to identity (`hi=ho`, `wi=wo`), the filter-unmerge produces `y=x=0` trivially, and the pad guards are always true. The implicit descriptor computes the same values but still emits the full VALU sequence (magic divisions, multiplications, bounds comparisons). Flat arithmetic emits exactly one `mul` and one `add` per operand — zero dead instructions.
+`g` is the conv group (`blockIdx.z`), `k < cpg` and `n < kpg` are the
+within-group GEMM coordinates, and the B load is bounded by `n < kpg`, not the
+absolute `k_out`. With `groups == 1` the group terms vanish (`cpg == C`,
+`kpg == K`) and nothing extra is emitted.
+
+**Why this is faster:** With `Y=X=1`, `sH=sW=1`, `pH=pW=0` the embed transforms reduce to identity (`hi=ho`, `wi=wo`), the filter-unmerge produces `y=x=0` trivially, and the pad guards are always true. The implicit descriptor computes the same values but still emits the full VALU sequence (magic divisions, multiplications, bounds comparisons). Flat arithmetic emits one `mul` and one `add` per operand (plus the group-base `add` when `groups > 1`) — zero dead instructions.
 
 ---
 
