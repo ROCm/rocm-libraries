@@ -132,7 +132,9 @@ namespace hipblaslt_jit
         // from TensileliteAssembly::make, or those a backend with a HIP main
         // kernel builds itself. An Executable build requires each one's kernel.
         std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
-        // Other kernels the executable must define, such as helpers'.
+        // Other kernels the executable must define, such as helpers'. Jit
+        // stores the HIP helper helpers[i] in JitLibrary under kernelNames[i];
+        // a helper without one is compiled with the executable.
         std::vector<std::string> kernelNames;
     };
 
