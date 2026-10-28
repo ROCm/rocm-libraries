@@ -291,7 +291,7 @@ default.
 |---|---|---|
 | `free` | `lo`, `hi` (default -1, 1) | uniform over `[lo, hi]` |
 | `fixed` | `value` (default 0) | `value`. This is the constant fill. |
-| `nonzero` | `lo`, `hi` (default -1, 1; `lo <= hi`) | a `free` draw that is not zero in the tensor's data type (redrawn while it rounds to zero, then the endpoint of larger magnitude). Unsupported when that endpoint is itself zero in the data type. |
+| `nonzero` | `lo`, `hi` (default -1, 1; `lo <= hi`) | a `free` draw that is not zero in the tensor's data type (redrawn while it rounds to zero, then the endpoint of larger magnitude). Unsupported when that endpoint is itself zero in the data type. For integer types the draw is uniform over the integers of `[lo, hi]` that the type can hold, excluding zero; it is unsupported when none remain (a range wholly outside the type, an empty one, or one holding only zero). |
 | `zeros` | none | zero. Unsupported for `fp8_e8m0`, which has no zero. |
 | `large` | `scale` (**required**, `> 0`) | a magnitude uniform in `[top/2, top]` with a random sign, where `top = min(scale, the data type's largest finite value)`. Never infinite. Integer types need `scale >= 1`. |
 | `subnormal` | none | a subnormal value of the tensor's data type, random sign where signed. Unsupported for integers and for types without subnormals (`fp8_e8m0`). |
@@ -301,7 +301,7 @@ Any entry may add `seed`, an unsigned 32-bit integer that seeds that tensor's dr
 entry with a `seed` and no `kind` changes only the seed.
 
 **The parse is strict.** An unknown `kind` (there is no `constant`; use `fixed`), a
-`kind` that is not a string, an entry that is not an object, a field the kind reads
+`kind` that is not a string, an entry that is not an object, an entry with neither `kind` nor `seed`, a field the kind reads
 that is not a finite number in the range of a 32-bit float, a bad `seed`, `lo > hi`
 (`nonzero`, `special`), a `large` without `scale > 0`, or a `special` without a valid
 `special` and a `fraction` in `[0, 1]` is a metadata error: the case registers as a
