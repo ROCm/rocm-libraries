@@ -683,7 +683,7 @@ void testing_logging(const Arguments& arg)
         bool found = false;
         for(std::string line; std::getline(ks_ifs, line);)
         {
-            if(line.find("-f gemm_strided_batched_ex") != std::string::npos
+            if(line.find("-f gemm_ex ") != std::string::npos
                && line.find("# source=") != std::string::npos
                && line.find("parent_api=") != std::string::npos)
             {

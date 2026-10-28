@@ -169,6 +169,31 @@ rocblas_status rocblas_internal_gemm_64(rocblas_handle    handle,
                 }
             }
         }
+
+        if(status == rocblas_status_success
+           && (handle->layer_mode & rocblas_layer_mode_log_kernel_select))
+        {
+            rocblas_internal_log_kernel_select(
+                handle,
+                rocblas_gemm_kernel_select_problem<BATCHED>(trans_a,
+                                                            trans_b,
+                                                            m_64,
+                                                            n_64,
+                                                            k_64,
+                                                            alpha,
+                                                            lda_64,
+                                                            stride_a,
+                                                            ldb_64,
+                                                            stride_b,
+                                                            beta,
+                                                            ldc_64,
+                                                            stride_c,
+                                                            batch_count_64),
+                "source",
+                k_64 == 0 || (alpha && *alpha == 0) ? "rocblas_gemm_scale_launcher_64"
+                                                    : "rocblas_gemm_source_solution_64",
+                "none");
+        }
     }
 
     return status;

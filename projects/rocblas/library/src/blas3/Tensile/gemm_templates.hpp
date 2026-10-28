@@ -24,7 +24,51 @@
 
 #include "blas3/rocblas_gemm.hpp"
 #include "int64_helpers.hpp"
+#include "logging.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp"
+#include "utility.hpp"
+
+// Describes a rocblas_internal_gemm{,_64} problem, whose output D is C, for 0x10 logging.
+// alpha and beta must be host pointers.
+template <bool BATCHED, typename T>
+rocblas_kernel_select_problem rocblas_gemm_kernel_select_problem(rocblas_operation trans_a,
+                                                                 rocblas_operation trans_b,
+                                                                 int64_t           m,
+                                                                 int64_t           n,
+                                                                 int64_t           k,
+                                                                 const T*          alpha,
+                                                                 int64_t           lda,
+                                                                 rocblas_stride    stride_a,
+                                                                 int64_t           ldb,
+                                                                 rocblas_stride    stride_b,
+                                                                 const T*          beta,
+                                                                 int64_t           ldc,
+                                                                 rocblas_stride    stride_c,
+                                                                 int64_t           batch_count)
+{
+    rocblas_kernel_select_problem p;
+    p.trans_a       = trans_a;
+    p.trans_b       = trans_b;
+    p.m             = m;
+    p.n             = n;
+    p.k             = k;
+    p.alpha         = alpha;
+    p.beta          = beta;
+    p.input_type    = rocblas_datatype_from_type<T>;
+    p.output_type   = rocblas_datatype_from_type<T>;
+    p.compute_type  = rocblas_datatype_from_type<T>;
+    p.lda           = lda;
+    p.ldb           = ldb;
+    p.ldc           = ldc;
+    p.ldd           = ldc;
+    p.stride_a      = stride_a;
+    p.stride_b      = stride_b;
+    p.stride_c      = stride_c;
+    p.stride_d      = stride_c;
+    p.batch_count   = batch_count;
+    p.pointer_array = BATCHED;
+    return p;
+}
 
 template <typename T>
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status

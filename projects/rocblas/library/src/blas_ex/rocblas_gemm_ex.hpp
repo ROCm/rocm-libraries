@@ -316,6 +316,11 @@ bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
 
     return false;
 }
+// Element type of T*, const T*, T* const* or const T* const*.
+template <typename P>
+using rocblas_gemm_elem_t
+    = std::remove_cv_t<std::remove_pointer_t<std::remove_cv_t<std::remove_pointer_t<P>>>>;
+
 /*
  * Runs a GEMM whose m or n is 1 as a GEMV. The caller must have established
  * that this is legal (rocblas_can_use_gemv_in_gemm) and desirable
@@ -345,6 +350,7 @@ rocblas_status rocblas_gemv_in_gemm_launcher(rocblas_handle    handle,
                                              rocblas_stride    stride_d,
                                              rocblas_int       batch_count)
 {
+    rocblas_status status;
     if(n == 1)
     {
         // If transB is transpose, then just use ldb as increment. Currently can't handle trans_b as conjugate.
@@ -353,27 +359,28 @@ rocblas_status rocblas_gemv_in_gemm_launcher(rocblas_handle    handle,
         // gemm and gemv handle transA differently
         rocblas_int m_gemv = trans_a == rocblas_operation_none ? m : k;
         rocblas_int n_gemv = trans_a == rocblas_operation_none ? k : m;
-        return rocblas_internal_gemv_launcher(handle,
-                                              trans_a,
-                                              m_gemv,
-                                              n_gemv,
-                                              alpha,
-                                              0,
-                                              a,
-                                              offset_a,
-                                              lda,
-                                              stride_a,
-                                              b,
-                                              offset_b,
-                                              incx_gemv,
-                                              stride_b,
-                                              beta,
-                                              0,
-                                              d,
-                                              offset_d,
-                                              1,
-                                              stride_d,
-                                              batch_count);
+
+        status = rocblas_internal_gemv_launcher(handle,
+                                                trans_a,
+                                                m_gemv,
+                                                n_gemv,
+                                                alpha,
+                                                0,
+                                                a,
+                                                offset_a,
+                                                lda,
+                                                stride_a,
+                                                b,
+                                                offset_b,
+                                                incx_gemv,
+                                                stride_b,
+                                                beta,
+                                                0,
+                                                d,
+                                                offset_d,
+                                                1,
+                                                stride_d,
+                                                batch_count);
     }
     else if(m == 1)
     {
@@ -386,30 +393,60 @@ rocblas_status rocblas_gemv_in_gemm_launcher(rocblas_handle    handle,
         // gemm and gemv handle transA differently
         rocblas_int m_gemv = transA_gemv == rocblas_operation_none ? n : k;
         rocblas_int n_gemv = transA_gemv == rocblas_operation_none ? k : n;
-        return rocblas_internal_gemv_launcher(handle,
-                                              transA_gemv,
-                                              m_gemv,
-                                              n_gemv,
-                                              alpha,
-                                              0,
-                                              b,
-                                              offset_b,
-                                              ldb,
-                                              stride_b,
-                                              a,
-                                              offset_a,
-                                              incx_gemv,
-                                              stride_a,
-                                              beta,
-                                              0,
-                                              d,
-                                              offset_d,
-                                              ldd,
-                                              stride_d,
-                                              batch_count);
-    }
 
-    return rocblas_status_internal_error; // rocblas_use_gemv_in_gemm() requires m == 1 || n == 1
+        status = rocblas_internal_gemv_launcher(handle,
+                                                transA_gemv,
+                                                m_gemv,
+                                                n_gemv,
+                                                alpha,
+                                                0,
+                                                b,
+                                                offset_b,
+                                                ldb,
+                                                stride_b,
+                                                a,
+                                                offset_a,
+                                                incx_gemv,
+                                                stride_a,
+                                                beta,
+                                                0,
+                                                d,
+                                                offset_d,
+                                                ldd,
+                                                stride_d,
+                                                batch_count);
+    }
+    else
+        return rocblas_status_internal_error; // rocblas_use_gemv_in_gemm() requires m == 1 || n == 1
+
+    if(status == rocblas_status_success
+       && (handle->layer_mode & rocblas_layer_mode_log_kernel_select))
+    {
+        rocblas_kernel_select_problem p;
+        p.trans_a       = trans_a;
+        p.trans_b       = trans_b;
+        p.m             = m;
+        p.n             = n;
+        p.k             = k;
+        p.alpha         = alpha;
+        p.beta          = beta;
+        p.input_type    = rocblas_datatype_from_type<rocblas_gemm_elem_t<TiConstPtr>>;
+        p.output_type   = rocblas_datatype_from_type<rocblas_gemm_elem_t<ToPtr>>;
+        p.compute_type  = rocblas_datatype_from_type<rocblas_gemm_elem_t<TScal>>;
+        p.lda           = lda;
+        p.ldb           = ldb;
+        p.ldc           = ldd;
+        p.ldd           = ldd;
+        p.stride_a      = stride_a;
+        p.stride_b      = stride_b;
+        p.stride_c      = stride_d;
+        p.stride_d      = stride_d;
+        p.batch_count   = batch_count;
+        p.pointer_array = std::is_pointer_v<std::remove_pointer_t<TiConstPtr>>;
+        rocblas_internal_log_kernel_select(
+            handle, p, "gemv", "rocblas_internal_gemv_launcher", "none");
+    }
+    return status;
 }
 
 template <bool BATCHED>

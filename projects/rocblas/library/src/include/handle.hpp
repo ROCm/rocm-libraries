@@ -428,7 +428,13 @@ public:
     // at the top of each *_impl and cleared on scope exit. Used by rocblas_layer_mode_log_kernel_select
     // (0x10) to annotate internal-GEMM trace lines with their parent API. Null when no API is active.
     const char* current_api_name = nullptr;
-    void        init_check_numerics();
+
+    // Backends that returned not_implemented for the most recent GEMM sub-problem, e.g.
+    // "hipblaslt,tensile". Written by runContractionProblem when 0x10 logging is on and consumed
+    // by the source-GEMM fallback through rocblas_internal_take_kernel_select_fallback().
+    const char* kernel_select_fallback_from = nullptr;
+
+    void init_check_numerics();
 
     // data pointer for rocSOLVER
     std::shared_ptr<void> data_ptr;
@@ -947,7 +953,10 @@ struct rocblas_internal_api_scope
         , m_prev(m_handle ? m_handle->current_api_name : nullptr)
     {
         if(m_handle)
-            m_handle->current_api_name = name;
+        {
+            m_handle->current_api_name            = name;
+            m_handle->kernel_select_fallback_from = nullptr;
+        }
     }
     ~rocblas_internal_api_scope()
     {
@@ -961,6 +970,14 @@ private:
     rocblas_handle m_handle;
     const char*    m_prev;
 };
+
+// Returns and clears the backends that rejected the preceding GEMM sub-problem ("none" if none did).
+inline const char* rocblas_internal_take_kernel_select_fallback(rocblas_handle handle)
+{
+    const char* from                    = handle->kernel_select_fallback_from;
+    handle->kernel_select_fallback_from = nullptr;
+    return from ? from : "none";
+}
 
 // For functions which don't use temporary device memory, and won't be likely
 // to use them in the future, the RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle)

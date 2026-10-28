@@ -7,6 +7,7 @@ rocBLAS documentation is available at
 
 ### Added
 
+* `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`) writes one `rocblas-bench`-replayable line to the trace log for each internal GEMM sub-problem that launches a kernel. Use it to break higher-level Level 3 calls such as `trsm`, `trmm`, and `syrk` into kernels that can be benchmarked individually. The bench function is `gemm_ex`, `gemm_batched_ex`, or `gemm_strided_batched_ex`, matching the sub-problem layout. A trailing comment names the path that ran it (`hipblaslt`, `tensile`, `source`, or `gemv`), the selected kernel or launcher (except for hipBLASLt), the backends it fell back from, and the calling API.
 * gfx1170 and gfx1171 enabled. Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM default to the hipBLASLt backend on these architectures. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 
 ### Changed
@@ -39,7 +40,6 @@ rocBLAS documentation is available at
 
 ### Added
 
-* `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`): emits a `rocblas-bench`-replayable line per internal GEMM sub-problem, annotated with the selected kernel name (Tensile backend only) and the source backend (`hipblaslt` or `tensile`). Useful for decomposing higher-level BLAS3 calls (`trsm`, `trmm`, `syrk`, ...) into individually benchmarkable kernels. Lines also carry `fallback_from=` and `parent_api=` for context.
 * Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
 

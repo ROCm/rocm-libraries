@@ -1,0 +1,23 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: kernel_select
+  category: quick
+  function:
+    - kernel_select_trsm: *single_precision
+    - kernel_select_layout: *single_precision
+    - kernel_select_combined: *single_precision
+    - kernel_select_source: *single_precision
+    - kernel_select_gemv: *single_precision
+  api: C
+
+- name: kernel_select_no_hipblaslt
+  category: quick
+  function:
+    - kernel_select_tensile: *single_precision
+    - kernel_select_check_only: *single_precision
+  api: C
+  use_hipblaslt: 0
+...

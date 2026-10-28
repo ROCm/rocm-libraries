@@ -42,21 +42,28 @@ Internal API logging outputs information like the GEMM backend used for a partic
 Not all internal APIs are logged. The log output goes to the same stream as trace logging.
 
 Kernel-selection logging (``ROCBLAS_LAYER=0x10``) emits one ``rocblas-bench``-replayable line per
-internal GEMM sub-problem dispatched, including those produced by decomposed BLAS3 ops such as
-``trsm``, ``trmm``, ``syrk``, and friends. Each line ends in a ``#`` comment that names the source
-backend (``hipblaslt`` or ``tensile``), the selected kernel name (Tensile backend only), whether
-the call fell back from another backend, and the user-facing API that triggered it. The line
-itself is copy-pasteable into ``rocblas-bench`` to reproduce that single sub-problem in isolation.
-Output goes to the same stream as trace logging. Example:
+internal GEMM sub-problem that launches a kernel, including those produced by decomposed BLAS3 ops
+such as ``trsm``, ``trmm``, ``syrk``, and friends. The bench function is ``gemm_ex``,
+``gemm_batched_ex``, or ``gemm_strided_batched_ex``, matching how the sub-problem is laid out in
+memory. Each line ends in a ``#`` comment with these fields:
+
+* ``source``: the path that ran the sub-problem: ``hipblaslt``, ``tensile``, ``source``
+  (rocBLAS source kernels), or ``gemv`` (a GEMM with ``m == 1`` or ``n == 1`` run as a GEMV).
+* ``kernel``: the selected kernel or launcher. It is omitted for the hipBLASLt backend.
+* ``fallback_from``: the backends that rejected the sub-problem before it ran, for example
+  ``hipblaslt,tensile``, or ``none``.
+* ``parent_api``: the user-facing API that triggered the sub-problem.
+
+The part of the line before the ``#`` can be pasted into ``rocblas-bench`` to reproduce that single
+sub-problem in isolation. Output goes to the same stream as trace logging. Example:
 
 .. code-block:: text
 
-   ./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB N -m 4096 -n 4096 -k 4096 \
-     --alpha 1 --a_type f32_r --lda 4096 --stride_a 0 --b_type f32_r --ldb 4096 --stride_b 0 \
-     --beta 0 --c_type f32_r --ldc 4096 --stride_c 0 --d_type f32_r --ldd 4096 --stride_d 0 \
-     --batch_count 1 --compute_type f32_r --algo 0 --solution_index 0 --flags 0 \
-     # source=tensile kernel=Cijk_Ailk_Bljk_SB_MT128x128x8 \
-     fallback_from=hipblaslt parent_api=rocblas_strsm
+   ./rocblas-bench -f gemm_ex --transposeA N --transposeB N -m 4096 -n 4096 -k 4096 --alpha 1 \
+     --a_type f32_r --lda 4096 --b_type f32_r --ldb 4096 --beta 0 --c_type f32_r --ldc 4096 \
+     --d_type f32_r --ldd 4096 --compute_type f32_r --algo 0 --solution_index 0 --flags 0 \
+     # source=tensile kernel=Cijk_Ailk_Bljk_SB_MT128x128x8 fallback_from=hipblaslt \
+     parent_api=rocblas_strsm
 
 Bits can be combined: ``ROCBLAS_LAYER=0x19`` enables trace (``0x1``), internal (``0x8``), and
 kernel-selection (``0x10``) simultaneously.
