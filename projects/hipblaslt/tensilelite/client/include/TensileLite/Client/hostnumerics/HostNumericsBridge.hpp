@@ -375,6 +375,11 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
         }
+        // --num-elements-to-validate 0 turns validation off. A reference that is
+        // still needed, for example to print tensors, covers every element, as the
+        // client always has.
+        if(elementsToValidate == 0)
+            return roc::hostnumerics::IndexRange::all(*logicalCount);
         return roc::hostnumerics::primeIndexRange(
             *logicalCount, descriptor.totalAllocatedElements(), elementsToValidate);
     }

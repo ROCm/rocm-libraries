@@ -723,6 +723,9 @@ TEST(IndexRangeCpp, SizeBoundaries) {
     EXPECT_EQ(range.end(), 7);
     EXPECT_EQ(range.stride(), 2);
     EXPECT_THROW(primeIndexRange(2, maximum, 1), std::runtime_error);
+    // Zero requested elements selects none; a request covering every element selects all.
+    EXPECT_EQ(primeIndexRange(10, 10, 0).count(), 0);
+    EXPECT_EQ(primeIndexRange(10, 10, 10).count(), 10);
 }
 
 }  // namespace
