@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,6 +82,87 @@ void testing_gtsv_no_pivot_bad_arg(const Arguments& arg)
 #undef PARAMS_SOLVE
 }
 
+// mode 0 is the historical random tridiagonal system. Modes 1-3 are the
+// zero-off-diagonal systems that the medium spike path used to turn into NaN:
+// a diagonal matrix, an upper bidiagonal matrix, and a lower bidiagonal matrix.
+// The right-hand side is chosen so the solution is exact in floating point.
+template <typename T>
+static void gtsv_no_pivot_init_system(int             mode,
+                                      rocsparse_int   m,
+                                      rocsparse_int   n,
+                                      int64_t         ldb,
+                                      host_vector<T>& hdl,
+                                      host_vector<T>& hd,
+                                      host_vector<T>& hdu,
+                                      host_vector<T>& hB)
+{
+    if(mode == 0)
+    {
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            hdl[i] = random_cached_generator<T>(1, 8);
+            hd[i]  = random_cached_generator<T>(17, 32);
+            hdu[i] = random_cached_generator<T>(1, 8);
+        }
+
+        hdl[0]     = std::numeric_limits<T>::infinity();
+        hdu[m - 1] = std::numeric_limits<T>::infinity();
+
+        for(rocsparse_int j = 0; j < n; ++j)
+        {
+            for(rocsparse_int i = 0; i < m; ++i)
+            {
+                hB[j * ldb + i] = random_cached_generator<T>(-10, 10);
+            }
+        }
+        return;
+    }
+
+    const T zero = static_cast<T>(0);
+    const T one  = static_cast<T>(1);
+
+    for(rocsparse_int i = 0; i < m; ++i)
+    {
+        hdl[i] = zero;
+        hdu[i] = zero;
+        hd[i]  = (mode == 1) ? static_cast<T>(2) : static_cast<T>(4);
+    }
+
+    if(mode == 2)
+    {
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            hdu[i] = one;
+        }
+    }
+    else if(mode == 3)
+    {
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            hdl[i] = one;
+        }
+    }
+
+    for(rocsparse_int j = 0; j < n; ++j)
+    {
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            if(mode == 1)
+            {
+                hB[j * ldb + i] = static_cast<T>(4);
+            }
+            else if(mode == 2)
+            {
+                hB[j * ldb + i] = (i == m - 1) ? static_cast<T>(4) : static_cast<T>(5);
+            }
+            else
+            {
+                hB[j * ldb + i] = (i == 0) ? static_cast<T>(4) : static_cast<T>(5);
+            }
+        }
+    }
+}
+
 template <typename T>
 void testing_gtsv_no_pivot(const Arguments& arg)
 {
@@ -102,34 +183,16 @@ void testing_gtsv_no_pivot(const Arguments& arg)
 
     rocsparse_seedrand();
 
+    const int mode_begin = (arg.matrix == rocsparse_matrix_zero) ? 1 : 0;
+    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 3 : 0;
+
     // Host tri-diagonal matrix
     host_vector<T> hdl(m);
     host_vector<T> hd(m);
     host_vector<T> hdu(m);
 
-    // initialize tri-diagonal matrix
-    for(rocsparse_int i = 0; i < m; ++i)
-    {
-        hdl[i] = random_cached_generator<T>(1, 8);
-        hd[i]  = random_cached_generator<T>(17, 32);
-        hdu[i] = random_cached_generator<T>(1, 8);
-    }
-
-    hdl[0]     = std::numeric_limits<T>::infinity();
-    hdu[m - 1] = std::numeric_limits<T>::infinity();
-
-    // Host dense rhs
+    // Host dense rhs. Entries past m stay at 7 and are not part of the system.
     host_vector<T> hB(ldb * n, static_cast<T>(7));
-
-    for(rocsparse_int j = 0; j < n; ++j)
-    {
-        for(rocsparse_int i = 0; i < m; ++i)
-        {
-            hB[j * ldb + i] = random_cached_generator<T>(-10, 10);
-        }
-    }
-
-    host_vector<T> hB_original = hB;
 
     // Device tri-diagonal matrix
     device_vector<T> ddl(m);
@@ -139,12 +202,6 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     // Device dense rhs
     device_vector<T> dB(ldb * n);
 
-    // Copy to device
-    ddl.transfer_from(hdl);
-    dd.transfer_from(hd);
-    ddu.transfer_from(hdu);
-    dB.transfer_from(hB);
-
     // Obtain required buffer size
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(rocsparse_gtsv_no_pivot_buffer_size<T>(PARAMS_BUFFER_SIZE));
@@ -152,51 +209,62 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     void* dbuffer;
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
 
-    if(arg.unit_check)
+    for(int mode = mode_begin; mode <= mode_end; ++mode)
     {
-        CHECK_ROCSPARSE_ERROR(testing::rocsparse_gtsv_no_pivot<T>(PARAMS_SOLVE));
+        gtsv_no_pivot_init_system<T>(mode, m, n, ldb, hdl, hd, hdu, hB);
+        host_vector<T> hB_original = hB;
 
-        hB.transfer_from(dB);
+        ddl.transfer_from(hdl);
+        dd.transfer_from(hd);
+        ddu.transfer_from(hdu);
+        dB.transfer_from(hB);
 
-        // Check
-        std::vector<T> hresult(ldb * n, static_cast<T>(7));
+        if(arg.unit_check)
+        {
+            CHECK_ROCSPARSE_ERROR(testing::rocsparse_gtsv_no_pivot<T>(PARAMS_SOLVE));
+
+            hB.transfer_from(dB);
+
+            // Check
+            std::vector<T> hresult(ldb * n, static_cast<T>(7));
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-        for(rocsparse_int j = 0; j < n; j++)
-        {
-            hresult[ldb * j] = hd[0] * hB[ldb * j] + hdu[0] * hB[ldb * j + 1];
-            hresult[ldb * j + m - 1]
-                = hdl[m - 1] * hB[ldb * j + m - 2] + hd[m - 1] * hB[ldb * j + m - 1];
-
-            for(rocsparse_int i = 1; i < m - 1; i++)
+            for(rocsparse_int j = 0; j < n; j++)
             {
-                hresult[ldb * j + i] = hdl[i] * hB[ldb * j + i - 1] + hd[i] * hB[ldb * j + i]
-                                       + hdu[i] * hB[ldb * j + i + 1];
+                hresult[ldb * j] = hd[0] * hB[ldb * j] + hdu[0] * hB[ldb * j + 1];
+                hresult[ldb * j + m - 1]
+                    = hdl[m - 1] * hB[ldb * j + m - 2] + hd[m - 1] * hB[ldb * j + m - 1];
+
+                for(rocsparse_int i = 1; i < m - 1; i++)
+                {
+                    hresult[ldb * j + i] = hdl[i] * hB[ldb * j + i - 1] + hd[i] * hB[ldb * j + i]
+                                           + hdu[i] * hB[ldb * j + i + 1];
+                }
             }
+
+            near_check_segments<T>(ldb * n, hB_original.data(), hresult.data());
         }
 
-        near_check_segments<T>(ldb * n, hB_original.data(), hresult.data());
-    }
+        if(arg.timing && mode == mode_begin)
+        {
+            const double gpu_solve_time_used
+                = rocsparse_clients::run_benchmark(arg, rocsparse_gtsv_no_pivot<T>, PARAMS_SOLVE);
 
-    if(arg.timing)
-    {
-        const double gpu_solve_time_used
-            = rocsparse_clients::run_benchmark(arg, rocsparse_gtsv_no_pivot<T>, PARAMS_SOLVE);
+            double gbyte_count = gtsv_gbyte_count<T>(m, n);
 
-        double gbyte_count = gtsv_gbyte_count<T>(m, n);
+            double gpu_gbyte = get_gpu_gbyte(gpu_solve_time_used, gbyte_count);
 
-        double gpu_gbyte = get_gpu_gbyte(gpu_solve_time_used, gbyte_count);
-
-        display_timing_info(display_key_t::M,
-                            m,
-                            display_key_t::N,
-                            n,
-                            display_key_t::bandwidth,
-                            gpu_gbyte,
-                            display_key_t::time_ms,
-                            get_gpu_time_msec(gpu_solve_time_used));
+            display_timing_info(display_key_t::M,
+                                m,
+                                display_key_t::N,
+                                n,
+                                display_key_t::bandwidth,
+                                gpu_gbyte,
+                                display_key_t::time_ms,
+                                get_gpu_time_msec(gpu_solve_time_used));
+        }
     }
 
     // Free buffer

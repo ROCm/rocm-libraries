@@ -26,6 +26,7 @@
 #include "internal/precond/rocsparse_gtsv.h"
 #include "rocsparse_grid.hpp"
 
+#include "gtsv_nopivot_spike_repair_device.h"
 #include "gtsv_nopivot_strided_batch_device.h"
 #include "gtsv_nopivot_strided_batch_medium_device.h"
 #include "gtsv_nopivot_thomas_device.h"
@@ -678,6 +679,25 @@ namespace rocsparse
                {1024, launch_spike_solver_kernel<1024, T>}
 
             };
+
+        // The column permutation that builds the spike system can place exact
+        // zeros on its diagonal. Repair those before either solver reads it.
+        // Each batch has its own spike system. A system that already has a
+        // nonzero spike diagonal is not modified.
+        const rocsparse_int repair_threads = 256;
+        const rocsparse_int repair_blocks  = (batch_count - 1) / repair_threads + 1;
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::gtsv_nopivot_strided_batch_spike_repair_kernel<T>),
+            dim3(repair_blocks),
+            dim3(repair_threads),
+            0,
+            handle->stream,
+            num_spikes,
+            batch_count,
+            buffer_data->dl_spike[level],
+            buffer_data->d_spike[level],
+            buffer_data->du_spike[level],
+            buffer_data->B_spike[level]);
 
         if(num_spikes <= 1024)
         {
