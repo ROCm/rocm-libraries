@@ -1696,7 +1696,8 @@ namespace TensileLite
 
     // Members a grouped heuristic should rank. An empty M or N launches with zero
     // tiles and must not be part of the distance search: with no kernel that
-    // accepts it, that search evaluates every row (ROCM-33326).
+    // accepts it, that search evaluates every row (ROCM-33326). Workspace sizing
+    // still walks the full group, because each member takes an argument slot.
     inline std::vector<ContractionProblemGemm>
         groupedGemmMembersToRank(std::vector<ContractionProblemGemm> const& gemms)
     {
@@ -1708,6 +1709,18 @@ namespace TensileLite
                 ranked.push_back(gemm);
         }
         return ranked;
+    }
+
+    // The distance-search key. Null when every member is empty.
+    inline ContractionProblemGemm const*
+        groupedGemmMemberToRank(std::vector<ContractionProblemGemm> const& gemms)
+    {
+        for(auto const& gemm : gemms)
+        {
+            if(gemm.hasOutputTiles())
+                return &gemm;
+        }
+        return nullptr;
     }
 
     class ContractionProblemGroupedGemm : public ContractionProblem

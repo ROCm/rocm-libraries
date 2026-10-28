@@ -65,31 +65,42 @@ namespace
 
     struct Scan
     {
-        int considered = 0;
-        int index      = -1;
+        int    considered     = 0;
+        int    index          = -1;
+        size_t workspaceGroup = 0;
     };
 
-    // findTopSolutionsGroupedGemm keys off the first member and asks each row
-    // whether it accepts the whole group. A row here accepts only its own size,
-    // and only when every member has output tiles.
+    // The distance table is keyed by the member the search ranks. Production
+    // keeps the full group for workspace (an empty member still takes an
+    // argument slot) and ignores members with no output tiles. The unfiltered
+    // path is the hang: the key is the first member, and a row is rejected
+    // when any member has no tiles.
     Scan search(KernelTable const&                         table,
                 std::vector<ContractionProblemGemm> const& members,
                 bool                                       filter)
     {
-        auto ranked = filter ? groupedGemmMembersToRank(members) : members;
         Scan scan;
-        if(ranked.empty())
+        scan.workspaceGroup = members.size();
+
+        ContractionProblemGemm const* keyProblem = nullptr;
+        if(filter)
+            keyProblem = groupedGemmMemberToRank(members);
+        else if(!members.empty())
+            keyProblem = &members[0];
+        if(keyProblem == nullptr)
             return scan;
 
-        Key key{static_cast<int64_t>(ranked[0].freeSizeA(0)),
-                static_cast<int64_t>(ranked[0].freeSizeB(0))};
+        Key key{static_cast<int64_t>(keyProblem->freeSizeA(0)),
+                static_cast<int64_t>(keyProblem->freeSizeB(0))};
 
         auto found = table.findBestKeyMatch(key, [&](KernelRow const& row) {
             scan.considered++;
             if(row.key != key)
                 return std::shared_ptr<Selected>{};
-            for(auto const& member : ranked)
+            for(auto const& member : members)
             {
+                if(filter && !member.hasOutputTiles())
+                    continue;
                 if(!member.hasOutputTiles())
                     return std::shared_ptr<Selected>{};
             }
@@ -124,6 +135,7 @@ TEST(HostUnitGroupedHeuristic, smoke_EmptyMemberDoesNotVisitEveryKernel)
                              size_t                                     rankedCount) {
         EXPECT_EQ(groupedGemmMembersToRank(members).size(), rankedCount) << label;
         const Scan filtered = search(table, members, true);
+        EXPECT_EQ(filtered.workspaceGroup, members.size()) << label;
         EXPECT_LT(filtered.considered, everyKernel) << label;
         EXPECT_EQ(filtered.considered, 1) << label;
         EXPECT_EQ(filtered.index, 128) << label;

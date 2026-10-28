@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
@@ -165,6 +166,8 @@ namespace TensileLite
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     for(size_t idx = 0; idx < problems.size(); idx++)
                     {
+                        if(!problems[idx].hasOutputTiles())
+                            continue;
                         auto problem = problems[idx];
                         Task task(hardware, problem, *(solution));
                         solution->problemPredicate->debugEval(problem, std::cout);
@@ -179,10 +182,22 @@ namespace TensileLite
                     return std::shared_ptr<MySolution>();
                 }
 
+                // Workspace counts every member, including an empty one: it still
+                // takes an argument slot. Predicates rank only members with tiles.
+                auto const* rankedProblem = groupedGemmMemberToRank(problems);
+                if(rankedProblem == nullptr)
+                {
+                    if(debug)
+                        PredicateDebugger::printFooter(std::cout, false);
+                    return std::shared_ptr<MySolution>();
+                }
+
                 size_t ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
                 for(size_t idx = 0; idx < problems.size(); idx++)
                 {
+                    if(!problems[idx].hasOutputTiles())
+                        continue;
                     auto problem = problems[idx];
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
@@ -218,7 +233,7 @@ namespace TensileLite
                 if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
                 {
                     solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
+                        = solution->requiredHostSizeGroupedGemmSingle(*rankedProblem, hardware);
                 }
 
                 if(debug)
@@ -283,8 +298,9 @@ namespace TensileLite
         {
             bool debug = Debug::Instance().printPredicateEvaluation();
 
-            auto solution    = resolved();
-            bool useSolution = false;
+            auto             solution      = resolved();
+            bool             useSolution   = false;
+            MyProblem const* rankedProblem = nullptr;
             if(solution)
             {
                 if(debug)
@@ -293,12 +309,21 @@ namespace TensileLite
                 if((*solution->hardwarePredicate)(hardware))
                     useSolution = true;
 
+                rankedProblem = groupedGemmMemberToRank(problems);
+                if(rankedProblem == nullptr)
+                    useSolution = false;
+
                 if(searchType == SolutionLibrarySearchType::DEFAULT)
                 {
-                    size_t ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
-                    for(size_t idx = 0; idx < problems.size(); idx++)
+                    size_t ws = 0;
+                    if(useSolution)
+                        ws = (*solution).requiredWorkspaceSizeGroupedGemm(problems, hardware);
+
+                    for(size_t idx = 0; idx < problems.size() && useSolution; idx++)
                     {
+                        if(!problems[idx].hasOutputTiles())
+                            continue;
                         auto problem = problems[idx];
                         Task task(hardware, problem, (*solution));
                         problem.setWorkspaceSizeGroupedGemm(ws);
@@ -324,7 +349,8 @@ namespace TensileLite
                 }
                 else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
                 {
-                    if(!isGemmTypeSame((*solution), problems[0]))
+                    if(rankedProblem == nullptr
+                       || !isGemmTypeSame((*solution), *rankedProblem))
                         useSolution = false;
                 }
 
@@ -334,6 +360,8 @@ namespace TensileLite
                     if(searchType == SolutionLibrarySearchType::DEFAULT)
                         for(size_t idx = 0; idx < problems.size(); idx++)
                         {
+                            if(!problems[idx].hasOutputTiles())
+                                continue;
                             auto problem = problems[idx];
                             Task task(hardware, problem, (*solution));
                             solution->problemPredicate->debugEval(problem, std::cout);
@@ -352,7 +380,7 @@ namespace TensileLite
                 if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
                 {
                     solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
+                        = solution->requiredHostSizeGroupedGemmSingle(*rankedProblem, hardware);
                 }
                 return SolutionSet<MySolution>({solution});
             }

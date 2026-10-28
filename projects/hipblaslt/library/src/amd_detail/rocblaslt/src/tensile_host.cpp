@@ -8090,17 +8090,19 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
 
         // Rank only members that have output tiles. An empty M or N is legal in
         // a group and still launches (zero tiles), but feeding it to the distance
-        // search walks the whole gfx942 logic library (ROCM-33326). The count
-        // set above stays the full group, so synchronizer checks still see it.
-        auto ranked = TensileLite::groupedGemmMembersToRank(data->problem.gemms);
-        if(ranked.empty())
+        // search walks the whole gfx942 logic library (ROCM-33326). The group
+        // passed below stays complete: workspace counts an argument slot per
+        // member, and launch does not rerun WorkspaceCheck when uniform
+        // summation order is off. The count set above is that full group.
+        auto const* ranked = TensileLite::groupedGemmMemberToRank(data->problem.gemms);
+        if(ranked == nullptr)
         {
             heuristicResults.clear();
             return rocblaslt_status_success;
         }
 
-        auto solutions
-            = library->findTopSolutionsGroupedGemm(ranked, *hardware, requestedAlgoCount);
+        auto solutions = library->findTopSolutionsGroupedGemm(
+            data->problem.gemms, *hardware, requestedAlgoCount);
 
         auto algoCount       = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
         int  returnAlgoCount = 0;
@@ -8112,7 +8114,7 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                        heuristicResults.data(),
                                        &returnAlgoCount,
                                        workspaceBytes,
-                                       ranked[0],
+                                       *ranked,
                                        *hardware);
     }
 
