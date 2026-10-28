@@ -35,6 +35,13 @@ BRANCH_SPEC_KW = {
         "mfma32": dict(use_mfma_32x32=True, block_m_per_warp=32),
         "striped16": {},
     },
+    "gfx942": {
+        "transposed32": dict(
+            use_mfma_32x32x8=True, use_transposed_qk_32x32=True, block_m_per_warp=32
+        ),
+        "mfma32": dict(use_mfma_32x32x8=True, block_m_per_warp=32),
+        "striped16": {},
+    },
 }
 
 # One FP32 LSE store per (writer lane, softmax-state slot), Python-unrolled.
@@ -54,11 +61,16 @@ _OFF_SHA256 = {
             "mfma32": "75c49deabc455a47c596709cab31c2434cf7dc0a9903f292f0178ab96bc2ed57",
             "striped16": "2581bfec6efe59e48aec76a867d28d53a26ef41066d7df4a9b050529b983aad5",
         },
+        "gfx942": {
+            "transposed32": "f529f39c3eaceaa06689456bdc96d340652d0a09b74811379e98ef9b71eb967f",
+            "mfma32": "022a6b762edbc729f480577c9a123b15d79fb7226de95cfed20034c2f88d4f0e",
+            "striped16": "9f3b0e780b9ed4044bc42980fcc9577002b43bc3c278bbfdf3fa481bd771ea9a",
+        },
     },
 }
 
 _CASES = [("gfx950", b) for b in ("transposed32", "mfma32", "striped16")]
-_SPEC_ARCHES = ["gfx950"]
+_SPEC_ARCHES = ["gfx950", "gfx942"]
 
 
 def _module(arch):
@@ -105,6 +117,26 @@ def test_2d_kernel_name_gains_lse_suffix_only_when_on(arch, branch):
     assert off.kernel_name() == default.kernel_name()
     assert not default.kernel_name().endswith("_lse")
     assert on.kernel_name() == default.kernel_name() + "_lse"
+
+
+# gfx942 also builds branch A with one softmax-state slot (production flash
+# specs set it) and the q-major grid; the name rule must hold for those too.
+@pytest.mark.parametrize(
+    "branch,extra",
+    [
+        ("transposed32", {}),
+        ("transposed32", {"use_transposed_scalar_state": True}),
+        ("mfma32", {}),
+        ("striped16", {}),
+        ("striped16", {"use_q_major_grid": True}),
+    ],
+)
+def test_gfx942_lse_name_is_off_name_plus_lse_suffix(branch, extra):
+    off = _spec("gfx942", branch, **extra)
+    on = _spec("gfx942", branch, emit_lse=True, **extra)
+    assert off.emit_lse is False
+    assert not off.kernel_name().endswith("_lse")
+    assert on.kernel_name() == off.kernel_name() + "_lse"
 
 
 @pytest.mark.parametrize("arch,branch", _CASES)
