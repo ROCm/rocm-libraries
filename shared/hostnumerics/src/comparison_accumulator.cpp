@@ -25,6 +25,20 @@ void ComparisonAccumulator::observeReal(size_t logicalIndex, ptrdiff_t observedO
                                         std::optional<bool> allCloseDecision,
                                         const ExactRealEvidence* exactEvidence) {
     ++m_result.compared;
+    // Finite real norm-only entries need no elementwise classification or report samples.
+    // Accumulate the same evidence in the same order as the general path.
+    if (m_options.computeFrobenius && !m_options.allClose &&
+        !m_options.computeElementwiseStatistics && !m_options.computeUlp &&
+        !m_options.reportMatchingElements && std::isfinite(observed) && std::isfinite(expected)) {
+        const double difference = exactEvidence != nullptr ? exactEvidence->component.difference
+                                                           : std::abs(observed - expected);
+        accumulateFrobenius(
+            difference,
+            exactEvidence != nullptr ? exactEvidence->observedMagnitude : std::abs(observed),
+            exactEvidence != nullptr ? exactEvidence->expectedMagnitude : std::abs(expected),
+            exactEvidence != nullptr ? exactEvidence->difference : difference);
+        return;
+    }
     // ULP-only validation does not need the general elementwise or norm evidence. Most entries in
     // a passing numerical result are exactly equal, so count those directly and calculate a ULP
     // distance only for the exceptional values.
@@ -148,15 +162,10 @@ void ComparisonAccumulator::observe(size_t logicalIndex, ptrdiff_t observedOffse
             const long double expectedMagnitude = exactEvidence != nullptr
                                                       ? exactEvidence->expectedMagnitude
                                                       : valueMagnitude(expected);
-            m_result.maximumObservedMagnitude =
-                std::max(m_result.maximumObservedMagnitude, static_cast<double>(observedMagnitude));
-            m_result.maximumExpectedMagnitude =
-                std::max(m_result.maximumExpectedMagnitude, static_cast<double>(expectedMagnitude));
-            m_observedSquares += observedMagnitude * observedMagnitude;
-            m_expectedSquares += expectedMagnitude * expectedMagnitude;
             const long double differenceMagnitude =
                 exactEvidence != nullptr ? exactEvidence->difference : difference;
-            m_differenceSquares += differenceMagnitude * differenceMagnitude;
+            accumulateFrobenius(difference, observedMagnitude, expectedMagnitude,
+                                differenceMagnitude);
         } else if (nonFiniteMismatch) {
             m_differenceSquares = std::numeric_limits<long double>::infinity();
         }
@@ -206,6 +215,19 @@ void ComparisonAccumulator::observe(size_t logicalIndex, ptrdiff_t observedOffse
     }
 
     if (m_options.allClose && !close) ++m_result.mismatches;
+}
+
+void ComparisonAccumulator::accumulateFrobenius(double difference, long double observedMagnitude,
+                                                long double expectedMagnitude,
+                                                long double differenceMagnitude) {
+    m_result.maxAbsoluteDifference = std::max(m_result.maxAbsoluteDifference, difference);
+    m_result.maximumObservedMagnitude =
+        std::max(m_result.maximumObservedMagnitude, static_cast<double>(observedMagnitude));
+    m_result.maximumExpectedMagnitude =
+        std::max(m_result.maximumExpectedMagnitude, static_cast<double>(expectedMagnitude));
+    m_observedSquares += observedMagnitude * observedMagnitude;
+    m_expectedSquares += expectedMagnitude * expectedMagnitude;
+    m_differenceSquares += differenceMagnitude * differenceMagnitude;
 }
 
 void ComparisonAccumulator::merge(ComparisonAccumulator&& other) {

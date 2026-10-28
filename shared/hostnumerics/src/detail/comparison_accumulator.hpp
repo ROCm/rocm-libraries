@@ -62,6 +62,8 @@ class ComparisonAccumulator {
     ComparisonReport finish();
 
    private:
+    void accumulateFrobenius(double difference, long double observedMagnitude,
+                             long double expectedMagnitude, long double differenceMagnitude);
     void accumulateUlpDistance(double distance);
     void accumulateUlp(double exact, double approximation);
 
