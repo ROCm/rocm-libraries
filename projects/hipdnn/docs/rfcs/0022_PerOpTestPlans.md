@@ -134,9 +134,12 @@ flowchart LR
 - **The plan is engine-independent.** It tests the op. It has no engine matrix.
   Claims (`support.json`) and per-engine TOML apply the plan to each engine
   ([§8.4](#84-from-plan-to-engine)).
-- **The plan is the source of truth.** The generator reads the declared axes,
-  legality rules, shape catalog and level rules, and writes the bundles. Nobody
-  edits bundles by hand.
+- **The declarations are the source of truth for the bundles.** The generator
+  reads the declared axes, legality rules, shape catalog and level rules, and
+  writes the bundles. Nobody edits bundles by hand. The plan document records
+  the approach and the reason for each case. It must trace to those
+  declarations, but it is not itself the input of the generator. Where the
+  declarations live is open question 1 ([§19](#19-open-questions-and-future-work)).
 - **Traceability in both directions.** Each bundle case maps to a plan item.
   Each plan item maps to at least one case. A PR that adds, moves or deletes
   cases updates the plan in the same PR.
@@ -173,7 +176,16 @@ A plan lists every feature of the op, in these groups:
 | Awkward combinations | Legal but hazardous graphs: inputs of different dtypes, tensors in different layouts, degenerate ratios |
 | Values | Uniform, zero-excluded, all-zero, constant and large-magnitude fills. NaN, Inf, subnormals. Accumulation length. Determinism. |
 | Execution | Workspace limits, plan reuse with new pointers, serialization round trip ([RFC 0009](0009_CompiledPlanSerialization.md)) |
-| Invalid inputs | One frontend **unit test** for each validation rule. These are not sweep cases. |
+| Invalid inputs | A rule that only the frontend enforces: one frontend **unit test** for each rule. A rejection that an engine must enforce: an `expected_rejection` bundle ([§9](#9-case-purpose)). |
+
+**Rejection coverage is not limited to what the frontend validates today.** The
+plan lists every combination that the API implies must be rejected, including
+combinations that the frontend accepts now. Each rejection that is visible to an
+engine is an `expected_rejection` bundle: the engine under test must reject it,
+and an engine that accepts it fails the lane. A rejection that an engine does
+not enforce is an applicability bug in that engine. Fix the engine, or
+quarantine the bundle in the provider's tier YAML with a comment and a ticket.
+There is no soft "known gap" state.
 
 For each feature, the plan records the values to cover, the earliest level, the
 oracle readiness ([§11](#11-oracles-and-reference-prerequisites)) and the purpose of its cases ([§9](#9-case-purpose)).
@@ -199,7 +211,12 @@ pointer *less* aligned than declared and expects `BAD_PARAM`.
 | **X** stress | Limits. | Huge batch, int32 overflow, very long accumulation. |
 
 **Defaults are non-degenerate.** Each dimension or ratio that can exceed 1 does
-so in the default shape.
+so in the default shape. One exception: a ratio whose non-unit values select a
+separate code path (for example grouped heads or unequal head dims in
+attention). In the default shape, one defect there would fail every S and L
+case, and S and L would stop isolating one feature. Keep that ratio at 1 in the
+default. Cover its non-unit values as their own S, H and L cases and as
+all-pairs axes.
 
 **Per-level ceilings.** Each plan tunes these starting values.
 
@@ -209,6 +226,10 @@ so in the default shape.
 | PR | ≤ 200 MFLOP, ≤ 16 MB | S, H, a few M |
 | nightly | ≤ 8 GFLOP, ≤ 64 MB | S, L, M, H |
 | full | none | all, including X |
+
+A plan may state a ceiling as measured wall time instead of FLOP and bytes when
+the CPU reference dominates the case time. Fit the budget from a cost model
+that was measured on one architecture.
 
 ## 8. Sweep Construction, Levels and Lanes
 
@@ -221,7 +242,7 @@ so in the default shape.
 | One at a time | S and L shapes isolate one feature. |
 | All-pairs | By the end of nightly, each value of each axis meets each value of each other axis. A seeded generator makes this from the declared axes and legality. |
 | Full | Complete products only where an interaction is plausible. |
-| Probes | Each unsupported feature, awkward combination and hazard has a probe. Each level has rejection probes. |
+| Probes | Each unsupported feature, awkward combination and hazard has a probe. Each level has rejection cases: `expected_rejection` bundles for the rejections that an engine must enforce ([§6](#6-feature-inventory)). |
 | Regressions | The reproducer of each escaped bug is a concrete case in the lowest level that can afford it. |
 | Concrete graphs | Each level runs checked-in graphs only. Random sampling belongs to the exhaustive tool ([§14](#14-exhaustive-mode-and-the-separate-tool)). |
 
@@ -270,8 +291,18 @@ Each generated case has a `purpose` in its sweep metadata:
 | Purpose | Expected outcome | Claims |
 |---|---|---|
 | `claim` | The claiming engine accepts and is correct. | `--write-support-claims` writes them ([RFC 0015](0015_EngineSupportClaims.md)). |
-| `probe` | A typed rejection, or a correct accept. | Never written. The published support matrix excludes probes. |
+| `probe` | Tolerant: a typed rejection, or a correct accept. | Never written. The published support matrix excludes probes. |
 | `regression` | Same as the original bug case. | Same as the original case. |
+
+A probe whose rejection an engine must enforce also sets the `expected_rejection`
+bundle flag. It is strict: it is never executed or compared, and an engine that
+accepts it fails the lane. It is outside the claim model, so no claim names it.
+
+A case that exists for the seam of one engine may carry an optional
+`motivation` note that names that engine. It is provenance only. It changes no
+behavior and does not appear in the feature inventory, so the plan stays
+engine-independent (P2). It lets a reviewer see why the case exists, and
+delete it when that engine no longer needs it.
 
 Today, a rejected probe and a probe that never ran both show as SKIP. The engine
 integration gate will record rejections with a typed reason. This RFC requires
@@ -287,6 +318,10 @@ Each plan has a register:
 
 Rejection probes are never in the register.
 
+A quarantined `expected_rejection` bundle ([§6](#6-feature-inventory)) is listed
+in the plan with its ticket. It is a deferral, not a product that we chose not to
+run.
+
 ## 11. Oracles and Reference Prerequisites
 
 Verification follows [RFC 0011](0011_BundleTestFramework.md). In `auto` mode, the order is golden data, GPU
@@ -300,6 +335,7 @@ each oracle **models** it. List each gap with its fix. Typical gaps:
 | Types with no reference | fp8 and int8 conv |
 | Special values | NaN and Inf need a validator that matches infinities. |
 | Harness support | Exact-alignment placement, value-domain control, repeat-and-compare ([§15](#15-required-infrastructure)) |
+| Fused topology with no executing reference | A forward-plus-backward graph (for example SDPA) needs a reference that executes the fused graph and a golden generator that writes it. Until then, core cover ([§8.1](#81-sweep-rules)) and a G-A anchor cannot be met for it. |
 
 A feature with no oracle stays in the plan and is marked "not run". A golden case
 can cover it ([§12](#12-golden-tests), criterion G-B).
@@ -345,14 +381,23 @@ A case is not golden if it meets no criterion and a live reference can check it.
 A case is not golden if it exceeds 2 MiB or contains NaN or Inf.
 `verify_golden_bundles.py` rejects both. A case is not golden if the third-party
 semantics cannot map to hipDNN semantics.
+One exception: in an SDPA stats tensor, −inf on exactly the rows that the
+bounds and lengths of the case mask completely is not a non-finite value for
+this rule, because such a row has LSE = −inf by definition. The verifier must
+apply the same exception.
 
 ### 12.3 Generation
 
 - **Source.** An architecture-independent third party. PyTorch on CPU is the
   default. A hipDNN reference never generates golden data.
-- **Precision strategy.** Set it for each op in `meta.json`. Use precision
-  uplift for shallow ops and fp32. Use matched precision (the accumulation
-  contract of the engine) for deep ops and low-precision types ([RFC 0011](0011_BundleTestFramework.md)).
+- **Precision strategy.** Set it for each op in `meta.json`. Default to
+  precision uplift: compute in FP64 and round once to the output dtype. Matched
+  precision (the accumulation contract of the engine) is not the default for
+  deep ops or low-precision types. On SdpaBackward (ALMIOPEN-2894), uplift
+  golden data for bf16 and fp16 had 0 differing elements between
+  NumPy/OpenBLAS and torch/MKL over 57 bundles × 5 tensors. Matched FP32 moved
+  1–5 ulps between torch builds. The tolerance covers the intermediate rounding
+  of the engine either way ([RFC 0011](0011_BundleTestFramework.md)).
 - **Provenance.** Pin the third-party version. Seed the inputs. Record
   `forward_source` for backward ops in `meta.json`.
 - **Tolerance.** Calibrate it for each case from the observed error of both
@@ -467,7 +512,7 @@ Boundaries:
 | # | Capability | Status | Needed for |
 |---|---|---|---|
 | I1 | **Bundle generator.** Reads declared axes, legality, shape sets and level rules. Writes `sweep.json` for each level, with all-pairs and seeded rotation. | Missing. The conv sweeps came from C++ tests (`generator: capture-bundles`) or were written by hand (`generator: manual`). | [§8](#8-sweep-construction-levels-and-lanes) |
-| I2 | **`purpose` field** in sweep case metadata. Support-matrix generation excludes probes. | Missing | [§9](#9-case-purpose) |
+| I2 | **`purpose` field** in sweep case metadata, with the optional `motivation` note. Support-matrix generation excludes probes. | Missing | [§9](#9-case-purpose) |
 | I3 | **Exact-alignment and offset placement** in the harness | Missing. Pointers are allocator-aligned. | [§6](#6-feature-inventory) |
 | I4 | **Value-domain control** for each tensor: zero-excluded, all-zero, constant, large magnitude, subnormal, NaN and Inf injection. A seed derived for each tensor. | Missing. The tensor bundles fix ranges in code. For example, conv x and w are uniform in [0, 1], with one seed for every tensor. | [§6](#6-feature-inventory) |
 | I5 | **Repeat-and-compare** on bundles (determinism, plan reuse) | Exists only inside providers | [§6](#6-feature-inventory) |
@@ -475,6 +520,7 @@ Boundaries:
 | I7 | **Golden generator for each op** in `reference-data-scripts/`, writing `meta.json` with criterion and strategy | Batchnorm and SDPA only | [§12](#12-golden-tests) |
 | I8 | **Corpus intake** for M shapes | `migration-scripts/import_graph.py` is the start. | [§7](#7-shape-catalog-and-size-ladder) |
 | I9 | **Cold-cache timing** for each unique shape and arch | Ad hoc | [§8](#8-sweep-construction-levels-and-lanes) |
+| I10 | **`expected_rejection` bundle flag.** A strict rejection: never executed, an accepting engine fails the lane, no claim names it. | In review (PR #14346) | [§6](#6-feature-inventory), [§9](#9-case-purpose) |
 
 Templates can also need new placeholders. Today, conv `conv_mode`,
 `compute_data_type` and pointwise `operation` are hard-coded. These changes are
@@ -561,9 +607,12 @@ because nobody writes bundles by hand ([§4](#4-design-overview)).
 1. **Where axes and legality live.** A per-op Python module in
    `reference-data-scripts/`, or a data file beside the plan? The bundle
    generator and the exhaustive tool both read them.
-2. **Precision strategy for fp16 and bf16 golden cases.** We propose matched
-   precision. Confirm it against the accumulation contracts of all claiming
-   engines.
+   A per-op Python module worked for SdpaBackward: its tests proved all-pairs
+   coverage, legality and plan-item traceability.
+2. **Precision strategy beyond SdpaBackward.** Uplift is the default
+   ([§12.3](#123-generation)), on SdpaBackward evidence. Confirm it for
+   convolution and normalization, and against the accumulation contracts of all
+   claiming engines.
 3. **Source of tolerance calibration.** Per-case `meta.json` ([RFC 0011](0011_BundleTestFramework.md) level 2),
    or dynamic tolerances?
 4. **Full level and unclaimed dtypes.** Should full-level products run only on
