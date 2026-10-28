@@ -298,6 +298,25 @@ def _dense_runner(arch: str):
     return run_attention_dense_torch
 
 
+def _resolve_fp8_scale(
+    name: str, kwargs: Mapping[str, Any], tensors: Mapping[str, Any], label: str
+) -> float:
+    """One per-tensor fp8 dequant scale, resolved to a float at bind time.
+
+    Resolving at bind time host-syncs a device-tensor scale once, not on every
+    launch, which keeps graph capture intact. A missing scale raises rather than
+    silently dequantizing at unit scale; pass ``1.0`` explicitly for unit-scale KV.
+    """
+    value = kwargs.get(name, tensors.get(name))
+    if value is None:
+        raise ValueError(
+            f"{label} requires {name!r} (per-tensor dequant scale); none was "
+            f"supplied via bind kwarg or tensors[{name!r}]. Pass {name}=1.0 "
+            f"explicitly for unit-scale KV."
+        )
+    return float(value)
+
+
 def bind_dense_attention_torch(
     request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -322,27 +341,10 @@ def bind_dense_attention_torch(
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
-    # Resolve the fp8 dequant scales to Python floats at BIND time (like ``scale``).
-    # Doing it here, not per launch, means a device-tensor scale is host-synced once
-    # at bind -- not on every launch, which would break the graph-capture flow the
-    # bind-time capture exists for. An fp8 spec with no scale supplied anywhere is
-    # rejected rather than silently dequantized at unit scale (pass k_scale=1.0
-    # explicitly for genuinely unit-scale KV).
     bind_k_scale = bind_v_scale = None
     if getattr(spec, "kv_storage_dtype", None) is not None:
-
-        def _resolve_scale(name):
-            value = kwargs.get(name, tensors.get(name))
-            if value is None:
-                raise ValueError(
-                    f"fp8 dense requires {name!r} (per-tensor dequant scale); none "
-                    f"was supplied via bind kwarg or tensors[{name!r}]. Pass "
-                    f"{name}=1.0 explicitly for unit-scale KV."
-                )
-            return float(value)
-
-        bind_k_scale = _resolve_scale("k_scale")
-        bind_v_scale = _resolve_scale("v_scale")
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, tensors, "fp8 dense")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, tensors, "fp8 dense")
 
     def launch(**_kw):
         call = {
@@ -461,24 +463,10 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
-    # Resolve the fp8 dequant scales to floats at BIND time (see the dense binding
-    # for the rationale: one host-sync for a device-tensor scale, not per launch,
-    # and reject a missing scale rather than silently dequantizing at unit scale).
     bind_k_scale = bind_v_scale = 1.0
     if bool(getattr(problem, "use_fp8", False)):
-
-        def _resolve_scale(name):
-            value = kwargs.get(name, tensors.get(name))
-            if value is None:
-                raise ValueError(
-                    f"fp8 attention requires {name!r} (per-tensor dequant scale); "
-                    f"none supplied via bind kwarg or tensors[{name!r}]. Pass "
-                    f"{name}=1.0 explicitly for unit-scale KV."
-                )
-            return float(value)
-
-        bind_k_scale = _resolve_scale("k_scale")
-        bind_v_scale = _resolve_scale("v_scale")
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, tensors, "fp8 attention")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, tensors, "fp8 attention")
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")

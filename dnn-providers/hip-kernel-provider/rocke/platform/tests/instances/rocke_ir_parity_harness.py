@@ -3762,7 +3762,7 @@ def cases():
             "fp8_d64_swa_w128_sq512",
             {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
         ),
-        # fp16 compute with fp8 KV (AICK-1932 fp16 output). D128 + D64 lock the
+        # fp16 compute/output with fp8 KV. D128 + D64 lock the
         # fp16 MFMA dequant path through the golden and cpp byte-identity gate.
         ("fp8_fp16_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16"}),
         (
