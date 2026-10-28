@@ -86,10 +86,11 @@ void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
 #undef PARAMS_SOLVE
 }
 
-// mode 0 is the historical random tridiagonal system. Modes 1-3 are the
-// zero-off-diagonal systems that the medium spike path used to turn into NaN:
-// a diagonal matrix, an upper bidiagonal matrix, and a lower bidiagonal matrix.
-// The right-hand side is chosen so the solution is exact in floating point.
+// mode 0 is the historical random tridiagonal system. Modes 1-3 are diagonally
+// dominant zero-off-diagonal systems: diagonal, upper bidiagonal, and lower
+// bidiagonal. Modes 4-7 use unit diagonals and off-diagonals of +/-1 with a
+// non-constant solution, so a repair that drops a fill term cannot hide inside
+// a tiny coupling. The right-hand side matches that solution exactly.
 template <typename T>
 static void gtsv_no_pivot_strided_batch_init_system(int             mode,
                                                     rocsparse_int   m,
@@ -128,27 +129,56 @@ static void gtsv_no_pivot_strided_batch_init_system(int             mode,
     const T zero = static_cast<T>(0);
     const T one  = static_cast<T>(1);
 
+    const bool unit_coupling = mode >= 4;
+    const bool upper         = (mode == 2 || mode == 6 || mode == 7);
+    const bool lower         = (mode == 3 || mode == 4 || mode == 5);
+    const T    diag          = unit_coupling ? one : (mode == 1 ? static_cast<T>(2) : static_cast<T>(4));
+    const T    off = (mode == 5 || mode == 7) ? static_cast<T>(-1) : one;
+
     for(rocsparse_int j = 0; j < batch_count; ++j)
     {
         const rocsparse_int offset = batch_stride * j;
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            hdl[offset + i] = (mode == 3) ? one : zero;
-            hdu[offset + i] = (mode == 2) ? one : zero;
-            hd[offset + i]  = (mode == 1) ? static_cast<T>(2) : static_cast<T>(4);
+            hdl[offset + i] = lower ? off : zero;
+            hdu[offset + i] = upper ? off : zero;
+            hd[offset + i]  = diag;
+        }
 
-            if(mode == 1)
+        // The first subdiagonal and the last superdiagonal are outside the system.
+        hdl[offset]             = std::numeric_limits<T>::infinity();
+        hdu[offset + m - 1]     = std::numeric_limits<T>::infinity();
+
+        for(rocsparse_int i = 0; i < m; ++i)
+        {
+            if(!unit_coupling)
             {
-                hx[offset + i] = static_cast<T>(4);
+                if(mode == 1)
+                {
+                    hx[offset + i] = static_cast<T>(4);
+                }
+                else if(mode == 2)
+                {
+                    hx[offset + i] = (i == m - 1) ? static_cast<T>(4) : static_cast<T>(5);
+                }
+                else
+                {
+                    hx[offset + i] = (i == 0) ? static_cast<T>(4) : static_cast<T>(5);
+                }
+                continue;
             }
-            else if(mode == 2)
+
+            const T x_i = static_cast<T>((i % 7) - 3);
+            T       rhs = diag * x_i;
+            if(lower && i > 0)
             {
-                hx[offset + i] = (i == m - 1) ? static_cast<T>(4) : static_cast<T>(5);
+                rhs = rhs + off * static_cast<T>(((i - 1) % 7) - 3);
             }
-            else
+            if(upper && i + 1 < m)
             {
-                hx[offset + i] = (i == 0) ? static_cast<T>(4) : static_cast<T>(5);
+                rhs = rhs + off * static_cast<T>(((i + 1) % 7) - 3);
             }
+            hx[offset + i] = rhs;
         }
     }
 }
@@ -173,8 +203,10 @@ void testing_gtsv_no_pivot_strided_batch(const Arguments& arg)
 
     rocsparse_seedrand();
 
+    // rocsparse_matrix_zero selects the zero-off-diagonal systems above, not an
+    // all-zero matrix.
     const int mode_begin = (arg.matrix == rocsparse_matrix_zero) ? 1 : 0;
-    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 3 : 0;
+    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 7 : 0;
 
     // Host tri-diagonal matrix. Entries past m stay at 7 and are not referenced.
     host_vector<T> hdl(batch_stride * batch_count, static_cast<T>(7));

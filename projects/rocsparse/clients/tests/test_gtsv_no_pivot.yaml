@@ -115,12 +115,10 @@ Tests:
   denseld: [436987]
   matrix: [rocsparse_matrix_random]
 
-# ROCM-33473: a diagonal or one-sided bidiagonal system with m > 1024 takes the
-# spike path. The column permutation puts the zero off-diagonals on the spike
-# diagonal, and the spike solver then divides by that zero. m = 1024 stays on
-# the shared-memory path. m = 131073 makes the spike system itself larger than
-# 1024, so the repair has to survive the recursive call. matrix zero selects
-# those systems in the test.
+# Diagonal and one-sided bidiagonal systems. m = 1024 stays on the shared-memory
+# path. Larger m takes the spike path, and m = 131073 makes that spike system
+# itself larger than 1024, so the repair has to survive the recursive call.
+# matrix zero selects those systems in the test.
 - name: gtsv_no_pivot
   category: pre_checkin
   function: gtsv_no_pivot

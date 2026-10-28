@@ -82,10 +82,11 @@ void testing_gtsv_no_pivot_bad_arg(const Arguments& arg)
 #undef PARAMS_SOLVE
 }
 
-// mode 0 is the historical random tridiagonal system. Modes 1-3 are the
-// zero-off-diagonal systems that the medium spike path used to turn into NaN:
-// a diagonal matrix, an upper bidiagonal matrix, and a lower bidiagonal matrix.
-// The right-hand side is chosen so the solution is exact in floating point.
+// mode 0 is the historical random tridiagonal system. Modes 1-3 are diagonally
+// dominant zero-off-diagonal systems: diagonal, upper bidiagonal, and lower
+// bidiagonal. Modes 4-7 use unit diagonals and off-diagonals of +/-1 with a
+// non-constant solution, so a repair that drops a fill term cannot hide inside
+// a tiny coupling. The right-hand side matches that solution exactly.
 template <typename T>
 static void gtsv_no_pivot_init_system(int             mode,
                                       rocsparse_int   m,
@@ -121,44 +122,55 @@ static void gtsv_no_pivot_init_system(int             mode,
     const T zero = static_cast<T>(0);
     const T one  = static_cast<T>(1);
 
+    const bool unit_coupling = mode >= 4;
+    const bool upper         = (mode == 2 || mode == 6 || mode == 7);
+    const bool lower         = (mode == 3 || mode == 4 || mode == 5);
+    const T    diag          = unit_coupling ? one : (mode == 1 ? static_cast<T>(2) : static_cast<T>(4));
+    const T    off = (mode == 5 || mode == 7) ? static_cast<T>(-1) : one;
+
     for(rocsparse_int i = 0; i < m; ++i)
     {
-        hdl[i] = zero;
-        hdu[i] = zero;
-        hd[i]  = (mode == 1) ? static_cast<T>(2) : static_cast<T>(4);
+        hdl[i] = lower ? off : zero;
+        hdu[i] = upper ? off : zero;
+        hd[i]  = diag;
     }
 
-    if(mode == 2)
-    {
-        for(rocsparse_int i = 0; i < m; ++i)
-        {
-            hdu[i] = one;
-        }
-    }
-    else if(mode == 3)
-    {
-        for(rocsparse_int i = 0; i < m; ++i)
-        {
-            hdl[i] = one;
-        }
-    }
+    // The first subdiagonal and the last superdiagonal are outside the system.
+    hdl[0]     = std::numeric_limits<T>::infinity();
+    hdu[m - 1] = std::numeric_limits<T>::infinity();
 
     for(rocsparse_int j = 0; j < n; ++j)
     {
         for(rocsparse_int i = 0; i < m; ++i)
         {
-            if(mode == 1)
+            if(!unit_coupling)
             {
-                hB[j * ldb + i] = static_cast<T>(4);
+                if(mode == 1)
+                {
+                    hB[j * ldb + i] = static_cast<T>(4);
+                }
+                else if(mode == 2)
+                {
+                    hB[j * ldb + i] = (i == m - 1) ? static_cast<T>(4) : static_cast<T>(5);
+                }
+                else
+                {
+                    hB[j * ldb + i] = (i == 0) ? static_cast<T>(4) : static_cast<T>(5);
+                }
+                continue;
             }
-            else if(mode == 2)
+
+            const T x_i = static_cast<T>((i % 7) - 3);
+            T       rhs = diag * x_i;
+            if(lower && i > 0)
             {
-                hB[j * ldb + i] = (i == m - 1) ? static_cast<T>(4) : static_cast<T>(5);
+                rhs = rhs + off * static_cast<T>(((i - 1) % 7) - 3);
             }
-            else
+            if(upper && i + 1 < m)
             {
-                hB[j * ldb + i] = (i == 0) ? static_cast<T>(4) : static_cast<T>(5);
+                rhs = rhs + off * static_cast<T>(((i + 1) % 7) - 3);
             }
+            hB[j * ldb + i] = rhs;
         }
     }
 }
@@ -183,8 +195,10 @@ void testing_gtsv_no_pivot(const Arguments& arg)
 
     rocsparse_seedrand();
 
+    // rocsparse_matrix_zero selects the zero-off-diagonal systems above, not an
+    // all-zero matrix.
     const int mode_begin = (arg.matrix == rocsparse_matrix_zero) ? 1 : 0;
-    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 3 : 0;
+    const int mode_end   = (arg.matrix == rocsparse_matrix_zero) ? 7 : 0;
 
     // Host tri-diagonal matrix
     host_vector<T> hdl(m);

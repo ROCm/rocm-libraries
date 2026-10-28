@@ -124,10 +124,9 @@ Tests:
   denseld: [4000]
   matrix: [rocsparse_matrix_random]
 
-# ROCM-33473: same zero-off-diagonal spike failure as gtsv_no_pivot, on the
-# strided-batch entry point. m = 1024 stays on the shared-memory path.
-# m = 131073 recurses. matrix zero selects the diagonal and both bidiagonal
-# systems in the test.
+# Same zero-off-diagonal systems as gtsv_no_pivot, on the strided-batch entry
+# point. m = 1024 stays on the shared-memory path. m = 131073 recurses.
+# matrix zero selects the diagonal and both bidiagonal systems in the test.
 - name: gtsv_no_pivot_strided_batch
   category: pre_checkin
   function: gtsv_no_pivot_strided_batch
@@ -144,6 +143,16 @@ Tests:
   M: [131073]
   N: [1, 2]
   denseld: [131073]
+  matrix: [rocsparse_matrix_zero]
+
+# More than one repair block, so the grid-stride loop over batches runs.
+- name: gtsv_no_pivot_strided_batch
+  category: pre_checkin
+  function: gtsv_no_pivot_strided_batch
+  precision: *single_double_precisions_complex_real
+  M: [1025, 2050]
+  N: [300]
+  denseld: [2050]
   matrix: [rocsparse_matrix_zero]
 
 # Nightly

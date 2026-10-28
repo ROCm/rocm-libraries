@@ -684,10 +684,10 @@ namespace rocsparse
         // zeros on its diagonal. Repair those before either solver reads it.
         // Each batch has its own spike system. A system that already has a
         // nonzero spike diagonal is not modified.
-        const rocsparse_int repair_threads = 256;
+        constexpr uint32_t repair_threads = 256;
         const rocsparse_int repair_blocks  = (batch_count - 1) / repair_threads + 1;
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::gtsv_nopivot_strided_batch_spike_repair_kernel<T>),
+            (rocsparse::gtsv_nopivot_strided_batch_spike_repair_kernel<repair_threads, T>),
             dim3(repair_blocks),
             dim3(repair_threads),
             0,
