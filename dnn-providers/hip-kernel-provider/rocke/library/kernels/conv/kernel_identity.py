@@ -21,16 +21,21 @@ Names are spelled by :mod:`kernels.conv.kernel_label`.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass, field
 
 __all__ = [
+    "DIRECT_PROBLEM_CAPABILITY_ATTRS",
+    "IDENTITY_CAPABILITY_FIELDS",
     "KernelIdentity",
     "current_llvm_flavor",
     "dgrad_sub_gemms",
+    "identity_capability_key",
     "identity_supports_problem",
+    "problem_capability_key",
 ]
 
 
@@ -634,3 +639,139 @@ def identity_supports_problem(
             return False, why
 
     return True, "ok"
+
+
+# ---------------------------------------------------------------------------
+# Capability keys
+# ---------------------------------------------------------------------------
+#
+# :func:`identity_supports_problem` is a pure function of the identity and the
+# problem, but it reads only a part of each: most of an identity is tuning
+# (tile shapes it does read, but also pipeline, LDS layout, scheduling) and
+# most of a direct problem is extents the baked kernel takes as kernargs. A
+# caller filtering one cache of ~10^4 entries per shape over ~10^3 shapes pays
+# for that asymmetry ~10^7 times, so both sides get a *capability key*: the
+# projection onto what the predicate actually reads. Two identities with the
+# same key answer alike for every problem, and two problems with the same key
+# are answered alike by every identity -- so the predicate can be evaluated
+# once per (identity key, problem key) pair instead of once per entry and
+# shape.
+#
+# Both keys are deliberately conservative: a field listed here that the
+# predicate does not read only costs reuse, while one it reads and the key
+# omits is a wrong answer. ``library/tests/test_capability_keys.py`` holds the
+# two sides to that by perturbing the fields the keys leave out and asserting
+# the predicate does not move.
+
+#: Fields of :class:`KernelIdentity` that :func:`identity_supports_problem`
+#: reads (directly, or through ``_grid_fits`` / ``_group_merge_fits`` /
+#: :func:`dgrad_sub_gemms`). ``is_direct`` is a property over ``algorithm``
+#: and stands in for it.
+IDENTITY_CAPABILITY_FIELDS = (
+    "llvm_flavor",
+    "direction",
+    "is_direct",
+    "is_3d",
+    "is_pointwise",
+    "grouped",
+    "patch",
+    "group_merge",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "dtype_d",
+    "split_k",
+    "two_stage",
+    "filter_h",
+    "filter_w",
+    "stride_h",
+    "stride_w",
+    "dilation_h",
+    "dilation_w",
+    "pad_h",
+    "pad_w",
+    "cpg",
+    "kpg",
+    "async_dma",
+    "async_chunk_a",
+    "async_chunk_b",
+    "max_sub_gemms",
+    "tap_outer_k",
+    "dy_halo",
+    "halo_max_wo",
+)
+
+#: Problem attributes the predicate reads when the identity is a *direct* one.
+#: A direct binary bakes its whole geometry and takes batch, image size and
+#: group count as kernargs, so the predicate never looks at an extent: it
+#: stops at the baked-geometry equalities. Every branch that reads one
+#: (``_grid_fits``, the dgrad sub-GEMM table, the patch and dy-halo rules, the
+#: wgrad atomic epilogue) is behind ``not identity.is_direct`` or behind a
+#: field only an implicit-GEMM identity sets. That is what makes this key
+#: coarse enough to be worth having: thousands of shapes collapse onto the few
+#: hundred geometries the cache was built for.
+DIRECT_PROBLEM_CAPABILITY_ATTRS = (
+    "cpg",
+    "kpg",
+    "groups",
+    "is_3d",
+    "is_pointwise",
+    "Y",
+    "X",
+    "Z",
+    "KH",
+    "KW",
+    "stride",
+    "sH",
+    "sW",
+    "dilation",
+    "dH",
+    "dW",
+    "dil_h",
+    "dil_w",
+    "PAD",
+    "pH",
+    "pW",
+)
+
+
+def identity_capability_key(identity: KernelIdentity) -> tuple:
+    """``identity`` projected onto :data:`IDENTITY_CAPABILITY_FIELDS`.
+
+    Identities sharing a key are indistinguishable to
+    :func:`identity_supports_problem` -- it is told the same thing about all
+    of them -- so a filter over a cache can answer once per key.
+    """
+    return tuple(getattr(identity, name) for name in IDENTITY_CAPABILITY_FIELDS)
+
+
+def problem_capability_key(problem: object, *, is_direct: bool) -> tuple | None:
+    """``problem`` projected onto what the predicate reads, or ``None``.
+
+    ``is_direct`` says which projection applies: a direct identity reads only
+    :data:`DIRECT_PROBLEM_CAPABILITY_ATTRS`, an implicit-GEMM one reads
+    extents too (the launch grid, the dgrad sub-GEMM decomposition, the
+    dy-halo and patch rules), and rather than track which of those a future
+    rule adds, the implicit key is the whole problem. It is then exact rather
+    than coarse, which still collapses a shape that repeats across dtypes,
+    directions or runs.
+
+    ``None`` means "not keyable" -- an implicit-GEMM problem that is not a
+    dataclass, or one whose fields are not hashable. Callers fall back to
+    evaluating the predicate.
+    """
+    if is_direct:
+        return tuple(getattr(problem, a, None) for a in DIRECT_PROBLEM_CAPABILITY_ATTRS)
+    if not dataclasses.is_dataclass(problem) or isinstance(problem, type):
+        return None
+    key = tuple(
+        (f.name, getattr(problem, f.name, None)) for f in dataclasses.fields(problem)
+    )
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key

@@ -529,7 +529,7 @@ def plan_for(
         reduce_id = _split_reduce_identity(
             identity.arch, identity.wave_size, spec.split_c, identity.dtype_a
         )
-        entry = cache.get(reduce_id)
+        entry = cache.entry_meta(reduce_id)
         if entry is None:
             return None, f"missing cached {_SPLIT_REDUCE} helper (rebuild the cache)"
         reduce_spec = make_spec(_SPLIT_REDUCE, problem, {"split_c": spec.split_c})
@@ -537,7 +537,7 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "ws_split")
         )
         fold = DirectStep(
-            kernel_name=entry[1]["kernel_name"],
+            kernel_name=entry["kernel_name"],
             hsaco_path=cache.hsaco_path(reduce_id),
             signature=conv.signature,
             grid=reduce_spec.grid(problem),
@@ -572,7 +572,7 @@ def plan_for(
             fold_knobs,
             identity.dtype_a,
         )
-        entry = cache.get(fold_id)
+        entry = cache.entry_meta(fold_id)
         if entry is None:
             return None, "missing cached wgrad fold (rebuild the cache)"
         fold_spec = make_spec(_WGRAD_FOLD, problem, fold_knobs)
@@ -584,7 +584,7 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "ws")
         )
         fold = DirectStep(
-            kernel_name=entry[1]["kernel_name"],
+            kernel_name=entry["kernel_name"],
             hsaco_path=cache.hsaco_path(fold_id),
             signature=dw_wgrad_fold_signature(fold_spec),
             grid=grid,
@@ -676,7 +676,7 @@ def plan_for(
             helper_knobs,
             identity.dtype_a,
         )
-        entry = cache.get(helper_id)
+        entry = cache.entry_meta(helper_id)
         if entry is None:
             return None, f"missing cached {helper} helper (rebuild the cache)"
         helper_path = cache.hsaco_path(helper_id)
@@ -684,7 +684,7 @@ def plan_for(
         grid, block = dc.direct_launch_geometry(helper_spec)
         steps.append(
             DirectStep(
-                kernel_name=entry[1]["kernel_name"],
+                kernel_name=entry["kernel_name"],
                 hsaco_path=helper_path,
                 signature=conv_direct_transform_signature(
                     identity.dtype_a, runtime_channels
