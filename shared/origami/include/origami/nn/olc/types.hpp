@@ -64,7 +64,7 @@ struct manifest_entry_t;
 /// Where the model is used. Supplied by the caller (e.g. hipBLASLt when it loads a library).
 struct deployment_t {
   std::string arch;   ///< e.g. "gfx950"
-  std::string dtype;  ///< problem class: "bf16" or "tf32"
+  std::string dtype;  ///< problem class: "bf16", "tf32" or "fp8"
   /// Canonical manifest of the library's PredictionMatching rows for this dtype class
   /// (@see canonical_manifest()).
   const std::vector<manifest_entry_t>* library_kernels = nullptr;
