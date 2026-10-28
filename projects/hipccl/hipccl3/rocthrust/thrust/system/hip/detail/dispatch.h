@@ -27,7 +27,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/integer_math.h>
 #include <thrust/detail/preprocessor.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
@@ -38,6 +37,24 @@
 #endif
 
 #include <string>
+
+THRUST_NAMESPACE_BEGIN
+namespace detail
+{
+template <typename T, _THRUST_STD::enable_if_t<_THRUST_STD::is_arithmetic_v<T>, int> = 0>
+[[nodiscard]] THRUST_HOST_DEVICE constexpr bool is_negative([[maybe_unused]] T x) noexcept
+{
+  if constexpr (_THRUST_STD::is_unsigned_v<T>)
+  {
+    return false;
+  }
+  else
+  {
+    return x < 0;
+  }
+}
+} // namespace detail
+THRUST_NAMESPACE_END
 
 #if defined(THRUST_FORCE_32_BIT_OFFSET_TYPE) && defined(THRUST_FORCE_64_BIT_OFFSET_TYPE)
 #  error "Only THRUST_FORCE_32_BIT_OFFSET_TYPE or THRUST_FORCE_64_BIT_OFFSET_TYPE may be defined!"
