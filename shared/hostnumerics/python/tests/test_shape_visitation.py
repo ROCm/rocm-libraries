@@ -131,7 +131,13 @@ class ShapeVisitationTests(unittest.TestCase):
                 (interval.start, interval.stop, interval.stride), (0, logical, stride)
             )
             self.assertEqual(interval.indices(), list(range(0, logical, stride)))
-        for requested in (0, 10, 11):
+        self.assertEqual(
+            hn.prime_index_range(
+                logical_elements=10, allocated_elements=SIZE_MAX, requested_elements=0
+            ).count(),
+            0,
+        )
+        for requested in (10, 11):
             self.assertEqual(
                 hn.prime_index_range(
                     logical_elements=10,

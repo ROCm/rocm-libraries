@@ -112,10 +112,11 @@ struct PrimeIndexRangeOptions {
 
 // Samples [0, logicalElements) with the smallest prime stride not less than
 // allocatedElements / requestedElements, so the sample count is approximate.
-// Zero requested elements, or at least logicalElements, selects every index.
-// Throws if no such prime fits size_t.
+// Zero requested elements selects no index; at least logicalElements selects
+// every index. Throws if no such prime fits size_t.
 inline IndexRange primeIndexRange(const PrimeIndexRangeOptions& options) {
-    if (options.requestedElements == 0 || options.requestedElements >= options.logicalElements)
+    if (options.requestedElements == 0) return IndexRange::all(0);
+    if (options.requestedElements >= options.logicalElements)
         return IndexRange::all(options.logicalElements);
     const auto stride = detail::getNextPrime(options.allocatedElements / options.requestedElements);
     if (!stride) throw std::runtime_error("Prime-stride index selection overflow.");
