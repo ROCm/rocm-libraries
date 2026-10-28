@@ -9,8 +9,8 @@
  * SCOPE (this translation unit).
  *   rocke_attn_unified_emit_2d_softmax_loop  -- the scf.for_iter over [0,kv_len)
  *     with per-iter physical/token resolve, the INLINE vec8 QK dot product +
- *     scalar tail fold, score*scale*rcp_ln2, optional softcap, causal +
- *     sliding-window mask, online (m,l,acc) update with the -inf masked-row
+ *     scalar tail fold (fp8 K/V: cvt + k_scale), score*scale*rcp_ln2, optional
+ *     softcap, the mask band (right bound + sliding window), online (m,l,acc) update with the -inf masked-row
  *     guard select, and the inline single-V-element fold via kv_desc.offset.
  *   rocke_attn_unified_emit_2d_epilogue      -- out_val = acc*rcp(l), cast to
  *     dtype, guarded store at q_desc.offset under (active && dim < head_size).
@@ -72,6 +72,33 @@ static rocke_value_t* rocke__q_offset(rocke_attn_unified_build_ctx_t* ctx,
     return off;
 }
 
+rocke_value_t* rocke_attn_unified_scalar_band_ok(rocke_attn_unified_build_ctx_t* ctx,
+                                                 rocke_value_t* kpos,
+                                                 bool window)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_unified_attention_problem_t* p = ctx->p;
+    rocke_value_t* ok = NULL;
+
+    if(p->right_bound >= 0)
+    {
+        rocke_value_t* upper = rocke_b_add(b, ctx->context_len, ctx->query_pos);
+        if(p->right_bound > 0)
+        {
+            upper = rocke_b_add(b, upper, rocke_b_const_i32(b, p->right_bound));
+        }
+        ok = rocke_b_cmp_le(b, kpos, upper);
+    }
+    if(window && p->sliding_window > 0)
+    {
+        rocke_value_t* dist
+            = rocke_b_sub(b, rocke_b_add(b, ctx->context_len, ctx->query_pos), kpos);
+        rocke_value_t* sw_ok = rocke_b_cmp_lt(b, dist, rocke_b_const_i32(b, p->sliding_window));
+        ok = (ok == NULL) ? sw_ok : rocke_b_land(b, ok, sw_ok);
+    }
+    return ok;
+}
+
 /* ==========================================================================
  * rocke_attn_unified_emit_2d_softmax_loop
  *
@@ -82,6 +109,10 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
     rocke_ir_builder_t* b = ctx->b;
     const rocke_unified_attention_problem_t* p = ctx->p;
     const rocke_type_t* dtype = ctx->dtype;
+    const bool fp8 = p->use_fp8;
+    const rocke_type_t* kv_dtype = fp8 ? rocke_fp8e4m3() : dtype;
+    const int kv_vec_align = fp8 ? 8 : 16;
+    const int kv_scalar_align = fp8 ? 1 : 2;
     const int VEC = 8;
     int d8;
     int d;
@@ -141,7 +172,7 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
             rocke_value_t* qv_vec = rocke_b_global_load_vN(
                 b, ctx->abi_query, rocke_b_add(b, q_off_base, d_base), dtype, VEC, /*align=*/16);
             rocke_value_t* kv_vec = rocke_b_global_load_vN(
-                b, ctx->abi_key, rocke_b_add(b, k_off_base, d_base), dtype, VEC, /*align=*/16);
+                b, ctx->abi_key, rocke_b_add(b, k_off_base, d_base), kv_dtype, VEC, kv_vec_align);
             int i;
             for(i = 0; i < VEC; ++i)
             {
@@ -152,7 +183,13 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
                  * would emit K first and swap the operands. Force the Python
                  * order with explicit sequenced locals. */
                 rocke_value_t* qv_f = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv_vec, i));
-                rocke_value_t* kv_f = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv_vec, i));
+                rocke_value_t* kv = rocke_b_vec_extract(b, kv_vec, i);
+                rocke_value_t* kv_f
+                    = fp8 ? rocke_b_cvt_fp8_to_f32(b, kv) : rocke_b_cast_to_f32(b, kv);
+                if(fp8)
+                {
+                    kv_f = rocke_b_fmul(b, kv_f, ctx->abi_k_scale);
+                }
                 score = rocke_b_fadd(b, score, rocke_b_fmul(b, qv_f, kv_f));
             }
         }
@@ -165,8 +202,14 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
                 b, &ctx->kv_desc, physical, token_in_block, ctx->kv_head, d_v);
             rocke_value_t* qv_s = rocke_b_cast_to_f32(
                 b, rocke_b_global_load(b, ctx->abi_query, q_off, dtype, /*align=*/2));
-            rocke_value_t* kv_s = rocke_b_cast_to_f32(
-                b, rocke_b_global_load(b, ctx->abi_key, k_off, dtype, /*align=*/2));
+            rocke_value_t* kv_raw
+                = rocke_b_global_load(b, ctx->abi_key, k_off, kv_dtype, kv_scalar_align);
+            rocke_value_t* kv_s
+                = fp8 ? rocke_b_cvt_fp8_to_f32(b, kv_raw) : rocke_b_cast_to_f32(b, kv_raw);
+            if(fp8)
+            {
+                kv_s = rocke_b_fmul(b, kv_s, ctx->abi_k_scale);
+            }
             score = rocke_b_fadd(b, score, rocke_b_fmul(b, qv_s, kv_s));
         }
 
@@ -177,17 +220,11 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
             score = rocke_b_fmul(b, rocke__apply_softcap(b, score, ctx->softcap), ctx->rcp_ln2);
         }
 
-        /* causal_ok = kpos <= context_len + query_pos */
-        rocke_value_t* causal_ok
-            = rocke_b_cmp_le(b, kpos, rocke_b_add(b, ctx->context_len, ctx->query_pos));
-        if(p->sliding_window > 0)
+        rocke_value_t* band_ok = rocke_attn_unified_scalar_band_ok(ctx, kpos, true);
+        if(band_ok != NULL)
         {
-            rocke_value_t* dist
-                = rocke_b_sub(b, rocke_b_add(b, ctx->context_len, ctx->query_pos), kpos);
-            rocke_value_t* sw_ok = rocke_b_cmp_lt(b, dist, rocke_b_const_i32(b, p->sliding_window));
-            causal_ok = rocke_b_land(b, causal_ok, sw_ok);
+            score = rocke_b_select(b, band_ok, score, ctx->neg_inf);
         }
-        score = rocke_b_select(b, causal_ok, score, ctx->neg_inf);
 
         rocke_value_t* new_m_raw = rocke_b_fmax(b, m_val, score);
         /* masked-row guard: force m to 0 when fully masked (m_j > -inf ? m_j : 0). */
@@ -200,8 +237,14 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
         /* single V element fold via kv_desc.offset(..., dim=dim) */
         rocke_value_t* v_off = rocke_unified_attn_paged_kv_offset(
             b, &ctx->kv_desc, physical, token_in_block, ctx->kv_head, ctx->dim);
-        rocke_value_t* vv = rocke_b_cast_to_f32(
-            b, rocke_b_global_load(b, ctx->abi_value, v_off, dtype, /*align=*/2));
+        rocke_value_t* vv_raw
+            = rocke_b_global_load(b, ctx->abi_value, v_off, kv_dtype, kv_scalar_align);
+        rocke_value_t* vv
+            = fp8 ? rocke_b_cvt_fp8_to_f32(b, vv_raw) : rocke_b_cast_to_f32(b, vv_raw);
+        if(fp8)
+        {
+            vv = rocke_b_fmul(b, vv, ctx->abi_v_scale);
+        }
         /* Left-to-right operand order to match Python: fmul(acc,alpha) before
          * fmul(prob,vv). Sequence the two nested products explicitly. */
         rocke_value_t* acc_scaled = rocke_b_fmul(b, acc_val, alpha);
@@ -234,6 +277,13 @@ void rocke_attn_unified_emit_2d_epilogue(rocke_attn_unified_build_ctx_t* ctx)
 
     /* out_val = loop.results[2] * rcp(loop.results[1]) */
     rocke_value_t* out_val = rocke_b_fmul(b, ctx->loop_acc, rocke_b_rcp(b, ctx->loop_l));
+    if(!rocke_unified_attention_problem_default_mask(p))
+    {
+        /* A non-default mask can leave a row with no visible key: emit 0, not
+         * acc * rcp(0). */
+        out_val = rocke_b_select(
+            b, rocke_b_fcmp(b, "ogt", ctx->loop_l, ctx->zero_f), out_val, ctx->zero_f);
+    }
     rocke_value_t* out_cast = rocke_b_cast_f32_to(b, out_val, ctx->dtype);
 
     /* out_off, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=dim) */

@@ -30,9 +30,11 @@
 #include <vector>
 
 #include "family_glue.hpp"
+#include "rocke/error.hpp"
 
 extern "C" {
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors_3d.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_fmha_appendkv.h"
 #include "rocke/instance_fmha_bwd.h"
@@ -1440,7 +1442,6 @@ static const unported_field k_problem_unported[] = {
     {"use_additive_bias", false, 0},
     {"fp8_fnuz", false, 0},
     {"target_ctas", false, 0},
-    {"waves_per_eu", true, 0},
     {"compile_backend", true, 0},
     {"causal_top_left", false, 0},
     {"right_bound", false, 0},
@@ -1566,24 +1567,182 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     return d;
 }
 
-py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch)
+/* Run a spec validator (the port of a spec class __post_init__) and raise what
+ * Python would: NotImplementedError for ROCKE_ERR_NOTIMPL, else ValueError. */
+template <class Fn>
+static void raise_if_spec_invalid(const char* who, Fn&& validate)
+{
+    rocke_ir_builder_t b;
+    rocke_status_t code = ROCKE_OK;
+    std::string err;
+    if(rocke_ir_builder_init(&b, who) != ROCKE_OK)
+        throw std::runtime_error(std::string(who) + ": builder init failed");
+    try
+    {
+        if(!validate(&b))
+        {
+            const char* m = rocke_ir_builder_error(&b);
+            code = rocke_ir_builder_status(&b);
+            err = (m != nullptr && *m != '\0') ? m : "spec validation failed";
+        }
+    }
+    catch(const ckc::Error& e)
+    {
+        code = e.code();
+        err = e.what();
+    }
+    rocke_ir_builder_free(&b);
+    if(err.empty())
+        return;
+    if(code == ROCKE_ERR_NOTIMPL)
+        raise_not_implemented(err);
+    throw py::value_error(err);
+}
+
+/* Python attention_unified._tiled_spec_from_problem: build the spec (Python
+ * validates it in the spec class __post_init__), then resolve its LDS budget.
+ * ``hook_arch`` is the one arch the calling hook serves. */
+py::dict attn_tiled_spec_from_problem(const py::dict& d,
+                                      const std::string& arch,
+                                      const std::string& hook_arch)
 {
     require_arch(arch);
-    /* The C selector builds only the gfx950 spec and returns a zeroed default
-     * for every other arch. */
-    if(arch != "gfx950")
-        raise_not_implemented("attn_tiled_spec_from_problem: the C++ selector supports only "
-                              "gfx950 (got "
-                              + arch + ")");
+    if(arch != hook_arch)
+        raise_not_implemented("attn_tiled_spec_from_problem: this hook builds only the " + hook_arch
+                              + " spec (got " + arch + ")");
     Store st;
     rocke_unified_attention_problem_t p = problem_dict_to_c(d, st);
     const char* a = arch.c_str();
     rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
-    /* Run the LDS-budget resolver (mirrors the Python _resolve_lds_budget call
-     * that attention_unified._tiled_spec_from_problem makes after building the spec). */
-    char reason[256] = {};
-    rocke_unified_attn_resolve_lds_budget(&spec, a, reason, sizeof(reason));
+    if(arch == "gfx942")
+        raise_if_spec_invalid("attn_tiled_spec_from_problem", [&](rocke_ir_builder_t* b) {
+            return rocke_attention_tiled_2d_spec_validate(b, &spec);
+        });
+    char reason[512] = {};
+    if(!rocke_unified_attn_resolve_lds_budget(&spec, a, reason, sizeof(reason)))
+        throw std::runtime_error(reason);
     return spec_to_dict(spec);
+}
+
+/* Every public tiled-2D selector on one problem, keyed by the Python selector's
+ * name without its leading underscore, so a parity test can compare each one
+ * with Python on any arch, not only the arches C++ assembles a spec for. */
+static py::dict tiled_2d_selectors(const py::dict& d, const std::string& arch)
+{
+    Store st;
+    const rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+    const rocke_unified_attention_problem_t* pp = &p;
+    const char* a = arch.c_str();
+    py::dict r;
+    r["select_2d_tile_size"] = rocke_unified_attn_select_2d_tile_size(pp, a);
+    r["select_2d_num_warps"] = rocke_unified_attn_select_2d_num_warps(pp, a);
+    r["select_2d_block_m_per_warp"] = rocke_unified_attn_select_2d_block_m_per_warp(pp, a);
+    int wpe = 0;
+    r["select_2d_waves_per_eu"]
+        = rocke_unified_attn_select_2d_waves_per_eu(pp, a, &wpe) ? py::cast(wpe) : py::none();
+    const char* kv = rocke_unified_attn_kv_storage_dtype(pp);
+    r["kv_storage_dtype"] = kv ? py::cast(std::string(kv)) : py::none();
+
+    r["enable_combo_2d"] = rocke_unified_attn_enable_combo_2d(pp, a);
+    r["enable_transposed_qk_32x32"] = rocke_unified_attn_enable_transposed_qk_32x32(pp, a);
+    r["enable_mfma_32x32"] = rocke_unified_attn_enable_mfma_32x32(pp, a);
+    r["enable_transposed_half_local_pv"]
+        = rocke_unified_attn_enable_transposed_half_local_pv(pp, a);
+    r["enable_register_pv"] = rocke_unified_attn_enable_register_pv(pp, a);
+    r["enable_single_batch_combo"] = rocke_unified_attn_enable_single_batch_combo(pp, a);
+    r["enable_transposed_subflags"] = rocke_unified_attn_enable_transposed_subflags(pp, a);
+    r["enable_d128_small_tile"] = rocke_unified_attn_enable_d128_small_tile(pp, a);
+    r["enable_softmax_mfma_interleave"] = rocke_unified_attn_enable_softmax_mfma_interleave(pp, a);
+    r["enable_v_double_buffer"] = rocke_unified_attn_enable_v_double_buffer(pp, a);
+    r["enable_early_v_schedule"] = rocke_unified_attn_enable_early_v_schedule(pp, a);
+
+    r["gfx942_4warp_fast"] = rocke_unified_attn_gfx942_4warp_fast(pp, a);
+    r["enable_gfx942_fp16_flash"] = rocke_unified_attn_enable_gfx942_fp16_flash(pp, a);
+    r["enable_gfx942_bf16_flash"] = rocke_unified_attn_enable_gfx942_bf16_flash(pp, a);
+    r["enable_gfx942_d128_smalltile_doublek"]
+        = rocke_unified_attn_enable_gfx942_d128_smalltile_doublek(pp, a);
+    r["gfx942_bf16_wide_tile_size"] = rocke_unified_attn_gfx942_bf16_wide_tile_size(pp, a);
+    int nw = 0;
+    bool single_k = false;
+    rocke_unified_attn_gfx942_bf16_wide_geometry(pp, a, &nw, &single_k);
+    r["gfx942_bf16_wide_geometry"] = py::make_tuple(nw, single_k);
+    r["gfx942_bf16_wide_use_cfvst"] = rocke_unified_attn_gfx942_bf16_wide_use_cfvst(pp);
+    r["gfx942_flash_use_cfvst"] = rocke_unified_attn_gfx942_flash_use_cfvst(pp);
+    r["gfx942_flash_use_single_buffer"] = rocke_unified_attn_gfx942_flash_use_single_buffer(pp);
+    r["enable_gfx942_flash_mask_limit"] = rocke_unified_attn_enable_gfx942_flash_mask_limit(pp, a);
+    r["enable_gfx942_flash_k_sliced_ring"]
+        = rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(pp, a);
+    r["select_gfx942_flash_ring_depth"] = rocke_unified_attn_select_gfx942_flash_ring_depth(pp, a);
+    r["select_gfx942_flash_k_slice_hd"] = rocke_unified_attn_select_gfx942_flash_k_slice_hd(pp);
+    r["select_gfx942_flash_num_warps"] = rocke_unified_attn_select_gfx942_flash_num_warps(pp, a);
+    return r;
+}
+
+/* UnifiedAttentionProblem fields the C 3D spec has no slot for (they set the
+ * gfx950-only spec fields of the same name). */
+static const unported_field k_problem_3d_unported[] = {
+    {"use_additive_bias", false, 0},
+    {"causal_top_left", false, 0},
+    {"right_bound", false, 0},
+};
+
+static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s)
+{
+    py::dict d;
+    d["head_size"] = s.head_size;
+    d["block_size"] = s.block_size;
+    d["num_query_heads"] = s.num_query_heads;
+    d["num_kv_heads"] = s.num_kv_heads;
+    d["dtype"] = s.dtype ? std::string(s.dtype) : std::string("");
+    d["use_sinks"] = s.use_sinks;
+    d["sliding_window"] = s.sliding_window;
+    d["has_softcap"] = s.has_softcap;
+    d["num_segments"] = s.num_segments;
+    d["use_alibi"] = s.use_alibi;
+    d["use_qq_bias"] = s.use_qq_bias;
+    d["num_seqs"] = s.num_seqs;
+    d["waves_per_eu"] = s.has_waves_per_eu ? py::cast(s.waves_per_eu) : py::none();
+    d["kv_storage_dtype"]
+        = s.kv_storage_dtype ? py::cast(std::string(s.kv_storage_dtype)) : py::none();
+    d["tile_size_override"]
+        = s.has_tile_size_override ? py::cast(s.tile_size_override) : py::none();
+    d["use_invariant_hoist"] = s.use_invariant_hoist;
+    d["use_wide_kv_load"] = s.use_wide_kv_load;
+    d["use_i64_kv_addr"] = s.use_i64_kv_addr;
+    d["use_decode_grid"] = s.use_decode_grid;
+    d["kv_cache_policy"]
+        = s.kv_cache_policy ? py::cast(std::string(s.kv_cache_policy)) : py::none();
+    d["use_kv_lds_swizzle"] = s.use_kv_lds_swizzle;
+    d["use_wave_page_id_load"] = s.use_wave_page_id_load;
+    return d;
+}
+
+/* Python attention_unified._tiled_3d_spec_from_problem: build the 3D spec (Python
+ * validates it in the spec class __post_init__). ``hook_arch`` is the one arch
+ * the calling hook serves. */
+static py::dict attn_tiled_3d_spec_from_problem(const py::dict& d,
+                                                const std::string& arch,
+                                                const std::string& hook_arch)
+{
+    require_arch(arch);
+    if(arch != hook_arch)
+        raise_not_implemented("attn_tiled_3d_spec_from_problem: this hook builds only the "
+                              + hook_arch + " spec (got " + arch + ")");
+    reject_unported(d,
+                    "attn_tiled_3d_spec_from_problem",
+                    k_problem_3d_unported,
+                    sizeof(k_problem_3d_unported) / sizeof(k_problem_3d_unported[0]));
+    Store st;
+    rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+    if(p.num_kv_heads <= 0 || p.num_query_heads % p.num_kv_heads != 0)
+        throw py::value_error("num_query_heads must be divisible by num_kv_heads");
+    rocke_unified_attention_3d_tiled_spec_t spec
+        = rocke_unified_attn_tiled_3d_spec_from_problem(&p, arch.c_str());
+    raise_if_spec_invalid("attn_tiled_3d_spec_from_problem", [&](rocke_ir_builder_t* b) {
+        return arch == "gfx950" ? rocke_gfx950_unified_attention_3d_tiled_spec_validate(b, &spec)
+                                : rocke_unified_attention_3d_tiled_spec_validate(b, &spec);
+    });
+    return spec_3d_to_dict(spec);
 }
 
 static py::dict config_2d_to_dict(const rocke_attention_2d_config_t& c)
@@ -1639,14 +1798,44 @@ void register_attention(py::module_& m)
     m.def(
         "gfx950_attn_tiled_spec_from_problem",
         [](const py::dict& d, const std::string& arch) {
-            return attn_tiled_spec_from_problem(d, arch);
+            return attn_tiled_spec_from_problem(d, arch, "gfx950");
         },
         py::arg("problem"),
         py::arg("arch"),
         "Run the gfx950 tiled-2D selector on a UnifiedAttentionProblem dict "
         "and return the assembled spec as a dict (mirrors "
-        "attention_spec_builder._tiled_spec_from_problem).");
+        "attention_unified._tiled_spec_from_problem).");
+    m.def(
+        "gfx942_attn_tiled_spec_from_problem",
+        [](const py::dict& d, const std::string& arch) {
+            return attn_tiled_spec_from_problem(d, arch, "gfx942");
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "Run the gfx942 tiled-2D selector on a UnifiedAttentionProblem dict "
+        "and return the assembled spec as a dict (mirrors "
+        "attention_unified._tiled_spec_from_problem: raises ValueError where the "
+        "spec fails validation, RuntimeError where its LDS budget cannot be met).");
+    m.def("unified_attention_tiled_2d_selectors",
+          &tiled_2d_selectors,
+          py::arg("problem"),
+          py::arg("arch"),
+          "Every public C++ tiled-2D selector on a UnifiedAttentionProblem dict, "
+          "keyed by the Python selector name without its leading underscore.");
 
+    for(const char* a : {"gfx942", "gfx950"})
+    {
+        std::string hook_arch(a);
+        m.def((hook_arch + "_attn_tiled_3d_spec_from_problem").c_str(),
+              [hook_arch](const py::dict& d, const std::string& arch) {
+                  return attn_tiled_3d_spec_from_problem(d, arch, hook_arch);
+              },
+              py::arg("problem"),
+              py::arg("arch"),
+              "Run the tiled-3D selectors on a UnifiedAttentionProblem dict and return "
+              "the assembled spec as a dict (mirrors "
+              "attention_unified._tiled_3d_spec_from_problem).");
+    }
     m.def(
         "unified_attention_select_path",
         [](const py::dict& d) {

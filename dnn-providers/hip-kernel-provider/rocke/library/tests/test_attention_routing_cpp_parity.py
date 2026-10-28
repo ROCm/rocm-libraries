@@ -13,6 +13,7 @@ predicates, and checks that every problem C++ admits actually builds."""
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import asdict, replace
 
 import pytest
@@ -26,7 +27,7 @@ from kernels.common.attention_unified import (
     _mask_label,
     _reject_mask_on_arch,
     _reject_mask_semantics,
-    _tiled_spec_from_problem,
+    _tiled_3d_spec_from_problem,
     supports_native_unified_attention,
     supports_native_unified_attention_3d_tiled,
     supports_native_unified_attention_tiled,
@@ -199,17 +200,39 @@ def test_tiled_3d_gate_matches_python(engine):
             assert (ok, reason) == (py_ok, py_reason), ctx
 
 
+def test_tiled_3d_admitted_problems_build(engine):
+    """Every problem the C++ 3D gate admits lowers through the C++ 3D segment
+    builder, from the spec the C++ 3D selectors build.
+
+    Python's gate also admits gfx942 problems whose KV cache needs 64-bit
+    addressing, which the gfx942 3D spec rejects as not implemented; C++ must
+    reject those the same way."""
+    seen = set()
+    for p, arch in itertools.product(_tiled_2d_shapes(), ("gfx942", "gfx950")):
+        ok, _ = engine.unified_attention_supports_tiled_3d(asdict(p), arch)
+        if not ok:
+            continue
+        hook = getattr(engine, f"{arch}_attn_tiled_3d_spec_from_problem")
+        try:
+            _tiled_3d_spec_from_problem(p, arch)
+        except NotImplementedError as e:
+            with pytest.raises(NotImplementedError, match=re.escape(str(e))):
+                hook(asdict(p), arch)
+            continue
+        spec = hook(asdict(p), arch)
+        key = (arch, repr(sorted(spec.items())))
+        if key in seen:
+            continue
+        seen.add(key)
+        lower = getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")
+        assert lower(spec, arch), (p, arch, spec)
+
+
 def test_scalar_gate_matches_python(engine):
     for p, arch in itertools.product(_gate_problems(), _ARCHES):
         ok, reason = engine.unified_attention_supports_scalar(asdict(p), arch)
         py_ok, py_reason = _python_gate(supports_native_unified_attention, p, arch)
-        ctx = (p, arch, py_ok, py_reason)
-        if reason == "scalar fp8 K/V is not ported to C++ yet":
-            assert not ok and py_ok and p.use_fp8, ctx
-        elif reason == f"scalar {_mask_label(p)} masks are not ported to C++ yet":
-            assert not ok and py_ok and not p.default_mask, ctx
-        else:
-            assert (ok, reason) == (py_ok, py_reason), ctx
+        assert (ok, reason) == (py_ok, py_reason), (p, arch)
 
 
 # One setting per gfx942 flash env knob the 2D gate reads.
@@ -327,21 +350,15 @@ def test_tiled_2d_gate_follows_gfx942_env(engine, monkeypatch, env):
 
 
 def test_tiled_2d_admitted_problems_build(engine):
-    """Every problem the C++ gate admits lowers through the C++ builder.
-
-    gfx942 has no C++ spec-from-problem yet, so it lowers Python's spec; gfx950
-    lowers the spec the C++ selector builds."""
+    """Every problem the C++ gate admits lowers through the C++ builder, from
+    the spec the C++ selector builds."""
     seen = set()
     for p, arch in itertools.product(_tiled_2d_shapes(), ("gfx942", "gfx950")):
         ok, _ = engine.unified_attention_supports_tiled_2d(asdict(p), arch)
         if not ok:
             continue
-        if arch == "gfx942":
-            spec = asdict(_tiled_spec_from_problem(p, arch))
-            lower = engine.gfx942_attention_tiled_2d_lower_llvm
-        else:
-            spec = engine.gfx950_attn_tiled_spec_from_problem(asdict(p), arch)
-            lower = engine.gfx950_attention_tiled_2d_lower_llvm
+        spec = getattr(engine, f"{arch}_attn_tiled_spec_from_problem")(asdict(p), arch)
+        lower = getattr(engine, f"{arch}_attention_tiled_2d_lower_llvm")
         key = (arch, repr(sorted(spec.items())))
         if key in seen:
             continue

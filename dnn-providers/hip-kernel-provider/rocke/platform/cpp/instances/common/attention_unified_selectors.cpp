@@ -561,6 +561,18 @@ static int gfx942_flash_wide_setting(void)
     return 4;
 }
 
+bool rocke_unified_attn_env_is_off(const char* name)
+{
+    char v[16];
+    env_lower(name, v, sizeof(v));
+    return in_set(v, k_env_off, ROCKE_ENV_SET_LEN(k_env_off));
+}
+
+bool rocke_unified_attn_enable_i64_kv_addr(const rocke_unified_attention_problem_t* p)
+{
+    return enable_i64_kv_addr(p);
+}
+
 bool rocke_unified_attn_gfx942_4warp_fast(const rocke_unified_attention_problem_t* p,
                                           const char* arch)
 {
@@ -805,6 +817,40 @@ int rocke_unified_attn_select_gfx942_flash_num_warps(const rocke_unified_attenti
                                                      const char* arch)
 {
     return select_gfx942_flash_num_warps(p, arch);
+}
+
+bool rocke_unified_attn_enable_gfx942_flash_q_direct(const rocke_unified_attention_problem_t* p,
+                                                     const char* arch)
+{
+    return (enable_gfx942_fp16_flash(p, arch)
+            || rocke_unified_attn_enable_gfx942_bf16_flash(p, arch))
+           && p->head_size == 64;
+}
+
+const char*
+    rocke_unified_attn_gfx942_flash_kv_cache_policy(const rocke_unified_attention_problem_t* p)
+{
+    (void)p;
+    return "all";
+}
+
+bool rocke_unified_attn_enable_gfx942_flash_k_sliced_ldsseq(
+    const rocke_unified_attention_problem_t* p, const char* arch)
+{
+    static const char* const on_or_ck[] = {"1", "on", "enable", "enabled", "yes", "true", "ck"};
+    char v[16];
+
+    if(!rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(p, arch))
+    {
+        return false;
+    }
+    /* LdsSeq is a depth-3 slot layout; the depth-2 ring has no slot 2. */
+    if(rocke_unified_attn_select_gfx942_flash_ring_depth(p, arch) != 3)
+    {
+        return false;
+    }
+    env_lower("HIPDNN_GFX942_K_LDSSEQ", v, sizeof(v));
+    return in_set(v, on_or_ck, ROCKE_ENV_SET_LEN(on_or_ck));
 }
 
 /* ----------------------------------------------------- select_2d_tile_size */
@@ -1310,32 +1356,79 @@ bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attention_pr
     return enable_early_v_schedule(p, arch);
 }
 
+/* --------------------------------------------------------- fp8 MFMA QK */
+
+bool rocke_unified_attn_fp8_qk_loader_fits(const rocke_unified_attention_problem_t* p,
+                                           const char* arch,
+                                           int tile_size,
+                                           int num_warps)
+{
+    /* The async fp8 K loader moves 16, 12 or 4 bytes per lane per call; one of
+     * those payloads must evenly tile the T*HD K bytes of an iteration. */
+    static const int bytes_per_lane[] = {16, 12, 4};
+    int tile_bytes;
+    int threads;
+    size_t i;
+
+    if(tile_size <= 0)
+    {
+        tile_size = rocke_unified_attn_select_2d_tile_size(p, arch);
+    }
+    if(num_warps <= 0)
+    {
+        num_warps = rocke_unified_attn_select_2d_num_warps(p, arch);
+    }
+    tile_bytes = tile_size * p->head_size;
+    threads = num_warps * 64;
+    for(i = 0; i < sizeof(bytes_per_lane) / sizeof(bytes_per_lane[0]); ++i)
+    {
+        int payload = threads * bytes_per_lane[i];
+        if(tile_bytes >= payload && tile_bytes % payload == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool rocke_unified_attn_enable_fp8_mfma_qk(const rocke_unified_attention_problem_t* p,
+                                           const char* arch,
+                                           int tile_size,
+                                           int num_warps)
+{
+    if(!p->use_fp8)
+    {
+        return false;
+    }
+    /* The combo reads K from LDS at the working dtype, so it needs the
+     * sync-dequant loader. */
+    if(enable_combo_2d(p, arch))
+    {
+        return false;
+    }
+    /* Long prefill stays on the sync-dequant path. */
+    if(p->max_seqlen_q > 256)
+    {
+        return false;
+    }
+    if(tile_size <= 0)
+    {
+        tile_size = rocke_unified_attn_select_2d_tile_size(p, arch);
+    }
+    if(!rocke_unified_attn_fp8_qk_loader_fits(p, arch, tile_size, num_warps))
+    {
+        return false;
+    }
+    return p->sliding_window > 0 || p->max_seqlen_k <= 16 * tile_size;
+}
+
 /* ----------------------------------------- tiled_spec_from_problem */
 
-/* Python: attention_spec_builder._tiled_spec_from_problem(problem).
- * Mirrors the gfx950 branch of the Python function: runs every selector and gate
- * predicate in the same order and assembles a rocke_attention_tiled_2d_spec_t.
- * The gfx942/gfx1250 branches of the Python function are not ported here -- those
- * use a different spec construction path (bf16-wide / fp16-flash / gfx1250) that
- * is covered by other C entry points; this function gates on gfx950 only and
- * returns a zeroed default for other arches.
- *
- * NOTE: the Python function also calls _resolve_lds_budget after building the spec.
- * The caller is responsible for calling rocke_unified_attn_resolve_lds_budget on the
- * returned spec when needed (the parity harness does this). */
-rocke_attention_tiled_2d_spec_t
-    rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attention_problem_t* p,
-                                               const char* arch)
+/* The problem-shape fields every spec builder copies (spec_builder). */
+static rocke_attention_tiled_2d_spec_t
+    spec_problem_fields(const rocke_unified_attention_problem_t* p)
 {
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
-
-    /* Default spec is returned for non-gfx950 architectures */
-    if(arch == NULL || strcmp(arch, "gfx950") != 0)
-    {
-        return s;
-    }
-
-    /* Mirror the Python field assignments. */
     s.head_size = p->head_size;
     s.block_size = p->block_size;
     s.num_query_heads = p->num_query_heads;
@@ -1347,83 +1440,199 @@ rocke_attention_tiled_2d_spec_t
     s.use_alibi = p->use_alibi;
     s.use_qq_bias = p->use_qq_bias;
     s.num_seqs = p->num_seqs;
+    return s;
+}
 
-    /* Selectors */
-    s.num_warps = rocke_unified_attn_select_2d_num_warps(p, arch);
+static void spec_set_waves_per_eu(rocke_attention_tiled_2d_spec_t* s,
+                                  const rocke_unified_attention_problem_t* p,
+                                  const char* arch)
+{
+    int wpe = 2;
+    if(rocke_unified_attn_select_2d_waves_per_eu(p, arch, &wpe))
     {
-        int wpe = 2;
-        if(rocke_unified_attn_select_2d_waves_per_eu(p, arch, &wpe))
-        {
-            s.has_waves_per_eu = true;
-            s.waves_per_eu = wpe;
-        }
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = wpe;
     }
-    s.kv_storage_dtype = rocke_unified_attn_kv_storage_dtype(p);
-    {
-        int ts = rocke_unified_attn_select_2d_tile_size(p, arch);
-        s.has_tile_size = true;
-        s.tile_size = ts;
-    }
-    s.block_m_per_warp = rocke_unified_attn_select_2d_block_m_per_warp(p, arch);
+}
 
-    /* Gate predicates mirroring Python _enable_* calls */
+/* Python: spec_builder._base_2d_generic_fields(problem, arch) -- the generic
+ * (non-flash) fields every arch's generic builder shares. */
+static rocke_attention_tiled_2d_spec_t
+    spec_base_2d_generic(const rocke_unified_attention_problem_t* p, const char* arch)
+{
+    rocke_attention_tiled_2d_spec_t s = spec_problem_fields(p);
     bool combo = enable_combo_2d(p, arch);
     bool combo_no_sw = combo && (p->sliding_window == 0);
     bool subflags = enable_transposed_subflags(p, arch);
-
-    s.use_mfma_32x32
-        = enable_transposed_qk_32x32(p, arch); /* _enable_mfma_32x32 == transposed_qk_32x32 */
-    s.use_transposed_qk_32x32 = enable_transposed_qk_32x32(p, arch);
-    s.use_transposed_half_local_pv = enable_transposed_qk_32x32(p, arch);
-
-    /* Transposed sub-flags: mirrors Python scalar_state / skip_legacy_qreg / mask_opts */
-    bool scalar_state = combo || subflags;
-    bool skip_legacy_qreg = combo || subflags;
     bool bias_active = (p->softcap > 0) || has_score_bias(p);
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;
-    s.use_transposed_scalar_state = scalar_state;
-    s.use_mfma32_skip_legacy_qreg = skip_legacy_qreg;
+    int tile_size = rocke_unified_attn_select_2d_tile_size(p, arch);
+
+    s.num_warps = rocke_unified_attn_select_2d_num_warps(p, arch);
+    spec_set_waves_per_eu(&s, p, arch);
+    s.kv_storage_dtype = rocke_unified_attn_kv_storage_dtype(p);
+    s.has_tile_size = true;
+    s.tile_size = tile_size;
+    s.block_m_per_warp = rocke_unified_attn_select_2d_block_m_per_warp(p, arch);
+    /* _enable_mfma_32x32 and _enable_transposed_half_local_pv are both
+     * _enable_transposed_qk_32x32. */
+    s.use_mfma_32x32 = enable_transposed_qk_32x32(p, arch);
+    s.use_transposed_qk_32x32 = s.use_mfma_32x32;
+    s.use_transposed_half_local_pv = s.use_mfma_32x32;
+    s.use_transposed_scalar_state = combo || subflags;
     s.use_transposed_mask_once = mask_opts;
     s.use_transposed_mask_limit = mask_opts;
-
-    /* V schedule flags (gfx950-specific) */
-    s.use_v_double_buffer = enable_v_double_buffer(p, arch);
+    s.use_mfma32_skip_legacy_qreg = combo || subflags;
     s.use_early_v_schedule = enable_early_v_schedule(p, arch);
-
-    /* sched_barrier: mirrors Python _enable_sched_barrier -- fires for the
-     * V-double-buffer cohort AND head_size==128. */
-    s.use_sched_barrier = s.use_v_double_buffer && (p->head_size == 128);
-
-    /* fast_paged_kv_desc: combo_no_sw + bf16 + no-fp8 + exact 64/8 head counts.
-     * The bf16 guard mirrors the Python spec builder -- the descriptor is bf16-only
-     * (the spec validator enforces it), so an fp16 combo spec must not set it. */
+    /* The fast descriptor is bf16-only (the spec validator enforces it). */
     s.use_fast_paged_kv_desc = combo_no_sw && (strcmp(p->dtype, "bf16") == 0) && !p->use_fp8
-                               && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
-
+                               && (p->num_query_heads == 64) && (p->num_kv_heads == 8)
+                               && tile_size == 64;
     s.use_register_pv = enable_register_pv(p, arch);
-    /* i64_kv_addr: mirrors Python _enable_i64_kv_addr. */
+    s.use_fp8_mfma_qk = rocke_unified_attn_enable_fp8_mfma_qk(p, arch, 0, 0);
     s.use_i64_kv_addr = enable_i64_kv_addr(p);
+    return s;
+}
 
-    /* k_single_buffer: mirrors Python _enable_k_single_buffer -- d128 small-tile
-     * cohort AND the geometry invariant block_m <= tile_size, DERIVED from the
-     * selectors already assigned above (num_warps * block_m_per_warp vs tile_size)
-     * rather than the stale block_size>=32 proxy. The proxy assumed nw=2
-     * (block_m=64) and went stale when enable_softmax_mfma_interleave widened this
-     * cohort to nw=4 (block_m=128 > T=64 at block_size=32 -> uncaught ValueError at
-     * build; block_size=64 held only by coincidence, T=2*64=128==block_m). */
+/* Python: spec_builder._spec_generic_2d_non_gfx950(problem, arch). */
+static rocke_attention_tiled_2d_spec_t
+    spec_generic_2d_non_gfx950(const rocke_unified_attention_problem_t* p, const char* arch)
+{
+    return spec_base_2d_generic(p, arch);
+}
+
+/* Python: spec_builder._spec_gfx950_generic(problem, arch), without the D256
+ * fast-route overrides and the softmax-interleave fields. */
+static rocke_attention_tiled_2d_spec_t
+    spec_gfx950_generic(const rocke_unified_attention_problem_t* p, const char* arch)
+{
+    rocke_attention_tiled_2d_spec_t s = spec_base_2d_generic(p, arch);
+
+    s.use_v_double_buffer = enable_v_double_buffer(p, arch);
+    /* _enable_sched_barrier: the V-double-buffer cohort at head_size 128. */
+    s.use_sched_barrier = s.use_v_double_buffer && (p->head_size == 128);
+    /* _enable_k_single_buffer: the d128 small-tile cohort, when Q fits the lone
+     * K slot (block_m <= tile_size). */
     {
         int block_m_ks = s.num_warps * s.block_m_per_warp;
         int t_eff_ks = s.has_tile_size ? s.tile_size : s.block_size;
         s.use_k_single_buffer = enable_d128_small_tile(p, arch) && (block_m_ks <= t_eff_ks);
     }
-
-    /* fp8_mfma_qk: mirrors Python _enable_fp8_mfma_qk; requires _fp8_qk_loader_fits
-     * which is not yet ported here. The field stays at its spec_default() value (false)
-     * when use_fp8 is false; for fp8 problems the parity harness excludes this field
-     * from the comparison until the predicate is fully ported.
-     * NOTE: this is the only field not fully implemented; all non-fp8 problems in the
-     * problem matrix will have correct selector parity. */
     return s;
+}
+
+/* The gfx942 flash builders share everything but the geometry and K staging. */
+static rocke_attention_tiled_2d_spec_t spec_gfx942_flash(const rocke_unified_attention_problem_t* p,
+                                                         const char* arch,
+                                                         int num_warps,
+                                                         int tile_size,
+                                                         int block_m_per_warp,
+                                                         bool use_cfvst,
+                                                         bool use_k_single_buffer,
+                                                         bool use_k_sliced_ring)
+{
+    rocke_attention_tiled_2d_spec_t s = spec_problem_fields(p);
+    bool use_mask_limit = rocke_unified_attn_enable_gfx942_flash_mask_limit(p, arch);
+
+    s.num_warps = num_warps;
+    spec_set_waves_per_eu(&s, p, arch);
+    s.kv_storage_dtype = rocke_unified_attn_kv_storage_dtype(p);
+    s.has_tile_size = true;
+    s.tile_size = tile_size;
+    s.block_m_per_warp = block_m_per_warp;
+    s.use_mfma_32x32x8 = true;
+    s.use_transposed_qk_32x32 = true;
+    s.use_transposed_scalar_state = use_mask_limit;
+    s.use_transposed_invariant_hoist = use_mask_limit;
+    s.use_transposed_mask_once = use_mask_limit;
+    s.use_transposed_mask_limit = use_mask_limit;
+    s.use_conflict_free_v_store = use_cfvst;
+    s.use_k_single_buffer = use_k_single_buffer;
+    s.use_k_sliced_ring = use_k_sliced_ring;
+    s.ring_depth = rocke_unified_attn_select_gfx942_flash_ring_depth(p, arch);
+    s.k_slice_hd = rocke_unified_attn_select_gfx942_flash_k_slice_hd(p);
+    s.use_k_sliced_ldsseq = rocke_unified_attn_enable_gfx942_flash_k_sliced_ldsseq(p, arch);
+    s.use_q_direct_global = rocke_unified_attn_enable_gfx942_flash_q_direct(p, arch);
+    s.kv_cache_policy = rocke_unified_attn_gfx942_flash_kv_cache_policy(p);
+    s.use_i64_kv_addr = enable_i64_kv_addr(p);
+    return s;
+}
+
+/* Python: spec_builder._spec_gfx942_fp16_flash(problem, arch). */
+static rocke_attention_tiled_2d_spec_t
+    spec_gfx942_fp16_flash(const rocke_unified_attention_problem_t* p, const char* arch)
+{
+    return spec_gfx942_flash(p,
+                             arch,
+                             select_gfx942_flash_num_warps(p, arch),
+                             rocke_unified_attn_select_2d_tile_size(p, arch),
+                             rocke_unified_attn_select_2d_block_m_per_warp(p, arch),
+                             rocke_unified_attn_gfx942_flash_use_cfvst(p),
+                             rocke_unified_attn_gfx942_flash_use_single_buffer(p),
+                             rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(p, arch));
+}
+
+/* Python: spec_builder._spec_gfx942_bf16_flash(problem, arch). With the sliced-K
+ * ring it takes the fp16 ring geometry (FLASH_WIDE warps, cfvst, T=64);
+ * otherwise the bf16-wide geometry. */
+static rocke_attention_tiled_2d_spec_t
+    spec_gfx942_bf16_flash(const rocke_unified_attention_problem_t* p, const char* arch)
+{
+    bool use_ring = rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(p, arch);
+    int nw;
+    bool single_k;
+    bool use_cfvst;
+
+    if(use_ring)
+    {
+        nw = gfx942_flash_wide_setting();
+        single_k = false;
+        use_cfvst = true;
+    }
+    else
+    {
+        rocke_unified_attn_gfx942_bf16_wide_geometry(p, arch, &nw, &single_k);
+        use_cfvst = rocke_unified_attn_gfx942_bf16_wide_use_cfvst(p);
+    }
+    return spec_gfx942_flash(p,
+                             arch,
+                             nw,
+                             use_ring ? 64 : rocke_unified_attn_gfx942_bf16_wide_tile_size(p, arch),
+                             32,
+                             use_cfvst,
+                             single_k,
+                             use_ring);
+}
+
+/* Python: attention_spec_builder._tiled_spec_from_problem(problem, arch), branch
+ * for branch. gfx1250 (no C++ tiled-2D spec) and a NULL arch return the
+ * default spec. Python's caller (attention_unified._tiled_spec_from_problem)
+ * then runs _resolve_lds_budget; here the caller runs
+ * rocke_unified_attn_resolve_lds_budget, and on gfx942 the spec validator
+ * (Python runs __post_init__ when it constructs the spec). */
+rocke_attention_tiled_2d_spec_t
+    rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attention_problem_t* p,
+                                               const char* arch)
+{
+    if(arch == NULL || arch_is(arch, "gfx1250"))
+    {
+        return rocke_attention_tiled_2d_spec_default();
+    }
+    /* The gfx942 4-warp GQA cohort takes the generic spec, not the flash one. */
+    if(rocke_unified_attn_enable_gfx942_bf16_flash(p, arch)
+       && !rocke_unified_attn_gfx942_4warp_fast(p, arch))
+    {
+        return spec_gfx942_bf16_flash(p, arch);
+    }
+    if(enable_gfx942_fp16_flash(p, arch) && !rocke_unified_attn_gfx942_4warp_fast(p, arch))
+    {
+        return spec_gfx942_fp16_flash(p, arch);
+    }
+    if(arch_is(arch, "gfx950"))
+    {
+        return spec_gfx950_generic(p, arch);
+    }
+    return spec_generic_2d_non_gfx950(p, arch);
 }
 
 /* --------------------------------------------------- LDS-budget resolver */
@@ -1784,12 +1993,10 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            score
-                = rocke_b_fadd(b,
-                               score,
-                               rocke_b_fmul(b,
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
-                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
+            /* Sequenced: Python emits the Q operand before the K one. */
+            rocke_value_t* qv_f = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
+            rocke_value_t* kv_f = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
+            score = rocke_b_fadd(b, score, rocke_b_fmul(b, qv_f, kv_f));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the

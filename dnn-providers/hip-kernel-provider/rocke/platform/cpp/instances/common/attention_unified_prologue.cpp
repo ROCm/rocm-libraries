@@ -30,6 +30,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "rocke/helper_helper_rocke.helpers.attention.h"
 #include "rocke/instance_attention_unified_internal.h"
 
 /* ===================================================================== *
@@ -113,6 +114,10 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
     rocke_ir_builder_t* b = ctx->b;
     const rocke_type_t* dt = ctx->dtype;
     const rocke_type_t* dtp = rocke_ptr_type(b, dt, "global");
+    /* Only the 2D builder passes kv_dtype (fp8 K/V); 3D types K/V as dtype. */
+    const rocke_type_t* kvp = (ctx->kind == ROCKE_ATTN_UNIFIED_2D && ctx->p->use_fp8)
+                                  ? rocke_ptr_type(b, rocke_fp8e4m3(), "global")
+                                  : dtp;
     const rocke_type_t* i32p = rocke_ptr_type(b, rocke_i32(), "global");
     const rocke_type_t* f32p = rocke_ptr_type(b, rocke_f32(), "global");
 
@@ -129,11 +134,12 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
     o.align_set = true;
     ctx->abi_query = rocke_b_param(b, "query_ptr", dtp, &o);
 
-    /* key = b.param("key_cache_ptr", ..., noalias=True, readonly=True, align=16) */
-    ctx->abi_key = rocke_b_param(b, "key_cache_ptr", dtp, &o);
+    /* key = b.param("key_cache_ptr", PtrType(kv_dtype,"global"), noalias=True,
+     *               readonly=True, align=16) */
+    ctx->abi_key = rocke_b_param(b, "key_cache_ptr", kvp, &o);
 
-    /* value = b.param("value_cache_ptr", ..., noalias=True, readonly=True, align=16) */
-    ctx->abi_value = rocke_b_param(b, "value_cache_ptr", dtp, &o);
+    /* value = b.param("value_cache_ptr", PtrType(kv_dtype,"global"), ...) */
+    ctx->abi_value = rocke_b_param(b, "value_cache_ptr", kvp, &o);
 
     /* sink = b.param("sink_ptr", PtrType(dtype,"global"), readonly=True, align=16) */
     memset(&o, 0, sizeof(o));
@@ -187,21 +193,27 @@ void rocke_attn_unified_declare_scalar_params(rocke_attn_unified_build_ctx_t* ct
  *          b.scf_yield(next_seq)
  *      seq_idx = scan.results[0]
  *
- *  Python (3D): _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) delegates to
- *  binary_search_seq_idx (per_token, 32 iterations). That helper is not yet
- *  exported to the C layer; per the helper-header note the 3D scan falls back to
- *  the SAME inline linear cu_q scan (numerically identical seq_idx) until
- *  rocke_binary_search_seq_idx lands. So both kinds emit the inline linear scan.
+ *  Python (3D): _emit_find_seq_idx_scan(b, cu_q, q_tok, num_seqs) ->
+ *      binary_search_seq_idx(b, cu_q, q_tok, num_seqs, block_q=1, iterations=32,
+ *                            per_token=True)
  *
  *  Fills ctx->seq_idx.
  * ===================================================================== */
 void rocke_attn_unified_emit_find_seq_idx(rocke_attn_unified_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* seq_init = rocke_b_const_i32(b, 0);
+    rocke_value_t* seq_init;
     rocke_iter_arg_t iter[1];
     rocke_for_t scan;
 
+    if(ctx->kind == ROCKE_ATTN_UNIFIED_3D)
+    {
+        ctx->seq_idx = rocke_binary_search_seq_idx(
+            b, ctx->abi_cu_q, ctx->q_tok, ctx->num_seqs, /*block_q=*/1, /*iterations=*/32, true);
+        return;
+    }
+
+    seq_init = rocke_b_const_i32(b, 0);
     iter[0].name = "seq_idx";
     iter[0].init = seq_init;
 
@@ -292,8 +304,10 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
     ctx->query_pos = rocke_b_sub(b, ctx->q_tok, ctx->cu_start);
     /* kv_len = b.global_load_i32(seq_lens, seq_idx) */
     ctx->kv_len = rocke_b_global_load_i32(b, ctx->abi_seq_lens, ctx->seq_idx, 4);
-    /* context_len = b.sub(kv_len, q_len) */
-    ctx->context_len = rocke_b_sub(b, ctx->kv_len, ctx->q_len);
+    /* context_len = _scalar_context_len(b, p, kv_len, q_len): the diagonal
+     * offset, 0 for a top-left mask. */
+    ctx->context_len = ctx->p->causal_top_left ? rocke_b_const_i32(b, 0)
+                                               : rocke_b_sub(b, ctx->kv_len, ctx->q_len);
     /* kv_head = _magic_div(b, q_head, num_queries_per_kv) */
     ctx->kv_head = rocke_unified_attn_magic_div(b, ctx->q_head, ctx->num_queries_per_kv);
 
@@ -320,10 +334,14 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
 
         /* seg_stop_i = b.mul(b.add(segm_idx, 1),
          *                    b.mul(tiles_per_segment, const_i32(block_size))) */
-        seg_stop_raw = rocke_b_mul(
-            b,
-            rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1)),
-            rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
+        {
+            /* Sequenced: Python emits segm_idx + 1 before the inner mul. */
+            rocke_value_t* next_seg = rocke_b_add(b, ctx->segm_idx, rocke_b_const_i32(b, 1));
+            seg_stop_raw = rocke_b_mul(
+                b,
+                next_seg,
+                rocke_b_mul(b, ctx->tiles_per_segment, rocke_b_const_i32(b, ctx->p->block_size)));
+        }
 
         /* seg_stop_i = b.select(b.cmp_lt(seg_stop_i, kv_len), seg_stop_i, kv_len) */
         lt = rocke_b_cmp_lt(b, seg_stop_raw, ctx->kv_len);
