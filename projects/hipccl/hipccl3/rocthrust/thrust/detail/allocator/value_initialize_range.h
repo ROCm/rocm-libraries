@@ -32,10 +32,6 @@
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {

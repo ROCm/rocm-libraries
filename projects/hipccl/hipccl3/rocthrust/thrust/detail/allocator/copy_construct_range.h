@@ -38,9 +38,10 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/tuple.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_trivially_copy_constructible.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

@@ -33,10 +33,7 @@
 #include <thrust/pair.h>
 
 #include _THRUST_LIBCXX_INCLUDE(__cmath/ceil_div.h)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 

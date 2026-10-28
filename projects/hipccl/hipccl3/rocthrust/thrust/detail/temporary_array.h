@@ -49,9 +49,8 @@ THRUST_NAMESPACE_END
 #include <thrust/iterator/detail/tagged_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
