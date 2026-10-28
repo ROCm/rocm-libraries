@@ -5,17 +5,19 @@ invalidation, ordering, and launching the consumer. All installs belong to
 isolated temporary environments, never the pytest interpreter or its user site.
 """
 
+import _ctypes
 import base64
 import hashlib
 import json
 import os
 import shutil
+import sysconfig
 import time
 import zipfile
 from pathlib import Path
 
 import pytest
-from cmake_harness import SuppliedPython, consumer_preamble, write_module
+from cmake_harness import PKG, SuppliedPython, consumer_preamble, write_module
 
 pytestmark = pytest.mark.quick
 
@@ -148,9 +150,11 @@ endforeach()
             {"kernels/__init__.py": f"VALUE = {value!r}\n"},
         )
 
-    def configure(self, *, python=None, success=True):
+    def configure(self, *, python=None, comgr_lib=None, success=True):
         # CMAKE_MAKE_PROGRAM is supplied rather than discovered so the Ninja the
         # surrounding build uses drives this sub-build too.
+        if comgr_lib is None:
+            comgr_lib = self.root / "comgr with spaces"
         return self.run(
             self.cmake,
             "-S",
@@ -162,7 +166,7 @@ endforeach()
             f"-DCMAKE_MAKE_PROGRAM={self.make_program}",
             f"-DPython3_EXECUTABLE={python or self.python}",
             f"-DROCKE_WHEEL_DIR={self.wheels}",
-            f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB={self.root / 'comgr with spaces'}",
+            f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB={comgr_lib}",
             success=success,
         )
 
@@ -225,6 +229,105 @@ def build_environment(tmp_path, cmake, cmake_make_program):
         )
 
     return factory
+
+
+def _configure_comgr_consumer(environment, *, sdk):
+    """Use the production resolver with isolated metadata and a loadable fixture.
+
+    Copy only runtime modules beneath an empty package initializer so this probe
+    needs neither NumPy nor the authoring surface. A Python shared library stands
+    in for a loadable COMGR file; no compiler function or GPU action is exercised.
+    """
+    runtime = environment.source / "rocke/platform/python/rocke/runtime"
+    runtime.mkdir(parents=True)
+    (runtime.parent / "__init__.py").write_text("", encoding="utf-8")
+    (runtime / "__init__.py").write_text("", encoding="utf-8")
+    source_runtime = PKG.parent / "rocke/platform/python/rocke/runtime"
+    for name in (
+        "comgr.py",
+        "_ctypes_bind.py",
+        "runtime_coexistence.py",
+        "_sdk_comgr.py",
+    ):
+        shutil.copyfile(source_runtime / name, runtime / name)
+    relative = (
+        "_rocm_sdk_core/bin/amd_comgr.dll"
+        if os.name == "nt"
+        else "_rocm_sdk_core/lib/libamd_comgr.so.3"
+    )
+    sdk_library = environment.site / relative
+    # Standalone Python builds may embed _ctypes rather than ship an extension.
+    loadable = getattr(_ctypes, "__file__", None)
+    if loadable is None:
+        loadable = Path(sysconfig.get_config_var("LIBDIR")) / sysconfig.get_config_var(
+            "LDLIBRARY"
+        )
+    if sdk:
+        sdk_library.parent.mkdir(parents=True)
+        shutil.copyfile(loadable, sdk_library)
+        (sdk_library.parent.parent / "__init__.py").write_text(
+            "raise AssertionError('SDK initialization must not run')\n",
+            encoding="utf-8",
+        )
+        metadata = environment.site / "rocm_sdk_core-7.9.0rc1.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: rocm-sdk-core\nVersion: 7.9.0rc1\n",
+            encoding="utf-8",
+        )
+        (metadata / "RECORD").write_text(f"{relative},,\n", encoding="utf-8")
+    competing = environment.source / "package-comgr"
+    competing.write_bytes(b"not a loadable library")
+    (environment.source / "CMakeLists.txt").write_text(
+        consumer_preamble("HkpComgrSelection")
+        + """set(ROCKE_WHEEL_VERSION 0.1.0)
+set(HKP_PKG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/descriptor-packaging")
+add_library(amd_comgr SHARED IMPORTED)
+set_target_properties(amd_comgr PROPERTIES
+    IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/package-comgr")
+_hkp_resolve_rocke_args(args comgr_lib)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/comgr-selection.txt" "${comgr_lib}\\n${args}\\n")
+""",
+        encoding="utf-8",
+    )
+    return loadable
+
+
+def test_configure_uses_sdk_without_deriving_imported_comgr(build_environment):
+    env = build_environment()
+    _configure_comgr_consumer(env, sdk=True)
+    env.configure(comgr_lib="")
+    selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
+    assert selection.startswith("\n")
+    assert "ROCKE_COMGR_LIB" not in selection
+    assert "package-comgr" not in selection
+
+
+def test_configure_rejects_package_comgr_when_sdk_is_missing(build_environment):
+    env = build_environment()
+    _configure_comgr_consumer(env, sdk=False)
+    proc = env.configure(comgr_lib="", success=False)
+    diagnostic = " ".join((proc.stdout + proc.stderr).split())
+    assert "no candidate path" in diagnostic
+    assert "rocke[sdk-core]" in diagnostic
+
+
+@pytest.mark.parametrize("loadable", [True, False])
+def test_configure_explicit_comgr_is_sole_candidate(build_environment, loadable):
+    env = build_environment()
+    fixture_library = _configure_comgr_consumer(env, sdk=True)
+    explicit = env.root / ("explicit.dll" if os.name == "nt" else "explicit.so")
+    if loadable:
+        shutil.copyfile(fixture_library, explicit)
+    proc = env.configure(comgr_lib=explicit, success=loadable)
+    if loadable:
+        selection = (env.build_dir / "comgr-selection.txt").read_text(encoding="utf-8")
+        assert selection.splitlines()[0] == explicit.as_posix()
+        assert f"ROCKE_COMGR_LIB;{explicit.as_posix()}" in selection
+    else:
+        diagnostic = " ".join((proc.stdout + proc.stderr).split())
+        assert explicit.as_posix() in diagnostic
+        assert "1 candidate(s) failed" in diagnostic
 
 
 def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):

@@ -510,6 +510,11 @@ test-category YAML and TheRock's tier selection determine which registered
 tests actually execute. Check the selected list in the job log or with CTest's
 verbose listing. Registration alone does not establish CI coverage.
 
+The wheel-based hipDNN superbuild lane installs the built platform wheel with
+its `sdk-core` extra before CTest. It uses the shared SDK dependency for COMGR
+discovery, with no CI-specific compiler path override. The SDK is already present
+for configure-time packaging probes through that lane's ROCm dependencies.
+
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
 pytest entry excludes the staged library tests, which have separate CTest
