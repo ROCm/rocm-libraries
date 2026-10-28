@@ -40,8 +40,9 @@ namespace rocsparse
     // that still has its pivot on the subdiagonal is eliminated against the previous
     // row only when that row has no subdiagonal of its own. Otherwise the subtraction
     // would write a coefficient two columns to the left, and the tridiagonal storage
-    // would drop it. Passes repeat so a swap that clears a subdiagonal can unlock the
-    // next elimination. A single zero off-diagonal inside an otherwise tridiagonal
+    // would drop it. The elimination and the swap that follows it run in one
+    // ascending sweep, so a cleared subdiagonal unlocks the next elimination in
+    // that same sweep. A single zero off-diagonal inside an otherwise tridiagonal
     // system can still leave a spike diagonal at zero; that case is unchanged.
     // Systems whose spike diagonal is already nonzero are left untouched.
     //
@@ -99,30 +100,29 @@ namespace rocsparse
             return;
         }
 
-        // Each pass is exact. Swaps need both equations to stay inside the pair,
+        // Each step is exact. Swaps need both equations to stay inside the pair,
         // and an elimination needs the previous row to have no subdiagonal, so
-        // nothing is written outside the three stored bands. A later pass uses
-        // the subdiagonal a swap just cleared. A swap puts nonzero values on
-        // both diagonals, so the passes cannot cycle.
+        // nothing is written outside the three stored bands. Elimination and the
+        // swap after it share one ascending sweep: the swap clears the next
+        // row's subdiagonal before that row is visited. A swap puts nonzero
+        // values on both diagonals, so the passes cannot cycle.
         for(rocsparse_int pass = 0; pass < num_spikes; ++pass)
         {
             bool progress = false;
 
-            // Interior pairs (1, 2), (3, 4), ... The last spike row keeps the real
-            // pivot on its diagonal and is not part of a pair.
-            for(rocsparse_int i = 1; i + 1 <= num_spikes - 2; i += 2)
+            for(rocsparse_int i = 1; i < num_spikes;)
             {
                 const rocsparse_int j = i + 1;
-                if(dl[i] == zero && du[j] == zero && (d[i] == zero || d[j] == zero) && dl[j] != zero
-                   && du[i] != zero)
+
+                // Interior pairs (1, 2), (3, 4), ... The last spike row keeps the
+                // real pivot on its diagonal and is not the left side of a pair.
+                if((i % 2) == 1 && j <= num_spikes - 2 && dl[i] == zero && du[j] == zero
+                   && (d[i] == zero || d[j] == zero) && dl[j] != zero && du[i] != zero)
                 {
                     gtsv_nopivot_swap_spike_rows<T>(i, j, dl, d, du, B, nrhs, rhs_stride);
                     progress = true;
                 }
-            }
 
-            for(rocsparse_int i = 1; i < num_spikes; ++i)
-            {
                 if(d[i] == zero && dl[i] != zero && d[i - 1] != zero && dl[i - 1] == zero)
                 {
                     const T mult = dl[i] / d[i - 1];
@@ -135,12 +135,9 @@ namespace rocsparse
                     }
                     progress = true;
                 }
-            }
 
-            for(rocsparse_int i = 1; i < num_spikes - 1;)
-            {
-                const rocsparse_int j = i + 1;
-                if(d[i] == zero && dl[i] == zero && du[i] != zero && du[j] == zero && dl[j] != zero)
+                if(j < num_spikes && d[i] == zero && dl[i] == zero && du[i] != zero && du[j] == zero
+                   && dl[j] != zero)
                 {
                     gtsv_nopivot_swap_spike_rows<T>(i, j, dl, d, du, B, nrhs, rhs_stride);
                     progress = true;

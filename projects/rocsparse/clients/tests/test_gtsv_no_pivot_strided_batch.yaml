@@ -155,6 +155,16 @@ Tests:
   denseld: [2050]
   matrix: [rocsparse_matrix_zero]
 
+# Lower-bidiagonal repair must finish in one sweep. This size is nightly only.
+- name: gtsv_no_pivot_strided_batch
+  category: nightly
+  function: gtsv_no_pivot_strided_batch
+  precision: *single_double_precisions_complex_real
+  M: [1048576]
+  N: [1]
+  denseld: [1048576]
+  matrix: [rocsparse_matrix_zero]
+
 # Nightly
 - name: gtsv_no_pivot_strided_batch
   category: nightly
