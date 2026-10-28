@@ -158,7 +158,7 @@ restore the whole matrix.
 Measured on gfx90a (MI210) with `ctest -R "hipdnn_gpu_ref_tests_(quick|standard)_suite"`.
 Each pair of columns comes from one node and one build tree.
 
-Cut (node `hpe-rack-11`):
+Cut (MI210 node A):
 
 | Tier | Cases before | Cases after | ctest time before | ctest time after |
 |---|---|---|---|---|
@@ -166,7 +166,7 @@ Cut (node `hpe-rack-11`):
 | standard | 3654 | 599 | 258.4 s | 57.2 s |
 | **total** | **8066** | **3446** | **537.0 s** | **297.0 s** |
 
-Tier move (node `ctr2-mlse-hpe-alola-s94-17`). The same 3446 cases, with
+Tier move (MI210 node B). The same 3446 cases, with
 reduced-precision and mixed-type cases moved to standard:
 
 | Tier | Cases before | Cases after | ctest time before | ctest time after |
@@ -175,7 +175,7 @@ reduced-precision and mixed-type cases moved to standard:
 | standard | 599 | 2116 | 68.1 s | 230.7 s |
 | **total** | **3446** | **3446** | **322.8 s** | **321.5 s** |
 
-Comprehensive and Full (node `ctr2-mlse-hpe-alola-s94-17`,
+Comprehensive and Full (MI210 node B,
 `hipdnn_gpu_ref_tests --gtest_filter="Comprehensive*:Full*"`, one process). The
 "before" column already excludes the conv channel-last fp16/bf16 classes
 removed in the first cut:
