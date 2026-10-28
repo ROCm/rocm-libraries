@@ -184,6 +184,9 @@ class Headers:
         )  # function prototype / typedef / macro / inline -> its source text
         self.macro_file: dict[str, str] = {}
         self.inline_funcs: set[str] = set()
+        # function -> every header declaring it (kernel_name_join is in
+        # helper_rocke.helpers.spec.h and helper_helper_rocke.helpers.spec.h)
+        self.func_files: dict[str, list[str]] = {}
         self.paths: dict[str, str] = {}  # header file name -> path read
         for fn in sorted(set(os.listdir(inc)) | set(over)):
             if not fn.endswith((".h", ".hpp")):
@@ -206,6 +209,8 @@ class Headers:
             for s in syms:
                 if s.in_struct:
                     continue
+                if s.kind == "function" and fn not in self.func_files.get(s.name, []):
+                    self.func_files.setdefault(s.name, []).append(fn)
                 if s.kind == "function" and s.linkage == "external":
                     self.funcs.setdefault(
                         s.name,

@@ -1610,21 +1610,34 @@ def translate(modname: str, rocke: str, abi_dir: str | None = None) -> Result:
             for n in PKG.adapter_names()
         ):
             lines.append(f'#include "{own}"')
+    # rocKE headers the code needs, each once: the header of every function it
+    # calls and of every type of another header it names (a twin struct held by
+    # value in a private struct, rocke_gemm_tile_spec_t); a function several
+    # headers declare (rocke_kernel_name_join) needs only one of them
     incs = set()
-    for fname in re.findall(r"\b(rocke_\w+)\(", joined):
-        f = env.headers.funcs.get(fname)
-        if f is not None and f.file not in ("ir.h", "ir_internal.h", header):
-            incs.add(f.file)
-    # a type of another header the source names (a twin struct held by value
-    # in a private struct, rocke_gemm_tile_spec_t) needs that header too
+    skip = ("ir.h", "ir_internal.h", "error.hpp", header)
     type_text = "\n".join(struct_lines) + "\n" + joined
     for t in set(re.findall(r"\b(rocke_\w+_t)\b", type_text)):
         f = env.headers.typedef_file.get(t)
-        if f is not None and f not in ("ir.h", "ir_internal.h", header):
+        if f is not None and f not in skip:
             if header is None or not _includes(env, header, f):
                 incs.add(f)
+    several = []
+    for fname in dict.fromkeys(re.findall(r"\b(rocke_\w+)\(", joined)):
+        f = env.headers.funcs.get(fname)
+        if f is None:
+            continue
+        files = env.headers.func_files.get(fname) or [f.file]
+        if len(files) > 1:
+            several.append(files)
+        elif f.file not in skip:
+            incs.add(f.file)
+    for files in several:
+        if not any(x in incs or x in skip for x in files):
+            incs.add(files[0])
     for inc in sorted(incs):
-        lines.append(f'#include "rocke/{inc}"')
+        if f'#include "rocke/{inc}"' not in lines:
+            lines.append(f'#include "rocke/{inc}"')
     lines.append("")
     if header:
         lines += extern_consts(env, mod, header)
