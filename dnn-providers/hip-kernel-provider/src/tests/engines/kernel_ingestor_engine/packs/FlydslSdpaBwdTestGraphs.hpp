@@ -383,6 +383,65 @@ inline SdpaBwdTensor& addScaleTensor(SdpaBwdGraph& graph, std::optional<float> b
     return graph.tensors.back();
 }
 
+/// Adds a bias, and with @p withDbias a dBias of the same layout, whose batch axis is
+/// broadcast (extent 1) when @p overBatch and whose head axis is when @p overHead. Its rows
+/// are padded to a whole 16-byte vector of the dtype, as the matcher requires of a dBias.
+inline void addBroadcastBias(SdpaBwdGraph& graph, bool overBatch, bool overHead, bool withDbias)
+{
+    const int64_t batch = overBatch ? 1 : graph.batch;
+    const int64_t heads = overHead ? 1 : graph.heads;
+    auto& bias = addBias(graph, {batch, heads, graph.seqQ, graph.seqKv});
+    bias.strides = headMajorStrides(heads, graph.seqQ, ceilToVectorOf(bias.dtype, graph.seqKv));
+    if(withDbias)
+    {
+        addDbias(graph);
+    }
+}
+
+/// @p spec with a bias broadcast over the batch and/or head axis; see addBroadcastBias.
+inline SdpaBwdSpec
+    withBroadcastBias(const SdpaBwdSpec& spec, bool overBatch, bool overHead, bool withDbias)
+{
+    return spec.withEdit(
+        [=](SdpaBwdGraph& graph) { addBroadcastBias(graph, overBatch, overHead, withDbias); });
+}
+
+/// A graph whose head dims @p headDimQk and @p headDimV are not whole vectors of @p dtype,
+/// with every row stride the next whole vector (the default graph's, ceil8 for 16-bit and
+/// ceil4 for FLOAT).
+inline SdpaBwdSpec oddHeadDimSpec(hipdnn_flatbuffers_sdk::data_objects::DataType dtype,
+                                  int64_t headDimQk,
+                                  int64_t headDimV)
+{
+    const auto vector = vectorElementsOf(dtype);
+    if(headDimQk % vector == 0 || headDimV % vector == 0)
+    {
+        throw std::invalid_argument("oddHeadDimSpec: a head dim is a whole number of vectors");
+    }
+    SdpaBwdSpec spec;
+    spec.dtype = dtype;
+    spec.headDimQk = headDimQk;
+    spec.headDimV = headDimV;
+    return spec;
+}
+
+/// A dropout graph (probability 0.2, INT64 seed and offset on the device) whose query and key
+/// lengths differ and whose key length is not a multiple of 4, so a Philox plane is not a
+/// whole number of 4-wide draws per row.
+inline SdpaBwdSpec dropoutSpecOfLengths(int64_t seqQ, int64_t seqKv)
+{
+    if(seqQ == seqKv || seqKv % 4 == 0)
+    {
+        throw std::invalid_argument(
+            "dropoutSpecOfLengths: the lengths must differ and the key length not be a multiple "
+            "of 4");
+    }
+    SdpaBwdSpec spec;
+    spec.seqQ = seqQ;
+    spec.seqKv = seqKv;
+    return spec.withEdit([](SdpaBwdGraph& graph) { addDropout(graph); });
+}
+
 namespace detail
 {
 

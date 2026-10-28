@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -20,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -90,6 +92,17 @@ PackSymbols splitSymbols(Slot slot)
                 ""};
     }
 }
+
+/// The dq slot's multi-launch dispatch, over the same graph match and kernel match.
+const PackSymbols DQ_REDUCE{"hipkernel:flydsl_sdpa_bwd_split",
+                            "hipkernel.flydsl_sdpa_bwd_split.graph_match",
+                            "",
+                            "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match",
+                            "",
+                            "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch",
+                            "",
+                            "",
+                            ""};
 
 const PackSymbols MERGED{"hipkernel:flydsl_sdpa_bwd_merged",
                          "hipkernel.flydsl_sdpa_bwd_merged.graph_match",
@@ -200,7 +213,23 @@ struct RowSpec
     int64_t blockThreads = 256;
     int64_t blockKv = 64;
     int64_t blockM = 64;
+    /// The launch grid's spelling; empty is the slot's gfx950 one.
+    std::string grid;
 };
+
+const char* const GRID_PREP = "qblocks_by_heads_by_seqs";
+const char* const GRID_DKDV_HEADS_FIRST = "kheads_by_kvblocks_by_seqs";
+const char* const GRID_DKDV_BLOCKS_FIRST = "kvblocks_by_kheads_by_seqs";
+const char* const GRID_DQ = "qheads_by_qblocks_by_seqs";
+
+std::string defaultGrid(Slot slot)
+{
+    if(slot == Slot::PREP)
+    {
+        return GRID_PREP;
+    }
+    return slot == Slot::DKDV ? GRID_DKDV_HEADS_FIRST : GRID_DQ;
+}
 
 KernelDefinition makeRow(Slot slot, const RowSpec& row)
 {
@@ -211,7 +240,8 @@ KernelDefinition makeRow(Slot slot, const RowSpec& row)
                        {"head_dim_v", row.tile},
                        {"padded", row.padded},
                        {"floor", row.floorValue},
-                       {"hints", int64_t{1}}};
+                       {"hints", int64_t{1}},
+                       {"grid", row.grid.empty() ? defaultGrid(slot) : row.grid}};
     if(slot == Slot::PREP)
     {
         kernel.metadata["sink"] = row.sink;
@@ -914,20 +944,44 @@ TEST(TestFlydslSdpaBwdSplitKernel, APackedDkdvObjectServesDenseGqaOnly)
     EXPECT_FALSE(serves(Slot::DKDV, grouped, packed));
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph, BI8DeclinesA16BitBiasOutsideTheStagingContract)
+/// A 16-bit bias whose row stride of 17 is not a multiple of 8 elements: outside the LDS
+/// staging contract, though the shared matcher accepts the graph.
+SdpaBwdSpec unstagedBiasSpec()
 {
-    // A bias row stride of 17 is not a multiple of 8 elements.
-    const auto unstaged = baseSpec().withEdit([](SdpaBwdGraph& g) {
+    return baseSpec().withEdit([](SdpaBwdGraph& g) {
         auto& bias = addBias(g);
         bias.strides = {int64_t{8} * 16 * 17, int64_t{16} * 17, 17, 1};
     });
-    ASSERT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
-        matchSdpaBwdSpec(unstaged, flydsl_sdpa_bwd::MatchOptions{true})));
-    EXPECT_FALSE(graphMatch(unstaged).has_value());
-    EXPECT_TRUE(graphMatch(withBias(baseSpec(), false)).has_value());
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph, BI8StagesARowBroadcastBiasOnlyAtAKeyLengthOfWholeVectors)
+RowSpec dqRowStaging(const char* biasStage)
+{
+    RowSpec row = biasRow();
+    row.biasStage = biasStage;
+    return row;
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, BI8DeclinesTheRowsThatStageAnUnstageable16BitBias)
+{
+    const auto unstaged = unstagedBiasSpec();
+    ASSERT_TRUE(std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(
+        matchSdpaBwdSpec(unstaged, flydsl_sdpa_bwd::MatchOptions{true})));
+    // The graph is served; each dq row decides by its own bias_stage.
+    EXPECT_TRUE(graphMatch(unstaged).has_value());
+    EXPECT_FALSE(serves(Slot::DQ, unstaged, dqRowStaging("auto")));
+    EXPECT_FALSE(serves(Slot::DQ, unstaged, dqRowStaging("direct")));
+    EXPECT_TRUE(serves(Slot::DQ, unstaged, dqRowStaging("none")));
+    // The same rows serve a bias inside the contract.
+    const auto staged = withBias(baseSpec(), false);
+    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStaging("auto")));
+    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStaging("direct")));
+    EXPECT_TRUE(serves(Slot::DQ, staged, dqRowStaging("none")));
+    // Only the dq objects stage the bias.
+    EXPECT_TRUE(serves(Slot::PREP, unstaged, plainRow()));
+    EXPECT_TRUE(serves(Slot::DKDV, unstaged, biasRow()));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, BI8StagesARowBroadcastBiasOnlyAtAKeyLengthOfWholeVectors)
 {
     // A row-broadcast bias has no padding behind its single row, so a staged object's last
     // 16-byte chunk stays inside the allocation only when Sk is a multiple of 8 elements.
@@ -938,9 +992,10 @@ TEST(TestFlydslSdpaBwdSplitGraph, BI8StagesARowBroadcastBiasOnlyAtAKeyLengthOfWh
             bias.strides = {g.heads * int64_t{24}, 24, 24, 1};
         });
     };
-    EXPECT_FALSE(graphMatch(rowBroadcast(baseSpec(), 20)).has_value());
-    EXPECT_TRUE(graphMatch(rowBroadcast(baseSpec(), 24)).has_value());
-    // fp32 dQ objects load the bias directly: no staging contract.
+    EXPECT_FALSE(serves(Slot::DQ, rowBroadcast(baseSpec(), 20), dqRowStaging("auto")));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(baseSpec(), 20), dqRowStaging("none")));
+    EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(baseSpec(), 24), dqRowStaging("auto")));
+    // fp32 dQ objects load the bias directly: no staging contract, whatever the row says.
     RowSpec single = biasRow();
     single.dtype = "fp32";
     EXPECT_TRUE(serves(Slot::DQ, rowBroadcast(fp32Spec(), 18), single));
@@ -981,6 +1036,74 @@ TEST(TestFlydslSdpaBwdSplitKernel, DeclinesALaunchGridPastTheLimitsOfAnAxis)
     EXPECT_FALSE(serves(Slot::DKDV, longSequence, narrow));
     EXPECT_FALSE(serves(Slot::DQ, longSequence, narrow));
     EXPECT_TRUE(serves(Slot::DKDV, longSequence, plainRow()));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, TheDkdvGridFollowsTheRowsGridOrder)
+{
+    auto spec = dimsSpec(3, 6, 100, 91, 64);
+    spec.kvHeads = 2;
+    RowSpec row = plainRow();
+    row.blockKv = 32;
+    // 91 keys at 32 per block: 3 key blocks, over 2 key heads and 3 sequences.
+    row.grid = GRID_DKDV_HEADS_FIRST;
+    EXPECT_EQ(dumpOf(Slot::DKDV, spec, row).grid, (std::array<unsigned int, 3>{2, 3, 3}));
+    row.grid = GRID_DKDV_BLOCKS_FIRST;
+    EXPECT_EQ(dumpOf(Slot::DKDV, spec, row).grid, (std::array<unsigned int, 3>{3, 2, 3}));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, TheAxisLimitsApplyToWhateverLandsOnYAndZ)
+{
+    RowSpec headsFirst = plainRow();
+    headsFirst.grid = GRID_DKDV_HEADS_FIRST;
+    RowSpec blocksFirst = plainRow();
+    blocksFirst.grid = GRID_DKDV_BLOCKS_FIRST;
+
+    // 70000 key blocks: y in the heads-first order, x in the other.
+    headsFirst.blockKv = 1;
+    blocksFirst.blockKv = 1;
+    const auto longKeys = dimsSpec(1, 1, 16, 70000, 64);
+    EXPECT_FALSE(serves(Slot::DKDV, longKeys, headsFirst));
+    EXPECT_TRUE(serves(Slot::DKDV, longKeys, blocksFirst));
+
+    // 70000 key heads: x in the heads-first order, y in the other.
+    headsFirst.blockKv = 64;
+    blocksFirst.blockKv = 64;
+    const auto manyHeads = dimsSpec(1, 70000, 16, 16, 64);
+    EXPECT_TRUE(serves(Slot::DKDV, manyHeads, headsFirst));
+    EXPECT_FALSE(serves(Slot::DKDV, manyHeads, blocksFirst));
+
+    // The batch is z in both.
+    const auto manyBatches = dimsSpec(70000, 1, 16, 16, 64);
+    EXPECT_FALSE(serves(Slot::DKDV, manyBatches, headsFirst));
+    EXPECT_FALSE(serves(Slot::DKDV, manyBatches, blocksFirst));
+}
+
+TEST(TestFlydslSdpaBwdSplitKernel, ARowWithAnUnknownOrMissingGridIsDeclined)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(baseSpec()));
+    const auto bound = matchesGraph(splitSymbols(Slot::DQ), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    for(const Slot slot : SLOTS)
+    {
+        SCOPED_TRACE(static_cast<int>(slot));
+        EXPECT_TRUE(serves(slot, baseSpec(), plainRow()));
+        for(const char* grid : {"", "heads_by_blocks", "kvblocks_by_kheads_by_seqs_x"})
+        {
+            auto row = makeRow(slot, plainRow());
+            row.metadata["grid"] = std::string(grid);
+            EXPECT_FALSE(matchesKernel(splitSymbols(slot), fixture.context(), row, *bound)) << grid;
+        }
+        auto missing = makeRow(slot, plainRow());
+        missing.metadata.erase("grid");
+        EXPECT_FALSE(matchesKernel(splitSymbols(slot), fixture.context(), missing, *bound));
+    }
+    // A spelling of another slot is not this slot's.
+    RowSpec foreign = plainRow();
+    foreign.grid = GRID_DQ;
+    EXPECT_FALSE(serves(Slot::PREP, baseSpec(), foreign));
+    EXPECT_FALSE(serves(Slot::DKDV, baseSpec(), foreign));
+    foreign.grid = GRID_PREP;
+    EXPECT_FALSE(serves(Slot::DQ, baseSpec(), foreign));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, DeclinesARecordWithoutTheFieldsItsSlotReads)
@@ -1386,6 +1509,253 @@ TEST(TestFlydslSdpaBwdSplitDispatch, EachSlotsWorkspaceBytesAreItsScratchOnly)
     EXPECT_EQ(dispatchHandler(splitSymbols(Slot::DQ))
                   .workspaceBytes(plain.context(), *plainBound, makeRow(Slot::DQ, plainRow())),
               0U);
+}
+
+// ---------------------------------------------------------------------------
+// The dq_reduce dispatch
+// ---------------------------------------------------------------------------
+
+/// The argument list a kpack entry records for @p params: kind and size per argument.
+std::vector<KernelArgument> recordedSignature(const ParamList& params)
+{
+    std::vector<KernelArgument> signature;
+    uint32_t offset = 0;
+    for(const auto& param : params)
+    {
+        const auto size = static_cast<uint32_t>(paramBytes(param.kind));
+        offset = (offset + size - 1) / size * size;
+        signature.push_back(
+            {param.kind == 'p' ? "global_buffer" : "by_value", size, offset, param.name});
+        offset += size;
+    }
+    return signature;
+}
+
+const char* const DQ_ENTRY_SYMBOL = "dq_entry_symbol";
+const char* const REDUCE_ENTRY_SYMBOL = "reduce_entry_symbol";
+
+/// A dq row of @p row whose launches are the `sources` entries "dq" and, with @p reduce, the
+/// "dbias_reduce" one, in archives that do not exist: prepare() gets as far as loading the
+/// first launch's code object and no further.
+KernelDefinition sourcesRow(const RowSpec& row,
+                            std::optional<std::vector<KernelArgument>> reduce
+                            = recordedSignature(reduceParams()))
+{
+    auto kernel = makeRow(Slot::DQ, row);
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    KernelSource dq;
+    dq.kind = KernelSourceKind::KPACK;
+    dq.library = "there-is-no-archive-here.kpack";
+    dq.tocKey = "toc#0";
+    dq.symbol = DQ_ENTRY_SYMBOL;
+    dq.signature = recordedSignature(dqParams());
+    kernel.sources = {{"dq", dq}};
+    if(reduce.has_value())
+    {
+        KernelSource reduceSource = dq;
+        reduceSource.symbol = REDUCE_ENTRY_SYMBOL;
+        reduceSource.signature = std::move(*reduce);
+        kernel.sources["dbias_reduce"] = std::move(reduceSource);
+    }
+    return kernel;
+}
+
+/// What @p pack's prepare() throws for @p kernel on the graph of @p spec; empty when it
+/// throws nothing, which no case expects (no archive exists).
+std::string
+    prepareFailure(const PackSymbols& pack, const SdpaBwdSpec& spec, const KernelDefinition& kernel)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    const auto bound = matchesGraph(pack, fixture.context());
+    EXPECT_TRUE(bound.has_value());
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    try
+    {
+        dispatchHandler(pack).prepare(fixture.context(), *bound, kernel);
+    }
+    catch(const std::exception& error)
+    {
+        return error.what();
+    }
+    return {};
+}
+
+bool contains(const std::string& text, const std::string& part)
+{
+    return text.find(part) != std::string::npos;
+}
+
+RowSpec bareDqRow()
+{
+    RowSpec row = biasRow();
+    row.reduceSymbol = "fmha_reduce_by_symbol";
+    return row;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, OnlyTheDqReduceHandlerDeclaresLaunches)
+{
+    const std::set<std::string> launches{"dq", "dbias_reduce"};
+    EXPECT_EQ(dispatchHandler(DQ_REDUCE).launchNames(), launches);
+    for(const Slot slot : SLOTS)
+    {
+        EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).launchNames().empty());
+    }
+    EXPECT_FALSE(dispatchHandler(DQ_REDUCE).supportsSaving());
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqReduceHandlerHasTheDqHandlersScratch)
+{
+    const auto spec = withBias(baseSpec(), true, {1, 1, 16, 16});
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    const auto bound = matchesGraph(DQ_REDUCE, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto row = makeRow(Slot::DQ, bareDqRow());
+    EXPECT_EQ(
+        dispatchHandler(DQ_REDUCE).workspaceBytes(fixture.context(), *bound, row),
+        dispatchHandler(splitSymbols(Slot::DQ)).workspaceBytes(fixture.context(), *bound, row));
+    EXPECT_EQ(dispatchHandler(DQ_REDUCE).workspaceBytes(fixture.context(), *bound, row),
+              size_t{2} * 8 * 16 * 16 * 2);
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowLaunchesOnlyDqWithoutABroadcastDbias)
+{
+    // The row carries no reduce launch at all: the dq launch is the only one resolved, so
+    // prepare() reaches its code object.
+    const auto kernel = sourcesRow(bareDqRow(), std::nullopt);
+    for(const auto& spec : {withBias(baseSpec(), false), withBias(baseSpec(), true)})
+    {
+        const auto failure = prepareFailure(DQ_REDUCE, spec, kernel);
+        EXPECT_TRUE(contains(failure, DQ_ENTRY_SYMBOL)) << failure;
+        EXPECT_FALSE(contains(failure, "no launch")) << failure;
+    }
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, ABroadcastDbiasLaunchesTheReduceKernelFromItsOwnEntry)
+{
+    const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
+
+    // Both entries present and agreeing: the dq launch is the first to load.
+    const auto loads = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow()));
+    EXPECT_TRUE(contains(loads, DQ_ENTRY_SYMBOL)) << loads;
+    EXPECT_FALSE(contains(loads, "is packaged with arguments")) << loads;
+
+    // The second launch is required...
+    const auto missing
+        = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'dbias_reduce'")) << missing;
+
+    // ...and is the entry's own: its recorded argument list is checked, before any load.
+    auto dropped = recordedSignature(reduceParams());
+    dropped.pop_back();
+    const auto refused = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
+    EXPECT_FALSE(contains(refused, DQ_ENTRY_SYMBOL)) << refused;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowNeverTakesTheBySymbolPath)
+{
+    const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
+    const auto kernel = sourcesRow(bareDqRow());
+    // The row's reduce_symbol names a symbol no entry has; no failure ever mentions it.
+    const auto failure = prepareFailure(DQ_REDUCE, broadcast, kernel);
+    EXPECT_FALSE(contains(failure, "fmha_reduce_by_symbol")) << failure;
+    // The single-launch dq dispatch reads `source`, which a multi-launch row does not have.
+    const auto single = prepareFailure(splitSymbols(Slot::DQ), broadcast, kernel);
+    EXPECT_TRUE(contains(single, "several launches")) << single;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqDispatchStillReducesBySymbol)
+{
+    // One code object, the reduce symbol the row names: dq loads first, under the row's
+    // own symbol.
+    auto kernel = makeRow(Slot::DQ, bareDqRow());
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    kernel.source.kind = KernelSourceKind::KPACK;
+    kernel.source.library = "there-is-no-archive-here.kpack";
+    kernel.source.tocKey = "toc#0";
+    kernel.source.symbol = DQ_ENTRY_SYMBOL;
+    kernel.source.signature = recordedSignature(dqParams());
+    const auto failure = prepareFailure(
+        splitSymbols(Slot::DQ), withBias(baseSpec(), true, {1, 1, 16, 16}), kernel);
+    EXPECT_TRUE(contains(failure, DQ_ENTRY_SYMBOL)) << failure;
+}
+
+// ---------------------------------------------------------------------------
+// Graphs the gfx11 objects serve
+// ---------------------------------------------------------------------------
+
+TEST(TestFlydslSdpaBwdSplitLaunch, ABiasBroadcastOverBatchAndOrHeadsReducesTheKeptPlanes)
+{
+    struct Case
+    {
+        bool overBatch;
+        bool overHead;
+        unsigned int planes;
+    };
+    // B = 2, H = 8: the reduce launch has one grid row per (batch, head) plane the dBias keeps.
+    for(const auto& [overBatch, overHead, planes] :
+        {Case{true, false, 8}, Case{false, true, 2}, Case{true, true, 1}})
+    {
+        SCOPED_TRACE(std::to_string(overBatch) + std::to_string(overHead));
+        const auto spec = withBroadcastBias(baseSpec(), overBatch, overHead, true);
+        ASSERT_TRUE(serves(Slot::DQ, spec, biasRow()));
+        const auto dump = dumpOf(Slot::DQ, spec, biasRow());
+        ASSERT_TRUE(dump.reduces);
+        EXPECT_EQ(dump.reduceGrid[1], planes);
+        EXPECT_EQ(dump.scratchBytes, size_t{2} * 8 * 16 * 16 * 2);
+    }
+    // Without a dBias nothing is reduced, whatever the bias broadcasts over.
+    const auto bias = withBroadcastBias(baseSpec(), true, true, false);
+    ASSERT_TRUE(serves(Slot::DQ, bias, biasRow()));
+    EXPECT_FALSE(dumpOf(Slot::DQ, bias, biasRow()).reduces);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, AnOddHeadDimLaunchesAtTheRowStrideOfWholeVectors)
+{
+    // D = 77 in 16-bit rows 80 elements apart (ceil8); fp32 rows are ceil4 = 80 too.
+    RowSpec padded = plainRow(96);
+    padded.padded = 1;
+    for(const Slot slot : {Slot::DKDV, Slot::DQ})
+    {
+        const auto values
+            = valuesOf(slot, dumpOf(slot, oddHeadDimSpec(DataType::HALF, 77, 77), padded));
+        EXPECT_EQ(values.at("hdim_qk"), 77U);
+        EXPECT_EQ(values.at("stride_q_seq"), 80U);
+        EXPECT_EQ(values.at("stride_k_seq"), 80U);
+        EXPECT_EQ(values.at("stride_v_seq"), 80U);
+        EXPECT_EQ(values.at("stride_do_seq"), 80U);
+        EXPECT_EQ(values.at("rt_flags"), 1U);
+    }
+    RowSpec fp32 = padded;
+    fp32.dtype = "fp32";
+    const auto values
+        = valuesOf(Slot::DQ, dumpOf(Slot::DQ, oddHeadDimSpec(DataType::FLOAT, 77, 77), fp32));
+    EXPECT_EQ(values.at("stride_q_seq"), 80U);
+    EXPECT_EQ(values.at("stride_dq_seq"), 80U);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, DropoutWithUnequalAndUnalignedLengthsLaunchesTheRuntimeFlags)
+{
+    const auto spec = dropoutSpecOfLengths(37, 29);
+    RowSpec dropout = plainRow();
+    dropout.dropout = 1;
+    for(const Slot slot : {Slot::DKDV, Slot::DQ})
+    {
+        ASSERT_TRUE(serves(slot, spec, dropout));
+        const auto values = valuesOf(slot, dumpOf(slot, spec, dropout));
+        EXPECT_EQ(values.at("max_seqlen_q"), 37U);
+        EXPECT_EQ(values.at("max_seqlen_k"), 29U);
+        EXPECT_NE(values.at("idropout_p"), 0U);
+        EXPECT_EQ(values.at("rt_flags") & 2U, 2U);
+    }
 }
 
 } // namespace
