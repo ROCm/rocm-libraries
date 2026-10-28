@@ -263,3 +263,31 @@ Overrides for specific types.
         | 0: F32
         | 1: XF32(eg TF32)
         | 2: F32_BF16
+
+.. _env-jit:
+
+Just-in-time solution selection
+===============================
+
+These variables are read only when hipBLASLt is built with just-in-time (JIT)
+GEMM support. A build without that support does not consult them.
+``HIPBLASLT_JIT`` is read once per process.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_JIT``
+        | Selects whether heuristic queries consult the JIT library.
+      - | Unset, empty or 0: heuristic queries do not consult JIT (default)
+        | 1: a tuning-override match, then tuned exact-size solutions, then JIT-built solutions, then the other library solutions. A kernel already listed is skipped. Grouped GEMM is not covered. The JIT library directory is not pruned
+        | 2: the JIT library only
+        | Any other value warns once and leaves JIT off
+
+    * - | ``HIPBLASLT_JIT_LIBRARY_PATH``
+        | Directory where generated solutions are stored. Read once per process.
+      - | Unset or empty: ``/tmp/hipblaslt-jit-<uid>`` on Linux and ``%TEMP%\\hipblaslt-jit-<user>`` on Windows
+        | A directory path: that directory is the library root. hipBLASLt creates it when missing and refuses a symbolic link, a path owned by another user, or a directory writable by group or others
