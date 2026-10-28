@@ -193,16 +193,23 @@ class TestRocIsaForwarding(_StateSaveRestore):
             rocIsa.getInstance().initMany([(12, 5, 0)], "/fake/path", False)
         initMany.assert_called_once_with([(12, 5, 0)], "/fake/path", False)
 
-    def test_initmany_inits_each_arch(self):
-        with mock.patch.object(_base, "init") as init:
-            _base.initMany([(9, 4, 2), (12, 5, 0)], "/fake/path", False)
-        self.assertEqual(
-            init.call_args_list,
-            [
-                mock.call((9, 4, 2), "/fake/path", False),
-                mock.call((12, 5, 0), "/fake/path", False),
-            ],
-        )
+    def test_initmany_probes_native_isas_in_one_fallback(self):
+        live_data = _base.getData()
+        live_data.clear()
+        _base._is_init = False
+
+        def fallback(keys, assemblerPath, debug):
+            for key in keys:
+                live_data[key] = _base.IsaInfo({"SupportedISA": 1}, {}, {}, {})
+
+        with mock.patch.object(_base, "_init_native_fallback", side_effect=fallback) as native:
+            _base.initMany((x for x in [(9, 4, 2), (12, 5, 0), (9, 5, 0), (9, 4, 2)]),
+                           "/fake/path", False)
+        native.assert_called_once_with([(9, 4, 2), (9, 5, 0)], "/fake/path", False)
+        self.assertEqual(set(live_data), {(9, 4, 2), (9, 5, 0), (12, 5, 0)})
+        self.assertTrue(_base.isInit())
+        # Like init() for each arch, the last arch is the selected one.
+        self.assertEqual(_base._current_isa, (9, 4, 2))
 
     def test_isinit_forwards(self):
         _base._is_init = True

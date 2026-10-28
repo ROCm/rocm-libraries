@@ -250,7 +250,7 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
         try:
             asm, arch_c, reg, bugs = _caps.getCaps(key)
         except KeyError:
-            _init_native_fallback(arch, assemblerPath, debug, key)
+            _init_native_fallback([key], assemblerPath, debug)
             _is_init = True
             return
         _data[key] = IsaInfo(asm, arch_c, reg, bugs)
@@ -261,16 +261,28 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
 def initMany(archs: Any, assemblerPath: str = "", debug: bool = False) -> None:
     """Mirror of ``rocisa::rocIsa::initMany`` (base.hpp).
 
-    Same result as calling ``init`` for each arch. The C++ version probes
-    the ISAs concurrently; here they are initialised one after another.
+    Same result as calling ``init`` for each arch. ISAs that stinkytofu has
+    no caps for are probed together, by one native ``initMany`` call in a
+    single subprocess.
     """
+    archs = list(archs)
+    native = []
+    for arch in archs:
+        key = _caps.normalize_isa_key(arch)
+        if key in _data or key in native:
+            continue
+        try:
+            _data[key] = IsaInfo(*_caps.getCaps(key))
+        except KeyError:
+            native.append(key)
+    if native:
+        _init_native_fallback(native, assemblerPath, debug)
     for arch in archs:
         init(arch, assemblerPath, debug)
 
 
-def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
-                          key: "tuple") -> None:
-    """Query ISA caps from native rocisa via a subprocess.
+def _init_native_fallback(keys: "list", assemblerPath: str, debug: bool) -> None:
+    """Query the caps of ISA keys from native rocisa via one subprocess.
 
     Loading ``_rocisa.so`` in-process would conflict with the already-loaded
     ``_stinkytofu.so`` (nanobind duplicate type registration).  A subprocess
@@ -282,21 +294,24 @@ def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
     import sys
     import textwrap
 
-    isa_tuple = tuple(int(x) for x in key)
+    isas = [tuple(int(x) for x in key) for key in keys]
     script = textwrap.dedent(f"""\
         import os, json
         os.environ["ROCISA_BACKEND"] = "rocisa"
         import rocisa
         ti = rocisa.rocIsa.getInstance()
-        arch = {isa_tuple!r}
-        ti.init(arch, {assemblerPath!r}, {debug!r})
-        info = ti.getIsaInfo(arch)
-        print(json.dumps({{
-            "asmCaps":  {{str(k): int(v) for k, v in dict(info.asmCaps).items()}},
-            "archCaps": {{str(k): int(v) for k, v in dict(info.archCaps).items()}},
-            "regCaps":  {{str(k): int(v) for k, v in dict(info.regCaps).items()}},
-            "asmBugs":  {{str(k): int(v) for k, v in dict(info.asmBugs).items()}},
-        }}))
+        isas = {isas!r}
+        ti.initMany(isas, {assemblerPath!r}, {debug!r})
+        result = []
+        for arch in isas:
+            info = ti.getIsaInfo(arch)
+            result.append({{
+                "asmCaps":  {{str(k): int(v) for k, v in dict(info.asmCaps).items()}},
+                "archCaps": {{str(k): int(v) for k, v in dict(info.archCaps).items()}},
+                "regCaps":  {{str(k): int(v) for k, v in dict(info.regCaps).items()}},
+                "asmBugs":  {{str(k): int(v) for k, v in dict(info.asmBugs).items()}},
+            }})
+        print(json.dumps(result))
     """)
 
     env = {**os.environ, "ROCISA_BACKEND": "rocisa"}
@@ -306,13 +321,13 @@ def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"Native rocisa fallback subprocess failed for ISA {key}:\n"
+            f"Native rocisa fallback subprocess failed for ISAs {isas}:\n"
             f"{result.stderr}"
         )
-    data = json.loads(result.stdout)
-    _data[key] = IsaInfo(
-        data["asmCaps"], data["archCaps"], data["regCaps"], data["asmBugs"],
-    )
+    for isa, data in zip(isas, json.loads(result.stdout)):
+        _data[isa] = IsaInfo(
+            data["asmCaps"], data["archCaps"], data["regCaps"], data["asmBugs"],
+        )
 
 
 def isInit() -> bool:
@@ -340,7 +355,7 @@ def getIsaInfo(arch: Any) -> "IsaInfo":
         try:
             asm, arch_c, reg, bugs = _caps.getCaps(key)
         except KeyError:
-            _init_native_fallback(arch, "", False, key)
+            _init_native_fallback([key], "", False)
             return _data[key]
         info = IsaInfo(asm, arch_c, reg, bugs)
         _data[key] = info
