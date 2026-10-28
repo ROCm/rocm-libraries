@@ -40,16 +40,17 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/distance.h>
-#  include <thrust/iterator/counting_iterator.h>
-#  include <thrust/iterator/transform_iterator.h>
+#  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/type_traits/unwrap_contiguous_iterator.h>
-#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#    include <thrust/detail/algorithm_wrapper.h>
 
-#    include <iterator>
-#  endif
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/counting_iterator.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_iterator.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/zip_iterator.h)
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -69,7 +70,6 @@ InputIt THRUST_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first
 }; // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
-#  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/reduce.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -99,110 +99,13 @@ struct functor
     }
   }
 };
-
-template <class ValueType, class InputIt, class UnaryOp>
-struct transform_input_iterator_t
-{
-  using self_t            = transform_input_iterator_t;
-  using difference_type   = thrust::detail::it_difference_t<InputIt>;
-  using value_type        = ValueType;
-  using pointer           = void;
-  using reference         = value_type;
-  using iterator_category = _THRUST_STD::random_access_iterator_tag;
-
-  InputIt input;
-  mutable UnaryOp op;
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE transform_input_iterator_t(InputIt input, UnaryOp op)
-      : input(input)
-      , op(op)
-  {}
-
-  transform_input_iterator_t(const self_t&) = default;
-
-  // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
-  // an explicit copy assignment operator that doesn't try to assign it.
-  THRUST_HOST_DEVICE self_t& operator=(const self_t& o)
-  {
-    input = o.input;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator++(int)
-  {
-    self_t retval = *this;
-    ++input;
-    return retval;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t& operator++()
-  {
-    ++input;
-    return *this;
-  }
-
-  // Pass the dereferenced value straight to op (like ::cuda::transform_iterator) instead of materializing the
-  // value_type first, so value types need not be constructible on the device. See:
-  // https://github.com/NVIDIA/cccl/issues/3591
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*() const
-  {
-    return op(*input);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*()
-  {
-    return op(*input);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator+(difference_type n) const
-  {
-    return self_t(input + n, op);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t& operator+=(difference_type n)
-  {
-    input += n;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t operator-(difference_type n) const
-  {
-    return self_t(input - n, op);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE self_t& operator-=(difference_type n)
-  {
-    input -= n;
-    return *this;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE difference_type operator-(self_t other) const
-  {
-    return input - other.input;
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator[](difference_type n) const
-  {
-    return op(input[n]);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE bool operator==(const self_t& rhs) const
-  {
-    return (input == rhs.input);
-  }
-
-  THRUST_HOST_DEVICE THRUST_FORCEINLINE bool operator!=(const self_t& rhs) const
-  {
-    return (input != rhs.input);
-  }
-};
 } // namespace __find_if
 
 template <class Derived, class InputIt, class Size, class Predicate>
 InputIt THRUST_HOST_DEVICE
 find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
-  using result_type = typename thrust::tuple<bool, Size>;
+  using result_type = _THRUST_STD::tuple<bool, Size>;
 
   // empty sequence
   if (num_items == 0)
@@ -220,12 +123,9 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
   const Size interval_threshold = 1 << 20;
   const Size interval_size      = (_THRUST_STD::min)(interval_threshold, num_items);
 
-  // Upstream uses ::cuda::make_transform_iterator here. thrust::transform_iterator converts to the value_type before
-  // calling the functor (https://github.com/NVIDIA/cccl/issues/3591), so keep a dedicated iterator that does not.
-  auto unwrapped_first = thrust::try_unwrap_contiguous_iterator(first);
-  using XfrmIterator   = __find_if::transform_input_iterator_t<bool, decltype(unwrapped_first), Predicate>;
-
-  const auto begin = thrust::make_zip_iterator(XfrmIterator(unwrapped_first, predicate), counting_iterator<Size>(0));
+  const auto begin = _THRUST_LIBCXX::make_zip_iterator(
+    _THRUST_LIBCXX::make_transform_iterator(thrust::try_unwrap_contiguous_iterator(first), predicate),
+    _THRUST_LIBCXX::counting_iterator<Size>(0));
   const auto end = begin + num_items;
 
   for (auto interval_begin = begin; interval_begin < end; interval_begin += interval_size)
@@ -236,7 +136,7 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
       interval_end = end;
     } // end if
 
-    result_type result = reduce(
+    const result_type result = reduce(
       policy, interval_begin, interval_end, result_type(false, interval_end - begin), __find_if::functor<result_type>());
 
     // see if we found something

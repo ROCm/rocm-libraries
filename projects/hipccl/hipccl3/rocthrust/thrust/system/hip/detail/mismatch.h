@@ -40,11 +40,13 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/distance.h>
-#  include <thrust/iterator/zip_iterator.h>
-#  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-#  include <thrust/zip_function.h>
+
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/zip_function.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/zip_iterator.h)
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#  include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -69,9 +71,9 @@ _THRUST_STD::pair<InputIt1, InputIt2> THRUST_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
   const auto n            = _THRUST_STD::distance(first1, last1);
-  const auto first        = thrust::make_zip_iterator(first1, first2);
-  const auto last         = thrust::make_zip_iterator(last1, first2 + n);
-  const auto mismatch_pos = hip_rocprim::find_if_not(policy, first, last, thrust::make_zip_function(binary_pred));
+  const auto first        = _THRUST_LIBCXX::make_zip_iterator(first1, first2);
+  const auto last         = _THRUST_LIBCXX::make_zip_iterator(last1, first2 + n);
+  const auto mismatch_pos = hip_rocprim::find_if_not(policy, first, last, _THRUST_LIBCXX::zip_function(binary_pred));
   const auto dist         = _THRUST_STD::distance(first, mismatch_pos);
   return _THRUST_STD::make_pair(first1 + dist, first2 + dist);
 }
