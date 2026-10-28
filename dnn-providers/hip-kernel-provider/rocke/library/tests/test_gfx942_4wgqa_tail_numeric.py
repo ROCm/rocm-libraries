@@ -22,10 +22,10 @@ import multiprocessing as mp
 
 import pytest
 
-from test_gfx942_gqa_head_fold_numeric import (
-    _load_windowed_harness,
-    requires_gfx942_gpu,
-)
+from _gpu_gate import requires_gpu
+from test_gfx942_gqa_head_fold_numeric import _load_windowed_harness
+
+requires_gfx942_gpu = requires_gpu("gfx942")
 
 TOL = 4e-2  # repo-wide bf16 attention gate
 FOUR_WARP_SPEC_ID = "gfx942_u2d_gfx942_4warp_nw1_mw32_t64_llvm"

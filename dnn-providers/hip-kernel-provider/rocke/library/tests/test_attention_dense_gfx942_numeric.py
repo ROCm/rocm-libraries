@@ -35,25 +35,13 @@ from kernels.gfx942.attention_dense import (
     supports_attention_dense,
 )
 
+from _gpu_gate import requires_gpu
+
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 
-def _gpu_ready():
-    """True only on a gfx942 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
-    target), NOT the marketing name: the whole MI300 family is gfx942, but the
-    marketing string varies (``MI300X``/``MI300A``/``MI308X``) and a substring check
-    for ``"mi300"`` silently MISSES ``MI308X`` -- the exact skip that hid this lane on
-    the first run. The arch string is stable across the family."""
-    if not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx942" in arch
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 (MI300X) GPU with ROCm torch"
-)
+requires_gfx942_gpu = requires_gpu("gfx942")
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
 

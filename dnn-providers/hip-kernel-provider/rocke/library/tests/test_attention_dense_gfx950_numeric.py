@@ -29,22 +29,13 @@ from kernels.gfx950.attention_dense import (
     supports_attention_dense,
 )
 
+from _gpu_gate import requires_gpu
+
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 
-def _gpu_ready():
-    """True only on a gfx950 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
-    target), NOT the marketing name."""
-    if not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx950" in arch
-
-
-requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
-)
+requires_gfx950_gpu = requires_gpu("gfx950")
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
 

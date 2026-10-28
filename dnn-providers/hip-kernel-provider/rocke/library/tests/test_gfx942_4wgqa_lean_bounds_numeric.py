@@ -22,21 +22,9 @@ import math
 import pytest
 from kernels.common import attention_unified as au
 
+from _gpu_gate import requires_gpu
 
-def _gpu_ready():
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    if not torch.cuda.is_available():
-        return False
-    name = torch.cuda.get_device_name(0).lower()
-    return "mi300" in name or "gfx942" in name
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
-)
+requires_gfx942_gpu = requires_gpu("gfx942")
 
 _PAD_COLS = 8
 
