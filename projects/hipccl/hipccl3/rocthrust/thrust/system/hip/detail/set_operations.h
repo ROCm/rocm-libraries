@@ -50,14 +50,10 @@
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
-#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#    include <thrust/detail/algorithm_wrapper.h>
-#  endif
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(__algorithm/max.h)
-#    include _THRUST_STD_INCLUDE(__algorithm/min.h)
-#  endif
+#  include _THRUST_STD_INCLUDE(__algorithm/max.h)
+#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(__bit/popcount.h)
 
 #  include <rocprim/rocprim.hpp>
 
@@ -460,7 +456,7 @@ struct SetOpAgent
     Size tile_output_count    = 0;
     Size thread_output_prefix = 0;
     Size tile_output_prefix   = 0;
-    Size thread_output_count  = static_cast<Size>(__popc(active_mask));
+    Size thread_output_count  = static_cast<Size>(_THRUST_STD::popcount(static_cast<unsigned>(active_mask)));
 
     if (tile_idx == 0) // first tile
     {
