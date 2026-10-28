@@ -482,7 +482,11 @@ def cmd_orient_gate(args) -> None:
         fail(f"CONTEXT.md not found: {rd / 'CONTEXT.md'}")
     docs = [rd / "CONTEXT.md", *sorted((rd / "orient").glob("*.md"))]
     cited = sorted(
-        {m.group(1) for d in docs for m in CITED_PATH.finditer(d.read_text("utf-8"))}
+        {
+            m.group(1).removeprefix("./")
+            for d in docs
+            for m in CITED_PATH.finditer(d.read_text("utf-8"))
+        }
     )
     # The tree listing needs no blobs, so a blobless clone fetches nothing.
     code, out, err = rl.git(clone, "ls-tree", "-r", "--name-only", "--full-tree", base)

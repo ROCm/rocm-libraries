@@ -323,7 +323,8 @@ from Open questions into Decisions. Run `comments.py draft "$EVIDENCE" <N>` for 
 (needs `ID-MAP.md`): an `OPEN` or `UNVERIFIED` `BLOCKING` or `IMPORTANT` finding whose first
 `Where` is `path:line` inside a changed hunk becomes an inline entry, every other one a
 `## General` item; an `UNVERIFIED` one is marked `(UNVERIFIED: <verifier's Reason>)`. An `OPEN`
-`SUGGESTION` or `FUTURE WORK` finding is one item per tier and kind. Review and edit the
+`SUGGESTION` or `FUTURE WORK` finding is its own `## General` item, below a `**<tier>: <kind>**`
+line. Review and edit the
 drafts. Re-dispatch `LEAK` for
 its output sweep ([lanes/leaks.md](lanes/leaks.md); output `$EVIDENCE/r<N>/lanes/LEAK-sweep.md`) before the user sees either file; redact each hit it reports in the output and in the published `$KNOWLEDGE` copy (the sweep reads both and fails when the copy is missing), then sweep again. Evidence subdirectories are local-only and not swept.
 `comments.py check-sweep "$EVIDENCE" <N>` exits 0 only when the sweep says `Sweep: clean` and is newer than every file it read; a later edit makes it stale.

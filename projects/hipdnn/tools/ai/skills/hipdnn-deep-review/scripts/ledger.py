@@ -174,8 +174,10 @@ def cmd_ids(a):
     counter in LEDGER.md; write ID-MAP.md; add a candidate row per new finding. IDs already
     in an existing ID-MAP.md keep their value; a SUPERSEDED-BY entry there sets the row's
     status. Fails when a report is nested below `r<k>/`, holds `ID:` lines it cannot parse,
-    reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>` is capitals and an
-    optional number) or a finding whose Tier is missing or not one of the four tiers.
+    cites its own lane's `<LANE>-p<n>` in its Findings section where no report of the round
+    parsed that finding, reports a provisional ID not of the form `<LANE>-p<n>` (`<LANE>` is
+    capitals and an optional number) or a finding whose Tier is missing or not one of the
+    four tiers.
     """
     rp = rl.round_dir(a.evidence, a.round)
     require_flat(rp)
@@ -201,10 +203,13 @@ def cmd_ids(a):
         note(r["Final ID"])
     reported = {}
     unparsed = []
+    tokens = []
     for path in rl.lane_files(rp):
         text = path.read_text(encoding="utf-8")
         if rl.unparsed_ids(text):
             unparsed.append(path.name)
+        lane = re.sub(r"-f\d+$", "", path.stem)
+        tokens += [(path.name, t) for t in rl.lane_tokens(text, lane)]
         for f in rl.parse_findings(text):
             prov = f["ID"]
             if f.get("Tier") not in rl.TIERS:
@@ -225,6 +230,14 @@ def cmd_ids(a):
         raise rl.Fail(
             f"unparsed ID: lines in {', '.join(unparsed)}: write each finding as plain "
             "labelled lines starting at column 0 (no bullet, bold or partial fence)"
+        )
+    lost = sorted(
+        f"{name}: {t}" for name, t in tokens if t not in reported and t not in mapping
+    )
+    if lost:
+        raise rl.Fail(
+            f"own-lane IDs not parsed as findings: {', '.join(lost)}: write each finding "
+            "as plain labelled lines starting at column 0"
         )
     for prov, (stem, f, prefix) in sorted(reported.items(), key=lambda kv: kv[1][0]):
         if prov not in mapping:

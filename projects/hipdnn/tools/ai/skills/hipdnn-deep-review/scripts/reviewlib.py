@@ -113,17 +113,21 @@ def is_fence(line):
     return line.lstrip().startswith("```")
 
 
-# A markdown heading or a thematic break outside fenced code ends a field's continuation.
-FIELD_END = re.compile(r"^(?:#{1,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
-# An `ID:` line in any markup a lane may wrap it in (bullet, quote, bold, inline code).
-ID_LINE = re.compile(r"^\s*(?:[-*>]\s+)?(?:\*\*|__|`)?ID(?:\*\*|__|`)?:")
+# A `##` or deeper heading or a thematic break outside fenced code ends a field's
+# continuation; a single `#` line (a shell comment) does not.
+FIELD_END = re.compile(r"^(?:#{2,6}\s|\s*(?:-{3,}|\*{3,}|_{3,})\s*$)")
+# An `ID:` line in any markup a lane may wrap it in: bullets, numbering, quotes, table
+# pipes, headings, bold, italics or inline code. Flat prefix class: linear time.
+ID_LINE = re.compile(
+    r"^[\s\-*+>|#]*(?:\d+[.)][\s\-*+>|#]*)*(?:\*\*|__|[*_`])?ID(?:\*\*|__|[*_`])?\s*:"
+)
 
 
 def parse_fields(text, labels, first="ID"):
     """Labelled-line blocks: a `<first>:` line starts a block; a later labelled line
     starts the next field; any other line (blank lines and fenced code included)
-    continues the current field, until a markdown heading or a `---` line outside fenced
-    code ends it (a later labelled line still joins the block). A fence directly before a
+    continues the current field, until a `##` or deeper heading or a `---` line outside
+    fenced code ends it (a later labelled line still joins the block). A fence directly before a
     `<first>:` line wraps the blocks up to the next bare fence outside nested code;
     neither fence is read. Returns a list of {label: value} dicts."""
     label_re = re.compile(
@@ -164,11 +168,18 @@ def parse_fields(text, labels, first="ID"):
 
 def unparsed_ids(text):
     """Number of `ID:` lines of a lane report's Findings section that parse_findings does
-    not read as a finding: marked up (bullet, quote, bold, inline code) or inside a code
-    fence that does not wrap whole blocks."""
+    not read as a finding: marked up (bullet, numbering, quote, table, heading, bold,
+    italics, inline code), spaced (`ID :`) or inside a code fence that does not wrap whole
+    blocks."""
     findings = split_sections(text).get("Findings", "")
     seen = sum(1 for line in findings.splitlines() if ID_LINE.match(line))
     return seen - len(parse_findings(text))
+
+
+def lane_tokens(text, lane):
+    """The `<lane>-p<n>` tokens of a lane report's Findings section, in any markup."""
+    findings = split_sections(text).get("Findings", "")
+    return set(re.findall(rf"(?<![A-Za-z0-9-]){re.escape(lane)}-p\d+\b", findings))
 
 
 def split_sections(text):
