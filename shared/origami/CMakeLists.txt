@@ -18,8 +18,48 @@ option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
 
+# Configure the Windows version resource (PE VERSIONINFO) embedded into
+# origami.dll. This mirrors the sibling rocBLAS/hipBLAS/hipBLASLt libraries so
+# the DLL reports file/product version metadata in its Windows file
+# properties. A resource compiler is required to compile version.rc; the
+# ROCm toolchain detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a
+# NOTREQUIRED/NOTFOUND sentinel when none is available. When no real
+# compiler is present, warn and skip the resource rather than fail
+# configuration, so the DLL still builds (without version metadata) on
+# machines lacking a resource compiler.
+if(WIN32 AND CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
+    set(ORIGAMI_VERSION_COMMIT_ID "unknown")
+    if(GIT_EXECUTABLE)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE _origami_git_commit_id
+            RESULT_VARIABLE _origami_git_result
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(_origami_git_result EQUAL 0 AND _origami_git_commit_id)
+            set(ORIGAMI_VERSION_COMMIT_ID "${_origami_git_commit_id}")
+        endif()
+    endif()
+    string(TIMESTAMP ORIGAMI_COPYRIGHT_YEAR "%Y")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/version.rc"
+        @ONLY)
+    set(_origami_have_version_rc TRUE)
+elseif(WIN32)
+    message(WARNING
+        "Origami: no Windows resource compiler (llvm-rc/rc) detected; "
+        "origami.dll will be built WITHOUT VERSIONINFO metadata. Install "
+        "the Windows SDK or make llvm-rc available (e.g. on PATH or in "
+        "the ROCm llvm/bin directory) to embed version info.")
+endif()
+
 set(BUILD_SHARED_LIBS "${ORIGAMI_BUILD_SHARED_LIBS}")
 add_library(origami)
+if(WIN32 AND BUILD_SHARED_LIBS AND _origami_have_version_rc)
+    target_sources(origami PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
+endif()
 
 rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
@@ -105,25 +145,62 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-rocm_install(TARGETS origami)
+if(ORIGAMI_INSTALL_COMPONENT)
+    rocm_install(TARGETS origami COMPONENT "${ORIGAMI_INSTALL_COMPONENT}")
 
-install(TARGETS origami-headers
-    EXPORT origami-targets
-    FILE_SET HEADERS
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    COMPONENT devel
-)
+    install(TARGETS origami-headers
+        EXPORT origami-targets
+        FILE_SET HEADERS
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+    )
 
-rocm_export_targets(
-    TARGETS
-    roc::origami
-    roc::origami-headers
-    DEPENDS
-    PACKAGE
-    hip
-    NAMESPACE
-    roc::
-)
+    set(_origami_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/origami")
+    install(EXPORT origami-targets
+        NAMESPACE roc::
+        DESTINATION "${_origami_config_dir}"
+        COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
+        INSTALL_DESTINATION "${_origami_config_dir}"
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config-version.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config-version.cmake"
+        DESTINATION "${_origami_config_dir}"
+        COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+    )
+    unset(_origami_config_dir)
+else()
+    rocm_install(TARGETS origami)
+
+    install(TARGETS origami-headers
+        EXPORT origami-targets
+        FILE_SET HEADERS
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT devel
+    )
+
+    rocm_export_targets(
+        TARGETS
+        roc::origami
+        roc::origami-headers
+        DEPENDS
+        PACKAGE
+        hip
+        NAMESPACE
+        roc::
+    )
+endif()
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     rocm_install(TARGETS origami-tests COMPONENT tests)

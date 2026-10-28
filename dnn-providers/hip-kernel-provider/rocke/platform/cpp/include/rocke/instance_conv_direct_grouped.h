@@ -12,8 +12,9 @@
  *   - 16c variant (cpg=kpg=16): one wave owns one group; mfma_f32_16x16x16_f16
  *     (and, when fold_k32=True, the wide 16x16x32 f16 atom for S=0/1). 8 waves /
  *     block, LDS double-buffered ping-pong, 3-slot circular accumulator over H.
- *   - 4c  variant (cpg=kpg=4): mfma_f32_4x4x4_f16 emits 16 independent 4x4x4
- *     matmuls per wave, mapping one wave to 16 groups at once. No LDS staging;
+ *   - 4c  variant (cpg=kpg=4): mfma_f32_4x4x4_f16 (bf16 I/O: mfma_f32_4x4x4_bf16)
+ *     emits 16 independent 4x4x4 matmuls per wave, mapping one wave to 16 groups
+ *     at once. No LDS staging;
  *     per-lane register inputs only.
  *
  *   Python (conv_direct_grouped.py)        C99 (this header)
@@ -31,7 +32,12 @@
  *   is_valid_spec_4c(spec, arch)             rocke_direct_conv_4c_is_valid_spec
  *   build_direct_conv_16c(spec, arch)        rocke_build_direct_conv_16c
  *   build_direct_conv_4c(spec, arch)         rocke_build_direct_conv_4c
- *   (+ convenience: build -> lower .ll)      rocke_direct_conv_{16c,4c}_lower_to_llvm
+ *   @dataclass(frozen) DirectConvSpec        rocke_direct_conv_spec_t
+ *   is_valid_spec(spec, arch)                rocke_direct_conv_is_valid_spec
+ *   build_direct_conv(spec, arch)            rocke_build_direct_conv
+ *   build_direct_transpose_weights_dgrad     rocke_build_direct_transpose_weights_dgrad_new
+ *   build_direct_reorganize_weights          rocke_build_direct_reorganize_weights_new
+ *   (+ convenience: build -> lower .ll)      rocke_direct_conv_{,16c,4c}_lower_to_llvm
  *
  * SPEC AS EXPLICIT C STRUCTS. The frozen Python dataclasses become value
  * structs; rocke_direct_conv_problem_default() / rocke_direct_conv_16c_spec_default()
@@ -76,11 +82,12 @@ struct rocke_arena; /* fwd (rocke/arena.h)                      */
  *  class DirectConvProblem:
  *      N, H, W, groups, cpg, kpg          # required
  *      KH=3, KW=3, PAD=1, stride=1
+ *      dtype="fp16"                        # "fp16" or "bf16"
  *
  *  Layouts:
- *    A: NHWC fp16, [N, H, W, groups*cpg]
- *    B: KRSC fp16, [groups*kpg, KH, KW, cpg]
- *    D: NHWK fp16, [N, H, W, groups*kpg]
+ *    A: NHWC, [N, H, W, groups*cpg]
+ *    B: KRSC, [groups*kpg, KH, KW, cpg]
+ *    D: NHWK, [N, H, W, groups*kpg]
  * ===================================================================== */
 typedef struct rocke_direct_conv_problem
 {
@@ -94,10 +101,19 @@ typedef struct rocke_direct_conv_problem
     int KW; /* default 3 */
     int PAD; /* default 1 */
     int stride; /* default 1 */
+    const char* dtype; /* "fp16" or "bf16"; NULL is treated as "fp16" by all
+                        * build functions.  Always set this field explicitly or
+                        * use rocke_direct_conv_problem_default() which sets it
+                        * to "fp16".  Zero-initialising the struct leaves dtype
+                        * NULL, which silently selects fp16 and will silently
+                        * drop a bf16 request. */
+    int dil_h; /* default 1; filter dilation, honoured by the non-grouped */
+    int dil_w; /* forward kernel only (every other variant rejects it)   */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
- * six required dims zeroed. Caller fills N,H,W,groups,cpg,kpg. */
+ * six required dims zeroed.  dtype is initialised to "fp16".
+ * Caller fills N,H,W,groups,cpg,kpg; override dtype for bf16. */
 rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void);
 
 /* @property total_c -> groups * cpg. */
@@ -148,25 +164,27 @@ int rocke_direct_conv_16c_n_acc_slots(const rocke_direct_conv_16c_spec_t* spec);
 
 /* kernel_name():
  *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
- *                    "db" if double_buffer else "sb", flags={"k32": fold_k32})
+ *                    "db" if double_buffer else "sb",
+ *                    flags={"k32": fold_k32, "bf16": problem.dtype=="bf16"})
  * Writes NUL-terminated into out (capacity out_cap). */
 rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spec_t* spec,
                                                  char* out,
                                                  size_t out_cap);
 
 /* validate(): the hard assertions of DirectConv16cSpec.validate (cpg==kpg==16,
- * groups % block_groups == 0). On a violated invariant returns ROCKE_ERR_VALUE and
- * (if reason non-NULL, cap reason_cap) writes the message; else ROCKE_OK. */
+ * groups % block_groups == 0, dtype in {"fp16","bf16"}). On a violated invariant
+ * returns ROCKE_ERR_VALUE and (if reason non-NULL, cap reason_cap) writes the
+ * message; else ROCKE_OK. */
 rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t* spec,
                                               char* reason,
                                               size_t reason_cap);
 
 /* is_valid_spec_16c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Checks: ArchTarget.from_gfx(arch) resolves; cpg==kpg==16; groups % block_groups
- * == 0; the 16x16x16 f16 MFMA atom present on arch; and when fold_k32 the
- * 16x16x32 f16 atom present on arch (absent on gfx942 -> clean reject). On reject
- * writes the reason (if non-NULL) and returns false; on accept writes "ok",
- * returns true. */
+ * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {"fp16","bf16"};
+ * cpg==kpg==16; groups % block_groups == 0; the 16x16x16 {f16,bf16} MFMA atom
+ * present on arch; and when fold_k32 the 16x16x32 {f16,bf16} atom present on arch
+ * (absent on gfx942 -> clean reject). On reject writes the reason (if non-NULL)
+ * and returns false; on accept writes "ok", returns true. */
 bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spec,
                                          const char* arch,
                                          char* reason,
@@ -182,6 +200,10 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
  *      block_q: int = 4
  *      block_groups: int = 16
  *      wave_size: int = 64
+ *      dgrad_fused_weights: bool = False
+ *      dgrad_weights_lds: bool = False
+ *      stage_rows: bool = False
+ *      waves_q: int = 1
  * ===================================================================== */
 typedef struct rocke_direct_conv_4c_spec
 {
@@ -190,38 +212,560 @@ typedef struct rocke_direct_conv_4c_spec
     int block_q; /* default 4  */
     int block_groups; /* default 16 */
     int wave_size; /* default 64 */
+    /* Dgrad only: B is the original weight W[groups*cpg, KH, KW, kpg] and the
+     * prologue builds the flipped, k<->c transposed fragments itself. */
+    bool dgrad_fused_weights; /* default false */
+    /* With dgrad_fused_weights: stage W in LDS and use ds_read_b64_tr_b16
+     * instead of per-element gathers (needs has_ds_read_tr). */
+    bool dgrad_weights_lds; /* default false */
+    /* Row-staged dgrad form (needs dgrad_fused_weights + dgrad_weights_lds and
+     * a stride-1 'same'-padded filter): the workgroup's input row is copied
+     * to a double-buffered padded LDS row with 16-byte loads, one row ahead,
+     * and the waves read their B fragments with ds_read_b64. The rows stream
+     * through a runtime loop bounded by p_Hi. */
+    bool stage_rows; /* default false */
+    /* stage_rows only: waves along q (4 columns each); block_q == 4*waves_q. */
+    int waves_q; /* default 1 */
 } rocke_direct_conv_4c_spec_t;
 
 /* Default 4c spec (name "direct_conv_4c", block_q 4, block_groups 16,
  * wave_size 64, problem == default()). */
 rocke_direct_conv_4c_spec_t rocke_direct_conv_4c_spec_default(void);
 
-/* @property threads_per_block -> (block_groups // 16) * wave_size. */
+/* @property threads_per_block -> (block_groups // 16) * waves_q * wave_size. */
 int rocke_direct_conv_4c_threads_per_block(const rocke_direct_conv_4c_spec_t* spec);
 
 /* kernel_name():
- *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}")
+ *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
+ *                    flags={"bf16": dtype == "bf16",
+ *                           "fw": dgrad_fused_weights and not dgrad_weights_lds,
+ *                           "fwl": dgrad_fused_weights and dgrad_weights_lds,
+ *                           f"sr{waves_q}": stage_rows})
  * Writes NUL-terminated into out (capacity out_cap). */
 rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_t* spec,
                                                 char* out,
                                                 size_t out_cap);
 
-/* validate(): the hard assertions of DirectConv4cSpec.validate (cpg==kpg==4,
- * block_groups % 16 == 0, block_q % 4 == 0, groups % block_groups == 0). On a
+/* validate(): the hard assertions of DirectConv4cSpec.validate (dtype in
+ * {fp16, bf16}, cpg==kpg==4, block_groups % 16 == 0, block_q % 4 == 0,
+ * groups % block_groups == 0, dgrad_weights_lds implies dgrad_fused_weights,
+ * and the stage_rows / waves_q rules of rocke_dconv4c_stage_rows_reject). On a
  * violated invariant returns ROCKE_ERR_VALUE + (reason if non-NULL); else ROCKE_OK. */
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
                                              char* reason,
                                              size_t reason_cap);
 
 /* is_valid_spec_4c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
- * Checks: ArchTarget.from_gfx(arch) resolves; cpg==kpg==4; block_groups % 16 == 0;
- * block_q % 4 == 0; groups % block_groups == 0. The 4x4x4 f16 atom is NOT gated
+ * Checks: ArchTarget.from_gfx(arch) resolves; dtype in {fp16, bf16}; "same"
+ * padding; stride 1; cpg==kpg==4; block_groups % 16 == 0; block_q % 4 == 0;
+ * groups % block_groups == 0; KH*KW <= ROCKE_DCONV4C_MAX_TAPS; the stage_rows
+ * / waves_q rules; dgrad_weights_lds needs dgrad_fused_weights, a target with
+ * ds_read_tr and at most ROCKE_DCONV4C_MAX_WL_PASSES staging passes;
+ * stage_rows needs at most ROCKE_DCONV4C_MAX_ROW_PASSES row passes and fits
+ * the target's LDS. The 4x4x4 f16 / bf16 (_1k) atom is NOT gated
  * through has_shape (catalog lists only warp tiles; comgr selects it on both
  * targets). On reject writes the reason and returns false; else "ok" + true. */
 bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
                                         const char* arch,
                                         char* reason,
                                         size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectConv8cSpec  (cpg = kpg = 8)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectConv8cSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_conv_8c"
+ *      block_q: int = 16
+ *      block_groups: int = 8
+ *      wave_size: int = 64
+ *      double_buffer: bool = True
+ * ===================================================================== */
+typedef struct rocke_direct_conv_8c_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_conv_8c" */
+    int block_q; /* default 16 */
+    int block_groups; /* default 8  */
+    int wave_size; /* default 64 */
+    bool double_buffer; /* default true */
+} rocke_direct_conv_8c_spec_t;
+
+rocke_direct_conv_8c_spec_t rocke_direct_conv_8c_spec_default(void);
+int rocke_direct_conv_8c_threads_per_block(const rocke_direct_conv_8c_spec_t* spec);
+rocke_status_t rocke_direct_conv_8c_kernel_name(const rocke_direct_conv_8c_spec_t* spec,
+                                                char* out,
+                                                size_t out_cap);
+rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* spec,
+                                             char* reason,
+                                             size_t reason_cap);
+bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
+                                        const char* arch,
+                                        char* reason,
+                                        size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectConv32cSpec  (cpg = kpg = 32)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectConv32cSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_conv_32c"
+ *      block_q: int = 32
+ *      block_groups: int = 4
+ *      wave_size: int = 64
+ *      double_buffer: bool = True
+ * ===================================================================== */
+typedef struct rocke_direct_conv_32c_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_conv_32c" */
+    int block_q; /* default 32 */
+    int block_groups; /* default 4  */
+    int wave_size; /* default 64 */
+    bool double_buffer; /* default true */
+} rocke_direct_conv_32c_spec_t;
+
+rocke_direct_conv_32c_spec_t rocke_direct_conv_32c_spec_default(void);
+int rocke_direct_conv_32c_threads_per_block(const rocke_direct_conv_32c_spec_t* spec);
+rocke_status_t rocke_direct_conv_32c_kernel_name(const rocke_direct_conv_32c_spec_t* spec,
+                                                 char* out,
+                                                 size_t out_cap);
+rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t* spec,
+                                              char* reason,
+                                              size_t reason_cap);
+bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spec,
+                                         const char* arch,
+                                         char* reason,
+                                         size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectDepthwiseSpec  (cpg = kpg = 1, scalar FMA, no MFMA)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise"
+ *      block_w: int = 8
+ *      block_waves: int = 1
+ *      wave_size: int = 64
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise" */
+    int block_w; /* default 8  */
+    int block_waves; /* default 1  */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_spec_t;
+
+rocke_direct_depthwise_spec_t rocke_direct_depthwise_spec_default(void);
+/* @property threads_per_block -> block_waves * wave_size */
+int rocke_direct_depthwise_threads_per_block(const rocke_direct_depthwise_spec_t* spec);
+/* @property block_ch -> block_waves * wave_size */
+int rocke_direct_depthwise_block_ch(const rocke_direct_depthwise_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_spec_t* spec,
+                                                  char* out,
+                                                  size_t out_cap);
+rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec_t* spec,
+                                               char* reason,
+                                               size_t reason_cap);
+bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* spec,
+                                          const char* arch,
+                                          char* reason,
+                                          size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectDepthwiseColSpec  (cpg = kpg = 1, column-streamed, no MFMA)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseColSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_col"
+ *      block_w: int = 1
+ *      block_waves: int = 1
+ *      wave_size: int = 64
+ *      dtype: str = "fp16"
+ *      max_live_f32: Optional[int] = None
+ *      block_h: int = 16
+ *
+ *  Loop order s (runtime scf.for over KW) -> y (unrolled input rows of one
+ *  block_h-row output tile) -> r (unrolled over KH), so live f32 per lane is
+ *  block_h*block_w + KH -- linear in KH and independent of KW, unlike the
+ *  preload sibling's KH*KW + KH*block_w.  AOT: block_h is the build-time
+ *  capability, the image extents are kernargs.
+ *  Grid: (ceil(Wo / block_w), ceil(groups / block_ch), N * ceil(Ho / block_h)).
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_col_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_col" */
+    int block_w; /* default 1  */
+    int block_waves; /* default 1  */
+    int wave_size; /* default 64 */
+    const char* dtype; /* default "fp16"; one of fp16 / bf16 */
+    /* Python's Optional[int] max_live_f32.
+     * 0  = sentinel for Python None: use the arch VGPR budget as-is.
+     * >0 = tighten via min(max_live_f32, arch_budget).
+     * <0 = invalid; is_valid_spec() will reject it. */
+    int max_live_f32;
+    int block_h; /* default 16; output rows per block (the unrolled row tile) */
+} rocke_direct_depthwise_col_spec_t;
+
+rocke_direct_depthwise_col_spec_t rocke_direct_depthwise_col_spec_default(void);
+/* @property threads_per_block / block_ch -> block_waves * wave_size */
+int rocke_direct_depthwise_col_threads_per_block(const rocke_direct_depthwise_col_spec_t* spec);
+int rocke_direct_depthwise_col_block_ch(const rocke_direct_depthwise_col_spec_t* spec);
+/* @property n_iters -> (block_h - 1) * problem.stride + problem.KH */
+int rocke_direct_depthwise_col_n_iters(const rocke_direct_depthwise_col_spec_t* spec);
+/* @property live_f32 -> block_h * block_w + problem.KH */
+int rocke_direct_depthwise_col_live_f32(const rocke_direct_depthwise_col_spec_t* spec);
+/* resolve_max_live_f32(arch) -> min(spec.max_live_f32, vgprs * 3 // 8) when the
+ * override is set, else the budget. Returns 0 on unknown arch. */
+int rocke_direct_depthwise_col_resolve_max_live_f32(const rocke_direct_depthwise_col_spec_t* spec,
+                                                    const char* arch);
+/* dtype_tag() -> the IR scalar name ("f16"/"bf16") when the dtype string
+ * resolves, else the string with non-alphanumerics replaced by '_'. */
+rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise_col_spec_t* spec,
+                                                    char* out,
+                                                    size_t out_cap);
+rocke_status_t rocke_direct_depthwise_col_kernel_name(const rocke_direct_depthwise_col_spec_t* spec,
+                                                      char* out,
+                                                      size_t out_cap);
+rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_col_spec_t* spec,
+                                                   char* reason,
+                                                   size_t reason_cap);
+bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_spec_t* spec,
+                                              const char* arch,
+                                              char* reason,
+                                              size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectDepthwiseSpatialSpec  (cpg = kpg = 1, groups <= wave_size)
+ *
+ *  Thread layout: ch = tid % groups, w_in_wave = tid // groups.
+ *  Each wave covers n_w_per_wave = wave_size // groups output W positions.
+ *  block_w = block_waves * n_w_per_wave.
+ *  Grid: (ceil(Wo / block_w), 1, N) — no channel tile.
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_spatial_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_spatial" */
+    int block_waves; /* default 1  */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_spatial_spec_t;
+
+rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);
+int rocke_direct_depthwise_spatial_n_w_per_wave(const rocke_direct_depthwise_spatial_spec_t* spec);
+int rocke_direct_depthwise_spatial_block_w(const rocke_direct_depthwise_spatial_spec_t* spec);
+int rocke_direct_depthwise_spatial_threads_per_block(
+    const rocke_direct_depthwise_spatial_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap);
+bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_spatial_spec_t* spec,
+                                                  const char* arch,
+                                                  char* reason,
+                                                  size_t reason_cap);
+rocke_status_t rocke_direct_depthwise_spatial_validate(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* reason, size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectDepthwiseTiledSpec  (cpg = kpg = 1, output-stationary)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseTiledSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_tiled"
+ *      block_w: int = 8
+ *      block_h: int = 4
+ *      block_waves: int = 1
+ *      unroll_rows: bool = False
+ *      wave_size: int = 64
+ *
+ *  A block owns a block_h x block_w output tile of block_ch channels; a
+ *  runtime loop walks the filter rows with one weight row and a sliding
+ *  window of input rows in registers.
+ *  Grid: (ceil(Wo / block_w), ceil(C / block_ch), N * ceil(Ho / block_h)).
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_tiled_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_tiled" */
+    int block_w; /* default 8  */
+    int block_h; /* default 4  */
+    int block_waves; /* default 1  */
+    bool unroll_rows; /* default false */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_tiled_spec_t;
+
+/* Register budget and unrolled-FMA cap (Python: _DW_TILED_REG_BUDGET /
+ * _DW_TILED_UNROLL_MAX_FMAS). */
+#define ROCKE_DCONV_DW_TILED_REG_BUDGET 256
+#define ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS 6144
+
+rocke_direct_depthwise_tiled_spec_t rocke_direct_depthwise_tiled_spec_default(void);
+int rocke_direct_depthwise_tiled_threads_per_block(const rocke_direct_depthwise_tiled_spec_t* spec);
+int rocke_direct_depthwise_tiled_block_ch(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property n_cols -> (block_w - 1) * stride + KW */
+int rocke_direct_depthwise_tiled_n_cols(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property live_regs -> block_h * block_w + block_h * n_cols + 2 * KW */
+int rocke_direct_depthwise_tiled_live_regs(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property unrolled_fmas -> KH * block_h * block_w * KW */
+int rocke_direct_depthwise_tiled_unrolled_fmas(const rocke_direct_depthwise_tiled_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
+    const rocke_direct_depthwise_tiled_spec_t* spec, char* out, size_t out_cap);
+rocke_status_t rocke_direct_depthwise_tiled_validate(
+    const rocke_direct_depthwise_tiled_spec_t* spec, char* reason, size_t reason_cap);
+bool rocke_direct_depthwise_tiled_is_valid_spec(const rocke_direct_depthwise_tiled_spec_t* spec,
+                                                const char* arch,
+                                                char* reason,
+                                                size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectConvDgradSpec  (grouped dgrad: scalar FMA, any cpg/kpg, stride>=1)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectConvDgradSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_conv_dgrad"
+ *      block_q: int = 16       # input W positions per block
+ *      block_groups: int = 8   # waves per workgroup (one group per wave)
+ *      wave_size: int = 64
+ *
+ *  Grid: (ceil(Wi / block_q), ceil(total_c / (block_groups * wave_size)), N)
+ *  Block: (block_groups * wave_size, 1, 1)
+ * ===================================================================== */
+typedef struct rocke_direct_conv_dgrad_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_conv_dgrad" */
+    int block_q; /* default 16 */
+    int block_groups; /* default 8  */
+    int wave_size; /* default 64 */
+} rocke_direct_conv_dgrad_spec_t;
+
+rocke_direct_conv_dgrad_spec_t rocke_direct_conv_dgrad_spec_default(void);
+int rocke_direct_conv_dgrad_threads_per_block(const rocke_direct_conv_dgrad_spec_t* spec);
+rocke_status_t rocke_direct_conv_dgrad_kernel_name(const rocke_direct_conv_dgrad_spec_t* spec,
+                                                   char* out,
+                                                   size_t out_cap);
+rocke_status_t rocke_direct_conv_dgrad_validate(const rocke_direct_conv_dgrad_spec_t* spec,
+                                                char* reason,
+                                                size_t reason_cap);
+bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t* spec,
+                                           const char* arch,
+                                           char* reason,
+                                           size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectDepthwiseDgradSpec  (cpg=kpg=1 dgrad, scalar FMA, any stride)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseDgradSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_dgrad"
+ *      block_w: int = 8
+ *      block_waves: int = 1
+ *      wave_size: int = 64
+ *
+ *  Grid: (ceil(Wi / block_w), ceil(groups / block_ch), N)
+ *  Block: (block_waves * wave_size, 1, 1)
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_dgrad_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_dgrad" */
+    int block_w; /* default 8  */
+    int block_waves; /* default 1  */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_dgrad_spec_t;
+
+rocke_direct_depthwise_dgrad_spec_t rocke_direct_depthwise_dgrad_spec_default(void);
+int rocke_direct_depthwise_dgrad_threads_per_block(const rocke_direct_depthwise_dgrad_spec_t* spec);
+int rocke_direct_depthwise_dgrad_block_ch(const rocke_direct_depthwise_dgrad_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_dgrad_kernel_name(
+    const rocke_direct_depthwise_dgrad_spec_t* spec, char* out, size_t out_cap);
+rocke_status_t rocke_direct_depthwise_dgrad_validate(
+    const rocke_direct_depthwise_dgrad_spec_t* spec, char* reason, size_t reason_cap);
+bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgrad_spec_t* spec,
+                                                const char* arch,
+                                                char* reason,
+                                                size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectDepthwiseDgradWindowedSpec  (cpg=kpg=1 dgrad, stride 1, windowed)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseDgradWindowedSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_dgrad_win"
+ *      block_w: int = 8
+ *      block_waves: int = 1
+ *      ch_per_lane: int = 1
+ *      block_h: int = 8          # dX rows per block (a tile; must be > 0)
+ *      dot2: bool = False        # fdot2 tap pairs (gfx950)
+ *      mfma: bool = False        # Toeplitz MFMA form (gfx950)
+ *      w_fold: int = 1           # images per MFMA tile (mfma only)
+ *      prefetch_rows: int = 1    # dY rows in flight (mfma only)
+ *      wave_size: int = 64
+ *
+ *  AOT: takes the direct dgrad kernarg block (N, H, W, Ho, Wo, groups and the
+ *  dY/dX strides are runtime); KH, KW and PAD are baked.
+ *  Grid (VALU):  (ceil(W / block_w), ceil(groups / block_ch), N * ceil(H / block_h))
+ *  Grid (mfma):  (ceil(W / tile_w), ceil(groups / block_ch),
+ *                 ceil(N / w_fold) * ceil(H / block_h))
+ * ===================================================================== */
+#define ROCKE_DW_DGRAD_WIN_MAX_UNROLL (1 << 15)
+#define ROCKE_DW_DGRAD_WIN_OOB_LANE (1 << 30)
+#define ROCKE_DW_DGRAD_WIN_OOB_UNIFORM ((1 << 30) - 1)
+#define ROCKE_DW_DGRAD_WIN_MAX_TENSOR_BYTES ((1 << 30) - 1)
+#define ROCKE_DW_DGRAD_MFMA_CH 8
+#define ROCKE_DW_DGRAD_MFMA_MAX_UNROLL 512
+#define ROCKE_DW_DGRAD_MFMA_MAX_WAVES 8
+#define ROCKE_DW_DGRAD_MFMA_MAX_FRAG_VGPRS 224
+#define ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS 4
+#define ROCKE_DW_DGRAD_MFMA_LDS_BUDGET (64 * 1024)
+
+typedef struct rocke_direct_depthwise_dgrad_win_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_dgrad_win" */
+    int block_w; /* default 8 */
+    int block_waves; /* default 1 */
+    int ch_per_lane; /* default 1 */
+    int block_h; /* default 8 */
+    bool dot2; /* default false */
+    bool mfma; /* default false */
+    int w_fold; /* default 1 */
+    int prefetch_rows; /* default 1 */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_dgrad_win_spec_t;
+
+rocke_direct_depthwise_dgrad_win_spec_t rocke_direct_depthwise_dgrad_win_spec_default(void);
+int rocke_direct_depthwise_dgrad_win_threads_per_block(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_block_ch(const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_tile_w(const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+long long rocke_direct_depthwise_dgrad_win_unrolled_fmas(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+int rocke_direct_depthwise_dgrad_win_mfma_lds_bytes(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_dgrad_win_kernel_name(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec, char* out, size_t out_cap);
+bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
+    const rocke_direct_depthwise_dgrad_win_spec_t* spec,
+    const char* arch,
+    char* reason,
+    size_t reason_cap);
+
+/* ===================================================================== *
+ *  DirectConvWgradSpec  (backward-weights, dW = dY^T * X)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectConvWgradSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_conv_wgrad"
+ *      wave_tile_k: int = 16
+ *      wave_tile_c: int = 16
+ *      waves_k: int = 1
+ *      waves_c: int = 1
+ *      waves_q: int = 1
+ *      wave_size: int = 64
+ *      ho_per_block: int = 4
+ *      mfma_k: int = 32
+ *      runtime_channels: bool = False
+ *
+ *  Computes dW[k, r, s, c] = sum_{n,ho,wo} dY[n,ho,wo,k] * X[n,hi,wi,c] with
+ *  one block owning every (r, s) filter tap: the dY row ring is reused KH times
+ *  and one LDS S-row strip serves all KW s-taps. dW is fp32 and reached by
+ *  global_atomic_add, so the caller must zero it before launch.
+ *
+ *  ABI note: D is a `ptr<f32, global>` here (the other five variants take
+ *  `ptr<f16, global>`); the argument names and order are still those of
+ *  rocke_conv_direct_arg_names().
+ * ===================================================================== */
+typedef struct rocke_direct_conv_wgrad_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_conv_wgrad" */
+    int wave_tile_k; /* default 16 -- K output channels per wave (MFMA M) */
+    int wave_tile_c; /* default 16 -- C input channels per wave (MFMA N)  */
+    int waves_k; /* default 1  -- waves along K                       */
+    int waves_c; /* default 1  -- waves along C                       */
+    int waves_q; /* default 1  -- waves along Q (one wo_tile each)    */
+    int wave_size; /* default 64 */
+    int ho_per_block; /* default 4  -- output rows per block               */
+    int mfma_k; /* default 32 -- MFMA K-inner: 16 or 32             */
+    /* default 0 -- nonzero: cpg/kpg come from p_total_c/p_groups and
+     * p_total_k/p_groups at run time instead of being baked; the kernel name
+     * gains the "rtc" flag. Mirrors DirectConvWgradSpec.runtime_channels. */
+    int runtime_channels;
+} rocke_direct_conv_wgrad_spec_t;
+
+/* Largest filter this variant accepts. The C++ engine holds the per-tap
+ * accumulators and the delta ring in fixed-size arrays sized by these, so the
+ * cap is part of the SPEC contract and is enforced by both validators (Python:
+ * _WGRAD_MAX_KH / _WGRAD_MAX_KW) -- otherwise a KH=9 spec would build under
+ * Python and fail to build here. */
+#define ROCKE_DCONV_WGRAD_MAX_KH 8
+#define ROCKE_DCONV_WGRAD_MAX_KW 8
+
+/* Largest filter the depthwise forward variants (regular and spatial) accept.
+ * Their builders hold the KH x KW weights in fixed-size register tables sized
+ * by these, so both validators enforce the cap (Python: _DW_MAX_KH /
+ * _DW_MAX_KW) and a validated spec always builds. */
+#define ROCKE_DCONV_DW_MAX_KH 32
+#define ROCKE_DCONV_DW_MAX_KW 32
+
+rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void);
+
+/* @property block_k -> waves_k * wave_tile_k. */
+int rocke_direct_conv_wgrad_block_k(const rocke_direct_conv_wgrad_spec_t* spec);
+/* @property block_c -> waves_c * wave_tile_c. */
+int rocke_direct_conv_wgrad_block_c(const rocke_direct_conv_wgrad_spec_t* spec);
+/* @property threads_per_block -> waves_k * waves_c * waves_q * wave_size. */
+int rocke_direct_conv_wgrad_threads_per_block(const rocke_direct_conv_wgrad_spec_t* spec);
+/* @property wo_block -> mfma_k (output columns per MFMA chunk). */
+int rocke_direct_conv_wgrad_wo_block(const rocke_direct_conv_wgrad_spec_t* spec);
+/* n_ho_blocks() -> ceil(problem.H / ho_per_block).
+ * Sized on the INPUT height: the builder decodes `by` as an input-row block
+ * (hi_block_start = by * ho_per_block) and the row loop walks hi. H and Ho
+ * coincide only when 2*PAD == KH-1, so sizing on Ho would leave the last input
+ * rows unvisited. */
+int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* spec);
+/* n_wo_tiles() -> ceil(Wo / wo_block). */
+int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spec);
+/* n_q_blocks() -> ceil(n_wo_tiles / waves_q). */
+int rocke_direct_conv_wgrad_n_q_blocks(const rocke_direct_conv_wgrad_spec_t* spec);
+
+/* kernel_name():
+ *   kernel_name_join(name, problem.short(), f"bk{block_k}", f"bc{block_c}",
+ *                    f"hpb{ho_per_block}", f"mk{mfma_k}",
+ *                    flags={"wq": waves_q} if waves_q > 1 else {},
+ *                    + "bf16" for a bf16 problem, + "rtc" for runtime_channels) */
+rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                   char* out,
+                                                   size_t out_cap);
+
+/* validate(): the hard assertions of DirectConvWgradSpec.validate. */
+rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                char* reason,
+                                                size_t reason_cap);
+
+/* is_valid_wgrad_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
+ * Adds to validate()'s checks: the arch resolves, the 16x16x16 f16 MFMA atom is
+ * present, the 16x16x32 f16 atom is present when mfma_k == 32, and the target
+ * has ds_read_tr16_b64 (gfx950+) for the LDS transpose staging. */
+bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t* spec,
+                                           const char* arch,
+                                           char* reason,
+                                           size_t reason_cap);
 
 /* ===================================================================== *
  *  BUILD ENTRIES
@@ -253,19 +797,251 @@ rocke_kernel_def_t* rocke_build_direct_conv_4c_new(rocke_ir_builder_t* b,
                                                    const rocke_direct_conv_4c_spec_t* spec,
                                                    const char* arch);
 
-/* ===================================================================== *
- *  SIGNATURE (manifest)  --  both kernels share the 6-entry ABI:
- *    ptr A:f16, ptr B:f16, ptr D:f16, scalar A_bytes:i32, B_bytes:i32,
- *    D_bytes:i32.
- * ===================================================================== */
+/* build_direct_conv_8c(spec, arch). Same contract as 16c, for the 8c variant
+ * (mfma_f32_16x16x16_f16 with s-fold into K=16). */
+rocke_kernel_def_t* rocke_build_direct_conv_8c(rocke_ir_builder_t* b,
+                                               const rocke_direct_conv_8c_spec_t* spec,
+                                               const char* arch);
+rocke_kernel_def_t* rocke_build_direct_conv_8c_new(rocke_ir_builder_t* b,
+                                                   const rocke_direct_conv_8c_spec_t* spec,
+                                                   const char* arch);
 
-/* Writes the 6 manifest entries into out[] (capacity out_cap) and sets
- * *out_count = 6. Strings live in `arena`. Returns ROCKE_OK or ROCKE_ERR_VALUE
- * (NULL args / out_cap < 6). One signature serves both 16c and 4c. */
-rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
-                                           struct rocke_sig_entry* out,
-                                           size_t out_cap,
-                                           size_t* out_count);
+/* build_direct_conv_32c(spec, arch). Same contract for the 32c variant
+ * (mfma_f32_32x32x8_f16, 4 atoms per (r,s), 16 acc slots per lane). */
+rocke_kernel_def_t* rocke_build_direct_conv_32c(rocke_ir_builder_t* b,
+                                                const rocke_direct_conv_32c_spec_t* spec,
+                                                const char* arch);
+rocke_kernel_def_t* rocke_build_direct_conv_32c_new(rocke_ir_builder_t* b,
+                                                    const rocke_direct_conv_32c_spec_t* spec,
+                                                    const char* arch);
+
+/* build_direct_depthwise(spec, arch). Scalar FMA depthwise kernel (cpg=kpg=1).
+ * No MFMA; each lane owns one channel. */
+rocke_kernel_def_t* rocke_build_direct_depthwise(rocke_ir_builder_t* b,
+                                                 const rocke_direct_depthwise_spec_t* spec,
+                                                 const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_new(rocke_ir_builder_t* b,
+                                                     const rocke_direct_depthwise_spec_t* spec,
+                                                     const char* arch);
+
+/* build_direct_depthwise_col(spec, arch). Column-streamed depthwise kernel
+ * (cpg=kpg=1). The KW axis is a runtime scf.for whose iter_args carry the
+ * block_h x block_w accumulator band, so register pressure is independent of
+ * KW. AOT: takes the direct-conv kernarg block of rocke_conv_direct_arg_names. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_col(rocke_ir_builder_t* b,
+                                                     const rocke_direct_depthwise_col_spec_t* spec,
+                                                     const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_col_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_col_spec_t* spec, const char* arch);
+
+/* build_direct_depthwise_spatial(spec, arch). Small-group spatial depthwise kernel
+ * (cpg=kpg=1, groups <= wave_size). Thread layout: ch=tid%groups, w=tid//groups. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_spatial_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_spatial_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_spatial_spec_t* spec, const char* arch);
+
+/* build_direct_depthwise_tiled(spec, arch). Output-stationary depthwise kernel
+ * (cpg=kpg=1): runtime filter-row loop, one weight row in registers. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_tiled_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_tiled_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_tiled_spec_t* spec, const char* arch);
+
+/* build_direct_conv_dgrad(spec, arch). Grouped dgrad scalar FMA kernel.
+ * Computes dX[n,hi,wi,c] = sum_{r,s,k} dY[n,ho,wo,k] * W[k,r,s,c].
+ * No MFMA; each thread owns one (c_in, wi) and loops over k_out. */
+rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
+                                                  const rocke_direct_conv_dgrad_spec_t* spec,
+                                                  const char* arch);
+rocke_kernel_def_t* rocke_build_direct_conv_dgrad_new(rocke_ir_builder_t* b,
+                                                      const rocke_direct_conv_dgrad_spec_t* spec,
+                                                      const char* arch);
+
+/* build_direct_depthwise_dgrad(spec, arch). Scalar FMA depthwise dgrad kernel
+ * (cpg=kpg=1). Each lane owns one channel and loops over (r,s) taps. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
+
+/* build_direct_depthwise_dgrad_windowed(spec, arch). Windowed depthwise dgrad
+ * (stride 1, cpg=kpg=1): a block streams the dY rows of a tile of block_h dX
+ * rows once each; VALU, fdot2 or Toeplitz MFMA form. _new validates the spec
+ * (as the Python builder does) and names the kernel. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch);
+
+/* build_direct_conv_wgrad(spec, arch). Same contract as the 16c entry for the
+ * backward-weights kernel (delta register ring + S-row strip, fp32 atomic dW). */
+rocke_kernel_def_t* rocke_build_direct_conv_wgrad(rocke_ir_builder_t* b,
+                                                  const rocke_direct_conv_wgrad_spec_t* spec,
+                                                  const char* arch);
+rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
+                                                      const rocke_direct_conv_wgrad_spec_t* spec,
+                                                      const char* arch);
+
+/* ===================================================================== *
+ *  DirectConvSpec  (parametric: any cpg that is a multiple of 4)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectConvSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_conv"
+ *      block_q: int = 16
+ *      block_groups: int = 8
+ *      wave_size: int = 64
+ *      double_buffer: bool = True
+ *      block_h: int = 16
+ *      waves_q: int = 1
+ *      waves_k: int = 1
+ *      runtime_k_loop: bool = False
+ *      persistent_grid: bool = False
+ *      persistent_rounds: int = 64
+ *      fold_k32: bool = False
+ *      runtime_channels: bool = False
+ *      k_atoms: int = 0
+ *      m_tiles: int = 0
+ *      preload_weights: bool = False
+ *      dgrad_fused_weights: bool = False
+ *      dgrad_weights_lds: bool = False
+ *      waves_per_eu: int = 0
+ *      row_guard: bool = False
+ *      prefetch_rows: int = 0
+ *      lds_only_sync: bool = False
+ *      waves_m: int = 1
+ *      xcd_tiles: bool = False
+ *      lds_pad: int = 0
+ *      stage_out: bool = False
+ *      row_exit: bool = False
+ *
+ *  The forward kernel the MFMA dgrad pipeline runs on the transposed problem.
+ *  With runtime_channels the per-group channel counts come from
+ *  p_total_c / p_groups and p_total_k / p_groups; the binary bakes only the
+ *  K-atom and M-tile counts (k_atoms / m_tiles) they round up to.
+ *
+ *  The fused-weight dgrad knobs (preload_weights, dgrad_fused_weights,
+ *  dgrad_weights_lds, waves_per_eu, row_guard) and the row-stream knobs
+ *  (prefetch_rows, lds_only_sync, waves_m, xcd_tiles, lds_pad, stage_out,
+ *  row_exit) are mirrored field for field; every knob defaults off, so a spec
+ *  that leaves them emits the kernel it emitted before they existed.
+ * ===================================================================== */
+typedef struct rocke_direct_conv_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_conv" */
+    int block_q; /* default 16 */
+    int block_groups; /* default 8  */
+    int wave_size; /* default 64 */
+    bool double_buffer; /* default true */
+    int block_h; /* default 16 -- output rows per block */
+    int waves_q; /* default 1 */
+    int waves_k; /* default 1 */
+    bool runtime_k_loop; /* default false */
+    bool persistent_grid; /* default false */
+    int persistent_rounds; /* default 64 */
+    bool fold_k32; /* default false */
+    bool runtime_channels; /* default false */
+    int k_atoms; /* default 0 -- runtime_channels only */
+    int m_tiles; /* default 0 -- runtime_channels only */
+    bool preload_weights; /* default false -- waves_k == 1 prologue weight preload */
+    bool dgrad_fused_weights; /* default false -- gather the original dgrad W */
+    bool dgrad_weights_lds; /* default false -- stage W in LDS, transpose reads */
+    int waves_per_eu; /* default 0 -- > 0: amdgpu-waves-per-eu hint */
+    bool row_guard; /* default false -- skip the MFMAs of rows past p_Hi */
+    int prefetch_rows; /* default 0 -- input-row prefetch distance (0..3) */
+    bool lds_only_sync; /* default false -- LDS-only row barrier */
+    int waves_m; /* default 1 -- waves per group along the M-tiles */
+    bool xcd_tiles; /* default false -- XCD row-band workgroup remap */
+    int lds_pad; /* default 0 -- extra elements per staged input column */
+    bool stage_out; /* default false -- 16-byte stores via an LDS output tile */
+    bool row_exit; /* default false -- leave once the next flush is past p_Hi */
+} rocke_direct_conv_spec_t;
+
+/* DirectConvSpec with the dataclass defaults (problem == problem_default()). */
+rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void);
+
+/* @property threads_per_block
+ *   -> block_groups * waves_q * waves_k * waves_m * wave_size. */
+int rocke_direct_conv_threads_per_block(const rocke_direct_conv_spec_t* spec);
+
+/* preload_weight_vgprs(spec): VGPRs per lane the waves_k == 1 preloaded /
+ * fused weight fragments keep live (waves_m must be >= 1). */
+int rocke_direct_conv_preload_weight_vgprs(const rocke_direct_conv_spec_t* spec);
+
+/* direct_conv_lds_bytes(spec): LDS bytes build_direct_conv allocates. */
+long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec);
+
+/* kernel_name():
+ *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
+ *                    "db"|"sb", f"bh{block_h}", ["wq{waves_q}"], ["wk{waves_k}"],
+ *                    ["rk"], ["k32"], ["bf16"],
+ *                    [f"rtc_ka{k_atoms}_mt{m_tiles}"], ["pw"], ["fw"|"fwl"],
+ *                    ["we{n}"], ["pf{n}"], ["lso"], ["wm{n}"], ["xc"],
+ *                    ["lp{n}"], ["so"], ["rg"], ["rx"]) -- bracketed parts
+ *   only when set. */
+rocke_status_t
+    rocke_direct_conv_kernel_name(const rocke_direct_conv_spec_t* spec, char* out, size_t out_cap);
+
+/* validate(): the ValueErrors of DirectConvSpec.validate. */
+rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
+                                          char* reason,
+                                          size_t reason_cap);
+
+/* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". */
+bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
+                                     const char* arch,
+                                     char* reason,
+                                     size_t reason_cap);
+
+/* build_direct_conv(spec, arch). Same contract as the 16c entry. */
+rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
+                                            const rocke_direct_conv_spec_t* spec,
+                                            const char* arch);
+rocke_kernel_def_t* rocke_build_direct_conv_new(rocke_ir_builder_t* b,
+                                                const rocke_direct_conv_spec_t* spec,
+                                                const char* arch);
+
+/* ===================================================================== *
+ *  MFMA dgrad weight transforms
+ *
+ *  DirectTransposeWeightsDgradSpec(problem, runtime_channels=False)
+ *      W[total_K, KH, KW, cpg] -> W_T[total_C, KH, KW, kpg], spatially flipped.
+ *  DirectReorganizeWeightsSpec(problem, fold_k32=False, runtime_channels=False)
+ *      W_T -> W_coa, the coalesced per-(r, s, atom, m) preload layout.
+ *
+ *  Both take A, D, A_bytes, D_bytes; with runtime_channels two more i32
+ *  kernargs follow, p_cpg and p_kpg (the original problem's per-group channel
+ *  counts), and the kernel names gain "_rtc".
+ * ===================================================================== */
+typedef struct rocke_direct_transpose_weights_dgrad_spec
+{
+    rocke_direct_conv_problem_t problem;
+    bool runtime_channels; /* default false */
+} rocke_direct_transpose_weights_dgrad_spec_t;
+
+typedef struct rocke_direct_reorganize_weights_spec
+{
+    rocke_direct_conv_problem_t problem;
+    bool fold_k32; /* default false */
+    bool runtime_channels; /* default false */
+} rocke_direct_reorganize_weights_spec_t;
+
+/* build_direct_transpose_weights_dgrad(spec, arch): initialises `b` with the
+ * Python kernel name and builds the kernel. */
+rocke_kernel_def_t* rocke_build_direct_transpose_weights_dgrad_new(
+    rocke_ir_builder_t* b,
+    const rocke_direct_transpose_weights_dgrad_spec_t* spec,
+    const char* arch);
+/* build_direct_reorganize_weights(spec, arch): same contract. */
+rocke_kernel_def_t* rocke_build_direct_reorganize_weights_new(
+    rocke_ir_builder_t* b, const rocke_direct_reorganize_weights_spec_t* spec, const char* arch);
+
+/* Launch signature: every direct kernel takes the AOT argument list of
+ * rocke_conv_direct_arg_names() (instance_conv_abi.h); there is no
+ * per-family signature builder. */
 
 /* ===================================================================== *
  *  CONVENIENCE: build -> lower to LLVM .ll text.
@@ -281,12 +1057,69 @@ rocke_status_t rocke_direct_conv_16c_lower_to_llvm(const rocke_direct_conv_16c_s
                                                    char* err,
                                                    size_t err_cap);
 
+rocke_status_t rocke_direct_conv_lower_to_llvm(const rocke_direct_conv_spec_t* spec,
+                                               const char* arch,
+                                               rocke_llvm_flavor_t flavor,
+                                               char** out_ll,
+                                               char* err,
+                                               size_t err_cap);
 rocke_status_t rocke_direct_conv_4c_lower_to_llvm(const rocke_direct_conv_4c_spec_t* spec,
                                                   const char* arch,
                                                   rocke_llvm_flavor_t flavor,
                                                   char** out_ll,
                                                   char* err,
                                                   size_t err_cap);
+
+rocke_status_t rocke_direct_conv_8c_lower_to_llvm(const rocke_direct_conv_8c_spec_t* spec,
+                                                  const char* arch,
+                                                  rocke_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap);
+
+rocke_status_t rocke_direct_conv_32c_lower_to_llvm(const rocke_direct_conv_32c_spec_t* spec,
+                                                   const char* arch,
+                                                   rocke_llvm_flavor_t flavor,
+                                                   char** out_ll,
+                                                   char* err,
+                                                   size_t err_cap);
+
+rocke_status_t rocke_direct_depthwise_lower_to_llvm(const rocke_direct_depthwise_spec_t* spec,
+                                                    const char* arch,
+                                                    rocke_llvm_flavor_t flavor,
+                                                    char** out_ll,
+                                                    char* err,
+                                                    size_t err_cap);
+
+rocke_status_t
+    rocke_direct_depthwise_col_lower_to_llvm(const rocke_direct_depthwise_col_spec_t* spec,
+                                             const char* arch,
+                                             rocke_llvm_flavor_t flavor,
+                                             char** out_ll,
+                                             char* err,
+                                             size_t err_cap);
+
+rocke_status_t rocke_direct_conv_dgrad_lower_to_llvm(const rocke_direct_conv_dgrad_spec_t* spec,
+                                                     const char* arch,
+                                                     rocke_llvm_flavor_t flavor,
+                                                     char** out_ll,
+                                                     char* err,
+                                                     size_t err_cap);
+
+rocke_status_t
+    rocke_direct_depthwise_dgrad_lower_to_llvm(const rocke_direct_depthwise_dgrad_spec_t* spec,
+                                               const char* arch,
+                                               rocke_llvm_flavor_t flavor,
+                                               char** out_ll,
+                                               char* err,
+                                               size_t err_cap);
+
+rocke_status_t rocke_direct_conv_wgrad_lower_to_llvm(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                     const char* arch,
+                                                     rocke_llvm_flavor_t flavor,
+                                                     char** out_ll,
+                                                     char* err,
+                                                     size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -26,8 +26,9 @@
 struct RTCKernelStockham : public RTCKernel
 {
     RTCKernelStockham(const std::string&                       kernel_name,
+                      KIntType                                 itype,
                       std::shared_future<hipModule_wrapper_t>& module)
-        : RTCKernel(kernel_name, module)
+        : RTCKernel(kernel_name, itype, module)
         , hardcoded_dim(kernel_name.find("_dim") != std::string::npos)
     {
     }

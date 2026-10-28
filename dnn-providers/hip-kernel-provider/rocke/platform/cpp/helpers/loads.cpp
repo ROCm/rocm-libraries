@@ -505,6 +505,134 @@ void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
 }
 
 /* ============================================================================
+ * CoalescedTileLoader address-prefetch split (plan_slots / slot_offsets /
+ * issue_slots). Same per-chunk ops as load_global, regrouped so a K loop can
+ * carry the byte offsets across iterations. Mirrors the Python methods.
+ * ========================================================================== */
+
+void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
+                                            const rocke_coalesced_tile_loader_t* self,
+                                            rocke_value_t* tid,
+                                            rocke_ctl_staged_t* slots)
+{
+    if(slots != NULL)
+        slots->count = 0;
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || slots == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "plan_slots: NULL loader or slots");
+        return;
+    }
+
+    /* Python:
+     *   c_threads  = b.const_i32(self.block_size)
+     *   c_load_vec = b.const_i32(self.load_vec)
+     *   c_span     = b.const_i32(rows_per_vec if row else cols_per_vec) */
+    rocke_value_t* c_threads = rocke_b_const_i32(b, self->block_size);
+    rocke_value_t* c_load_vec = rocke_b_const_i32(b, self->load_vec);
+    rocke_value_t* c_span = rocke_b_const_i32(b, ctl_span(self));
+
+    int vecs_per_thread = 0;
+    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
+        return;
+    }
+    if(vecs_per_thread > ROCKE_CTL_MAX_VECS_PER_THREAD)
+    {
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "CoalescedTileLoader: vecs_per_thread %d > ROCKE_CTL_MAX_VECS_PER_THREAD %d",
+            vecs_per_thread,
+            ROCKE_CTL_MAX_VECS_PER_THREAD);
+        return;
+    }
+
+    for(int e = 0; e < vecs_per_thread; ++e)
+    {
+        /* Python: vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid) */
+        rocke_value_t* c_e = rocke_b_const_i32(b, e);
+        rocke_value_t* scaled = rocke_b_mul(b, c_e, c_threads);
+        rocke_value_t* vec_idx = rocke_b_add(b, scaled, tid);
+        ctl_decode_row_col(
+            b, self, vec_idx, c_span, c_load_vec, &slots->vecs[e].row, &slots->vecs[e].col);
+        slots->vecs[e].v = NULL;
+    }
+    slots->count = vecs_per_thread;
+}
+
+void rocke_coalesced_tile_loader_slot_offsets(rocke_ir_builder_t* b,
+                                              const rocke_coalesced_tile_loader_t* self,
+                                              const rocke_ctl_staged_t* slots,
+                                              rocke_loads_descriptor_fn descriptor,
+                                              void* descriptor_user,
+                                              rocke_value_t** out_offsets)
+{
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || slots == NULL || descriptor == NULL || out_offsets == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "slot_offsets: NULL argument");
+        return;
+    }
+    if(!self->use_buffer_rsrc)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader.slot_offsets requires use_buffer_rsrc=True");
+        return;
+    }
+
+    /* Python:
+     *   c_elem_bytes = b.const_i32(elem_bytes)   -- 2: this port loads 16-bit
+     *   c_oob        = b.const_i32(self.oob_sentinel) */
+    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
+    rocke_value_t* c_oob = rocke_b_const_i32(b, self->oob_sentinel);
+
+    for(int e = 0; e < slots->count; ++e)
+    {
+        /* Python: off_elems, valid = descriptor(b, row, col) */
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off_elems
+            = descriptor(b, slots->vecs[e].row, slots->vecs[e].col, &valid, descriptor_user);
+        rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
+        out_offsets[e] = (valid != NULL) ? rocke_b_select(b, valid, off_bytes, c_oob) : off_bytes;
+    }
+}
+
+void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
+                                             const rocke_coalesced_tile_loader_t* self,
+                                             rocke_value_t* rsrc,
+                                             const rocke_ctl_staged_t* slots,
+                                             rocke_value_t* const* offsets,
+                                             rocke_ctl_staged_t* staged)
+{
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || slots == NULL || offsets == NULL || staged == NULL || rsrc == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "issue_slots: NULL argument");
+        return;
+    }
+
+    /* Python: c0 = b.const_i32(0) */
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    int count = slots->count;
+    for(int e = 0; e < count; ++e)
+    {
+        rocke_value_t* v
+            = (self->load_vec == 1)
+                  ? rocke_b_buffer_load_f16(b, rsrc, offsets[e], c0)
+                  : rocke_b_buffer_load_vN_f16(b, rsrc, offsets[e], c0, self->load_vec / 2);
+        staged->vecs[e].row = slots->vecs[e].row;
+        staged->vecs[e].col = slots->vecs[e].col;
+        staged->vecs[e].v = v;
+    }
+    staged->count = count;
+}
+
+/* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */
 

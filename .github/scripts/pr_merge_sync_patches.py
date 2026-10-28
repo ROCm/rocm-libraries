@@ -134,8 +134,14 @@ def _apply_patch(repo_path: Path, patch_path: Path) -> None:
 
 
 def _stage_changes(repo_path: Path) -> None:
-    """Stage all changes in the repository."""
-    _run_git(["add", "."], cwd=repo_path)
+    """Stage all changes in the repository, ignore rules included.
+
+    ``-f`` is required. The sub-repo's ignore rules are not the monorepo's, so a
+    file that is force-tracked upstream can match an ignore pattern here. A plain
+    ``git add .`` skips such a file without an error, and the sync then pushes a
+    commit that is missing part of the patch it just applied.
+    """
+    _run_git(["add", "-f", "."], cwd=repo_path)
     logger.debug(f"Staged all changes in {repo_path}")
 
 

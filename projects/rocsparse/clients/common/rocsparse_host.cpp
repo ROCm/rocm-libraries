@@ -2705,7 +2705,7 @@ void host_hybmv(rocsparse_operation  trans,
                 rocsparse_int        M,
                 rocsparse_int        N,
                 T                    alpha,
-                rocsparse_int        ell_nnz,
+                int64_t              ell_nnz,
                 const rocsparse_int* ell_col_ind,
                 const T*             ell_val,
                 rocsparse_int        ell_width,
@@ -3957,7 +3957,8 @@ void host_csrsm(J                    M,
         std::vector<T> y(M, 0);
         for(size_t i = 0; i < x.size(); i++)
         {
-            x[i] = B[i];
+            x[i]
+                = (transB == rocsparse_operation_conjugate_transpose) ? rocsparse_conj(B[i]) : B[i];
         }
 
         for(J i = 0; i < M; i++)
@@ -6276,7 +6277,6 @@ void host_bsric0(rocsparse_direction               direction,
 template <typename T>
 static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
 {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
     // Apply the boost magnitude (>= 0) along the direction of the original pivot
     // so its sign (real) or phase (complex) is preserved and a negative boost can
     // never swap the pivot sign, matching the device kernels.
@@ -6284,9 +6284,6 @@ static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
     const auto abs_boost = std::abs(boost_val);
     return (abs_value > 0) ? (static_cast<T>(abs_boost) * (value / abs_value))
                            : static_cast<T>(abs_boost);
-#else
-    return boost_val;
-#endif
 }
 
 template <typename T, typename U>
@@ -9097,7 +9094,7 @@ void host_csr_to_hyb(rocsparse_int                     M,
                      std::vector<rocsparse_int>&       ell_col_ind,
                      std::vector<T>&                   ell_val,
                      rocsparse_int&                    ell_width,
-                     rocsparse_int&                    ell_nnz,
+                     int64_t&                          ell_nnz,
                      std::vector<rocsparse_int>&       coo_row_ind,
                      std::vector<rocsparse_int>&       coo_col_ind,
                      std::vector<T>&                   coo_val,
@@ -9145,8 +9142,9 @@ void host_csr_to_hyb(rocsparse_int                     M,
         }
     }
 
-    // ELL nnz
-    ell_nnz = ell_width * M;
+    // ELL nnz. The product must be formed in 64-bit: ell_width * M exceeds
+    // the range of rocsparse_int well before either factor does.
+    ell_nnz = static_cast<int64_t>(ell_width) * M;
 
     // Allocate memory for HYB matrix
     if(ell_nnz > 0)
@@ -9175,7 +9173,7 @@ void host_csr_to_hyb(rocsparse_int                     M,
         {
             if(p < ell_width)
             {
-                rocsparse_int idx = p++ * M + i;
+                int64_t idx = static_cast<int64_t>(p++) * M + i;
 
                 ell_col_ind[idx] = csr_col_ind[j];
                 ell_val[idx]     = csr_val[j];
@@ -9190,7 +9188,7 @@ void host_csr_to_hyb(rocsparse_int                     M,
 
         for(rocsparse_int j = row_nnz; j < ell_width; ++j)
         {
-            rocsparse_int idx = p++ * M + i;
+            int64_t idx = static_cast<int64_t>(p++) * M + i;
 
             ell_col_ind[idx] = -1;
             ell_val[idx]     = static_cast<T>(0);
@@ -9442,7 +9440,7 @@ void host_ell_to_csr(rocsparse_int                     M,
     {
         for(rocsparse_int p = 0; p < ell_width; ++p)
         {
-            rocsparse_int idx = p * M + i;
+            int64_t       idx = static_cast<int64_t>(p) * M + i;
             rocsparse_int col = ell_col_ind[idx] - ell_base;
 
             if(col >= 0 && col < N)
@@ -9478,7 +9476,7 @@ void host_ell_to_csr(rocsparse_int                     M,
 
         for(rocsparse_int p = 0; p < ell_width; ++p)
         {
-            rocsparse_int idx = p * M + i;
+            int64_t       idx = static_cast<int64_t>(p) * M + i;
             rocsparse_int col = ell_col_ind[idx] - ell_base;
 
             if(col >= 0 && col < N)
@@ -9713,7 +9711,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                    rocsparse_int        M,                                        \
                                    rocsparse_int        N,                                        \
                                    TYPE                 alpha,                                    \
-                                   rocsparse_int        ell_nnz,                                  \
+                                   int64_t              ell_nnz,                                  \
                                    const rocsparse_int* ell_col_ind,                              \
                                    const TYPE*          ell_val,                                  \
                                    rocsparse_int        ell_width,                                \
@@ -10038,7 +10036,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                         std::vector<rocsparse_int>&       ell_col_ind,            \
                                         std::vector<TYPE>&                ell_val,                \
                                         rocsparse_int&                    ell_width,              \
-                                        rocsparse_int&                    ell_nnz,                \
+                                        int64_t&                          ell_nnz,                \
                                         std::vector<rocsparse_int>&       coo_row_ind,            \
                                         std::vector<rocsparse_int>&       coo_col_ind,            \
                                         std::vector<TYPE>&                coo_val,                \

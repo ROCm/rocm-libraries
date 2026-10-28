@@ -77,10 +77,8 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
     case rocsparse_sptrsm_input_scalar_datatype:
     case rocsparse_sptrsm_input_scalar_alpha:
     case rocsparse_sptrsm_input_analysis_policy:
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     case rocsparse_sptrsm_input_solve_mode:
     case rocsparse_sptrsm_input_diagonal_modifier:
-#endif
     {
         return false;
     }
@@ -145,7 +143,6 @@ try
         return rocsparse_status_success;
     }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     case rocsparse_sptrsm_input_solve_mode:
     {
         ROCSPARSE_CHECKARG(4,
@@ -179,7 +176,6 @@ try
         sptrsm_descr->set_diagonal_modifier(diagonal_modifier);
         return rocsparse_status_success;
     }
-#endif
 
     case rocsparse_sptrsm_input_scalar_datatype:
     {
@@ -473,10 +469,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
@@ -510,7 +502,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -635,10 +626,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
@@ -672,7 +659,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -821,10 +807,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
@@ -858,7 +840,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -984,10 +965,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (operation == rocsparse_operation_conjugate_transpose);
@@ -1021,7 +998,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -1177,10 +1153,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // CSC: use transposed operation for buffer sizing (matches solve-time allocation)
             const rocsparse_operation trans_csr_buf = (operation == rocsparse_operation_none)
                                                           ? rocsparse_operation_transpose
@@ -1227,7 +1199,6 @@ namespace rocsparse
             }
             }
             return rocsparse_status_success;
-#endif
         }
 
         case rocsparse_format_bsr:
@@ -1475,10 +1446,6 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 // CSC stored as A^T in CSR: swap col_ptr<->row_ptr, row_ind<->col_ind,
                 // invert fill_mode, and map the operation accordingly.
                 rocsparse_csrsm_info csrsm_info{};
@@ -1543,7 +1510,6 @@ namespace rocsparse
                 }
                 sptrsm_descr->set_stage(rocsparse_sptrsm_stage_analysis);
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_coo_aos:
@@ -1576,7 +1542,6 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 convert_scalars(handle, sptrsm_descr, sptrsm_descr->get_scalar_alpha(), &alpha));
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
             if(sptrsm_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
             {
                 const rocsparse_diagonal_modifier modifier = sptrsm_descr->get_diagonal_modifier();
@@ -1656,7 +1621,6 @@ namespace rocsparse
                 }
                 }
             }
-#endif
 
             switch(sptrsm_case)
             {

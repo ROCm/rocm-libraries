@@ -16,6 +16,7 @@
  * here rocke_h_emit/rocke_h_emitf does the same).
  */
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 
@@ -32,22 +33,30 @@ static const rocke_value_t* h_res(const rocke_op_t* op)
 
 /* ----------------------------- arith: int width casts ---------------------- */
 
-/* def _op_arith_zext(self, op):
- *     (v,) = op.operands
- *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
- *                f"({_type_to_hip(op.result.type)}){_name(v)};") */
+/* Zero extension must cast through the unsigned spelling of the source type.
+ * A direct int8_t -> int/int64_t cast sign-extends bytes 0x80..0xff. */
 static rocke_status_t rocke_h_op_arith_zext(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     const char* t = rocke_h_type_to_hip(lw, r->type);
-    rocke_h_emitf(lw, "%s %s = (%s)%s;", t, rocke_h_name(lw, r), t, rocke_h_name(lw, v));
+    const char* source_unsigned = rocke_h_unsigned_int_type(v->type);
+    if(!source_unsigned)
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "HIP zext requires an integer scalar source, got '%s'",
+                            v->type ? v->type->name : "(null)");
+    }
+    rocke_h_emitf(
+        lw, "%s %s = (%s)(%s)%s;", t, rocke_h_name(lw, r), t, source_unsigned, rocke_h_name(lw, v));
     return lw->status;
 }
 
 /* def _op_arith_sext(self, op): -- identical lowering to zext in HIP. */
 static rocke_status_t rocke_h_op_arith_sext(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_unsigned_operands(op, "arith.zext");
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     const char* t = rocke_h_type_to_hip(lw, r->type);
@@ -146,11 +155,47 @@ static rocke_status_t rocke_h_op_arith_cast_f32_to(rocke_h_lowerer_t* lw, const 
     return lw->status;
 }
 
+/* def _op_arith_cvt_f32_to_f64(self, op):
+ *     (v,) = op.operands
+ *     self._emit(f"double {_name(op.result)} = (double){_name(v)};") */
+static rocke_status_t rocke_h_op_arith_cvt_f32_to_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw, "double %s = (double)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
+    return lw->status;
+}
+
+/* def _op_arith_cvt_f64_to_f32(self, op):
+ *     (v,) = op.operands
+ *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
+static rocke_status_t rocke_h_op_arith_cvt_f64_to_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw, "float %s = (float)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
+    return lw->status;
+}
+
 /* def _op_arith_sitofp_f32(self, op):
  *     (v,) = op.operands
  *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
 static rocke_status_t rocke_h_op_arith_sitofp_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw, "float %s = (float)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
+    return lw->status;
+}
+
+/* def _op_arith_uitofp_f32(self, op):
+ *     # u8 -> f32: a uint8_t converts exactly.
+ *     _refuse_non_u8_source(op)
+ *     (v,) = op.operands
+ *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
+static rocke_status_t rocke_h_op_arith_uitofp_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_i_refuse_non_u8_source(op);
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     rocke_h_emitf(lw, "float %s = (float)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
@@ -246,6 +291,25 @@ static rocke_status_t rocke_h_op_arith_cvt_f32_to_i8_sat(rocke_h_lowerer_t* lw,
                   rn,
                   rn,
                   rn);
+    return lw->status;
+}
+
+/* def _op_arith_cvt_f32_to_u8_sat(self, op):
+ *     (v,) = op.operands
+ *     rounded = f"{_name(op.result)}_r"
+ *     self._emit(f"float {rounded} = rintf({_name(v)});")
+ *     self._emit(f"uint8_t {_name(op.result)} = "
+ *                f"(uint8_t)fminf(fmaxf({rounded}, 0.0f), 255.0f);")
+ * The clamp into [0, 255] happens in f32 so the conversion is always in range,
+ * and fmaxf turns a NaN into 0, as the LLVM lowering's maxnum does. */
+static rocke_status_t rocke_h_op_arith_cvt_f32_to_u8_sat(rocke_h_lowerer_t* lw,
+                                                         const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    const char* rn = rocke_h_name(lw, r);
+    rocke_h_emitf(lw, "float %s_r = rintf(%s);", rn, rocke_h_name(lw, v));
+    rocke_h_emitf(lw, "uint8_t %s = (uint8_t)fminf(fmaxf(%s_r, 0.0f), 255.0f);", rn, rn);
     return lw->status;
 }
 
@@ -430,12 +494,16 @@ const rocke_h_handler_entry_t* rocke_h_handlers_cast(void)
         {ROCKE_OP_ARITH_BITCAST, rocke_h_op_arith_bitcast},
         {ROCKE_OP_ARITH_CAST_TO_F32, rocke_h_op_arith_cast_to_f32},
         {ROCKE_OP_ARITH_CAST_F32_TO, rocke_h_op_arith_cast_f32_to},
+        {ROCKE_OP_ARITH_CVT_F32_TO_F64, rocke_h_op_arith_cvt_f32_to_f64},
+        {ROCKE_OP_ARITH_CVT_F64_TO_F32, rocke_h_op_arith_cvt_f64_to_f32},
         {ROCKE_OP_ARITH_SITOFP_F32, rocke_h_op_arith_sitofp_f32},
+        {ROCKE_OP_ARITH_UITOFP_F32, rocke_h_op_arith_uitofp_f32},
         {ROCKE_OP_ARITH_CVT_FP8_TO_F32, rocke_h_op_arith_cvt_fp8_to_f32},
         {ROCKE_OP_ARITH_CVT_BF8_TO_F32, rocke_h_op_arith_cvt_bf8_to_f32},
         {ROCKE_OP_ARITH_CVT_F32_TO_FP8, rocke_h_op_arith_cvt_f32_to_fp8},
         {ROCKE_OP_ARITH_CVT_F32_TO_BF8, rocke_h_op_arith_cvt_f32_to_bf8},
         {ROCKE_OP_ARITH_CVT_F32_TO_I8_SAT, rocke_h_op_arith_cvt_f32_to_i8_sat},
+        {ROCKE_OP_ARITH_CVT_F32_TO_U8_SAT, rocke_h_op_arith_cvt_f32_to_u8_sat},
         {ROCKE_OP_ARITH_CVT_PK_F32_FP8X4, rocke_h_op_arith_cvt_pk_f32_fp8x4},
         {ROCKE_OP_ARITH_CVT_PK_F32_BF8X4, rocke_h_op_arith_cvt_pk_f32_bf8x4},
         {ROCKE_OP_ARITH_CVT_PK_FP8_F32X4, rocke_h_op_arith_cvt_pk_fp8_f32x4},

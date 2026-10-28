@@ -208,6 +208,13 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_LGBM_ONLY``
+        | Uses only the LightGBM heuristics: bypasses TunaNet solver selection and the
+        | KTN / two-tower kernel-tuning models, keeping the LightGBM solver selector and
+        | perf-config picker.
+      - | 0: Disable (default)
+        | 1: Enable
+
     * - | ``MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK``
         | Forces immediate mode fallback for convolution operations.
       - | 0: Disable
@@ -320,6 +327,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_DEPTHWISE_FWD_2D``
+        | Controls ConvDirectDepthwiseFwd2D direct solution.
+      - | 0: Disable
+        | 1: Enable
+
     * - | ``MIOPEN_DEBUG_CONV_DIRECT_ASM_1X1U_PERF_VALS``
         | Controls performance values for ConvAsm1x1U direct solution.
       - | 0: Disable
@@ -385,11 +397,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1``
         | Controls ConvBinWinogradRxSf2x3g1 FP32/FP16 Fwd/Bwd F(2,3) Winograd (non-group convolutions).
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_AMD_FUSED_WINOGRAD``
-        | Controls Fused FP32 F(3,3) Winograd with variable filter size.
       - | 0: Disable
         | 1: Enable
 

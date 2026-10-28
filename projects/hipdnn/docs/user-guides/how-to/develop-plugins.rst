@@ -236,6 +236,27 @@ Both surfaces retain the resolved ID whether or not it selected anything. That I
 
 A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable and the engine override rules in the heuristic config file turn an operator's string into an ID without the resolver. They can do so exactly: a declared name hashes to the engine's ID, and an engine that declares none is displayed as its ID in hexadecimal, which both surfaces also parse. Either spelling can be pasted from the enumeration.
 
+.. _optional-prediction-exports:
+
+Optional prediction exports
+===========================
+
+hipDNN looks each of the following entry points up when the plugin loads. Every one is optional. Where an entry point accepts ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` as an answer, that answer is treated exactly like a missing export; what hipDNN then reports differs per entry point, as each item states. The declarations and full contracts are in ``EnginePluginApi.h`` and ``HeuristicsPluginApi.h``.
+
+Engine plugins (engine plugin API 1.5.0)
+----------------------------------------
+
+- ``hipdnnEnginePluginEnumerateCandidates`` returns one page of the engine's matched catalog in the ``candidate_page`` of a serialized ``EngineDetails``. Explicit knob settings in the engine config restrict the catalog. ``offset`` is zero-based and must not exceed the total count; ``limit`` must be in ``[1, 10000]``. Candidate IDs are non-empty and unique, and their order is stable across calls and independent of ranking. A page must hold exactly ``min(limit, total_count - offset)`` candidates and echo the requested engine ID and ``offset``; hipDNN rejects any other page with ``HIPDNN_STATUS_PLUGIN_ERROR``. An empty page is therefore a successful answer: at ``offset`` 0 it means the engine has no candidates (``total_count`` is 0), and at ``offset`` equal to ``total_count`` it means the catalog is exhausted. A missing export or ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` makes the candidate query fail with ``HIPDNN_STATUS_NOT_SUPPORTED`` instead, and any other failure status with ``HIPDNN_STATUS_PLUGIN_ERROR``. Free a successful response with ``hipdnnEnginePluginDestroyEngineDetails``.
+- ``hipdnnEnginePluginGetPrediction`` describes (``evaluate`` = 0) or evaluates (``evaluate`` = 1) a UHD prediction for an engine (``HIPDNN_ENGINE_PREDICTION_ENGINE``, tuning off) or for one exact configuration (``HIPDNN_ENGINE_PREDICTION_CONFIGURATION``, complete knob settings). It must not benchmark, tune, or run GPU work, and a missing prediction never changes applicability. The result's metric is always the engine config's ranking metric (``tflops`` when empty); an engine with no model for that metric reports ``UNAVAILABLE``, and an unregistered metric is ``HIPDNN_PLUGIN_STATUS_BAD_PARAM``. Free the serialized ``EnginePrediction`` with ``hipdnnEnginePluginDestroyEngineDetails``; it is left empty on failure. A missing export or ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` reaches the caller as an ``UNAVAILABLE`` prediction whose reason says the engine exposes no prediction capability, so the status alone does not tell it apart from an engine with no model for the metric. Any other failure status, and a malformed or inconsistent response, reaches the caller as an ``INVALID`` prediction rather than an error.
+
+Plugins built on ``EnginePluginImpl.inl`` export both entry points. The ``IEngine`` defaults report enumeration as ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and every prediction as ``UNAVAILABLE``; override ``enumerateCandidates`` and ``getPrediction`` to provide them.
+
+Heuristic plugins (heuristic plugin API 0.1.0)
+----------------------------------------------
+
+- ``hipdnnHeuristicPolicyFinalizeWithHost`` is called instead of ``hipdnnHeuristicPolicyFinalize`` when exported. It receives a ``hipdnnHeuristicHostCallbacks_t`` table whose ``get_prediction`` callback returns verified ``EnginePrediction`` buffers for the input candidate engine IDs only, in the units of ``ranking_metric``. The table, its strings, and every returned buffer are borrowed for the duration of the call: don't retain or free them, and don't call back after returning. Check ``version`` and ``struct_size`` before reading fields; a version 1 table has no ``ranking_metric`` and means ``tflops``. A ``NULL`` host means predictions are unavailable. A prediction-ranking policy orders by ``ranking_metric`` in that metric's direction and declines (``out_applied`` = 0) when no candidate has a usable prediction. Declining is the only way to opt out once exported: any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` included, is a plugin error.
+- ``hipdnnHeuristicPolicyGetEngineConfig`` returns the exact serialized ``EngineConfig`` chosen for an engine ID the policy returned, after a successful finalize. Its ``engine_id`` must match that engine and it must keep every knob setting that was scored. The buffer stays owned by the policy descriptor until the descriptor's next mutation or destruction; the host doesn't free it. A missing export or ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` means the policy has no configuration for that engine.
+
 Create a kernel engine plugin
 =============================
 
@@ -256,7 +277,7 @@ Steps
 
 2. Implement the plugin API functions.
 
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``engine_plugin_api.h``. However, the common architectural pattern consists of:
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in ``EnginePluginApi.h``. However, the common architectural pattern consists of:
 
    - **Engine manager**: Manages available engines and their capabilities.
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique ``int64_t`` ID).
@@ -471,9 +492,9 @@ After creating a hipDNN handle, you can query which engine plugins were successf
 
   hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(
       hipdnnHandle_t handle,
-      size_t* num_plugin_paths,
-      char** plugin_paths,
-      size_t* max_string_len
+      size_t* numPluginPaths,
+      char** pluginPaths,
+      size_t* maxStringLen
   );
 
 This function uses a two-call pattern:
@@ -513,7 +534,7 @@ Testing is crucial for ensuring plugin reliability and correctness. Plugins shou
 Test structure
 --------------
 
-Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md>`_, plugins should organize tests as follows:
+Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TESTING_STRATEGY.md>`_, plugins should organize tests as follows:
 
 .. code::
 
@@ -563,11 +584,11 @@ The internal integration tests are typically simple tests to ensure that the plu
     - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).
     - **Full**: These tests can contain regression shapes, large shapes, or slow shapes.
 
-External integrations tests use an external integration test executable written to load plugins and perform end-to-end verification of graph operations using the plugin. For details on how to use the external integration test harness see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md>`_ in the hipDNN repo.
+External integrations tests use an external integration test executable written to load plugins and perform end-to-end verification of graph operations using the plugin. For details on how to use the external integration test harness see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/docs/README.md>`_ in the hipDNN repo.
 
 .. note::
 
-  See `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/Testing.md#testing-requirements>`_.
+  See `general testing principles <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TESTING_STRATEGY.md#methodology>`_.
 
 Example: MIOpen provider plugin
 ================================
@@ -661,4 +682,4 @@ To verify your plugin has proper symbol visibility:
 
 If you see many internal symbols exported, your visibility settings are incorrect.
 
-``hipdnnEnginePluginGetEngineName`` is present whether or not your container implements ``getEngineName``. See :ref:`engine-names`.
+``hipdnnEnginePluginGetEngineName`` is present whether or not your container implements ``getEngineName``. See :ref:`engine-names`. The same holds for ``hipdnnEnginePluginEnumerateCandidates`` and ``hipdnnEnginePluginGetPrediction``; see :ref:`optional-prediction-exports`.
