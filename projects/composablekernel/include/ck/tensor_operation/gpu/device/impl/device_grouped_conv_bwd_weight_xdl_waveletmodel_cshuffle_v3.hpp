@@ -1035,7 +1035,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
             }
         }
 
-        if constexpr(UseTdm)
+        if constexpr(UseNamedBarrier || UseTdm)
         {
             if(!is_gfx125_supported())
             {
