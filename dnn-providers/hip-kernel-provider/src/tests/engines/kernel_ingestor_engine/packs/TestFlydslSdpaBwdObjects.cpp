@@ -50,9 +50,11 @@
  * the engine must decline is checked to be absent from the manager's applicable engines and
  * refused when the engine is selected by id.
  *
- * The cases need the install's gfx950 objects, so they skip on any other device and on an
- * install that staged no gfx950 shard (flydslShipsForThisDevice). On a device the install
- * ships them for, a missing object fails.
+ * The cases run on every device whose architecture has objects in the install: gfx950, and a
+ * gfx11 device served by the gfx11-generic content. They skip on any other device and on an
+ * install that staged no shard for the device (flydslShipsForThisDevice). On a device the
+ * install ships them for, a missing object fails. The dropout reference draws from the
+ * 64-bit Philox stream on both architectures.
  *
  * Tolerances are relative to the largest reference element of each gradient: a kernel that
  * is wrong, rather than rounded, misses by a good fraction of it.
@@ -89,6 +91,11 @@ struct BwdCase
     int64_t headDim = 64;
     bool causal = false;
     bool bias = false;
+    /// With a bias: whether the graph asks for its gradient, and which axes the bias (and so
+    /// its gradient) broadcasts over.
+    bool dbias = true;
+    bool biasOverBatch = false;
+    bool biasOverHead = false;
     /// Per-batch valid lengths of a padded varlen graph; empty for a dense one.
     std::vector<int32_t> lengthsQ;
     std::vector<int32_t> lengthsKv;
@@ -109,6 +116,33 @@ struct BwdCase
     int32_t validKv(int64_t batchIndex) const
     {
         return padded() ? lengthsKv[static_cast<size_t>(batchIndex)] : static_cast<int32_t>(seqKv);
+    }
+
+    /// Elements between two rows of a (S, D) tensor and of the (Sq, Skv) bias: the width
+    /// rounded up to a whole 16-byte vector, as the graph builders lay them out.
+    int64_t rowStride() const
+    {
+        return ceilToVectorOf(dtype, headDim);
+    }
+
+    int64_t biasRowStride() const
+    {
+        return ceilToVectorOf(dtype, seqKv);
+    }
+
+    int64_t biasBatch() const
+    {
+        return biasOverBatch ? 1 : batch;
+    }
+
+    int64_t biasHeads() const
+    {
+        return biasOverHead ? 1 : heads;
+    }
+
+    size_t biasElements() const
+    {
+        return static_cast<size_t>(biasBatch() * biasHeads() * seqQ * seqKv);
     }
 
     double scale() const
@@ -137,10 +171,11 @@ SdpaBwdSpec specOf(const BwdCase& c)
     }
     if(c.bias)
     {
-        spec = spec.withEdit([](SdpaBwdGraph& g) {
-            addBias(g);
-            addDbias(g);
-        });
+        const auto overBatch = c.biasOverBatch;
+        const auto overHead = c.biasOverHead;
+        const auto withDbias = c.dbias;
+        spec = spec.withEdit(
+            [=](SdpaBwdGraph& g) { addBroadcastBias(g, overBatch, overHead, withDbias); });
     }
     if(c.padded())
     {
@@ -239,6 +274,14 @@ size_t at(int64_t b, int64_t h, int64_t s, int64_t e, int64_t heads, int64_t seq
     return static_cast<size_t>(((b * heads + h) * seq + s) * width + e);
 }
 
+/// Index of a score's bias in the dense (Bb, Hb, Sq, Skv) bias, whose broadcast axes have
+/// extent 1.
+size_t biasAt(const BwdCase& c, int64_t b, int64_t h, int64_t s, int64_t e)
+{
+    return at(
+        c.biasOverBatch ? 0 : b, c.biasOverHead ? 0 : h, s, e, c.biasHeads(), c.seqQ, c.seqKv);
+}
+
 /// Whether query row @p row may see key @p column.
 bool visible(const BwdCase& c, int64_t batchIndex, int64_t row, int64_t column)
 {
@@ -263,7 +306,7 @@ double scoreOf(const BwdCase& c,
     double score = c.scale() * dot;
     if(c.bias)
     {
-        score += in.bias[at(batchIndex, head, row, column, c.heads, c.seqQ, c.seqKv)];
+        score += in.bias[biasAt(c, batchIndex, head, row, column)];
     }
     return score;
 }
@@ -392,7 +435,8 @@ Gradients backwardOf(const BwdCase& c,
                     }
                     if(c.bias)
                     {
-                        grads.dbias[at(b, h, row, j, c.heads, c.seqQ, c.seqKv)] = ds;
+                        // A broadcast axis sums the scores it repeats over.
+                        grads.dbias[biasAt(c, b, h, row, j)] += ds;
                     }
                 }
             }
@@ -475,6 +519,43 @@ std::vector<double> widened(const std::vector<T>& values)
         return static_cast<double>(static_cast<float>(value));
     });
     return wide;
+}
+
+/// @p dense, rows of @p width elements, rounded to @p T into rows @p stride apart; the
+/// elements between rows are zero.
+template <typename T>
+std::vector<T> packRows(const std::vector<double>& dense, int64_t width, int64_t stride)
+{
+    const auto rows = dense.size() / static_cast<size_t>(width);
+    std::vector<T> packed(rows * static_cast<size_t>(stride), T(0.0F));
+    for(size_t row = 0; row < rows; ++row)
+    {
+        for(int64_t e = 0; e < width; ++e)
+        {
+            packed[row * static_cast<size_t>(stride) + static_cast<size_t>(e)]
+                = T(static_cast<float>(
+                    dense[row * static_cast<size_t>(width) + static_cast<size_t>(e)]));
+        }
+    }
+    return packed;
+}
+
+/// The inverse of packRows: the @p width elements of each row of @p packed, widened.
+template <typename T>
+std::vector<double> unpackRows(const std::vector<T>& packed, int64_t width, int64_t stride)
+{
+    const auto rows = packed.size() / static_cast<size_t>(stride);
+    std::vector<double> dense(rows * static_cast<size_t>(width));
+    for(size_t row = 0; row < rows; ++row)
+    {
+        for(int64_t e = 0; e < width; ++e)
+        {
+            dense[row * static_cast<size_t>(width) + static_cast<size_t>(e)]
+                = static_cast<double>(static_cast<float>(
+                    packed[row * static_cast<size_t>(stride) + static_cast<size_t>(e)]));
+        }
+    }
+    return dense;
 }
 
 /// Relative tolerance of a gradient in @p dtype, against the largest reference element.
@@ -606,8 +687,7 @@ void expectEngineMatchesReference(std::string_view engine, const BwdCase& c)
     in.dO = widened(roundedTo<T>(fillValues(qCount, 4U)));
     if(c.bias)
     {
-        in.bias = widened(roundedTo<T>(
-            fillValues(static_cast<size_t>(c.batch * c.heads * c.seqQ * c.seqKv), 5U)));
+        in.bias = widened(roundedTo<T>(fillValues(c.biasElements(), 5U)));
     }
     // A padded graph's rows past its lengths carry no data: the gradient's input is zero
     // there, as a packed batch's padding is.
@@ -623,20 +703,25 @@ void expectEngineMatchesReference(std::string_view engine, const BwdCase& c)
     const auto oRounded = widened(roundedTo<T>(forward.o));
     const auto expected = backwardOf(c, in, oRounded, forward.lse);
 
-    DeviceBuffer q(qCount * sizeof(T));
-    DeviceBuffer k(kvCount * sizeof(T));
-    DeviceBuffer v(kvCount * sizeof(T));
-    DeviceBuffer o(qCount * sizeof(T));
-    DeviceBuffer dO(qCount * sizeof(T));
+    // The graph's rows are a whole vector apart, so a head dim that is not a whole number of
+    // vectors leaves unused elements between rows.
+    const auto stride = c.rowStride();
+    const auto paddedQ = qCount / static_cast<size_t>(c.headDim) * static_cast<size_t>(stride);
+    const auto paddedKv = kvCount / static_cast<size_t>(c.headDim) * static_cast<size_t>(stride);
+    DeviceBuffer q(paddedQ * sizeof(T));
+    DeviceBuffer k(paddedKv * sizeof(T));
+    DeviceBuffer v(paddedKv * sizeof(T));
+    DeviceBuffer o(paddedQ * sizeof(T));
+    DeviceBuffer dO(paddedQ * sizeof(T));
     DeviceBuffer stats(forward.lse.size() * sizeof(float));
-    DeviceBuffer dq(qCount * sizeof(T));
-    DeviceBuffer dk(kvCount * sizeof(T));
-    DeviceBuffer dv(kvCount * sizeof(T));
-    q.upload(roundedTo<T>(in.q));
-    k.upload(roundedTo<T>(in.k));
-    v.upload(roundedTo<T>(in.v));
-    o.upload(roundedTo<T>(oRounded));
-    dO.upload(roundedTo<T>(in.dO));
+    DeviceBuffer dq(paddedQ * sizeof(T));
+    DeviceBuffer dk(paddedKv * sizeof(T));
+    DeviceBuffer dv(paddedKv * sizeof(T));
+    q.upload(packRows<T>(in.q, c.headDim, stride));
+    k.upload(packRows<T>(in.k, c.headDim, stride));
+    v.upload(packRows<T>(in.v, c.headDim, stride));
+    o.upload(packRows<T>(oRounded, c.headDim, stride));
+    dO.upload(packRows<T>(in.dO, c.headDim, stride));
     stats.upload(forward.lse);
     dq.poison();
     dk.poison();
@@ -651,15 +736,20 @@ void expectEngineMatchesReference(std::string_view engine, const BwdCase& c)
                                                     {uid::DK, dk.get()},
                                                     {uid::DV, dv.get()}};
 
-    const auto biasCount = static_cast<size_t>(in.bias.size());
-    DeviceBuffer bias(biasCount * sizeof(T));
-    DeviceBuffer dbias(biasCount * sizeof(T));
+    const auto biasStride = c.biasRowStride();
+    const auto paddedBias
+        = in.bias.size() / static_cast<size_t>(c.seqKv) * static_cast<size_t>(biasStride);
+    DeviceBuffer bias(paddedBias * sizeof(T));
+    DeviceBuffer dbias(paddedBias * sizeof(T));
     if(c.bias)
     {
-        bias.upload(roundedTo<T>(in.bias));
-        dbias.poison();
+        bias.upload(packRows<T>(in.bias, c.seqKv, biasStride));
         buffers.push_back({uid::BIAS, bias.get()});
-        buffers.push_back({uid::DBIAS, dbias.get()});
+        if(c.dbias)
+        {
+            dbias.poison();
+            buffers.push_back({uid::DBIAS, dbias.get()});
+        }
     }
     DeviceBuffer lengthsQ(c.lengthsQ.size() * sizeof(int32_t));
     DeviceBuffer lengthsKv(c.lengthsKv.size() * sizeof(int32_t));
@@ -695,24 +785,24 @@ void expectEngineMatchesReference(std::string_view engine, const BwdCase& c)
 
     const double tolerance = toleranceOf(c.dtype);
     expectGradient("dQ",
-                   widened(dq.download<T>()),
+                   unpackRows(dq.download<T>(), c.headDim, stride),
                    expected.dq,
                    scopeOf(c, true, c.heads, c.headDim),
                    tolerance);
     expectGradient("dK",
-                   widened(dk.download<T>()),
+                   unpackRows(dk.download<T>(), c.headDim, stride),
                    expected.dk,
                    scopeOf(c, false, c.kvHeads, c.headDim),
                    tolerance);
     expectGradient("dV",
-                   widened(dv.download<T>()),
+                   unpackRows(dv.download<T>(), c.headDim, stride),
                    expected.dv,
                    scopeOf(c, false, c.kvHeads, c.headDim),
                    tolerance);
-    if(c.bias)
+    if(c.bias && c.dbias)
     {
         expectGradient("dBias",
-                       widened(dbias.download<T>()),
+                       unpackRows(dbias.download<T>(), c.seqKv, biasStride),
                        expected.dbias,
                        std::vector<bool>(expected.dbias.size(), true),
                        tolerance);
@@ -757,7 +847,8 @@ void expectDeclined(std::string_view engine, const SdpaBwdSpec& spec)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-/// Skips the case unless this install ships every op of an engine for the current device.
+/// Skips the case unless this install ships every op of an engine for the current device,
+/// whichever architecture's content serves it.
 class FlydslSdpaBwdDevice : public ::testing::Test
 {
 protected:
@@ -859,6 +950,35 @@ BwdCase paddedCase(DataType dtype)
     return c;
 }
 
+/// Dropout over a query length that differs from the key length, the key length not a multiple
+/// of 4: a Philox row holds a partial 4-wide draw.
+BwdCase raggedDropoutCase(DataType dtype, bool causal)
+{
+    BwdCase c = dropoutCase(dtype);
+    c.seqQ = 70;
+    c.seqKv = 45;
+    c.causal = causal;
+    return c;
+}
+
+/// A bias, and its gradient unless @p dbias is false, broadcast over the named axes.
+BwdCase broadcastBiasCase(DataType dtype, bool overBatch, bool overHead, bool dbias = true)
+{
+    BwdCase c = biasCase(dtype);
+    c.biasOverBatch = overBatch;
+    c.biasOverHead = overHead;
+    c.dbias = dbias;
+    return c;
+}
+
+/// A head dim that is not a power of two; the rows are a whole vector apart.
+BwdCase headDimCase(DataType dtype, int64_t headDim)
+{
+    BwdCase c = plainCase(dtype);
+    c.headDim = headDim;
+    return c;
+}
+
 /// Bias beside a padding mask is outside both engines' contract.
 SdpaBwdSpec biasWithPaddingSpec()
 {
@@ -946,6 +1066,66 @@ TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, CausalMatchesTheReference)
 TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, BiasAndDbiasMatchTheReference)
 {
     expectCase(SPLIT_ENGINE, biasCase(DataType::FLOAT));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, DropoutOfUnequalLengthsMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, raggedDropoutCase(DataType::HALF, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, CausalDropoutOfUnequalLengthsMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, raggedDropoutCase(DataType::BFLOAT16, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, BiasBroadcastOverBatchMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, broadcastBiasCase(DataType::BFLOAT16, true, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, BiasBroadcastOverHeadsMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, broadcastBiasCase(DataType::HALF, false, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, BiasBroadcastOverBatchAndHeadsMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, broadcastBiasCase(DataType::BFLOAT16, true, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, BiasWithoutDbiasMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, broadcastBiasCase(DataType::HALF, false, false, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, HeadDimOf72MatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, headDimCase(DataType::BFLOAT16, 72));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, HeadDimOf77AtAPaddedRowStrideMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, headDimCase(DataType::HALF, 77));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, DropoutOfUnequalLengthsMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, raggedDropoutCase(DataType::FLOAT, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, BiasBroadcastOverBatchAndHeadsMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, broadcastBiasCase(DataType::FLOAT, true, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, BiasWithoutDbiasMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, broadcastBiasCase(DataType::FLOAT, false, false, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatchFp32, HeadDimOf37AtAPaddedRowStrideMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, headDimCase(DataType::FLOAT, 37));
 }
 
 TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, DeclinesBiasBesideAPaddingMask)
