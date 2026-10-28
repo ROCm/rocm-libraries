@@ -113,14 +113,14 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode` | 309 (90 + 63 + 84 + 72) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 741 (90 + 63 + 84 + 72 + 33 + 198 + 198 + 3 reduce companions of the dQ op) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
 | `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged sdpa_bwd_dbias_reduce sdpa_bwd_dsink_reduce` | 2,982 (90 + 63 + 56 + 20 + 24 + 86 + 1,319 + 1,010 + 309 + 3 + 2) |
 | `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
@@ -146,7 +146,7 @@ version, so `ROCM_PATH` must be set. `REFERENCE_DIR` is the directory the SDPA b
 produces: `python tools/sdpa_bwd_s1.py --sweep-repo <sweep git dir> --ref <git ref>
 --selection selection.toml --out <S1 dir> --reference-dir "$REFERENCE_DIR"` (it fails while
 any member lacks a binary; see that tool's docstring). `sdpa_bwd_dbias_reduce`, `sdpa_bwd_dsink_reduce` and every other `OPS` entry take none, so
-`REFERENCE_DIR` is needed only for `gfx950`.
+`REFERENCE_DIR` is needed for the `sdpa_bwd_{prep,dkdv,dq,merged}` ops: on `gfx950` it is the gfx950 S1 snapshot's, on `gfx11-generic` the gfx11 one's (its `selection.toml`, `tools/sdpa_bwd_tables_from_sweep.py` installs its tables and `tests/data/sdpa_bwd_gfx11_reference.csv`). A gfx11 object is not gated like a gfx950 one: it must be its S1 pin byte for byte, with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
 
 Then compare every object against the manifests the tree ships:
 

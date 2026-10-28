@@ -1,6 +1,6 @@
 # attention_bwd_rdna
 
-The gfx11-generic (`gfx11-generic`, wave32 WMMA) SDPA backward kernels: prep, dK/dV, dQ and dBias reduce, in a 16-bit and an fp32 (VALU) family, with the modules they share. Every file is written for this provider except `fmha_common_gfx1201.py`, which is AOTriton's; each file's header says which. "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources come from. `fmha_bwd_dbias_reduce_rdna.py` is the earlier smoke kernel and is independent of the modules below.
+The gfx11-generic (`gfx11-generic`, wave32 WMMA) SDPA backward kernels: prep, dK/dV, dQ and dBias reduce, in a 16-bit and an fp32 (VALU) family, with the modules they share. Every file is written for this provider except `fmha_common_gfx1201.py`, which is AOTriton's; each file's header says which. "The sweep" is the AMD-internal FlyDSL backward kernel sweep these sources come from.
 
 ## Origin
 

@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""The SDPA backward build schema: a ``Spec`` names one gfx950 backward object.
+"""The SDPA backward build schema: a ``Spec`` names one backward object (gfx950 or a generic gfx11 target).
 
 No FlyDSL import: the string grammar, the key, the hash and the validation are pure Python,
 shared by ``_sdpa_bwd_cdna_build`` (which turns a Spec into an object) and its callers.
@@ -37,6 +37,19 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
             ``gqa_pack=1`` packs the GQA group into the q-tile row axis of the dK/dV role; ``store_db=0`` builds a bias
             dQ object without the dB store; ``bias_stage=direct`` loads the bias directly instead of staging it in LDS.
 
+  arch    : not a field of the head: ``;arch=<arch>`` follows the head when the arch is not gfx950 (``gfx11-generic``,
+            ``gfx12-generic``), before any knob, so every gfx950 key and hash is unchanged. A generic arch builds prep, dkdv,
+            dq and dbias_reduce only; its tiles are ``GENERIC_LADDER`` for every dtype; its floor is ``g1`` for a padded dkdv
+            or dq and ``tail`` for every other kernel; its knobs are ``KNOBS_GENERIC`` (fp32: ``KNOBS_GENERIC_F32``).
+            dkdv: num_waves block_q waves_per_eu split_head_dim contraction_shards transposed_source sched_strategy dump rne
+            dq  : num_waves block_m block_n waves_per_eu store_db bias_stage contraction_shards kt_lds_layout lpt_tile_order dump rne
+            fp32 dkdv: num_waves block_q block_kv waves_per_eu sched_strategy dump
+            fp32 dq  : num_waves block_m block_n waves_per_eu store_db lpt_tile_order dump
+            A knob is listed only when it is not the policy value: ``split_head_dim=1``, ``contraction_shards=<2^n>``,
+            ``transposed_source=derived``, ``sched_strategy=<non-default>``, ``lpt_tile_order=0``, ``kt_lds_layout=staged``,
+            ``dump=1``. ``rne=1`` (bf16 dkdv and dq only) narrows P and dS to bf16 round-to-nearest-even instead of
+            truncating; it is a spelled pin, so an RNE object and its truncating twin have different keys.
+
 ``Spec.hash()`` is the first 12 hex digits of sha256(key()).
 """
 
@@ -49,6 +62,21 @@ LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)  # the 16-bit ladder
 # fp32 rides tile 512 for head dims 257..512: no 384 rung, so ``rung_below(512, "fp32")`` is 256.
 FP32_LADDER = tuple(t for t in LADDER if t != 384)
 KERNELS = ("prep", "dkdv", "dq", "dbias_reduce", "dsink_reduce", "merged")
+ARCHES = ("gfx950", "gfx11-generic", "gfx12-generic")
+GFX950 = "gfx950"
+# The generic arches build these kernels (from the gfx11 sources; gfx12-generic shares them).
+GENERIC_KERNELS = ("prep", "dkdv", "dq", "dbias_reduce")
+# The generic arches' native head-dim rungs: no 384 or 512, one ladder for every dtype.
+GENERIC_LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+# dbias_reduce's placeholder tile: the gfx950 spelling on every arch (16 is the generic ladder's first rung).
+REDUCE_TILE = 32
+SCHED_STRATEGIES = (
+    "max-ilp",
+    "iterative-ilp",
+    "iterative-minreg",
+    "iterative-maxocc",
+    "default",
+)
 ROLE_ORDERS = ("concat", "lpt")
 DTYPES = ("f16", "bf16")  # the 16-bit dtypes
 FP32 = "fp32"
@@ -90,30 +118,140 @@ KNOBS = {
     ),
 }
 
-# The fp32-legal perf knobs and values per kernel; anything else is rejected on fp32. The dK/dV schedule (per-wave or
-# D-split) and the wave count are per-tile entries of the fp32 tuning table, not Spec keys.
-FP32_KNOBS = {
-    "prep": {},
-    "dbias_reduce": {},
-    "dkdv": {"mfma_rows": (16,), "block_q": (16, 32), "num_stream_buffers": (1,)},
-    "dq": {"block_m": (16, 32), "block_n": (16,)},
+# The generic arches' perf knobs per kernel, in canonical order (``KNOBS_GENERIC_F32`` for fp32).
+KNOBS_GENERIC = {
+    "prep": (),
+    "dbias_reduce": (),
+    "dkdv": (
+        "num_waves",
+        "block_q",
+        "waves_per_eu",
+        "split_head_dim",
+        "contraction_shards",
+        "transposed_source",
+        "sched_strategy",
+        "dump",
+        "rne",
+    ),
+    "dq": (
+        "num_waves",
+        "block_m",
+        "block_n",
+        "waves_per_eu",
+        "store_db",
+        "bias_stage",
+        "contraction_shards",
+        "kt_lds_layout",
+        "lpt_tile_order",
+        "dump",
+        "rne",
+    ),
 }
-# Knob values only the fp32 family has (the 16-bit policies never take them): rejected on a 16-bit Spec.
+# The generic fp32 (VALU) family: block_q is dK/dV's BLOCK_M and block_kv its BLOCK_N, block_m and block_n dQ's.
+KNOBS_GENERIC_F32 = {
+    "prep": (),
+    "dbias_reduce": (),
+    "dkdv": (
+        "num_waves",
+        "block_q",
+        "block_kv",
+        "waves_per_eu",
+        "sched_strategy",
+        "dump",
+    ),
+    "dq": (
+        "num_waves",
+        "block_m",
+        "block_n",
+        "waves_per_eu",
+        "store_db",
+        "lpt_tile_order",
+        "dump",
+    ),
+}
+
+# The columns of a generic arch's instance-table row after the ten head fields (``tools/sdpa_bwd_tables_from_sweep.py``): the
+# knobs of both dtype families, the 16-bit list first, then the fp32-only knobs.
+GENERIC_TABLE_KNOBS = {
+    kernel: tuple(dict.fromkeys(KNOBS_GENERIC[kernel] + KNOBS_GENERIC_F32[kernel]))
+    for kernel in KNOBS_GENERIC
+}
+
+# The fp32-legal perf knobs and values per arch and kernel; anything else is rejected on fp32. On gfx950 the dK/dV
+# schedule (per-wave or D-split) and the wave count are per-tile entries of the fp32 tuning table, not Spec keys.
+FP32_KNOBS = {
+    GFX950: {
+        "prep": {},
+        "dbias_reduce": {},
+        "dkdv": {"mfma_rows": (16,), "block_q": (16, 32), "num_stream_buffers": (1,)},
+        "dq": {"block_m": (16, 32), "block_n": (16,)},
+    },
+    "gfx11-generic": {
+        "prep": {},
+        "dbias_reduce": {},
+        "dkdv": {
+            "num_waves": (4, 8),
+            "block_q": (16, 32),
+            "block_kv": (16, 32),
+            "waves_per_eu": (1, 2, 3, 4),
+            "sched_strategy": SCHED_STRATEGIES,
+            "dump": (1,),
+        },
+        "dq": {
+            "num_waves": (4, 8),
+            "block_m": (16, 32),
+            "block_n": (16, 32),
+            "waves_per_eu": (1, 2, 3, 4),
+            "store_db": (0,),
+            "lpt_tile_order": (0,),
+            "dump": (1,),
+        },
+    },
+}
+FP32_KNOBS["gfx12-generic"] = FP32_KNOBS["gfx11-generic"]
+# The arches with an fp32 family: gfx12-generic has none.
+FP32_ARCHES = (GFX950, "gfx11-generic")
+# Knob values only the gfx950 fp32 family has (the gfx950 16-bit policies never take them): rejected on a gfx950 16-bit Spec.
 FP32_ONLY_VALUES = {
     "dkdv": {"block_q": (16,)},
     "dq": {"block_m": (16,), "block_n": (16,)},
 }
 
 ALL_KNOBS = tuple(dict.fromkeys(k for ks in KNOBS.values() for k in ks))
+# Every knob field of a Spec, either arch.
+KNOB_FIELDS = tuple(
+    dict.fromkeys(
+        ALL_KNOBS
+        + tuple(k for ks in KNOBS_GENERIC.values() for k in ks)
+        + tuple(k for ks in KNOBS_GENERIC_F32.values() for k in ks)
+    )
+)
 STR_KNOBS = {
     "bias_stage": ("direct",),
     "role_order": ROLE_ORDERS,
+    "transposed_source": ("derived",),
+    "kt_lds_layout": ("staged",),
+    "sched_strategy": SCHED_STRATEGIES,
 }  # knobs whose value is one of these words rather than an int
+# Boolean knobs, spelled ``<knob>=1`` only.
+ONE_KNOBS = ("gqa_pack", "sink", "split_head_dim", "dump", "rne")
 
 
-def rung_below(t, dtype=None):
-    """The rung below tile ``t`` on the dtype's ladder (None: the 16-bit ladder); fp32 tile 512 gives 256."""
-    return max([r for r in LADDERS.get(dtype, LADDER) if r < t], default=0)
+def knobs_of(kernel: str, arch: str = GFX950, dtype: str | None = None) -> tuple:
+    """The knobs @p kernel takes on @p arch, in canonical order (a generic arch's fp32 family has its own list)."""
+    if arch == GFX950:
+        return KNOBS.get(kernel, ())
+    return (KNOBS_GENERIC_F32 if dtype == FP32 else KNOBS_GENERIC).get(kernel, ())
+
+
+def ladder(arch: str = GFX950, dtype: str | None = None) -> tuple:
+    """The head-dim tiles of @p arch for @p dtype (None: the 16-bit ladder); a generic arch has one ladder for every dtype."""
+    return LADDERS.get(dtype, LADDER) if arch == GFX950 else GENERIC_LADDER
+
+
+def rung_below(t, dtype=None, arch=GFX950):
+    """The rung below tile ``t`` on the ladder of ``arch`` and ``dtype`` (None: the 16-bit ladder); gfx950 fp32 tile 512 gives 256."""
+    return max([r for r in ladder(arch, dtype) if r < t], default=0)
 
 
 @dataclass(frozen=True)
@@ -142,18 +280,37 @@ class Spec:
     bias_stage: str | None = None
     role_order: str | None = None
     sink: int | None = None
+    split_head_dim: int | None = None
+    contraction_shards: int | None = None
+    transposed_source: str | None = None
+    sched_strategy: str | None = None
+    dump: int | None = None
+    kt_lds_layout: str | None = None
+    lpt_tile_order: int | None = None
+    block_kv: int | None = None
+    rne: int | None = None
+    arch: str = GFX950
 
     def __post_init__(self):
         def bad(msg):
             raise ValueError(f"{msg}: {self!r}")
 
+        if self.arch not in ARCHES:
+            bad("arch")
+        generic = self.arch != GFX950
         if self.kernel not in KERNELS:
             bad("kernel")
+        if generic and self.kernel not in GENERIC_KERNELS:
+            bad(f"{self.kernel} is not built on {self.arch}")
         if self.dtype not in ALL_DTYPES:
             bad("dtype")
-        if self.tile not in LADDERS[self.dtype]:
-            bad(f"tile (the {self.dtype} ladder is {LADDERS[self.dtype]})")
-        if self.dtype == FP32 and self.kernel not in FP32_KNOBS:
+        if self.dtype == FP32 and self.arch not in FP32_ARCHES:
+            bad(f"fp32 is not built on {self.arch}")
+        if self.tile not in ladder(self.arch, self.dtype):
+            bad(
+                f"tile (the {self.dtype} ladder of {self.arch} is {ladder(self.arch, self.dtype)})"
+            )
+        if self.dtype == FP32 and self.kernel not in FP32_KNOBS[self.arch]:
             bad(f"kernel {self.kernel} has no fp32 family")
         if self.cls not in CLASSES:
             bad("cls")
@@ -175,8 +332,17 @@ class Spec:
             self.cls != "plain" or self.dform != "bk" or self.dropout
         ):
             bad("prep takes only dtype, tile, padded")
-        if self.kernel == "dbias_reduce" and (
-            self.tile != LADDER[0]
+        if generic:
+            if self.kernel in ("dkdv", "dq"):
+                if self.floor != ("g1" if self.padded else "tail"):
+                    bad(
+                        f"on {self.arch} a padded {self.kernel} carries floor=g1 (floor 0, the one padded form) "
+                        "and an exact one the inert floor=tail"
+                    )
+            elif self.floor != "tail":
+                bad(f"{self.kernel} on {self.arch} carries floor=tail")
+        if self.kernel in ("dbias_reduce", "dsink_reduce") and (
+            self.tile != REDUCE_TILE
             or self.cls != "plain"
             or self.dform != "bk"
             or self.dropout
@@ -186,33 +352,22 @@ class Spec:
             or self.hints != 1
         ):
             bad(
-                "dbias_reduce takes only dtype (tile is the placeholder 32, every other field its default)"
+                f"{self.kernel} takes only dtype (tile is the placeholder {REDUCE_TILE}, every other field its default)"
             )
-        if self.kernel == "dsink_reduce" and (
-            self.tile != LADDER[0]
-            or self.cls != "plain"
-            or self.dform != "bk"
-            or self.dropout
-            or self.padded
-            or self.floor != "tail"
-            or self.hdv
-            or self.hints != 1
-        ):
-            bad(
-                "dsink_reduce takes only dtype (tile is the placeholder 32, every other field its default)"
-            )
-        for k in ALL_KNOBS:
+        allowed = knobs_of(self.kernel, self.arch, self.dtype)
+        for k in KNOB_FIELDS:
             v = getattr(self, k)
             if v is None:
                 continue
-            if k not in KNOBS[self.kernel]:
-                bad(f"knob {k} does not apply to {self.kernel}")
+            if k not in allowed:
+                bad(f"knob {k} does not apply to {self.kernel} on {self.arch}")
             if self.dtype == FP32:
-                if v not in FP32_KNOBS[self.kernel].get(k, ()):
+                if v not in FP32_KNOBS[self.arch][self.kernel].get(k, ()):
                     bad(
-                        f"knob {k}={v} is not fp32-legal for {self.kernel} (fp32: {FP32_KNOBS[self.kernel]})"
+                        f"knob {k}={v} is not fp32-legal for {self.kernel} on {self.arch} "
+                        f"(fp32: {FP32_KNOBS[self.arch][self.kernel]})"
                     )
-            elif v in FP32_ONLY_VALUES.get(self.kernel, {}).get(k, ()):
+            elif not generic and v in FP32_ONLY_VALUES.get(self.kernel, {}).get(k, ()):
                 bad(f"knob {k}={v} is an fp32 knob value, not legal on {self.dtype}")
             if k in STR_KNOBS:
                 if v not in STR_KNOBS[k]:
@@ -227,28 +382,58 @@ class Spec:
                     bad(
                         "store_db is spelled store_db=0 and applies to bias dQ objects only"
                     )
-            elif k == "gqa_pack":
+            elif k in ONE_KNOBS:
                 if v != 1:
-                    bad("gqa_pack is spelled gqa_pack=1")
-            elif k == "sink":
-                if v != 1:
-                    bad("sink is spelled sink=1")
+                    bad(f"{k} is spelled {k}=1")
+                if k == "rne" and self.dtype != "bf16":
+                    bad("rne applies to bf16 dkdv/dq objects only")
+            elif k == "lpt_tile_order":
+                if v != 0:
+                    bad(
+                        "lpt_tile_order is spelled lpt_tile_order=0 (on is the policy value)"
+                    )
             elif not isinstance(v, int) or v <= 0:
                 bad(f"knob {k} must be a positive int")
+            elif k == "contraction_shards" and v & (v - 1):
+                bad("contraction_shards must be a power of two")
+        if self.dtype == FP32 and generic:
+            bq, bk = (
+                (self.block_q, self.block_kv)
+                if self.kernel == "dkdv"
+                else (self.block_m, self.block_n)
+            )
+            if bq is not None and bk is not None and bq < bk:
+                bad("fp32 tiles have BLOCK_M >= BLOCK_N")
+        if generic and self.kernel in ("dkdv", "dq"):
+            shards = self.contraction_shards
+            if self.kernel == "dkdv":
+                if shards is not None and not self.split_head_dim:
+                    bad("contraction_shards needs split_head_dim=1")
+                team = 2 * (shards or 1) if self.split_head_dim else 1
+            else:
+                team = shards or 1
+            if shards is not None and (
+                self.tile % shards or (self.tile // shards) % 16
+            ):
+                bad(
+                    f"per-wave column slice {self.tile}/{shards} must be a multiple of 16"
+                )
+            if self.num_waves is not None and self.num_waves % team:
+                bad(f"num_waves must be a multiple of the team size {team}")
 
     @property
     def knobs(self):
         """The set perf knobs, in canonical order."""
         return {
             k: getattr(self, k)
-            for k in KNOBS[self.kernel]
+            for k in knobs_of(self.kernel, self.arch, self.dtype)
             if getattr(self, k) is not None
         }
 
     @property
     def functional(self):
-        """The functional key: everything but the perf knobs."""
-        return (
+        """The functional key: everything but the perf knobs (the arch is the head's last element when it is not gfx950)."""
+        head = (
             self.kernel,
             self.dtype,
             self.tile,
@@ -260,9 +445,12 @@ class Spec:
             self.hdv,
             self.hints,
         )
+        return head if self.arch == GFX950 else head + (self.arch,)
 
     def key(self):
-        head = ",".join(str(v) for v in self.functional)
+        head = ",".join(str(v) for v in self.functional[:10])
+        if self.arch != GFX950:
+            head += f";arch={self.arch}"
         return head + "".join(f";{k}={v}" for k, v in self.knobs.items())
 
     def hash(self):
@@ -274,10 +462,17 @@ class Spec:
         kernel, dtype, tile, cls, dform, dropout, padded, floor, hdv, hints = (
             head.split(",")
         )
-        knobs = {}
+        knobs, arch = {}, GFX950
         for item in kv:
             n, v = item.split("=")
-            if n not in ALL_KNOBS:
+            if n == "arch":
+                if v == GFX950 or arch != GFX950:
+                    raise ValueError(
+                        f"arch is spelled once, and only when it is not gfx950: {s!r}"
+                    )
+                arch = v
+                continue
+            if n not in KNOB_FIELDS:
                 raise ValueError(f"unknown knob {n!r} in {s!r}")
             knobs[n] = v if n in STR_KNOBS else int(v)
         return Spec(
@@ -291,13 +486,14 @@ class Spec:
             floor,
             int(hdv),
             int(hints),
+            arch=arch,
             **knobs,
         )
 
 
-def dbias_reduce_spec(dtype: str) -> Spec:
-    """The standalone dBias reduce object of @p dtype: the pin a combined bias object's reduce kernel is gated against."""
-    return Spec("dbias_reduce", dtype, LADDERS[dtype][0])
+def dbias_reduce_spec(dtype: str, arch: str = GFX950) -> Spec:
+    """The standalone dBias reduce object of @p dtype on @p arch: the pin a combined bias object's reduce kernel is gated against."""
+    return Spec("dbias_reduce", dtype, REDUCE_TILE, arch=arch)
 
 
 # The instance-row spelling of an unset knob: -1 for the int knobs (0 is legal for

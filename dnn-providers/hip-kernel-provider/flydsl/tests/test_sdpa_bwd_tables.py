@@ -213,3 +213,86 @@ def test_the_engines_restated_constants_match_the_tables(tables, monkeypatch) ->
         "a gqa_pack row has a dK/dV block_q above PACK_MAX_BLOCK_Q (64, "
         f"FlydslSdpaBwdMergedNative.cpp): {block_q}"
     )
+
+
+GFX11 = "gfx11-generic"
+GFX11_SPLIT_OPS = [f"sdpa_bwd_{k}" for k in ("prep", "dkdv", "dq")]
+
+
+def test_gfx11_table_columns_agree_with_the_spec_grammar() -> None:
+    from generators._sdpa_bwd_spec import GENERIC_TABLE_KNOBS  # noqa: PLC0415
+
+    assert _instances.SDPA_BWD_GFX11_KNOBS == GENERIC_TABLE_KNOBS
+
+
+def test_gfx11_rows_are_the_s1_reference_set() -> None:
+    """Every table row's Spec is a pin of ``sdpa_bwd_gfx11_reference.csv`` and none is lost; the dBias reduce rows are the dQ companions."""
+    from generators import _sdpa_bwd_rdna_build as build  # noqa: PLC0415
+
+    with (DATA / "sdpa_bwd_gfx11_reference.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        reference = {row["hash"]: row["spec"] for row in csv.DictReader(fh)}
+    built = {}
+    for kind in ("prep", "dkdv", "dq", "dbias_reduce"):
+        for spec in build.specs_for(kind):
+            assert spec.hash() not in built
+            built[spec.hash()] = spec.key()
+    assert built == reference
+    assert [
+        len(build.specs_for(k)) for k in ("prep", "dkdv", "dq", "dbias_reduce")
+    ] == [
+        33,
+        198,
+        198,
+        3,
+    ]
+
+
+def test_gfx11_rows_have_the_field_set_of_the_gfx950_rows_of_their_op() -> None:
+    """The KMD of an op is one for every arch: same fields, same order."""
+    for op in GFX11_SPLIT_OPS:
+        gfx950 = list(_instances.instances_for(op, TARGET)[0].knobs)
+        for instance in _instances.instances_for(op, GFX11):
+            assert list(instance.knobs) == gfx950, instance.name
+
+
+def test_gfx11_row_values_follow_the_kmd_contract() -> None:
+    from generators._sdpa_bwd_spec import GENERIC_LADDER  # noqa: PLC0415
+
+    for instance in _instances.instances_for("sdpa_bwd_prep", GFX11):
+        k = instance.knobs
+        below = max([r for r in (0, *GENERIC_LADDER) if r < k["head_dim"]])
+        assert (k["sink"], k["padded"], k["dform"], k["floor"]) == (
+            0,
+            1,
+            "bk",
+            str(below),
+        )
+    for instance in _instances.instances_for("sdpa_bwd_dkdv", GFX11):
+        k = instance.knobs
+        assert (
+            k["mfma_rows"],
+            k["dkv_shards"],
+            k["tight_registers"],
+            k["num_stream_buffers"],
+            k["gqa_pack"],
+            k["floor"],
+        ) == (-1, -1, -1, -1, 0, "g1")
+    rows = _instances.instances_for("sdpa_bwd_dq", GFX11)
+    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 66
+    for instance in rows:
+        k = instance.knobs
+        assert k["mfma_rows"] == -1 and k["head_dim_v"] == k["head_dim"]
+        if k["has_bias"]:
+            assert (k["store_db"], k["bias_stage"]) == (1, "none")
+            assert (
+                k["reduce_symbol"]
+                == _instances.SDPA_BWD_GFX11_REDUCE_SYMBOL[instance.dtype]
+            )
+        else:
+            assert (k["store_db"], k["bias_stage"], k["reduce_symbol"]) == (
+                -1,
+                "auto",
+                "",
+            )

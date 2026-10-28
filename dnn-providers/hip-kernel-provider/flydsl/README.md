@@ -277,7 +277,7 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_sdpa_bwd_prep`, `gen_sdpa_bwd_dkdv`, `gen_sdpa_bwd_dq`, `gen_sdpa_bwd_merged`, `gen_sdpa_bwd_dbias_reduce`, `gen_sdpa_bwd_dsink_reduce`, `gen_sdpa_bwd_rdna_dbias_reduce` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_sdpa_bwd_prep`, `gen_sdpa_bwd_dkdv`, `gen_sdpa_bwd_dq`, `gen_sdpa_bwd_merged`, `gen_sdpa_bwd_dbias_reduce`, `gen_sdpa_bwd_dsink_reduce` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py`, `_sdpa_bwd_cdna_build.py`, `_sdpa_bwd_rdna_build.py` | what each architecture's SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
