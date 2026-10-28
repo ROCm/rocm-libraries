@@ -139,7 +139,7 @@ class FMA_F16_HPA_MAD_MIX(MAC):
                     # plain integer offsets, so "ValuC+<n>" is the form.
                     vars["cIdxExpr"] = "{block0}*2 + {block1}*{ThreadTile0}*2 + 0*2 + 0".format_map(vars)
                     cidx = eval(vars["cIdxExpr"])
-                    cStr = vgpr("ValuC+{cidx}".format_map(vars)) # *2 b/c of fp32
+                    cStr = vgpr("ValuC+%u" % cidx) # *2 b/c of fp32
                     module.add(instruction(dst=cStr, src0=aStr, src1=bStr, src2=cStr,
                                            vop3=VOP3PModifiers(op_sel=[0,0,0], op_sel_hi=[1,1,0]),
                                            comment="ValuC[%u] iui=%u" % (cidx, vars["iui"])))
@@ -150,7 +150,7 @@ class FMA_F16_HPA_MAD_MIX(MAC):
 
                     vars["cIdxExpr"] = "{block0}*2 + {block1}*{ThreadTile0}*2 + 0*2 + 1".format_map(vars)
                     cidx  = eval(vars["cIdxExpr"])
-                    cStr  = vgpr("ValuC+{cidx}".format_map(vars)) # *2 b/c of fp32
+                    cStr  = vgpr("ValuC+%u" % cidx) # *2 b/c of fp32
                     opSel = [1,0,0] if writer.tPA["tileIdx"] == 0 else [0,1,0]
                     module.add(instruction(dst=cStr, src0=aStr, src1=bStr, src2=cStr,
                                            vop3=VOP3PModifiers(op_sel=opSel, op_sel_hi=[1,1,0]),
@@ -158,7 +158,7 @@ class FMA_F16_HPA_MAD_MIX(MAC):
 
                     vars["cIdxExpr"] = "{block0}*2 + {block1}*{ThreadTile0}*2 + {Half_ThreadTile0}*2 + 0".format_map(vars)
                     cidx  = eval(vars["cIdxExpr"])
-                    cStr  = vgpr("ValuC+{cidx}".format_map(vars))
+                    cStr  = vgpr("ValuC+%u" % cidx)
                     opSel = [0,1,0] if writer.tPA["tileIdx"] == 0 else [1,0,0]
                     module.add(instruction(dst=cStr, src0=aStr, src1=bStr, src2=cStr,
                                            vop3=VOP3PModifiers(op_sel=opSel, op_sel_hi=[1,1,0]),
@@ -166,7 +166,7 @@ class FMA_F16_HPA_MAD_MIX(MAC):
 
                     vars["cIdxExpr"] = "{block0}*2+{block1}*{ThreadTile0}*2+{Half_ThreadTile0}*2+1".format_map(vars)
                     cidx = eval(vars["cIdxExpr"])
-                    cStr = vgpr("ValuC+{cidx}".format_map(vars))
+                    cStr = vgpr("ValuC+%u" % cidx)
                     module.add(instruction(dst=cStr, src0=aStr, src1=bStr, src2=cStr,
                                            vop3=VOP3PModifiers(op_sel=[1,1,0], op_sel_hi=[1,1,0]),
                                            comment="ValuC[%u]" % cidx))

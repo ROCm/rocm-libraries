@@ -45,6 +45,18 @@ _CONFIG = os.path.join(
     "mac.yaml",
 )
 
+# The same problem and fork sweep with LocalReadVectorWidth 1, which is what
+# selects the non-dot path: on gfx90a UseDotInstruction is forced False, so
+# FMA_F16_HPA_MAD_MIX is the component that runs.
+_CONFIG_MAD_MIX = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "test_data",
+    "_designed",
+    "gfx90a",
+    "mac_mad_mix.yaml",
+)
+
 
 def test_r2_mac_hhs_dot2_emits_assembly():
     """Non-MFMA HHS DOT2 config emits real gfx942 assembly, all err==0."""
@@ -74,3 +86,32 @@ def test_r2_mac_hhs_dot2_golden(snapshot):
         key=lambda d: d["basename"],
     )
     assert digest == snapshot
+
+
+def test_r2_mac_hhs_mad_mix_emits_assembly():
+    """The non-dot fp16 HPA MAC path emits real gfx90a assembly, all err==0.
+
+    On gfx90a ``UseDotInstruction`` is forced False, so
+    ``FMA_F16_HPA_MAD_MIX`` is selected instead of ``FMA_F16_HPA_DOT2``.  No
+    shipped logic tree reaches that class -- its ``__call__`` signature
+    mismatched the call site, so it raised before it could emit anything -- and
+    nothing exercised it.  It has to work now, and the accumulator index has to
+    be a plain integer: rocisa parses a register name into a base name and a
+    list of integer offsets, so an expression left in the name is read as its
+    first integer and the rest is dropped.
+    """
+    results = emit_kernels_from_config(_CONFIG_MAD_MIX, limit=8, arch="gfx90a")
+    assert len(results) >= 1, f"expected >=1 kernel, got {len(results)}"
+    assert all(err == 0 for (_b, _s, err) in results), (
+        f"expected all err==0, got {[(b, e) for b, _s, e in results if e != 0]}"
+    )
+    for base, src, _err in results:
+        assert src and len(src.splitlines()) > 500, (
+            f"suspiciously short source for {base}"
+        )
+        assert ".amdgcn_target" in src, f"missing .amdgcn_target in {base}"
+        assert "gfx90a" in src, f"missing gfx90a target marker in {base}"
+        # The mix MAC instruction is what distinguishes this path from the dot2 one.
+        assert ("v_fma_mix_f32" in src) or ("v_mad_mix_f32" in src), (
+            f"expected a mix MAC instruction in {base}"
+        )

@@ -97,7 +97,7 @@ class FMA_BF16_HPA(MAC):
                         bStr1 = vgpr("ValuB_X{m}_I{iui}+{bOff1}".format_map(vars))
 
                         cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + 0
-                        cStr = vgpr("ValuC+{cidx}".format_map(vars))
+                        cStr = vgpr("ValuC+%u" % cidx)
                         module.add(VFmaF32(dst=cStr, src0=aStr0, src1=bStr0, src2=cStr,
                                            comment="ValuC[%u]" % cidx))
 
@@ -108,19 +108,19 @@ class FMA_BF16_HPA(MAC):
                         aStr = aStr1 if writer.tPB["tile01Idx"] else aStr0
                         bStr = bStr0 if writer.tPB["tile01Idx"] else bStr1
                         cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + 1
-                        cStr = vgpr("ValuC+{cidx}".format_map(vars)) # *2 b/c of fp32
+                        cStr = vgpr("ValuC+%u" % cidx) # *2 b/c of fp32
                         module.add(VFmaF32(dst=cStr, src0=aStr, src1=bStr, src2=cStr,
                                            comment="ValuC[%u]" % cidx))
 
                         aStr = aStr0 if writer.tPB["tile01Idx"] else aStr1
                         bStr = bStr1 if writer.tPB["tile01Idx"] else bStr0
                         cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + kernel["ThreadTile0"] + 0
-                        cStr = vgpr("ValuC+{cidx}".format_map(vars))
+                        cStr = vgpr("ValuC+%u" % cidx)
                         module.add(VFmaF32(dst=cStr, src0=aStr, src1=bStr, src2=cStr,
                                            comment="ValuC[%u]" % cidx))
 
                         cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + kernel["ThreadTile0"] + 1
-                        cStr = vgpr("ValuC+{cidx}".format_map(vars))
+                        cStr = vgpr("ValuC+%u" % cidx)
                         module.add(VFmaF32(dst=cStr, src0=aStr1, src1=bStr1, src2=cStr,
                                            comment="ValuC[%u]" % cidx))
                         """
