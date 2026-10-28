@@ -149,7 +149,6 @@ class MxFp4TdmGemmSpec:
 # Each landed substep removes its flag from this frozenset.
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "scale_double_buffer",
         "wave_separated_tdm",
         "scale_tdm",
         "lds_pad",
@@ -423,6 +422,18 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         for repeat in range(spec.wave_repeat_n)
     ]
 
+    def _a_scales_for_group(group0):
+        return [
+            _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
+            for atom_row in atom_rows
+        ]
+
+    def _b_scales_for_group(group0):
+        return [
+            _pack_b_scale(b.add(block_n, b.add(atom_col, lane_col)), group0)
+            for atom_col in atom_cols
+        ]
+
     def _compute_tile(k0, parity, accumulators):
         a_buffer, b_buffer = _buffer_offsets(parity)
         out = list(accumulators)
@@ -435,6 +446,14 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                 _load_a_fragment(a_buffer, atom_row, inner_ks[0])
                 for atom_row in atom_rows
             ]
+        # Scale DRAM double-buffer: prefetch next E8M0 packs into VGPR while
+        # the current WMMA cluster runs (still global loads).
+        a_scale_prefetch = None
+        b_scale_prefetch = None
+        if spec.scale_double_buffer and inner_ks:
+            group0 = b.div(b.add(k0, b.const_i32(inner_ks[0])), c32)
+            a_scale_prefetch = _a_scales_for_group(group0)
+            b_scale_prefetch = _b_scales_for_group(group0)
         for step_i, inner_k in enumerate(inner_ks):
             group0 = b.div(b.add(k0, b.const_i32(inner_k)), c32)
             next_inner = inner_ks[step_i + 1] if step_i + 1 < len(inner_ks) else None
@@ -447,18 +466,36 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                     ]
             else:
                 a_frags = None
+            if spec.scale_double_buffer:
+                a_scales = a_scale_prefetch
+                b_scales = b_scale_prefetch
+                if next_inner is not None:
+                    next_group = b.div(b.add(k0, b.const_i32(next_inner)), c32)
+                    a_scale_prefetch = _a_scales_for_group(next_group)
+                    b_scale_prefetch = _b_scales_for_group(next_group)
+            else:
+                a_scales = None
+                b_scales = None
             for rm, atom_row in enumerate(atom_rows):
                 a_frag = (
                     a_frags[rm]
                     if a_frags is not None
                     else _load_a_fragment(a_buffer, atom_row, inner_k)
                 )
-                a_scale = _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
+                a_scale = (
+                    a_scales[rm]
+                    if a_scales is not None
+                    else _pack_a_scale(b.add(block_m, b.add(atom_row, lane)), group0)
+                )
                 for rn, atom_col in enumerate(atom_cols):
                     index = rm * spec.wave_repeat_n + rn
                     b_frag = _load_b_fragment(b_buffer, atom_col, inner_k)
-                    b_scale = _pack_b_scale(
-                        b.add(block_n, b.add(atom_col, lane_col)), group0
+                    b_scale = (
+                        b_scales[rn]
+                        if b_scales is not None
+                        else _pack_b_scale(
+                            b.add(block_n, b.add(atom_col, lane_col)), group0
+                        )
                     )
                     out[index] = b.mma(
                         _WmmaScaleF4Atom(),

@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    scale_double_buffer=True,
+                    wave_separated_tdm=True,
                 ),
                 "not implemented yet",
             ),
@@ -219,6 +219,26 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
             llvm_flavor="llvm23",
         )
         self.assertIn("llvm.amdgcn.global.prefetch", llvm)
+
+    def test_step6_3_scale_double_buffer_validates(self):
+        self.assertIn("step6_3_mxfp4_gemm", variant_names())
+        spec = variant_spec(
+            "step6_3_mxfp4_gemm",
+            128,
+            64,
+            512,
+            tile_k=512,
+        )
+        self.assertTrue(spec.scale_double_buffer)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
+        # Prefetched scale packs still originate as global i8 loads.
+        self.assertIn("load <4 x i8>, ptr addrspace(1)", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)
