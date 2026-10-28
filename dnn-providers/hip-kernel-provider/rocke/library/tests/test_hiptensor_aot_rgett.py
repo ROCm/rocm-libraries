@@ -39,6 +39,36 @@ def test_classes_build():
     assert len(names) == 4
 
 
+def test_class_set():
+    """Every lane / D width in each digit-slot bucket, the wide classes of packed operands, C
+    prefetch on every bilinear class and no bilinear 16-byte-store class of every slot.
+    """
+    from kernels.common.hiptensor_aot.rgett import BILINEAR_C_PREFETCH, SLOT_BUCKETS
+
+    cls = rgett_classes()
+    assert len({c.kernel_name() for c in cls}) == len(cls)
+    for c in cls:
+        assert c.slots in SLOT_BUCKETS
+        assert c.c_prefetch == (BILINEAR_C_PREFETCH if c.bilinear else 0)
+        assert not (c.bilinear and c.epi_pair and c.slots == 0)
+        assert not c.wide_d or c.vec_a == c.vec_b == 8
+    narrow = {
+        (c.dtype, c.bilinear, c.vec_a, c.vec_b, c.vec_d, c.epi_pair, c.slots)
+        for c in cls
+        if not c.wide_d
+    }
+    # 2 types x 2 variants x 4 lane pairs x 4 D widths x 3 buckets, less the 8 bilinear pair
+    # classes of every slot
+    assert len(narrow) == 2 * 2 * 4 * 4 * 3 - 8
+
+
+def test_slots_check():
+    with pytest.raises(ValueError):
+        RgettSpec("f16", False, 8, 8, 4, True, slots=7).check()
+    with pytest.raises(ValueError):
+        RgettSpec("f16", False, 8, 8, 4, True, c_prefetch=2).check()
+
+
 def test_jit_form_has_no_geometry_arguments():
     sp = RgettSpec("bf16", True, 8, 2, 2, False)
     geom = {n: 1 for n in geometry_names()}
@@ -166,7 +196,20 @@ def _make(md, ext, dt, rng, pad_inner=0):
     return view
 
 
-def run(rng, sp_dtype, ext, md, bilinear, alpha, beta, pad=0, jit=False, wide=False):
+def run(
+    rng,
+    sp_dtype,
+    ext,
+    md,
+    bilinear,
+    alpha,
+    beta,
+    pad=0,
+    jit=False,
+    wide=False,
+    slots=0,
+    cpf=0,
+):
     t = {
         x: _make(
             md[x if x != "C" else "D"], ext, sp_dtype, rng, pad if x in "AB" else 0
@@ -184,7 +227,10 @@ def run(rng, sp_dtype, ext, md, bilinear, alpha, beta, pad=0, jit=False, wide=Fa
         p["vec_d"],
         p["vec_d8"] and p["vec_d"] == 4,
         wide_d=wide,
+        slots=slots,
+        c_prefetch=cpf if bilinear else 0,
     )
+    assert not slots or p["digits"] <= slots
     geom = {n: p["vals"][n] for n in geometry_names()} if jit else None
     k = build_rgett(spec, arch="gfx950", geom=geom)
     vals = dict(p["vals"])
@@ -267,3 +313,34 @@ def test_rgett_padded_k_and_ragged_tiles():
     md["A"] = [m for m in md["A"] if m != 0] + [0]
     for bil in (False, True):
         run(rng, "f16", ext, md, bil, 1.0, 1.0)
+
+
+@gpu
+@pytest.mark.parametrize("dt", ["f16", "bf16"])
+@pytest.mark.parametrize("ranks", [(1, 1, 1), (2, 2, 2), (3, 2, 3)])
+def test_rgett_slot_buckets(dt, ranks):
+    """The digit-slot bucket classes (the smallest bucket that holds the problem's digits, and
+    every larger one), with and without C prefetch: the same bits as the reference."""
+    from kernels.common.hiptensor_aot.rgett import SLOT_BUCKETS
+
+    rng = random.Random(31 + sum(ranks))
+    for bil in (False, True):
+        ext, md = _problem(rng, *ranks)
+        seed = rng.randrange(1 << 20)
+        ref = None
+        for n in SLOT_BUCKETS:
+            for cpf in (0, 2) if bil else (0,):
+                strides = {
+                    x: [_packed(md[x], ext)[m] for m in md[x]] for x in ("A", "B", "D")
+                }
+                digits = rgett_plan(contraction_groups(md, ext, strides), 2, bil)[
+                    "digits"
+                ]
+                if n and digits > n:
+                    continue
+                got, _sp = run(
+                    random.Random(seed), dt, ext, md, bil, 1.5, -0.5, slots=n, cpf=cpf
+                )
+                if ref is None:
+                    ref = got
+                assert torch.equal(got, ref)

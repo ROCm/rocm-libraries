@@ -16,8 +16,11 @@ kernel hipTensor's JIT compiles (the class recipe is rolled over every geometry 
 Class (:class:`RgettSpec`): data type, bilinear, the DTL lane width of each operand (``vec_a`` /
 ``vec_b``: 8 elements = 16-byte lanes when the operand's fastest run and every other stride are
 multiples of 8, else 2 elements = 4-byte lanes), the D vector width ``vec_d`` (1, 2, 4) and
-``epi_pair`` (16-byte D stores, 8-element D runs), and the ring body's levers (K tile, DTL stages,
-chiplet raster).
+``epi_pair`` (16-byte D stores, 8-element D runs), ``wide_d`` (D past 2^31 bytes), ``slots`` (the
+digits per digit space the kernel decomposes: a class for problems of at most 2 or 4 digits per
+space skips the magic-number division of the unused slots, which costs about a tenth of the main
+loop on the doc rows when every slot is decomposed), ``c_prefetch`` (bilinear: C loads issued
+two atom rows ahead) and the ring body's levers (K tile, DTL stages, chiplet raster).
 
 Geometry (i32 kernel arguments; the host plan :func:`.gett_host.rgett_plan`): ``ra*`` / ``rb*``
 the GEMM rows of the kernel's A and B operands (extent ``e``, magic pair ``m, s`` of every digit
@@ -80,6 +83,11 @@ class RgettSpec:
     epi_pair: bool = False  # 16-byte D stores (D runs of 8, vec_d 4)
     # D (and C) past 2^31 bytes (up to MAX_D_BYTES): the epilogue masks the summed offset
     wide_d: bool = False
+    # bilinear: C loads issued this many atom rows ahead of their use (0: per row)
+    c_prefetch: int = 0
+    # digits per digit space the kernel decomposes (0: every slot); the geometry arguments are
+    # the same, the slots past ``slots`` must have extent 1
+    slots: int = 0
     tile_k: int = 32
     dtl_stages: int = 3
     chiplet_wgm: int = 8
@@ -96,6 +104,10 @@ class RgettSpec:
             raise ValueError("epi_pair needs vec_d 4")
         if self.tile_k not in (32, 64):
             raise ValueError("tile_k must be 32 or 64")
+        if self.c_prefetch and not self.bilinear:
+            raise ValueError("c_prefetch needs bilinear")
+        if self.slots and not 1 <= self.slots <= min(SLOTS_KL, SLOTS_KT, SLOTS_ROW):
+            raise ValueError("slots must be 0 or 1 .. the smallest digit space")
 
     def kernel_name(self) -> str:
         return (
@@ -103,6 +115,8 @@ class RgettSpec:
             f"_a{self.vec_a}_b{self.vec_b}_d{self.vec_d}{'p' if self.epi_pair else ''}"
             f"_t{self.tile_k}s{self.dtl_stages}w{self.chiplet_wgm}c{self.chiplet_chunk_size}"
             + ("_wd" if self.wide_d else "")
+            + (f"_cp{self.c_prefetch}" if self.c_prefetch else "")
+            + (f"_n{self.slots}" if self.slots else "")
         )
 
     def key(self) -> str:
@@ -139,10 +153,18 @@ class RtGettHooks(GettHooks):
     None) or the constants ``geom``."""
 
     def __init__(
-        self, plan, knobs, spec, dtype, geom: Optional[Dict[str, int]], wide: bool = False
+        self,
+        plan,
+        knobs,
+        spec,
+        dtype,
+        geom: Optional[Dict[str, int]],
+        wide: bool = False,
+        slots: int = 0,
     ):
         super().__init__(plan, knobs, spec, dtype=dtype)
         self.wide = wide
+        self.slots = slots
         self.geom = geom
         self.g: Dict[str, Value] = {}
 
@@ -162,6 +184,8 @@ class RtGettHooks(GettHooks):
     def _space(self, b: IRBuilder, x: Value, prefix: str, strides):
         """(offset per stride name, digit values) of index ``x`` over a digit space."""
         n = dict((p, k) for p, _s, k in SPACES)[prefix]
+        if self.slots:
+            n = min(n, self.slots)
         offs = {s: None for s in strides}
         digits = []
         rest = x
@@ -315,24 +339,54 @@ def build_rgett(
         chiplet_chunk_size=spec.chiplet_chunk_size,
     )
     body = dataclasses.replace(body, name=name)
-    knobs = GettKnobs(bilinear=spec.bilinear, epi_pair=spec.epi_pair)
-    hooks = RtGettHooks(_plan(spec), knobs, body, spec.dtype, geom, spec.wide_d)
+    knobs = GettKnobs(
+        bilinear=spec.bilinear, epi_pair=spec.epi_pair, c_prefetch=spec.c_prefetch
+    )
+    hooks = RtGettHooks(
+        _plan(spec), knobs, body, spec.dtype, geom, spec.wide_d, spec.slots
+    )
     object.__setattr__(body, "_gett", hooks)
     return build_universal_gemm(body, arch=arch)
 
 
+#: digit-slot buckets of the pack's classes (0: every slot)
+SLOT_BUCKETS = (2, 4, 0)
+#: bilinear classes: C loads issued this many atom rows ahead
+BILINEAR_C_PREFETCH = 2
+
+
 def rgett_classes(dtypes=("f16", "bf16")):
-    """The classes hipTensor's kernel pack carries."""
+    """The classes hipTensor's kernel pack carries: every lane / D width, each in the digit-slot
+    buckets :data:`SLOT_BUCKETS`, and the D-past-2^31-bytes classes of packed operands. The
+    bilinear 16-byte-store classes decomposing every slot are left out (their row offsets per
+    atom row cost more than the 8-byte stores save; the planner uses the 8-byte class).
+    """
     out = []
     for dt in dtypes:
         for bil in (False, True):
+            cpf = BILINEAR_C_PREFETCH if bil else 0
             for va in (8, 2):
                 for vb in (8, 2):
                     for vd, pair in ((4, True), (4, False), (2, False), (1, False)):
-                        out.append(RgettSpec(dt, bil, va, vb, vd, pair))
-                        if va == vb == 8:
-                            # D past 2^31 bytes (packed operands have 8-element runs)
-                            out.append(RgettSpec(dt, bil, va, vb, vd, pair, wide_d=True))
+                        for n in SLOT_BUCKETS:
+                            if bil and pair and n == 0:
+                                continue
+                            for wide in (False, True) if va == vb == 8 else (False,):
+                                # wide: D past 2^31 bytes (packed operands have 8-element
+                                # runs)
+                                out.append(
+                                    RgettSpec(
+                                        dt,
+                                        bil,
+                                        va,
+                                        vb,
+                                        vd,
+                                        pair,
+                                        wide_d=wide,
+                                        c_prefetch=cpf,
+                                        slots=n,
+                                    )
+                                )
     return out
 
 
@@ -344,6 +398,8 @@ __all__ = [
     "SLOTS_KL",
     "SLOTS_KT",
     "SLOTS_ROW",
+    "SLOT_BUCKETS",
+    "BILINEAR_C_PREFETCH",
     "build_rgett",
     "geometry_names",
     "rgett_classes",

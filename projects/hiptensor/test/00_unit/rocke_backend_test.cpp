@@ -2004,8 +2004,7 @@ namespace
             return;
         }
         EXPECT_EQ(a.pick, b.pick);
-        EXPECT_TRUE(a.source == "MODEL" || a.source == "STATIC" || a.source == "RULE")
-            << a.source;
+        EXPECT_TRUE(a.source == "MODEL" || a.source == "STATIC" || a.source == "RULE") << a.source;
         // on gfx950 the ring GETT wins by rule when the layout admits it, else the model decides
         bool const ring = a.pick.rfind("rgett:", 0) == 0;
         if(deviceArch() == "gfx950")
@@ -3547,6 +3546,10 @@ namespace
             // A of 2.68 GB: the 64-bit-address cf32 body
             HugeContractionCase{
                 HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 20480, 64, 16384, true},
+            // D and C of more than 2^30 complex elements (8.6 GB): the complex elementwise
+            // launches with 64-bit offsets (their 32-bit offsets index components)
+            HugeContractionCase{
+                HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 33000, 32600, 64, true},
             // M past 65535 rows of 256-row tiles (A of 2.18 GB, T of more than 2^31 elements):
             // the 64-bit-address h16 body in two row ranges
             HugeContractionCase{
@@ -5070,9 +5073,9 @@ namespace
         {
             return picks;
         }
-        int64_t const        M = 264, N = 200, K = 96;
-        std::mt19937         rng(int(type) * 7 + int(offset));
-        auto                 make = [&](std::vector<int32_t> modes, std::vector<int64_t> ext) {
+        int64_t const M = 264, N = 200, K = 96;
+        std::mt19937  rng(int(type) * 7 + int(offset));
+        auto          make = [&](std::vector<int32_t> modes, std::vector<int64_t> ext) {
             Tensor t;
             t.type    = type;
             t.modes   = modes;
@@ -5125,9 +5128,11 @@ namespace
                     sr += a.real() * b.real() - a.imag() * b.imag();
                     si += a.real() * b.imag() + a.imag() * b.real();
                 }
-                cplx       v = alphaRe == 0.0 ? cplx(0, 0) : cplx(alphaRe * sr, alphaRe * si);
-                cplx const c = C.values[m + n * M];
-                v = betaRe == 0.0 ? v : cplx(v.real() + betaRe * c.real(), v.imag() + betaRe * c.imag());
+                cplx       v    = alphaRe == 0.0 ? cplx(0, 0) : cplx(alphaRe * sr, alphaRe * si);
+                cplx const c    = C.values[m + n * M];
+                v               = betaRe == 0.0
+                                      ? v
+                                      : cplx(v.real() + betaRe * c.real(), v.imag() + betaRe * c.imag());
                 want[m + n * M] = cplx(roundTo(v.real(), type), roundTo(v.imag(), type));
             }
         }
@@ -5158,12 +5163,10 @@ namespace
             EXPECT_EQ(hiptensorCreatePlanPreference(
                           api.handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
                       HIPTENSOR_STATUS_SUCCESS);
-            EXPECT_EQ(hiptensorPlanPreferenceSetAttribute(api.handle,
-                                                          pref,
-                                                          HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK,
-                                                          &rank,
-                                                          sizeof(rank)),
-                      HIPTENSOR_STATUS_SUCCESS);
+            EXPECT_EQ(
+                hiptensorPlanPreferenceSetAttribute(
+                    api.handle, pref, HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK, &rank, sizeof(rank)),
+                HIPTENSOR_STATUS_SUCCESS);
             uint64_t ws = 0;
             EXPECT_EQ(hiptensorEstimateWorkspaceSize(
                           api.handle, desc, pref, HIPTENSOR_WORKSPACE_MAX, &ws),
@@ -5230,11 +5233,14 @@ namespace
             for(size_t i = 0; i < want.size(); i++)
             {
                 auto const g = got.values[i], x = want[i];
-                bool const same
-                    = (std::isnan(g.real()) == std::isnan(x.real()))
-                      && (std::isnan(g.imag()) == std::isnan(x.imag()))
-                      && (std::isnan(x.real()) || g.real() == x.real())
-                      && (std::isnan(x.imag()) || g.imag() == x.imag());
+                // a complex NaN is an element with a NaN component (a complex scale times
+                // (NaN, 0) is (NaN, NaN), the reference's real scale gives (NaN, 0))
+                bool const xNan = std::isnan(x.real()) || std::isnan(x.imag());
+                bool const gNan = std::isnan(g.real()) || std::isnan(g.imag());
+                bool const same = isComplex(type)
+                                      ? (xNan ? gNan : g == x)
+                                      : (std::isnan(g.real()) == std::isnan(x.real()))
+                                            && (std::isnan(x.real()) || g.real() == x.real());
                 if(!same && bad++ < 5)
                 {
                     ADD_FAILURE() << sel.pick << " alpha " << alphaRe << " beta " << betaRe
@@ -5360,10 +5366,10 @@ namespace
         {
             return "";
         }
-        LogCapture                 log;
-        std::map<int32_t, int64_t> ext = {{'a', 72}, {'b', 40}, {'c', 3}, {'d', 5}};
-        std::vector<int32_t>       modes = {'a', 'b', 'c', 'd'};
-        std::vector<Tensor>        ins;
+        LogCapture                        log;
+        std::map<int32_t, int64_t>        ext   = {{'a', 72}, {'b', 40}, {'c', 3}, {'d', 5}};
+        std::vector<int32_t>              modes = {'a', 'b', 'c', 'd'};
+        std::vector<Tensor>               ins;
         std::vector<std::vector<int32_t>> orders
             = {{'b', 'a', 'd', 'c'}, {'a', 'c', 'b', 'd'}, {'c', 'b', 'a', 'd'}};
         for(int i = 0; i < c.arity; i++)
@@ -5461,7 +5467,7 @@ namespace
         }
         api.keep(desc);
         Choice choice;
-        choice.rank = c.rank;
+        choice.rank     = c.rank;
         uint64_t     ws = 0;
         SelectionLog sel;
         auto         plan = planWith(api, desc, choice, log, ws, &sel);
@@ -5495,7 +5501,7 @@ namespace
         else
         {
             Scalar a = s[0], b = s[1], g = s[2];
-            status   = hiptensorElementwiseTrinaryExecute(api.handle,
+            status = hiptensorElementwiseTrinaryExecute(api.handle,
                                                         plan,
                                                         a.as(c.scalar),
                                                         p[0],
@@ -5521,8 +5527,9 @@ namespace
             {
                 double const sc = scaleOf(i).re;
                 // an input whose scale is zero is not read (its NaN does not reach D)
-                t.push_back(sc == 0.0 ? 0.0
-                                      : sc * unaryRef(uop[i], ins[i].values[ins[i].offset(index)].real()));
+                t.push_back(
+                    sc == 0.0 ? 0.0
+                              : sc * unaryRef(uop[i], ins[i].values[ins[i].offset(index)].real()));
             }
             double r = t[0];
             if(c.arity >= 2)
@@ -5562,7 +5569,7 @@ namespace
                             {3, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
                             {3, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
                             {3, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}};
-        int seed = 2900;
+        int       seed   = 2900;
         for(auto const& r : rows)
         {
             for(size_t skew : {size_t(0), size_t(1)})

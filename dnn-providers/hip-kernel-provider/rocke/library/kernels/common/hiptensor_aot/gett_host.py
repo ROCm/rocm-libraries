@@ -437,8 +437,17 @@ def rgett_plan(
     if -(-m_ext // 256) > 65535:
         raise ValueError("more than 65535 rows of tiles")
     vals.update(M=m_ext, N=n_ext, K=k_pad)
+    digits = max(
+        len(ops["A"]["digits"]),
+        len(ops["B"]["digits"]),
+        len(d_row),
+        len(d_col),
+        len(kp["local"]),
+        len(kp["tile"]),
+    )
     return dict(
         vals=vals,
+        digits=digits,
         swapped=swapped,
         vec_a=ops["A"]["vec"],
         vec_b=ops["B"]["vec"],

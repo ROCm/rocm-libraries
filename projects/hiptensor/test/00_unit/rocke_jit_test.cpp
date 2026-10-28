@@ -338,14 +338,24 @@ namespace
         EXPECT_EQ(bad, 0) << what;
     }
 
+    // `rank` >= 0: HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK (the candidate at that place of the
+    // selection order)
     hiptensorPlan_t makePlan(ApiObjects&                    api,
                              hiptensorOperationDescriptor_t desc,
                              hiptensorJitMode_t             jit,
-                             uint64_t*                      workspace = nullptr)
+                             uint64_t*                      workspace = nullptr,
+                             int32_t                        rank      = -1)
     {
         hiptensorPlanPreference_t pref = nullptr;
         EXPECT_EQ(hiptensorCreatePlanPreference(api.handle, &pref, HIPTENSOR_ALGO_DEFAULT, jit),
                   HIPTENSOR_STATUS_SUCCESS);
+        if(rank >= 0)
+        {
+            EXPECT_EQ(
+                hiptensorPlanPreferenceSetAttribute(
+                    api.handle, pref, HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK, &rank, sizeof(rank)),
+                HIPTENSOR_STATUS_SUCCESS);
+        }
         uint64_t ws = 0;
         EXPECT_EQ(hiptensorEstimateWorkspaceSize(
                       api.handle, desc, pref, HIPTENSOR_WORKSPACE_DEFAULT, &ws),
@@ -569,8 +579,11 @@ namespace
     }
 
     // f16 contraction with f32 compute: D[m0, n0, m1] = alpha * A[k0, m0, k1, m1] B[n0, k1, k0]
-    // + beta * C (integer data, exact in f16).
-    JitLine runContraction(hiptensorJitMode_t jit, std::mt19937& rng, size_t skew = 0)
+    // + beta * C (integer data, exact in f16). `rank`: as makePlan.
+    JitLine runContraction(hiptensorJitMode_t jit,
+                           std::mt19937&      rng,
+                           size_t             skew = 0,
+                           int32_t            rank = -1)
     {
         ApiObjects api;
         LogCapture log;
@@ -613,7 +626,7 @@ namespace
                   HIPTENSOR_STATUS_SUCCESS);
         api.keep(op);
         uint64_t ws   = 0;
-        auto     plan = makePlan(api, op, jit, &ws);
+        auto     plan = makePlan(api, op, jit, &ws, rank);
         if(plan == nullptr)
         {
             ADD_FAILURE() << "contraction: no plan\n" << log.all();
@@ -734,7 +747,11 @@ TEST(RockeJit, DefaultSpecializesExactly)
                                   && c.name.find("transposing") == std::string::npos;
             EXPECT_EQ(j.specialized, promoted ? 1 : 0) << c.name;
         }
-        auto j = runContraction(HIPTENSOR_JIT_MODE_DEFAULT, rng, skew);
+        // the first pick (on targets with the direct GETT: that kernel, which has no elementwise
+        // launch) is exact; the next candidate packs its operands with elementwise launches,
+        // which the JIT specializes
+        static_cast<void>(runContraction(HIPTENSOR_JIT_MODE_DEFAULT, rng, skew));
+        auto j = runContraction(HIPTENSOR_JIT_MODE_DEFAULT, rng, skew, 1);
         EXPECT_TRUE(j.found);
         EXPECT_GE(j.launches, 1);
     }

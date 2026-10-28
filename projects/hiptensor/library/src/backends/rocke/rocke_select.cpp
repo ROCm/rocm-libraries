@@ -481,9 +481,9 @@ namespace hiptensor
                 return r != Route::RingGett && r != Route::DirectGett;
             };
             std::stable_partition(sel.order.begin(), sel.order.end(), modelRoute);
-            auto preferred = std::find_if(sel.order.begin(),
-                                          sel.order.end(),
-                                          [&candidates](int i) { return candidates[i].preferred; });
+            auto preferred = std::find_if(sel.order.begin(), sel.order.end(), [&candidates](int i) {
+                return candidates[i].preferred;
+            });
             if(preferred != sel.order.end())
             {
                 bool const ring = candidates[*preferred].facts.route == Route::RingGett;

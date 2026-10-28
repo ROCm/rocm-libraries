@@ -12,8 +12,9 @@ Index arithmetic:
 * Coordinates are i32. A flat index is split into coordinates with host-computed magic numbers
   (:func:`magic_u31`): ``q = x / d`` is ``umulhi(x, m) >> s`` for every ``0 <= x < 2^31``; the
   host passes ``m = 0`` for ``d = 1`` (then ``q = x``).
-* Offsets are element offsets, i32 (``idx64 = False``, every offset of every tensor below 2^31)
-  or i64 (the pointer is advanced by a 64-bit byte offset before each access).
+* Offsets are element offsets, i32 (``idx64 = False``, every offset of every tensor below 2^31;
+  complex kernels index the components, so every element offset below 2^30) or i64 (the pointer
+  is advanced by a 64-bit byte offset before each access).
 
 Operator codes are hipTensor's ``hiptensorOperator_t`` values (:data:`UNARY_OPS`,
 :data:`BINARY_OPS`); a kernel branches on them with wave-uniform branches, so an operator a

@@ -1099,16 +1099,36 @@ class GettHooks:
             n = b.add(n0, b.const_i32(32 * j))
             cols.append(self._d_part(b, n, pl.d_col_digits, pl.N if rag_n else 0, big))
         alpha = self.p["alpha"]
-        for mi in range(mfA):
+
+        def _row(mi):
             m = b.add(m0, b.const_i32(mi * 16))
-            roff = self._d_part(b, m, pl.d_row_digits, pl.M if rag_m else 0, big)
+            return self._d_part(b, m, pl.d_row_digits, pl.M if rag_m else 0, big)
+
+        def _cload(roff):
             cl = {}
-            if self.k.bilinear:
-                for j in range(mfB // 2):
-                    cv = b.buffer_load_vN(
-                        rs_c, self._d_off(b, roff, cols[j]), c0, self.dt, 8
-                    )
-                    cl[j] = [b.vec_extract(cv, e) for e in range(8)]
+            for j in range(mfB // 2):
+                cv = b.buffer_load_vN(
+                    rs_c, self._d_off(b, roff, cols[j]), c0, self.dt, 8
+                )
+                cl[j] = [b.vec_extract(cv, e) for e in range(8)]
+            return cl
+
+        # c_prefetch d: as in :meth:`epilogue`, the C loads of atom row mi + d are
+        # issued before row mi's math and stores (rows 0 .. d-1 up front)
+        cpf = int(self.k.c_prefetch) if self.k.bilinear else 0
+        pend: Dict[int, Tuple[Value, dict]] = {}
+        for mi in range(min(cpf, mfA)):
+            r_ = _row(mi)
+            pend[mi] = (r_, _cload(r_))
+        for mi in range(mfA):
+            if cpf:
+                roff, cl = pend.pop(mi)
+                if mi + cpf < mfA:
+                    r_ = _row(mi + cpf)
+                    pend[mi + cpf] = (r_, _cload(r_))
+            else:
+                roff = _row(mi)
+                cl = _cload(roff) if self.k.bilinear else {}
             for j in range(mfB // 2):
                 ax = acc_out(vals[mi * mfB + 2 * j])
                 ay = acc_out(vals[mi * mfB + 2 * j + 1])

@@ -1626,11 +1626,11 @@ namespace hiptensor
             bool const promoteAll = mode && *mode == "all";
             for(auto const& step : program.steps)
             {
-                report.launches += step.kernel != nullptr
-                                           && (step.kernel->family == "ew"
-                                               || step.kernel->family == "ewv")
-                                       ? 1
-                                       : 0;
+                report.launches
+                    += step.kernel != nullptr
+                               && (step.kernel->family == "ew" || step.kernel->family == "ewv")
+                           ? 1
+                           : 0;
             }
             if(report.launches == 0)
             {

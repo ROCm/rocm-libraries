@@ -321,7 +321,9 @@ def _canon(ext=None, **kw):
     return TensorGettSpec.make(a, b, d, ext or e, **kw)
 
 
-@pytest.mark.parametrize("knobs", [GettKnobs(), GettKnobs(bilinear=True, epi_pair=True)])
+@pytest.mark.parametrize(
+    "knobs", [GettKnobs(), GettKnobs(bilinear=True, epi_pair=True)]
+)
 def test_wide_ragged_d_is_admitted_and_masks_the_summed_offset(knobs):
     """A ragged D over 2 GiB (38400 x 30240) is served: the row / column
     sentinel would land inside D there, so the epilogue masks the summed
@@ -337,6 +339,26 @@ def test_wide_ragged_d_is_admitted_and_masks_the_summed_offset(knobs):
     ir = lower_kernel_to_llvm(build_tensor_gett(sp), arch="gfx950")
     assert "add nuw i32" in ir
     assert str(G.WIDE_OOB - (1 << 32)) in ir  # the wide sentinel (as an i32)
+
+
+def test_pair_epilogue_c_prefetch_issues_the_same_loads():
+    """The 16-byte-store epilogue with ``c_prefetch``: the same C loads, issued earlier (the
+    kernel differs, the count of buffer loads does not); ``c_prefetch`` 0 is the per-row form.
+    """
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+    ext = {"M": 2048, "N": 1024, "K": 512}
+    irs = []
+    for cpf in (0, 2):
+        sp = _canon(
+            ext=ext, knobs=GettKnobs(bilinear=True, epi_pair=True, c_prefetch=cpf)
+        )
+        ok, why = is_valid_spec(sp)
+        assert ok, why
+        assert sp.plan().vec_d8  # the 16-byte-store epilogue applies
+        irs.append(lower_kernel_to_llvm(build_tensor_gett(sp), arch="gfx950"))
+    assert irs[0] != irs[1]
+    assert irs[0].count("buffer.load") == irs[1].count("buffer.load")
 
 
 def test_narrow_d_keeps_the_row_column_sentinel():

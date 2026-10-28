@@ -44,9 +44,10 @@ def _magic(vals: Dict[str, int], m: str, s: str, d: int) -> None:
     vals[s] = ss
 
 
-def ew_args(dims, names: Sequence[str], block: int = 256):
+def ew_args(dims, names: Sequence[str], block: int = 256, cplx: bool = False):
     """Kernel argument values (sizes, strides, magic numbers) and grid of a generic elementwise
-    launch over canonical ``dims`` whose stride lists follow ``names`` (e.g. ``["A", "D"]``).
+    launch over canonical ``dims`` whose stride lists follow ``names`` (e.g. ``["A", "D"]``);
+    ``cplx``: a complex kernel (its 32-bit offsets index components, twice the element offsets).
     """
     rank = len(dims)
     inner = min(3, rank)
@@ -70,8 +71,9 @@ def ew_args(dims, names: Sequence[str], block: int = 256):
             vals[f"s{n}{i}"] = st[t] if e != 1 else 0
     for i in (0, 1, 3, 4, 5, 6):
         _magic(vals, f"m{i}", f"s{i}", slots[i][0])
+    limit = I32_MAX // 2 if cplx else I32_MAX
     idx64 = any(
-        sum((e - 1) * abs(st[t]) for e, st in dims) > I32_MAX for t in range(len(names))
+        sum((e - 1) * abs(st[t]) for e, st in dims) > limit for t in range(len(names))
     )
     grid = (-(-n_in // block), vals["ystep"], 1)
     return vals, grid, idx64

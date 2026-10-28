@@ -314,10 +314,16 @@ namespace hiptensor
                              "elementwise kernel";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                bool idx64 = false;
+                // 32-bit offsets address every element below 2^31; a complex kernel indexes the
+                // components (twice the element offset)
+                bool const    cplxRow = std::any_of(ints.begin(), ints.end(), [](auto const& kv) {
+                    return kv.first == "cplx" && kv.second == 1;
+                });
+                int64_t const limit   = cplxRow ? kI32Max / 2 : kI32Max;
+                bool          idx64   = false;
                 for(int t = 0; t < tensors; t++)
                 {
-                    idx64 = idx64 || spanOf(dims, t) > kI32Max;
+                    idx64 = idx64 || spanOf(dims, t) > limit;
                 }
                 ints.emplace_back("idx64", idx64 ? 1 : 0);
                 bool const math = std::any_of(operands.begin(),
@@ -832,11 +838,11 @@ namespace hiptensor
                 }
                 if(layout != nullptr)
                 {
-                    layout->dims      = dims;
-                    layout->operands  = operands;
-                    layout->strs      = strs;
-                    layout->binaryOps = {static_cast<int>(problem.opAB),
-                                         static_cast<int>(problem.opABC)};
+                    layout->dims     = dims;
+                    layout->operands = operands;
+                    layout->strs     = strs;
+                    layout->binaryOps
+                        = {static_cast<int>(problem.opAB), static_cast<int>(problem.opABC)};
                 }
                 return HIPTENSOR_STATUS_SUCCESS;
             }
@@ -954,8 +960,8 @@ namespace hiptensor
                         }
                     }
                 }
-                bool const vectorInput = std::find(vector.begin(), vector.end() - 1, true)
-                                         != vector.end() - 1;
+                bool const vectorInput
+                    = std::find(vector.begin(), vector.end() - 1, true) != vector.end() - 1;
                 if(!ok || !vectorInput)
                 {
                     reason = "no vector class for this layout";
@@ -976,8 +982,8 @@ namespace hiptensor
                 }
                 LaunchStep step;
                 step.kernel = kernel;
-                ArgWriter w(step);
-                bool      good = true;
+                ArgWriter                                    w(step);
+                bool                                         good = true;
                 std::vector<std::pair<BufferRole, uint32_t>> align;
                 for(auto const& p : g.pointers)
                 {
@@ -1034,8 +1040,8 @@ namespace hiptensor
                 }
                 uint32_t const block = static_cast<uint32_t>(kernel->attr("block", 256));
                 step.block           = dim3(block, 1, 1);
-                step.grid            = dim3(
-                    static_cast<uint32_t>(ceilDiv(nIn / vec, block)), g.grid.y, g.grid.z);
+                step.grid
+                    = dim3(static_cast<uint32_t>(ceilDiv(nIn / vec, block)), g.grid.y, g.grid.z);
                 if(auto st = finishStep(step, w, reason); st != HIPTENSOR_STATUS_SUCCESS)
                 {
                     return st;
@@ -1053,7 +1059,8 @@ namespace hiptensor
                 facts              = CandidateFacts{};
                 facts.route        = Route::Elementwise;
                 facts.main         = kernel;
-                facts.ctas = int64_t(prog.steps[0].grid.x) * prog.steps[0].grid.y * prog.steps[0].grid.z;
+                facts.ctas
+                    = int64_t(prog.steps[0].grid.x) * prog.steps[0].grid.y * prog.steps[0].grid.z;
                 facts.block = block;
                 program     = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
@@ -1142,8 +1149,8 @@ namespace hiptensor
                     }
                 }
                 int const slots = int(kernel->attr("slots_b"));
-                bool      ok    = int(others.size()) <= slots && eo % vo == 0
-                          && dims[t].stride[nd] % vo == 0;
+                bool      ok
+                    = int(others.size()) <= slots && eo % vo == 0 && dims[t].stride[nd] % vo == 0;
                 for(int i : others)
                 {
                     ok = ok && dims[i].stride[nd] % vo == 0;
@@ -1207,9 +1214,9 @@ namespace hiptensor
                         }
                     }
                 }
-                int64_t const tt     = kernel->attr("tile_t"), to = kernel->attr("tile_o");
+                int64_t const tt = kernel->attr("tile_t"), to = kernel->attr("tile_o");
                 int64_t const tilesO = ceilDiv(eo, to), tilesT = ceilDiv(et, tt);
-                int64_t       nb     = 1;
+                int64_t       nb = 1;
                 for(int i : others)
                 {
                     nb *= dims[i].extent;
@@ -1280,9 +1287,8 @@ namespace hiptensor
                     reason = "tiled elementwise arguments do not fit the kernel arguments";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                step.grid  = dim3(static_cast<uint32_t>(tilesO * tilesT),
-                                 static_cast<uint32_t>(ystep),
-                                 1);
+                step.grid
+                    = dim3(static_cast<uint32_t>(tilesO * tilesT), static_cast<uint32_t>(ystep), 1);
                 step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
                 if(auto st = finishStep(step, w, reason); st != HIPTENSOR_STATUS_SUCCESS)
                 {
@@ -1299,6 +1305,56 @@ namespace hiptensor
                 facts.block        = kernel->attr("block", 256);
                 program            = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // The tiled kernel in place of the last launch of `steps`, when it is the only launch
+            // from `first` on and a launch of the generic kernel over `dims` (real data) that
+            // planEwt serves: an operand pack or epilogue of a contraction that reads an input
+            // along another mode than it writes. The generic launch is its fallback (pointers
+            // not aligned to the tiled kernel's vectors).
+            void tileLaunch(Pack const&                                             pack,
+                            std::vector<std::pair<std::string, std::string>> const& strs,
+                            std::vector<Dim> const&                                 dims,
+                            std::vector<EwOperand> const&                           operands,
+                            std::array<int, 2> const&                               binaryOps,
+                            bool                                                    cplx,
+                            std::vector<LaunchStep>&                                steps,
+                            size_t                                                  first)
+            {
+                if(cplx || steps.size() != first + 1 || steps.back().kernel == nullptr
+                   || steps.back().kernel->family != kEw)
+                {
+                    return;
+                }
+                EwLayout lay;
+                lay.dims      = dims;
+                lay.operands  = operands;
+                lay.strs      = strs;
+                lay.binaryOps = binaryOps;
+                Program generic;
+                generic.pack = &pack;
+                generic.steps.push_back(steps.back());
+                Program        tiled;
+                CandidateFacts facts;
+                std::string    why;
+                if(planEwt(lay, pack, generic, tiled, facts, why) != HIPTENSOR_STATUS_SUCCESS
+                   || tiled.steps.size() != 1)
+                {
+                    return;
+                }
+                LaunchStep step = std::move(tiled.steps.front());
+                for(auto& ptr : step.pointers)
+                {
+                    for(auto const& [role, align] : tiled.fallbackAlign)
+                    {
+                        if(ptr.role == role)
+                        {
+                            ptr.align = std::max(ptr.align, align);
+                        }
+                    }
+                }
+                step.fallback = std::make_shared<LaunchStep const>(steps.back());
+                steps.back()  = std::move(step);
             }
 
             // ------------------------------------------------------------------------ reduction
@@ -2040,12 +2096,15 @@ namespace hiptensor
                 in.scale = ScalarRole::One;
                 in.op    = static_cast<int>(X.unaryOp);
                 EwOperand out;
-                out.name    = "D";
-                out.role    = BufferRole::Workspace;
-                out.bytes   = offset;
+                out.name     = "D";
+                out.role     = BufferRole::Workspace;
+                out.bytes    = offset;
+                size_t const first = program.steps.size();
+                std::vector<std::pair<std::string, std::string>> const strs{
+                    {"a", dtypeName(X.type)}, {"d", toType}};
                 auto status = ewSteps(pack,
                                       {{"arity", 1}, {"cplx", cplx ? 1 : 0}},
-                                      {{"a", dtypeName(X.type)}, {"d", toType}},
+                                      strs,
                                       dims,
                                       {in, out},
                                       {0, 0},
@@ -2056,6 +2115,7 @@ namespace hiptensor
                 {
                     return status;
                 }
+                tileLaunch(pack, strs, dims, {in, out}, {0, 0}, cplx, program.steps, first);
                 int64_t const batches = c.L.size();
                 if(kP > k)
                 {
@@ -2121,10 +2181,13 @@ namespace hiptensor
                 out.role = BufferRole::Out;
                 auto dt  = dtypeName(D.type);
                 // C may have another data type than D (the scale form reads no C: D's type)
-                auto ct     = C.present ? dtypeName(C.type) : dt;
+                auto         ct    = C.present ? dtypeName(C.type) : dt;
+                size_t const first = program.steps.size();
+                std::vector<std::pair<std::string, std::string>> const strs{
+                    {"a", tType}, {"c", ct}, {"d", dt}};
                 auto status = ewSteps(pack,
                                       {{"arity", 2}, {"cplx", cplx ? 1 : 0}},
-                                      {{"a", tType}, {"c", ct}, {"d", dt}},
+                                      strs,
                                       dims,
                                       {t, cin, out},
                                       {HIPTENSOR_OP_ADD, 0},
@@ -2135,6 +2198,14 @@ namespace hiptensor
                 {
                     return status;
                 }
+                tileLaunch(pack,
+                           strs,
+                           dims,
+                           {t, cin, out},
+                           {HIPTENSOR_OP_ADD, 0},
+                           cplx,
+                           program.steps,
+                           first);
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
@@ -3335,7 +3406,7 @@ namespace hiptensor
                        || status == HIPTENSOR_STATUS_ARCH_MISMATCH;
             }
 
-        // ------------------------------------------------- contractions read and written in place
+            // ------------------------------------------------- contractions read and written in place
 
             constexpr char kDgett[] = "dgett";
             constexpr char kRgett[] = "rgett";
@@ -3371,7 +3442,8 @@ namespace hiptensor
 
             // Consecutive modes (innermost first) contiguous in every tensor of `tensors` merge
             // into one digit while the extent stays below 2^31 (gett_host.merge_modes).
-            std::vector<GMode> mergeModes(std::vector<GMode> const& modes, std::vector<int> const& tensors)
+            std::vector<GMode> mergeModes(std::vector<GMode> const& modes,
+                                          std::vector<int> const&   tensors)
             {
                 std::vector<GMode> out;
                 for(auto const& m : modes)
@@ -3559,7 +3631,7 @@ namespace hiptensor
                     kmodes.push_back(GMode{});
                 }
                 sortBy(kmodes, 0);
-                auto const byA = mergeModes(kmodes, {0, 1});
+                auto const                      byA = mergeModes(kmodes, {0, 1});
                 std::vector<std::vector<GMode>> orders;
                 if(byA.size() <= size_t(kKOrderSearch))
                 {
@@ -3697,11 +3769,11 @@ namespace hiptensor
 
             // The kernel arguments of a digit space: <prefix>e<i>, the magic pair <prefix>m<i>,
             // <prefix>s<i> of every slot but the last, the strides <prefix><name><i>.
-            bool setDigits(ArgWriter&                                   w,
-                           std::string const&                           prefix,
+            bool setDigits(ArgWriter&                                                   w,
+                           std::string const&                                           prefix,
                            std::vector<std::pair<int64_t, std::vector<int64_t>>> const& digits,
-                           std::vector<std::string> const&              names,
-                           int                                          slots)
+                           std::vector<std::string> const&                              names,
+                           int                                                          slots)
             {
                 if(int(digits.size()) > slots)
                 {
@@ -3716,10 +3788,8 @@ namespace hiptensor
                     if(i < slots - 1)
                     {
                         ok = ok
-                             && setMagic(w,
-                                         (prefix + "m" + is).c_str(),
-                                         (prefix + "s" + is).c_str(),
-                                         e);
+                             && setMagic(
+                                 w, (prefix + "m" + is).c_str(), (prefix + "s" + is).c_str(), e);
                     }
                     for(size_t n = 0; ok && n < names.size(); n++)
                     {
@@ -3860,22 +3930,22 @@ namespace hiptensor
             // The arrangement of a contraction on the direct GETT (gett_host.dgett_plan).
             struct DgettLayout
             {
-                bool               swapped = false;
-                char               aFast = 'k', bFast = 'k';
-                std::vector<GMode> M, N, L; // merged, innermost first; strides of A, B, C, D
-                KPlan              k;
-                int64_t            m = 1, n = 1, l = 1;
-                bool               idx64 = false;
+                bool                   swapped = false;
+                char                   aFast = 'k', bFast = 'k';
+                std::vector<GMode>     M, N, L; // merged, innermost first; strides of A, B, C, D
+                KPlan                  k;
+                int64_t                m = 1, n = 1, l = 1;
+                bool                   idx64 = false;
                 std::array<int64_t, 4> spanBytes{};
             };
 
-            bool dgettLayout(Problem const&           p,
-                             Classified const&        c,
-                             int64_t                  tk,
-                             std::array<int64_t, 4>   es,
-                             PackKernel const&        anyKernel,
-                             DgettLayout&             out,
-                             std::string&             reason)
+            bool dgettLayout(Problem const&         p,
+                             Classified const&      c,
+                             int64_t                tk,
+                             std::array<int64_t, 4> es,
+                             PackKernel const&      anyKernel,
+                             DgettLayout&           out,
+                             std::string&           reason)
             {
                 bool const bilinear = p.t[2].present;
                 auto       grab     = [bilinear](Group const& g) {
@@ -3890,7 +3960,7 @@ namespace hiptensor
                     return ms;
                 };
                 auto M = grab(c.M), N = grab(c.N), K = grab(c.K), L = grab(c.L);
-                out    = DgettLayout{};
+                out = DgettLayout{};
                 for(auto const& m : M)
                 {
                     out.swapped = out.swapped || m.stride[3] == 1;
@@ -4000,19 +4070,17 @@ namespace hiptensor
                 {
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                auto const& A = p.t[0];
-                auto const& C = p.t[2];
-                auto const& D = p.t[3];
-                auto        find
-                    = [&](std::string const& comp, int idx64, char af, char bf) {
-                          return pack.find(kDgett,
-                                           {{"cplx", cls.cplx ? 1 : 0},
-                                            {"math", cls.math ? 1 : 0},
-                                            {"idx64", idx64}},
-                                           {{"comp", comp},
-                                            {"a_fast", std::string(1, af)},
-                                            {"b_fast", std::string(1, bf)}});
-                      };
+                auto const& A    = p.t[0];
+                auto const& C    = p.t[2];
+                auto const& D    = p.t[3];
+                auto        find = [&](std::string const& comp, int idx64, char af, char bf) {
+                    return pack.find(
+                        kDgett,
+                        {{"cplx", cls.cplx ? 1 : 0}, {"math", cls.math ? 1 : 0}, {"idx64", idx64}},
+                        {{"comp", comp},
+                         {"a_fast", std::string(1, af)},
+                         {"b_fast", std::string(1, bf)}});
+                };
                 // a target without the f32 atom (gfx90a) computes f32 in f64
                 if(cls.comp == "f32" && find("f32", 0, 'k', 'k') == nullptr)
                 {
@@ -4024,8 +4092,8 @@ namespace hiptensor
                     reason = "the pack has no direct GETT kernel for this compute class";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                int64_t const          tk = any->attr("tile_k"), tm = any->attr("tile_m"),
-                              tn          = any->attr("tile_n");
+                int64_t const tk = any->attr("tile_k"), tm = any->attr("tile_m"),
+                              tn = any->attr("tile_n");
                 std::array<int64_t, 4> es{};
                 for(int t = 0; t < 4; t++)
                 {
@@ -4075,8 +4143,8 @@ namespace hiptensor
                     ok = ok && w.scalar("alpha", ScalarRole::Alpha)
                          && w.scalar("beta", C.present ? ScalarRole::Beta : ScalarRole::Zero);
                 }
-                auto const& kA = p.t[ka];
-                auto const& kB = p.t[kb];
+                auto const& kA    = p.t[ka];
+                auto const& kB    = p.t[kb];
                 auto const  cType = C.present ? C.type : D.type;
                 ok = ok && w.set("dtA", dtCode(kA.type)) && w.set("dtB", dtCode(kB.type))
                      && w.set("dtC", dtCode(cType)) && w.set("dtD", dtCode(D.type))
@@ -4096,8 +4164,7 @@ namespace hiptensor
                      && setDigits(w, "n", digitsOf(lay.N, {1, 2, 3}), {"B", "C", "D"}, mn)
                      && setDigits(w, "kl", digitsOf(lay.k.local), {"A", "B"}, kl)
                      && setDigits(w, "kt", digitsOf(lay.k.tile), {"A", "B"}, kt)
-                     && setDigits(
-                         w, "l", digitsOf(lay.L, {0, 1, 2, 3}), {"A", "B", "C", "D"}, sl)
+                     && setDigits(w, "l", digitsOf(lay.L, {0, 1, 2, 3}), {"A", "B", "C", "D"}, sl)
                      && w.set("kps", lay.k.padSlot) && w.set("kpl", lay.k.padLimit)
                      && w.set("krl", lay.k.ragged >= 0 ? lay.k.ragged : (int64_t(1) << 30));
                 if(!ok)
@@ -4105,9 +4172,8 @@ namespace hiptensor
                     reason = "direct GETT arguments do not fit the kernel arguments";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                step.grid  = dim3(static_cast<uint32_t>(tilesM * tilesN),
-                                 1,
-                                 static_cast<uint32_t>(lay.l));
+                step.grid
+                    = dim3(static_cast<uint32_t>(tilesM * tilesN), 1, static_cast<uint32_t>(lay.l));
                 step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
                 if(auto s = finishStep(step, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
                 {
@@ -4277,7 +4343,7 @@ namespace hiptensor
                 };
                 Packed     pk[2];
                 uint64_t   workspace = 0;
-                auto const packOf = [&](int role, std::vector<GMode> const& rows, int t) {
+                auto const packOf    = [&](int role, std::vector<GMode> const& rows, int t) {
                     Packed out;
                     for(auto const& x : rows)
                     {
@@ -4398,8 +4464,7 @@ namespace hiptensor
                       || (bilinear && spanElems(all, 2) * es > any->attr("limit_d_bytes"));
                 auto const* anyWide = pack.find(kRgett, {{"wide", 1}}, {{"dtype", dtypeName(T)}});
                 if(wideD
-                   && (anyWide == nullptr
-                       || spanElems(all, 3) * es > anyWide->attr("limit_d_bytes")
+                   && (anyWide == nullptr || spanElems(all, 3) * es > anyWide->attr("limit_d_bytes")
                        || (bilinear && spanElems(all, 2) * es > anyWide->attr("limit_d_bytes"))))
                 {
                     reason = "D past the ring GETT's 32-bit offsets";
@@ -4421,14 +4486,33 @@ namespace hiptensor
                     reason = "the ring GETT's index spaces or grid are past their limits";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                auto const* kernel = pack.find(kRgett,
-                                               {{"bilinear", bilinear ? 1 : 0},
-                                                {"vec_a", vecA},
-                                                {"vec_b", vecB},
-                                                {"vec_d", vecD},
-                                                {"pair", pair ? 1 : 0},
-                                                {"wide", wideD ? 1 : 0}},
-                                               {{"dtype", dtypeName(T)}});
+                // the class of the smallest digit-slot bucket that holds every digit space (its
+                // kernel skips the unused slots), else the class of every slot; bilinear classes
+                // of every slot store 8 bytes per lane
+                size_t const      digits = std::max({digA.size(),
+                                                     digB.size(),
+                                                     dRow.size(),
+                                                     dCol.size(),
+                                                     kp.local.size(),
+                                                     kp.tile.size()});
+                PackKernel const* kernel = nullptr;
+                for(int64_t slots : {int64_t(2), int64_t(4), int64_t(0)})
+                {
+                    if(kernel != nullptr || (slots != 0 && digits > size_t(slots)))
+                    {
+                        continue;
+                    }
+                    bool const classPair = pair && !(bilinear && slots == 0);
+                    kernel               = pack.find(kRgett,
+                                                     {{"bilinear", bilinear ? 1 : 0},
+                                                      {"vec_a", vecA},
+                                                      {"vec_b", vecB},
+                                                      {"vec_d", vecD},
+                                                      {"pair", classPair ? 1 : 0},
+                                                      {"wide", wideD ? 1 : 0},
+                                                      {"slots", slots}},
+                                                     {{"dtype", dtypeName(T)}});
+                }
                 if(kernel == nullptr)
                 {
                     reason = "the pack has no ring GETT class for this layout";
@@ -4482,12 +4566,15 @@ namespace hiptensor
                     in.role  = t == 0 ? BufferRole::A : BufferRole::B;
                     in.scale = ScalarRole::One;
                     EwOperand out;
-                    out.name    = "D";
-                    out.role    = BufferRole::Workspace;
-                    out.bytes   = pk[r].offset;
+                    out.name           = "D";
+                    out.role           = BufferRole::Workspace;
+                    out.bytes          = pk[r].offset;
+                    size_t const first = prog.steps.size();
+                    std::vector<std::pair<std::string, std::string>> const strs{
+                        {"a", dtypeName(T)}, {"d", dtypeName(T)}};
                     auto status = ewSteps(pack,
                                           {{"arity", 1}, {"cplx", 0}},
-                                          {{"a", dtypeName(T)}, {"d", dtypeName(T)}},
+                                          strs,
                                           dims,
                                           {in, out},
                                           {0, 0},
@@ -4498,21 +4585,22 @@ namespace hiptensor
                     {
                         return status;
                     }
+                    tileLaunch(pack, strs, dims, {in, out}, {0, 0}, false, prog.steps, first);
                 }
                 LaunchStep step;
                 step.kernel = kernel;
                 ArgWriter  w(step);
-                auto const roleOf
-                    = [](int t) { return t == 0 ? BufferRole::A : BufferRole::B; };
-                bool ok = (packA ? w.pointer("A", BufferRole::Workspace, pk[0].offset)
-                                 : w.pointer("A", roleOf(ga)))
+                auto const roleOf = [](int t) { return t == 0 ? BufferRole::A : BufferRole::B; };
+                bool       ok     = (packA ? w.pointer("A", BufferRole::Workspace, pk[0].offset)
+                                           : w.pointer("A", roleOf(ga)))
                           && (packB ? w.pointer("B", BufferRole::Workspace, pk[1].offset)
                                     : w.pointer("B", roleOf(gb)))
                           && w.pointer("C", BufferRole::Out) && w.set("M", m) && w.set("N", n)
                           && w.set("K", kPadded) && w.scalar("alpha", ScalarRole::Alpha);
                 if(bilinear)
                 {
-                    ok = ok && w.pointer("Cin", BufferRole::C) && w.scalar("beta", ScalarRole::Beta);
+                    ok = ok && w.pointer("Cin", BufferRole::C)
+                         && w.scalar("beta", ScalarRole::Beta);
                 }
                 auto rowDigits = [](std::vector<GMode> const& g, int t) {
                     std::vector<std::pair<int64_t, std::vector<int64_t>>> out;
@@ -4537,9 +4625,7 @@ namespace hiptensor
                 }
                 int64_t const tilesM = ceilDiv(m, kernel->attr("tile_m"));
                 int64_t const tilesN = ceilDiv(n, kernel->attr("tile_n"));
-                step.grid            = dim3(static_cast<uint32_t>(tilesN),
-                                 static_cast<uint32_t>(tilesM),
-                                 1);
+                step.grid  = dim3(static_cast<uint32_t>(tilesN), static_cast<uint32_t>(tilesM), 1);
                 step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
                 if(auto s = finishStep(step, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
                 {
@@ -4722,9 +4808,8 @@ namespace hiptensor
                         {
                             program.fallback       = std::make_shared<Program>(std::move(fallback));
                             program.fallbackOnZero = {ScalarRole::Alpha};
-                            program.fallbackAlign  = {{BufferRole::A, 16u},
-                                                     {BufferRole::B, 16u},
-                                                     {BufferRole::Out, 16u}};
+                            program.fallbackAlign  = {
+                                {BufferRole::A, 16u}, {BufferRole::B, 16u}, {BufferRole::Out, 16u}};
                             if(C.present)
                             {
                                 program.fallbackOnZero.push_back(ScalarRole::Beta);
@@ -4885,19 +4970,16 @@ namespace hiptensor
                     Program        program;
                     CandidateFacts facts;
                     std::string    why;
-                    auto status = planDgett(problem, pack, c, program, facts, why);
+                    auto           status = planDgett(problem, pack, c, program, facts, why);
                     if(status == HIPTENSOR_STATUS_SUCCESS)
                     {
-                        // on a target without the GEMM routes (gfx90a, gfx942) the direct GETT
-                        // of a 16-bit or f32 compute class is preferred to the f64 route
-                        bool const gemmRoute
-                            = std::any_of(out.begin(), out.end(), [](Candidate const& x) {
-                                  return x.facts.route == Route::H16 || x.facts.route == Route::X6
-                                         || x.facts.route == Route::CF32
-                                         || x.facts.route == Route::RingGett
-                                         || x.facts.route == Route::TunedGett;
-                              });
-                        bool const prefer = !gemmRoute && facts.main->attrStr("comp") != "f64";
+                        // on a target without the GEMM routes (gfx90a, gfx942: no GEMM kernel in
+                        // the pack) the direct GETT of a 16-bit or f32 compute class is preferred
+                        // to the f64 route. A property of the target, not of the candidates
+                        // within the workspace limit, so that a plan with the workspace of the
+                        // estimate selects the estimate's kernel.
+                        bool const gemmTarget = pack.find(kGemm, {}, {}) != nullptr;
+                        bool const prefer     = !gemmTarget && facts.main->attrStr("comp") != "f64";
                         add("dgett:" + facts.main->name, std::move(program), facts);
                         out.back().preferred = prefer;
                     }
@@ -5051,7 +5133,8 @@ namespace hiptensor
                 {
                     auto const& f1 = first.fallback != nullptr ? *first.fallback : first;
                     auto const& f2 = second.fallback != nullptr ? *second.fallback : second;
-                    out.fallback   = std::make_shared<Program>(combineTrinary(problem, f1, f2, tBytes));
+                    out.fallback
+                        = std::make_shared<Program>(combineTrinary(problem, f1, f2, tBytes));
                     for(auto const& [role, align] : first.fallbackAlign)
                     {
                         if(role == BufferRole::A || role == BufferRole::B)
@@ -5065,8 +5148,8 @@ namespace hiptensor
                     }
                     for(auto const& [role, align] : second.fallbackAlign)
                     {
-                        auto r = role == BufferRole::B   ? BufferRole::C
-                                 : role == BufferRole::C ? BufferRole::D
+                        auto r = role == BufferRole::B     ? BufferRole::C
+                                 : role == BufferRole::C   ? BufferRole::D
                                  : role == BufferRole::Out ? BufferRole::Out
                                                            : BufferRole::None;
                         if(r != BufferRole::None)

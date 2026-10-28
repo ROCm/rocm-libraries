@@ -846,6 +846,9 @@ def build_kernel(family, params, arch, num_cus):
             vec_d=spec.vec_d,
             pair=int(spec.epi_pair),
             wide=int(spec.wide_d),
+            # digits per digit space the class decomposes (0: every slot), C prefetch distance
+            slots=spec.slots,
+            cp=spec.c_prefetch,
             tile_m=256,
             tile_n=256,
             tile_k=spec.tile_k,
