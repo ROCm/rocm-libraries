@@ -52,8 +52,8 @@ _EXPECTED_LSE_STORES = {
 
 # sha256 of lower_kernel_to_llvm(...) text for the LSE-off build, keyed by the
 # resolved LLVM flavor (the text differs per flavor, like the flavor-keyed IR
-# golden), one entry per committed flavor. Recorded after the running-max carry
-# fix was merged into this branch, before any LSE store existed.
+# golden), one entry per committed flavor. Every hash was computed on the tree
+# after the running-max carry fix and before any LSE store existed.
 _OFF_SHA256 = {
     "llvm20": {
         "gfx950": {
