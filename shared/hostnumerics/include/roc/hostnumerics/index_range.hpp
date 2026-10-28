@@ -54,12 +54,12 @@ class IndexRange {
 
 // Samples [0, logicalElements) with the smallest prime stride not less than
 // allocatedElements / requestedElements, so the sample count is approximate.
-// Zero requested elements, or at least logicalElements, selects every index.
-// Throws if no such prime fits size_t.
+// Zero requested elements selects no index; at least logicalElements selects
+// every index. Throws if no such prime fits size_t.
 inline IndexRange primeIndexRange(size_t logicalElements, size_t allocatedElements,
                                   size_t requestedElements) {
-    if (requestedElements == 0 || requestedElements >= logicalElements)
-        return IndexRange::all(logicalElements);
+    if (requestedElements == 0) return IndexRange::all(0);
+    if (requestedElements >= logicalElements) return IndexRange::all(logicalElements);
     const auto stride = detail::getNextPrime(allocatedElements / requestedElements);
     if (!stride) throw std::runtime_error("Prime-stride index selection overflow.");
     return {0, logicalElements, *stride};
