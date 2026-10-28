@@ -104,6 +104,7 @@ set(TENSILELITE_HOST_SOURCES
     "${CMAKE_CURRENT_LIST_DIR}/src/KernelLanguageTypes.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/MLFeatures.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/MLPNet.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/OrigamiOLC.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/PerformanceMetricTypes.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/ScalarValueTypes.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/src/TensorDescriptor.cpp"

@@ -61,6 +61,7 @@
 #include <Tensile/FusedA2AKernArg.hpp>
 #endif
 #include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/OrigamiOLC.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/Tensile.hpp>
@@ -3474,6 +3475,19 @@ namespace
                     std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
                               << " (or .zlib variant): " << strerror(errno) << std::endl;
                     // rocblaslt_abort();
+                }
+
+                // Origami Learned Correction (OLC) models load with the prediction rows
+                // that use them (OrigamiOLC::loadForLogic), so the sinks are set before the
+                // library.
+                if(TensileLite::OrigamiOLC::enabled())
+                {
+                    TensileLite::OrigamiOLC::setLoadLoggers(
+                        [](std::string const& msg) { log_info("loadLibrary", msg); },
+                        [](std::string const& msg) { log_error("loadLibrary", msg); });
+                    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+                        TensileLite::OrigamiOLC::setCallLogger(
+                            [](std::string const& msg) { log_info("findTopSolutions", msg); });
                 }
 
 #if ROCBLASLT_TENSILE_LAZY_LOAD
