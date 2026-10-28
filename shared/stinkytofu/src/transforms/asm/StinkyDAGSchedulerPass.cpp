@@ -423,7 +423,7 @@ static void scheduleRegionWithMovableSideEffects(
         applyClusterBarrierSccRule(dagNodes, instToId, dagGraph, regionCycles);
 
     // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
-    // CDNA5ReadyQueue holds each behind the WMMA before its first consumer.
+    // CDNA5ReadyQueue holds each behind the WMMA two before its first consumer.
     // Must run before dsReadPriority: outside ProgramOrder, parent-VALU inputs are the
     // first DS tier.
     for (unsigned i = 0; i < regionSize; ++i) {

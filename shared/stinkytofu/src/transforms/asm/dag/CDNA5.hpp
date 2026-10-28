@@ -371,8 +371,8 @@ static std::vector<BarrierTokenGroup> groupBarrierTokens(
 //      non-WMMA node with a smaller DAG id (preload / double-buffer).
 //  (1b) WMMA-parent VALU — a VALU/transcendental with a direct matrix DAG
 //      successor is an ordinary valuQueue candidate. A DAG-only edge from the
-//      WMMA before its first consumer holds it to that WMMA's window
-//      (onInitRegion), so it does not hold its VGPR longer.
+//      WMMA two before its first consumer (kSplatLeadWmmas) holds it to that
+//      WMMA's window (onInitRegion), so it does not hold its VGPR longer.
 //  (2) DS / VGPR latency — block WMMA until modeled ds_load latency for WMMA
 //      src VGPRs has decayed; seed from the BB prefix before each region.
 //  (3) VALU is only gated by the co-issue window.
@@ -2970,16 +2970,17 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     fillsThisWindow_ = 0;
     fillQuotaPerWindow_ = 0;
 
-    // A VALU feeding a WMMA (splat v_perm) issues no earlier than the WMMA just before its first
-    // consumer, so it rides that WMMA's window instead of holding its VGPR a window longer. A
-    // DAG-only edge: the VALU stays an ordinary valuQueue candidate.
+    // A VALU feeding a WMMA (splat v_perm) issues no earlier than the WMMA kSplatLeadWmmas before
+    // its first consumer: a v_perm in the window right before its consumer delays it; one window
+    // earlier hides that. A DAG-only edge: the VALU stays an ordinary valuQueue candidate.
     {
-        std::vector<StinkyInstruction*> wmmaBefore(deps.dag.nodes.size(), nullptr);
-        StinkyInstruction* prevWmma = nullptr;
+        constexpr int kSplatLeadWmmas = 2;
+        std::vector<unsigned> wmmaIds;
+        std::vector<int> wmmaPos(deps.dag.nodes.size(), -1);
         for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
             if (!isMatrixInstruction(*deps.dag.nodes[n].inst)) continue;
-            wmmaBefore[n] = prevWmma;
-            prevWmma = const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst);
+            wmmaPos[n] = static_cast<int>(wmmaIds.size());
+            wmmaIds.push_back(n);
         }
         for (unsigned n = 0; n < deps.dag.nodes.size(); ++n) {
             // feedsWmma also marks a WMMA whose D a later WMMA accumulates into.
@@ -2989,10 +2990,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             for (unsigned succ : deps.dag.graph[n])
                 if (isMatrixInstruction(*deps.dag.nodes[succ].inst))
                     firstConsumer = std::min(firstConsumer, succ);
-            if (firstConsumer != UINT_MAX && wmmaBefore[firstConsumer] != nullptr)
-                deps.requestedConstraints.emplace_back(
-                    wmmaBefore[firstConsumer],
-                    const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
+            if (firstConsumer == UINT_MAX || wmmaPos[firstConsumer] <= 0) continue;
+            const int lead = std::max(0, wmmaPos[firstConsumer] - kSplatLeadWmmas);
+            deps.requestedConstraints.emplace_back(
+                const_cast<StinkyInstruction*>(deps.dag.nodes[wmmaIds[lead]].inst),
+                const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
         }
     }
 

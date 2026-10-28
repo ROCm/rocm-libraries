@@ -2468,7 +2468,7 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
 // ---------------------------------------------------------------------------
 // Parent VALUs (feedsWmma) go out one WMMA at a time: the parents of a WMMA,
 // then that WMMA, then the next WMMA's parents. A DAG-only edge from the WMMA
-// before a parent's first consumer holds the parent back; without it every
+// two before a parent's first consumer holds the parent back; without it every
 // ready parent VALU issues before the first WMMA (perm0, perm1, wmma0, wmma1).
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
@@ -2584,12 +2584,10 @@ TEST_F(DAGSchedulerPassTest, ParentValuUnlocksEarlierBlockedWmmaBeforeLaterReady
     EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma3));
 }
 
-// MX128 splat v_perm per WMMA: each parent belongs in the issue window of the
-// WMMA just before its consumer. Once perm20 issues, wmma1 sits in wmmaQueue
-// waiting on perm20's latency and wmma2 becomes the nearest blocked WMMA, so
-// unlocking "the earliest blocked WMMA" pulls perm24 ahead of wmma1 and the
-// splat lives in a VGPR one window longer than needed.
-TEST_F(DAGSchedulerPassTest, ParentValuWaitsForPreviousWmmaToIssue) {
+// MX128 splat v_perm per WMMA: each parent issues no earlier than the WMMA two
+// before its consumer (kSplatLeadWmmas): one window of lead still delays the
+// consumer; two hide that without holding the splat VGPR longer.
+TEST_F(DAGSchedulerPassTest, ParentValuWaitsForWmmaTwoBeforeConsumer) {
     StinkyInstruction* wmma0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
     ASSERT_NE(wmma0, nullptr);
 
@@ -2605,6 +2603,12 @@ TEST_F(DAGSchedulerPassTest, ParentValuWaitsForPreviousWmmaToIssue) {
     ASSERT_NE(wmma2, nullptr);
     wmma2->addSrcReg(StinkyRegister("v", 24, 1));
 
+    StinkyInstruction* perm28 =
+        createVAddInBlock(bb, arch, /*destReg=*/28, /*src0Reg=*/29, /*src1Reg=*/30);
+    StinkyInstruction* wmma3 = createWmmaScaleF8(/*destStart=*/500, /*src0Start=*/600);
+    ASSERT_NE(wmma3, nullptr);
+    wmma3->addSrcReg(StinkyRegister("v", 28, 1));
+
     createMovableDsLoad(/*destReg=*/700, /*addrReg=*/80, /*ldsToken=*/1);
     createMovableDsLoad(/*destReg=*/704, /*addrReg=*/80, /*ldsToken=*/2);
 
@@ -2612,11 +2616,18 @@ TEST_F(DAGSchedulerPassTest, ParentValuWaitsForPreviousWmmaToIssue) {
     runPassWithUnrollGemm();
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount);
 
-    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm20));
-    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1));
-    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, perm24))
-        << "wmma2's parent must wait for wmma1, the WMMA right before its consumer";
+    EXPECT_LT(positionOf(*bb, wmma0), positionOf(*bb, perm24))
+        << "wmma2's parent must wait for wmma0, two WMMAs before its consumer";
     EXPECT_LT(positionOf(*bb, perm24), positionOf(*bb, wmma2));
+    EXPECT_LT(positionOf(*bb, wmma1), positionOf(*bb, perm28))
+        << "wmma3's parent must wait for wmma1, two WMMAs before its consumer";
+    EXPECT_LT(positionOf(*bb, perm28), positionOf(*bb, wmma3));
+    EXPECT_LT(positionOf(*bb, perm20), positionOf(*bb, wmma1));
+    // A one-WMMA lead would hold perm24 behind wmma1 and perm28 behind wmma2.
+    EXPECT_LT(positionOf(*bb, perm24), positionOf(*bb, wmma1))
+        << "wmma2's parent rides wmma0's window, ahead of wmma1";
+    EXPECT_LT(positionOf(*bb, perm28), positionOf(*bb, wmma2))
+        << "wmma3's parent rides wmma1's window, ahead of wmma2";
 }
 
 // Next-iter / already-consumed ds_loads can get a better dsReadPriority than
