@@ -30,7 +30,10 @@ from __future__ import annotations
 from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
-from ..arch.wmma_scale import gfx1250_scaled_wmma
+from ..arch.wmma_scale import (
+    gfx1250_scaled_wmma,
+    is_wmma_scale_f32_32x16x128_f4,
+)
 from ..ir import I32, Op, VectorType
 from .wmma_scale import ScaledWmmaLLVM
 
@@ -565,6 +568,58 @@ class Gfx1250Backend(Gfx12RdnaBackend):
     ``s_waitcnt`` layout are placeholders adequate for flat-global WMMA GEMM
     bring-up; the gfx1250 57-bit SRD and split wait-counter model are deferred
     (see gfx1250_universal_attention_plan.md, Leg A Phase 2/3)."""
+
+    def emit_mma(self, lowerer, op) -> None:
+        if is_wmma_scale_f32_32x16x128_f4(op.attrs.get("op_id", "")):
+            self._emit_wmma_scale_f32_32x16x128_f4(lowerer, op)
+            return
+        super().emit_mma(lowerer, op)
+
+    def _emit_wmma_scale_f32_32x16x128_f4(self, lowerer, op) -> None:
+        """One ``v_wmma_scale_f32_32x16x128_f4``.
+
+        A is ``<16 x i32>``, B is ``<8 x i32>``, and C and D are ``<16 x float>``.
+        Scale opsel A is fixed to 1, opsel B is 0 for the single N block, and
+        both scale formats are E8M0. This atom is not a member of the 16x16
+        ``wmma_scaled`` family.
+        """
+        name = "tile.wmma_scale_f32_32x16x128_f4"
+        if lowerer._flavor != "llvm23":
+            raise NotImplementedError(
+                f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
+            )
+        if len(op.operands) != 5:
+            raise ValueError(f"{name} expects 5 operands, got {len(op.operands)}")
+        a, b, c, a_scale, b_scale = op.operands
+
+        def _vec(value, elem, count):
+            return (
+                isinstance(value.type, VectorType)
+                and value.type.elem == elem
+                and value.type.count == count
+            )
+
+        if not _vec(a, I32, 16) or not _vec(b, I32, 8):
+            raise ValueError(
+                f"{name} expects <16 x i32> and <8 x i32> matrix operands, got "
+                f"{a.type.name}/{b.type.name}"
+            )
+        if not _vec(c, c.type.elem, 16) or c.type.elem.name != "f32":
+            raise ValueError(f"{name} expects a <16 x float> accumulator")
+        if op.result.type != c.type:
+            raise ValueError(f"{name} result type must match the accumulator")
+        if a_scale.type.name != "i32" or b_scale.type.name != "i32":
+            raise ValueError(f"{name} expects i32 scale operands")
+        intrinsic = "llvm.amdgcn.wmma.scale.f32.32x16x128.f4.v16f32.v16i32.v8i32"
+        lowerer._need("wmma.scale.f32.32x16x128.f4")
+        lowerer._current().emit(
+            f"  {op.result.name} = call <16 x float> @{intrinsic}("
+            f"<16 x i32> {lowerer._operand(a)}, <8 x i32> {lowerer._operand(b)}, "
+            f"i16 0, <16 x float> {lowerer._operand(c)}, "
+            f"i32 1, i32 0, i32 {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 0, i32 {lowerer._operand(b_scale)}, "
+            f"i1 false, i1 false)"
+        )
 
     @property
     def emits_legacy_s_waitcnt(self) -> bool:

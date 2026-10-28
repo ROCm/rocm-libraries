@@ -666,6 +666,12 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
         "i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"
     ),
+    "wmma.scale.f32.32x16x128.f4": (
+        "declare <16 x float> @llvm.amdgcn.wmma.scale.f32.32x16x128.f4."
+        "v16f32.v16i32.v8i32(<16 x i32>, <8 x i32>, i16 immarg, <16 x float>, "
+        "i32 immarg, i32 immarg, i32, i32 immarg, i32 immarg, i32, "
+        "i1 immarg, i1 immarg)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "

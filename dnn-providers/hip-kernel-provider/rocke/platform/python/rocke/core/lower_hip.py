@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from .arch.wmma_scale import gfx1250_scaled_wmma
+from .arch.wmma_scale import gfx1250_scaled_wmma, is_wmma_scale_f32_32x16x128_f4
 from .dtypes import dtype_info
 from .ir import (
     _FENCE_ORDERINGS,
@@ -703,6 +703,13 @@ class _Lowerer:
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
         op_id = op.attrs["op_id"]
+        if is_wmma_scale_f32_32x16x128_f4(op_id):
+            if self.arch.gfx != "gfx1250":
+                raise NotImplementedError(
+                    "wmma_scale_f32_32x16x128_f4 requires gfx1250"
+                )
+            self._emit_wmma_scale_f32_32x16x128_f4(op)
+            return
         from .arch.mfma_scale import (
             gfx950_scaled_mfma,
             scaled_mfma_error,
@@ -923,6 +930,15 @@ class _Lowerer:
             f"f32x8 {_name(op.result)} = "
             f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
             f"{a}, {b}, (int16_t)0, {_name(op.operands[2])}, false, false);"
+        )
+
+    def _emit_wmma_scale_f32_32x16x128_f4(self, op: Op) -> None:
+        a, b, c, a_scale, b_scale = op.operands
+        self._emit(
+            f"f32x16 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_scale_f32_32x16x128_f4("
+            f"{_name(a)}, {_name(b)}, (short)0, {_name(c)}, "
+            f"1, 0, {_name(a_scale)}, 0, 0, {_name(b_scale)}, false, false);"
         )
 
     def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:

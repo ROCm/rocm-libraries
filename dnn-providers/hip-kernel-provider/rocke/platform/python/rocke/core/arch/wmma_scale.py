@@ -102,6 +102,14 @@ class ScaledWmmaOp:
         return self.scales.block_k == 16
 
 
+WMMA_SCALE_F32_32X16X128_F4 = "wmma_scale_f32_32x16x128_f4"
+
+
+def is_wmma_scale_f32_32x16x128_f4(op_id: str) -> bool:
+    """The FP4 32x16x128 scaled WMMA, outside the 16x16 ``wmma_scaled`` family."""
+    return op_id.removeprefix("tile.") == WMMA_SCALE_F32_32X16X128_F4
+
+
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     """Resolve a catalog contract; LLVM selectors are backend details.
 
