@@ -180,6 +180,10 @@ TEST(rocfft_internal, rtc_compile_failure)
 
 TEST(rocfft_internal, rtc_cache_store_then_get)
 {
+    // keep off any on-disk cache named in the environment
+    EnvironmentSetTemp env_user("ROCFFT_RTC_CACHE_PATH", ":memory:");
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
     RTCCache cache;
 
     const std::string    name = "internal_test_kernel";
@@ -205,6 +209,9 @@ TEST(rocfft_internal, rtc_cache_store_then_get)
 
 TEST(rocfft_internal, rtc_cache_store_replaces)
 {
+    EnvironmentSetTemp env_user("ROCFFT_RTC_CACHE_PATH", ":memory:");
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
     RTCCache cache;
 
     const std::string    name = "internal_test_replace";
@@ -219,6 +226,9 @@ TEST(rocfft_internal, rtc_cache_store_replaces)
 
 TEST(rocfft_internal, rtc_cache_serialize_round_trip)
 {
+    EnvironmentSetTemp env_user("ROCFFT_RTC_CACHE_PATH", ":memory:");
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
     const std::string       name = "internal_test_serialize";
     const std::string       arch = "gfx942";
     std::array<char, 32>    sum{};
@@ -251,6 +261,7 @@ TEST(rocfft_internal, rtc_cache_corrupt_file_is_survivable)
     }
 
     EnvironmentSetTemp env_path("ROCFFT_RTC_CACHE_PATH", path.string().c_str());
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
 
     std::array<char, 32> sum{};
     EXPECT_NO_THROW({
