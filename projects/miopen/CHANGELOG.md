@@ -96,6 +96,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   solver requires. A stored size that was too small could make `miopenConvolution*Immediate` run
   with too little workspace. A stored size that was too large could make Find skip the best
   solver, and TrustVerify copied the wrong size into the user find-db.
+* [Conv] Fixed 22,220 wrong workspace sizes in the gfx950 system find-db, mostly for
+  `GemmWrwUniversal`, the CK grouped backward-weights solvers and `TransposedConvBinWinoRxS`.
 
 ### Added
 * [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
