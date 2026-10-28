@@ -26,7 +26,12 @@ per-file `parents[N]` math.
 ## Quick start (CMake-managed environment)
 
 When the rocke features are enabled, the build creates and maintains the
-editable environment for you:
+editable environment for you. First install the platform with `[sdk-core]`
+into the interpreter environment passed as `Python3_EXECUTABLE`, using the
+same AMD SDK release/index as other ROCm frameworks in that environment.
+See [compiler installation](platform/dsl_docs/runtime/comgr_and_hipmodule.md#installing-the-compiler).
+The build-local environment inherits that SDK through `--system-site-packages`;
+its base editable installs do not acquire the SDK themselves:
 
 ```sh
 cmake -S dnn-providers/hip-kernel-provider -B build \
@@ -66,13 +71,16 @@ python3 -m venv --system-site-packages .venv
 pip install --upgrade pip "setuptools>=61" wheel
 # editable_mode=compat writes a .pth at the source root so newly added modules
 # are importable without reinstalling.
-pip install --config-settings editable_mode=compat -e rocke/platform
+pip install --config-settings editable_mode=compat -e 'rocke/platform[sdk-core]' \
+    --extra-index-url https://stable.repo.amd.com/rocm/whl-next/
 pip install --config-settings editable_mode=compat --no-deps -e rocke/library
 ```
 
 Order matters: `platform` first (it provides the `rocke` distribution that
 `rocke-library` depends on); `library` with `--no-deps` so pip resolves `rocke`
 from the local editable install rather than an index.
+Use the SDK index matching any ROCm framework already in the environment;
+the command above uses the stable index.
 
 After this, from any directory:
 

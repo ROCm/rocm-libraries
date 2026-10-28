@@ -333,10 +333,9 @@ if(ROCKE_INSTALL_PYTHON_PACKAGE)
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
 
-  # Also install pre-built wheels when available. These are not yet consumed
-  # by CI (the existing PYTHONPATH=. approach is still used), but shipping
-  # them in the artifact prepares for a future migration to pip-installed
-  # wheels and enables the library tests to run.
+  # Stage pre-built wheels for CI/test runners to install. The platform wheel
+  # must be installed with [sdk-core] in the runner's Python environment;
+  # CMake's file-copy installation does not resolve Python dependencies.
   if(ROCKE_BUILD_PYENV)
     install(FILES
             "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl"
