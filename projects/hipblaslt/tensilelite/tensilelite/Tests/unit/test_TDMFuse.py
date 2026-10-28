@@ -2761,18 +2761,24 @@ def test_solution_accepts_both_scales_on_two_waves_with_streamk_and_data_paralle
     assert TF.tdmStashedMembers(sol._state) == ("MXSB",)
 
 
+@pytest.mark.parametrize("mx, missing", [("mx_a", "DirectToLdsMXSB"), ("mx_b", "DirectToLdsMXSA")])
+def test_one_wave_one_sided_mx_raises_in_the_directtolds_check(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, mx, missing):
+    """One-sided MX is handled on more than one wave only. On one wave the DirectToLds check
+    compares both pairs, so it reads the key of the scale the problem does not carry, which
+    is never set: B's pair after A's equal one with MX on A, A's pair first with MX on B."""
+    with pytest.raises(KeyError, match=missing):
+        _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, ProblemType=_ONE_SCALE[mx], **_WAVES[1])
+
+
 @pytest.mark.parametrize("policy", [{}, _STREAMK_SPLIT], ids=["default", "streamk"])
 @pytest.mark.parametrize("mx", sorted(_ONE_SCALE))
-@pytest.mark.parametrize("fuse", [0, 1, 2, 3])
-def test_solution_adds_no_one_sided_limit_on_one_wave(
+@pytest.mark.parametrize("fuse", [1, 2, 3])
+def test_one_wave_rejects_rows_one_to_three_with_one_mx_scale(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, mx, policy):
-    """One wave takes TDMFuse=0 only; Solution adds no one-sided MX limit there."""
+    """The one-wave rule rejects TDMFuse 1-3 before any one-sided MX limit or the DirectToLds check."""
     sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse,
                        ProblemType=_ONE_SCALE[mx], **_WAVES[1], **policy)
+    assert sol.get("Valid") is False
     assert _ONE_SIDED_MX not in out, out
-    if fuse:
-        assert sol.get("Valid") is False
-        assert "TDMFuse=%d needs more than one wave (NumWaves=1)" % fuse in out, out
-    elif not policy:
-        assert sol.get("Valid") is True, out
-        assert TF.tdmStashedMembers(sol._state) == ()
+    assert "TDMFuse=%d needs more than one wave (NumWaves=1)" % fuse in out, out
