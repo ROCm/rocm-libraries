@@ -160,3 +160,9 @@ def test_parallel_map2_caps_workers_at_task_count(njobs):
     with _gp(ShowProgressBar=False):
         P.ParallelMap2(_add, zip([1, 3], [2, 4]))
     assert njobs == [2]
+
+
+def test_parallel_map2_spawn_worker_keeps_a_subprocess_for_one_task(njobs):
+    with _gp(ShowProgressBar=True):
+        P.ParallelMap2(_double, [1], multiArg=False, spawn_worker=True)
+    assert njobs == [2]

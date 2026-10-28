@@ -707,10 +707,15 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->ir_c_K_pw = ctx->p_kpg;
         ctx->ir_c_M_pw = ctx->p_M;
         ctx->ir_always_valid = rocke_b_const_i32(b, 1);
+        /* Python: _pw_a_chan_base = b.mul(group_idx, p_cpg) if grouped else None.
+         * Grouped: A's pixel row is all C channels and the group's slab starts
+         * at g*cpg. Merge rejects pointwise, so grouped means groups > 1. */
+        ctx->ir_pw_a_chan_base = ctx->grouped ? rocke_b_mul(b, ctx->group_idx, ctx->p_cpg) : NULL;
     }
     else
     {
         ctx->ir_c_C_pw = ctx->ir_c_K_pw = ctx->ir_c_M_pw = ctx->ir_always_valid = NULL;
+        ctx->ir_pw_a_chan_base = NULL;
     }
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- (946-951) */
@@ -923,9 +928,12 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     if(ctx.is_pointwise)
     {
         /* Python: _always_valid_d = b.const_i32(1), used as the pointwise
-         * d_addr's validity. */
-        ctx.d_k_out_group_base = NULL;
+         * d_addr's validity. Grouped, d_addr reuses the loaders'
+         * k_out_group_base (g*kpg) and strides rows by all K channels;
+         * ungrouped, K == kpg and the row pitch stays p_kpg. */
+        ctx.d_k_out_group_base = ctx.grouped ? ctx.k_out_group_base : NULL;
         ctx.ir_always_valid_d = rocke_b_const_i32(b, 1);
+        ctx.ir_d_pitch_pw = ctx.grouped ? ctx.p_K : ctx.p_kpg;
     }
     else
     {
@@ -946,6 +954,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
             ctx.d_k_out_group_base = NULL;
         }
         ctx.ir_always_valid_d = NULL;
+        ctx.ir_d_pitch_pw = NULL;
     }
 
     if(ctx.fwd_split)

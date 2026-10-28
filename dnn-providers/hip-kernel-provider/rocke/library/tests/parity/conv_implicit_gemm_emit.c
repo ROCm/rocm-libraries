@@ -342,6 +342,38 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         *arch = "gfx1250";
         return 0;
     }
+    case 36:
+    case 37:
+    case 38:
+        /* Grouped pointwise (1x1, stride 1, no pad): the flat fast path with
+         * the group's channel slab on A, the within-group filter bound on B and
+         * the group's columns in D's K-wide rows. groups=4, cpg=kpg=16. 36:
+         * direct store, 37: cshuffle store, 38: async_dma loaders. Keep in
+         * lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_default(2, 14, 14, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        if(idx == 37)
+            spec->epilogue = "cshuffle";
+        if(idx == 38)
+            spec->async_dma = true;
+        *arch = "gfx950";
+        return 0;
+    case 39:
+        /* Grouped pointwise on the WMMA direct store, which spells the
+         * pointwise D offset out inline rather than through d_addr. */
+        spec->problem = rocke_conv_problem_default(2, 14, 14, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        *arch = "gfx1250";
+        return 0;
     default:
         return -1;
     }
@@ -350,20 +382,20 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
 /* Split-K forward (split_k > 1) and its single-launch cluster form
  * (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
  * with _split_k_spec() in conv_implicit_gemm_emit.py.
- *   36: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
- *   37: mem/cshuffle, 64x64 tile, 2x2 warps
- *   38: mem/default (vector_size_c=1), 32x32x32 tile
- *   39: grouped (groups=2) wavelet/cshuffle
- *   40: cluster S=4, mem/cshuffle, 16x16x64 tile
- *   41: cluster S=8, mem/cshuffle, 64x64 tile
- *   42: cluster S=15, mem/cshuffle, 16x16x64 tile
- *   43: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
- *   44: cluster S=12, mem/default, 32x32x32 tile
- *   45: split_k=2 on gfx950 (MFMA): rejected by both engines
- *   46: split_k=2 with a bias acc_epilogue: rejected by both engines
- *   47: split_k=0: rejected by both engines
- *   48: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
- *   49: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines */
+ *   40: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
+ *   41: mem/cshuffle, 64x64 tile, 2x2 warps
+ *   42: mem/default (vector_size_c=1), 32x32x32 tile
+ *   43: grouped (groups=2) wavelet/cshuffle
+ *   44: cluster S=4, mem/cshuffle, 16x16x64 tile
+ *   45: cluster S=8, mem/cshuffle, 64x64 tile
+ *   46: cluster S=15, mem/cshuffle, 16x16x64 tile
+ *   47: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
+ *   48: cluster S=12, mem/default, 32x32x32 tile
+ *   49: split_k=2 on gfx950 (MFMA): rejected by both engines
+ *   50: split_k=2 with a bias acc_epilogue: rejected by both engines
+ *   51: split_k=0: rejected by both engines
+ *   52: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
+ *   53: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines */
 static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
     const rocke_conv_problem_t small_m
@@ -402,21 +434,21 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
 
     switch(idx)
     {
-    case 36:
+    case 40:
         spec->problem = small_m;
         return 0;
-    case 37:
     case 41:
+    case 45:
         spec->problem = csh_64;
         spec->tile_m = 64;
         spec->tile_n = 64;
         spec->warp_m = 2;
         spec->warp_n = 2;
         spec->pipeline = "mem";
-        spec->split_k_cluster = (idx == 41) ? 8 : 0;
+        spec->split_k_cluster = (idx == 45) ? 8 : 0;
         return 0;
-    case 38:
-    case 44:
+    case 42:
+    case 48:
         spec->problem = dflt;
         spec->tile_m = 32;
         spec->tile_n = 32;
@@ -426,18 +458,18 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         spec->epilogue = "default";
         spec->vector_size_c = 1;
         spec->pipeline = "mem";
-        spec->split_k_cluster = (idx == 44) ? 12 : 0;
-        return 0;
-    case 39:
-        spec->problem = grouped;
-        return 0;
-    case 40:
-    case 42:
-        spec->problem = small_m;
-        spec->pipeline = "mem";
-        spec->split_k_cluster = (idx == 40) ? 4 : 15;
+        spec->split_k_cluster = (idx == 48) ? 12 : 0;
         return 0;
     case 43:
+        spec->problem = grouped;
+        return 0;
+    case 44:
+    case 46:
+        spec->problem = small_m;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = (idx == 44) ? 4 : 15;
+        return 0;
+    case 47:
         spec->problem = grouped;
         spec->tile_m = 32;
         spec->tile_n = 32;
@@ -446,7 +478,7 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         spec->pipeline = "mem";
         spec->split_k_cluster = 4;
         return 0;
-    case 45:
+    case 49:
         spec->problem = csh_64;
         spec->tile_m = 64;
         spec->tile_n = 64;
@@ -459,22 +491,22 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
         spec->pipeline = "mem";
         *arch = "gfx950";
         return 0;
-    case 46:
+    case 50:
         spec->problem = small_m;
         spec->pipeline = "mem";
         spec->acc_epilogue.bias = 1.0;
         return 0;
-    case 47:
+    case 51:
         spec->problem = small_m;
         spec->split_k = 0;
         return 0;
-    case 48:
+    case 52:
         spec->problem = odd_k;
         spec->pipeline = "mem";
         spec->split_k_cluster = 4;
         spec->vector_size_c = 2;
         return 0;
-    case 49:
+    case 53:
         spec->problem = small_m;
         spec->pipeline = "mem";
         spec->split_k_cluster = 4;
@@ -493,7 +525,7 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
  * conv_implicit_gemm_emit.py. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
-    if(idx >= 36 && idx <= 49)
+    if(idx >= 40 && idx <= 53)
     {
         if(make_cfg_split_k(idx, spec, arch) != 0)
             return -1;
