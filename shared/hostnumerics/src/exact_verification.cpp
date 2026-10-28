@@ -115,7 +115,7 @@ ExactVerification verifyExactSum(const Tensor& observed, const Tensor& input,
     }
     const auto wide = input.copyConvertedTo(ScalarType::Float64);
     const auto bounds =
-        referenceSum(wide.absolute(), axes, ScalarType::Float64, ScalarType::Float64);
+        referenceSum(absolute(wide), axes, ScalarType::Float64, ScalarType::Float64);
     if (observed.shape() != bounds.shape())
         throw std::runtime_error(
             "Exact reduction observed shape does not match the reduced shape.");

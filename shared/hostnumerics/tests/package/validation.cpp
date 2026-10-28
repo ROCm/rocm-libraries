@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/gemm.hpp>
 #include <roc/hostnumerics/generation.hpp>
@@ -15,6 +16,29 @@
 #include <roc/hostnumerics/tensor_operations.hpp>
 #include <span>
 #include <utility>
+
+TEST(Package, NamedActivations) {
+    using namespace roc::hostnumerics;
+
+    const Tensor input(-2.0);
+    const double sigmoidValue = 1.0 / (1.0 + std::exp(2.0));
+    const std::array<std::pair<Tensor, double>, 8> cases{{
+        {absolute(input), 2.0},
+        {relu(input), 0.0},
+        {gelu(input),
+         -(1.0 + std::tanh(std::sqrt(2.0 / std::numbers::pi) * (-2.0 + 0.044715 * -8.0)))},
+        {sigmoid(input), sigmoidValue},
+        {tanh(input, 0.75, 1.25), std::tanh(-1.5) * 1.25},
+        {silu(input), -2.0 * sigmoidValue},
+        {swish(input, 1.5), -2.0 / (1.0 + std::exp(3.0))},
+        {clip(input, -1.0, 1.0), -1.0},
+    }};
+    for (const auto& [output, expected] : cases) {
+        EXPECT_EQ(output.type(), ScalarType::Float64);
+        EXPECT_EQ(output.shape(), Shape{});
+        EXPECT_NEAR(output.item<double>(), expected, 1e-14);
+    }
+}
 
 TEST(Package, Operations) {
     using namespace roc::hostnumerics;

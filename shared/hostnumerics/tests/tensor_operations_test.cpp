@@ -194,9 +194,13 @@ void testTensorOperations() {
             "Named ReLU operation mismatch.");
     require(clippedOutput.loadAs<float>({0}) == -1.0f && clippedOutput.loadAs<float>({3}) == 1.0f,
             "Named clip operation mismatch.");
-    require(compare(activationInput.relu(), reluOutput, {}).passed() &&
-                compare(activationInput.clip(-1.0, 1.0), clippedOutput, {}).passed(),
-            "Tensor activation methods differ from the named operations.");
+    const Tensor expectedRelu =
+        Tensor::copyNativeValues<float>(Shape{4}, std::array<float, 4>{0.0f, 0.0f, 0.0f, 2.0f});
+    const Tensor expectedClip =
+        Tensor::copyNativeValues<float>(Shape{4}, std::array<float, 4>{-1.0f, -0.5f, 0.0f, 1.0f});
+    require(compare(reluOutput, expectedRelu, {}).passed() &&
+                compare(clippedOutput, expectedClip, {}).passed(),
+            "Named activation operations differ from the expected values.");
 }
 
 }  // namespace hostnumerics_test
