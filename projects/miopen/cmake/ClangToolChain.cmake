@@ -231,21 +231,28 @@ endif()
 
 # MIOpen embeds a Windows VERSIONINFO resource (MIOpen.rc and friends) that needs a resource
 # compiler. Prefer llvm-rc from the ROCm LLVM toolchain (next to clang++), then any rc on PATH.
-# Leave CMAKE_RC_COMPILER unset if neither is found: cmake/ResourceCompiler.cmake probes whatever
-# ends up here, falls back to the Windows SDK rc.exe, and fails configuration with actionable
-# guidance only if nothing usable exists.
 #
-# The NOTREQUIRED test matters. CMake pins the resource compiler into
-# CMakeFiles/<ver>/CMakeRCCompiler.cmake and re-reads it on every subsequent configure, and only
-# strings ending in -NOTFOUND are falsy -- so a bare "NOT CMAKE_RC_COMPILER" would be permanently
-# false on any build directory that has ever recorded the NOTREQUIRED sentinel, and this block
-# would silently never run again. Matching the sentinel explicitly keeps the search live, and is
-# what cmake/ResourceCompiler.cmake and hipBLASLt's equivalent guard already do.
+# If neither is found, fall back to the NOTREQUIRED sentinel rather than leaving the variable
+# unset. CMake's Windows-Clang GNU-frontend path (which is what the ROCm clang++ takes) treats a
+# missing resource compiler as fatal inside project(), and project() runs at CMakeLists.txt:76 --
+# well before cmake/ResourceCompiler.cmake is included. Without the sentinel a host that has
+# neither compiler on PATH dies with CMake's generic "No CMAKE_RC_COMPILER could be found" instead
+# of reaching the probe, which is what produces the actionable report naming the SDK roots searched
+# and the flags to pass. The sentinel keeps project() alive so that diagnosis can run.
+#
+# The NOTREQUIRED test in the guard below matters for the opposite reason. CMake pins the resource
+# compiler into CMakeFiles/<ver>/CMakeRCCompiler.cmake and re-reads it on every subsequent
+# configure, and only strings ending in -NOTFOUND are falsy -- so a bare "NOT CMAKE_RC_COMPILER"
+# would be permanently false on any build directory that has ever recorded the sentinel, and this
+# block would silently never run again. Matching it explicitly keeps the search live, and is what
+# cmake/ResourceCompiler.cmake and hipBLASLt's equivalent guard already do.
 if(WIN32 AND (NOT CMAKE_RC_COMPILER OR CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND"))
     get_filename_component(_miopen_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
     find_program(_MIOPEN_RC_COMPILER NAMES llvm-rc rc HINTS "${_miopen_llvm_bin}")
     if(_MIOPEN_RC_COMPILER)
         set(CMAKE_RC_COMPILER "${_MIOPEN_RC_COMPILER}")
+    else()
+        set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
     endif()
 endif()
 

@@ -55,7 +55,15 @@ set( MIOpen_SOVERSION 1.0 )
 # Callable from any directory: add_custom_command(TARGET) below resolves in the caller's scope,
 # which is where ${target} is defined.
 function(miopen_embed_version_resource target file_description internal_name)
-    if(NOT WIN32)
+    # Shared libraries only. ${_MIOPEN_IMPL_TARGET} is declared without an explicit SHARED, so it
+    # follows BUILD_SHARED_LIBS and becomes a static archive under -DBUILD_SHARED_LIBS=OFF or
+    # -DMIOPEN_EMBED_BUILD=ON (which forces it off). A VERSIONINFO resource in a static archive is
+    # meaningless -- the linker does not propagate it into the consuming binary -- and the
+    # POST_BUILD check below would be handed a .lib, which has no version resource to read, and
+    # would fail the build. Executables are skipped for a different reason: MIOpen.rc.in hardcodes
+    # FILETYPE VFT_DLL, so the resource would be wrong for one.
+    get_target_property(_type ${target} TYPE)
+    if(NOT WIN32 OR NOT _type MATCHES "^(SHARED|MODULE)_LIBRARY$")
         return()
     endif()
     # Derived here rather than at directory scope so the function is self-contained and renders the
