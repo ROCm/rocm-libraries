@@ -945,13 +945,17 @@ def function_nodes(tree) -> dict:
 
 
 def defs_named(tree, name) -> list:
-    """[(qualname, FunctionDef)] of every def called `name`, methods and nested ones included,
-    in source order: how `launch_surface.py --check` resolves a `python_source` symbol.
-    """
+    """Every def called `name` anywhere in `tree`, in source order: methods, nested functions and
+    defs under `if`, `try` or `with` included. This is how `launch_surface.py --check` resolves a
+    `python_source` symbol (`ast.walk`, matched by name)."""
     if tree is None or not name:
         return []
-    found = [(q, n) for q, n in function_nodes(tree).items() if n.name == name]
-    return sorted(found, key=lambda item: item[1].lineno)
+    found = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name
+    ]
+    return sorted(found, key=lambda n: (n.lineno, n.col_offset))
 
 
 def string_lists(path: str, text: str, tree=None) -> list:
@@ -2764,7 +2768,7 @@ def surfaces_rows(ctx: Ctx) -> list:
                 # a prose locator names no symbol, so the module is the python side
                 dumps[side] = None if tree is None else surface.module
                 continue
-            nodes = [n for _, n in defs_named(tree, surface.function)]
+            nodes = defs_named(tree, surface.function)
             if nodes and side == "after":
                 line = nodes[0].lineno
             dumps[side] = (

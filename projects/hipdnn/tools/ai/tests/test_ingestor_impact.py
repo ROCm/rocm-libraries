@@ -842,22 +842,34 @@ WITH_METHOD = (
     BUILD
     + "\n\nclass Tuning:\n    def launch_block(self):\n        return (64, 1, 1)\n"
 )
+TWO_METHODS = (
+    WITH_METHOD
+    + "\n\nclass Other:\n    def launch_block(self):\n        return (32, 1, 1)\n"
+)
+UNDER_TRY = (
+    BUILD
+    + "\n\ntry:\n    def launch_block():\n        return (64, 1, 1)\nexcept ImportError:\n    pass\n"
+)
 
 
 @pytest.mark.parametrize(
-    "after, status",
-    [(WITH_METHOD.replace("(64, 1, 1)", "(128, 1, 1)"), "changed"),
-     (WITH_METHOD.replace("def launch_block", "def launch_blk"), "mismatch")],
-    ids=["method-edited", "method-renamed"],
+    "before, after, status",
+    [(WITH_METHOD, WITH_METHOD.replace("(64, 1, 1)", "(128, 1, 1)"), "changed"),
+     (WITH_METHOD, WITH_METHOD.replace("def launch_block", "def launch_blk"), "mismatch"),
+     (TWO_METHODS, TWO_METHODS.replace("(32, 1, 1)", "(16, 1, 1)"), "changed"),
+     (UNDER_TRY, UNDER_TRY.replace("(64, 1, 1)", "(128, 1, 1)"), "changed")],
+    ids=["method-edited", "method-renamed", "second-same-named-method-edited",
+         "def-under-module-level-try-edited"],
 )  # fmt: skip
 def test_launch_surface_naming_a_method_resolves_like_launch_surface_check(
-    mod, capsys, tmp_path, after, status
+    mod, capsys, tmp_path, before, after, status
 ):
-    # catches: a python_source symbol looked up only at module level, so every method-defined
-    # surface reads "missing"; or a renamed method no longer reported missing
+    # catches: a python_source symbol looked up only at module level or only through def and
+    # class bodies, so a method or a def under `try:` reads "missing" or goes unseen; only the
+    # first of several same-named defs compared; or a renamed method no longer reported missing
     block = manifest(("block", "kernels/gfx950/attn.py:launch_block", GEOM))
     repo, base = make_repo(
-        tmp_path, {BUILDER: WITH_METHOD, GEOM: "int block();\n", MANIFEST: block}
+        tmp_path, {BUILDER: before, GEOM: "int block();\n", MANIFEST: block}
     )
     head = commit(repo, {BUILDER: after})
     rows = rows_of(report(mod, capsys, repo, base, head), "surfaces")
@@ -878,14 +890,18 @@ FACTORY_MANIFEST = manifest(
      ({PACK: PACK_STATIC.replace('"q_ptr"', "@@").replace('"k_ptr"', '"q_ptr"').replace("@@", '"k_ptr"')},
       "mismatch", "disagrees with builder build_attn"),
      ({SIG_FACTORY: FACTORY.replace("def attn_signature", "def attn_sig")},
-      "mismatch", "function attn_signature")],
-    ids=["mirror-edited", "mirror-reordered", "factory-renamed"],
+      "mismatch", "function attn_signature"),
+     ({BUILDER: BODY_EDIT}, "changed", "the manifest declares attn_signature"),
+     ({BUILDER: BUILD.replace('"scale", F32', '"scale", F64')}, "mismatch", "types do not")],
+    ids=["mirror-edited", "mirror-reordered", "factory-renamed", "source-builder-edited",
+         "source-builder-type-changed"],
 )  # fmt: skip
 def test_kernargs_pair_declaring_a_signature_factory_compares_the_manifest_builder(
     mod, capsys, tmp_path, edit, status, says
 ):
     # catches: a declared function with no `b.param` list reported as a missing builder, so a
-    # SignatureBuilder factory reads BREAKS; or the fallback hiding a real disagreement
+    # SignatureBuilder factory reads BREAKS; the fallback hiding a real disagreement; or an edit
+    # to the manifest's `source` builder alone not checking the pair
     repo, base = make_repo(tmp_path, {BUILDER: BUILD, SIG_FACTORY: FACTORY, PACK: PACK_STATIC,
                                       MANIFEST: FACTORY_MANIFEST})  # fmt: skip
     head = commit(repo, edit)
@@ -968,13 +984,18 @@ def test_emit_fold_compares_each_companion_launch_with_its_static_list(
     mod, capsys, tmp_path, reduce_params, status
 ):
     # catches: only a KernelModule's primary launch compared with the pack, so a companion's
-    # changed kernargs read as consistent
-    pack = (
+    # changed kernargs read as consistent; or a pack found only by the arch-named fallback,
+    # not through the manifest's `source` builder that the family names
+    # no arch in the pack's name, so only the manifest's builder can pair it
+    pack = HKP + "src/engines/kernel_ingestor_engine/packs/AttnNative.cpp"
+    lists = (
         PACK_STATIC
         + "\n"
         + ptr_sig("reduceSignature", ["out_ptr", "part_ptr", "lens_ptr"])
     )
-    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON, PACK: pack})
+    declared = FACTORY_MANIFEST.replace(PACK, pack)
+    repo, base = make_repo(tmp_path, {BUILDER: BUILD, KDP: KDP_JSON, SIG_FACTORY: FACTORY,
+                                      pack: lists, MANIFEST: declared})  # fmt: skip
     head = commit(repo, {BUILDER: BODY_EDIT})
     primary = [["q_ptr", "ptr"], ["k_ptr", "ptr"], ["scale", "float"]]
     emit = write_emit(tmp_path / "m.json", repo, base, head, params_changed=["v"],
@@ -984,7 +1005,7 @@ def test_emit_fold_compares_each_companion_launch_with_its_static_list(
     bad = rows_of(data, "kernargs", "mismatch")
     assert [r["status"] for r in bad] == ([status] if status else [])
     if status:
-        assert "build_attn[reduce]" in bad[0]["reason"] and bad[0]["path"] == PACK
+        assert "build_attn[reduce]" in bad[0]["reason"] and bad[0]["path"] == pack
 
 
 @pytest.mark.parametrize(

@@ -28,14 +28,18 @@ import is reported.
 How the copies are paired:
 
 - A `launch_surface` entry's `python_source` symbol resolves as `launch_surface.py --check`
-  resolves it: any function of that name in the module, a method or nested function included. It
-  is reported missing only when no function of that name exists.
+  resolves it: any function of that name anywhere in the module (`ast.walk`), a method, a nested
+  function or a def under `if`, `try` or `with` included. Every function of that name is compared,
+  and the symbol is reported missing only when none exists.
 - A declared `kernargs` pair compares each static C++ list in its `cpp_mirror` with the builder
   whose `b.param` list it matches, searched in the surface's module and the manifest's own
   `source` module, the declared function first. A multi-launch pack holds one list per launch (a
   segment and a reduce kernel), and a declared function may be a `SignatureBuilder` factory with no
   `b.param` list; the row then names the builder it was paired with. A list that matches no
-  builder is compared with the builder it shares most names with, and is a `mismatch`.
+  builder but is related to one (it shares at least two names, and at least half of its own) is
+  compared with the related builder it shares most names with, and is a `mismatch`. An unrelated
+  list is skipped; when no list of the mirror was compared, one `changed` row says `cannot
+  compare`.
 - A copy that holds the old list is `changed`, not `mismatch`, when it still matches the new
   list with the new conditional parameters left out: variants that do not enable them pass that
   list. The variants that do enable them are what the emitter or a device run settles.
@@ -142,6 +146,11 @@ a flags-ON build when one exists), the architecture, and the flags.
 - The emitter compares emitted arguments with the static C++ lists only for variants whose
   arguments changed between base and head. The variants of a new engine have no base side, so
   their lists are checked statically only.
-- Only `std::vector<KernelArgument>` functions are read as C++ argument lists. A list built by
-  helper calls instead (`gfx942Pointer("query_ptr", ...)`) is not parsed: its declared pair reads
-  `changed` with `cannot compare`, so compare it with the builder by hand.
+- Only `std::vector<KernelArgument>` functions holding `KernelArgument{...}` literals are read as
+  static C++ argument lists. A list built by helper calls instead (`gfx942Pointer("query_ptr",
+  ...)`) is not parsed. When such a function exists, its row reads "`<f>() is a dynamic kernarg
+  signature: it cannot be compared with <function> statically`", and only when the mirror file
+  changed; when there is none, the pair's row reads "`the C++ mirror holds no
+  std::vector<KernelArgument> function (its list is built another way): cannot compare`". With
+  only the builder edited, a dynamic list gives no pair row. Compare such a list with the builder
+  by hand.
