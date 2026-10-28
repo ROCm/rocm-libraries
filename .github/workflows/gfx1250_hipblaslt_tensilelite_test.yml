@@ -129,16 +129,18 @@ jobs:
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
       # Unset: the strict-mode check falls back to the runner name's -gpuN.
-      # --memory caps this container so a runaway build or test step is OOM-killed in
-      # its own cgroup instead of taking the host, and the other runners' jobs, with
-      # it: RUNNERS_PER_HOST=4 of these share one machine. --memory-swap must be set
-      # to the same value; left unset, Docker allows swap up to 2x --memory and the
-      # cap does not hold. Note --ipc host puts /dev/shm outside this cgroup, so
-      # shared-memory allocations are not covered.
+      # --memory is this job's memory budget, not just a runaway guard: RUNNERS_PER_HOST=4
+      # of these share one ~499 GiB machine, so the cap has to be near host/4 for four
+      # concurrent jobs to fit. 110g leaves ~59 GiB for the OS and Docker. A larger cap
+      # is not a real boundary: a job can sit under it while the host still goes OOM,
+      # which is how the 10-27 failure happened (one job peaked ~393 GiB).
+      # --memory-swap must be set to the same value; left unset, Docker allows swap up
+      # to 2x --memory and the cap does not hold. Note --ipc host puts /dev/shm outside
+      # this cgroup, so shared-memory allocations are not covered.
       options: >-
         -e ROCR_VISIBLE_DEVICES
-        --memory 440g
-        --memory-swap 440g
+        --memory 110g
+        --memory-swap 110g
         --ipc host
         --ulimit memlock=-1:-1
         --ulimit nofile=1048576:1048576
@@ -331,6 +333,10 @@ jobs:
           ./install.sh -c -j 32 -a gfx1250-strict --skip_rocroller 2>&1 \
             | sed -E 's/[Cc]lang( version)? [0-9.]+/clang <ver>/g; s/ROCm[ -]?[0-9.]+/ROCm <ver>/g' \
             | awk -F, -v OFS=, "$HW_SCRUB"
+          # memory.peak is monotonic for the life of the cgroup, so reading it here and
+          # again at the end of the job separates the build's peak from the tests'
+          # without needing to reset it (writing memory.peak needs a newer kernel).
+          cat /sys/fs/cgroup/memory.peak > "$RUNNER_TEMP/mem_peak_after_build" 2>/dev/null || true
 
       - name: Run hipBLASLt tests
         id: hipblaslt
@@ -435,6 +441,41 @@ jobs:
                 -e 's/ \([0-9][^()]* seconds\)//g' -e 's/ \([0-9]+(\.[0-9]+)? secs elapsed\)//g' \
                 -e 's/(End -|_Final) [0-9]+(\.[0-9]+)?s\b/\1/g' -e 's/ done \([0-9]+(\.[0-9]+)?s\)/ done/g' \
             | awk -F, -v OFS=, "$HW_SCRUB" | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
+
+      - name: Report the container's memory counters
+        # Diagnostic only, never fails the job: --memory above is a first guess, and
+        # these counters are the evidence for the real number. memory.events' max and
+        # oom_kill are non-zero only if the cap actually fired, which also shows
+        # whether allocations that bypass the cgroup (hipHostMalloc's pinned pages,
+        # /dev/shm under --ipc host) are being charged here at all. Feeds AIHPBLAS-5352.
+        # cgroup v2 only; prints whatever it finds.
+        if: always()
+        continue-on-error: true
+        run: |
+          C=/sys/fs/cgroup
+          gib() { awk -v b="$1" 'BEGIN { if (b ~ /^[0-9]+$/) printf "%.1f GiB", b/1073741824; else print b }'; }
+          mkdir -p test_results
+          {
+            echo "### Container memory"
+            echo
+            if [ -r "$C/memory.max" ]; then
+              echo "| counter | value |"
+              echo "| --- | --- |"
+              for f in memory.max memory.peak memory.current memory.swap.peak; do
+                [ -r "$C/$f" ] && echo "| $f | $(gib "$(cat "$C/$f")") |"
+              done
+              [ -r "$RUNNER_TEMP/mem_peak_after_build" ] \
+                && echo "| memory.peak after build | $(gib "$(cat "$RUNNER_TEMP/mem_peak_after_build")") |"
+              echo
+              echo '```'
+              echo "memory.events:"
+              cat "$C/memory.events"
+              echo '```'
+            else
+              echo "No cgroup v2 memory counters under $C."
+              ls "$C" 2>/dev/null | head -20
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY" | tee test_results/container_memory.txt
 
       - name: Upload test results
         id: upload
