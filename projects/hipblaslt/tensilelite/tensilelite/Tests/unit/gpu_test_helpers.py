@@ -48,44 +48,19 @@ from rocisa.enum import RegisterType
 from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from tensilelite.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from tensilelite.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
+from tensilelite.Tests.gpu_detection import detect_gpu_target
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- Assembler target ----
-def _detect_gfx_target():
-    """The arch to assemble for. Not a test gate: use ``gpu(...)`` / ``gpu_is``.
-
-    Detection order:
-    1. TENSILE_GPU_TARGET env var (explicit override)
-    2. rocm_agent_enumerator (GPU hardware detection)
-
-    Returns None if no GPU can be detected.
-    """
-    override = os.environ.get("TENSILE_GPU_TARGET")
-    if override:
-        return override
-
-    rocmpath = os.environ.get("ROCM_PATH", "/opt/rocm")
-    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
-    if os.path.exists(enumerator):
-        try:
-            output = subprocess.check_output(
-                [enumerator, "-t", "GPU"], stderr=subprocess.DEVNULL
-            )
-            archs = [
-                line.strip()
-                for line in output.decode().splitlines()
-                if line.strip() and "gfx000" not in line
-            ]
-            if archs:
-                return archs[0]
-        except subprocess.CalledProcessError:
-            pass
-
-    return None
+def _assembler_target():
+    """The arch to assemble for: the device the ``gpu`` gate checked."""
+    target = detect_gpu_target()
+    if not target:
+        raise ValueError("No GPU target: none visible to HIP, TENSILE_GPU_TARGET unset")
+    return target
 
 
 # ---- Constants ----
-GFX_TARGET = _detect_gfx_target()
 # Compatibility aliases for `pytest.mark.gpu("gfx950")`.
 requires_gpu = pytest.mark.gpu("gfx950")
 GPU_MARKS = [requires_gpu]
@@ -337,10 +312,9 @@ def generate_set_directives(sgprs):
 def init_rocisa(target=None, wavesize=None):
     """Initialize rocIsa singleton for the detected GPU target.
     Args:
-        target: Optional gfx string (e.g. 'gfx950'). When None (default), we
-                use GFX_TARGET as detected from the host via
-                rocm_agent_enumerator. Passing an explicit target is required
-                only by tests whose assertions are tied to a specific ISA's
+        target: Optional gfx string (e.g. 'gfx950'). When None (default), the
+                detected device. Passing an explicit target is required only
+                by tests whose assertions are tied to a specific ISA's
                 opcode mnemonics (mfma vs wmma).
         wavesize: Optional wavefront size for ri.setKernel. Defaults to WAVESIZE
                 (wave64); wave32 targets (e.g. gfx1250) pass 32.
@@ -351,9 +325,7 @@ def init_rocisa(target=None, wavesize=None):
     from rocisa import rocIsa
     from tensilelite.Common.Architectures import gfxToIsa
     ri = rocIsa.getInstance()
-    gfx_target = target if target is not None else GFX_TARGET
-    if not gfx_target:
-        raise ValueError(f"Invalid GPU target: '{gfx_target}'")
+    gfx_target = target if target is not None else _assembler_target()
     isa = gfxToIsa(gfx_target)
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
     ri.init(isa, asmpath)
@@ -444,7 +416,7 @@ def generate_kernel_asm(inner_asm, writer, args, lds_size=0, num_threads=None):
     next_free_vgpr = max_vgpr + num_agprs
 
     return f"""\
-.amdgcn_target "amdgcn-amd-amdhsa--{GFX_TARGET}"
+.amdgcn_target "amdgcn-amd-amdhsa--{_assembler_target()}"
 
 // Register name mappings
 .set vgprSerial, 0
@@ -583,7 +555,7 @@ def assemble_kernel(asm_source, output_path, wavefront_size=64):
     cmd = [
         "amdclang++", "-x", "assembler",
         "--target=amdgcn-amd-amdhsa",
-        f"-mcpu={GFX_TARGET}",
+        f"-mcpu={_assembler_target()}",
     ]
     if wavefront_size is not None:
         cmd.append(f"-mwavefrontsize{wavefront_size}")

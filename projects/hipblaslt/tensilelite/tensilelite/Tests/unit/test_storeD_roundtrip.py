@@ -37,7 +37,6 @@ from tensilelite.Components.Subtile.Kernel import TileInfo, CD_F32
 
 from gpu_test_helpers import (
     TileConfig,
-    GFX_TARGET,
     WAVESIZE,
     NUM_THREADS,
     create_writer,

@@ -54,9 +54,9 @@ question that this section returns to below. It matters more than the headline c
 
 **Arch gating.** Unit tests: `@pytest.mark.gpu` (any GPU) or `@pytest.mark.gpu("gfx950")`; the
 [conftest](tensilelite/Tests/unit/conftest.py) skips what HIP's device can't run (`TENSILE_GPU_TARGET`
-overrides; `gfx1250` covers `gfx1250-strict`, not the reverse; nearest mark wins). No arch/hip `skipif`;
-`test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`. `Tests/common` configs use
-`skip-gfxNNNN`.
+overrides; `gfx1250` covers `gfx1250-strict`, not the reverse; nearest mark wins). No arch/hip `skipif`
+or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
+`Tests/common` configs use `skip-gfxNNNN`.
 
 A significant part of that suite is a **characterization suite** under
 [`tensilelite/Tests/unit/characterization/`](tensilelite/Tests/unit/characterization/), established in
