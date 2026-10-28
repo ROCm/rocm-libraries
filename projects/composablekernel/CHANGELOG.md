@@ -26,6 +26,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added N and K padding to the XDL two-stage MoE GEMM with preshuffled weights, so `DeviceMoeGemm` instances with a padding `GemmSpecialization` accept model dimensions that are not multiples of the tile size.
 * Added optional instance filters for the CK Tile LayerNorm2D forward and quantized GEMM examples to reduce compilation for selected workloads.
 * Added a CI path-length check that rejects newly added or renamed files whose repository-relative path exceeds 200 characters, keeping the absolute path under the Windows `MAX_PATH` limit of 260.
 * Added bf16, fp32, fp8, and bf8 data types and the rrr, crr, and ccr layouts to the CK Tile Tile Engine batched GEMM and its dispatcher bridge.
