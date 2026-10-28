@@ -33,8 +33,8 @@ Documentation for rocFFT is available at
   factors when the output data layout uses a batch distance larger than the transform length.
 * Fixed `rocfft_plan_create` failures and GPU memory access faults for 1D complex transforms of
   lengths involving large prime factors when batches are interleaved (unit batch distance).
-* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 half precision
-  with batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
+* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 with
+  batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
 
 ### Optimized
 
