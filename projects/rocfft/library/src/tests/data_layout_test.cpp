@@ -86,13 +86,13 @@ protected:
         std::shuffle(ret.begin(), ret.end(), rng);
         return ret;
     }
-    // Full layout of random ranks/spans whose axes are laid out in random order,
-    // with random padding between consecutive axes (non-aliasing, not packed).
-    data_layout_t random_full_layout(size_t min_span = 1)
+    // Full layout of random ranks/spans whose axes are laid out in random order, with
+    // random padding between consecutive axes (non-aliasing, not necessarily packed).
+    data_layout_t random_full_layout()
     {
         const auto          len_rank   = uniform(1, 4);
         const auto          batch_rank = uniform(1, 2);
-        const auto          spans      = random_vec(len_rank + batch_rank, min_span, 7);
+        const auto          spans      = random_vec(len_rank + batch_rank, 1, 7);
         std::vector<size_t> strides(spans.size());
         size_t              next = uniform(1, 2);
         for(auto axis : random_permutation(spans.size()))
@@ -197,24 +197,65 @@ TEST_F(data_layout_test, padded_buffer_element_count)
     }
 }
 
+// A layout is contiguous iff its elements fill a buffer without gaps: taken by increasing
+// stride, each non-unit-span axis must be strided by the number of elements spanned by the
+// axes before it (1 for the first one), whatever the axis order.
+// contiguous_strides_and_distances() returns the layout's own strides if it is contiguous,
+// and packed strides in natural axis order otherwise.
 TEST_F(data_layout_test, contiguous_strides)
 {
-    auto padded = data_layout_t::default_full_layout({4, 8}, 3, true);
-    EXPECT_EQ(padded.contiguous_strides_and_distances(), (std::vector<size_t>{1, 4, 32}));
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        // random spans (some of them 1) laid out in random order: packed in about half the
+        // cases, otherwise with a possibly strided first axis and random padding between
+        // axes (which may still happen to be packed)
+        const auto          len_rank   = uniform(1, 4);
+        const auto          batch_rank = uniform(1, 2);
+        const auto          rank       = len_rank + batch_rank;
+        const auto          spans      = random_vec(rank, 1, 7);
+        const bool          packed     = uniform(0, 1);
+        std::vector<size_t> strides(rank);
+        size_t              next = packed ? 1 : uniform(1, 2);
+        for(auto axis : random_permutation(rank))
+        {
+            strides[axis] = next;
+            next          = next * spans[axis] + (packed ? 0 : uniform(0, 3));
+        }
+        const data_layout_t layout(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
+        SCOPED_TRACE("layout " + layout.str());
 
-    // 4x8 with strides 8 and 1 still covers every slot exactly once
-    auto swapped = data_layout_t::full_layout({4, 8}, {8, 1}, 1, 32);
-    EXPECT_TRUE(swapped.is_contiguous());
-    EXPECT_EQ(swapped.contiguous_strides_and_distances(), (std::vector<size_t>{8, 1, 32}));
+        std::vector<size_t> non_unit_axes;
+        for(size_t d = 0; d < rank; d++)
+            if(spans[d] > 1)
+                non_unit_axes.push_back(d);
+        std::sort(non_unit_axes.begin(), non_unit_axes.end(), [&](size_t a, size_t b) {
+            return strides[a] < strides[b];
+        });
+        bool   contiguous = true;
+        size_t count      = 1;
+        for(auto d : non_unit_axes)
+        {
+            contiguous &= strides[d] == count;
+            count *= spans[d];
+        }
+
+        std::vector<size_t> packed_strides(rank, 1);
+        for(size_t d = 1; d < rank; d++)
+            packed_strides[d] = packed_strides[d - 1] * spans[d - 1];
+
+        EXPECT_EQ(layout.is_contiguous(), contiguous);
+        EXPECT_EQ(layout.contiguous_strides_and_distances(), contiguous ? strides : packed_strides);
+    }
 }
 
 TEST_F(data_layout_test, offset_in)
 {
     for(size_t i = 0; i < num_random_cases; i++)
     {
-        // outer: random sub-range (nonzero lower bounds, batch axes included) of a
-        // random full layout; inner: random sub-range of outer, arbitrary strides
-        const auto          full         = random_full_layout(2);
+        // outer: random sub-range, along every axis (batch axes included), of a random
+        // full layout, so its lower bounds are generally not 0; inner: random sub-range
+        // of outer, with arbitrary strides since offset_in only uses outer's strides
+        const auto          full         = random_full_layout();
         const auto          rank         = full.get_full_rank();
         const auto          full_upper   = full.upper();
         const auto          outer_stride = full.strides_and_distances();
@@ -246,41 +287,138 @@ TEST_F(data_layout_test, offset_in)
         EXPECT_THROW(outside.offset_in(outer), std::invalid_argument);
     }
 
-    auto outer      = data_layout_t::full_layout({8, 8}, {1, 8}, 1, 64);
-    auto other_rank = data_layout_t::full_layout({8}, {1}, 1, 8);
-    EXPECT_THROW(other_rank.offset_in(outer), std::invalid_argument);
+    // layouts must have the same numbers of length and batch axes
+    const auto layout_2d = data_layout_t::full_layout({8, 8}, {1, 8}, 1, 64);
+    const auto layout_1d = data_layout_t::full_layout({8}, {1}, 1, 8);
+    EXPECT_THROW(layout_1d.offset_in(layout_2d), std::invalid_argument);
+
+    // even with the same total number of axes
+    const data_layout_t layout_1d_two_batches({0, 0, 0}, {8, 8, 1}, {1, 8, 64}, 2);
+    EXPECT_THROW(layout_1d_two_batches.offset_in(layout_2d), std::invalid_argument);
 }
 
+// Any sub-range along the slowest-varying axis of a layout is one unbroken run of it.
+// Unit-length axes do not vary, so they are never the slowest-varying axis, whatever
+// their stride (e.g. a trailing batch axis of length 1).
 TEST_F(data_layout_test, continuous_chunk)
 {
+    // 4x8 transform, batch 1: rows 2-4 of the length-8 axis are one unbroken run
+    const auto          batch_of_one = data_layout_t::default_full_layout({4, 8}, 1);
+    const data_layout_t rows({0, 2, 0}, {4, 5, 1}, {1, 4, 32});
+    EXPECT_TRUE(rows.is_continuous_in(batch_of_one));
+
     for(size_t i = 0; i < num_random_cases; i++)
     {
-        // packed with spans >= 2: the last batch axis is the slowest-varying one
-        const auto whole = data_layout_t::default_full_layout(random_vec(uniform(1, 4), 2, 7),
-                                                              random_vec(uniform(1, 2), 2, 7));
-        const auto rank  = whole.get_full_rank();
-        const auto slow  = rank - 1;
+        // random spans (some of them 1) laid out in random order, with random padding;
+        // the axis of largest stride is made unit-length in about half the cases
+        const auto len_rank   = uniform(1, 4);
+        const auto batch_rank = uniform(1, 2);
+        const auto rank       = len_rank + batch_rank;
+        auto       spans      = random_vec(rank, 1, 7);
+        const auto order      = random_permutation(rank);
+        if(uniform(0, 1))
+            spans[order.back()] = 1;
+        std::vector<size_t> strides(rank);
+        size_t              next = uniform(1, 2);
+        for(auto axis : order)
+        {
+            strides[axis] = next;
+            next          = next * spans[axis] + uniform(0, 3);
+        }
+        const data_layout_t whole(std::vector<size_t>(rank, 0), spans, strides, batch_rank);
         SCOPED_TRACE("whole " + whole.str());
+
+        // slowest-varying axis: the last non-unit axis laid out above (axis 0 if none)
+        size_t slow = 0;
+        for(auto axis : order)
+            if(spans[axis] > 1)
+                slow = axis;
 
         auto lo  = whole.lower();
         auto hi  = whole.upper();
         lo[slow] = uniform(0, hi[slow] - 1);
         hi[slow] = uniform(lo[slow] + 1, hi[slow]);
-        const data_layout_t chunk(lo, hi, whole.strides_and_distances(), whole.get_batch_rank());
+        const data_layout_t chunk(lo, hi, strides, batch_rank);
         EXPECT_TRUE(chunk.is_continuous_in(whole)) << chunk.str();
 
-        // a different stride along the slowest axis only matters if the chunk spans it
-        auto other_strides = whole.strides_and_distances();
-        other_strides[slow] += 1;
-        const data_layout_t restrided(lo, hi, other_strides, whole.get_batch_rank());
-        EXPECT_EQ(restrided.is_continuous_in(whole), hi[slow] - lo[slow] == 1) << restrided.str();
+        // a chunk running past the end of the slowest-varying axis is not continuous
+        auto past_hi  = hi;
+        past_hi[slow] = spans[slow] + uniform(1, 3);
+        const data_layout_t overflow(lo, past_hi, strides, batch_rank);
+        EXPECT_FALSE(overflow.is_continuous_in(whole)) << overflow.str();
 
-        // narrowing any faster axis breaks continuity
-        const auto d = uniform(0, slow - 1);
-        hi[d] -= 1;
-        const data_layout_t gap(lo, hi, whole.strides_and_distances(), whole.get_batch_rank());
+        // a different stride along the slowest axis only matters if the chunk spans it
+        auto slow_restrided = strides;
+        slow_restrided[slow] += 1;
+        const data_layout_t slow_chunk(lo, hi, slow_restrided, batch_rank);
+        EXPECT_EQ(slow_chunk.is_continuous_in(whole), hi[slow] - lo[slow] == 1) << slow_chunk.str();
+
+        // strides along unit-length axes are irrelevant
+        auto unit_restrided = strides;
+        for(size_t d = 0; d < rank; d++)
+            if(spans[d] == 1)
+                unit_restrided[d] += uniform(1, 5);
+        const data_layout_t unit_chunk(lo, hi, unit_restrided, batch_rank);
+        EXPECT_TRUE(unit_chunk.is_continuous_in(whole)) << unit_chunk.str();
+
+        // narrowing or restriding any other non-unit axis breaks continuity
+        std::vector<size_t> others;
+        for(size_t d = 0; d < rank; d++)
+            if(d != slow && spans[d] > 1)
+                others.push_back(d);
+        if(others.empty())
+            continue;
+        const auto d = others[uniform(0, others.size() - 1)];
+
+        auto gap_hi = hi;
+        gap_hi[d] -= 1;
+        const data_layout_t gap(lo, gap_hi, strides, batch_rank);
         EXPECT_FALSE(gap.is_continuous_in(whole)) << gap.str();
+
+        auto other_restrided = strides;
+        other_restrided[d] += 1;
+        const data_layout_t other_chunk(lo, hi, other_restrided, batch_rank);
+        EXPECT_FALSE(other_chunk.is_continuous_in(whole)) << other_chunk.str();
     }
+}
+
+TEST_F(data_layout_test, same_logical_range)
+{
+    for(size_t i = 0; i < num_random_cases; i++)
+    {
+        const auto          full       = random_full_layout();
+        const auto          rank       = full.get_full_rank();
+        const auto          batch_rank = full.get_batch_rank();
+        const auto          upper      = full.upper();
+        std::vector<size_t> lo(rank), hi(rank);
+        for(size_t d = 0; d < rank; d++)
+        {
+            lo[d] = uniform(0, upper[d] - 1);
+            hi[d] = uniform(lo[d] + 1, upper[d]);
+        }
+        const data_layout_t a(lo, hi, full.strides_and_distances(), batch_rank);
+        SCOPED_TRACE("a " + a.str());
+
+        // strides are irrelevant
+        const data_layout_t b(lo, hi, random_vec(rank, 1, 100), batch_rank);
+        EXPECT_TRUE(a.has_same_logical_range_as(b)) << b.str();
+        EXPECT_TRUE(b.has_same_logical_range_as(a)) << b.str();
+
+        // moving either bound of any one axis, length or batch, makes the ranges differ
+        const auto d = uniform(0, rank - 1);
+        if(uniform(0, 1))
+            lo[d] += 1;
+        else
+            hi[d] += uniform(1, 3);
+        const data_layout_t c(lo, hi, full.strides_and_distances(), batch_rank);
+        EXPECT_FALSE(a.has_same_logical_range_as(c)) << c.str();
+        EXPECT_FALSE(c.has_same_logical_range_as(a)) << c.str();
+    }
+
+    // same full rank, but a different split between length and batch axes
+    const data_layout_t one_batch({0, 0, 0}, {4, 8, 3}, {1, 4, 32}, 1);
+    const data_layout_t two_batches({0, 0, 0}, {4, 8, 3}, {1, 4, 32}, 2);
+    EXPECT_THROW(one_batch.has_same_logical_range_as(two_batches), std::invalid_argument);
 }
 
 TEST_F(data_layout_test, intersection)
@@ -322,6 +460,28 @@ TEST_F(data_layout_test, intersection)
         EXPECT_EQ(overlap.is_empty(), count == 0);
         EXPECT_EQ(overlap.strides_and_distances(), exp_stride);
     }
+
+    // arguments must have the same length/batch split...
+    const auto          full_3d = data_layout_t::default_full_layout({4, 8, 2}, 3);
+    const data_layout_t two_batches({0, 0, 0, 0}, {4, 8, 2, 3}, {1, 4, 32, 64}, 2);
+    EXPECT_THROW(data_layout_t::make_contiguous_intersection_of(full_3d, two_batches),
+                 std::invalid_argument);
+
+    // ...and the same embedding (if any): views of different length axes, or an embedded
+    // view and a plain layout with the same axes, are rejected
+    const auto          innermost = full_3d.get_layout_for_len_axes({0});
+    const auto          middle    = full_3d.get_layout_for_len_axes({1});
+    const data_layout_t plain_middle(
+        middle.lower(), middle.upper(), middle.strides_and_distances(), middle.get_batch_rank());
+    EXPECT_THROW(data_layout_t::make_contiguous_intersection_of(innermost, middle),
+                 std::invalid_argument);
+    EXPECT_THROW(data_layout_t::make_contiguous_intersection_of(middle, plain_middle),
+                 std::invalid_argument);
+
+    // a shared embedding is kept in the result
+    const auto middle_overlap = data_layout_t::make_contiguous_intersection_of(middle, middle);
+    EXPECT_TRUE(middle_overlap.is_embedded());
+    EXPECT_EQ(middle_overlap.corresponding_axes_in_embedding(), (std::vector<size_t>{1}));
 }
 
 TEST_F(data_layout_test, inplace_complex_is_unchanged)
