@@ -148,8 +148,9 @@ class UnifiedAttentionProblem:
     causal_top_left: bool = False
     right_bound: int = 0
     # Optional FP32 natural-log softmax normalizer, [total_q, num_query_heads, 1].
-    # Implemented by the gfx942/gfx950 split-KV (3D) reduce only; every other
-    # path declines it (see _reject_lse).
+    # Implemented by the gfx942/gfx950 split-KV (3D) reduce and tiled 2D
+    # kernels (not the gfx942 4-warp GQA builder); every other path declines it
+    # (see _reject_lse).
     emit_lse: bool = False
 
     def __post_init__(self):
@@ -5965,9 +5966,11 @@ def run_unified_attention_torch(
 
     ``lse`` is the optional caller-owned natural-log softmax normalizer, a
     contiguous FP32 ``[total_q, num_query_heads, 1]`` tensor, written only when
-    ``problem.emit_lse`` is set. Only the gfx942/gfx950 split-KV (3D) path
-    writes it; every other path raises ``NotImplementedError`` rather than
-    returning without it. Rows with no visible key get ``-inf`` (and O = 0).
+    ``problem.emit_lse`` is set. The gfx942/gfx950 split-KV (3D) and tiled 2D
+    paths write it (an LSE request skips the gfx942 2D graph replay and the
+    4-warp GQA builder); the scalar path, sinks and other arches raise
+    ``NotImplementedError`` rather than returning without it. Rows with no
+    visible key get ``-inf`` (and O = 0).
     """
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.

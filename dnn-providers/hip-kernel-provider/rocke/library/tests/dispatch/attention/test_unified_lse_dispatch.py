@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Dispatcher contract for the optional unified split-KV LSE output (host only)."""
+"""Dispatcher contract for the optional unified (split-KV and tiled 2D) LSE output (host only)."""
 
 import dataclasses
 
