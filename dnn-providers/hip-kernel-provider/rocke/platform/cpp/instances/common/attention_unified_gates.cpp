@@ -160,16 +160,13 @@ static bool reject_tiled_2d_not_ported(const rocke_unified_attention_problem_t* 
             gate_reason(reason, reason_cap, "gfx942 4-warp GQA tiled 2D is not ported to C++ yet");
             return true;
         }
-        if(rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(p, arch))
+        if(rocke_unified_attn_enable_i64_kv_addr(p)
+           && rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(p, arch))
         {
-            gate_reason(
-                reason, reason_cap, "gfx942 tiled 2D sliced-K ring is not ported to C++ yet");
-            return true;
-        }
-        if(rocke_unified_attn_enable_gfx942_flash_mask_limit(p, arch))
-        {
-            gate_reason(
-                reason, reason_cap, "gfx942 tiled 2D flash mask-limit is not ported to C++ yet");
+            gate_reason(reason,
+                        reason_cap,
+                        "gfx942 tiled 2D i64 KV addressing with the sliced-K ring is not ported "
+                        "to C++ yet");
             return true;
         }
         return false;

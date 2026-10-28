@@ -263,7 +263,8 @@ static void test_supports_tiled_2d(void)
     check_tiled_2d(&p, "gfx950", false, "tiled 2D additive bias is not ported to C++ yet");
     check_tiled_2d(&p, "gfx942", false, "additive bias is only implemented on gfx950");
 
-    /* gfx942 prefill: D128 sliding window (4-warp), fp16 D64 MHA (ring), bf16 D128 (mask-limit). */
+    /* gfx942 prefill: D128 sliding window (4-warp, not ported), fp16 D64 MHA (sliced-K ring) and
+     * bf16 D128 (mask-limit), both built by C++. */
     p = decode_problem();
     p.sliding_window = 256;
     p.max_seqlen_q = 512;
@@ -276,13 +277,12 @@ static void test_supports_tiled_2d(void)
     p.num_query_heads = 8;
     p.max_seqlen_q = 2048;
     p.total_q = 8192;
-    check_tiled_2d(&p, "gfx942", false, "gfx942 tiled 2D sliced-K ring is not ported to C++ yet");
+    check_tiled_2d(&p, "gfx942", true, "supported");
 
     p = decode_problem();
     p.max_seqlen_q = 2048;
     p.total_q = 8192;
-    check_tiled_2d(
-        &p, "gfx942", false, "gfx942 tiled 2D flash mask-limit is not ported to C++ yet");
+    check_tiled_2d(&p, "gfx942", true, "supported");
 
     /* gfx950: single-batch fp16 D64 MHA picks the V double-buffer, which the
      * C++ builder builds. */

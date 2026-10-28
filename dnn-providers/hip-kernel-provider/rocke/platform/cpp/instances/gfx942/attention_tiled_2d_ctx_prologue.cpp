@@ -183,34 +183,15 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->USE_QQ_BIAS = spec->use_qq_bias;
 
     ctx->TRANSPOSED_SCALAR_STATE = spec->use_transposed_scalar_state;
-    /* No kernel body in this engine reads TRANSPOSED_INVARIANT_HOIST; accepting
-     * it would silently build the plain kernel body under a name claiming the
-     * hoist code path. Reject rather than emit that. */
-    if(spec->use_transposed_invariant_hoist)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        snprintf(b->err,
-                 ROCKE_ERR_MSG_CAP,
-                 "use_transposed_invariant_hoist: the gfx942 C twin does not emit the "
-                 "invariant-hoist code path (not yet ported)");
-        return false;
-    }
     ctx->TRANSPOSED_INVARIANT_HOIST = spec->use_transposed_invariant_hoist;
     ctx->TRANSPOSED_MASK_ONCE = spec->use_transposed_mask_once;
     ctx->TRANSPOSED_HALF_LOCAL_PV = spec->use_transposed_half_local_pv;
     ctx->SKIP_LEGACY_QREG = spec->use_mfma32_skip_legacy_qreg;
-    /* Same reasoning as above, for TRANSPOSED_MASK_LIMIT. */
-    if(spec->use_transposed_mask_limit)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        snprintf(b->err,
-                 ROCKE_ERR_MSG_CAP,
-                 "use_transposed_mask_limit: the gfx942 C twin does not emit the "
-                 "mask-limit code path (not yet ported)");
-        return false;
-    }
     ctx->TRANSPOSED_MASK_LIMIT = spec->use_transposed_mask_limit;
     ctx->GROUPED_KV2 = spec->use_grouped_kv2_softmax;
+    ctx->CAUSAL_MASK_PHASE_SPLIT = spec->use_causal_mask_phase_split;
+    ctx->V_HBM_DIRECT = spec->use_v_hbm_direct;
+    ctx->K_HBM_DIRECT = spec->use_k_hbm_direct;
     ctx->FAST_PAGED_KV_DESC = spec->use_fast_paged_kv_desc;
     ctx->I64_KV_ADDR = spec->use_i64_kv_addr;
     ctx->EARLY_V_SCHEDULE = spec->use_early_v_schedule;
@@ -232,24 +213,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->CONFLICT_FREE_V_STORE = CONFLICT_FREE_V_STORE;
     ctx->K_SINGLE_BUF = spec->use_k_single_buffer;
     const bool K_SLICED_RING = spec->use_k_sliced_ring;
-    /* The sliced-K ring is carried in the spec but not emitted by this engine.
-     * Python's __post_init__ accepts it and the Python builder emits it; this
-     * twin has the ring's shape and none of its schedule -- K_lds is sized as
-     * [ring_depth, T, k_slice_hd] below, but no slice DMA is ever issued and the
-     * QK body still reads K_lds through the double-buffer index, so a ring spec
-     * would lower to a kernel reading slices nothing staged. Reject rather than
-     * emit that, the same contract the gfx950 twin applies to its unported
-     * V-double-buffer family. Replace this with the real emit when the schedule
-     * is ported; the geometry fields it needs are already carried. */
-    if(K_SLICED_RING)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        snprintf(b->err,
-                 ROCKE_ERR_MSG_CAP,
-                 "use_k_sliced_ring: the gfx942 C twin does not emit the sliced-K "
-                 "ring schedule (not yet ported)");
-        return false;
-    }
     ctx->K_SLICED_RING = K_SLICED_RING;
     ctx->K_SLICED_LDSSEQ = spec->use_k_sliced_ldsseq;
     ctx->USE_IGLP_OPT = spec->use_iglp_opt;
@@ -506,6 +469,50 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->K_SLICE_HD = K_SLICE_HD;
     ctx->K_SLICE_SLOTS = K_SLICE_SLOTS;
     ctx->K_SLICED_ACTIVE = K_SLICED_ACTIVE;
+    if(K_SLICED_ACTIVE)
+    {
+        /* The K slice loader still builds a single i32 voffset, which would
+         * differ from Python and overflow on a cache past the 2 GiB voffset
+         * range. */
+        if(ctx->I64_KV_ADDR)
+        {
+            b->status = ROCKE_ERR_NOTIMPL;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "use_i64_kv_addr: the gfx942 tiled 2D C++ builder does not yet port the "
+                     "64-bit KV-offset path of the sliced-K ring");
+            return false;
+        }
+        /* The ring's partial vmcnt fence counts one slice's DMA calls: the slice
+         * must split into whole calls, and the count must fit the 6-bit vmcnt
+         * field. */
+        const int kv_halves_per_call = ctx->THREADS * ctx->KV_DMA_HALVES_PER_LANE;
+        if((T * K_SLICE_HD) % kv_halves_per_call != 0)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "T=%d * k_slice_hd=%d must be a multiple of KV_HALVES_PER_CALL=%d so the "
+                     "ring's partial vmcnt fence counts whole slice prefetches",
+                     T,
+                     K_SLICE_HD,
+                     kv_halves_per_call);
+            return false;
+        }
+        if((T * K_SLICE_HD) / kv_halves_per_call > 63)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "ring partial-vmcnt count %d exceeds the 6-bit vmcnt field (T=%d, "
+                     "k_slice_hd=%d, KV_HALVES_PER_CALL=%d)",
+                     (T * K_SLICE_HD) / kv_halves_per_call,
+                     T,
+                     K_SLICE_HD,
+                     kv_halves_per_call);
+            return false;
+        }
+    }
     ctx->K_LDS_ELEM_BYTES = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES = K_BUF_BYTES;
     ctx->K_BUFS = K_BUFS;
@@ -524,6 +531,12 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     {
         int shp[3] = {K_BUFS, T, K_SLICE_HD};
         ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "KldsS");
+    }
+    else if(spec->use_k_hbm_direct)
+    {
+        /* K is read straight from HBM by the QK MFMA loop; keep a stub slab. */
+        int shp[3] = {K_BUFS, 1, 1};
+        ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "KldsStub");
     }
     else
     {
@@ -1049,6 +1062,48 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
             /* The softmax bucket reads the per-reg slope from hoist_q_head. */
             ctx->hoist_q_head[reg] = slope;
+        }
+    }
+
+    /* Transposed-32x32 per-lane invariants, once before the KV loop. */
+    ctx->st_qp_hoist = NULL;
+    ctx->st_row_ok_hoist = NULL;
+    ctx->st_causal_lim_hoist = NULL;
+    ctx->st_alibi_slope_hoist = NULL;
+    if(ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_INVARIANT_HOIST)
+    {
+        rocke_value_t* st_q_row
+            = rocke_b_add(b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
+        rocke_value_t* st_qp = rocke_b_add(
+            b, ctx->qb_start_pos, rocke_b_div(b, st_q_row, rocke_b_const_i32(b, ctx->NQK)));
+        rocke_value_t* st_qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* st_qh = rocke_b_add(b, st_qh_mul, st_qh_mod);
+        rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* st_ok_vr
+                = rocke_b_cmp_lt(b, st_q_row, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            ctx->st_row_ok_hoist = rocke_b_land(b, st_ok_inner, st_ok_vr);
+        }
+        else
+        {
+            ctx->st_row_ok_hoist = st_ok_inner;
+        }
+        ctx->st_qp_hoist = st_qp;
+        ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
+        if(ctx->USE_ALIBI)
+        {
+            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+            ctx->st_alibi_slope_hoist = rocke_b_masked_global_load(b,
+                                                                   ctx->alibi_slopes_ptr,
+                                                                   st_qh,
+                                                                   st_qh_ok,
+                                                                   rocke_b_const_f32(b, 0.0),
+                                                                   rocke_f32(),
+                                                                   4);
         }
     }
 }

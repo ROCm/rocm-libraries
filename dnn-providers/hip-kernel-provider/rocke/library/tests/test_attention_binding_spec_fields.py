@@ -26,9 +26,6 @@ from kernels.gfx950.attention_tiled_3d import UnifiedAttention3DTiledSpec
 
 # Python spec fields the shared C tiled-2D struct has no slot for.
 _UNPORTED_2D = {
-    "use_v_hbm_direct",
-    "use_k_hbm_direct",
-    "use_causal_mask_phase_split",
     "use_additive_bias",
     "causal_top_left",
     "right_bound",
@@ -68,6 +65,24 @@ def test_gfx942_2d_binding_keeps_the_x8_path(engine):
     )
     expected = _lower_python(build_gfx942_2d(spec, arch="gfx942"), "gfx942")
     assert "32x32x8" in expected
+    actual = engine.gfx942_attention_tiled_2d_lower_llvm(asdict(spec), "gfx942")
+    assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "field", ["use_v_hbm_direct", "use_k_hbm_direct", "use_causal_mask_phase_split"]
+)
+def test_gfx942_2d_binding_reads_gfx942_only_fields(engine, field):
+    spec = Gfx942Spec2D(
+        **_REQUIRED_2D,
+        dtype="fp16",
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        **{field: True},
+    )
+    expected = _lower_python(build_gfx942_2d(spec, arch="gfx942"), "gfx942")
     actual = engine.gfx942_attention_tiled_2d_lower_llvm(asdict(spec), "gfx942")
     assert actual == expected
 

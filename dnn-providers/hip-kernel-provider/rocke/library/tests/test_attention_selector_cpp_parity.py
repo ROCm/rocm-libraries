@@ -237,13 +237,16 @@ _CPP_GFX942_ONLY_SPEC_FIELDS = frozenset(
         "use_conflict_free_v_store",
         "use_conflict_free_v_store_split",
         "use_global_load_lds_k",
+        "use_causal_mask_phase_split",
         "use_iglp_opt",
+        "use_k_hbm_direct",
         "use_k_sliced_ldsseq",
         "use_k_sliced_ring",
         "use_mfma_32x32x8",
         "use_q_direct_global",
         "use_q_major_grid",
         "use_qk_pv_sched_group_barrier",
+        "use_v_hbm_direct",
     }
 )
 

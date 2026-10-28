@@ -131,6 +131,9 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.use_kq_lds_pad = false;
     s.kq_lds_pad_halves = 8;
     s.use_mask_phase_split = false;
+    s.use_v_hbm_direct = false;
+    s.use_k_hbm_direct = false;
+    s.use_causal_mask_phase_split = false;
     return s;
 }
 
@@ -534,6 +537,34 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         rocke_attn2d_set_err(
             b, ROCKE_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");
         return false;
+    }
+
+    if(s->use_k_hbm_direct)
+    {
+        if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_hbm_direct requires transposed-x8 "
+                                 "(use_mfma_32x32x8 + use_transposed_qk_32x32); "
+                                 "the 16x16 QK loop always reads K_lds");
+            return false;
+        }
+        if(s->use_k_sliced_ring)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring");
+            return false;
+        }
+        if(s->use_global_load_lds_k)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_hbm_direct is mutually exclusive with "
+                                 "use_global_load_lds_k");
+            return false;
+        }
     }
 
     if(s->use_global_load_lds_k && s->kv_storage_dtype != NULL)
