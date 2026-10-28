@@ -219,6 +219,8 @@ def test_soundness_gate_accepts_rectangular_wave():
         c_canon=c_canon,
         a_free_atoms=2,
         b_free_atoms=1,
+        a_dtype=mma.a_dtype,
+        b_dtype=mma.b_dtype,
     )
     pipeline = types.SimpleNamespace(ops=[op])
     assert verify_mma_soundness(pipeline) == 1  # no MmaSoundnessError

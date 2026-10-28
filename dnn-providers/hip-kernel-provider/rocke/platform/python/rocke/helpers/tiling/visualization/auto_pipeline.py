@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....core.dtypes import dtype_info
 from ....core.storage import element_bytes
 from . import block_diagram as _bd
 
@@ -905,19 +906,30 @@ def _view_compute_flow(pipeline, *, lds_view, operand, wave, out_path):
 
     import os
 
-    from .layout_render import MmaTee
+    tee = _compute_flow_tee(pipeline)
+    in_label, out_label = tee.in_dtype, tee.out_dtype
+    root = os.path.splitext(_with_dtype(out_path, in_label))[0]
+    return tee.render(
+        os.path.dirname(root) or ".",
+        name=os.path.basename(root),
+        title=f"COMPUTE flow [{in_label}->{out_label}]: LDS read A/B -> MMA (A x B) -> C",
+    )
+
+
+def _compute_flow_tee(pipeline):
+    """The MMA tee of the COMPUTE flow, built from the recording alone: the recorded operands and
+    canonical refs, A and B widths and labels from the recorded MMA op, C from the global C store.
+    """
+    from .layout_render import MmaTee, mma_input_label
 
     mma_op = next(o for o in pipeline.ops if o.kind == "mma")
-    reads = [t for t in pipeline.transactions if t.space == "lds" and t.kind == "load"]
+    a_dtype, b_dtype = mma_op.a_dtype, mma_op.b_dtype
     cst = next(
         t for t in pipeline.transactions if t.space == "global" and t.kind == "store"
     )
-    dtype = reads[0].dtype_name  # A/B input dtype (f16)
-    ab_bits, c_bits = element_bytes(dtype) * 8, element_bytes(cst.dtype_name) * 8
-
     # FLOW the shade from the operand's real PRODUCER (a direct LDS read) via the shared axis-agnostic helper --
     # the tee's A/B colours are the true load-transaction groups, matching the LDS diagram.
-    tee = MmaTee(
+    return MmaTee(
         a_enc=mma_op.a_enc,
         b_enc=mma_op.b_enc,
         c_enc=mma_op.c_enc,
@@ -925,9 +937,9 @@ def _view_compute_flow(pipeline, *, lds_view, operand, wave, out_path):
         a_canon=mma_op.a_canon,
         b_canon=mma_op.b_canon,
         c_canon=mma_op.c_canon,
-        a_dtype_bits=ab_bits,
-        b_dtype_bits=ab_bits,
-        c_dtype_bits=c_bits,
+        a_dtype_bits=dtype_info(a_dtype.name).encoded_bits,
+        b_dtype_bits=dtype_info(b_dtype.name).encoded_bits,
+        c_dtype_bits=dtype_info(cst.dtype_name).encoded_bits,
         dims_a=("M", "K"),
         dims_b=("N", "K"),
         dims_c=("M", "N"),
@@ -935,14 +947,8 @@ def _view_compute_flow(pipeline, *, lds_view, operand, wave, out_path):
         shade_b=_lds_load_shade(pipeline, mma_op, "B", mma_op.b_enc),
         show_static=True,
         show_logical_inputs=False,
-        in_dtype=dtype,
+        in_dtype=mma_input_label(a_dtype, b_dtype),
         out_dtype=cst.dtype_name,
-    )
-    root = os.path.splitext(_with_dtype(out_path, dtype))[0]
-    return tee.render(
-        os.path.dirname(root) or ".",
-        name=os.path.basename(root),
-        title=f"COMPUTE flow [{dtype}->{cst.dtype_name}]: LDS read A/B -> MMA (A x B) -> C",
     )
 
 
@@ -1468,14 +1474,11 @@ def _view_epilogue_flow(pipeline, *, out_path):
     # REACHABILITY, not position: the first recorded reorder is an A-operand bridge on any kernel that
     # bridges its operands. Raises rather than falling through to a degenerate panel.
     reo = select_c_shuffle(pipeline)
-    reads = [t for t in pipeline.transactions if t.space == "lds" and t.kind == "load"]
+    a_dtype, b_dtype = mma_op.a_dtype, mma_op.b_dtype
     cst = next(
         t for t in pipeline.transactions if t.space == "global" and t.kind == "store"
     )
-    ab_bits, c_bits = (
-        element_bytes(reads[0].dtype_name) * 8,
-        element_bytes(cst.dtype_name) * 8,
-    )
+    c_bits = dtype_info(cst.dtype_name).encoded_bits
     tee = MmaTee(
         a_enc=mma_op.a_enc,
         b_enc=mma_op.b_enc,
@@ -1484,8 +1487,8 @@ def _view_epilogue_flow(pipeline, *, out_path):
         a_canon=mma_op.a_canon,
         b_canon=mma_op.b_canon,
         c_canon=mma_op.c_canon,
-        a_dtype_bits=ab_bits,
-        b_dtype_bits=ab_bits,
+        a_dtype_bits=dtype_info(a_dtype.name).encoded_bits,
+        b_dtype_bits=dtype_info(b_dtype.name).encoded_bits,
         c_dtype_bits=c_bits,
         dims_a=("M", "K"),
         dims_b=("N", "K"),

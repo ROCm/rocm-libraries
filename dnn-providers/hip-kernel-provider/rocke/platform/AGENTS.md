@@ -457,7 +457,8 @@ how to drive it):
    `make_tensor_desc`/`make_window` give ptr-free memory + auto-clipping; `make_fragment` + the
    b-first verbs `load_fragment` / `store_fragment` / `fill_fragment` move data; `make_tile_desc(...)`
    authors any custom distribution as a quantity-major geometric table (no raw encoding integers).
-3. **Turn knobs / customize freely:** atom selection (shape tuple or intrinsic name), wave-tile
+3. **Turn knobs / customize freely:** atom selection (`Tiling(atom_shape=)` by shape, or
+   `TileMma(atom_override=)` by instruction name), wave-tile
    size, subtile `order`, operand `style=`, dtypes, target, clip bounds, and fully custom
    distributions — all are data, composable per the matrix. The recorder + the `analysis/` gates
    (`verify_lds_roundtrip` / `verify_mma_soundness`) verify a recorded kernel; reflection

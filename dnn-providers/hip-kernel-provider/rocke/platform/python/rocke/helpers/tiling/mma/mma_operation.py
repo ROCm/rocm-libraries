@@ -17,8 +17,10 @@ customise. The front door hides neither.
 from __future__ import annotations
 
 from ....core.ir import Type
+from ..traits import MmaTraitsCatalog
 from .driver import TileMmaDriver
 from .plan import Tiling, TileMmaPlan
+from .styles import LayoutStyle
 
 __all__ = ["Tiling", "TileMma"]
 
@@ -27,26 +29,38 @@ class TileMma:
     """A target-resolved wave-tile MMA operation + subtile driver (dense; the M1 surface).
 
     Author call: ``TileMma((16, 16, 64), a=F16, b=F16, c=F32, target="gfx90a",
-    tiling=Tiling(atom_shape=(16, 16, 16)))`` with the dtypes imported from ``rocke.core.ir``
-    (``d=`` names a result dtype other than ``c``; see :class:`TileMmaPlan`). Resolution +
-    validation happen at construction, fail-fast, with no IR. Calling the instance (``mma(b, a_frag, b_frag, acc)``) walks the atom grid
-    internally and returns the updated accumulator ``Fragment``. Reach ``.plan`` / ``.driver`` for the
-    composed pieces.
+    tiling=Tiling(atom_shape=(16, 16, 16)))`` with the dtypes imported from ``rocke.core.ir``.
+    The keywords are :class:`TileMmaPlan`'s:
+
+    * ``a``, ``b``, ``c``, ``d`` -- the A and B operand dtypes, the accumulator taken in and the
+      result returned (``d`` omitted = ``c``), each a scalar IR type.
+    * ``target`` -- the gfx target the instruction is resolved for.
+    * ``tiling`` -- the :class:`Tiling` knobs (atom shape, subtile order, ``mac_prio``).
+    * ``style`` -- the operand-layout profile (:class:`CanonicalStyle` by default).
+    * ``catalog`` -- the MMA catalog to resolve from (the committed one by default).
+    * ``atom_override="<op_id>"`` -- pins one catalog instruction by name instead of selecting by
+      shape and dtypes; ``shape`` and every dtype are then optional (an omitted shape is the
+      instruction's own, an omitted dtype is the instruction's), and each dtype given must be one
+      the instruction takes.
+
+    Resolution + validation happen at construction, fail-fast, with no IR. Calling the instance
+    (``mma(b, a_frag, b_frag, acc)``) walks the atom grid internally and returns the updated
+    accumulator ``Fragment``. Reach ``.plan`` / ``.driver`` for the composed pieces.
     """
 
     def __init__(
         self,
-        shape=None,
+        shape: tuple[int, int, int] | None = None,
         *,
-        a=None,
-        b=None,
-        c=None,
-        d=None,
-        target,
-        tiling=None,
-        style=None,
-        catalog=None,
-        atom_override=None,
+        a: Type | None = None,
+        b: Type | None = None,
+        c: Type | None = None,
+        d: Type | None = None,
+        target: str,
+        tiling: Tiling | None = None,
+        style: LayoutStyle | None = None,
+        catalog: MmaTraitsCatalog | None = None,
+        atom_override: str | None = None,
     ) -> None:
         self._plan = TileMmaPlan(
             shape,
