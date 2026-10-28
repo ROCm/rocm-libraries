@@ -132,6 +132,36 @@ TEST_F(IRParserTest, ParsesLabelReference) {
     EXPECT_EQ(instructions[0].srcRegs[0].literalValue, "label_LoopEndL");
 }
 
+TEST_F(IRParserTest, ParsesSymbolicLiteralOperand) {
+    // DumpStinkyModulePass prints .set symbols and special registers bare.
+    const std::string input = R"(
+        s2 = "st.s_mov_b32"(ttmp9)
+        s82 = "st.s_mul_i32"(MT1, s3)
+        s18 = "st.s_mov_b32"(BufferOOB)
+    )";
+
+    auto result = parseSourceStringWithDiagnostics(input);
+    ASSERT_FALSE(result.hasErrors());
+    auto instructions = result.getInstructions();
+    ASSERT_EQ(instructions.size(), 3);
+
+    EXPECT_EQ(instructions[0].srcRegs[0].dataType, StinkyRegister::Type::LiteralString);
+    EXPECT_EQ(instructions[0].srcRegs[0].getLiteralString(), "ttmp9");
+    EXPECT_EQ(instructions[1].srcRegs[0].getLiteralString(), "MT1");
+    EXPECT_EQ(instructions[1].srcRegs[1].reg.type, RegType::S);
+    EXPECT_EQ(instructions[1].srcRegs[1].reg.idx, 3u);
+    EXPECT_EQ(instructions[2].srcRegs[0].getLiteralString(), "BufferOOB");
+}
+
+TEST_F(IRParserTest, RejectsUnknownRegisterTypeWithIndex) {
+    const std::string input = R"(s0 = "st.s_mov_b32"(Foo[1]))";
+
+    auto result = parseSourceStringWithDiagnostics(input);
+    ASSERT_TRUE(result.hasErrors());
+    ASSERT_FALSE(result.diagnostics.empty());
+    EXPECT_NE(result.diagnostics[0].getMessage().find("Unknown register type"), std::string::npos);
+}
+
 TEST_F(IRParserTest, ParsesMemoryInstruction) {
     const std::string input = R"(v[0] = "st.buffer_load_b32"(v[1:2]))";
 
@@ -603,6 +633,177 @@ st.func @temp() {
     ASSERT_NE(result.parsedFunction->blocks[0]->instructions[1]->opcodeStr, "");
     EXPECT_EQ(result.parsedFunction->blocks[0]->instructions[0]->opcodeStr, "ds_load_b128");
     EXPECT_EQ(result.parsedFunction->blocks[0]->instructions[1]->opcodeStr, "s_wait_dscnt");
+}
+
+TEST_F(IRParserTest, ParsesModuleWrapperAndKeepsItsName) {
+    const std::string input = R"(st.module @Cijk_MT16x16_-Qev53+KB1=sp {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+
+  st.func @helper() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    EXPECT_EQ(result.moduleName, "Cijk_MT16x16_-Qev53+KB1=sp");
+    ASSERT_EQ(result.functions.size(), 2u);
+    EXPECT_EQ(result.functions[0]->funcName, "main");
+    EXPECT_EQ(result.functions[1]->funcName, "helper");
+}
+
+TEST_F(IRParserTest, BareFunctionsHaveNoModuleName) {
+    const std::string input = R"(st.func @main() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    EXPECT_TRUE(result.moduleName.empty());
+    EXPECT_EQ(result.functions.size(), 1u);
+}
+
+TEST_F(IRParserTest, RejectsTextAfterAFunction) {
+    // A mistyped keyword used to end the parse, and the second function was lost.
+    const std::string input = R"(st.func @main() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+st.fnuc @helper() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected 'st.func'");
+    EXPECT_EQ(result.diagnostics.front().getLine(), 5u);
+}
+
+TEST_F(IRParserTest, RejectsAnUnclosedModule) {
+    const std::string input = R"(st.module @kernel {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected '}' to close the module");
+}
+
+TEST_F(IRParserTest, RejectsTextAfterTheModule) {
+    const std::string input = R"(st.module @kernel {
+  st.func @main() {
+    ^entry:
+      "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  }
+}
+st.func @stray() {
+^entry:
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Expected end of input after the module");
+}
+
+TEST_F(IRParserTest, ReadsLabelAttributesAndQuotedLabels) {
+    const std::string input = R"(st.func @k() {
+^entry:
+  "st.s_branch"(label_loop) { issueCycles = 1, latencyCycles = 1 }
+^label_loop: { label, alignment = 16 }
+  label_mid: { alignment = 8 }
+  ".LBB0_1":
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    EXPECT_TRUE(result.diagnostics.empty());
+    const auto& blocks = result.functions.at(0)->blocks;
+    ASSERT_EQ(blocks.size(), 2u);
+    EXPECT_FALSE(blocks[0]->isLabel);
+    EXPECT_TRUE(blocks[1]->isLabel);
+    EXPECT_EQ(blocks[1]->labelAlignment, 16);
+    const auto& body = blocks[1]->instructions;
+    ASSERT_EQ(body.size(), 3u);
+    EXPECT_TRUE(body[0]->isLabel);
+    EXPECT_EQ(body[0]->opcodeStr, "label_mid");
+    EXPECT_EQ(body[0]->alignment, 8);
+    EXPECT_TRUE(body[1]->isLabel);
+    EXPECT_EQ(body[1]->opcodeStr, ".LBB0_1");
+    EXPECT_EQ(body[1]->alignment, 1);
+}
+
+TEST_F(IRParserTest, RejectsHeaderAlignmentWithoutLabel) {
+    MultiParseResult result =
+        parseAllSourceStringsWithDiagnostics("st.func @k() {\n^b: { alignment = 4 }\n}\n");
+
+    ASSERT_TRUE(result.hasErrors());
+    EXPECT_EQ(result.diagnostics.front().getMessage(),
+              "A block header's 'alignment' needs 'label'");
+    EXPECT_EQ(result.diagnostics.size(), 1u);
+}
+
+TEST_F(IRParserTest, WarnsOnUnknownLabelAttribute) {
+    MultiParseResult result =
+        parseAllSourceStringsWithDiagnostics("st.func @k() {\n^b: { label, colour = 3 }\n}\n");
+
+    ASSERT_FALSE(result.hasErrors());
+    ASSERT_EQ(result.diagnostics.size(), 1u);
+    EXPECT_EQ(result.diagnostics.front().getMessage(), "Unknown label attribute: colour");
+    EXPECT_TRUE(result.functions.at(0)->blocks.at(0)->isLabel);
+}
+
+TEST_F(IRParserTest, DecodesEscapesInQuotedStrings) {
+    const std::string input = R"stir(st.func @k() {
+^entry:
+  "st.asm_directive"("TEXTBLOCK", ".amdgcn_target \"gfx\"\n\\x\t")
+}
+)stir";
+
+    MultiParseResult result = parseAllSourceStringsWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors());
+    // A directive line needs no cycle attributes, so nothing warns.
+    EXPECT_TRUE(result.diagnostics.empty());
+    const auto& inst = result.functions.at(0)->blocks.at(0)->instructions.at(0);
+    ASSERT_EQ(inst->srcRegs.size(), 2u);
+    EXPECT_EQ(inst->srcRegs[1].literalValue, ".amdgcn_target \"gfx\"\n\\x\t");
+}
+
+TEST_F(IRParserTest, QuotesOnlyTextThatDoesNotReadBackBare) {
+    EXPECT_TRUE(readsBackBare("label_loop"));
+    EXPECT_TRUE(readsBackBare("MT1"));
+    EXPECT_TRUE(readsBackBare("vgprBase+0"));
+    EXPECT_TRUE(readsBackBare("0xffff0000"));
+    EXPECT_FALSE(readsBackBare("v0"));
+    EXPECT_FALSE(readsBackBare(".LBB0_1"));
+    EXPECT_FALSE(readsBackBare("v[vgprX+1]"));
+    EXPECT_FALSE(readsBackBare("two words"));
+    EXPECT_FALSE(readsBackBare("true"));
+    EXPECT_TRUE(readsBackBare("label_loop", /*asLabel=*/true));
+    EXPECT_FALSE(readsBackBare("Successors", /*asLabel=*/true));
+    EXPECT_FALSE(readsBackBare("^entry", /*asLabel=*/true));
+    EXPECT_EQ(quoteStirString("a\"b\\c\nd"), "\"a\\\"b\\\\c\\nd\"");
 }
 
 TEST_F(IRParserTest, ParsesBlockLabelWithCaret) {

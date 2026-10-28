@@ -7,7 +7,14 @@
 #ifdef STINKYTOFU_HAS_COMGR
 #include <amd_comgr/amd_comgr.h>
 
+#include <cstdio>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -121,10 +128,115 @@ struct ComgrActionInfo {
     }
 };
 
-}  // namespace
+/// The first log object comgr added to \p set, or empty.
+std::string readLog(amd_comgr_data_set_t set) {
+    size_t count = 0;
+    if (amd_comgr_action_data_count(set, AMD_COMGR_DATA_KIND_LOG, &count) !=
+            AMD_COMGR_STATUS_SUCCESS ||
+        count == 0)
+        return {};
+    amd_comgr_data_t log{};
+    if (amd_comgr_action_data_get_data(set, AMD_COMGR_DATA_KIND_LOG, 0, &log) !=
+        AMD_COMGR_STATUS_SUCCESS)
+        return {};
+    std::string text;
+    size_t size = 0;
+    if (amd_comgr_get_data(log, &size, nullptr) == AMD_COMGR_STATUS_SUCCESS && size > 0) {
+        text.resize(size);
+        if (amd_comgr_get_data(log, &size, text.data()) != AMD_COMGR_STATUS_SUCCESS) text.clear();
+    }
+    amd_comgr_release_data(log);
+    return text;
+}
 
-bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaName,
-                          uint32_t wavefrontSize) {
+int duplicateFd(int fd) {
+#ifdef _WIN32
+    return _dup(fd);
+#else
+    return dup(fd);
+#endif
+}
+
+int replaceFd(int from, int to) {
+#ifdef _WIN32
+    return _dup2(from, to);
+#else
+    return dup2(from, to);
+#endif
+}
+
+void closeFd(int fd) {
+#ifdef _WIN32
+    _close(fd);
+#else
+    close(fd);
+#endif
+}
+
+int fileFd(std::FILE* file) {
+#ifdef _WIN32
+    return _fileno(file);
+#else
+    return fileno(file);
+#endif
+}
+
+/// While active, points stderr (file descriptor 2) at a temporary file.
+/// comgr prints some assembler errors, such as an undefined label, there
+/// instead of in the action log. stderr belongs to the whole process, so
+/// another thread's output during the capture lands in it too.
+class StderrCapture {
+   public:
+    explicit StderrCapture(bool active) {
+        if (!active) return;
+        std::fflush(stderr);
+        file_ = std::tmpfile();
+        if (file_ == nullptr) return;
+        saved_ = duplicateFd(2);
+        if (saved_ >= 0 && replaceFd(fileFd(file_), 2) >= 0) return;
+        if (saved_ >= 0) closeFd(saved_);
+        saved_ = -1;
+        std::fclose(file_);
+        file_ = nullptr;
+    }
+
+    ~StderrCapture() {
+        restore();
+        if (file_ != nullptr) std::fclose(file_);
+    }
+
+    StderrCapture(const StderrCapture&) = delete;
+    StderrCapture& operator=(const StderrCapture&) = delete;
+
+    /// Put stderr back and return what was written to it.
+    std::string finish() {
+        restore();
+        if (file_ == nullptr) return {};
+        std::string text;
+        std::rewind(file_);
+        char buffer[4096];
+        size_t count = 0;
+        while ((count = std::fread(buffer, 1, sizeof(buffer), file_)) > 0)
+            text.append(buffer, count);
+        return text;
+    }
+
+   private:
+    void restore() {
+        if (saved_ < 0) return;
+        std::fflush(stderr);
+        replaceFd(saved_, 2);
+        closeFd(saved_);
+        saved_ = -1;
+    }
+
+    std::FILE* file_ = nullptr;
+    int saved_ = -1;
+};
+
+/// Logging is off when \p log is null; the toolchain probes run many of these.
+bool assemble(const std::string& asmString, const std::string& isaName, uint32_t wavefrontSize,
+              std::string* log) {
 #ifdef _WIN32
     if (!isRocmPathSet()) return false;
 #endif
@@ -151,6 +263,9 @@ bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaNa
     if (amd_comgr_action_info_set_isa_name(actionInfo.handle, isaName.c_str()) !=
         AMD_COMGR_STATUS_SUCCESS)
         return false;
+    if (log != nullptr &&
+        amd_comgr_action_info_set_logging(actionInfo.handle, true) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
 
     std::vector<const char*> options;
     if (wavefrontSize == 64) options.push_back("-mwavefrontsize64");
@@ -160,9 +275,25 @@ bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaNa
             return false;
     }
 
+    StderrCapture capture(log != nullptr);
     auto status = amd_comgr_do_action(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
                                       actionInfo.handle, inputSet.handle, outputSet.handle);
+    const std::string printed = capture.finish();
+    if (log != nullptr) *log = readLog(outputSet.handle) + printed;
     return status == AMD_COMGR_STATUS_SUCCESS;
+}
+
+}  // namespace
+
+bool tryAssembleWithComgr(const std::string& asmString, const std::string& isaName,
+                          uint32_t wavefrontSize) {
+    return assemble(asmString, isaName, wavefrontSize, nullptr);
+}
+
+bool assembleWithComgr(const std::string& asmString, const std::string& isaName,
+                       uint32_t wavefrontSize, std::string& log) {
+    log.clear();
+    return assemble(asmString, isaName, wavefrontSize, &log);
 }
 
 bool hasComgrSupport() {
@@ -191,6 +322,12 @@ bool comgrSupportsIsa(const std::string& isaName) {
 
 bool tryAssembleWithComgr(const std::string& /*asmString*/, const std::string& /*isaName*/,
                           uint32_t /*wavefrontSize*/) {
+    return false;
+}
+
+bool assembleWithComgr(const std::string& /*asmString*/, const std::string& /*isaName*/,
+                       uint32_t /*wavefrontSize*/, std::string& log) {
+    log.clear();
     return false;
 }
 

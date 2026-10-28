@@ -41,6 +41,8 @@
 
 namespace stinkytofu {
 class PassContext;
+// Defined in OptimizationRemark.hpp, which includes this header.
+struct OptimizationRemark;
 // Deliberately forward-declared, not included: HWModel.hpp reaches HazardRules.hpp
 // and from there the asm IR, which does not belong in every PassManager consumer.
 struct HWModel;
@@ -113,11 +115,19 @@ class Pass {
 //
 // It does not own a Function; the Function is passed to PassManager::run(Function&).
 class STINKYTOFU_EXPORT PassContext {
+   public:
+    /// Receives the remark itself, so a consumer can switch on its kind and
+    /// match its remarkName instead of the message text.
+    using RemarkHandler = std::function<void(const OptimizationRemark& remark)>;
+
+   private:
     GemmTileConfig gemmConfig;
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
     bool enableRemarks_ = false;
     bool analysisFailed_ = false;
+    /// Optional sink for each remark emitRemark writes to stderr.
+    RemarkHandler remarkHandler_;
     uint32_t wavefrontSize = 0;         ///< Computed from gemmConfig.arch
     const HWModel* hwModel_ = nullptr;  ///< Computed from gemmConfig.arch
 
@@ -174,6 +184,16 @@ class STINKYTOFU_EXPORT PassContext {
 
     bool getRemarksEnabled() const {
         return enableRemarks_;
+    }
+
+    /// Receive each remark emitRemark prints. Empty disables the sink; stderr
+    /// is unchanged. The function must not throw into a pass.
+    void setRemarkHandler(RemarkHandler handler) {
+        remarkHandler_ = std::move(handler);
+    }
+
+    const RemarkHandler& getRemarkHandler() const {
+        return remarkHandler_;
     }
 
     /// Set by analysis/verification passes that detect a failure the driver should

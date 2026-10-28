@@ -421,11 +421,19 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     return true;
 }
 
+// rocisa's hardware_caps.hpp sets the same two archCaps for gfx1250; keep the
+// two tables in step.
+void setGfx1250StandaloneCaps(AsmCapsConfig& caps) {
+    caps.requiresXCntForVolatileVMEM = true;
+    caps.enableXnackReplay = true;
+}
+
 struct Gfx1250Registrar {
     Gfx1250Registrar() {
         BackendRegistry::setArchPipeline(
-            GFX1250_ARCH,
-            {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody", "globalWriteEpilogue"}});
+            GFX1250_ARCH, {buildGfx1250Pipeline,
+                           {"loopWithPrefetch", "noLoadLoopBody", "globalWriteEpilogue"},
+                           setGfx1250StandaloneCaps});
     }
 };
 static Gfx1250Registrar s_gfx1250Registrar;

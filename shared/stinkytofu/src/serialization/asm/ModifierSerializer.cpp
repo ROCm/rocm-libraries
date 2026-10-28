@@ -32,6 +32,7 @@
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -486,7 +487,7 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
 
 // LabelData
 bool serializeVisit(const LabelData& mod, std::ostream& os) {
-    os << ", mod.label = { label = \"" << mod.label << "\""
+    os << ", mod.label = { label = " << quoteStirString(mod.label)
        << ", alignment = " << static_cast<int>(mod.alignment) << " }";
     return true;
 }

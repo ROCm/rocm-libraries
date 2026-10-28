@@ -7,10 +7,12 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ComgrProbe.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -326,8 +328,13 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
         checkInList(v, {{9, 5, 0}}) || checkInList(v, {{9, 0, 10}}) || (v[0] == 9 && v[1] == 4);
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["HasInvWbDevFences"] = checkInList(v, {{12, 5, 0}});
-    rv["RequiresXCntForVolatileVMEM"] = checkInList(v, {{12, 5, 0}});
-    rv["EnableXnackReplay"] = checkInList(v, {{12, 5, 0}});
+    // query() caches this per arch, so the backends must be registered before the
+    // first query. NB_MODULE registers them before any binding can run.
+    AsmCapsConfig standaloneCaps;
+    BackendRegistry::applyStandaloneCaps(
+        {static_cast<int>(v[0]), static_cast<int>(v[1]), static_cast<int>(v[2])}, standaloneCaps);
+    rv["RequiresXCntForVolatileVMEM"] = standaloneCaps.requiresXCntForVolatileVMEM;
+    rv["EnableXnackReplay"] = standaloneCaps.enableXnackReplay;
     rv["DefaultScopeIsCULocal"] = checkInList(v, {{12, 5, 0}});
 
     rv["LDSBankCount"] = 64;

@@ -893,7 +893,8 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 //----------------------------------------------------------------------
 
 /// Parse one non-directive, non-label line into a ParsedInstruction.
-/// Returns nullptr for unknown mnemonics (caller stores as TEXTBLOCK).
+/// Returns nullptr, with a warning, for an unknown mnemonic or operands it
+/// cannot read; the caller stores the line as TEXTBLOCK.
 std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArchID arch,
                                                  std::vector<Diagnostic>& diags, unsigned lineNo,
                                                  const SymbolTable& syms,
@@ -907,18 +908,27 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     std::string mnemonic(lexer.consume().text);
 
     // Look up the hardware instruction descriptor
-    auto isaOpcode = getMnemonicToIsaOpcode(mnemonic, arch);
+    auto isaOpcode = findMnemonicIsaOpcode(mnemonic, arch);
     const HwInstDesc* hwInstDesc = (isaOpcode != GFX::INVALID)
                                        ? getMCIDByIsaOp(static_cast<IsaOpcode>(isaOpcode), arch)
                                        : nullptr;
 
     if (!hwInstDesc) {
-        diags.emplace_back(Diagnostic::Level::Warning,
+        diags.emplace_back(Diagnostic::Level::Warning, DiagId::UnknownMnemonic,
                            "Unknown mnemonic '" + mnemonic + "'; storing as text", lineNo, 1);
         return nullptr;
     }
 
+    auto keptAsText = [&]() -> std::unique_ptr<ParsedInstruction> {
+        diags.emplace_back(Diagnostic::Level::Warning, DiagId::UnreadableOperands,
+                           "Could not read the operands of '" + mnemonic + "'; storing as text",
+                           lineNo, 1);
+        return nullptr;
+    };
+
     auto inst = std::make_unique<ParsedInstruction>(mnemonic);
+    inst->line = lineNo;
+    inst->column = 1;
     inst->issueCycles = hwInstDesc->issue;
     inst->latencyCycles = hwInstDesc->latency;
 
@@ -949,6 +959,25 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
                 continue;
             }
 
+            // A branch target names a label. Take the whole word, which the
+            // lexer may split (`.LBB0_1`), so a name needs no `label_` prefix.
+            // A numeric offset keeps the register path below.
+            if (field.fieldType == FieldType::label &&
+                lexer.peek().kind != TokenKind::IntegerLiteral &&
+                lexer.peek().kind != TokenKind::HexLiteral) {
+                std::string target =
+                    line.substr(static_cast<size_t>(lexer.peek().text.data() - line.data()));
+                trimStr(target);
+                if (target.empty() || target.find_first_of(" \t,") != std::string::npos)
+                    return keptAsText();
+                while (!lexer.isAtEnd() && lexer.peek().kind != TokenKind::Eof &&
+                       lexer.peek().kind != TokenKind::Newline)
+                    lexer.consume();
+                inst->srcRegs.push_back(StinkyRegister(target));
+                regOpIdx++;
+                continue;
+            }
+
             // Snapshot the lookahead so we can recover an unrecognised
             // identifier as a LiteralString if parseOneRegister fails on
             // a non-first operand (see recovery block below).
@@ -963,7 +992,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
                     // First register operand failed (e.g. unresolvable symbolic
                     // expression like v[sym-768:sym-765]). parseOneRegister may
                     // have consumed tokens; preserve the line as TEXTBLOCK.
-                    return nullptr;
+                    return keptAsText();
                 }
                 // Non-first operand recovery: a `.set` symbol (or any other
                 // bare identifier) used as an immediate source — e.g.
@@ -1010,7 +1039,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
     // bail to TEXTBLOCK pass-through so the line round-trips verbatim
     // instead of dropping the unmodelled modifier on emission.
     if (!parseModifiers(lexer, *inst, hwInstDesc, syms)) {
-        return nullptr;
+        return keptAsText();
     }
 
     return inst;
@@ -1698,6 +1727,54 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
     func->blocks.push_back(std::move(block));
     result.parsedFunction = std::move(func);
     return result;
+}
+
+std::optional<ParsedRegion> cutParsedRegion(ParsedFunction& func, const std::string& startLabel,
+                                            const std::string& endLabel, std::string& error) {
+    if (func.blocks.size() != 1) {
+        error = "a label region needs a function with one block";
+        return std::nullopt;
+    }
+    ParsedBlock& block = *func.blocks.front();
+    auto& insts = block.instructions;
+
+    // First occurrence of each, in case a label name repeats later in the file.
+    size_t startIdx = insts.size();
+    size_t endIdx = insts.size();
+    for (size_t idx = 0; idx < insts.size(); ++idx) {
+        if (!insts[idx]->isLabel) continue;
+        if (startIdx == insts.size() && insts[idx]->opcodeStr == startLabel) startIdx = idx;
+        if (endIdx == insts.size() && insts[idx]->opcodeStr == endLabel) endIdx = idx;
+    }
+    if (startIdx == insts.size()) {
+        error = "start label '" + startLabel + "' not found";
+        return std::nullopt;
+    }
+    if (endIdx == insts.size()) {
+        error = "end label '" + endLabel + "' not found";
+        return std::nullopt;
+    }
+    if (endIdx < startIdx) {
+        error = "end label '" + endLabel + "' comes before start label '" + startLabel + "'";
+        return std::nullopt;
+    }
+
+    auto part = [&](const std::string& name, size_t begin, size_t end) {
+        auto out = std::make_unique<ParsedFunction>();
+        out->funcName = name;
+        auto outBlock = std::make_unique<ParsedBlock>();
+        outBlock->blockId = block.blockId;
+        for (size_t idx = begin; idx < end; ++idx)
+            outBlock->instructions.push_back(std::move(insts[idx]));
+        out->blocks.push_back(std::move(outBlock));
+        return out;
+    };
+    ParsedRegion cut;
+    cut.before = part(func.funcName + "_pre", 0, startIdx);
+    cut.region = part(func.funcName, startIdx, endIdx + 1);
+    cut.after = part(func.funcName + "_post", endIdx + 1, insts.size());
+    insts.clear();
+    return cut;
 }
 
 }  // namespace stinkytofu

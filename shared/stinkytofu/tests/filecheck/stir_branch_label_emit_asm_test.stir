@@ -1,0 +1,24 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --emit-asm
+#
+# STIR names a branch target by its block header. The block gets its label back
+# on load, so the assembly defines loop: ahead of the branch that names it. It
+# used to print the branch with no label, which the assembler rejects. ^exit is
+# named by nothing, so it gets no label.
+#
+# CHECK: s_mov_b32 s0, 0
+# CHECK-NEXT: loop:
+# CHECK-NEXT: s_add_u32 s0, s0, 1
+# CHECK-NEXT: s_cbranch_scc1 loop
+# CHECK-NEXT: s_endpgm
+
+st.func @k() {
+^entry:
+  s0 = "st.s_mov_b32"(0) { issueCycles = 1, latencyCycles = 2 }
+  Successors: ^loop
+^loop:
+  s0 = "st.s_add_u32"(s0, 1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"(loop) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^loop, ^exit
+^exit:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

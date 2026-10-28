@@ -200,24 +200,24 @@ const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch) {
     return &getMCIDTable(arch)[isaOpcode];
 }
 
-uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
-    auto get = [&](const std::unordered_map<std::string, uint16_t>& map,
-                   const std::string& mnemonic) -> uint16_t {
-        auto it = map.find(mnemonic);
-        if (it == map.end()) {
-            // Keep this check in release builds too: returning it->second on a
-            // past-the-end iterator is UB and previously caused a segfault when
-            // an unmapped mnemonic reached the emitter.
-            std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic << " in arch "
-                      << getArchName(arch) << "\n";
-            return GFX::INVALID;
-        }
-        return it->second;
-    };
-
+uint16_t findMnemonicIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
     const auto* archInfo =
         ArchHelper::getInstance().getArchInfo(arch);  // Ensure ArchHelper is initialized
-    return get(archInfo->getMnemonicToIsaOpcodeMap(), mnemonic);
+    const auto& map = archInfo->getMnemonicToIsaOpcodeMap();
+    auto it = map.find(mnemonic);
+    // Keep this check in release builds too: returning it->second on a
+    // past-the-end iterator is UB and previously caused a segfault when
+    // an unmapped mnemonic reached the emitter.
+    return it == map.end() ? static_cast<uint16_t>(GFX::INVALID) : it->second;
+}
+
+uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
+    const uint16_t opcode = findMnemonicIsaOpcode(mnemonic, arch);
+    if (opcode == GFX::INVALID) {
+        std::cerr << "Error: No ISA opcode found for mnemonic " << mnemonic << " in arch "
+                  << getArchName(arch) << "\n";
+    }
+    return opcode;
 }
 
 //----------------------------------------------------------------------

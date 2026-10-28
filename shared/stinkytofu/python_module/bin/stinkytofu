@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+"""Find the stinkytofu package next to this script.
+
+build/bin uses build/lib. A copy installed under a prefix uses
+lib/pythonX.Y/dist-packages. `python3 -m stinkytofu` is the same program
+when that directory is already on PYTHONPATH."""
+
+import os
+import sys
+
+
+def module_dir(script_file):
+    """Directory to put on sys.path so `import stinkytofu` finds the package."""
+    root = os.path.dirname(os.path.dirname(os.path.realpath(script_file)))
+    lib = os.path.join(root, "lib")
+    version = "python%d.%d" % sys.version_info[:2]
+    candidates = [
+        lib,
+        os.path.join(lib, version, "dist-packages"),
+        os.path.join(lib, version, "site-packages"),
+    ]
+    for path in candidates:
+        if os.path.isfile(os.path.join(path, "stinkytofu", "__init__.py")):
+            return path
+    return lib
+
+
+def main():
+    sys.path.insert(0, module_dir(__file__))
+    from stinkytofu.cli import main as command  # noqa: E402
+
+    return command()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

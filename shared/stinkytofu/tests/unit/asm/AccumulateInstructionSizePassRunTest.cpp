@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -123,6 +124,37 @@ TEST_F(AccumulateInstructionSizePassRunTest, ModuleFactorySetsTotalBytes) {
 
     pass->run(func, ctx, am);
     EXPECT_GT(module->getTotalInstructionBytes(), 0);
+}
+
+TEST_F(AccumulateInstructionSizePassRunTest, MeasuredSizesLayFunctionsOutAsThePassDoes) {
+    auto module = makeModule();
+    GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
+    Function& entry = module->getFunction();
+    if (entry.getEntryBlock() == nullptr) entry.createBasicBlock("entry");
+    AsmIRBuilder head(*entry.getEntryBlock(), arch);
+    head.create(getMCIDByUOp(GFX::s_nop, arch));
+    head.create(getMCIDByUOp(GFX::s_nop, arch));
+    Function& callee = module->createFunction("callee");
+    AsmIRBuilder body(*callee.getEntryBlock(), arch);
+    body.createLabel("callee");
+    body.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    auto pass = createAccumulateInstructionSizePass(*module);
+    PassContext ctx;
+    pass->run(entry, ctx, am);
+
+    const std::vector<FunctionSize> sizes = measureFunctionSizes(module->getFunctions());
+    ASSERT_EQ(sizes.size(), 2u);
+    EXPECT_EQ(sizes[0].function, &entry);
+    EXPECT_EQ(sizes[0].start, 0);
+    EXPECT_EQ(sizes[0].instructions, 2);
+    EXPECT_GT(sizes[0].cycles, 0);
+    EXPECT_EQ(sizes[1].start, sizes[0].bytes);
+    EXPECT_EQ(sizes[1].instructions, 1);
+    EXPECT_EQ(sizes[0].bytes + sizes[1].bytes, module->getTotalInstructionBytes());
+    ASSERT_EQ(sizes[1].labels.size(), 1u);
+    EXPECT_EQ(sizes[1].labels[0].first, "callee");
+    EXPECT_EQ(sizes[1].labels[0].second, sizes[1].start);
 }
 
 TEST_F(AccumulateInstructionSizePassRunTest, EmptyFunctionRunsWithoutError) {

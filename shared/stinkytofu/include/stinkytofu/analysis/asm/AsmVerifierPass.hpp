@@ -25,10 +25,12 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/support/Diagnostic.hpp"
 
 namespace stinkytofu {
 /// Configuration for StinkyTofu Assembly IR verification only.
@@ -46,6 +48,15 @@ struct AsmVerifierConfig {
 /// Only for ASM; do not use for Logical IR.
 STINKYTOFU_EXPORT std::string validateStinkyIR(Function& func,
                                                const AsmVerifierConfig& config = {});
+
+/// Every problem in \p func, each at its function, block, and instruction.
+///
+/// Makes validateStinkyIR's checks, reporting all of them, and two more: a
+/// branch whose target no label in the function defines, and broken attached
+/// SSA. validateStinkyIR leaves those two out, since a region cut from a
+/// kernel may branch outside itself. Empty when nothing is wrong.
+STINKYTOFU_EXPORT std::vector<Diagnostic> verifyStinkyIR(const Function& func,
+                                                         const AsmVerifierConfig& config = {});
 
 /// Pass that verifies StinkyTofu Assembly IR. Used only in the ASM pass pipeline.
 class STINKYTOFU_EXPORT StinkyIRVerifierPass : public Pass {

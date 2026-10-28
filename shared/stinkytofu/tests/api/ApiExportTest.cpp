@@ -27,8 +27,8 @@
 // real consumer (rocisa, stinkytofu-opt) is accidentally un-exported, this
 // file will fail to LINK — catching the regression before it reaches downstream.
 //
-// Rule: only add tests here for symbols that rocisa or stinkytofu-opt actually
-// call. Everything else should stay hidden.
+// Rule: only add tests here for symbols that rocisa, stinkytofu-opt, or the
+// Python module actually call. Everything else should stay hidden.
 
 #include <gtest/gtest.h>
 
@@ -49,14 +49,19 @@
 // --- stinkytofu-opt consumer headers ---
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
+#include "stinkytofu/analysis/asm/ssa/SSALiveIntervals.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
+#include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -121,10 +126,23 @@ TEST(ApiExport, BackendRegistryRegisterAllBackends) {
 }
 
 TEST(ApiExport, BackendRegistryGetArchPipeline) {
-    // stinkytofu-opt: getArchPipeline() to validate --arch flag
+    // rocisa: ToStinkyTofuUtils reads the pipeline's group names
     BackendRegistry::registerAllBackends();
     // May return null for unknown arch — that's fine; the symbol must link.
     (void)BackendRegistry::getArchPipeline(kArch);
+}
+
+TEST(ApiExport, BackendRegistryIsArchSupported) {
+    // stinkytofu-opt: isArchSupported() to validate --arch flag
+    BackendRegistry::registerAllBackends();
+    (void)BackendRegistry::isArchSupported(kArch);
+}
+
+TEST(ApiExport, BackendRegistryApplyStandaloneCaps) {
+    // stinkytofu-opt: pipeline mode fills the ModuleOptions archCaps from it
+    BackendRegistry::registerAllBackends();
+    AsmCapsConfig caps;
+    BackendRegistry::applyStandaloneCaps(kArch, caps);
 }
 
 TEST(ApiExport, BackendRegistryParseArchKey) {
@@ -173,6 +191,13 @@ TEST(ApiExport, PassManagerConstruction) {
     registerAllAnalyses(pm.getAnalysisManager());
 }
 
+TEST(ApiExport, StandalonePassManager) {
+    BackendRegistry::registerAllBackends();
+    (void)standalonePassFeatureConfig();
+    PassManager pm = makeStandalonePassManager(kArch);
+    (void)pm;
+}
+
 TEST(ApiExport, PassManagerDebugConfig) {
     PassManagerDebugConfig cfg;
     cfg.setPrintBeforeAll(true);
@@ -209,7 +234,8 @@ TEST(ApiExport, StinkyIRConverterPopulateFromParsed) {
     pf.blocks[0]->blockId = "entry";
     Function func("f");
     GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
-    (void)StinkyIRConverter::populateFunctionFromParsed(pf, func, arch);
+    std::vector<Diagnostic> diagnostics;
+    (void)StinkyIRConverter::populateFunctionFromParsed(pf, func, arch, diagnostics);
 }
 
 TEST(ApiExport, StinkyAsmEmitter) {
@@ -219,6 +245,84 @@ TEST(ApiExport, StinkyAsmEmitter) {
     StinkyAsmEmitter emitter(opts);
     std::ostringstream oss;
     emitter.emit(oss, func);
+}
+
+// =============================================================================
+// IR edits and verification (Python module stir_api.cpp)
+// =============================================================================
+
+TEST(ApiExport, ReplaceBlockBody) {
+    Function func("f");
+    BasicBlock* entry = func.createBasicBlock("entry");
+    ParseResult body = parseBlockBodyWithDiagnostics("");
+    ASSERT_NE(body.parsedFunction, nullptr);
+    std::vector<Diagnostic> diagnostics;
+    GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
+    EXPECT_EQ(StinkyIRConverter::replaceBlockBody(*body.parsedFunction->blocks.front(), *entry,
+                                                  arch, diagnostics),
+              StinkyErrorCode::SUCCESS);
+    (void)discardDefUseAnalysis(func);
+}
+
+TEST(ApiExport, VerifyStinkyIR) {
+    Function func("f");
+    EXPECT_FALSE(verifyStinkyIR(func).empty());
+}
+
+TEST(ApiExport, ModuleCopyAndRunRecord) {
+    Function source("f");
+    source.createBasicBlock("entry");
+    Function copy;
+    EXPECT_TRUE(copy.copyFrom(source));
+    EXPECT_EQ(copy.getName(), "f");
+
+    StinkyAsmModule module("m", kArch, StinkyAsmModule::ModuleOptions{});
+    module.addPassRun(PassRunRecord{{"StinkyRemoveNopPass"}, std::nullopt, {}, {}});
+    ASSERT_EQ(module.getPassRuns().size(), 1u);
+    EXPECT_EQ(module.getPassRuns().front().passes.front(), "StinkyRemoveNopPass");
+}
+
+TEST(ApiExport, BlockAndFunctionErase) {
+    Function func("f");
+    func.createBasicBlock("entry");
+    func.eraseBlock(*func.createBasicBlock("extra"));
+    EXPECT_EQ(func.size(), 1u);
+
+    StinkyAsmModule module("m", kArch, StinkyAsmModule::ModuleOptions{});
+    module.createFunction("helper");
+    EXPECT_TRUE(module.removeFunction("helper"));
+}
+
+// =============================================================================
+// Analysis queries (Python module stir_api.cpp)
+// =============================================================================
+
+TEST(ApiExport, AnalysisQueries) {
+    Function func("f");
+    BasicBlock* entry = func.createBasicBlock("entry");
+    GfxArchID arch = getGfxArchID(kArch[0], kArch[1], kArch[2]);
+    AsmIRBuilder(*entry, arch).create(getMCIDByUOp(GFX::s_nop, arch));
+
+    const SSALiveIntervals live = computeSSALiveIntervals(func);
+    const LiveRange& range = live.rangeOf(1);
+    EXPECT_TRUE(range.empty());
+    (void)range.start();
+    (void)range.end();
+    (void)range.length();
+    (void)range.toString();
+    EXPECT_EQ(live.classOf(1), RegType::UNKNOWN);
+    (void)live.widthOf(1);
+    (void)live.rangeLine(1);
+    EXPECT_EQ(live.peakPressure(RegType::V), 0u);
+    EXPECT_EQ(live.peakSlot(RegType::V), SSASlotIndexes::kInvalidSlot);
+    EXPECT_EQ(live.slots().placeOf(0).block, nullptr);
+    const StinkySSAValue* value = func.ssaArena().get(1);
+    if (value != nullptr && value->hasPhysicalBinding()) (void)value->physical();
+
+    EXPECT_TRUE(findHazardGaps(func).empty());
+    const std::vector<FunctionSize> sizes = measureFunctionSizes({&func});
+    ASSERT_EQ(sizes.size(), 1u);
+    EXPECT_EQ(sizes.front().instructions, 1);
 }
 
 // =============================================================================
@@ -250,7 +354,37 @@ TEST(ApiExport, GetGfxArchID) {
 }
 
 // =============================================================================
-// Pass factory functions (stinkytofu-opt availablePasses table)
+// Pass catalog (src/pipeline/PassCatalog.cpp)
+// =============================================================================
+
+TEST(ApiExport, PassCatalogNamesCreatePasses) {
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
+
+    const std::vector<PassInfo>& catalog = passCatalog();
+    EXPECT_FALSE(catalog.empty());
+    EXPECT_EQ(findCatalogPass("NotARealPass"), nullptr);
+    EXPECT_EQ(createCatalogPass("NotARealPass", {}), nullptr);
+
+    const PassInfo* lift = findCatalogPass("LiftAsmRegistersToSSAPass");
+    ASSERT_NE(lift, nullptr);
+    EXPECT_NE(createCatalogPass(lift->name, {}), nullptr);
+    EXPECT_EQ(createCatalogPass(lift->name, {"classes=not-a-class"}), nullptr);
+
+    const PassInfo* removeInst = findCatalogPass("RemoveInstructionPass");
+    ASSERT_NE(removeInst, nullptr);
+    EXPECT_EQ(createCatalogPass(removeInst->name, {}), nullptr);
+    EXPECT_NE(createCatalogPass(removeInst->name, {"s_nop"}), nullptr);
+
+    for (const PassInfo& info : catalog) {
+        EXPECT_EQ(findCatalogPass(info.name), &info);
+        if (std::string(info.name) == "RemoveInstructionPass") continue;
+        EXPECT_NE(createCatalogPass(info.name, {}), nullptr) << info.name;
+    }
+}
+
+// =============================================================================
+// Pass factory functions
 // =============================================================================
 
 TEST(ApiExport, PassFactories) {

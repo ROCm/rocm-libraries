@@ -29,6 +29,7 @@
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/ModulePassManager.hpp"
+#include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
 namespace stinkytofu {
@@ -36,13 +37,14 @@ class StinkyAsmModule;
 
 /// Global registry of per-architecture pipeline configuration.
 ///
-/// Each architecture registers an ArchPipeline (pipeline builder + group names)
-/// at static init time. Backend::runOptimization() retrieves the builder, and
-/// module construction code queries group names to set up instruction tracking.
+/// Each architecture registers an ArchPipeline (pipeline builder, group names,
+/// and optional standalone caps) at static init time. Backend::runOptimization()
+/// retrieves the builder, and module construction code queries group names to
+/// set up instruction tracking.
 ///
 /// @code
 /// // Static registrar (runs when TU is linked)
-/// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}});
+/// BackendRegistry::setArchPipeline({12, 5, 0}, {myBuilder, {"group0", "group1"}, myCaps});
 /// @endcode
 class STINKYTOFU_EXPORT BackendRegistry {
    public:
@@ -53,10 +55,15 @@ class STINKYTOFU_EXPORT BackendRegistry {
     using PipelineBuilder =
         std::function<bool(ModulePassManager&, StinkyAsmModule&, const PassBuilder&)>;
 
+    /// Function type: sets the AsmCapsConfig fields that rocisa's archCaps
+    /// supply through ModuleOptions, for a caller that has no rocisa to ask.
+    using StandaloneCapsBuilder = std::function<void(AsmCapsConfig&)>;
+
     /// Per-architecture pipeline configuration.
     struct ArchPipeline {
-        PipelineBuilder builder;              ///< Populates the module pass manager.
-        std::vector<std::string> groupNames;  ///< Instruction groups the builder operates on.
+        PipelineBuilder builder;               ///< Populates the module pass manager.
+        std::vector<std::string> groupNames;   ///< Instruction groups the builder operates on.
+        StandaloneCapsBuilder standaloneCaps;  ///< Optional. See applyStandaloneCaps().
     };
 
     /// Register the pipeline for \p arch (one per arch).
@@ -64,6 +71,17 @@ class STINKYTOFU_EXPORT BackendRegistry {
 
     /// Return the pipeline for \p arch, or nullptr if none registered.
     static const ArchPipeline* getArchPipeline(const std::array<int, 3>& arch);
+
+    /// True when \p arch is in the architecture tables and has a registered
+    /// pipeline. Check it before getGfxArchID, which asserts on an unknown triple.
+    static bool isArchSupported(const std::array<int, 3>& arch);
+
+    /// Run the StandaloneCapsBuilder registered for \p arch on \p caps. Leaves
+    /// \p caps unchanged when \p arch has no pipeline or the pipeline has no
+    /// builder. Call it after ToolchainCaps::probe(), which replaces the whole
+    /// struct. Backend never calls it: a rocisa run sets these fields in
+    /// ModuleOptions.
+    static void applyStandaloneCaps(const std::array<int, 3>& arch, AsmCapsConfig& caps);
 
     /// Remove all registered entries (all architectures). Mainly for tests.
     static void clear();

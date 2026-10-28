@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -34,6 +35,7 @@
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/pipeline/CloneSpec.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
+#include "stinkytofu/support/Diagnostic.hpp"
 
 /*
  * @brief Define the options for the ModuleOptions struct
@@ -157,6 +159,18 @@
     X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
+struct SignatureBase;
+
+/// One run_passes call of the Python analysis API, kept so the run can be
+/// repeated: the pass specs in order, the function it was limited to, and the
+/// feature and tile values the caller set.
+struct PassRunRecord {
+    std::vector<std::string> passes;
+    std::optional<std::string> function;
+    std::vector<std::pair<std::string, bool>> features;
+    std::vector<std::pair<std::string, uint32_t>> tile;
+};
+
 /**
  * @brief Assembly IR Module container
  *
@@ -310,6 +324,18 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     Function& createFunction(std::string_view name, bool isCallable = true);
 
     /**
+     * @brief Remove the callable Function \p name and its IR.
+     *
+     * Groups bounded by its instructions are cleared first, as
+     * invalidateGroupsInBlocks() does. A call whose `mod.call_targets` lists the
+     * name keeps it; that list does not reach the assembly.
+     *
+     * @return False, changing nothing, for the entry Function or a name no
+     * callable Function has.
+     */
+    bool removeFunction(std::string_view name);
+
+    /**
      * @brief Look up a Function by name. Empty name returns the entry Function.
      */
     Function* getFunction(std::string_view name);
@@ -401,6 +427,27 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @brief Get total instruction size in bytes, or -1 if not set.
      */
     int64_t getTotalInstructionBytes() const;
+
+    /**
+     * @brief Kernel header (`.amdhsa_*` and code object metadata) read from
+     * assembler source. Null for a module loaded from STIR or built in memory.
+     */
+    void setSignature(std::shared_ptr<SignatureBase> signature);
+    std::shared_ptr<SignatureBase> getSignature() const;
+
+    /**
+     * @brief Warnings from the parser and converter of the text load that built
+     * this module. Empty for a module built in memory.
+     */
+    void setLoadWarnings(std::vector<Diagnostic> warnings);
+    const std::vector<Diagnostic>& getLoadWarnings() const;
+
+    /**
+     * @brief Pass runs made on this module through the Python analysis API,
+     * oldest first. Empty for a module no such run has touched.
+     */
+    void addPassRun(PassRunRecord run);
+    const std::vector<PassRunRecord>& getPassRuns() const;
 
     // ---- Plugin data (opaque key-value store for pass plugins) ----
 

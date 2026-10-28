@@ -524,10 +524,9 @@ class DAGSchedulerPassTest : public ::testing::Test {
     }
 
     // Estimated cycles the schedule spends between \p from and \p to, counting
-    // neither end. Same scale the scheduler plans on (a WMMA costs the co-issue
-    // window it opens, anything else its issue cycles), so a distance measured
-    // here is comparable to the cycle leads the passes are written against. -1 if
-    // the two are not in this order.
+    // neither end. Same scale the scheduler plans on (instructionCycles), so a
+    // distance measured here is comparable to the cycle leads the passes are
+    // written against. -1 if the two are not in this order.
     static int cyclesBetween(const BasicBlock& block, const StinkyInstruction* from,
                              const StinkyInstruction* to) {
         int total = 0;
@@ -536,8 +535,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
             if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
             const auto* inst = cast<StinkyInstruction>(&ir);
             if (inst == to) return started ? total : -1;
-            if (started)
-                total += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
+            if (started) total += instructionCycles(*inst);
             if (inst == from) started = true;
         }
         return -1;

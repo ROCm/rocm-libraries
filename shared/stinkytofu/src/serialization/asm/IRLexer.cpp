@@ -154,8 +154,9 @@ Token IRLexer::lexToken() {
                 if (peekChar() == '\\') {
                     consumeChar();                        // consume backslash
                     if (!isAtBufferEnd()) consumeChar();  // consume escaped char
-                } else {
-                    consumeChar();
+                } else if (consumeChar() == '\n') {
+                    currentLine++;
+                    currentColumn = 1;
                 }
             }
             if (peekChar() == '"') consumeChar();  // consume closing quote

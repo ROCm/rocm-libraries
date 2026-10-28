@@ -47,4 +47,17 @@ inline std::vector<std::string> splitList(std::string_view text, char separator)
     return items;
 }
 
+/// The argument list in \p text, the part after '=' in `PassName=arg1,arg2`.
+/// Each argument is trimmed, and empty ones are dropped.
+inline std::vector<std::string> splitPassArgs(std::string_view text) {
+    constexpr std::string_view space = " \t\n\v\f\r";
+    std::vector<std::string> args;
+    for (const std::string& item : splitList(text, ',')) {
+        const size_t first = item.find_first_not_of(space);
+        if (first == std::string::npos) continue;
+        args.push_back(item.substr(first, item.find_last_not_of(space) - first + 1));
+    }
+    return args;
+}
+
 }  // namespace stinkytofu

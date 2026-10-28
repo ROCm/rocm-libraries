@@ -26,14 +26,17 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
+#include "stinkytofu/support/Diagnostic.hpp"
 
 namespace stinkytofu {
 enum class GfxArchID : uint32_t;
+struct ParsedBlock;
 struct ParsedFunction;
 
 /**
@@ -88,7 +91,8 @@ class STINKYTOFU_EXPORT StinkyIRConverter {
 
     /**
      * Static helper to populate a Function from an IR text string.
-     * This is the core conversion logic shared by both StinkyIRConverter and stinkytofu-opt.
+     * Parses \p irText, then calls populateFunctionFromParsed and prints its
+     * diagnostics to stderr.
      *
      * @param irText The IR source text to parse
      * @param func The Function to populate with a BasicBlock containing instructions
@@ -100,8 +104,29 @@ class STINKYTOFU_EXPORT StinkyIRConverter {
                                                       PassContext& passCtx, GfxArchID arch);
 
     /// Populate a Function from a pre-parsed ParsedFunction.
+    ///
+    /// An instruction with no opcode or hardware descriptor for \p arch, and a
+    /// successor label that names no block, are left out and reported as errors
+    /// in \p diagnostics. The rest is still built, and the call returns
+    /// CONVERT_ERROR; do not use \p func then.
     static StinkyErrorCode populateFunctionFromParsed(ParsedFunction& parsedFunc, Function& func,
-                                                      GfxArchID arch);
+                                                      GfxArchID arch,
+                                                      std::vector<Diagnostic>& diagnostics);
+
+    /// Replace the instructions of \p block, which must belong to a function,
+    /// with \p body, built as a load builds a block. \p body comes from
+    /// parseBlockBodyWithDiagnostics().
+    ///
+    /// The block keeps its name, its edges, and its own label; a leading
+    /// `name:` line in \p body replaces that label. A block the new
+    /// instructions name gets a label, as at load.
+    ///
+    /// When an instruction cannot be built, the block is unchanged, the errors
+    /// are in \p diagnostics, and the call returns CONVERT_ERROR. On success the
+    /// function's attached SSA and def-use analysis are discarded, since both
+    /// describe the old instructions.
+    static StinkyErrorCode replaceBlockBody(const ParsedBlock& body, BasicBlock& block,
+                                            GfxArchID arch, std::vector<Diagnostic>& diagnostics);
 
     /**
      * Get the PassContext associated with the last conversion.

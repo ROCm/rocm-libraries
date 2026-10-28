@@ -24,6 +24,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <limits>
@@ -150,6 +151,11 @@ inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping)
 
 inline GfxArchID getGfxArchID(const std::string& name) {
     return ArchHelper::getInstance().getGfxArchID(name);
+}
+
+inline GfxArchID getGfxArchID(const std::array<int, 3>& arch) {
+    return getGfxArchID(static_cast<uint32_t>(arch[0]), static_cast<uint32_t>(arch[1]),
+                        static_cast<uint32_t>(arch[2]));
 }
 
 inline uint32_t getWaveFrontSize(GfxArchID archID) {

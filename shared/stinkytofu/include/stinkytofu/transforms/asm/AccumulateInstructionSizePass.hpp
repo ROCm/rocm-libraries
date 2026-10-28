@@ -27,6 +27,8 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/IRBase.hpp"
@@ -35,6 +37,7 @@ namespace stinkytofu {
 class Pass;
 class StinkyAsmModule;
 class BasicBlock;
+class Function;
 
 /// \brief Accumulate instruction **cycle cost** and **encoded byte size** for a
 /// single basic block.
@@ -113,6 +116,27 @@ int64_t accumulateInstructionSize(
     std::ostream* debugOut = nullptr, int* outCount = nullptr, int64_t* outTotalBytes = nullptr,
     int64_t baseByteOffset = 0,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols = nullptr);
+
+/// One function's encoded bytes and cycles, measured where the kernel image
+/// places it.
+struct FunctionSize {
+    const Function* function = nullptr;
+    /// Byte offset of the function's first byte in the image.
+    int64_t start = 0;
+    int64_t bytes = 0;
+    int64_t cycles = 0;
+    /// Instructions that contributed cycles: not labels, PHIs, or directives.
+    int instructions = 0;
+    /// The function's labels, in program order, with their byte offsets in the image.
+    std::vector<std::pair<std::string, int64_t>> labels;
+};
+
+/// Lay \p functions out in order, as the kernel image does, and measure each as
+/// AccumulateInstructionSizePass does: one running byte offset, label map, and
+/// `.set` map across all of them, so alignment padding and PC-relative literals
+/// are sized where each function really sits.
+STINKYTOFU_EXPORT std::vector<FunctionSize> measureFunctionSizes(
+    const std::vector<Function*>& functions);
 
 /// Creates a pass that accumulates instruction size (cycles) over all
 /// instructions in the IR.

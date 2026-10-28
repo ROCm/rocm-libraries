@@ -29,12 +29,14 @@
 #include <sstream>
 #include <vector>
 
+#include "DirectiveTags.hpp"
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -91,7 +93,10 @@ void AsmPrinter::printRegister(const StinkyRegister& reg) {
             os << std::fixed << std::setprecision(6) << reg.getLiteralDouble();
             break;
         case StinkyRegister::Type::LiteralString:
-            os << reg.getLiteralString();
+            if (readsBackBare(reg.getLiteralString()))
+                os << reg.getLiteralString();
+            else
+                os << quoteStirString(reg.getLiteralString());
             break;
         case StinkyRegister::Type::HwReg:
             HwReg::printOperand(os, reg);
@@ -142,12 +147,22 @@ void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex) {
 void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex, int baseIndent) {
     std::string blockId =
         bb.getLabel().empty() ? ("bb" + std::to_string(blockIndex)) : bb.getLabel();
+    const StinkyInstruction* label = ownLabel(bb);
     os << std::string(static_cast<size_t>(baseIndent), ' ');
     os << "^" << blockId;
     if (options.ssaForm) printBlockArgumentList(bb);
-    os << ":\n";
+    os << ":";
+    if (label != nullptr) {
+        os << " { label";
+        const uint16_t alignment = label->getModifier<LabelData>()->alignment;
+        if (alignment > 1) os << ", alignment = " << alignment;
+        os << " }";
+    }
+    os << "\n";
     if (options.ssaForm) printBlockArgumentSources(bb, baseIndent);
-    for (const IRBase& ir : bb) printIR(ir, baseIndent);
+    for (const IRBase& ir : bb) {
+        if (&ir != label) printIR(ir, baseIndent);
+    }
     printSuccessorsLine(bb, baseIndent);
 }
 
@@ -275,8 +290,10 @@ void AsmPrinter::printIR(const IRBase& ir, int baseIndent) {
 }
 
 void AsmPrinter::printInstruction(const StinkyInstruction& inst, int baseIndent) {
-    // labels are block boundaries; do not print LABEL as instruction
-    if (inst.getUnifiedOpcode() == GFX::LABEL) return;
+    if (inst.getUnifiedOpcode() == GFX::LABEL) {
+        printLabel(inst, baseIndent);
+        return;
+    }
 
     os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
 
@@ -322,14 +339,41 @@ void AsmPrinter::printInstruction(const StinkyInstruction& inst, int baseIndent)
     os << " }\n";
 }
 
+void AsmPrinter::printLabel(const StinkyInstruction& label, int baseIndent) {
+    const LabelData* data = label.getModifier<LabelData>();
+    const std::string name = data != nullptr ? data->label : std::string();
+    os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+    os << (readsBackBare(name, /*asLabel=*/true) ? name : quoteStirString(name)) << ":";
+    if (data != nullptr && data->alignment > 1) os << " { alignment = " << data->alignment << " }";
+    os << "\n";
+}
+
 bool AsmPrinter::printModifierAsDict(const Modifier& mod) {
     return ModifierSerializer::serialize(mod, os);
 }
 
+bool AsmPrinter::printModifier(const Modifier& mod) {
+    std::ostringstream attribute;
+    if (!ModifierSerializer::serialize(mod, attribute)) return false;
+    std::string text = attribute.str();
+    // The serializer writes the ", " that joins attributes on an op line.
+    if (text.rfind(", ", 0) == 0) text.erase(0, 2);
+    os << text;
+    return true;
+}
+
 void AsmPrinter::printDirective(const AsmDirective& directive, int baseIndent) {
     os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
-    os << "\"st.asm_directive\"(\"" << directive.name << "\"";
-    if (!directive.symbol.empty()) os << ", \"" << directive.symbol << "\"";
+    os << "\"st.asm_directive\"(";
+    for (const auto& [kind, tag] : kTextDirectiveTags) {
+        if (kind != directive.kind) continue;
+        os << quoteStirString(tag) << ", " << quoteStirString(directive.value) << ")\n";
+        return;
+    }
+    os << quoteStirString(directive.name);
+    if (!directive.symbol.empty() || !directive.value.empty())
+        os << ", " << quoteStirString(directive.symbol);
+    if (!directive.value.empty()) os << ", " << quoteStirString(directive.value);
     os << ")\n";
 }
 

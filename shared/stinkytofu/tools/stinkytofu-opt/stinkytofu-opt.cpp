@@ -22,8 +22,8 @@
  * ************************************************************************ */
 #include "stinkytofu-opt.hpp"
 
+#include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -33,20 +33,22 @@
 #include <vector>
 
 #include "stinkytofu/Version.h"
-#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/pipeline/PassCatalog.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/support/PassArguments.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
 #include "stinkytofu/support/TimePassesInstrumentation.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
 
 using namespace stinkytofu;
 
@@ -70,9 +72,7 @@ class DeserializeStinkytofuIRPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        GfxArchID arch =
-            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
-                         passCtx.getGemmTileConfig().arch[2]);
+        GfxArchID arch = getGfxArchID(passCtx.getGemmTileConfig().arch);
 
         std::string irText = readFile(stinkytofuIRFile);
 
@@ -108,7 +108,7 @@ char DeserializeStinkytofuIRPass::ID = 0;
 void printAvailablePasses() {
     std::cout << "Available passes:\n";
     std::cout << "=================\n";
-    for (const auto& passInfo : availablePasses) {
+    for (const auto& passInfo : passCatalog()) {
         std::cout << "  --" << passInfo.name << "\n";
     }
 }
@@ -119,17 +119,6 @@ struct RequestedPass {
     std::string name;
     std::vector<std::string> args;
 };
-
-// Function to find and create a pass by name (with optional arguments)
-std::unique_ptr<Pass> createPassByName(const std::string& passName,
-                                       const std::vector<std::string>& args = {}) {
-    for (const auto& passInfo : availablePasses) {
-        if (passName == passInfo.name) {
-            return passInfo.creator(args);
-        }
-    }
-    return nullptr;
-}
 
 // Flags of the removed cap / throttle ds_load pacing and hide-budget prescan. Still accepted,
 // no longer read.
@@ -144,15 +133,6 @@ static bool isRemovedDsPacingFlag(const std::string& a) {
     return false;
 }
 
-static void trimWhitespace(std::string& s) {
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
-        s.erase(0, 1);
-    }
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
-        s.pop_back();
-    }
-}
-
 int extractOptLevel(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -165,14 +145,11 @@ int extractOptLevel(int argc, char** argv) {
 }
 
 bool isKernelConfigArg(const std::string& arg) {
-    static constexpr const char* kAssignPrefixes[] = {
-        "--TileA0=", "--TileB0=", "--TileM0=",  "--NumGRA=",
-        "--NumGRB=", "--NumGRM=", "--NumWaves="};
-    for (const char* prefix : kAssignPrefixes) {
-        if (arg.starts_with(prefix)) return true;
+    for (const GemmTileField& field : kGemmTileFields) {
+        const std::string flag = std::string("--") + field.name;
+        if (arg == flag || arg.starts_with(flag + "=")) return true;
     }
-    return arg == "--TileA0" || arg == "--TileB0" || arg == "--TileM0" || arg == "--NumGRA" ||
-           arg == "--NumGRB" || arg == "--NumGRM" || arg == "--NumWaves";
+    return false;
 }
 
 // Function to parse command-line arguments for passes.
@@ -225,31 +202,15 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
             // mistaken for a missing pass (e.g. `--debug-pass FooPass` was
             // emitting `Warning: Unknown pass 'debug-pass'` because the
             // `--` prefix was stripped and `debug-pass` wasn't a known pass).
-            if (arg == "-o" || arg == "--debug-pass" || arg == "--TileA0" || arg == "--TileB0" ||
-                arg == "--TileM0" || arg == "--NumGRA" || arg == "--NumGRB" || arg == "--NumGRM" ||
-                arg == "--NumWaves") {
+            if (arg == "-o" || arg == "--debug-pass") {
                 ++i;  // skip the value argument
                 continue;
             }
             std::string body = arg.substr(2);  // strip "--"
             RequestedPass rp;
             size_t eq = body.find('=');
-            if (eq == std::string::npos) {
-                rp.name = std::move(body);
-            } else {
-                rp.name = body.substr(0, eq);
-                std::string rest = body.substr(eq + 1);
-                size_t start = 0;
-                while (start <= rest.size()) {
-                    size_t comma = rest.find(',', start);
-                    std::string tok = rest.substr(
-                        start, comma == std::string::npos ? std::string::npos : comma - start);
-                    trimWhitespace(tok);
-                    if (!tok.empty()) rp.args.push_back(std::move(tok));
-                    if (comma == std::string::npos) break;
-                    start = comma + 1;
-                }
-            }
+            rp.name = body.substr(0, eq);
+            if (eq != std::string::npos) rp.args = splitPassArgs(body.substr(eq + 1));
             passes.push_back(std::move(rp));
         }
     }
@@ -279,59 +240,32 @@ static bool parseGemmTileConfigOptions(int argc, char** argv, stinkytofu::GemmTi
                                        std::string& error) {
     config = {};
     for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto parseAssign = [&](const char* prefix, const char* flag, uint32_t& field) -> bool {
-            if (!a.starts_with(prefix)) return true;
-            return parseGemmTileField(flag, a.substr(std::strlen(prefix)), field, error);
-        };
-        auto parseNext = [&](const char* flag, uint32_t& field) -> bool {
-            if (a != flag) return true;
-            if (i + 1 >= argc) return true;
-            return parseGemmTileField(flag, argv[++i], field, error);
-        };
-
-        if (!parseAssign("--TileA0=", "--TileA0", config.TileA0)) return false;
-        if (a.starts_with("--TileA0=")) continue;
-        if (!parseAssign("--TileB0=", "--TileB0", config.TileB0)) return false;
-        if (a.starts_with("--TileB0=")) continue;
-        if (!parseAssign("--TileM0=", "--TileM0", config.TileM0)) return false;
-        if (a.starts_with("--TileM0=")) continue;
-        if (!parseAssign("--NumGRA=", "--NumGRA", config.NumGRA)) return false;
-        if (a.starts_with("--NumGRA=")) continue;
-        if (!parseAssign("--NumGRB=", "--NumGRB", config.NumGRB)) return false;
-        if (a.starts_with("--NumGRB=")) continue;
-        if (!parseAssign("--NumGRM=", "--NumGRM", config.NumGRM)) return false;
-        if (a.starts_with("--NumGRM=")) continue;
-        if (!parseAssign("--NumWaves=", "--NumWaves", config.NumWaves)) return false;
-        if (a.starts_with("--NumWaves=")) continue;
-
-        if (!parseNext("--TileA0", config.TileA0)) return false;
-        if (a == "--TileA0") continue;
-        if (!parseNext("--TileB0", config.TileB0)) return false;
-        if (a == "--TileB0") continue;
-        if (!parseNext("--TileM0", config.TileM0)) return false;
-        if (a == "--TileM0") continue;
-        if (!parseNext("--NumGRA", config.NumGRA)) return false;
-        if (a == "--NumGRA") continue;
-        if (!parseNext("--NumGRB", config.NumGRB)) return false;
-        if (a == "--NumGRB") continue;
-        if (!parseNext("--NumGRM", config.NumGRM)) return false;
-        if (a == "--NumGRM") continue;
-        if (!parseNext("--NumWaves", config.NumWaves)) return false;
-        if (a == "--NumWaves") continue;
+        const std::string a = argv[i];
+        for (const GemmTileField& field : kGemmTileFields) {
+            const std::string flag = std::string("--") + field.name;
+            uint32_t& value = config.*field.member;
+            if (a.starts_with(flag + "=")) {
+                if (!parseGemmTileField(flag.c_str(), a.substr(flag.size() + 1), value, error))
+                    return false;
+                break;
+            }
+            if (a == flag) {
+                if (i + 1 < argc && !parseGemmTileField(flag.c_str(), argv[++i], value, error))
+                    return false;
+                break;
+            }
+        }
     }
     return true;
 }
 
 static void printKernelConfigHelp(std::ostream& os) {
     os << "  Kernel configuration (GemmTileConfig fields):\n";
-    os << "  --TileA0 <n>        (or --TileA0=<n>)\n";
-    os << "  --TileB0 <n>        (or --TileB0=<n>)\n";
-    os << "  --TileM0 <n>        (or --TileM0=<n>)\n";
-    os << "  --NumGRA <n>        (or --NumGRA=<n>)\n";
-    os << "  --NumGRB <n>        (or --NumGRB=<n>)\n";
-    os << "  --NumGRM <n>        (or --NumGRM=<n>)\n";
-    os << "  --NumWaves <n>      (or --NumWaves=<n>)\n";
+    for (const GemmTileField& field : kGemmTileFields) {
+        std::string usage = std::string("--") + field.name + " <n>";
+        usage.resize(20, ' ');
+        os << "  " << usage << "(or --" << field.name << "=<n>)\n";
+    }
 }
 }  // namespace
 
@@ -470,7 +404,7 @@ int main(int argc, char** argv) {
         // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
         // not registered as an identity in this build (no assert), so a plain triple spelling
         // (e.g. gfx942 in a gfx1250 build) falls through to the triple parser, and a stepping name
-        // absent from this build fails cleanly at the getArchPipeline() check below.
+        // absent from this build fails cleanly at the isArchSupported() check below.
         if (const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archStr)) {
             arch = {static_cast<int>(namedInfo->major), static_cast<int>(namedInfo->minor),
                     static_cast<int>(namedInfo->stepping)};
@@ -481,7 +415,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        if (!BackendRegistry::getArchPipeline(arch)) {
+        if (!BackendRegistry::isArchSupported(arch)) {
             std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
             std::cerr << "Supported architectures:";
             for (const auto& key : BackendRegistry::getRegisteredArchKeys())
@@ -504,7 +438,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
+    stinkytofu::PassFeatureConfig passFeatureConfig = stinkytofu::standalonePassFeatureConfig();
 
     // Parse --vgpr-msb-mode=none|msb8|msb16 (override of ToolchainCaps::probe).
     // Useful when running on a host whose comgr doesn't know the target ISA,
@@ -621,18 +555,21 @@ int main(int argc, char** argv) {
     if (!requestedPasses.empty()) {
         std::cerr << "\n=== Adding Passes ===\n";
         for (const auto& rp : requestedPasses) {
-            if (createPassByName(rp.name, rp.args)) {
-                std::cerr << "Adding pass: " << rp.name;
-                if (!rp.args.empty()) {
-                    std::cerr << " (args:";
-                    for (const auto& a : rp.args) std::cerr << " " << a;
-                    std::cerr << ")";
-                }
-                std::cerr << "\n";
-            } else {
+            // Name check only. Building the pass here would run the creator's
+            // side effects (a dump directory, an error on bad arguments) and
+            // then throw that instance away.
+            if (findCatalogPass(rp.name) == nullptr) {
                 std::cerr << "Warning: Unknown pass '" << rp.name << "' - skipping\n";
                 std::cerr << "Use --list-passes to see available passes\n";
+                continue;
             }
+            std::cerr << "Adding pass: " << rp.name;
+            if (!rp.args.empty()) {
+                std::cerr << " (args:";
+                for (const auto& a : rp.args) std::cerr << " " << a;
+                std::cerr << ")";
+            }
+            std::cerr << "\n";
         }
         std::cerr << "\n";
     } else {
@@ -706,8 +643,8 @@ int main(int argc, char** argv) {
     // Prefer the named stepping's identity when the user gave one; the triple alone first-matches
     // v1 for steppings that share it. resolvedArchName is only set after getArchInfo(name)
     // confirmed the name is registered, so getGfxArchID(name) here never hits its assert path.
-    GfxArchID archID = resolvedArchName.empty() ? getGfxArchID(arch[0], arch[1], arch[2])
-                                                : getGfxArchID(resolvedArchName);
+    GfxArchID archID =
+        resolvedArchName.empty() ? getGfxArchID(arch) : getGfxArchID(resolvedArchName);
 
     stinkytofu::MultiParseResult parsed;
     std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
@@ -721,29 +658,30 @@ int main(int argc, char** argv) {
         if (asmResult.hasErrors()) {
             std::cerr << "Error: Failed to parse assembly input file\n";
             for (const auto& diag : asmResult.diagnostics)
-                std::cerr << "  " << diag.getMessage() << "\n";
+                std::cerr << "  " << diag.format() << "\n";
             return 1;
         }
-        for (const auto& diag : asmResult.diagnostics)
-            std::cerr << "Warning: " << diag.getMessage() << "\n";
+        for (const auto& diag : asmResult.diagnostics) std::cerr << diag.format() << "\n";
         asmSignature = std::move(asmResult.signature);
         if (asmResult.parsedFunction)
             parsed.functions.push_back(std::move(asmResult.parsedFunction));
     } else {
         // Parse StinkyTofu IR text format
         parsed = stinkytofu::parseAllSourceStringsWithDiagnostics(fileContent);
-        if (parsed.hasErrors()) {
-            std::cerr << "Error: Failed to parse input file\n";
-            for (const auto& diag : parsed.diagnostics)
-                std::cerr << "  " << diag.getMessage() << "\n";
-            return 1;
-        }
         // Fall back to single-function parsing for flat format (no st.func)
-        if (parsed.functions.empty()) {
+        if (!parsed.hasErrors() && parsed.functions.empty()) {
             auto singleResult = stinkytofu::parseSourceStringWithDiagnostics(fileContent);
+            parsed.diagnostics.insert(parsed.diagnostics.end(), singleResult.diagnostics.begin(),
+                                      singleResult.diagnostics.end());
             if (singleResult.parsedFunction)
                 parsed.functions.push_back(std::move(singleResult.parsedFunction));
         }
+        if (parsed.hasErrors()) {
+            std::cerr << "Error: Failed to parse input file\n";
+            for (const auto& diag : parsed.diagnostics) std::cerr << "  " << diag.format() << "\n";
+            return 1;
+        }
+        for (const auto& diag : parsed.diagnostics) std::cerr << diag.format() << "\n";
     }
 
     // If --from-label / --to-label are given, split the flat ParsedFunction into three
@@ -760,62 +698,16 @@ int main(int argc, char** argv) {
             std::cerr << "Error: --from-label/--to-label requires exactly one function\n";
             return 1;
         }
-        // Take ownership of the original instruction list and name before splitting.
-        // parsed.functions[0] will be replaced below, which would destroy the block
-        // and invalidate any reference into it.
-        std::string origFuncName = parsed.functions[0]->funcName;
-        auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
-
-        // Find from-label and to-label positions (first occurrence, in case a
-        // label name repeats elsewhere in the file).
-        int fromIdx = -1, toIdx = -1;
-        for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (!originalInsts[idx]->isLabel) continue;
-            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
-            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
-        }
-        if (fromIdx < 0) {
-            std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
+        std::string regionError;
+        auto cut =
+            stinkytofu::cutParsedRegion(*parsed.functions[0], fromLabel, toLabel, regionError);
+        if (!cut) {
+            std::cerr << "Error: --from-label/--to-label: " << regionError << "\n";
             return 1;
         }
-        if (toIdx < 0) {
-            std::cerr << "Error: --to-label '" << toLabel << "' not found in assembly\n";
-            return 1;
-        }
-        if (toIdx < fromIdx) {
-            std::cerr << "Error: --to-label appears before --from-label in the assembly\n";
-            return 1;
-        }
-
-        // Build pre: [0, fromIdx)
-        auto preFunc = std::make_unique<stinkytofu::ParsedFunction>();
-        preFunc->funcName = origFuncName + "_pre";
-        auto preBlock = std::make_unique<stinkytofu::ParsedBlock>();
-        preBlock->blockId = "entry";
-        for (int idx = 0; idx < fromIdx; ++idx)
-            preBlock->instructions.push_back(std::move(originalInsts[idx]));
-        preFunc->blocks.push_back(std::move(preBlock));
-        preResult.functions.push_back(std::move(preFunc));
-
-        // Build sched: [fromIdx, toIdx]  (inclusive of both labels)
-        auto schedFunc = std::make_unique<stinkytofu::ParsedFunction>();
-        schedFunc->funcName = origFuncName;
-        auto schedBlock = std::make_unique<stinkytofu::ParsedBlock>();
-        schedBlock->blockId = "entry";
-        for (int idx = fromIdx; idx <= toIdx; ++idx)
-            schedBlock->instructions.push_back(std::move(originalInsts[idx]));
-        schedFunc->blocks.push_back(std::move(schedBlock));
-        parsed.functions[0] = std::move(schedFunc);
-
-        // Build post: (toIdx, end)
-        auto postFunc = std::make_unique<stinkytofu::ParsedFunction>();
-        postFunc->funcName = origFuncName + "_post";
-        auto postBlock = std::make_unique<stinkytofu::ParsedBlock>();
-        postBlock->blockId = "entry";
-        for (int idx = toIdx + 1; idx < (int)originalInsts.size(); ++idx)
-            postBlock->instructions.push_back(std::move(originalInsts[idx]));
-        postFunc->blocks.push_back(std::move(postBlock));
-        postResult.functions.push_back(std::move(postFunc));
+        preResult.functions.push_back(std::move(cut->before));
+        parsed.functions[0] = std::move(cut->region);
+        postResult.functions.push_back(std::move(cut->after));
     }
 
     // Open output stream (-o <file> or stdout)
@@ -843,12 +735,24 @@ int main(int argc, char** argv) {
         }
     };
 
+    // Set when an instruction or block edge could not be built; the run then exits 1.
+    bool loadFailed = false;
+    auto populate = [&](stinkytofu::ParsedFunction& pf, stinkytofu::Function& func) {
+        std::vector<stinkytofu::Diagnostic> diagnostics;
+        const auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(
+            pf, func, archID, diagnostics);
+        for (const auto& diag : diagnostics) std::cerr << diag.format() << "\n";
+        if (result == stinkytofu::StinkyErrorCode::SUCCESS) return true;
+        std::cerr << "Error: Failed to populate function '" << pf.funcName << "'\n";
+        loadFailed = true;
+        return false;
+    };
+
     // Helper: emit a ParsedFunction verbatim (no passes) to the output stream.
     auto emitVerbatim = [&](stinkytofu::MultiParseResult& mr) {
         for (auto& pf : mr.functions) {
             stinkytofu::Function func(pf->funcName);
-            stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*pf, func, archID);
-            emitFunction(func);
+            if (populate(*pf, func)) emitFunction(func);
         }
     };
 
@@ -862,6 +766,9 @@ int main(int argc, char** argv) {
     // Set to true if any analysis/verification pass reports a failure; surfaced as a
     // non-zero exit code after all functions and output have been processed.
     bool analysisFailed = false;
+    // A creator that rejects its arguments is told once. Later functions skip
+    // the name instead of constructing the pass again.
+    std::vector<std::string> rejectedPassNames;
 
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
@@ -887,16 +794,16 @@ int main(int argc, char** argv) {
             moduleOpts.NumGRM = gemmTileConfig.NumGRM;
             moduleOpts.WaveGroup0 = static_cast<int>(gemmTileConfig.NumWaves);
             moduleOpts.WaveGroup1 = 1;
+            // Backend reads these two from the module options, and there is no
+            // rocisa here to supply them.
+            stinkytofu::AsmCapsConfig standaloneCaps;
+            stinkytofu::BackendRegistry::applyStandaloneCaps(arch, standaloneCaps);
+            moduleOpts.RequiresXCntForVolatileVMEM = standaloneCaps.requiresXCntForVolatileVMEM;
+            moduleOpts.EnableXnackReplay = standaloneCaps.enableXnackReplay;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
-            auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
-                                                                                    func, archID);
-            if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
-                std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
-                          << "'\n";
-                continue;
-            }
+            if (!populate(*parsedFunc, func)) continue;
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
@@ -908,8 +815,7 @@ int main(int argc, char** argv) {
             emitFunction(func);
         } else {
             // Individual pass mode
-            stinkytofu::PassManager passManager;
-            stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
+            stinkytofu::PassManager passManager = stinkytofu::makeStandalonePassManager(arch);
 
             // Pipeline mode gets its session from Backend (ModuleOptions.TimePasses);
             // here there is no module, so the driver owns it.
@@ -926,29 +832,33 @@ int main(int argc, char** argv) {
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
             passManager.setGemmTileConfig(gemmTileConfig);
-            auto caps = stinkytofu::ToolchainCaps::probe(archID);
-            if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
-            // Stand in for rocisa's archCaps, which only TensileLite can supply.
-            caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
-            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
-            passManager.setAsmCapsConfig(caps);
+            if (vgprMsbOverride) {
+                stinkytofu::AsmCapsConfig caps = passManager.getPassContext().getAsmCapsConfig();
+                caps.vgprMsbMode = *vgprMsbOverride;
+                passManager.setAsmCapsConfig(caps);
+            }
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
             for (const auto& rp : requestedPasses) {
-                auto pass = createPassByName(rp.name, rp.args);
-                if (pass) passManager.addPass(std::move(pass));
+                if (std::find(rejectedPassNames.begin(), rejectedPassNames.end(), rp.name) !=
+                    rejectedPassNames.end())
+                    continue;
+                // Unknown names were reported before any function ran.
+                if (findCatalogPass(rp.name) == nullptr) continue;
+                auto pass = createCatalogPass(rp.name, rp.args);
+                if (!pass) {
+                    rejectedPassNames.push_back(rp.name);
+                    std::cerr << "Warning: pass '" << rp.name
+                              << "' rejected its arguments - skipping\n";
+                    continue;
+                }
+                passManager.addPass(std::move(pass));
             }
 
             stinkytofu::Function func(parsedFunc->funcName);
             func.setGemmTileConfig(gemmTileConfig);
 
-            auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
-                                                                                    func, archID);
-            if (result != stinkytofu::StinkyErrorCode::SUCCESS) {
-                std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
-                          << "'\n";
-                continue;
-            }
+            if (!populate(*parsedFunc, func)) continue;
             if (asmSignature) {
                 func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
                                  static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
@@ -963,5 +873,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return analysisFailed ? 1 : 0;
+    return (analysisFailed || loadFailed) ? 1 : 0;
 }

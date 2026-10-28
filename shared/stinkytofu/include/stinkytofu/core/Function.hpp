@@ -135,6 +135,14 @@ class STINKYTOFU_EXPORT Function {
         return basicBlocks.erase(pos);
     }
 
+    /// Erase \p block, which must not be the entry block and which no branch may
+    /// name, so a predecessor reaches it only by falling through. Each
+    /// predecessor's edge to it moves to the block after it, where that
+    /// predecessor now falls, unless the predecessor has that edge already. With
+    /// no block after it, or from the block after it, the edge is dropped.
+    /// Attached SSA is cleared.
+    void eraseBlock(BasicBlock& block);
+
     /// Entry block is the first in the list (basicBlocks.front()).
     BasicBlock* getEntryBlock() {
         return basicBlocks.empty() ? nullptr : &basicBlocks.front();
@@ -187,6 +195,13 @@ class STINKYTOFU_EXPORT Function {
 
     /// Delete all BasicBlocks and their IR (list traits delete each block and its IR).
     void clear();
+
+    /// Make this function a copy of \p other: its name, callability, GEMM tile
+    /// config, metadata, and blocks, with each IR node cloned and each block's
+    /// successor and predecessor lists kept in order. Attached SSA and def-use
+    /// chains are not copied. False when a node does not support clone(), which
+    /// leaves that node out.
+    bool copyFrom(const Function& other);
 
     SSAArena& ssaArena();
     const SSAArena& ssaArena() const;

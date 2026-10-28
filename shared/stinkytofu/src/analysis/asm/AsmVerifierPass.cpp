@@ -25,11 +25,16 @@
 
 #include <algorithm>
 #include <iostream>
-#include <sstream>
+#include <iterator>
+#include <string>
 #include <string_view>
+#include <unordered_set>
+#include <vector>
 
 #include "stinkytofu/ir/asm/ReadWriteOperands.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/AttachedSSAVerifier.hpp"
+#include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
 char StinkyIRVerifierPass::ID = 0;
@@ -126,29 +131,48 @@ static bool allowDynamicWmmaScaleSrcWidth(const HwInstDesc* hwDesc, bool isDest,
     return actualWidth == 8 || actualWidth == 12 || actualWidth == 16;
 }
 
-static std::string checkRegisterWidths(const StinkyInstruction* inst,
-                                       const AsmVerifierConfig& config) {
-    const HwInstDesc* hwDesc = inst->getHwInstDesc();
-    if (!hwDesc || !hwDesc->mnemonic) return "";
+/// Where an instruction sits. The verifier runs after every pass under
+/// --verify-each, so the location strings are built only for a report.
+struct InstructionPlace {
+    const Function& function;
+    const BasicBlock& block;
+    int index;
 
-    if (hwDesc->operandFields.empty()) return "";
+    IRLocation location() const {
+        return {function.getName(), block.getLabel(), index};
+    }
+};
 
-    std::stringstream errors;
+/// The presence, width, and register class of each operand \p inst has an
+/// encoding field for.
+static void checkRegisterWidths(const StinkyInstruction& inst, const InstructionPlace& at,
+                                std::vector<Diagnostic>& out) {
+    const HwInstDesc* hwDesc = inst.getHwInstDesc();
+    if (!hwDesc || !hwDesc->mnemonic) return;
+
+    if (hwDesc->operandFields.empty()) return;
+
+    auto report = [&](DiagId id, const std::string& message) {
+        out.emplace_back(Diagnostic::Level::Error, id,
+                         std::string("'") + hwDesc->mnemonic + "' " + message, at.location());
+    };
 
     unsigned destIdx = 0;
     unsigned srcIdx = 0;
     for (const auto& field : hwDesc->operandFields) {
         bool isDest = field.isDest;
         unsigned operandIndex = isDest ? destIdx++ : srcIdx++;
-        const auto& regs = isDest ? inst->getDestRegs() : inst->getSrcRegs();
+        const auto& regs = isDest ? inst.getDestRegs() : inst.getSrcRegs();
+        auto operand = [&] {
+            return std::string(isDest ? "dest[" : "src[") + std::to_string(operandIndex) + "]";
+        };
 
         if (field.fieldSizeBits == 0) continue;
 
         unsigned expectedWidth = field.fieldSizeBits / 32;
 
-        if (operandIndex >= regs.size() && !canUseLessOperand(inst)) {
-            errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "
-                   << (isDest ? "dest[" : "src[") << operandIndex << "]\n";
+        if (operandIndex >= regs.size() && !canUseLessOperand(&inst)) {
+            report(DiagId::MissingOperand, "missing operand " + operand());
             continue;
         }
 
@@ -170,11 +194,9 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                                                   expectedWidth, reg.reg.num);
 
             if (reg.reg.num != expectedWidth && !m64Truncated && !dynamicWmmaWidth) {
-                errors << "Instruction '";
-                inst->dump(errors);
-                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
-                       << "has register width " << reg.reg.num << ", expected " << expectedWidth
-                       << "\n";
+                report(DiagId::RegisterWidth, "operand " + operand() + " has register width " +
+                                                  std::to_string(reg.reg.num) + ", expected " +
+                                                  std::to_string(expectedWidth));
             }
         }
 
@@ -193,39 +215,34 @@ static std::string checkRegisterWidths(const StinkyInstruction* inst,
                 promotedOk = isExpectedTypeMatch(promotedFT, promotedET, reg.reg.type);
             }
             if (!promotedOk) {
-                errors << "Instruction '";
-                inst->dump(errors);
-                errors << "' operand " << (isDest ? "dest[" : "src[") << operandIndex << "] "
-                       << "has register type '" << regTypeToString(reg.reg.type) << "', expected '"
-                       << regTypeToString(expectedType) << "'\n";
+                report(DiagId::RegisterType, "operand " + operand() + " has register type '" +
+                                                 regTypeToString(reg.reg.type) + "', expected '" +
+                                                 regTypeToString(expectedType) + "'");
             }
         }
     }
-
-    return errors.str();
 }
 
 // ===========================================================================
 // Read-write operand validation
 // ===========================================================================
 
-static std::string checkReadWriteOperands(const StinkyInstruction* inst) {
-    const HwInstDesc* hwDesc = inst->getHwInstDesc();
-    if (!hwDesc || !hwDesc->mnemonic) return "";
+static void checkReadWriteOperands(const StinkyInstruction& inst, const InstructionPlace& at,
+                                   std::vector<Diagnostic>& out) {
+    const HwInstDesc* hwDesc = inst.getHwInstDesc();
+    if (!hwDesc || !hwDesc->mnemonic) return;
 
-    if (hwDesc->operandFields.empty()) return "";
+    if (hwDesc->operandFields.empty()) return;
 
-    const auto& destRegs = inst->getDestRegs();
-    const auto& srcRegs = inst->getSrcRegs();
+    const auto& destRegs = inst.getDestRegs();
+    const auto& srcRegs = inst.getSrcRegs();
 
-    std::stringstream errors;
     unsigned destIdx = 0, srcIdx = 0;
 
     for (const auto& field : hwDesc->operandFields) {
         // A destination is read-write when the opcode always reads it, and also
         // when this instance's write keeps part of the register.
-        const bool isReadWrite =
-            field.isDest ? readsDestination(*inst, destIdx) : field.isReadWrite;
+        const bool isReadWrite = field.isDest ? readsDestination(inst, destIdx) : field.isReadWrite;
         if (!isReadWrite) {
             if (field.isDest)
                 destIdx++;
@@ -249,94 +266,163 @@ static std::string checkReadWriteOperands(const StinkyInstruction* inst) {
         bool inSrc = std::find(srcRegs.begin(), srcRegs.end(), *reg) != srcRegs.end();
 
         if (!inDest || !inSrc) {
-            errors << "Instruction '" << hwDesc->mnemonic << "' has read-write field '"
-                   << static_cast<int>(field.encodeField) << "' with register that is missing "
-                   << "from " << (!inDest ? "destRegs" : "srcRegs") << "\n";
+            out.emplace_back(Diagnostic::Level::Error, DiagId::ReadWriteOperand,
+                             std::string("'") + hwDesc->mnemonic + "' has read-write field '" +
+                                 std::to_string(static_cast<int>(field.encodeField)) +
+                                 "' with register that is missing from " +
+                                 (!inDest ? "destRegs" : "srcRegs"),
+                             at.location());
         }
     }
-
-    return errors.str();
 }
 
 // ===========================================================================
 // StinkyTofu Assembly IR validation (ASM pipeline only)
 // ===========================================================================
 
+/// The checks validateStinkyIR reports, in its order: an empty function, Logical
+/// IR, a function without instructions, then each instruction's own problems.
+static void checkFunction(const Function& func, const AsmVerifierConfig& config,
+                          std::vector<Diagnostic>& out) {
+    const IRLocation whole{func.getName()};
+    if (func.empty()) {
+        out.emplace_back(Diagnostic::Level::Error, DiagId::EmptyFunction,
+                         "Function is empty (no basic blocks)", whole);
+        return;
+    }
+
+    size_t logicalCount = 0;
+    size_t stinkyCount = 0;
+    std::vector<Diagnostic> perInstruction;
+    for (const BasicBlock& bb : func) {
+        int index = 0;
+        for (const IRBase& ir : bb) {
+            if (ir.getType() == IRBase::IRType::LogicalIR) {
+                logicalCount++;
+                continue;
+            }
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            stinkyCount++;
+
+            const auto& inst = static_cast<const StinkyInstruction&>(ir);
+            const InstructionPlace at{func, bb, isIndexedInstruction(ir) ? index++ : -1};
+            const HwInstDesc* hwDesc = inst.getHwInstDesc();
+            if (!hwDesc || !hwDesc->mnemonic || hwDesc->mnemonic[0] == '\0') {
+                perInstruction.emplace_back(Diagnostic::Level::Error, DiagId::NoHardwareDescriptor,
+                                            "Instruction has no hardware descriptor",
+                                            at.location());
+                continue;
+            }
+            if (config.checkRegisterWidths) checkRegisterWidths(inst, at, perInstruction);
+            if (config.checkReadWriteOperands) checkReadWriteOperands(inst, at, perInstruction);
+        }
+    }
+
+    if (logicalCount > 0) {
+        out.emplace_back(Diagnostic::Level::Error, DiagId::LogicalIR,
+                         "StinkyTofu Assembly IR contains " + std::to_string(logicalCount) +
+                             " Logical instructions. This suggests IR is not fully lowered or "
+                             "mixed.",
+                         whole);
+    }
+    if (stinkyCount == 0) {
+        out.emplace_back(Diagnostic::Level::Error, DiagId::EmptyFunction,
+                         "Function contains no StinkyTofu instructions (empty IR)", whole);
+    }
+    out.insert(out.end(), std::make_move_iterator(perInstruction.begin()),
+               std::make_move_iterator(perInstruction.end()));
+}
+
+static void checkBranchTargets(const Function& func, std::vector<Diagnostic>& out) {
+    std::unordered_set<std::string> defined;
+    for (const BasicBlock& bb : func) {
+        for (const IRBase& ir : bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || !isLabel(*inst)) continue;
+            if (const auto* label = inst->getModifier<LabelData>()) defined.insert(label->label);
+        }
+    }
+    for (const BasicBlock& bb : func) {
+        int index = 0;
+        for (const IRBase& ir : bb) {
+            if (!isIndexedInstruction(ir)) continue;
+            const auto& inst = *cast<StinkyInstruction>(&ir);
+            for (const std::string& target : getBranchTargets(inst)) {
+                if (defined.count(target) != 0) continue;
+                const HwInstDesc* desc = inst.getHwInstDesc();
+                const char* mnemonic = desc && desc->mnemonic ? desc->mnemonic : "branch";
+                out.emplace_back(Diagnostic::Level::Error, DiagId::UndefinedLabel,
+                                 std::string("'") + mnemonic + "' targets '" + target +
+                                     "', which no label defines",
+                                 IRLocation{func.getName(), bb.getLabel(), index});
+            }
+            ++index;
+        }
+    }
+}
+
+static void checkAttachedSSA(const Function& func, std::vector<Diagnostic>& out) {
+    for (const std::string& error : verifyAttachedSSA(func).errors)
+        out.emplace_back(Diagnostic::Level::Error, DiagId::InvalidSSA, error,
+                         IRLocation{func.getName()});
+}
+
+std::vector<Diagnostic> verifyStinkyIR(const Function& func, const AsmVerifierConfig& config) {
+    std::vector<Diagnostic> found;
+    checkFunction(func, config, found);
+    checkBranchTargets(func, found);
+    checkAttachedSSA(func, found);
+    return found;
+}
+
 std::string validateStinkyIR(Function& func, const AsmVerifierConfig& config) {
     if (config.verbose) {
         std::cout << "[StinkyIRVerifier] Verifying StinkyTofu Assembly IR...\n";
     }
 
-    if (func.empty()) return "Function is empty (no basic blocks)";
+    std::vector<Diagnostic> found;
+    checkFunction(func, config, found);
 
-    if (!func.getEntryBlock()) return "Function has no entry basic block";
-
-    size_t logicalCount = 0;
-    size_t stinkyCount = 0;
-    size_t totalBlocks = 0;
+    // Only the first kind of problem is reported, in checkFunction's order.
     size_t invalidHwDesc = 0;
-    std::stringstream widthErrors;
-    std::stringstream rwErrors;
-
-    for (BasicBlock& bb : func) {
-        totalBlocks++;
-
-        for (IRBase& ir : bb) {
-            if (ir.getType() == IRBase::IRType::LogicalIR) {
-                logicalCount++;
-            } else if (ir.getType() == IRBase::IRType::StinkyTofu) {
-                stinkyCount++;
-
-                auto* stinkyInst = static_cast<StinkyInstruction*>(&ir);
-                const HwInstDesc* hwDesc = stinkyInst->getHwInstDesc();
-                if (!hwDesc || !hwDesc->mnemonic || hwDesc->mnemonic[0] == '\0') {
-                    invalidHwDesc++;
-                } else {
-                    if (config.checkRegisterWidths) {
-                        std::string widthError = checkRegisterWidths(stinkyInst, config);
-                        if (!widthError.empty()) widthErrors << widthError;
-                    }
-                    if (config.checkReadWriteOperands) {
-                        std::string rwError = checkReadWriteOperands(stinkyInst);
-                        if (!rwError.empty()) rwErrors << rwError;
-                    }
-                }
-            }
+    std::string widthErrors;
+    std::string rwErrors;
+    for (const Diagnostic& diagnostic : found) {
+        switch (diagnostic.getId()) {
+            case DiagId::EmptyFunction:
+            case DiagId::LogicalIR:
+                return diagnostic.getMessage();
+            case DiagId::NoHardwareDescriptor:
+                invalidHwDesc++;
+                break;
+            case DiagId::MissingOperand:
+            case DiagId::RegisterWidth:
+            case DiagId::RegisterType:
+                widthErrors += diagnostic.format() + "\n";
+                break;
+            case DiagId::ReadWriteOperand:
+                rwErrors += diagnostic.format() + "\n";
+                break;
+            default:
+                break;
         }
     }
 
-    if (logicalCount > 0) {
-        std::stringstream ss;
-        ss << "StinkyTofu Assembly IR contains " << logicalCount << " Logical instructions. "
-           << "This suggests IR is not fully lowered or mixed.";
-        return ss.str();
-    }
-
-    if (stinkyCount == 0) return "Function contains no StinkyTofu instructions (empty IR)";
-
     if (invalidHwDesc > 0) {
-        std::stringstream ss;
-        ss << "Found " << invalidHwDesc << " StinkyTofu instruction(s) with invalid or missing "
-           << "hardware instruction descriptors";
-        return ss.str();
+        return "Found " + std::to_string(invalidHwDesc) +
+               " StinkyTofu instruction(s) with invalid or missing hardware instruction "
+               "descriptors";
     }
-
-    std::string widthErrorStr = widthErrors.str();
-    if (!widthErrorStr.empty()) {
-        std::stringstream ss;
-        ss << "Register width validation failed:\n" << widthErrorStr;
-        return ss.str();
-    }
-
-    std::string rwErrorStr = rwErrors.str();
-    if (!rwErrorStr.empty()) {
-        std::stringstream ss;
-        ss << "Read-write operand validation failed:\n" << rwErrorStr;
-        return ss.str();
-    }
+    if (!widthErrors.empty()) return "Register width validation failed:\n" + widthErrors;
+    if (!rwErrors.empty()) return "Read-write operand validation failed:\n" + rwErrors;
 
     if (config.verbose) {
-        std::cout << "[StinkyIRVerifier] OK: " << totalBlocks << " blocks, " << stinkyCount
+        size_t stinkyCount = 0;
+        for (const BasicBlock& bb : func) {
+            for (const IRBase& ir : bb)
+                if (ir.getType() == IRBase::IRType::StinkyTofu) stinkyCount++;
+        }
+        std::cout << "[StinkyIRVerifier] OK: " << func.size() << " blocks, " << stinkyCount
                   << " stinky instructions\n";
     }
 

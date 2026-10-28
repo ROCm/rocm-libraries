@@ -22,8 +22,10 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -106,6 +108,11 @@ struct ParsedInstruction {
     /// (text after "//" or ";", with the marker stripped). Empty when no
     /// comment was present or the parser was not asked to capture them.
     std::string comment;
+    /// Source position, for a diagnostic raised after parsing. 0 when unknown.
+    unsigned line = 0;
+    unsigned column = 0;
+    /// A label's `{ alignment = N }`; 1 when it has none.
+    uint16_t alignment = 1;
 
     ParsedInstruction(const std::string& opcode, bool label = false)
         : opcodeStr(opcode), issueCycles(0), latencyCycles(0), isLabel(label) {}
@@ -119,6 +126,12 @@ struct ParsedBlock {
     std::string blockId;
     std::vector<std::unique_ptr<ParsedInstruction>> instructions;
     std::vector<std::string> successorIds;  // ^blockId references
+    /// Position of the `Successors:` line. 0 when the block has none.
+    unsigned successorsLine = 0;
+    unsigned successorsColumn = 0;
+    /// `^name: { label, alignment = N }`: the block starts with a LABEL of its own name.
+    bool isLabel = false;
+    uint16_t labelAlignment = 1;
 };
 
 /// Parsed function: name + blocks (Function -> BasicBlock -> IRBase hierarchy)
@@ -164,10 +177,18 @@ struct STINKYTOFU_EXPORT ParseResult {
 /// @return A ParseResult containing parsed instructions and any diagnostics (errors/warnings).
 STINKYTOFU_EXPORT ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr);
 
+/// Parse \p text as the body of one block: what the printer writes between a
+/// block header and its `Successors:` line, that is instruction, label, and
+/// directive lines. A block header, a `Successors:` line, or a `}` is an error.
+/// The body is parsedFunction's one block, whose blockId is empty.
+STINKYTOFU_EXPORT ParseResult parseBlockBodyWithDiagnostics(const std::string& text);
+
 /// Result of parsing multiple functions from an IR source string.
 struct MultiParseResult {
     std::vector<std::unique_ptr<ParsedFunction>> functions;
     std::vector<Diagnostic> diagnostics;
+    /// Name from an `st.module @name { ... }` wrapper. Empty for bare `st.func` text.
+    std::string moduleName;
 
     bool hasErrors() const {
         for (const auto& diag : diagnostics)
@@ -176,8 +197,19 @@ struct MultiParseResult {
     }
 };
 
-/// Parse all st.func definitions from a source string.
+/// Parse every st.func in a source string: bare, or inside the one
+/// `st.module @name { ... }` wrapper AsmPrinter writes for a module. Text that
+/// does not start with either is left for parseSourceStringWithDiagnostics,
+/// which reads the flat form.
 STINKYTOFU_EXPORT MultiParseResult
 parseAllSourceStringsWithDiagnostics(const std::string& sourceStr);
+
+/// \p text as a STIR quoted string, with `\\`, `\"`, `\n`, `\t` and `\r` escaped.
+STINKYTOFU_EXPORT std::string quoteStirString(std::string_view text);
+
+/// Whether \p text, printed without quotes, parses back as that same literal: as
+/// an operand, or with \p asLabel as a label name. The printer quotes any text
+/// for which it does not.
+STINKYTOFU_EXPORT bool readsBackBare(std::string_view text, bool asLabel = false);
 
 }  // namespace stinkytofu

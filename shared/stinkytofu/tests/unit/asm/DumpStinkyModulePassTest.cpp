@@ -33,6 +33,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -169,4 +170,38 @@ TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallableFunctions) {
     std::ifstream asmFile(asmPath);
     std::string asmContent((std::istreambuf_iterator<char>(asmFile)), {});
     EXPECT_EQ(static_cast<size_t>(std::count(asmContent.begin(), asmContent.end(), '\n')), 2u);
+}
+
+TEST_F(DumpStinkyModulePassTest, ModuleDumpParsesBack) {
+    // Tensile kernel names carry '-' and '=', which the IR lexer splits on.
+    const std::string kernelName = "Cijk_Alik_MT16x16_-Qev53Cx2-KB1mSpoxUG4=";
+    StinkyAsmModule::ModuleOptions options;
+    StinkyAsmModule module(kernelName, {12, 5, 0}, options);
+
+    Function& entry = module.getFunction();
+    entry.setName("entry_func");
+    setFunctionArch(entry, GfxArchID::Gfx1250);
+    AsmIRBuilder entryBuilder(*entry.getEntryBlock(), GfxArchID::Gfx1250);
+    entryBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
+
+    Function& callable = module.createFunction("callable_func");
+    setFunctionArch(callable, GfxArchID::Gfx1250);
+    AsmIRBuilder callableBuilder(*callable.getEntryBlock(), GfxArchID::Gfx1250);
+    callableBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
+
+    DumpStinkyModulePassConfig cfg;
+    cfg.stirPath = stirPath;
+    PassContext ctx;
+    AnalysisManager am;
+    createDumpStinkyModulePass(module, cfg)->run(entry, ctx, am);
+
+    std::ifstream stirFile(stirPath);
+    const std::string stirContent((std::istreambuf_iterator<char>(stirFile)), {});
+    MultiParseResult parsed = parseAllSourceStringsWithDiagnostics(stirContent);
+
+    ASSERT_FALSE(parsed.hasErrors());
+    EXPECT_EQ(parsed.moduleName, kernelName);
+    ASSERT_EQ(parsed.functions.size(), 2u);
+    EXPECT_EQ(parsed.functions[0]->funcName, "entry_func");
+    EXPECT_EQ(parsed.functions[1]->funcName, "callable_func");
 }

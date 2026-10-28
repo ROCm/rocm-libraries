@@ -1267,11 +1267,11 @@
 
     // -------------------- Parser --------------------
     // A .stir block looks like:
-    //   ^label_name:
+    //   ^label_name:            (or ^label_name: { label, alignment = 16 })
     //     <instructions...>
     //     Successors: ^a, ^b
     // The function ends with a closing `}` at column 0.
-    const LABEL_RE = /^\^([A-Za-z_][\w]*):\s*$/;
+    const LABEL_RE = /^\^([A-Za-z_.][\w.]*):\s*(?:\{[^}]*\}\s*)?$/;
     const SUCC_RE = /^\s*Successors:\s*(.*)$/;
 
     function parseStir(text) {

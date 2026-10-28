@@ -388,7 +388,10 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
 
 STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
 STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
+/// The ISA opcode of \p mnemonic on \p arch, or GFX::INVALID after printing an error.
 STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+/// getMnemonicToIsaOpcode without the print, for a caller that reports the miss itself.
+STINKYTOFU_EXPORT uint16_t findMnemonicIsaOpcode(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};
@@ -782,12 +785,36 @@ inline bool isMatrixInstruction(const StinkyInstruction& inst) {
     return isMFMA(inst) || isSMFMA(inst) || isWMMA(inst) || isSWMMA(inst) || isMXWMMA(inst);
 }
 
+/// Cycles \p inst occupies in program order: a matrix instruction its latency,
+/// which covers its co-issue window, and any other its issue cycles.
+inline int instructionCycles(const StinkyInstruction& inst) {
+    return isMatrixInstruction(inst) ? inst.latencyCycles : inst.issueCycles;
+}
+
 inline bool isHasSideEffect(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_HasSideEffect);
 }
 
 inline bool isLabel(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::LABEL;
+}
+
+/// Whether a block numbers \p ir among its instructions: every StinkyInstruction
+/// but a label. IRLocation::index counts this way, so a diagnostic's index is
+/// the position Python's functions() lists the instruction at.
+inline bool isIndexedInstruction(const IRBase& ir) {
+    const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+    return inst != nullptr && !isLabel(*inst);
+}
+
+/// The LABEL \p bb starts with, when it carries the block's own name: the label
+/// a STIR block header's `{ label }` stands for. Null when the block has none.
+inline const StinkyInstruction* ownLabel(const BasicBlock& bb) {
+    if (bb.empty() || bb.getLabel().empty()) return nullptr;
+    const auto* inst = dyn_cast<StinkyInstruction>(&*bb.begin());
+    if (inst == nullptr || !isLabel(*inst)) return nullptr;
+    const LabelData* label = inst->getModifier<LabelData>();
+    return label != nullptr && label->label == bb.getLabel() ? inst : nullptr;
 }
 
 /// Determines if an instruction must be preserved and cannot be eliminated.

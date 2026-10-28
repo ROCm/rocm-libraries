@@ -878,6 +878,9 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
                directive.kind == AsmDirectiveKind::ENDIF) {
         os << directive.value;
         return;
+    } else if (directive.kind == AsmDirectiveKind::ALIGN) {
+        os << ".align " << directive.intValue << "\n";
+        return;
     }
 
     if (!dirStream.str().empty()) {

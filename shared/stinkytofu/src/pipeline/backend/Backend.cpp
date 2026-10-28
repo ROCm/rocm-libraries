@@ -121,9 +121,7 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     // When VgprMsbMode was not set explicitly (standalone path without rocisa),
     // auto-probe using comgr if available.
     if (asmCapsConfig.vgprMsbMode == VgprMsbMode::None) {
-        auto arch = module.getArch();
-        GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
-        asmCapsConfig = ToolchainCaps::probe(archId);
+        asmCapsConfig = ToolchainCaps::probe(getGfxArchID(module.getArch()));
     }
 
     // After the probe above, which replaces the whole struct.

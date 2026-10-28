@@ -59,7 +59,9 @@ def cmake_build_args(
 def _detect_rocm() -> Path:
     """Detect ROCm installation path.
 
-    Priority: ROCM_PATH env > rocm-sdk path --root > /opt/rocm (Linux) or error (Windows).
+    Priority: ROCM_PATH env > rocm-sdk path --root > /opt/rocm (Linux) or
+    C:/opt/rocm (Windows). A path that is not a directory means ROCm is absent;
+    the build then leaves amd_comgr out and uses a system compiler.
     Warns if both ROCM_PATH and rocm-sdk are set but point to different paths.
     """
     env_path = os.environ.get("ROCM_PATH")
@@ -95,12 +97,94 @@ def _detect_rocm() -> Path:
     if sdk_path:
         return Path(sdk_path)
 
-    # 3. Platform-specific fallback
+    # 3. Platform-specific fallback. Callers check is_dir() and treat a missing
+    # directory as a standalone build with no ROCm.
     if sys.platform == "win32":
-        raise RuntimeError(
-            "ROCm SDK not found. Install rocm-sdk or set ROCM_PATH environment variable."
-        )
+        return Path("C:/opt/rocm")
     return Path("/opt/rocm")
+
+
+def _compiler_in_dir(directory: Path, name: str):
+    """Return a compiler in directory, or None. Accepts an optional .exe suffix."""
+    for candidate in (directory / name, directory / f"{name}.exe"):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.as_posix()
+    return None
+
+
+def _find_compiler_pair(pairs, directories, which):
+    """Return (cxx, cc) for the first pair found together.
+
+    PATH is searched before the directories. Both compilers must come from the
+    same place: both on PATH, or both in one directory. A C++ compiler from one
+    toolchain is never paired with the C compiler from another.
+    """
+    def on_path(name):
+        # Windows PATHEXT usually lets which("amdclang++") see amdclang++.exe.
+        # Try the suffix explicitly when it does not.
+        return which(name) or which(f"{name}.exe")
+
+    for cxx_name, cc_name in pairs:
+        cxx = on_path(cxx_name)
+        cc = on_path(cc_name)
+        if cxx and cc:
+            return cxx, cc
+    for directory in directories:
+        if not directory.is_dir():
+            continue
+        for cxx_name, cc_name in pairs:
+            cxx = _compiler_in_dir(directory, cxx_name)
+            cc = _compiler_in_dir(directory, cc_name)
+            if cxx and cc:
+                return cxx, cc
+    return None
+
+
+def _resolve_build_compilers(rocm: Path, gcc: bool, which=None, platform=None):
+    """Choose a C/C++ pair for this build.
+
+    Returns (cxx, cc, notice). notice is text to print, or None when the ROCm
+    compiler was found. Raises SystemExit when no acceptable pair exists.
+
+    A present ROCm install uses amdclang++ and amdclang, searched on PATH and
+    then in bin and lib/llvm/bin. It does not fall back to the system compiler.
+    Pass gcc=True to select g++ and gcc instead. With no ROCm directory, the
+    system clang, gcc, or (on Windows) MSVC pair is used.
+    """
+    which = shutil.which if which is None else which
+    platform = sys.platform if platform is None else platform
+
+    if gcc:
+        pairs = [("g++", "gcc")]
+        directories = []
+        missing = "GCC was requested, but g++ and gcc were not both found."
+        notice = "Using GCC as requested: {cxx} and {cc}."
+    elif rocm.is_dir():
+        pairs = [("amdclang++", "amdclang")]
+        directories = [rocm / "bin", rocm / "lib" / "llvm" / "bin"]
+        missing = (
+            "amdclang++ and amdclang were not found together on PATH or under "
+            f"{(rocm / 'bin').as_posix()} or {(rocm / 'lib' / 'llvm' / 'bin').as_posix()}. "
+            "Pass --gcc to build with GCC, or install the ROCm compiler."
+        )
+        notice = None
+    else:
+        pairs = [("clang++", "clang"), ("g++", "gcc"), ("c++", "cc")]
+        if platform == "win32":
+            pairs.append(("cl", "cl"))
+        directories = []
+        missing = (
+            "No C/C++ compiler pair found. Install clang or gcc"
+            + (", or Visual Studio" if platform == "win32" else "")
+            + ", or point ROCM_PATH at a ROCm that contains amdclang++."
+        )
+        notice = "ROCm not found; using {cxx} and {cc}."
+
+    found = _find_compiler_pair(pairs, directories, which)
+    if found is None:
+        raise SystemExit(missing)
+    cxx, cc = found
+    return cxx, cc, None if notice is None else notice.format(cxx=cxx, cc=cc)
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +356,11 @@ def build(
     if not no_python:
         cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
 
+    # Point CMake at ROCm only when that install is actually there. A standalone
+    # build has no ROCm; amd_comgr is then left out and the system compiler is used.
+    if rocm.is_dir():
+        cmake_opts.append(f"-DROCM_PATH={rocm_s}")
+
     # Locate ROCmCMakeBuildTools (version TWEAK git hash) and the SDK cmake prefix
     # so find_package(amd_comgr CONFIG) can locate the devel package's config.
     _rocm_sdk = shutil.which("rocm-sdk")
@@ -333,19 +422,23 @@ def build(
             if _vcpkg_tc.exists():
                 _vcpkg_toolchain_path = _vcpkg_tc.as_posix()
 
-        sep = os.pathsep
-        rocm_bin_dirs = [f"{rocm_s}/bin", f"{rocm_s}/lib/llvm/bin"]
-        os.environ["PATH"] = sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
-        os.environ["ROCM_PATH"] = rocm_s
-        os.environ["HIP_PATH"] = rocm_s
+        if rocm.is_dir():
+            sep = os.pathsep
+            rocm_bin_dirs = [
+                path.as_posix()
+                for path in (rocm / "bin", rocm / "lib" / "llvm" / "bin")
+                if path.is_dir()
+            ]
+            if rocm_bin_dirs:
+                os.environ["PATH"] = (
+                    sep.join(rocm_bin_dirs) + sep + os.environ.get("PATH", "")
+                )
+            os.environ["ROCM_PATH"] = rocm_s
+            os.environ["HIP_PATH"] = rocm_s
 
-        _cxx = shutil.which("amdclang++") or shutil.which("amdclang++.exe")
-        _cc = shutil.which("amdclang") or shutil.which("amdclang.exe")
-        if not _cxx or not _cc:
-            print(
-                "Could not find amdclang++/amdclang on PATH. Ensure ROCm SDK is installed."
-            )
-            sys.exit(1)
+        _cxx, _cc, notice = _resolve_build_compilers(rocm, gcc)
+        if notice:
+            print(notice)
 
         def _normalized(p: str) -> str:
             pp = Path(p)
@@ -400,12 +493,9 @@ def build(
         if shutil.which("ninja"):
             cmake_opts.append("-G Ninja")
 
-        if gcc:
-            _cxx = shutil.which("g++") or "g++"
-            _cc = shutil.which("gcc") or "gcc"
-        else:
-            _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-            _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+        _cxx, _cc, notice = _resolve_build_compilers(rocm, gcc)
+        if notice:
+            print(notice)
         compiler_opts += [
             f"-DCMAKE_CXX_COMPILER={_cxx}",
             f"-DCMAKE_C_COMPILER={_cc}",
@@ -621,3 +711,10 @@ def asan(c, build_dir=None, jobs=None, clean=False, rocm_path=None):
         clean=clean,
         rocm_path=rocm_path,
     )
+
+
+if __name__ == "__main__":
+    # `invoke build` and `python3 tasks.py build` run the same tasks.
+    from invoke import Collection, Program
+
+    Program(namespace=Collection.from_module(sys.modules[__name__])).run()

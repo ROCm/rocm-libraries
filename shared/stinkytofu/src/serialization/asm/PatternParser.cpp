@@ -47,7 +47,7 @@ void PatternParser::skipNewlines() {
 
 void PatternParser::error(const std::string& msg) {
     const Token& tok = lexer.peek();
-    diagnostics.emplace_back(Diagnostic::Level::Error, msg, tok.line, tok.column);
+    diagnostics.emplace_back(Diagnostic::Level::Error, DiagId::Syntax, msg, tok.line, tok.column);
     hadError = true;
 }
 
@@ -879,7 +879,7 @@ PatternParseResult parsePatternFileWithDiagnostics(const std::string& filename) 
     std::ifstream file(filename);
     if (!file.is_open()) {
         // Create a synthetic diagnostic for file open failure
-        result.diagnostics.emplace_back(Diagnostic::Level::Error,
+        result.diagnostics.emplace_back(Diagnostic::Level::Error, DiagId::CannotReadFile,
                                         "Failed to open pattern file: " + filename, 0, 0);
         return result;
     }

@@ -15,6 +15,27 @@ st.func @name() {
 }
 ```
 
+Labels and directives print in full, so the text reloads and emits the same assembly:
+
+```
+st.func @name() {
+^entry:
+  "st.asm_directive"(".set", "vgprBase", "0")
+  "st.s_branch"(label_loop) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^label_loop
+^label_loop: { label, alignment = 16 }
+  label_mid:
+  ".LBB0_1":
+  "st.asm_directive"("TEXTBLOCK", "s_sleep 0  // kept as text\n")
+  "st.s_cbranch_scc1"(".LBB0_1") { issueCycles = 1, latencyCycles = 1 }
+}
+```
+
+- `{ label }` on a header means the block starts with a label of its own name. `alignment` appears when it is above 1. A block an instruction names gets its label on load without the attribute; one that nothing names keeps it only with the attribute.
+- A label in the middle of a block, as in a function loaded from `.s`, is a line of its own, `name:` with an optional `{ alignment = N }`.
+- A name or literal that would not read back bare is quoted. Quoted strings escape `\\`, `\"`, `\n`, `\t` and `\r`.
+- A directive the emitter writes as its text (`TEXTBLOCK`, `MACRO`, `IF`, `ENDIF`) prints that tag and the text. `.set` prints its symbol and value.
+
 **Attached SSA** (`include/stinkytofu/ir/asm/ssa/`, `src/ir/asm/ssa/`) -- SSA identity overlay on Asm IR (`StinkySSAValue`, `StinkyOpOperand`). Owned by `Function` / `BasicBlock` in `core/`. Not a cached analysis; see [Lift Asm Registers to SSA](lift-asm-registers-to-ssa-pass.md).
 
 ## Build Dependency Chain
@@ -75,4 +96,4 @@ Pre-defined high-level operations (e.g., ReLU, Clamp) are defined in `src/ir/log
 
 ## stinkytofu-opt
 
-`tools/stinkytofu-opt/` is the standalone IR driver for testing passes. Pass registry is in `stinkytofu-opt.hpp::availablePasses`. FileCheck tests use `stinkytofu-check` to run a `RUN:` command and verify stdout against `CHECK:` directives. See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).
+`tools/stinkytofu-opt/` is the standalone IR driver for testing passes. The pass registry is `passCatalog` in `src/pipeline/PassCatalog.cpp`. FileCheck tests use `stinkytofu-check` to run a `RUN:` command and verify stdout against `CHECK:` directives. See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).

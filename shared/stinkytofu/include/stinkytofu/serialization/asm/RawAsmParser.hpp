@@ -23,6 +23,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -90,5 +92,24 @@ struct RawAsmParserOptions {
 STINKYTOFU_EXPORT RawAsmParseResult
 parseRawAsmString(const std::string& asmText, GfxArchID arch,
                   const RawAsmParserOptions& options = RawAsmParserOptions());
+
+/// A one-block parsed function cut at two labels: the instructions before the
+/// start label, the region from the start label through the end label (both
+/// labels kept), and the instructions after it.
+struct ParsedRegion {
+    std::unique_ptr<ParsedFunction> before;
+    std::unique_ptr<ParsedFunction> region;
+    std::unique_ptr<ParsedFunction> after;
+};
+
+/// Cut \p func at the first label named \p startLabel and the first named
+/// \p endLabel. The instructions move out of \p func. The region keeps the
+/// function's name; the parts around it are named with "_pre" and "_post".
+/// Returns nullopt and sets \p error when \p func has more than one block, a
+/// label is missing, or the end label comes first.
+STINKYTOFU_EXPORT std::optional<ParsedRegion> cutParsedRegion(ParsedFunction& func,
+                                                              const std::string& startLabel,
+                                                              const std::string& endLabel,
+                                                              std::string& error);
 
 }  // namespace stinkytofu

@@ -1,0 +1,518 @@
+# Python module
+
+`stinkytofu` is the Python package for the StinkyTofu library. This page covers the calls that load STIR or assembler source, run named passes, read the instructions back, and emit assembler source.
+
+The package uses the same parsers, pass catalog, printer, and emitter as `stinkytofu-opt`. After a pass runs, the module is still in memory, so you read opcodes and operands from it.
+
+The same package also exposes the logical IR, intrinsics, and `runOptimizationPipeline`. Those bindings are unchanged. The sections below are the analysis API.
+
+## Purpose
+
+Use it to test a pass on a kernel, and to edit a kernel by hand.
+
+1. Load physical STIR, or assembler `.s`, from a string or a file.
+2. Run catalog passes, in the order you list them, and read the remarks and dumps each one left.
+3. Read each instruction. Registers stay physical until you run `LiftAsmRegistersToSSAPass`. After that pass, operands are SSA value ids.
+4. Check the module with `verify()`, and edit it a block or an operand at a time.
+5. Ask the analyses for live ranges, register pressure, hazard gaps, and size, as objects.
+6. Compare two pass lists on copies of a module, and record each run as a command that repeats it.
+7. Shrink a failing kernel to the smallest module that still fails.
+8. Print the module back to STIR, or emit assembler source and assemble it.
+
+`stinkytofu run` runs only the passes you name. It does not run the optimization pipeline.
+
+## How to use
+
+Build from `shared/stinkytofu`. This build does not configure TensileLite or the rocm-libraries superbuild. The Python module is on by default here. `python3 tasks.py build --no-python` leaves it out. A TensileLite build does not produce it.
+
+```bash
+cd shared/stinkytofu
+python3 tasks.py build
+```
+
+The package lands in `build/lib/stinkytofu/`. No ROCm install is required. When `amd_comgr` is found, assembler capability probing is linked. Without it, probing reports unsupported, and the architecture tables are still available.
+
+There is no pip package. Put `build/lib` on `PYTHONPATH`, or run the launcher. `build/bin/stinkytofu` finds `build/lib` from its own location. The same script installed under a prefix finds `lib/pythonX.Y/dist-packages`.
+
+```bash
+export PYTHONPATH=shared/stinkytofu/build/lib
+python3 -c "import stinkytofu; print(stinkytofu.pass_names()[:3])"
+
+shared/stinkytofu/build/bin/stinkytofu passes
+python3 -m stinkytofu passes
+```
+
+### Command
+
+`passes` prints one catalog name per line.
+
+`run` loads a file, runs the passes you repeat with `--pass`, and writes the result to stdout. A `.s` file loads as assembler source and prints assembler source. Any other file loads as STIR and prints STIR.
+
+```bash
+stinkytofu run kernel.stir --arch 12,5,0 \
+    --pass LiftAsmRegistersToSSAPass \
+    --pass RegisterAllocationPass=apply,classes=vs
+
+stinkytofu run kernel.s --pass StinkyRemoveNopPass -o out.s
+
+stinkytofu run kernel.stir --function helper \
+    --pass StinkyRemoveNopPass --print-before asm --print-after asm
+```
+
+| Option | Meaning |
+| --- | --- |
+| `FILE` or `-` | STIR or `.s` file, or stdin |
+| `--arch 12,5,0` | `major,minor,stepping`. Default is `12,5,0` |
+| `--asm` | Read the input as assembler source. Use it for stdin, or a file without `.s` |
+| `--pass NAME[=args]` | Pass to run. Repeat for more than one, in order |
+| `--function NAME` | Run the passes on that function only. Default is every function |
+| `--feature NAME=true` or `=false` | Set `unroll_gemm` or `distribute_global_read`, as `run_passes(features=...)` does. Repeatable |
+| `--tile NAME=N` | Set a GEMM tile field, such as `NumWaves=2`, as `run_passes(tile=...)` does. Repeatable |
+| `--print-before stir` or `asm` | Write the function to stderr before each pass |
+| `--print-after stir` or `asm` | Write the function to stderr after each pass |
+| `--emit-asm` | Print assembler source. The default for assembler input |
+| `--ssa` | Print the SSA view. That text cannot be loaded again |
+| `-o PATH` | Write the result to a file |
+
+Exit status:
+
+| Code | When |
+| --- | --- |
+| 0 | The run finished |
+| 2 | The file is missing, the text does not load, the pass name is unknown, no function has the `--function` name, or a `--feature` or `--tile` setting is unknown or has a bad value |
+| 1 | A pass refuses the function, or a pass reports an analysis failure |
+
+Remarks from the passes also go to stderr. The `--print-before` and `--print-after` dumps go to stderr too. Stdout is only the module.
+
+`module.run_info()` gives each run as one of these commands, so a result can be rebuilt from its input file.
+
+`reduce` shrinks a file while a test command still reports it failing, as `llvm-reduce --test` does. Each candidate is written to a temporary file in the input's form: `.s` as assembler source, anything else as STIR. The command gets that path as its last argument, and exit status 0 means the candidate still fails. A test that aborts, or crashes in a pass, ends only its own process. The smallest failing module goes to stdout, and one progress line per removal, then a summary, go to stderr.
+
+On the hazard kernel in [Shrink a failing kernel](#shrink-a-failing-kernel), saved as `kernel.stir`:
+
+```bash
+cat > fails.sh <<'EOF'
+#!/bin/sh
+stinkytofu run "$1" --pass HazardGapAnalysisPass 2>&1 | grep -q "VIOLATION rule=SaluSgprToMemAddr"
+EOF
+chmod +x fails.sh
+stinkytofu reduce kernel.stir --test ./fails.sh -o small.stir
+# the last stderr line: functions 1 -> 1, blocks 1 -> 1, lines 7 -> 2 after 12 checks
+```
+
+| Option | Meaning |
+| --- | --- |
+| `FILE` or `-`, `--arch`, `--asm`, `-o PATH` | As for `run` |
+| `--test CMD` | The command to run on each candidate |
+| `--test-arg ARG` | An argument for the command, before the path. Repeatable |
+| `--timeout SECONDS` | Stop a test that runs this long. It counts as not failing |
+| `--max-checks N` | Stop after N tests, and print the smallest failing module so far |
+
+Exit status:
+
+| Code | When |
+| --- | --- |
+| 0 | The file was reduced, or `--max-checks` stopped the search |
+| 2 | The file is missing, the text does not load, the test command cannot start, or the test does not report the file as failing |
+
+Tests for this API are in `python_module/tests/test_stir_api.py`. When pytest is installed, standalone `ctest` runs that file.
+
+## API
+
+```python
+import stinkytofu
+
+module = stinkytofu.load_stir(text, arch=(12, 5, 0))
+records = module.run_passes([
+    "LiftAsmRegistersToSSAPass",
+    "RegisterAllocationPass=apply,classes=vs",
+])
+for record in records:              # one per pass, per function
+    for remark in record.remarks:
+        print(record.pass_name, remark.kind, remark.remark_name)
+physical = module.serialize()       # load_stir accepts this again
+view = module.serialize(ssa=True)   # diagnostic only
+```
+
+`arch` is `(major, minor, stepping)`. The default is `(12, 5, 0)`.
+
+The text after `=` is split on commas, the same way `stinkytofu-opt --Pass=...` splits it.
+
+`run_passes` uses the same feature defaults as `stinkytofu-opt` in individual-pass mode: GEMM loops are unrolled, and global reads are distributed. The `features` and `tile` options below change them for one call.
+
+### Load
+
+| Call | Result |
+| --- | --- |
+| `load_stir(text, arch=(12, 5, 0))` | A module parsed from physical STIR |
+| `load_stir_file(path, arch=(12, 5, 0))` | The same, read from a file |
+| `load_asm(text, arch=(12, 5, 0), *, ...)` | A module parsed from assembler source, with the parser `stinkytofu-opt` uses for `.s` |
+| `load_asm_file(path, arch=(12, 5, 0), *, ...)` | The same, read from a file |
+| `module.load_warnings()` | The warnings from that load, one `line:column: warning: ... [id]` string each |
+| `pass_names()` | The catalog names `run_passes` accepts |
+
+`load_stir` reads bare `st.func` text, or the `st.module @name { ... }` that `serialize()` prints, and keeps the module name.
+
+`load_asm` keeps the kernel header (`.amdhsa_*` and the code object metadata) for `emit_asm`. A branch can name any label, such as `label_loop` or `.LBB0_1`. A line stays in the module as text, with a warning, when the arch does not know its mnemonic or the parser cannot read its operands; `emit_asm` writes it back unchanged. Lines inside a `.macro` body are text without a warning. Its keyword options match `stinkytofu-opt` flags:
+
+| Option | Meaning |
+| --- | --- |
+| `preserve_symbolic_regs` | Keep names such as `v[vgprSerial]` for `emit_asm(symbolic_names=True)` |
+| `preserve_comments` | Keep trailing `//` and `;` comments for `emit_asm(comments=True)` |
+| `from_label`, `to_label` | Keep only the instructions from one label through the other. Give both. The region has no kernel header |
+
+The module owns its functions. A load raises `ValueError` when the arch is unknown, the text is SSA form, or the parser or converter reports an error. A STIR mnemonic the arch does not know, or a `Successors:` label that names no block, is an error. Each error line carries its line, its column, and an id that names the kind of failure:
+
+```text
+4:3: error: Unknown mnemonic 'v_add_f33' for gfx1250 [unknown-mnemonic]
+```
+
+Match on the id rather than the message. [Error codes](../user/error-codes.md) lists the ids.
+
+### Run
+
+`run_passes(passes, *, function=None, features=None, tile=None, print_before=None, print_after=None)` runs each name on every function, in order. It returns one `PassRecord` per pass on each function: the entry function's records first, in pass order, then each callee's.
+
+| Option | Meaning |
+| --- | --- |
+| `function` | Run on the function with this name only. `""` is an unnamed entry function |
+| `features` | A dict with `unroll_gemm` and `distribute_global_read`, each a bool. A key left out keeps the default above. Of the catalog passes, only `StinkyDAGSchedulerPass` reads them |
+| `tile` | A dict of GEMM tile fields, named as the `stinkytofu-opt` flags are: `TileA0`, `TileB0`, `TileM0`, `NumGRA`, `NumGRB`, `NumGRM`, `NumWaves`. Each is an int from 0 to 4294967295. A field left out stays 0, and `NumWaves` stays 1. The arch is always the module's |
+| `print_before`, `print_after` | `"stir"` or `"asm"`. Keep a dump of the function from before or after each pass, in that form |
+
+| `PassRecord` field | Meaning |
+| --- | --- |
+| `pass_name` | The catalog name you asked for |
+| `function` | The function's name |
+| `changed` | The function prints different physical STIR after the pass. Only that function is compared, not its callees |
+| `remarks` | Every remark the pass emitted on the function, in order. Each has `kind` (`"passed"`, `"missed"`, or `"analysis"`), `remark_name`, and `message` |
+| `before`, `after` | The dump `print_before` or `print_after` asked for, or `None` |
+
+`changed` compares physical STIR, so a pass that only adds SSA values reports `False`. `LiftAsmRegistersToSSAPass` is one. Its `LiftedToSSA` remark says what it lifted.
+
+A missed remark stays in the record when the same pass also reported a success. `TieExecMaskedWritesPass` can return `TiedWrites` and `UnmatchedExecSpan` together.
+
+A dump begins with a `*** Before Pass: NAME ***` or `*** After Pass: NAME ***` line. NAME is the name the pass object reports, which is not always the catalog name: register allocation prints `Register Allocation`. A dump of the entry function is followed by each callee, under a `; --- callee Function: NAME ---` line. `"asm"` prints the function as `emit_asm()` does, without the kernel header.
+
+Remarks still go to stderr as the pass runs.
+
+These raise, and the module is left as it was:
+
+| What happened | Exception |
+| --- | --- |
+| Unknown pass name | `ValueError`. The message lists `pass_names()` |
+| The pass rejects its arguments | `ValueError` |
+| No function has the `function` name | `ValueError`. The message lists the names |
+| An unknown `features` or `tile` key, a tile value out of range, or a dump form other than `"stir"` or `"asm"` | `ValueError` |
+| A `features` value that is not a bool, or a `tile` value that is not an int | `TypeError` |
+
+These raise after the pass has run, so that pass and the ones before it may already have changed the module:
+
+| What happened | Exception |
+| --- | --- |
+| A missed remark, and no success remark | `RuntimeError` with one `missed: <pass>: <message>` line per missed remark. `<pass>` is the name the remark carries, such as `RegisterAllocation` |
+| The pass reports an analysis failure | `RuntimeError` |
+
+A call that raises returns no records.
+
+### Print and emit
+
+`serialize()` prints physical STIR, as `st.module @name { ... }`. That text round-trips through `load_stir`, whether the module was loaded from STIR or from `.s`: labels, alignment, and directive text all print, so `load_stir(module.serialize()).emit_asm()` matches `module.emit_asm(signature=False)`. STIR carries no kernel header, and it drops source comments and function metadata, such as the kernel's VGPR total a `.s` load reads from its header. To keep all of that, use `module.copy()`. The label syntax is in [Architecture](architecture.md).
+
+`serialize(comments=True)` first writes one `// stinkytofu <version>: run ...` line for each run the module recorded; see `run_info()` below. `load_stir` skips those lines.
+
+A block that an instruction names gets its label back on load, so hand-written STIR that branches to `^loop` emits `loop:`.
+
+`serialize(ssa=True)` prints attached SSA for diagnosis. `load_stir` refuses that text. To see the values the allocator uses, load physical STIR, run `LiftAsmRegistersToSSAPass`, and read `defs` and `uses`.
+
+`emit_asm()` writes every function, entry first, with the emitter `stinkytofu-opt --emit-asm` uses. Its keyword options:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `comments` | false | The recorded runs, as `serialize(comments=True)` writes them, then header comments and kept source comments |
+| `cycle_info` | false | A cycle note on each instruction |
+| `symbolic_names` | false | Symbolic register names that the load kept |
+| `signature` | true | The kernel header `load_asm` kept. A STIR module has none |
+
+`assemble()` feeds `emit_asm()` to `amd_comgr`. It returns `None` when the text assembles, and the assembler's messages when it does not. Those include errors comgr prints to stderr instead of its log, such as `undefined label`. A build without `amd_comgr` raises `RuntimeError`.
+
+```python
+module = stinkytofu.load_asm_file("kernel.s")
+edited = module.emit_asm().replace("s_nop 0\n", "", 1)
+error = stinkytofu.load_asm(edited).assemble()   # None when the kernel assembles
+```
+
+### Read instructions
+
+`functions()` copies the module as it is at that call. A later `run_passes` leaves those objects unchanged. Each function has a `name` and `blocks()`, and `has_attached_ssa` is true once a lift has reached it.
+
+```python
+text = """\
+st.func @k() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+}
+"""
+
+module = stinkytofu.load_stir(text)
+for function in module.functions():          # entry function first
+    for block in function.blocks():
+        print(block.name)                    # "entry"
+        print(block.successors())            # ["label_loop"] when the block branches
+        for inst in block.instructions():
+            print(inst.opcode)               # "st.v_mov_b32"
+            print(inst.defs)                 # [("v", 0, 1)]
+            print(inst.uses)                 # [("v", 1, 1)]
+            print(inst.modifiers)            # ["mod.ds = { na = 1, ... }"], [] when none
+
+module.run_passes(["LiftAsmRegistersToSSAPass"])
+for function in module.functions():
+    for block in function.blocks():
+        for inst in block.instructions():
+            if inst.opcode == "st.v_add_f32":
+                value_id, reg_class = inst.defs[0]
+                print(value_id, reg_class)   # integer id, "v"
+```
+
+| Operand | Python value |
+| --- | --- |
+| Register | `(class, index, count)`, for example `("v", 0, 1)` |
+| SSA value | `(id, class)`, for example `(3, "v")` |
+| Hardware register | `("hwreg", id, offset, size)` |
+| Literal | A Python number or string |
+
+`inst.modifiers` is the `mod.X = { ... }` text `serialize()` prints for each modifier. To build new instructions, give `replace_block` their STIR text.
+
+### Verify and edit
+
+```python
+module = stinkytofu.load_stir("""\
+st.func @k() {
+^entry:
+  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }
+}
+""")
+module.set_operand("k", "entry", 0, ("defs", 0), ("v", 0, 2))
+for diagnostic in module.verify():
+    print(diagnostic)
+    # @k ^entry #0: error: 'ds_load_b128' operand dest[0] has register width 2, expected 4 [register-width]
+
+module.replace_block("k", "entry",
+                     'v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 4, latencyCycles = 56 }\n')
+assert module.verify() == []
+```
+
+`verify(*, function=None)` returns every problem in every function, or in the one named, as a list of `Diagnostic` objects. An empty list means it found none. It makes the checks `StinkyIRVerifierPass` makes, reporting all of them rather than the first kind:
+- an operand that is missing, or has the wrong width or register class;
+- a read-write register missing from the defs or the uses;
+- an instruction without a hardware descriptor.
+
+It makes two more: a branch to a label the function does not define (`undefined-label`), and attached SSA that breaks an invariant (`invalid-ssa`). It does not compare a block's successors with its branches.
+
+| `Diagnostic` field | Meaning |
+| --- | --- |
+| `level` | `"error"`, `"warning"`, or `"note"` |
+| `id` | The kind of failure, such as `"register-width"`. [Error codes](../user/error-codes.md) lists them |
+| `message` | The text, without the location or the id |
+| `function`, `block`, `index` | Where it is. `index` is the position in that block's `instructions()`. `block` and `index` are `None` for a problem with the whole function |
+| `line`, `column` | The position in loaded text, or `None` for a diagnostic about built IR. Every diagnostic `verify()` returns is about built IR |
+
+`str(diagnostic)` is the one line shown above.
+
+`replace_block(function, block, body)` replaces a block's instructions with STIR text. `body` holds the lines `serialize()` prints between the block's header and its `Successors:` line: instructions, label lines, and directives.
+- The block keeps its name, its `{ label }`, and its successors.
+- A first line that names the block, such as `loop: { alignment = 16 }`, replaces the block's own label.
+- A block the new instructions branch to gets a label, as on load.
+- The function's attached SSA is dropped. Run `LiftAsmRegistersToSSAPass` again to see values.
+
+It returns the warnings, one string each, as `load_warnings()` does. Their lines count from the start of `body`.
+
+`set_operand(function, block, index, operand, value)` sets one physical operand.
+- `index` is the instruction's position in `instructions()`.
+- `operand` is `("defs", i)` or `("uses", i)`: a position in that instruction's `defs` or `uses`.
+- `value` takes a form from the operand table above, other than an SSA value.
+
+It does not check the value against the instruction; `verify()` does that. A function with attached SSA is refused, since its `defs` and `uses` list SSA values. To edit its physical operands, load `module.serialize()` again.
+
+`block_lines(function, block)` returns a block's body as `serialize()` prints it, one string per line. There is a line for each instruction, label, and directive, including the text lines a `.s` load keeps. The block's own label is not among them, since the block's header carries it. `replace_block(function, block, "\n".join(lines))` leaves the module as it was, so a caller can drop lines and rebuild the block from the rest. A rebuilt block keeps what STIR keeps: its source comments and symbolic register names are gone.
+
+`delete_block(function, block)` deletes a block that no branch in another block names:
+- a predecessor that fell into the block now falls into the block after it;
+- with no block after it, the predecessors lose that edge, and the block's own edges go with it;
+- the function's attached SSA is dropped.
+
+`delete_function(function)` deletes a callable function and its blocks. A call that lists it in `mod.call_targets` keeps the name, which does not reach the assembly.
+
+These raise, and the module is left as it was:
+
+| What happened | Exception |
+| --- | --- |
+| No function or block has that name | `ValueError`. The message lists the names |
+| The body does not parse, or names an opcode the arch does not have | `ValueError`, with each error line and its id |
+| The body has a block header, a `Successors:` line, or a `}` | `ValueError` (`syntax`) |
+| `set_operand` on a function with attached SSA | `ValueError` |
+| `delete_block` on the entry block, or on a block a branch in another block names | `ValueError`. The message gives the branch, such as `'st.s_cbranch_scc1' at ^entry #1` |
+| `delete_function` on the entry function | `ValueError` |
+| A value with no operand form: a bool, an SSA value, an unknown register class, or an int that does not fit 32 bits | `ValueError` |
+| `index`, or the position in `operand`, is out of range | `IndexError` |
+
+### Ask the analyses
+
+Each query takes a function name (`""` is an unnamed entry) and returns objects copied at the call, as `functions()` does. An unknown name raises `ValueError`, listing the names.
+
+```python
+module = stinkytofu.load_stir(text)
+module.run_passes(["LiftAsmRegistersToSSAPass"])
+
+ranges = module.live_ranges("k")
+for live in ranges.ranges:
+    print(live)                       # %1:v [1d,5d), one line per value
+ranges.place(3)                       # ("entry", 0, "def")
+
+pressure = module.pressure("k")
+assert pressure.vgpr <= 256
+pressure.peaks["v"].place             # where the VGPR peak is first reached
+
+for gap in module.hazards("k"):
+    print(gap.rule, gap.gap, gap.required, gap.ok)
+
+module.size("k").bytes                # encoded bytes
+```
+
+`live_ranges` and `pressure` read attached SSA. On a function the lift has not reached, they raise `ValueError` naming `LiftAsmRegistersToSSAPass`. So a value id is always the one `defs` and `uses` show.
+
+**Slots.** A position is a slot. Each instruction has two: a `u` slot where it reads its operands, then a `d` slot where it writes its results. Each block also starts with a pair: a value live into the block starts at its `u` slot, and the block's arguments are defined at its `d` slot. `ranges.place(slot)` returns `(block, index, "use" or "def")`:
+- `index` is the position in `instructions()`, or `None` for a block's leading pair or a label;
+- it returns `None` for a slot past the last.
+
+| `LiveRange` field | Meaning |
+| --- | --- |
+| `value`, `reg_class`, `width` | The SSA value id, its class, and its DWORDs. The lift makes one value per DWORD |
+| `register` | The register the lift took the value from, as `(class, index, count)`, or `None` |
+| `segments` | Half-open `(start, end)` slot pairs: the value is live from `start` up to, not including, `end` |
+| `start`, `end`, `length` | The first live slot, one past the last, and the number of slots covered |
+
+`str(live)` is the line the `ssa_live_intervals` dump prints for the value.
+
+`pressure(function)` returns the most DWORDs of each class that are live at once. `vgpr` and `sgpr` give the two main classes, and are 0 when nothing of that class is live. `peaks` maps each class the lift covered to a `PressurePeak`, with `dwords`, `slot` (the first slot at the peak), and `place`.
+
+`hazards(function)` returns every producer and consumer pair that `HazardGapAnalysisPass` measures, the passing ones included:
+- the fields are `rule`, `required` and `gap` in cycles, `ok`, `block`, `producer` and `consumer` (positions in `instructions()`), `producer_opcode`, and `consumer_opcode`;
+- the pairs are within one block, and the rules are the ones counted in cycles from a write to a later read;
+- it reads physical registers, so it needs no lift. It does not raise for a gap below `required`, where the pass reports an analysis failure.
+
+`size(function)` returns a `FunctionSize`, measured as `AccumulateInstructionSizePass` measures it:
+- the module's functions are laid out in order, entry first, so alignment padding and PC-relative literals are sized where each function sits;
+- the fields are `start` (the byte offset of the function in the image), `bytes`, `cycles`, `instructions` (not counting labels and directives), and `labels`, which maps each label to its byte offset;
+- the kernel's total is the sum of `bytes` over its functions.
+
+### Copy, record, and compare
+
+`module.copy()` returns a separate module with the same functions. A pass run on one does not change the other. The copy is made in memory, not through text, so it keeps what STIR drops:
+- function metadata, which `InsertDelayAluPass` and register allocation read;
+- source comments and symbolic register names;
+- the kernel header, the load warnings, and the run history.
+
+Attached SSA is not copied: lift the copy again to read values.
+
+`module.run_info()` returns one `RunInfo` for each `run_passes` call that ran passes on the module, oldest first. The record is made before the first pass runs, so a call that raised partway is listed too. A call that failed its checks, such as one with an unknown pass name, ran nothing and is not listed.
+
+| `RunInfo` field | Meaning |
+| --- | --- |
+| `arch`, `version` | The module's arch, and `stinkytofu.version()` |
+| `passes` | The pass specs, as `run_passes` was given them |
+| `function` | The function the run was limited to, or `None` |
+| `features`, `tile` | The `features` and `tile` values the caller set |
+| `command` | The `stinkytofu run` command that repeats the run; add the input file |
+
+```python
+module.run_passes(["TDMLoadWaveSyncPass"], tile={"NumWaves": 2})
+[run] = module.run_info()
+run.command   # "stinkytofu run --arch 12,5,0 --pass TDMLoadWaveSyncPass --tile NumWaves=2"
+str(run)      # "stinkytofu 0.1.0-<commit>: run --arch 12,5,0 --pass ..."
+```
+
+`stinkytofu.compare(module, passes_a, passes_b, **options)` runs each pass list on its own `module.copy()` and returns a `Comparison`:
+- `options` are the `run_passes` keywords, applied to both sides;
+- the module you pass is not changed;
+- if one side's run raises, the same exception type is raised again, with `passes_a:` or `passes_b:` before its message.
+
+On the two-instruction kernel from [Read instructions](#read-instructions):
+
+```python
+module = stinkytofu.load_stir(text)
+result = stinkytofu.compare(module, ["StinkyRemoveNopPass"], ["LiftAsmRegistersToSSAPass"],
+                            function="k")
+result.b.pressure["k"].vgpr           # 2
+print(result)
+# k: vgpr - -> 2, sgpr - -> 0, bytes 8 -> 8, cycles 2 -> 2, hazard violations 0 -> 0
+```
+
+`result.a` and `result.b` are `Side` objects:
+- `passes`, `records` (the `PassRecord`s), and `module`, the copy after the run;
+- `pressure`, `size`, and `hazards`, which map each function the run reached to what the queries above return after the run.
+
+`pressure` is `None` for a function the run left without attached SSA, and `str(result)` shows that as `-`.
+
+### Shrink a failing kernel
+
+`stinkytofu.reduce(module, check, *, max_checks=None, log=None)` removes what a failure does not need, as `llvm-reduce` does, and returns a `Reduction`. `check(candidate)` returns true while the bug is still present:
+- each call gets its own copy of a candidate, which has no attached SSA, so the check runs the passes it needs, as it would on the original;
+- the first call is on the module you pass. If it returns false, `reduce` raises `ValueError`, and if it raises, so does `reduce`;
+- on a later candidate, an exception counts as not failing, so a check need not catch what a broken candidate makes a pass raise.
+
+This kernel breaks a hazard rule: `tensor_load_to_lds` reads `s0` too soon after `s_mov_b32` writes it.
+
+```python
+module = stinkytofu.load_stir("""\
+st.func @k() {
+^entry:
+  "st.s_nop"(0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_mov_b32"(s1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_nop"(1) { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+  v2 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+""")
+
+def still_fails(candidate):
+    return any(gap.rule == "SaluSgprToMemAddr" and not gap.ok for gap in candidate.hazards("k"))
+
+result = stinkytofu.reduce(module, still_fails, log=print)
+print(result)    # functions 1 -> 1, blocks 1 -> 1, lines 7 -> 2 after 12 checks
+print(result.module.serialize())
+# st.module @k {
+#   st.func @k() {
+#     ^entry:
+#       s0 = "st.s_mov_b32"(s1) { issueCycles = 1, latencyCycles = 1 }
+#       "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+#   }
+# }
+```
+
+A check that runs passes catches what it expects: `run_passes(["HazardGapAnalysisPass"])` raises `RuntimeError` with `HazardGapAnalysisPass reported an analysis failure` for the same kernel.
+
+Each round removes callable functions, then blocks other than a function's entry, then lines from each block, as `block_lines` lists them. Each level tries removing a chunk at a time, from all of them down to one. Rounds repeat until one removes nothing. A block goes once no branch in another block names it, so one round's line removals can let the next round's blocks go.
+- Candidates are `module.copy()` with the removals made, so function metadata and the kernel header stay, and the module you pass is not changed.
+- A candidate whose `verify()` reports a kind of problem the module did not have is skipped without a check. That keeps the label a branch names, and at least one instruction in each function.
+- A check should test for its particular failure. One that accepts any failure can end on a different bug.
+
+| `Reduction` field | Meaning |
+| --- | --- |
+| `module` | The smallest module the check still reported as failing |
+| `checks` | How many times the check ran |
+| `complete` | False when `max_checks` stopped the search |
+| `functions`, `blocks`, `lines` | `(before, after)` counts. `str()` prints them as `lines 5012 -> 37` |
+
+A pass that aborts takes the Python process with it. `stinkytofu.command_check(argv, *, form="stir", timeout=None)` makes a check that runs a command instead, which is what the `reduce` command uses:
+- the candidate is written to a temporary `candidate.stir` with `serialize()`, or `candidate.s` with `emit_asm()` when `form="asm"`, and its path is the command's last argument;
+- exit status 0 means the candidate still fails. The command reads no input, and its output is discarded;
+- a command still running after `timeout` seconds is stopped, and counts as not failing. One that cannot start raises `OSError` on the first check.
+
+```python
+check = stinkytofu.command_check(["sh", "fails.sh"], form="asm", timeout=60)
+small = stinkytofu.reduce(stinkytofu.load_asm_file("kernel.s"), check).module.emit_asm()
+```

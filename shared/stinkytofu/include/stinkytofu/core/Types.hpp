@@ -35,6 +35,8 @@ enum class StinkyErrorCode : int {
     SUCCESS = 0,
     PASSCTX_EMPTY = 1,
     PARSE_ERROR = 2,
+    /// The text parsed, but an instruction or block edge could not be built for the arch.
+    CONVERT_ERROR = 3,
 };
 
 /// GEMM-specific tile configuration
@@ -62,6 +64,19 @@ struct GemmTileConfig {
     uint32_t NumGRB = 0;               ///< Number of global read B
     uint32_t NumGRM = 0;               ///< Number of global read M
     uint32_t NumWaves = 1;             ///< Number of waves; 1 = single wave
+};
+
+/// The GemmTileConfig fields a driver sets by name. Keep in step with the struct.
+struct GemmTileField {
+    const char* name;
+    uint32_t GemmTileConfig::*member;
+};
+
+inline constexpr GemmTileField kGemmTileFields[] = {
+    {"TileA0", &GemmTileConfig::TileA0},     {"TileB0", &GemmTileConfig::TileB0},
+    {"TileM0", &GemmTileConfig::TileM0},     {"NumGRA", &GemmTileConfig::NumGRA},
+    {"NumGRB", &GemmTileConfig::NumGRB},     {"NumGRM", &GemmTileConfig::NumGRM},
+    {"NumWaves", &GemmTileConfig::NumWaves},
 };
 
 /// Pass-specific feature configuration
@@ -200,12 +215,12 @@ enum class VgprMsbMode : uint8_t {
 };
 
 /// Capabilities forwarded from rocisa (asmCaps and archCaps) by the conversion
-/// layer, or discovered by ToolchainCaps::probe() for the standalone path.
+/// layer. On the standalone path, ToolchainCaps::probe() discovers the toolchain
+/// fields and BackendRegistry::applyStandaloneCaps() adds the arch's archCaps.
 struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 
-    /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
-    /// path, which has no rocisa to ask.
+    /// rocisa archCaps `RequiresXCntForVolatileVMEM`.
     /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
     /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
     /// rule set (Rules 1–4).

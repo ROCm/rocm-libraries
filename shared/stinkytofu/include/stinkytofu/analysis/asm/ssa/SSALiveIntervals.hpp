@@ -72,7 +72,7 @@ struct LiveSegment {
 };
 
 /// Where one SSA value is live, as sorted disjoint non-adjacent segments.
-class LiveRange {
+class STINKYTOFU_EXPORT LiveRange {
    public:
     bool empty() const {
         return segments_.empty();
@@ -111,7 +111,7 @@ class LiveRange {
     std::vector<LiveSegment> segments_;
 };
 
-class SSALiveIntervals {
+class STINKYTOFU_EXPORT SSALiveIntervals {
    public:
     /// True when the function carried no attached SSA, so nothing was computed.
     bool empty() const {
@@ -126,6 +126,15 @@ class SSALiveIntervals {
     /// Live range of \p id, or an empty range for an unknown or dead ID.
     const LiveRange& rangeOf(SSAValueID id) const;
 
+    /// Register class of \p id, or UNKNOWN for an unknown ID.
+    RegType classOf(SSAValueID id) const;
+
+    /// DWORDs \p id occupies, as the pressure sweep counts them.
+    uint16_t widthOf(SSAValueID id) const;
+
+    /// The line toString() prints for \p id, such as "%3:v [6d,11u)".
+    std::string rangeLine(SSAValueID id) const;
+
     /// True when \p a and \p b are live at a common point, so they cannot share
     /// a physical register.
     bool overlap(SSAValueID a, SSAValueID b) const;
@@ -137,6 +146,10 @@ class SSALiveIntervals {
     const std::map<RegType, uint32_t>& peakPressure() const {
         return peakByClass_;
     }
+
+    /// First slot at which \p regClass reaches its peak, or
+    /// SSASlotIndexes::kInvalidSlot when no value of that class is live.
+    SlotIndex peakSlot(RegType regClass) const;
 
     const SSASlotIndexes& slots() const {
         return slots_;
@@ -172,18 +185,19 @@ class SSALiveIntervals {
     std::vector<RegType> classByValue_;
     std::vector<uint16_t> widthByValue_;  // DWORDs per value, for the peak sweep
     std::map<RegType, uint32_t> peakByClass_;
+    std::map<RegType, SlotIndex> peakSlotByClass_;
 };
 
 /// Compute live intervals for \p function, which must carry attached SSA.
 /// A function without attached SSA yields an empty result.
-SSALiveIntervals computeSSALiveIntervals(const Function& function);
+STINKYTOFU_EXPORT SSALiveIntervals computeSSALiveIntervals(const Function& function);
 
 /// As above, taking the block visit order from dominance information the caller
 /// already holds. Only convergence speed depends on the order.
 ///
 /// Exported because SSALiveIntervalsAnalysis::run() is defined in its header, so
 /// registerAllAnalyses() compiles this call into every consumer of the shared
-/// library. The single-argument overload has no such caller and stays internal.
+/// library.
 STINKYTOFU_EXPORT SSALiveIntervals computeSSALiveIntervals(const Function& function,
                                                            const DominanceInfo& dominance);
 

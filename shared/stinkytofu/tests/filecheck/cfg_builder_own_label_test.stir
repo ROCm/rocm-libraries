@@ -1,0 +1,19 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --print-output
+#
+# A one-block function whose block starts with a label of its own name. The
+# pass used to split that label off into a second ^loop block and abort with
+# "duplicate label-block name". The label stays in its block, and the code after
+# the branch becomes the fall-through piece.
+#
+# CHECK-LABEL: ^loop: { label }{{$}}
+# CHECK: "st.s_cbranch_scc1"(loop, SCC0)
+# CHECK-NEXT: Successors: ^loop, ^loop_1{{$}}
+# CHECK-NEXT: ^loop_1:{{$}}
+# CHECK-NEXT: "st.s_endpgm"
+
+st.func @k() {
+^loop: { label }
+  s0 = "st.s_add_u32"(s0, 1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"(loop, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

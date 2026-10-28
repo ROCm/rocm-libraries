@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
@@ -75,6 +76,10 @@ struct StinkyAsmModule::Impl {
 
     // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
     int64_t totalInstructionBytes = -1;
+
+    std::shared_ptr<SignatureBase> signature;
+    std::vector<Diagnostic> loadWarnings;
+    std::vector<PassRunRecord> passRuns;
 
     // Plugin data: opaque key-value stores for pass plugins.
     std::unordered_map<std::string, int64_t> pluginDataI64;
@@ -152,6 +157,19 @@ Function& StinkyAsmModule::createFunction(std::string_view name, bool isCallable
     func->setIsCallable(isCallable);
     func->createBasicBlock("entry");
     return *func;
+}
+
+bool StinkyAsmModule::removeFunction(std::string_view name) {
+    auto& callables = pImpl->callableFunctions;
+    const auto found = std::find_if(callables.begin(), callables.end(), [name](const auto& func) {
+        return func && func->getName() == name;
+    });
+    if (found == callables.end()) return false;
+    std::vector<BasicBlock*> blocks;
+    for (BasicBlock& block : **found) blocks.push_back(&block);
+    invalidateGroupsInBlocks(blocks);
+    callables.erase(found);
+    return true;
 }
 
 Function* StinkyAsmModule::getFunction(std::string_view name) {
@@ -316,6 +334,30 @@ void StinkyAsmModule::setTotalInstructionBytes(int64_t totalBytes) {
 
 int64_t StinkyAsmModule::getTotalInstructionBytes() const {
     return pImpl->totalInstructionBytes;
+}
+
+void StinkyAsmModule::setSignature(std::shared_ptr<SignatureBase> signature) {
+    pImpl->signature = std::move(signature);
+}
+
+std::shared_ptr<SignatureBase> StinkyAsmModule::getSignature() const {
+    return pImpl->signature;
+}
+
+void StinkyAsmModule::setLoadWarnings(std::vector<Diagnostic> warnings) {
+    pImpl->loadWarnings = std::move(warnings);
+}
+
+const std::vector<Diagnostic>& StinkyAsmModule::getLoadWarnings() const {
+    return pImpl->loadWarnings;
+}
+
+void StinkyAsmModule::addPassRun(PassRunRecord run) {
+    pImpl->passRuns.push_back(std::move(run));
+}
+
+const std::vector<PassRunRecord>& StinkyAsmModule::getPassRuns() const {
+    return pImpl->passRuns;
 }
 
 void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {

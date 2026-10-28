@@ -104,6 +104,7 @@ set(UNIT_ASM_TEST_FILES
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
     unit/asm/IRParserTest.cpp
+    unit/asm/IRConverterTest.cpp
     unit/asm/PatternParserTest.cpp
     unit/asm/FuzzTest.cpp
     unit/asm/HwInstDescTest.cpp
@@ -117,6 +118,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
     unit/asm/InsertClusterBarrierPassTest.cpp
     unit/asm/VerifyInstrumentationTest.cpp
+    unit/asm/VerifyStinkyIRTest.cpp
     unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
@@ -124,6 +126,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
     unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/HazardGapAnalysisTest.cpp
     unit/asm/Gfx1250HazardProfileTest.cpp
     unit/asm/WaitAluTrackerTest.cpp
     unit/asm/BasicBlockTest.cpp
@@ -152,8 +155,14 @@ set(UNIT_LOGICAL_TEST_FILES
 set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
+    unit/core/BlockAndFunctionEraseTest.cpp
     unit/core/ComgrProbeTest.cpp
+    unit/core/DiagnosticTest.cpp
+    unit/core/FunctionCopyTest.cpp
+    unit/core/OptimizationRemarkTest.cpp
+    unit/core/PassArgumentsTest.cpp
     unit/core/PassBuilderTest.cpp
+    unit/core/StandalonePassManagerTest.cpp
     unit/core/BackendTest.cpp
     unit/core/TimePassesInstrumentation_test.cpp
     unit/core/VersionTest.cpp

@@ -110,3 +110,63 @@ TEST(BackendRegistryTest, RegisteredKeysAreSorted) {
         EXPECT_LE(keys[i - 1], keys[i]) << "Keys should be sorted";
     }
 }
+
+// --- isArchSupported ---
+
+TEST(BackendRegistryTest, IsArchSupportedGfx1250) {
+    BackendRegistry::registerAllBackends();
+    EXPECT_TRUE(BackendRegistry::isArchSupported({12, 5, 0}));
+}
+
+TEST(BackendRegistryTest, IsArchSupportedRejectsUnknownTriple) {
+    EXPECT_FALSE(BackendRegistry::isArchSupported({0, 0, 0}));
+}
+
+TEST(BackendRegistryTest, IsArchSupportedNeedsAPipeline) {
+    BackendRegistry::registerAllBackends();
+    const std::array<int, 3> gfx1250{12, 5, 0};
+    const BackendRegistry::ArchPipeline* registered = BackendRegistry::getArchPipeline(gfx1250);
+    ASSERT_NE(registered, nullptr);
+    const BackendRegistry::ArchPipeline saved = *registered;
+
+    BackendRegistry::clearArch(gfx1250);
+    EXPECT_FALSE(BackendRegistry::isArchSupported(gfx1250));
+
+    BackendRegistry::setArchPipeline(gfx1250, saved);
+    EXPECT_TRUE(BackendRegistry::isArchSupported(gfx1250));
+}
+
+// --- applyStandaloneCaps ---
+
+TEST(BackendRegistryTest, Gfx1250StandaloneCapsSetBothFlags) {
+    BackendRegistry::registerAllBackends();
+    AsmCapsConfig caps;
+    BackendRegistry::applyStandaloneCaps({12, 5, 0}, caps);
+    EXPECT_TRUE(caps.requiresXCntForVolatileVMEM);
+    EXPECT_TRUE(caps.enableXnackReplay);
+}
+
+TEST(BackendRegistryTest, StandaloneCapsWithoutPipelineLeaveCapsAlone) {
+    AsmCapsConfig caps;
+    BackendRegistry::applyStandaloneCaps({0, 0, 0}, caps);
+    EXPECT_FALSE(caps.requiresXCntForVolatileVMEM);
+    EXPECT_FALSE(caps.enableXnackReplay);
+}
+
+TEST(BackendRegistryTest, StandaloneCapsBuilderIsOptional) {
+    BackendRegistry::registerAllBackends();
+    const std::array<int, 3> gfx1250{12, 5, 0};
+    const BackendRegistry::ArchPipeline* registered = BackendRegistry::getArchPipeline(gfx1250);
+    ASSERT_NE(registered, nullptr);
+    const BackendRegistry::ArchPipeline saved = *registered;
+
+    BackendRegistry::ArchPipeline withoutCaps = saved;
+    withoutCaps.standaloneCaps = nullptr;
+    BackendRegistry::setArchPipeline(gfx1250, withoutCaps);
+    AsmCapsConfig caps;
+    BackendRegistry::applyStandaloneCaps(gfx1250, caps);
+    EXPECT_FALSE(caps.requiresXCntForVolatileVMEM);
+    EXPECT_FALSE(caps.enableXnackReplay);
+
+    BackendRegistry::setArchPipeline(gfx1250, saved);
+}

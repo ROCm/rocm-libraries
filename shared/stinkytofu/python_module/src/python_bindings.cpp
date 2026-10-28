@@ -49,6 +49,7 @@
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
+#include "stir_api.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -64,8 +65,8 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     // Bind StinkyAsmModule Class
     // ========================================================================
-    nb::class_<StinkyAsmModule>(m, "StinkyAsmModule")
-        .def("getName", &StinkyAsmModule::getName, "Get the name of this module")
+    nb::class_<StinkyAsmModule> asmModule(m, "StinkyAsmModule");
+    asmModule.def("getName", &StinkyAsmModule::getName, "Get the name of this module")
         .def("setOutputName", &StinkyAsmModule::setOutputName,
              "Set the name used for output files (e.g. cost file); use full kernel name to match "
              ".o basename")
@@ -119,6 +120,7 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("extensionPoint"), nb::arg("passName"),
             "Register a named C++ pass at a pipeline extension point");
+    bind_stir_api(m, asmModule);
 
     // Pipeline extension point enum
     nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")

@@ -58,6 +58,13 @@ SlotIndex SSASlotIndexes::defSlot(const StinkyInstruction* instruction) const {
     return use == kInvalidSlot ? kInvalidSlot : use + 1;
 }
 
+SlotPlace SSASlotIndexes::placeOf(SlotIndex slot) const {
+    if (slot == kInvalidSlot || slot / kPointsPerStep >= byPair_.size()) return {};
+    SlotPlace place = byPair_[slot / kPointsPerStep];
+    place.def = slot % kPointsPerStep == 1;
+    return place;
+}
+
 SSASlotIndexes computeSSASlotIndexes(const Function& function) {
     SSASlotIndexes indexes;
     SlotIndex next = 0;
@@ -66,12 +73,15 @@ SSASlotIndexes computeSSASlotIndexes(const Function& function) {
         SSASlotIndexes::BlockRange range;
         range.start = next;
         next += kPointsPerStep;  // block arguments are defined at start + 1
+        indexes.byPair_.push_back({&block, -1, false});
 
+        int position = 0;
         for (const IRBase& ir : block) {
             const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
             if (instruction == nullptr) continue;
             indexes.byInstruction_.emplace(instruction, next);
             next += kPointsPerStep;
+            indexes.byPair_.push_back({&block, isIndexedInstruction(ir) ? position++ : -1, false});
         }
 
         range.end = next;

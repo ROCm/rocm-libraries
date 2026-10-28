@@ -19,8 +19,11 @@
  * ************************************************************************ */
 #include "stinkytofu/core/Function.hpp"
 
+#include <algorithm>
 #include <iostream>
+#include <iterator>
 #include <ostream>
+#include <unordered_map>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
@@ -38,6 +41,53 @@ Function::~Function() {
 void Function::clear() {
     clearAttachedSSA();
     basicBlocks.clear();
+}
+
+bool Function::copyFrom(const Function& other) {
+    if (&other == this) return true;
+    clear();
+    name = other.name;
+    isCallable = other.isCallable;
+    gemmConfig = other.gemmConfig;
+    metadata_ = other.metadata_;
+
+    bool complete = true;
+    std::unordered_map<const BasicBlock*, BasicBlock*> copies;
+    for (const BasicBlock& block : other) {
+        BasicBlock* copy = createBasicBlock(block.getLabel());
+        copies.emplace(&block, copy);
+        for (const IRBase& ir : block) {
+            if (IRBase* cloned = ir.clone())
+                copy->appendIR(cloned);
+            else
+                complete = false;
+        }
+    }
+    for (const BasicBlock& block : other) {
+        BasicBlock* copy = copies.at(&block);
+        for (const BasicBlock* succ : block.getSuccessors()) copy->addSuccessor(copies.at(succ));
+        for (const BasicBlock* pred : block.getPredecessors())
+            copy->addPredecessor(copies.at(pred));
+    }
+    return complete;
+}
+
+void Function::eraseBlock(BasicBlock& block) {
+    clearAttachedSSA();
+    const auto after = std::next(BasicBlockList::iterator(&block));
+    BasicBlock* next = after == basicBlocks.end() ? nullptr : &*after;
+    for (BasicBlock* pred : block.getPredecessors()) {
+        if (next == nullptr || pred == &block || pred == next) continue;
+        std::vector<BasicBlock*>& succs = pred->getSuccessors();
+        if (std::find(succs.begin(), succs.end(), next) != succs.end()) continue;
+        const auto edge = std::find(succs.begin(), succs.end(), &block);
+        if (edge == succs.end()) continue;
+        *edge = next;
+        next->addPredecessor(pred);
+    }
+    removePredecessorEdges(block);
+    removeSuccessorEdges(block);
+    block.erase();
 }
 
 SSAArena& Function::ssaArena() {

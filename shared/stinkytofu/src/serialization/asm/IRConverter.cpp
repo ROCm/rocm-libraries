@@ -23,26 +23,32 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
+#include "DirectiveTags.hpp"
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 
 namespace stinkytofu {
 StinkyIRConverter::StinkyIRConverter() : arch({12, 5, 0}) {}
 
 StinkyIRConverter::StinkyIRConverter(const std::array<int, 3>& targetArch) : arch(targetArch) {}
 
-static void convertInstruction(AsmIRBuilder& irBuilder,
-                               const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch) {
+/// Build one parsed instruction. Returns false, with an error in \p diagnostics,
+/// when \p arch has no instruction for it and nothing was inserted.
+static bool convertInstruction(AsmIRBuilder& irBuilder,
+                               const std::unique_ptr<ParsedInstruction>& inst, GfxArchID arch,
+                               std::vector<Diagnostic>& diagnostics) {
     if (inst->isLabel) {
-        StinkyInstruction* labelInst = irBuilder.createLabel(inst->opcodeStr);
+        StinkyInstruction* labelInst = irBuilder.createLabel(inst->opcodeStr, inst->alignment);
         if (labelInst && !inst->comment.empty())
             labelInst->addModifier<CommentData>(CommentData{inst->comment});
-        return;
+        return true;
     }
 
     // "FENCE" is the mnemonic printed by AsmPrinter; "scheduling_fence" is the
@@ -50,6 +56,7 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
     // Fences carry no modifiers — they are hard region boundaries with no tokens.
     if (inst->opcodeStr == "FENCE" || inst->opcodeStr == "scheduling_fence") {
         irBuilder.createFence();
+        return true;
     }
 
     if (inst->opcodeStr == "asm_directive") {
@@ -59,14 +66,15 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
         const bool hasPayload = inst->srcRegs.size() > 1 &&
                                 inst->srcRegs[1].dataType == StinkyRegister::Type::LiteralString;
 
-        // RawAsmParser::makeTextBlock encodes pass-through text as
-        //   srcRegs[0] = "TEXTBLOCK", srcRegs[1] = raw text (with trailing '\n').
-        // The "TEXTBLOCK" sentinel is not part of the directive name; route the
-        // raw text into AsmDirective::value so the emitter prints it verbatim.
-        if (hasName && inst->srcRegs[0].literalValue == "TEXTBLOCK") {
-            d->kind = AsmDirectiveKind::TEXTBLOCK;
+        // RawAsmParser::makeTextBlock and the printer encode a directive the
+        // emitter writes as its text as srcRegs[0] = tag, srcRegs[1] = that text
+        // (a TEXTBLOCK's keeps its trailing '\n'). The tag is not a directive
+        // name; the text goes to AsmDirective::value so it emits verbatim.
+        for (const auto& [kind, tag] : kTextDirectiveTags) {
+            if (!hasName || inst->srcRegs[0].literalValue != tag) continue;
+            d->kind = kind;
             if (hasPayload) d->value = inst->srcRegs[1].literalValue;
-            return;
+            return true;
         }
 
         if (hasName) {
@@ -91,21 +99,25 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
             d->value = inst->srcRegs[2].literalValue;
         }
         if (!inst->comment.empty()) d->comment = inst->comment;
-        return;
+        return true;
     }
 
-    auto opcode = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+    auto opcode = findMnemonicIsaOpcode(inst->opcodeStr, arch);
     if (opcode == GFX::INVALID) {
-        std::cerr << "Error: No ISA opcode found for mnemonic " << inst->opcodeStr << " in arch gfx"
-                  << static_cast<int>(arch) << "\n";
-        return;
+        diagnostics.emplace_back(
+            Diagnostic::Level::Error, DiagId::UnknownMnemonic,
+            "Unknown mnemonic '" + inst->opcodeStr + "' for " + getArchName(arch), inst->line,
+            inst->column);
+        return false;
     }
     const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
 
     if (hwInstDesc == nullptr) {
-        std::cerr << "Warning: No hardware instruction descriptor found for opcode " << opcode
-                  << " in arch gfx" << static_cast<int>(arch) << "\n";
-        return;
+        diagnostics.emplace_back(
+            Diagnostic::Level::Error, DiagId::NoHardwareDescriptor,
+            "No hardware descriptor for '" + inst->opcodeStr + "' on " + getArchName(arch),
+            inst->line, inst->column);
+        return false;
     }
 
     StinkyInstruction* stinkyInst = irBuilder.create(hwInstDesc);
@@ -120,6 +132,7 @@ static void convertInstruction(AsmIRBuilder& irBuilder,
     }
 
     if (!inst->comment.empty()) stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
+    return true;
 }
 
 StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
@@ -132,76 +145,127 @@ StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string&
     if (!result.parsedFunction || result.parsedFunction->blocks.empty())
         return StinkyErrorCode::PARSE_ERROR;
 
-    func.clear();
-    func.setName(result.parsedFunction->funcName);
-
-    std::unordered_map<std::string, BasicBlock*> blockMap;
-
-    for (auto& parsedBlock : result.parsedFunction->blocks) {
-        BasicBlock* bb = func.createBasicBlock(parsedBlock->blockId);
-        blockMap[parsedBlock->blockId] = bb;
-
-        AsmIRBuilder irBuilder(*bb, arch);
-        for (auto& inst : parsedBlock->instructions) {
-            convertInstruction(irBuilder, inst, arch);
-        }
-    }
-
-    // Wire successors
-    for (size_t i = 0; i < result.parsedFunction->blocks.size(); ++i) {
-        ParsedBlock& parsedBlock = *result.parsedFunction->blocks[i];
-        BasicBlock* bb = blockMap[parsedBlock.blockId];
-        if (!bb) continue;
-
-        for (const std::string& succId : parsedBlock.successorIds) {
-            std::string key = succId;
-            if (!key.empty() && key[0] == '^') key = key.substr(1);
-            BasicBlock* succ = blockMap[key];
-            if (succ) {
-                bb->addSuccessor(succ);
-                succ->addPredecessor(bb);
-            }
-        }
-    }
-
-    return StinkyErrorCode::SUCCESS;
+    std::vector<Diagnostic> diagnostics;
+    const StinkyErrorCode code =
+        populateFunctionFromParsed(*result.parsedFunction, func, arch, diagnostics);
+    for (const Diagnostic& diagnostic : diagnostics) std::cerr << diagnostic.format() << "\n";
+    return code;
 }
 
-StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(ParsedFunction& parsedFunc,
-                                                              Function& func, GfxArchID arch) {
+/// Add the names \p block's instructions refer to: literal operands, and the
+/// `mod.label` target a long branch carries. Directive text and labels are not
+/// references.
+static void addReferencedNames(const ParsedBlock& block, std::unordered_set<std::string>& names) {
+    for (const auto& inst : block.instructions) {
+        if (inst->isLabel || inst->opcodeStr == "asm_directive") continue;
+        for (const StinkyRegister& reg : inst->srcRegs) {
+            if (reg.dataType == StinkyRegister::Type::LiteralString) names.insert(reg.literalValue);
+        }
+        auto label = inst->modifiers.find("mod.label");
+        if (label == inst->modifiers.end()) continue;
+        auto target = label->second.find("label");
+        if (target != label->second.end()) names.insert(target->second);
+    }
+}
+
+/// Whether \p body starts with a `name:` line naming the block \p blockId,
+/// which is then that block's own label.
+static bool spellsOwnLabel(const ParsedBlock& body, const std::string& blockId) {
+    const auto& insts = body.instructions;
+    return !insts.empty() && insts.front()->isLabel && insts.front()->opcodeStr == blockId;
+}
+
+StinkyErrorCode StinkyIRConverter::populateFunctionFromParsed(
+    ParsedFunction& parsedFunc, Function& func, GfxArchID arch,
+    std::vector<Diagnostic>& diagnostics) {
     if (parsedFunc.blocks.empty()) return StinkyErrorCode::PARSE_ERROR;
 
     func.clear();
     func.setName(parsedFunc.funcName);
 
+    bool lost = false;
     std::unordered_map<std::string, BasicBlock*> blockMap;
+    std::unordered_set<std::string> referenced;
+    for (const auto& parsedBlock : parsedFunc.blocks) addReferencedNames(*parsedBlock, referenced);
 
     for (auto& parsedBlock : parsedFunc.blocks) {
         BasicBlock* bb = func.createBasicBlock(parsedBlock->blockId);
         blockMap[parsedBlock->blockId] = bb;
 
         AsmIRBuilder irBuilder(*bb, arch);
+        // A block is a label when its header says so or an instruction names it,
+        // as in LLVM, where every block a branch reaches carries a label.
+        if (!spellsOwnLabel(*parsedBlock, parsedBlock->blockId) &&
+            (parsedBlock->isLabel || referenced.count(parsedBlock->blockId) != 0))
+            irBuilder.createLabel(parsedBlock->blockId, parsedBlock->labelAlignment);
         for (auto& inst : parsedBlock->instructions) {
-            convertInstruction(irBuilder, inst, arch);
+            if (!convertInstruction(irBuilder, inst, arch, diagnostics)) lost = true;
         }
     }
 
-    for (size_t i = 0; i < parsedFunc.blocks.size(); ++i) {
-        ParsedBlock& parsedBlock = *parsedFunc.blocks[i];
-        BasicBlock* bb = blockMap[parsedBlock.blockId];
-        if (!bb) continue;
+    for (const auto& parsedBlock : parsedFunc.blocks) {
+        BasicBlock* bb = blockMap[parsedBlock->blockId];
 
-        for (const std::string& succId : parsedBlock.successorIds) {
+        for (const std::string& succId : parsedBlock->successorIds) {
             std::string key = succId;
             if (!key.empty() && key[0] == '^') key = key.substr(1);
-            BasicBlock* succ = blockMap[key];
-            if (succ) {
-                bb->addSuccessor(succ);
-                succ->addPredecessor(bb);
+            auto succ = blockMap.find(key);
+            if (succ == blockMap.end()) {
+                diagnostics.emplace_back(
+                    Diagnostic::Level::Error, DiagId::UnknownSuccessor,
+                    "Successor '" + succId + "' of block '^" + parsedBlock->blockId +
+                        "' is not a block in this function",
+                    parsedBlock->successorsLine, parsedBlock->successorsColumn);
+                lost = true;
+                continue;
             }
+            bb->addSuccessor(succ->second);
+            succ->second->addPredecessor(bb);
         }
     }
 
+    return lost ? StinkyErrorCode::CONVERT_ERROR : StinkyErrorCode::SUCCESS;
+}
+
+StinkyErrorCode StinkyIRConverter::replaceBlockBody(const ParsedBlock& body, BasicBlock& block,
+                                                    GfxArchID arch,
+                                                    std::vector<Diagnostic>& diagnostics) {
+    Function* func = block.getParent();
+    if (func == nullptr) return StinkyErrorCode::CONVERT_ERROR;
+
+    Function scratch(func->getName());
+    BasicBlock* built = scratch.createBasicBlock(block.getLabel());
+    AsmIRBuilder irBuilder(*built, arch);
+    bool lost = false;
+    for (const auto& inst : body.instructions) {
+        if (!convertInstruction(irBuilder, inst, arch, diagnostics)) lost = true;
+    }
+    if (lost) return StinkyErrorCode::CONVERT_ERROR;
+
+    func->clearAttachedSSA();
+    discardDefUseAnalysis(*func);
+
+    const IRBase* kept = spellsOwnLabel(body, block.getLabel()) ? nullptr : ownLabel(block);
+    for (auto it = block.begin(); it != block.end();) {
+        if (&*it == kept)
+            ++it;
+        else
+            it = block.eraseIR(it);
+    }
+    while (!built->empty()) {
+        IRBase* node = &*built->begin();
+        built->removeIR(node);
+        block.appendIR(node);
+    }
+
+    std::unordered_set<std::string> referenced;
+    addReferencedNames(body, referenced);
+    for (BasicBlock& bb : *func) {
+        if (referenced.count(bb.getLabel()) == 0 || ownLabel(bb) != nullptr) continue;
+        AsmIRBuilder labelBuilder(bb, arch);
+        labelBuilder.setInsertionPoint(bb.begin());
+        labelBuilder.createLabel(bb.getLabel());
+    }
     return StinkyErrorCode::SUCCESS;
 }
 
