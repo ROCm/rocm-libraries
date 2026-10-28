@@ -76,7 +76,7 @@ namespace kernel_select
             else
                 unsetenv(m_name.c_str());
         }
-        scoped_env(const scoped_env&)            = delete;
+        scoped_env(const scoped_env&) = delete;
         scoped_env& operator=(const scoped_env&) = delete;
     };
 
