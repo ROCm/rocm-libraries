@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    init_c_wmma=True,
+                    cluster_dim=(4, 4, 1),
                 ),
                 "not implemented yet",
             ),
@@ -435,6 +435,20 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         )
         self.assertIn("db3", smoke.kernel_name())
         self.assertIn("llvm.amdgcn.tensor.load.to.lds", llvm)
+
+    def test_step6_10_init_c_wmma_emits_undef_seed(self):
+        self.assertIn("step6_10_mxfp4_gemm", variant_names())
+        spec = variant_spec("step6_10_mxfp4_gemm", 128, 64, 512, tile_k=512)
+        self.assertTrue(spec.init_c_wmma)
+        self.assertEqual(is_valid_spec(spec), (True, "ok"))
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(spec, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("undef", llvm)
+        self.assertIn("initc", spec.kernel_name())
+        self.assertIn("llvm.amdgcn.wmma.scale.f32.32x16x128.f4", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)

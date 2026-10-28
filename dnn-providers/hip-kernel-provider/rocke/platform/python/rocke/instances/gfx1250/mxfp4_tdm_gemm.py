@@ -183,7 +183,6 @@ _LDS_SEGMENT_BYTES = 65536
 
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "init_c_wmma",
         "cluster_dim",
     }
 )
@@ -662,10 +661,17 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
             for atom_col in atom_cols
         ]
 
-    def _compute_tile(k0, parity, accumulators):
+    def _compute_tile(k0, parity, accumulators, *, seed_zero_c=None):
+        """Compute one DepthU tile.
+
+        ``seed_zero_c`` is an i1 IR value: when true (InitC WMMA), the first
+        WMMA in this tile uses ``zero_vec_f32`` as C; subsequent atoms/tiles
+        reuse the accumulator. Pass ``None`` to always reuse ``accumulators``.
+        """
         a_buffer, b_buffer, a_scale_buf, b_scale_buf = _buffer_offsets(parity)
         out = list(accumulators)
         inner_ks = list(range(0, spec.tile_k, _ATOM_K))
+        use_seed = seed_zero_c is not None
         # HalfPLR-style A local-read prefetch: load the next K-step A
         # fragments before the current WMMA cluster consumes them.
         a_prefetch = None
@@ -728,20 +734,35 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
                         b_scale = _pack_b_scale_lds(b_scale_buf, b_col, inner_k)
                     else:
                         b_scale = _pack_b_scale_global(b.add(block_n, b_col), group0)
+                    if use_seed:
+                        c_in = b.select(
+                            seed_zero_c,
+                            b.zero_vec_f32(_ACCUMULATORS_PER_ATOM),
+                            out[index],
+                        )
+                    else:
+                        c_in = out[index]
                     out[index] = b.mma(
                         _WmmaScaleF4Atom(),
                         a_frag,
                         b_frag,
-                        out[index],
+                        c_in,
                         a_scale,
                         b_scale,
                     )
+            # Only the first WMMA atom of the first K-step should seed C.
+            use_seed = False
+            seed_zero_c = None
         return out
 
-    accumulators = [
-        b.zero_vec_f32(_ACCUMULATORS_PER_ATOM)
-        for _ in range(spec.wave_repeat_m * spec.wave_repeat_n)
-    ]
+    n_acc = spec.wave_repeat_m * spec.wave_repeat_n
+    if spec.init_c_wmma:
+        # Undef placeholders; first MMA seeds C with zero_vec_f32 (InitC).
+        accumulators = [
+            b.undef_vec(F32, _ACCUMULATORS_PER_ATOM) for _ in range(n_acc)
+        ]
+    else:
+        accumulators = [b.zero_vec_f32(_ACCUMULATORS_PER_ATOM) for _ in range(n_acc)]
 
     _issue_tdm(c0, c0)
     _prefetch_gl2(c0)
@@ -768,14 +789,19 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
         b.s_barrier_bare()
         _issue_tdm(b.add(k0, b.const_i32(spec.tile_k)), next_parity)
         _prefetch_gl2(b.add(k0, b.const_i32(spec.tile_k)))
-        updated = _compute_tile(k0, parity, carried[1:])
+        seed = b.cmp_eq(k0, c0) if spec.init_c_wmma else None
+        updated = _compute_tile(k0, parity, carried[1:], seed_zero_c=seed)
         b.scf_yield(next_parity, *updated)
 
     final_parity = loop.results[0]
     b.s_wait_tensorcnt(0)
     b.s_waitcnt(lgkmcnt=0)
     b.s_barrier_bare()
-    final_accumulators = _compute_tile(upper, final_parity, loop.results[1:])
+    # Seed on the tail tile only when the dynamic-K loop did not run (K==tile_k).
+    seed_tail = b.cmp_eq(upper, c0) if spec.init_c_wmma else None
+    final_accumulators = _compute_tile(
+        upper, final_parity, loop.results[1:], seed_zero_c=seed_tail
+    )
 
     for rm, atom_row in enumerate(atom_rows):
         for rn, atom_col in enumerate(atom_cols):

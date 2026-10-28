@@ -112,6 +112,7 @@ silicon bench harness (timings outside the repo).
 | `step6_7_mxfp4_gemm` | + `lds_segment_interleave` (parity→64KiB segment) | `bad=0` (YAML MacroTile rejected: slot >64KiB) |
 | `step6_8_mxfp4_gemm` | + `lds_segment_b_rotate` (odd-wave B N±8) | `bad=0` (same YAML gate as 6.7) |
 | `step6_9_mxfp4_gemm` | + `tdm_plus_lds_buf` (auto depth 3 when slot fits) | `bad=0` (smoke depth=3; YAML stays invalid under interleave) |
+| `step6_10_mxfp4_gemm` | + `init_c_wmma` (first MMA seeds C=0; acc starts undef) | `bad=0` |
 
 ## Deferred controls
 
