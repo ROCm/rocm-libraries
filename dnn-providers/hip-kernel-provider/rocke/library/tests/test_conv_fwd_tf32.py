@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from dataclasses import replace
 
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
@@ -396,6 +397,44 @@ class TestConvFwdTf32Isa(unittest.TestCase):
                 scratch = re.search(r"\.private_segment_fixed_size:\s+(\d+)", notes)
                 if scratch:
                     self.assertEqual(int(scratch.group(1)), 0, "TF32 kernel spills")
+
+
+class TestConvFwdTf32Backend(unittest.TestCase):
+    """The C++ conv builder has no TF32 path, so the backend never hands it a
+    TF32 spec: ``cpp`` lowers through Python (recorded as a fallback), ``both``
+    reports the known gap, and neither returns a non-TF32 kernel."""
+
+    _CASES = (("gfx950", 16, 32, "16x16x32.bf16"), ("gfx942", 16, 8, "16x16x8.xf32"))
+
+    def test_cpp_lowers_tf32_through_python(self):
+        from rocke.core import backend as bk
+
+        for arch, m, k, mfma in self._CASES:
+            with self.subTest(arch=arch):
+                bk.reset_cpp_fallbacks()
+                with mock.patch.dict(os.environ, {"ROCKE_CPP_QUIET_FALLBACK": "1"}):
+                    res = bk.lower_conv_implicit_gemm(
+                        _spec(m, k), arch=arch, backend="cpp"
+                    )
+                self.assertEqual(res.backend, bk.BACKEND_PYTHON)
+                self.assertIn(f"llvm.amdgcn.mfma.f32.{mfma}", res.llvm_text)
+                self.assertTrue(
+                    any("mma_dtype" in why for _, why in bk.cpp_fallbacks()),
+                    bk.cpp_fallbacks(),
+                )
+
+    def test_strict_cpp_refuses_tf32(self):
+        from rocke.core import backend as bk
+
+        with mock.patch.dict(os.environ, {"ROCKE_CPP_STRICT": "1"}):
+            with self.assertRaisesRegex(bk.BackendError, "mma_dtype"):
+                bk.lower_conv_implicit_gemm(_spec(16, 32), arch="gfx950", backend="cpp")
+
+    def test_both_reports_the_gap(self):
+        from rocke.core import backend as bk
+
+        with self.assertRaises(bk.BackendCoverageGap):
+            bk.lower_conv_implicit_gemm(_spec(16, 32), arch="gfx950", backend="both")
 
 
 if __name__ == "__main__":
