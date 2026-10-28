@@ -203,7 +203,7 @@ fi
 if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     echo "=== Generating ragged bundles ==="
 
-    # Ragged (packed RFC-0014 BSHD), uniform S_max blocks, no seq-lens
+    # Ragged (packed RFC-0014 BSHD), deterministic varied per-batch lengths (generator default), no seq-lens
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_nomask_ragged"
     generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
         --q-dims 3 2 256 128 --v-dims 3 2 256 128 --seed 42 --attn-scale "$SCALE_D128"

@@ -15,7 +15,7 @@ Supported, fully composable operation axes:
   - causal mask:  none, top_left, bottom_right
   - sliding window: --window-left / --window-right
   - GROUP mode:   --seq-lens-q / --seq-lens-kv (actual per-batch valid lengths)
-  - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd)
+  - ragged:       --ragged-offsets (RFC 0014 packed BSHD; requires --layout bshd); without --seq-lens-* the per-batch lengths are deterministic and unequal
   - LSE output:   --stats (adds tensor uid=4)
 
 Any combination of the above may be applied in a single invocation (e.g. fp8 +
@@ -76,7 +76,14 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #         mma_core_mode is "unset" for bf16/fp16 and "fp8_e4m3" for fp8 (never
 #         "float"); it is the MMA operand precision, and a float request on
 #         16-bit or fp8 inputs is a mismatch that ASM_SDPA_ENGINE declines (see #12844)
-GENERATOR_VERSION = "1.4.0"
+# 1.5.0 — --ragged-offsets without --seq-lens-* now emits deterministic unequal
+#         per-batch Q/KV lengths (varied_seqlens) packed with no padding, instead of
+#         uniform S_max blocks. The Q/K/V/O/offset tensors and ragged_physical_lens of
+#         such bundles change; graph JSON is unchanged. The 4 checked-in ragged
+#         bundles are regenerated with 1.5.0; bundles from 1.4.0 keep recording 1.4.0.
+#         --ragged-offsets with --stats is rejected: the dense LSE reference holds -inf
+#         past each batch's valid length, which the bundle verifier rejects.
+GENERATOR_VERSION = "1.5.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -119,6 +126,15 @@ SDPA_SEQ_AXIS = 2
 # seq_lens so a bundle can catch a kernel that derives lengths from the offsets
 # instead of reading the seq_len tensor (RFC 0014 §2.3 padding).
 RAGGED_PAD_ROWS = 8
+
+# Ragged bundles without --seq-lens-* use unequal lengths: batch 0 keeps the full
+# S_max; batch b >= 1 takes VARIED_Q_PER_MILLE[(b - 1) % 5] thousandths of S_q (at
+# least 1). Every KV length is its Q length plus VARIED_KV_EXTRA_PER_MILLE[b % 5]
+# thousandths of S_kv, capped at S_kv, so kv >= q in every batch (bottom-right causal
+# never fully masks a row). Integer arithmetic only: the result depends on
+# (B, S_q, S_kv) alone.
+VARIED_Q_PER_MILLE = (330, 510, 130, 770, 250)
+VARIED_KV_EXTRA_PER_MILLE = (0, 250, 480, 120, 600)
 
 
 def compute_contiguous_strides(dims):
@@ -184,6 +200,25 @@ def physical_seqlens(valid_lens, s_max):
     valid seq_lens while staying within the padded dense block (RFC 0014).
     """
     return [min(s_max, v + RAGGED_PAD_ROWS) for v in valid_lens]
+
+
+def varied_seqlens(batch, s_q, s_kv):
+    """Deterministic unequal per-batch (q_lens, kv_lens) for ragged-only bundles."""
+    q_lens = [s_q] + [
+        max(1, s_q * VARIED_Q_PER_MILLE[(b - 1) % len(VARIED_Q_PER_MILLE)] // 1000)
+        for b in range(1, batch)
+    ]
+    kv_lens = [
+        min(
+            s_kv,
+            q
+            + s_kv
+            * VARIED_KV_EXTRA_PER_MILLE[b % len(VARIED_KV_EXTRA_PER_MILLE)]
+            // 1000,
+        )
+        for b, q in enumerate(q_lens)
+    ]
+    return q_lens, kv_lens
 
 
 def build_mask(s_q, s_kv, causal, window_left, window_right):
@@ -751,6 +786,14 @@ def generate_forward_bundle(
     # Mode is derived: GROUP when both seq-lens are given, RAGGED when
     # --ragged-offsets is set; the two may combine (ragged + seq-lens).
     has_seq_lens = seq_lens_q is not None and seq_lens_kv is not None
+    # Ragged without seq-lens: lengths come from the ragged offsets alone, so use
+    # deterministic unequal lengths (see varied_seqlens) packed without padding.
+    varied = ragged and seq_lens_q is None and seq_lens_kv is None
+    varied_lens_q, varied_lens_kv = (
+        varied_seqlens(B, S_q, S_kv) if varied else (None, None)
+    )
+    ref_lens_q = varied_lens_q if varied else seq_lens_q
+    ref_lens_kv = varied_lens_kv if varied else seq_lens_kv
 
     is_fp8 = dtype == "fp8"
     if not is_fp8 and dtype not in DTYPE_MAP:
@@ -808,6 +851,19 @@ def generate_forward_bundle(
             "--ragged-offsets requires --layout bshd (RFC 0014 packed memory is "
             "sequence-outermost within a batch, with a single sequence stride)"
         )
+    if ragged and stats:
+        errors.append(
+            "--ragged-offsets does not support --stats: the dense [B, H, S, 1] LSE "
+            "reference holds -inf in the rows past each batch's valid length, which "
+            "verify_golden_bundles.py rejects, and ASM_SDPA_ENGINE declines ragged "
+            "graphs with stats"
+        )
+    if varied and varied_lens_q == varied_lens_kv:
+        errors.append(
+            f"ragged bundles without --seq-lens-q/--seq-lens-kv use deterministic unequal "
+            f"lengths, but B={B}, S_q={S_q}, S_kv={S_kv} gives equal Q and KV lengths "
+            f"{varied_lens_q}; use B >= 2 and a larger S_max"
+        )
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -828,6 +884,8 @@ def generate_forward_bundle(
         f"group={has_seq_lens and not ragged}, stats={stats}"
     )
     print(f"  layout={layout}, ragged={ragged}")
+    if varied:
+        print(f"  ragged lens: q={varied_lens_q} kv={varied_lens_kv}")
     print(f"  Scale: {attn_scale:.10f}, Seed: {seed}")
 
     rng = torch.Generator().manual_seed(seed)
@@ -855,7 +913,7 @@ def generate_forward_bundle(
     keep_mask = build_mask(S_q, S_kv, causal, window_left, window_right)
 
     try:
-        if has_seq_lens:
+        if ref_lens_q is not None:
             O, lse = _compute_group_forward(
                 Q_compute,
                 K_compute,
@@ -866,8 +924,8 @@ def generate_forward_bundle(
                 causal,
                 window_left,
                 window_right,
-                seq_lens_q,
-                seq_lens_kv,
+                ref_lens_q,
+                ref_lens_kv,
                 o_torch_dtype,
                 want_lse=stats,
             )
@@ -889,12 +947,18 @@ def generate_forward_bundle(
 
     # Physical (packed) block rows per batch drive both pack_ragged and the
     # ragged_offset aux tensors so ragged_offset[B] matches the packed buffer
-    # size. When seq-lens are present they add small trailing padding (capped at
-    # S_max); without seq-lens the blocks are the full dense S_max (uniform).
-    valid_q = seq_lens_q if has_seq_lens else [S_q] * B
-    valid_kv = seq_lens_kv if has_seq_lens else [S_kv] * B
-    physical_q = physical_seqlens(valid_q, S_q) if ragged else None
-    physical_kv = physical_seqlens(valid_kv, S_kv) if ragged else None
+    # size. With seq-lens the blocks add small trailing padding (capped at
+    # S_max); without them the blocks are exactly the varied valid lengths.
+    valid_q = ref_lens_q if ref_lens_q is not None else [S_q] * B
+    valid_kv = ref_lens_kv if ref_lens_kv is not None else [S_kv] * B
+    # Without seq_len tensors the kernel reads lengths from ragged_offset spacing, so a
+    # block must be exactly its valid length (no pad rows).
+    physical_q = (
+        (valid_q if varied else physical_seqlens(valid_q, S_q)) if ragged else None
+    )
+    physical_kv = (
+        (valid_kv if varied else physical_seqlens(valid_kv, S_kv)) if ragged else None
+    )
     if ragged and has_seq_lens:
         # RFC 0014 §4.11.4 sentinel: kernels may leave in-block pad rows
         # undefined, so comparators skip NaN golden positions.
@@ -1107,7 +1171,8 @@ def main():
     parser.add_argument(
         "--stats",
         action="store_true",
-        help="Enable LSE output tensor (uid=4, shape [B, H_q, S_q, 1], dtype FP32)",
+        help="Enable LSE output tensor (uid=4, shape [B, H_q, S_q, 1], dtype FP32). "
+        "Not supported with --ragged-offsets.",
     )
     parser.add_argument(
         "--layout",
@@ -1121,9 +1186,10 @@ def main():
         action="store_true",
         dest="ragged",
         help="Emit a packed RFC-0014 ragged bundle (BSHD) with a ragged_offset aux "
-        "tensor per primary. Requires --layout bshd. Optional --seq-lens-q/"
-        "--seq-lens-kv add compact per-batch padding (needs max seq_len < S_max); "
-        "without them blocks are full uniform S_max.",
+        "tensor per primary. Requires --layout bshd. Without --seq-lens-q/"
+        "--seq-lens-kv the per-batch lengths are deterministic and unequal "
+        "(varied_seqlens) and blocks are packed without padding. With them, "
+        "per-batch padding is added (needs max seq_len < S_max).",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min", type=float, default=-1.0, dest="min_val")

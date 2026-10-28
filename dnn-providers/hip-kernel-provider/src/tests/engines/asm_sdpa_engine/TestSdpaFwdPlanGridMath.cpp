@@ -245,6 +245,37 @@ TEST(TestSdpaFwdPlanGridMath, GroupHd192x128CausalUsesTgDivOne)
     EXPECT_EQ(lp.tuneOpt, 0U);
 }
 
+// AITER applies tg_div=1 only to group hd192x128 on gfx942; gfx950 keeps tgDiv=2.
+TEST(TestSdpaFwdPlanGridMath, GroupHd192x128Gfx950CausalUsesTgDivTwo)
+{
+    auto p = makeHd192x128Gfx950Params();
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    p.seqLenQ = 1024U;
+    p.tileSizeQo = 128U;
+    // qTiles = ceil(1024/128) = 8; tgDiv = 2 (not the gfx942 exception); gdz = 4.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // nhead
+    EXPECT_EQ(lp.gridDimY, 2U); // batch
+    EXPECT_EQ(lp.gridDimZ, 4U);
+    EXPECT_EQ(lp.blockDimX, 256U);
+    EXPECT_EQ(lp.tuneOpt, 5U);
+}
+
+TEST(TestSdpaFwdPlanGridMath, GroupHd128Gfx950CausalUsesTgDivTwo)
+{
+    auto p = makeHd128Params();
+    p.archString = "gfx950";
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    // qTiles = ceil(2048/256) = 8; tgDiv = 2; gdz = 4.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // nhead
+    EXPECT_EQ(lp.gridDimY, 2U); // batch
+    EXPECT_EQ(lp.gridDimZ, 4U);
+    EXPECT_EQ(lp.blockDimX, 512U);
+}
+
 // =============================================================================
 // tune_opt tests
 // =============================================================================

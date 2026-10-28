@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
@@ -394,6 +395,26 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
                                                                   /*withStats=*/true),
                                            {"q", "k", "v", "o", "stats"}),
                    "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
+         false},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
+                                      false,
+                                      /*withStats=*/true),
+                   "Dense Q, K, V, O with stats (baseline for the stats-only ragged case)"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph({4, 8, 256, 128},
+                                                              {4, 8, 256, 128},
+                                                              DataType::BFLOAT16,
+                                                              DataType::FLOAT,
+                                                              false,
+                                                              false,
+                                                              /*withStats=*/true),
+                                           {"stats"}),
+                   "Dense Q, K, V, O with only STATS ragged -> STATS is an unsupported ragged "
+                   "tensor"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
@@ -432,12 +453,15 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
             graph.tensors.push_back(std::move(offset));
         });
     };
-    const auto withQoOffset = [](const std::function<void(TensorAttributesT&)>& mutate) {
-        return mutateGraph(createRaggedBshdSdpaFwdGraph(),
-                           [&](GraphT& graph) { mutate(findTensor(graph, "qo_ragged_offset")); });
-    };
 
-    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
+    // Mutates one ragged offset tensor of an otherwise valid group-mode graph.
+    const auto withOffset
+        = [](const std::string& offsetName, const std::function<void(TensorAttributesT&)>& mutate) {
+              return mutateGraph(createRaggedBshdSdpaFwdGraph(),
+                                 [&](GraphT& graph) { mutate(findTensor(graph, offsetName)); });
+          };
+
+    std::vector<std::pair<GraphTest, bool>> applicabilityTests
         = {{GraphTest{createRaggedBshdSdpaFwdGraph(), "Baseline group mode"}, true},
            {GraphTest{withMultiplier("q", 1), "Q multiplier 1 (element-unit offsets)"}, false},
            {GraphTest{withMultiplier("q", 128), "Q multiplier != Q sequence stride"}, false},
@@ -445,27 +469,51 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
            {GraphTest{withMultiplier("v", 128), "V multiplier != V sequence stride"}, false},
            {GraphTest{withMultiplier("o", 128), "O multiplier != O sequence stride"}, false},
            {GraphTest{withOwnOffset("o"), "O does not share Q's ragged offset tensor"}, false},
-           {GraphTest{withOwnOffset("v"), "V does not share K's ragged offset tensor"}, false},
-           {GraphTest{withQoOffset([](TensorAttributesT& t) { t.data_type = DataType::INT64; }),
-                      "INT64 ragged offset tensor"},
-            false},
-           {GraphTest{withQoOffset([](TensorAttributesT& t) {
-                          t.dims = {4, 1, 1, 1};
-                          t.strides = {1, 1, 1, 1};
-                      }),
-                      "Ragged offset tensor with B rather than B+1 entries"},
-            false},
-           {GraphTest{withQoOffset([](TensorAttributesT& t) { t.virtual_ = true; }),
-                      "Virtual ragged offset tensor"},
-            false},
-           {GraphTest{mutateGraph(createRaggedBshdSdpaFwdGraph(),
-                                  [](GraphT& graph) {
-                                      const int64_t missingUid = maxTensorUid(graph) + 1;
-                                      findTensor(graph, "q").ragged_offset_tensor_uid = missingUid;
-                                      findTensor(graph, "o").ragged_offset_tensor_uid = missingUid;
-                                  }),
-                      "Ragged offset uid missing from the tensor map"},
-            false}};
+           {GraphTest{withOwnOffset("v"), "V does not share K's ragged offset tensor"}, false}};
+
+    // The Q/O offset and the K/V offset are validated separately, so every defect is
+    // exercised on both. The graph has B = 4, so a valid offset tensor is [5, 1, 1, 1].
+    // Each dims/strides case violates exactly one clause of isTokenSeqstartTensor.
+    const std::vector<std::pair<std::string, std::vector<std::string>>> offsetTensors
+        = {{"qo_ragged_offset", {"q", "o"}}, {"kv_ragged_offset", {"k", "v"}}};
+    for(const auto& offsetTensor : offsetTensors)
+    {
+        const std::string& offsetName = offsetTensor.first;
+        const std::vector<std::string>& users = offsetTensor.second;
+        const auto addRejected
+            = [&](const std::string& defect, flatbuffers::FlatBufferBuilder&& graph) {
+                  std::string message = offsetName;
+                  message += ": ";
+                  message += defect;
+                  applicabilityTests.emplace_back(GraphTest{std::move(graph), message}, false);
+              };
+        const auto addShape = [&](const std::string& defect,
+                                  std::vector<int64_t> dims,
+                                  std::vector<int64_t> strides) {
+            addRejected(defect, withOffset(offsetName, [&](TensorAttributesT& t) {
+                            t.dims = dims;
+                            t.strides = strides;
+                        }));
+        };
+        addRejected("INT64", withOffset(offsetName, [](TensorAttributesT& t) {
+                        t.data_type = DataType::INT64;
+                    }));
+        addRejected("virtual",
+                    withOffset(offsetName, [](TensorAttributesT& t) { t.virtual_ = true; }));
+        addShape("B rather than B+1 entries", {4, 1, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[1] == 2", {5, 2, 1, 1}, {1, 1, 1, 1});
+        addShape("dims[2] == 2", {5, 1, 2, 1}, {1, 1, 1, 1});
+        addShape("dims[3] == 2", {5, 1, 1, 2}, {1, 1, 1, 1});
+        addShape("stride[0] == 2", {5, 1, 1, 1}, {2, 1, 1, 1});
+        addRejected("uid missing from the tensor map",
+                    mutateGraph(createRaggedBshdSdpaFwdGraph(), [&](GraphT& graph) {
+                        const int64_t missingUid = maxTensorUid(graph) + 1;
+                        for(const auto& user : users)
+                        {
+                            findTensor(graph, user).ragged_offset_tensor_uid = missingUid;
+                        }
+                    }));
+    }
 
     for(const auto& [test, applicability] : applicabilityTests)
     {

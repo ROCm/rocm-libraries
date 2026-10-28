@@ -33,7 +33,7 @@ Generated from the committed support claims (11174 graphs, 486 catalogued option
 
 | Op group (options) | [gfx942-linux](#gpu-gfx942-linux) | [gfx90a-linux](#gpu-gfx90a-linux) | [gfx950-linux](#gpu-gfx950-linux) |
 |---|---|---|---|
-| **[Attention](#group-attention)** (61) | 🟡 16% | ❌ | 🟡 22% |
+| **[Attention](#group-attention)** (61) | 🟡 18% | ❌ | 🟡 26% |
 | **[Batchnorm](#group-batchnorm)** (54) | 🟡 79% | 🟡 79% | 🟡 79% |
 | **[Block scale](#group-block-scale)** (39) | ❌ | ❌ | ❌ |
 | **[Convolution](#group-convolution)** (51) | 🟡 76% | 🟡 76% | 🟡 76% |
@@ -59,7 +59,7 @@ An op appears under an engine that claims at least one of its graphs somewhere.
 
 | Op (options) | [gfx90a](#gpu-gfx90a-linux)<br>L | [gfx942](#gpu-gfx942-linux)<br>L | [gfx950](#gpu-gfx950-linux)<br>L | [gfx1030](#gpu-gfx1030-windows)<br>W | [gfx1100](#gpu-gfx1100-linux)<br>L | [gfx1101](#gpu-gfx1101-linux)<br>L | [gfx1101](#gpu-gfx1101-windows)<br>W | [gfx1150](#gpu-gfx1150-linux)<br>L | [gfx1151](#gpu-gfx1151-linux)<br>L | [gfx1151](#gpu-gfx1151-windows)<br>W | [gfx1200](#gpu-gfx1200-linux)<br>L | [gfx1201](#gpu-gfx1201-linux)<br>L |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **[Sdpa](#op-sdpa)** (36) | ❌ | 🟡 27% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[Sdpa](#op-sdpa)** (36) | ❌ | 🟡 30% | 🟡 25% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### HIPBLASLT_ENGINE
 
