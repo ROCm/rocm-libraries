@@ -208,15 +208,16 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
            kTwoTowerSolvers.end();
 }
 
-// Solvers held out of the perf-config picker regardless of a shipped model.
+// Architectures a shipped model covers but the picker does not use yet.
 //
-// ConvHipConv's model was trained on an older hipconv config vocabulary and
-// over-selects a slow config, regressing OOTB. hipconv's config descriptors (and
-// kernel set) have since changed and are now version-tagged, so the model must be
-// retrained on current-hipconv data before it can be trusted. Gated here, rather
-// than by dropping the section from lgbm_pcfg.bin, so re-enabling is a one-line
-// revert once a retrained model ships.
-bool HeldOutOfPicker(const std::string& solver_name) { return solver_name == "ConvHipConv"; }
+// ConvHipConv on gfx1250: on held-out gfx1250 data the model retrained on hipconv v0.4 configs
+// gains 0.3% over the solver's default config (geomean, mean of 5 training seeds, 4 of them
+// within noise), and it has not been checked on gfx1250 hardware. Gated here, rather than by
+// dropping the gfx1250 buckets from lgbm_pcfg.bin, so enabling it is a one-line change.
+bool HeldOutOfPicker(const std::string& solver_name, const std::string& gfx_id)
+{
+    return solver_name == "ConvHipConv" && gfx_id.starts_with("gfx1250");
+}
 
 } // namespace
 
@@ -224,13 +225,6 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
                                     const Handle& handle)
 {
-    if(HeldOutOfPicker(solver_name))
-    {
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name
-                                    << " held out of the picker pending a retrained model");
-        return {};
-    }
-
     const LgbmPcfgMetadata* meta_ptr = nullptr;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.MetadataGet");
@@ -248,6 +242,12 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
         gfx_id = handle.GetDeviceName();
+    }
+
+    if(HeldOutOfPicker(solver_name, gfx_id))
+    {
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " held out of the picker on " << gfx_id);
+        return {};
     }
 
     // Two-tower KTN takes precedence where it applies: defer to the solver's own

@@ -27,6 +27,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
 
+### Changed
+* [Conv] The AI performance-config picker again selects `ConvHipConv` configs on gfx950, using a
+  model retrained on hipconv v0.4 configurations. On gfx1250 the solver keeps its default config
+  until the model is validated on gfx1250 hardware.
+
 ### Removed
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
 * Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
