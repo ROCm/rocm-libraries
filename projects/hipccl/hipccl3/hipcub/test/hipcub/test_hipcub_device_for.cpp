@@ -25,6 +25,9 @@
 // required hipcub headers
 #include <hipcub/device/device_for.hpp>
 
+// required test headers
+#include "test_utils.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <new>
@@ -855,30 +858,6 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
 // ForEachInExtents only enables when the cccl mdspan extension is enabled
 #if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
 
-template<class TestParams1, class TestParams2>
-struct HipcubTestParamsMerge
-{};
-
-template<class... Params1, class... Params2>
-struct HipcubTestParamsMerge<::testing::Types<Params1...>, ::testing::Types<Params2...>>
-{
-    using type = ::testing::Types<Params1..., Params2...>;
-};
-
-template<class TestParamsFirst, class... TestParams>
-struct HipcubTestParamsMergeAll
-{
-    using type = typename HipcubTestParamsMerge<
-        TestParamsFirst,
-        typename HipcubTestParamsMergeAll<TestParams...>::type>::type;
-};
-
-template<class TestParamsFirst>
-struct HipcubTestParamsMergeAll<TestParamsFirst>
-{
-    using type = TestParamsFirst;
-};
-
 template<class ExtentsType, bool UseGraphs = false>
 struct DeviceForEachInExtentsParams
 {
@@ -902,7 +881,7 @@ using HipcubDeviceForEachInExtentsParamGenerator
                        DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3, 4>>,
                        DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 2, 5, 3, 4>>>;
 
-using HipcubDeviceForEachInExtentsTestsParams = typename HipcubTestParamsMergeAll<
+using HipcubDeviceForEachInExtentsTestsParams = typename test_utils::merge_sequence<
     HipcubDeviceForEachInExtentsParamGenerator<std::int16_t>,
     HipcubDeviceForEachInExtentsParamGenerator<uint16_t>,
     HipcubDeviceForEachInExtentsParamGenerator<int32_t>,
