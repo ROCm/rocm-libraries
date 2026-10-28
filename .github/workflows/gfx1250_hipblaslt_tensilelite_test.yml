@@ -129,8 +129,16 @@ jobs:
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
       # Unset: the strict-mode check falls back to the runner name's -gpuN.
+      # --memory caps this container so a runaway build or test step is OOM-killed in
+      # its own cgroup instead of taking the host, and the other runners' jobs, with
+      # it: RUNNERS_PER_HOST=4 of these share one machine. --memory-swap must be set
+      # to the same value; left unset, Docker allows swap up to 2x --memory and the
+      # cap does not hold. Note --ipc host puts /dev/shm outside this cgroup, so
+      # shared-memory allocations are not covered.
       options: >-
         -e ROCR_VISIBLE_DEVICES
+        --memory 440g
+        --memory-swap 440g
         --ipc host
         --ulimit memlock=-1:-1
         --ulimit nofile=1048576:1048576
