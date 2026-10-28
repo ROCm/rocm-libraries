@@ -47,6 +47,9 @@ from hkp_pack import provenance_sidecar  # noqa: E402
 
 MANIFEST_NAME = "manifest.json"
 REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
+GFX11_REFERENCE_CSV = (
+    Path(__file__).resolve().parent / "data" / "sdpa_bwd_gfx11_reference.csv"
+)
 # ELF64 header offset of e_flags, and its EF_AMDGPU_MACH field.
 E_FLAGS_OFFSET = 48
 EF_AMDGPU_MACH = 0x0FF
@@ -297,7 +300,7 @@ def _pin_problems(manifests: list[Path], reference: dict[str, str]) -> list[str]
 def test_merged_rows_are_the_reference_rows() -> None:
     # A re-pinned sha256 under an unchanged Spec does not change the op's inputs digest,
     # so --check cannot stale the shipped descriptors; this compares the rows with the reference.
-    manifests = sorted(CONTENT.glob(f"sdpa_bwd_merged/gfx*/{MANIFEST_NAME}"))
+    manifests = sorted(CONTENT.glob(f"sdpa_bwd_merged/gfx950/{MANIFEST_NAME}"))
     if not manifests:
         pytest.skip(f"no sdpa_bwd_merged content under {CONTENT}")
     reference = _reference_rows(REFERENCE_CSV, "merged,")
@@ -311,12 +314,70 @@ SPLIT_KINDS = {"sdpa_bwd_prep": "prep,", "sdpa_bwd_dkdv": "dkdv,", "sdpa_bwd_dq"
 
 @pytest.mark.parametrize("op", SPLIT_KINDS)
 def test_split_rows_are_the_reference_rows(op: str) -> None:
-    manifests = sorted(CONTENT.glob(f"{op}/gfx*/{MANIFEST_NAME}"))
+    manifests = sorted(CONTENT.glob(f"{op}/gfx950/{MANIFEST_NAME}"))
     if not manifests:
-        pytest.skip(f"no {op} content under {CONTENT}")
+        pytest.skip(f"no {op} gfx950 content under {CONTENT}")
     reference = _reference_rows(REFERENCE_CSV, SPLIT_KINDS[op])
     problems = _pin_problems(manifests, reference)
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
+
+
+def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
+    """Where a gfx11-generic manifest differs from the S1 reference: every row and companion is a reference spec, ships the
+    reference's sha256 (a gfx11 object is its pin byte for byte), and no reference spec of the op's kinds is missing.
+    """
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    problems = []
+    shipped = set()
+    for record in [*manifest["instances"], *manifest.get("companions", [])]:
+        spec = record["spec"]
+        shipped.add(spec)
+        if spec not in reference:
+            problems.append(f"{spec}: not a reference row")
+        elif record["sha256"] != reference[spec]:
+            problems.append(
+                f"{spec}: ships {record['sha256']}, the pin is {reference[spec]}"
+            )
+    for spec in sorted(set(reference) - shipped):
+        problems.append(f"ships no row for {spec}")
+    return problems
+
+
+@pytest.mark.parametrize("op", SPLIT_KINDS)
+def test_gfx11_split_rows_are_the_reference_pins(op: str) -> None:
+    path = CONTENT / op / "gfx11-generic" / MANIFEST_NAME
+    if not path.is_file():
+        pytest.skip(f"no {op} gfx11-generic content under {CONTENT}")
+    kinds = [SPLIT_KINDS[op]] + (["dbias_reduce,"] if op == "sdpa_bwd_dq" else [])
+    reference = {
+        spec: sha
+        for kind in kinds
+        for spec, sha in _reference_rows(GFX11_REFERENCE_CSV, kind).items()
+    }
+    problems = _gfx11_pin_problems(path, reference)
+    assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
+
+
+def test_a_gfx11_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / MANIFEST_NAME
+    path.write_text(
+        json.dumps(
+            {
+                "instances": [{"spec": "dq,bf16,16", "sha256": "a" * 64}],
+                "companions": [{"spec": "dbias_reduce,bf16", "sha256": "b" * 64}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reference = {
+        "dq,bf16,16": "c" * 64,
+        "dbias_reduce,bf16": "b" * 64,
+        "dq,bf16,32": "d" * 64,
+    }
+    assert _gfx11_pin_problems(path, reference) == [
+        f"dq,bf16,16: ships {'a' * 64}, the pin is {'c' * 64}",
+        "ships no row for dq,bf16,32",
+    ]
 
 
 def _synthetic_split_op(

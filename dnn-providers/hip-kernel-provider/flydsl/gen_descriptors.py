@@ -119,6 +119,12 @@ SLOTTED_VERSION = "1.1"
 SPLIT_ENGINE = "sdpa_bwd_split"
 SPLIT_SLOT_OPS = ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq")
 SPLIT_SHARED_WORKSPACE = "ws.bytes"
+# The slot ops whose rows may be multi-launch: a dQ row that stores dB through a standalone reduce object (a
+# manifest ``companions`` entry) is authored in its own pack, on its own dispatch (RFC 0021: a pack's launch set is
+# uniform). The launches of such a row, in launch order, and the document that names the dispatch.
+SPLIT_REDUCE_OPS = ("sdpa_bwd_dq",)
+REDUCE_LAUNCHES = ("dq", "dbias_reduce")
+REDUCE_SUFFIX = "reduce"
 
 
 def slot_of(op: str) -> str | None:
@@ -195,6 +201,7 @@ GRAPH_DETERMINED_FIELDS = {
     "gqa_pack",
     "sink",
     "bias_stage",
+    "grid",
 }
 
 # Fields that say when an object is preferred rather than how it was built: the
@@ -286,6 +293,9 @@ class KernelEntry(NamedTuple):
     path: Path
     data: bytes
     record: dict[str, Any]
+    # The standalone reduce object of a row that stores dB through one (its manifest ``companions`` entry
+    # plus the path of the object), else None.
+    companion: dict[str, Any] | None = None
 
 
 def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
@@ -332,7 +342,9 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             )
         # An object the manifest no longer names is left behind when an instance is
         # renamed or dropped; the generators write objects but never delete them.
+        companions = manifest.get("companions", [])
         named = {record["file"] for record in manifest["instances"]}
+        named |= {companion["file"] for companion in companions}
         stray = sorted(
             p.name for p in manifest_path.parent.glob("*.hsaco") if p.name not in named
         )
@@ -342,6 +354,28 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 f"name, e.g. '{stray[0]}'. Delete them: they are left over from a "
                 "previous generation and would ship unreferenced."
             )
+        by_dtype: dict[str, dict[str, Any]] = {}
+        for companion in companions:
+            path = manifest_path.parent / companion["file"]
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"{manifest_path} names companion '{companion['file']}' but {path} does not exist"
+                )
+            data = path.read_bytes()
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != companion["sha256"]:
+                raise ValueError(
+                    f"{path}: SHA256 {actual} does not match the {companion['sha256']} "
+                    f"recorded in {manifest_path}. Regenerate the object rather than "
+                    "editing the manifest."
+                )
+            where = str(path)
+            verify_arch(describe(data, where, companion["symbol"]), arch, where)
+            verify_generic(data, arch, where)
+            dtype = companion["spec"].split(",")[1]
+            if dtype in by_dtype:
+                raise ValueError(f"{manifest_path}: two companions for dtype {dtype}")
+            by_dtype[dtype] = {**companion, "path": path}
         for record in manifest["instances"]:
             path = manifest_path.parent / record["file"]
             if not path.is_file():
@@ -361,7 +395,19 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             where = str(path)
             verify_arch(describe(data, where, record["symbol"]), arch, where)
             verify_generic(data, arch, where)
-            entries.append(KernelEntry(op, path, data, record))
+            companion = None
+            if companions and record["knobs"].get("reduce_symbol"):
+                companion = by_dtype.get(record["dtype"])
+                if (
+                    companion is None
+                    or companion["symbol"] != record["knobs"]["reduce_symbol"]
+                ):
+                    raise ValueError(
+                        f"{path}: names reduce symbol {record['knobs']['reduce_symbol']!r}, "
+                        f"the {record['dtype']} companion is "
+                        f"{companion and companion['symbol']!r}"
+                    )
+            entries.append(KernelEntry(op, path, data, record, companion))
     return entries
 
 
@@ -422,6 +468,7 @@ class OpDescriptors:
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
+        self.reduce_udd_id = _uuid(f"udd/{op}/{REDUCE_SUFFIX}")
         self.ued_id = _uuid(f"ued/{engine}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
 
@@ -459,7 +506,22 @@ class OpDescriptors:
                 field["default_value"] = 256
             kmd_fields.append(field)
 
+        # The dispatch of the multi-launch rows of a slot (``SPLIT_REDUCE_OPS``): a shared document, authored with
+        # every arch's pack of the op whether or not that arch has such rows.
+        reduce_udd = (
+            {
+                f"{self.stem}_{REDUCE_SUFFIX}.udd.json": {
+                    "version": DESCRIPTOR_VERSION,
+                    "id": self.reduce_udd_id,
+                    "name": f"flydsl {self.op} {REDUCE_SUFFIX} dispatch",
+                    "dispatch_symbol": f"{self.symbols}_{REDUCE_SUFFIX}.dispatch",
+                }
+            }
+            if self.op in SPLIT_REDUCE_OPS
+            else {}
+        )
         return {
+            **reduce_udd,
             f"{self.stem}.kmd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.kmd_id,
@@ -577,6 +639,7 @@ def _arch_documents(
     kernel, and the packaging probes take only inline UKDs.
     """
     kernels: list[dict[str, Any]] = []
+    reduce_kernels: list[dict[str, Any]] = []
     # A generic target's objects run on every member, so the pack and each UKD
     # list them all and the packer ships the bytes into each member's shard.
     runs_on = list(families.members(arch))
@@ -591,48 +654,78 @@ def _arch_documents(
         for key, value in record["knobs"].items():
             metadata[key] = _metadata_value(key, value)
 
-        kernels.append(
-            {
-                "version": DESCRIPTOR_VERSION,
-                "id": ukd_id,
-                "name": record["name"],
-                "arch": runs_on,
-                "kernel_source": {
+        document = {
+            "version": DESCRIPTOR_VERSION,
+            "id": ukd_id,
+            "name": record["name"],
+            "arch": runs_on,
+        }
+        if entry.companion is None:
+            document["kernel_source"] = {
+                "kind": "hsaco",
+                # Beside the KDP: the packer resolves an inline kernel's file
+                # relative to the folder of the KDP that holds it.
+                "file": record["file"],
+                "symbol": record["symbol"],
+            }
+        else:
+            # A dB-storing row whose dBias reduce is a standalone object: two launches
+            # (`REDUCE_LAUNCHES`), the row's own object and the companion's.
+            if record["knobs"]["reduce_symbol"] != entry.companion["symbol"]:
+                raise HkpPackError(
+                    f"{record['name']}: reduce_symbol {record['knobs']['reduce_symbol']!r} "
+                    f"is not the symbol {entry.companion['symbol']!r} of its dbias_reduce source"
+                )
+            document["sources"] = {
+                REDUCE_LAUNCHES[0]: {
                     "kind": "hsaco",
-                    # Beside the KDP: the packer resolves an inline kernel's file
-                    # relative to the folder of the KDP that holds it.
                     "file": record["file"],
                     "symbol": record["symbol"],
                 },
-                "metadata": metadata,
-                "priority": record["priority"],
+                REDUCE_LAUNCHES[1]: {
+                    "kind": "hsaco",
+                    "file": entry.companion["file"],
+                    "symbol": entry.companion["symbol"],
+                },
             }
+        document["metadata"] = metadata
+        document["priority"] = record["priority"]
+        (kernels if entry.companion is None else reduce_kernels).append(document)
+
+    def pack(suffix: str, dispatch: str, descriptors: list[dict[str, Any]]):
+        kdp = {
+            "version": DESCRIPTOR_VERSION if op.slot is None else SLOTTED_VERSION,
+            "id": _uuid(f"kdp/{op.op}/{arch}{suffix}"),
+            "name": f"flydsl {op.op} kernels ({arch})",
+            "arch": runs_on,
+            "matchers": [op.umd_id],
+            "engine": op.ued_id,
+            "dispatch": dispatch,
+            "provenance": op.provenance(),
+            "kernelDescriptors": descriptors,
+        }
+        if op.slot is not None:
+            kdp["slot"] = op.slot
+        return kdp
+
+    documents = {f"{op.stem}.kdp.json": pack("", op.udd_id, kernels)}
+    if reduce_kernels:
+        if op.op not in SPLIT_REDUCE_OPS:
+            raise HkpPackError(f"{op.op} has no multi-launch dispatch for its rows")
+        documents[f"{arch}.{REDUCE_SUFFIX}.kdp.json"] = pack(
+            f"/{REDUCE_SUFFIX}", op.reduce_udd_id, reduce_kernels
         )
-
-    kdp = {
-        "version": DESCRIPTOR_VERSION if op.slot is None else SLOTTED_VERSION,
-        "id": _uuid(f"kdp/{op.op}/{arch}"),
-        "name": f"flydsl {op.op} kernels ({arch})",
-        "arch": runs_on,
-        "matchers": [op.umd_id],
-        "engine": op.ued_id,
-        "dispatch": op.udd_id,
-        "provenance": op.provenance(),
-        "kernelDescriptors": kernels,
-    }
-    if op.slot is not None:
-        kdp["slot"] = op.slot
-    return {f"{op.stem}.kdp.json": kdp}
+    return documents
 
 
-def _require_injective_slot(op: OpDescriptors, kdp: dict[str, Any]) -> None:
-    """A slot's KMD tuples are unique among its kernels.
+def _require_injective_slot(op: OpDescriptors, kdps: list[dict[str, Any]]) -> None:
+    """A slot's KMD tuples are unique among its kernels, across the packs of the slot.
 
     The loader drops a slotted pack whose metadata tuple repeats one in its slot, so a
     generator that emitted two such rows would ship neither silently.
     """
     seen: dict[str, str] = {}
-    for kernel in kdp["kernelDescriptors"]:
+    for kernel in (k for kdp in kdps for k in kdp["kernelDescriptors"]):
         key = json.dumps(kernel["metadata"], sort_keys=True)
         if key in seen:
             raise HkpPackError(
@@ -642,11 +735,15 @@ def _require_injective_slot(op: OpDescriptors, kdp: dict[str, Any]) -> None:
         seen[key] = kernel["name"]
 
 
-def _require_disjoint_ids(slots: dict[str, dict[str, Any]]) -> None:
+def _require_disjoint_ids(slots: dict[str, list[dict[str, Any]]]) -> None:
     """No kernel id (nor pack id) appears in two slots of the engine, or twice in one."""
     owner: dict[str, str] = {}
-    for slot, kdp in slots.items():
-        ids = [kdp["id"], *(kernel["id"] for kernel in kdp["kernelDescriptors"])]
+    for slot, kdps in slots.items():
+        ids = [
+            identity
+            for kdp in kdps
+            for identity in (kdp["id"], *(k["id"] for k in kdp["kernelDescriptors"]))
+        ]
         for identity in ids:
             if identity in owner:
                 raise HkpPackError(
@@ -705,14 +802,18 @@ def build_documents(
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
     slot_ops: dict[str, OpDescriptors] = {}
-    slot_packs: dict[str, dict[str, Any]] = {}
+    slot_packs: dict[str, list[dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
         op = OpDescriptors(op_name, _fields_for_op(op_entries))
         folders[Path(op_name)] = op.documents()
         folders[Path(op_name) / arch] = pack = _arch_documents(op_entries, op, arch)
         if op.slot is not None:
             slot_ops[op_name] = op
-            slot_packs[op.slot] = pack[f"{op.stem}.kdp.json"]
+            slot_packs[op.slot] = [
+                document
+                for name, document in pack.items()
+                if name.endswith(".kdp.json")
+            ]
             _require_injective_slot(op, slot_packs[op.slot])
 
     if slot_ops:

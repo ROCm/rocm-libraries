@@ -66,6 +66,42 @@ def _entry(
     return gd.KernelEntry(op=op, path=Path("unused"), data=b"", record=record)
 
 
+GFX11 = "gfx11-generic"
+GFX11_REDUCE = "fmha_bwd_dbias_reduce_gfx11_kernel_0"
+
+
+def _gfx11_rows() -> list[gd.KernelEntry]:
+    """gfx11 rows: every slot has a plain row, and the dq op has a bias row whose reduce is a companion object."""
+    rows = [_entry(op, f"{op}_a", grid="g", has_bias=0) for op in SLOT_OPS]
+    companion = {
+        "hash": "aa5ed4007ca3",
+        "spec": f"dbias_reduce,bf16,32,plain,bk,0,0,tail,0,1;arch={GFX11}",
+        "file": "aa5ed4007ca3.hsaco",
+        "symbol": GFX11_REDUCE,
+        "sha256": "0" * 64,
+        "path": Path("unused"),
+    }
+    rows[2] = _entry(
+        "sdpa_bwd_dq", "sdpa_bwd_dq_a", grid="g", has_bias=0, reduce_symbol=""
+    )
+    rows.append(
+        gd.KernelEntry(
+            op="sdpa_bwd_dq",
+            path=Path("unused"),
+            data=b"",
+            record=_entry(
+                "sdpa_bwd_dq",
+                "sdpa_bwd_dq_bias",
+                grid="g",
+                has_bias=1,
+                reduce_symbol=GFX11_REDUCE,
+            ).record,
+            companion=companion,
+        )
+    )
+    return rows
+
+
 def _rows() -> list[gd.KernelEntry]:
     """Two rows per slot; the dq rows carry the combined dBias reduce symbol."""
     rows = []
@@ -105,11 +141,16 @@ def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
     for op, slot in zip(SLOT_OPS, SLOTS):
         docs = folders[Path(op)]
         # No UED, ranker or UHD beside a slot's KMD: the engine owns those.
-        assert sorted(docs) == [
-            f"flydsl_{op}.kmd.json",
-            f"flydsl_{op}.udd.json",
-            f"flydsl_{op}_kernel_match.umd.json",
-        ]
+        # The dQ op also carries the dispatch of its multi-launch rows (`dq_reduce`), shared by every arch.
+        extra = ["flydsl_sdpa_bwd_dq_reduce.udd.json"] if op == "sdpa_bwd_dq" else []
+        assert sorted(docs) == sorted(
+            [
+                f"flydsl_{op}.kmd.json",
+                f"flydsl_{op}.udd.json",
+                f"flydsl_{op}_kernel_match.umd.json",
+                *extra,
+            ]
+        )
         kmd = docs[f"flydsl_{op}.kmd.json"]
         assert (
             next(s for s in ued["slots"] if s["name"] == slot)["metadata"] == kmd["id"]
@@ -222,11 +263,12 @@ def test_no_kernel_id_is_shared_across_slots() -> None:
 def test_an_id_reused_across_slots_is_refused() -> None:
     folders = _split()
     packs = {slot: _kdp(folders, op) for op, slot in zip(SLOT_OPS, SLOTS)}
+    with_reduce = {slot: [kdp] for slot, kdp in packs.items()}
     packs["dq"]["kernelDescriptors"][0]["id"] = packs["prep"]["kernelDescriptors"][0][
         "id"
     ]
     with pytest.raises(gd.HkpPackError, match="slot 'prep' and slot 'dq'"):
-        gd._require_disjoint_ids(packs)
+        gd._require_disjoint_ids(with_reduce)
 
 
 def test_a_duplicate_metadata_tuple_in_a_slot_is_an_error_not_a_drop() -> None:
@@ -350,3 +392,68 @@ def test_a_slot_ops_inputs_move_no_other_ops_digest(tmp_path: Path) -> None:
         path.write_bytes(path.read_bytes() + b"\n# edited\n")
     after = digests()
     assert [op for op in before if before[op] != after[op]] == ["sdpa_bwd_dq"]
+
+
+def test_a_dq_row_with_a_companion_ships_in_its_own_pack_on_the_reduce_dispatch() -> (
+    None
+):
+    folders = gd.build_documents(_gfx11_rows(), GFX11)
+    pack = folders[Path("sdpa_bwd_dq") / GFX11]
+    assert sorted(pack) == ["flydsl_sdpa_bwd_dq.kdp.json", f"{GFX11}.reduce.kdp.json"]
+    plain, reduce = (
+        pack["flydsl_sdpa_bwd_dq.kdp.json"],
+        pack[f"{GFX11}.reduce.kdp.json"],
+    )
+    shared = folders[Path("sdpa_bwd_dq")]
+    udd = shared["flydsl_sdpa_bwd_dq_reduce.udd.json"]
+    assert (
+        udd["dispatch_symbol"] == "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch"
+    )
+    assert plain["dispatch"] == shared["flydsl_sdpa_bwd_dq.udd.json"]["id"]
+    assert reduce["dispatch"] == udd["id"]
+    assert (reduce["slot"], reduce["version"]) == ("dq", "1.1")
+    assert reduce["id"] != plain["id"]
+    (single,) = [k for k in plain["kernelDescriptors"]]
+    assert "kernel_source" in single and "sources" not in single
+    (multi,) = reduce["kernelDescriptors"]
+    assert "kernel_source" not in multi
+    assert multi["sources"] == {
+        "dq": {
+            "kind": "hsaco",
+            "file": "sdpa_bwd_dq_bias.hsaco",
+            "symbol": "sym_sdpa_bwd_dq_bias",
+        },
+        "dbias_reduce": {
+            "kind": "hsaco",
+            "file": "aa5ed4007ca3.hsaco",
+            "symbol": GFX11_REDUCE,
+        },
+    }
+    assert (
+        multi["metadata"]["reduce_symbol"] == multi["sources"]["dbias_reduce"]["symbol"]
+    )
+
+
+def test_a_reduce_symbol_that_is_not_its_companions_is_refused() -> None:
+    rows = _gfx11_rows()
+    rows[-1].record["knobs"]["reduce_symbol"] = "another_kernel"
+    with pytest.raises(gd.HkpPackError, match="reduce_symbol"):
+        gd.build_documents(rows, GFX11)
+
+
+def test_a_gfx11_pack_with_a_reduce_row_passes_the_authoring_validator(
+    tmp_path: Path,
+) -> None:
+    folders = gd.build_documents(_gfx11_rows(), GFX11)
+    gd._write(tmp_path, folders)
+    assert gd._check(tmp_path, folders) == []
+    gd.load_flat_input(
+        tmp_path, GenericTargets.load(DEFAULT_TABLE_PATH), log=lambda *a, **k: None
+    )
+
+
+def test_every_arch_run_of_the_dq_op_authors_the_shared_reduce_dispatch() -> None:
+    gfx950 = _split()[Path("sdpa_bwd_dq")]
+    gfx11 = gd.build_documents(_gfx11_rows(), GFX11)[Path("sdpa_bwd_dq")]
+    name = "flydsl_sdpa_bwd_dq_reduce.udd.json"
+    assert gfx950[name] == gfx11[name]
