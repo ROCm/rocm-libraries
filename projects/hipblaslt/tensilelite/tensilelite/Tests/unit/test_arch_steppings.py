@@ -1368,7 +1368,7 @@ def _detectionReturning(monkeypatch, stdout, returncode=0):
     so a machine that happens to set one would otherwise change what these tests
     are measuring. Tests about the pins set them back.
     """
-    import Tensile.Common.Architectures as Arch
+    import tensilelite.Common.Architectures as Arch
 
     class _Proc:
         pass
@@ -3964,3 +3964,63 @@ def test_bare_and_xnack_minus_together_are_refused():
 )
 def test_combinations_with_one_capability_set_are_allowed(specs):
     applyArchCapOverrides(_iim_with_replay_on(), specs)
+
+
+# compilerTargetOf asks the compiler rather than consulting a table, so that the
+# stripping is a compatibility measure and not a permanent property of the
+# architecture: the day a toolchain accepts the qualified target, the spec must
+# reach it intact and behave exactly like gfx942:xnack- does today. These pin
+# that contract from both sides by standing in for the answer.
+
+
+def _withProbeAnswering(monkeypatch, accepted):
+    """Make the target-ID probe return `accepted(targetId)` without a compiler.
+
+    Returns the stand-in compiler path and the function under test, which this
+    module does not import at the top level.
+    """
+    import tensilelite.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "_targetIdAccepted", lambda compiler, targetId: accepted(targetId))
+    return "/stand-in/amdclang++", Arch.compilerTargetOf
+
+
+@pytest.mark.parametrize(
+    "spec", ["gfx1250:xnack-", f"{GFX1250_STRICT}:xnack-", "gfx942:xnack-"]
+)
+def test_a_toolchain_that_takes_the_qualified_target_keeps_it(monkeypatch, spec):
+    """Nothing in the tree has to change when the compiler gains the target."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: True)
+    assert compilerTargetOf(spec, compiler) == spec
+
+
+@pytest.mark.parametrize(
+    "spec,expected",
+    [
+        ("gfx1250:xnack-", GFX1250),
+        (f"{GFX1250_STRICT}:xnack-", GFX1250_STRICT),
+        ("gfx1250:sramecc+:xnack-", "gfx1250:sramecc+"),  # only the xnack token goes
+    ],
+)
+def test_a_toolchain_that_refuses_it_drops_only_the_xnack_token(monkeypatch, spec, expected):
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: "xnack" not in t)
+    assert compilerTargetOf(spec, compiler) == expected
+
+
+def test_a_target_refused_for_another_reason_stays_refused(monkeypatch):
+    """Dropping xnack has to be what makes it acceptable, or the spec is left as
+    given so the real compile reports the real error."""
+    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: False)
+    assert compilerTargetOf("gfx9999:xnack-", compiler) == "gfx9999:xnack-"
+
+
+def test_a_build_alias_never_consults_the_compiler(monkeypatch):
+    """An alias names its own compiler target, so the probe is not reached."""
+
+    def refuse_everything(compiler, targetId):
+        raise AssertionError("the probe should not run for a build alias")
+
+    import tensilelite.Common.Architectures as Arch
+
+    monkeypatch.setattr(Arch, "_targetIdAccepted", refuse_everything)
+    assert Arch.compilerTargetOf(GFX1250V0, "/stand-in/amdclang++") == GFX1250
