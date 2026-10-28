@@ -223,6 +223,10 @@ namespace
                     name << "_SAMX_32_UE8M0";
                 else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                     name << "_SAMX_32_UE8M0_32_8";
+                else if(isW4A16Scaling(arg.scaleA))
+                    name << "_SAG" << w4a16GroupSize(arg.scaleA)
+                         << (isW4A16ZeroPoint(arg.scaleA) ? "_ZP" : "")
+                         << (arg.int4_encoding ? "_U4" : "_S4");
 
                 if(arg.scaleB == hipblaslt_scaling_format::Scalar)
                     name << "_SB";
@@ -263,8 +267,9 @@ namespace
                     name << "_PLACE_" << arg.placement;
                 if(arg.integer_exact_pattern[0])
                     name << "_IE_" << arg.integer_exact_pattern;
-                // grouped gemm only supports ext
-                if(arg.use_ext || arg.grouped_gemm > 0)
+                if(arg.api_method == kApiMethodGroupedC)
+                    name << "_APIGroupedC";
+                else if(arg.use_ext || arg.grouped_gemm > 0)
                     name << "_APIExt";
                 if(arg.use_ext_setproblem)
                     name << "_APIExtSet";
@@ -286,7 +291,6 @@ namespace
 
     TEST_P(matmul_test, matmul)
     {
-        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         SKIP_UNLESS_SELECTED_BY_FILTER();
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
@@ -326,7 +330,6 @@ namespace
 
     TEST_P(rocroller_predicate_test, unrollXYK)
     {
-        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         // rocRoller has predicates that check the dimensions (M/N/K) must be
         // multiples of the work group sizes. This test set the K dimension
         // to not be a multiple, and thus we shall see failure.

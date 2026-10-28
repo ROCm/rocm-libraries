@@ -12,6 +12,13 @@ from __future__ import annotations
 
 from typing import Mapping, Tuple
 
+from kernels.common.attention_dense_decode import NONPERSIST_DECODES, PERSIST_DECODES
+from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+from kernels.gfx950.attention_dense import (
+    Gfx950AttentionDenseSpec,
+    gfx950_dense_tile_legality,
+)
+
 from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rules)
     KnobAxis,
     Knobs,
@@ -117,9 +124,14 @@ _GFX942_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_causal_mask_phase_split"),
 )
 
+# The K/V cache policy's base value follows the problem (``_kv_cache_policy_3d``).
+# Combinations the spec rejects (e.g. a K/V layout knob without paged fp16/bf16
+# K/V) are dropped.
 _3D_AXES: Tuple[KnobAxis, ...] = (
-    _flag("use_invariant_hoist"),
     _flag("use_wide_kv_load"),
+    _choices_axis("kv_cache_policy", ("stream", "all")),
+    _flag("use_kv_lds_swizzle"),
+    _flag("use_wave_page_id_load"),
 )
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
@@ -145,8 +157,16 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "num_kv_blocks",
         "use_sinks",
         "causal_bottom_right",
+        # A fact of the target GPU, not a tuning choice: the base spec keeps
+        # its default (8 XCDs).
+        "chiplet_num_xcds",
     }
 )
+# Problem fields only some arches' dense specs declare (the band's right bound).
+DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"right_bound"}),
+    "gfx942": frozenset(),
+}
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),
@@ -182,16 +202,25 @@ _GFX950_NUM_PERSISTENT_POLICIES = _NUM_PERSISTENT_MULTIPLES + (
     "gqa_pair_2phase",
     "work",
 )
-# gfx942 implements only the qb_major / hkv_major decodes.
+# gfx942 has no gqa_pair decodes, so none of their exact CTA counts.
 _GFX942_NUM_PERSISTENT_POLICIES = _NUM_PERSISTENT_MULTIPLES + ("work",)
 _GFX942_LDS_ROW_PADS = (0, 4, 8, 12, 16, 24, 32)
 _GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
 _GFX942_BLOCK_M = (32, 64, 128, 256, 512)
 _GFX942_BLOCK_N = (32, 64, 128, 256)
-# The gfx950 bodies implement 128- and 256-row query tiles (see
-# supports_attention_dense); the validator prunes block_n the tile cannot take.
-_GFX950_BLOCK_M = (128, 256)
-_GFX950_BLOCK_N = (32, 64, 128)
+# Derive the gfx950 block_m / block_n axes from gfx950_dense_tile_legality so
+# the axis and the LDS predicate are always in sync.  The legality function is
+# the single source of truth: the axes below, the supports_attention_dense gate,
+# and (via this import) the tuning sweep all reference the same budget model.
+_GFX950_LEGAL_TILES: dict = {
+    hs: gfx950_dense_tile_legality(head_size=hs) for hs in (64, 128)
+}
+_GFX950_BLOCK_M: tuple = tuple(
+    sorted({bm for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
+_GFX950_BLOCK_N: tuple = tuple(
+    sorted({bn for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
 
 
 def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
@@ -200,13 +229,20 @@ def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
     )
 
 
+def _decode_axis(name: str, registry: Mapping, supported) -> KnobAxis:
+    """``name`` over the registry's decodes (in registry order) that the arch's
+    spec accepts; ``auto`` is the default."""
+    return _values(name, "auto", tuple(d for d in registry if d in supported))
+
+
 # One axis per spec field. The PV scheduling knobs lead as enablers: IGLP needs
 # the manual fence and sched_group template off, and a manual one needs IGLP
 # off, so each can only be reached once the others are decided. Then
 # prerequisites-first: the tile sets the query-block count the CTA counts and
 # decodes are exact for, persist_decode's gqa_pair modes need an exact
-# num_persistent, interleave is read only on the resolved qb_major decode, and
-# the fence mask / DS-read count / rescale threshold follow their parents.
+# num_persistent, interleave is read only on the resolved qb_major decode,
+# nonpersist_decode only by the grid body, and the fence mask / DS-read count /
+# rescale threshold follow their parents.
 _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_sched_fence", None, (True, False), enabler=True),
     _values("pv_sched_group_template", None, (True, False), enabler=True),
@@ -214,12 +250,17 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _choices_axis("block_m", _GFX950_BLOCK_M),
     _choices_axis("block_n", _GFX950_BLOCK_N),
     _num_persistent_axis(_GFX950_NUM_PERSISTENT_POLICIES),
-    _values(
+    _decode_axis(
         "persist_decode",
-        "auto",
-        ("qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"),
+        PERSIST_DECODES,
+        Gfx950AttentionDenseSpec.supported_persist_decodes(),
     ),
     _flag("interleave"),
+    _decode_axis(
+        "nonpersist_decode",
+        NONPERSIST_DECODES,
+        Gfx950AttentionDenseSpec.supported_nonpersist_decodes(),
+    ),
     _values("lazy_rescale", True, (False,)),
     _values("lazy_rescale_threshold", 8.0, _DENSE_LAZY_THRESHOLDS),
     _values("pv_sched_fence_mask", 0, _SCHED_BARRIER_MASKS),
@@ -242,7 +283,8 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
 # limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
 # prerequisites-first: exp2 policy reads persistent, v_row_pad policy reads
 # block_n, a non-derived v_row_pad needs the swizzle off, interleave is read
-# only on the resolved qb_major decode, and iglp_mode / the PV fence follow iglp.
+# only on the resolved qb_major decode, nonpersist_decode only on the
+# non-persistent grid, and iglp_mode / the PV fence follow iglp.
 _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("use_cfvst", None, (True, False), enabler=True),
     _values("lds_row_pad", 8, _GFX942_LDS_ROW_PADS, enabler=True),
@@ -251,8 +293,17 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _choices_axis("block_m", _GFX942_BLOCK_M),
     _choices_axis("block_n", _GFX942_BLOCK_N),
     _num_persistent_axis(_GFX942_NUM_PERSISTENT_POLICIES),
-    _values("persist_decode", "auto", ("qb_major", "hkv_major")),
+    _decode_axis(
+        "persist_decode",
+        PERSIST_DECODES,
+        Gfx942AttentionDenseSpec.supported_persist_decodes(),
+    ),
     _flag("interleave"),
+    _decode_axis(
+        "nonpersist_decode",
+        NONPERSIST_DECODES,
+        Gfx942AttentionDenseSpec.supported_nonpersist_decodes(),
+    ),
     _values("use_v_swizzle", None, (True, False)),
     _values("v_row_pad", None, _GFX942_V_ROW_PADS),
     _values("use_exp2_fast", None, (True, False)),
@@ -265,6 +316,76 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("causal_diag_split", False, (True,)),
 )
 
+# RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never
+# varies: the head-width buckets, mask class, bias kind, score features, layout
+# and K/V storage all come from the request.
+WMMA_PROBLEM_FIELDS = frozenset(
+    {
+        "dtype",
+        "head_dim",
+        "head_dim_v",
+        "mask",
+        "bias",
+        "use_softcap",
+        "use_sinks",
+        "use_alibi",
+        "use_qq_bias",
+        "layout",
+        "page_block_size",
+        "kv_dtype",
+        "name",
+    }
+)
+# The policy spells every prefill knob out (``block_m`` and ``wave_pair``
+# included), so each axis offers every setting and the base-equal choice is
+# pruned; the validator drops a wave-pair setting the head widths or the family
+# cannot run (gfx11 splits any width above 128; the pair needs multiples of 32).
+_RDNA_WMMA_AXES: Tuple[KnobAxis, ...] = (
+    _choices_axis("block_m", (32, 64, 128)),
+    _choices_axis("wave_pair", (True, False)),
+    _choices_axis("block_n", (16, 32, 64)),
+    _choices_axis("waves_per_eu", (0, 1, 2, 4)),
+    _choices_axis("scheduler_strategy", (None, "max-ilp")),
+    _choices_axis("lazy_rescale", (True, False)),
+    _choices_axis("k_pad", (0, 8, 16)),
+    _choices_axis("v_pad", (0, 8, 16)),
+    _choices_axis("cta_order", ("hqb", "hbq")),
+)
+
+# RDNA WMMA split-KV decode (``WmmaFmhaDecodeSpec``) fields the space never
+# varies: the bucket, bias kind, score features, layout and K/V storage come
+# from the request; ``wmma_family`` records which family resolved the knobs.
+WMMA_DECODE_PROBLEM_FIELDS = frozenset(
+    {
+        "head_size",
+        "dtype",
+        "bias",
+        "softcap",
+        "sinks",
+        "alibi",
+        "qq_bias",
+        "kv_dtype",
+        "layout",
+        "page_block_size",
+        "name",
+    }
+)
+WMMA_DECODE_PATH_FIELDS = frozenset({"wmma_family"})
+# The policy resolves every decode knob per family and bucket
+# (``resolve_wmma_fmha_decode_spec``), so each axis offers every setting.
+_RDNA_WMMA_DECODE_AXES: Tuple[KnobAxis, ...] = (
+    _choices_axis("num_waves", (1, 2, 4, 8)),
+    _choices_axis("dv_split", (1, 2, 4)),
+    _choices_axis("q_mode", ("reg", "lds")),
+    _choices_axis("v_store_early", (True, False)),
+    _choices_axis("prefetch", (True, False)),
+    _choices_axis("lockstep", (True, False)),
+    _choices_axis("scheduler_strategy", (None, "max-ilp")),
+    _choices_axis("waves_per_eu", (0, 1, 2, 4)),
+    _choices_axis("fp8_cvt", (True, False)),
+    _choices_axis("tanh_fast", (True, False)),
+)
+
 # Axes cover every tuning field; ones an arch rejects are pruned at once.
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
@@ -273,6 +394,14 @@ _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx942", "3d"): _3D_AXES,
     ("gfx950", "dense"): _GFX950_DENSE_AXES,
     ("gfx942", "dense"): _GFX942_DENSE_AXES,
+    **{
+        (arch, path): axes
+        for arch in ("gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201")
+        for path, axes in (
+            ("wmma", _RDNA_WMMA_AXES),
+            ("wmma_decode", _RDNA_WMMA_DECODE_AXES),
+        )
+    },
 }
 
 # Knobs fixed by the geometry variant's codepath rather than enumerated.
@@ -325,6 +454,7 @@ _R4_HLPV = {
 _VDBUF = {"use_v_double_buffer": True}
 _VDBUF_STGW = {**_VDBUF, "use_staggered_iter_wait": True}
 _PROD_SCHED_BARRIER_MASKS = (0x0, 0x008, 0x108)
+_SWZ_WPID = {"use_kv_lds_swizzle": True, "use_wave_page_id_load": True}
 
 _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = {
     ("gfx950", "narrow"): (
@@ -423,13 +553,19 @@ _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = 
         for depth, seq in ((2, False), (3, False), (3, True))
     )
     + (("kvcp_nt", {"kv_cache_policy": "nt"}),),
+    # 3D: the K/V layout combinations the dispatcher picks on some problem
+    # (``_dispatch_3d_knobs`` leads each problem's production walk).
     ("gfx942", "splitkv"): (
         ("baseline", {}),
-        ("hoist", {"use_invariant_hoist": True}),
         ("widekv", {"use_wide_kv_load": True}),
-        ("hoist_widekv", {"use_invariant_hoist": True, "use_wide_kv_load": True}),
+        ("widekv_swz_wpid", {"use_wide_kv_load": True, **_SWZ_WPID}),
+        ("swz_wpid", _SWZ_WPID),
     ),
-    ("gfx950", "splitkv"): (("baseline", {}),),
+    ("gfx950", "splitkv"): (
+        ("baseline", {}),
+        ("wpid", {"use_wave_page_id_load": True}),
+        ("swz_wpid", _SWZ_WPID),
+    ),
 }
 # Production micro-axes layered on some stacks: padded K for the single-K
 # unaliased-Q stack, the sched_group_barrier interleave on three transposed

@@ -102,7 +102,7 @@ adding sched groups, etc.
 `raw.ptr.buffer.load.lds`, `cvt.pk.f32.fp8`, `s.waitcnt`, …) plus
 structural counts (load, store, fmul, fadd, fmuladd, br, phi).
 
-How it works: just `lower_kernel_to_llvm(kdef)` plus a small regex
+How it works: just `lower_kernel_to_llvm(kdef, arch="gfx950")` plus a small regex
 table. Faster than `probe_isa_inspect` because it doesn't shell out to
 `llvm-objdump` and doesn't pay the COMGR HSACO step.
 

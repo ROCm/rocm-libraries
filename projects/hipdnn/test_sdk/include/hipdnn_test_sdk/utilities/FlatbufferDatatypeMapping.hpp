@@ -228,6 +228,23 @@ constexpr hipdnn_flatbuffers_sdk::data_objects::DataType nativeTypeToDataType()
 template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
 using DataTypeToNative = decltype(datatypeToNative<DT>());
 
+// Native type for an SDPA attention-mask tensor. UNSET means "no mask": the placeholder
+// float is never read because the builder for the UNSET key always passes a null mask.
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
+struct MaskDataTypeToNativeImpl
+{
+    using type = DataTypeToNative<DT>;
+};
+
+template <>
+struct MaskDataTypeToNativeImpl<hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
+{
+    using type = float;
+};
+
+template <hipdnn_flatbuffers_sdk::data_objects::DataType DT>
+using MaskDataTypeToNative = typename MaskDataTypeToNativeImpl<DT>::type;
+
 template <typename T>
 using NativeToDataType = decltype(nativeTypeToDataType<T>());
 

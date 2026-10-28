@@ -121,8 +121,8 @@ def test_kda_warp_tiled_matches_reference(harness, batch, state_dtype):
 
 @requires_gfx950
 @pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
-@pytest.mark.parametrize("max_work,tile,spec_id", _TUNED_TILES_KDA)
-def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, spec_id, state_dtype):
+@pytest.mark.parametrize("max_work,tile", _TUNED_TILES_KDA)
+def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, state_dtype):
     """Every tile in the KDA table agrees with the independent reference, for
     each state width. f32 doubles the state bytes each lane moves, so it
     exercises a different load/store split."""
@@ -136,11 +136,11 @@ def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, spec_id, state
     out_err, state_err = harness["check"](spec, batch=16)
 
     assert out_err <= harness["TOL"], (
-        f"KDA {spec_id} ({tile}, max_work={max_work}, state {state_dtype}) "
+        f"KDA tile {tile} (max_work={max_work}, state {state_dtype}) "
         f"output error {out_err:.3e}"
     )
     assert state_err <= harness["TOL"], (
-        f"KDA {spec_id} ({tile}, max_work={max_work}, state {state_dtype}) "
+        f"KDA tile {tile} (max_work={max_work}, state {state_dtype}) "
         f"state error {state_err:.3e}"
     )
 
@@ -149,9 +149,9 @@ def test_every_kda_tuned_tile_is_correct(harness, max_work, tile, spec_id, state
 @pytest.mark.parametrize(
     "batch,expected_spec_id,expected_tile",
     [
-        (1, "kda_w128", (4, 16, 4)),
-        (8, "kda_w512", (1, 16, 4)),
-        (32, "kda_w_large", (2, 16, 1)),
+        (1, "kda_nw4_wtk16_bpv4", (4, 16, 4)),
+        (8, "kda_nw1_wtk16_bpv4", (1, 16, 4)),
+        (32, "kda_nw2_wtk16_bpv1", (2, 16, 1)),
     ],
 )
 def test_kda_dispatch_band_launches_selected_kernel(
@@ -171,11 +171,8 @@ def test_kda_dispatch_band_launches_selected_kernel(
             num_v_heads=32,
         )
     )
-    got_tile = (
-        result.spec.num_warps,
-        result.spec.warp_threads_k,
-        result.spec.blocks_per_v_dim,
-    )
+    spec = result.spec.kernel_spec
+    got_tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
     assert result.candidate.spec_id == expected_spec_id
     assert got_tile == expected_tile
 
@@ -186,9 +183,9 @@ def test_kda_dispatch_band_launches_selected_kernel(
         signature=result.signature,
     )
 
-    inp = harness["make_inputs"](result.spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](result.spec, inp)
-    values, _ = harness["prepare"](result.spec, inp, batch)
+    inp = harness["make_inputs"](spec, batch)
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)
