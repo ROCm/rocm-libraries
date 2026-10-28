@@ -41,7 +41,7 @@ _FLAT = dict(
 
 
 def _pack_configs():
-    """make_rocke_pack.py kernel_descriptors(): the GEMM family."""
+    """The GEMM family of hipTensor's rocKE kernel pack (its pack writers' descriptor tables)."""
     bodies = {
         "h16": ("RIW", "RIW_SK", "C3", "Q3_SK"),
         "x6": ("RIW", "RIW_SK", "C3"),

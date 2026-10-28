@@ -54,6 +54,16 @@ gets its own buffer resource; only the per-lane part -- rows plus the K rows of
 one tile for A / B, rows plus columns for C / D -- is a 32-bit buffer offset and
 must stay below 2^31 bytes (:meth:`GettF64Problem.addr_span_bytes`). The planner
 splits a contraction whose output tile space is larger into several launches.
+
+f32 / complex-f32 data (``GettF64Problem.dtype = "f32"``): the same kernel
+with f32 words: the f32 MFMA 16x16x4 atom of the catalog with an f32
+accumulator (IEEE f32 products, native f32 accumulation), f32 LDS tiles and
+fragments (one ``ds_read_b32``; complex ``ds_read_b64``), f32 alpha / beta and
+the epilogue in f32. Real operands contiguous along a run whose length is a
+multiple of 4 load 16 bytes per lane (4 f32), even runs 8 bytes; complex
+operands load one element (8 bytes) per lane. The f32 kernel takes the knobs
+both engines build (no ``split_k`` / ``split_serial`` and none of the Python-only
+schedule levers).
 """
 
 from __future__ import annotations
@@ -92,13 +102,39 @@ def f64_atom(arch: str):
     )
 
 
+def f32_atom(arch: str):
+    """The catalog's ``16x16x4`` f32 MMA atom of ``arch`` (None if it has none)."""
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except (KeyError, ValueError):
+        return None
+    return target.mma.op_for_shape(
+        family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
+    )
+
+
+def gett_atom(arch: str, dtype: str = "f64"):
+    """The ``16x16x4`` MMA atom of ``dtype`` ("f64" or "f32") on ``arch``."""
+    return f32_atom(arch) if dtype == "f32" else f64_atom(arch)
+
+
 def f64_gett_archs() -> Tuple[str, ...]:
     """Every catalog target with the f64 atom the kernel is built on."""
     return tuple(a for a in known_arches() if f64_atom(a) is not None)
 
 
+def f32_gett_archs() -> Tuple[str, ...]:
+    """Every catalog target with the f32 atom the f32 kernel is built on."""
+    return tuple(a for a in known_arches() if f32_atom(a) is not None)
+
+
 #: Targets whose MMA catalog has the f64 atom (read from the catalog).
 F64_GETT_ARCHS = f64_gett_archs()
+#: Targets whose MMA catalog has the f32 atom (read from the catalog).
+F32_GETT_ARCHS = f32_gett_archs()
+#: Data types of the kernel's words ("f64": f64 / complex f64, "f32": f32 /
+#: complex f32).
+GETT_DTYPES = ("f64", "f32")
 
 _MASK_OFFSET = -(1 << 31)  # 0x80000000 as a buffer byte offset: always out of range
 _MAX_SPAN = (1 << 31) - 16
@@ -139,6 +175,8 @@ class GettF64Problem:
     ``K`` and ``L`` are the extents of those index spaces. A kernel bakes them
     in as constants, unless it is built with ``runtime_sizes`` (then this
     problem is only the layout template, see :func:`runtime_template`).
+    ``dtype``: the word type of every operand, ``"f64"`` (f64 / complex f64)
+    or ``"f32"`` (f32 / complex f32).
     """
 
     M: int
@@ -160,6 +198,7 @@ class GettF64Problem:
     complex_: bool = False
     conj_a: bool = False
     conj_b: bool = False
+    dtype: str = "f64"
 
     def __post_init__(self):
         for name in ("a_m", "a_k", "b_n", "b_k", "d_m", "d_n", "a_l", "b_l", "d_l"):
@@ -169,8 +208,13 @@ class GettF64Problem:
                 object.__setattr__(self, name, _norm(getattr(self, name)))
 
     @property
+    def word_bytes(self) -> int:
+        """Bytes of one real word (an f64 or an f32)."""
+        return 4 if self.dtype == "f32" else 8
+
+    @property
     def elem_bytes(self) -> int:
-        return 16 if self.complex_ else 8
+        return self.word_bytes * (2 if self.complex_ else 1)
 
     def c_digits(self) -> Tuple[Digits, Digits, Digits]:
         return (
@@ -227,6 +271,8 @@ class GettF64Problem:
             return False, "C digits do not cover (M, N, L)"
         if (self.conj_a or self.conj_b) and not self.complex_:
             return False, "conjugation needs complex data"
+        if self.dtype not in GETT_DTYPES:
+            return False, f"dtype must be one of {GETT_DTYPES}, got {self.dtype!r}"
         return True, "ok"
 
 
@@ -245,13 +291,14 @@ def gemm_problem(
     complex_: bool = False,
     conj_a: bool = False,
     conj_b: bool = False,
+    dtype: str = "f64",
 ) -> GettF64Problem:
     """A (batched) strided GEMM ``D = alpha * A @ B^T + beta * C``.
 
     ``a_strides = (stride_m, stride_k)`` of ``A[M, K]``; ``b_strides =
     (stride_n, stride_k)`` of ``B[N, K]``; ``d_strides = (stride_m,
     stride_n)``. Any layout (row / column major, transposed) is a choice of
-    strides.
+    strides. ``dtype``: ``"f64"`` or ``"f32"`` words.
     """
     c_strides = c_strides or d_strides
     cbs = batch_strides[2] if c_batch_stride is None else c_batch_stride
@@ -275,12 +322,13 @@ def gemm_problem(
         complex_=complex_,
         conj_a=conj_a,
         conj_b=conj_b,
+        dtype=dtype,
     )
 
 
 @dataclass(frozen=True)
 class GettF64Spec:
-    """One f64 / cf64 GETT kernel.
+    """One f64 / cf64 GETT kernel (f32 / cf32 with ``problem.dtype = "f32"``).
 
     Tiling knobs: ``tile_m`` x ``tile_n`` per CTA, ``warps_m`` x
     ``warps_n`` waves (each owns a ``tile_m / warps_m`` x ``tile_n / warps_n``
@@ -493,12 +541,20 @@ class GettF64Spec:
         return 63 if side % 64 == 0 else 31
 
     def resolved_pad(self) -> int:
-        """LDS row padding in f64 words (complex rows hold 2 words per element)."""
+        """LDS row padding in words (complex rows hold 2 words per element)."""
         if self.lds_pad is not None:
             return self.lds_pad
         if self.problem.complex_ or self.uses_swizzle():
             # complex: ds_read_b128, a quarter-wave touches one 256-byte row
             return 0
+        if self.problem.dtype == "f32":
+            # A wave of ds_read_b32 reads 16 words of four consecutive K rows:
+            # make both row pitches 64 bytes off a multiple of 128 bytes, so
+            # the four 64-byte row pieces take distinct bank groups.
+            for pad in (0, 16, 8, 24):
+                if all(((t + pad) * 4) % 128 == 64 for t in (self.tile_m, self.tile_n)):
+                    return pad
+            return 16
         # A half-wave of ds_read_b64 reads 16 words of two consecutive K rows:
         # make both row pitches odd multiples of 128 bytes.
         for pad in (0, 16, 8, 24):
@@ -514,9 +570,13 @@ class GettF64Spec:
             sizes, h = "rt", _problem_hash(tp) if tp is not None else "invalid"
         else:
             sizes, h = f"M{p.M}N{p.N}K{p.K}L{p.L}", _problem_hash(p)
+        if p.dtype == "f32":
+            dt = "c64" if p.complex_ else "f32"
+        else:
+            dt = "c128" if p.complex_ else "f64"
         return kernel_name_join(
             self.name,
-            "c128" if p.complex_ else "f64",
+            dt,
             sizes,
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
             f"w{self.warps_m}x{self.warps_n}",
@@ -598,11 +658,13 @@ def runtime_template(problem: GettF64Problem) -> Optional[GettF64Problem]:
     A ``runtime_sizes`` kernel depends on the problem only through: which
     index strides are 1 (those offsets need no multiply, and the vector loads
     run along them), the parity of an extent an operand is contiguous along (a
-    two-element vector load needs an even run), complex data and conjugation.
-    The template keeps exactly that: extent 3 for an odd run an operand loads
-    along, 2 otherwise, stride 1 or 2, ``L = 2`` with stride 2, and C's digits
-    spelled out. Problems with the same template share one kernel. None when
-    an index space has more than one digit.
+    two-element vector load needs an even run), complex data, conjugation and
+    the word type. The template keeps exactly that: extent 3 for an odd run an
+    operand loads along, 2 otherwise, stride 1 or 2, ``L = 2`` with stride 2,
+    and C's digits spelled out. Real f32 data also keep whether such a run is
+    a multiple of 4 (a four-element load): extent 4. Problems with the same
+    template share one kernel. None when an index space has more than one
+    digit.
     """
     p = problem
     cm, cn, cl = p.c_digits()
@@ -613,8 +675,12 @@ def runtime_template(problem: GettF64Problem) -> Optional[GettF64Problem]:
     def unit(d: Digits) -> bool:
         return d[0][1] == 1 and d[0][0] > 1
 
+    quad = p.dtype == "f32" and not p.complex_
+
     def parity(extent: int, *runs: Digits) -> int:
         loaded = any(unit(d) for d in runs)
+        if quad and loaded and extent % 4 == 0:
+            return 4
         return 3 if loaded and extent % 2 else 2
 
     ext = {
@@ -647,6 +713,7 @@ def runtime_template(problem: GettF64Problem) -> Optional[GettF64Problem]:
         complex_=p.complex_,
         conj_a=p.conj_a,
         conj_b=p.conj_b,
+        dtype=p.dtype,
     )
 
 
@@ -812,6 +879,12 @@ def _load_plan(
     else:
         cands = []
         run_s, run_k = _contiguous(side_digits), _contiguous(k_digits)
+        if p.dtype == "f32":
+            # 16-byte loads: four f32
+            if run_s and run_s % 4 == 0:
+                cands.append((False, 4))
+            if run_k and run_k % 4 == 0 and spec.tile_k % 4 == 0:
+                cands.append((True, 4))
         if run_s and run_s % 2 == 0:
             cands.append((False, 2))
         if run_k and run_k % 2 == 0 and spec.tile_k % 2 == 0:
@@ -836,7 +909,9 @@ def _load_plan(
     return None
 
 
-def _kmajor(spec: GettF64Spec, side_digits: Digits, k_digits: Digits, side: int) -> bool:
+def _kmajor(
+    spec: GettF64Spec, side_digits: Digits, k_digits: Digits, side: int
+) -> bool:
     """``kmajor_lds`` applies to this operand (its loader reads along K)."""
     if not spec.kmajor_lds:
         return False
@@ -845,7 +920,7 @@ def _kmajor(spec: GettF64Spec, side_digits: Digits, k_digits: Digits, side: int)
 
 
 def _lds_shape(spec: GettF64Spec, side_digits: Digits, k_digits: Digits, side: int):
-    """``[rows, cols]`` of an operand's LDS tile (f64 elements)."""
+    """``[rows, cols]`` of an operand's LDS tile (words)."""
     words = 2 if spec.problem.complex_ else 1
     if _kmajor(spec, side_digits, k_digits, side):
         return [spec.lds_stages * side, spec.tile_k + spec.kmajor_pad]
@@ -867,9 +942,22 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
         # The kernel depends on the problem only through its layout class.
         spec = replace(spec, problem=tp)
         p = tp
-    atom = f64_atom(arch)
+    atom = gett_atom(arch, p.dtype)
     if atom is None:
-        return False, f"{arch!r} has no 16x16x4 f64 MMA atom in its catalog"
+        return False, f"{arch!r} has no 16x16x4 {p.dtype} MMA atom in its catalog"
+    if p.dtype == "f32":
+        for lever, on in (
+            ("split_k", spec.split_k > 1),
+            ("split_serial", bool(spec.split_serial)),
+            ("acc_agpr", spec.acc_agpr),
+            ("frag_pipe", spec.frag_pipe),
+            ("k_inner", spec.k_inner != 1),
+            ("mfma_fence", spec.mfma_fence),
+            ("ilv", spec.ilv > 0),
+            ("kmajor_lds", spec.kmajor_lds),
+        ):
+            if on:
+                return False, f"{lever} is not built for f32 data"
     if not spec.runtime_sizes and p.L > MAX_GRID_Y:
         return False, f"L = {p.L} exceeds the grid limit {MAX_GRID_Y}; split the batch"
     if spec.warps_m * spec.warps_n not in (1, 2, 4, 8):
@@ -964,8 +1052,9 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
         * (spec.complex_accs if p.complex_ else 1)
         * (2 if spec.k_block else 1)
     )
-    if acc_words * 2 > 384:
-        return False, f"accumulator needs {acc_words * 2} registers per lane (max 384)"
+    dw = p.word_bytes // 4  # registers per accumulator word
+    if acc_words * dw > 384:
+        return False, f"accumulator needs {acc_words * dw} registers per lane (max 384)"
     if spec.acc_agpr and acc_words * 2 > 256:
         return (
             False,
@@ -994,7 +1083,7 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
         spec.lds_stages
         * spec.tile_k
         * ((spec.tile_m + spec.tile_n) * words + 2 * spec.resolved_pad())
-        * 8
+        * p.word_bytes
     )
     if spec.kmajor_lds:
         lds = sum(
@@ -1018,6 +1107,16 @@ def is_valid_spec(spec: GettF64Spec, arch: str = "gfx950") -> Tuple[bool, str]:
 def _ci(b: IRBuilder, x) -> Value:
     """An i32 operand: a compile-time int becomes a constant, a Value stays."""
     return b.const_i32(x) if isinstance(x, int) else x
+
+
+def _wty(p: GettF64Problem):
+    """The IR type of one real word of the problem's data."""
+    return F32 if p.dtype == "f32" else F64
+
+
+def _wconst(b: IRBuilder, p: GettF64Problem, x: float) -> Value:
+    """A constant word of the problem's data type."""
+    return b.const_f32(x) if p.dtype == "f32" else b.const_f64(x)
 
 
 def _mixed(b: IRBuilder, idx: Value, digits) -> Value:
@@ -1134,6 +1233,8 @@ class _Operand:
         p = spec.problem
         self.cx = p.complex_
         self.es = p.elem_bytes
+        self.wty = _wty(p)
+        self.dw = p.word_bytes // 4  # dwords per word
         self.base_ptr = base_ptr  # operand pointer moved by the batch offset
         self.k_digits = k_digits
         self.side_tile = side_tile
@@ -1263,8 +1364,8 @@ class _Operand:
                 )
             voff = b.select(ok, voff, b.const_i32(_MASK_OFFSET))
             words = pl.vec * (2 if self.cx else 1)
-            raw = b.buffer_load_vN(rsrc, voff, b.const_i32(0), I32, 2 * words)
-            return b.vec_bitcast(raw, VectorType(F64, words))
+            raw = b.buffer_load_vN(rsrc, voff, b.const_i32(0), I32, self.dw * words)
+            return b.vec_bitcast(raw, VectorType(self.wty, words))
 
     def store_lds(self, vals, stage: Value):
         """Write one K tile (from :meth:`load`) into LDS stage ``stage``."""
@@ -1285,8 +1386,10 @@ class _Operand:
         column ``col``."""
         if self.kmajor:
             b = self.b
-            return _frag(b, self.lds, b.add(self.stage_rows(row0), col), b.sub(row, row0), False)
-        return _frag(self.b, self.lds, row, col, self.cx)
+            return _frag(
+                b, self.lds, b.add(self.stage_rows(row0), col), b.sub(row, row0), False
+            )
+        return _frag(self.b, self.lds, row, col, self.cx, self.wty)
 
     def store_piece(self, v, i: int, row0: Value):
         """The LDS store of pass ``i`` (value ``v``) into the stage at ``row0``."""
@@ -1388,12 +1491,12 @@ class _Frag:
 def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     """Build the f64 / cf64 GETT kernel for ``spec`` on ``arch``.
 
-    Kernel arguments: ``A, B, [C,] D`` (``ptr<f64>``; complex data is
-    interleaved ``(re, im)``), then ``alpha`` (complex: ``alpha_re,
-    alpha_im``) and, when bilinear, ``beta`` (``beta_re, beta_im``), all f64;
-    with ``runtime_sizes`` then the sizes and strides of
-    :data:`RUNTIME_SIZE_ARGS`. Grid: :func:`gett_f64_grid`; block:
-    ``spec.threads``.
+    Kernel arguments: ``A, B, [C,] D`` (``ptr<f64>``, ``ptr<f32>`` for f32
+    data; complex data is interleaved ``(re, im)``), then ``alpha`` (complex:
+    ``alpha_re, alpha_im``) and, when bilinear, ``beta`` (``beta_re,
+    beta_im``), all of the data's word type; with ``runtime_sizes`` then the
+    sizes and strides of :data:`RUNTIME_SIZE_ARGS`. Grid:
+    :func:`gett_f64_grid`; block: ``spec.threads``.
     """
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
@@ -1404,7 +1507,8 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     cx = p.complex_
     es = p.elem_bytes
     wpe = 2 if cx else 1
-    atom = f64_atom(arch)
+    wty = _wty(p)
+    atom = gett_atom(arch, p.dtype)
     nt = spec.threads
     am_n, an_n = spec.wave_m // atom.m, spec.wave_n // atom.n
     pad = spec.resolved_pad()
@@ -1413,33 +1517,35 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = nt
     if spec.waves_per_eu:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
-    gptr = PtrType(F64, "global")
+    gptr = PtrType(wty, "global")
     # A and B never overlap D. C may be D itself (in-place update), so neither
     # carries noalias. 8-byte alignment: an f64 subtensor view need not be
-    # 16-byte aligned (the buffer loads only need 4).
+    # 16-byte aligned (the buffer loads only need 4). f32 data: 4-byte
+    # alignment.
+    al = p.word_bytes
     split = spec.split_k > 1
     # split_serial: the partials are reduced in this launch (C / D / alpha /
     # beta as without split_k, plus W and Cnt)
     partial_only = split and not spec.split_serial
-    A = b.param("A", gptr, noalias=True, readonly=True, align=8)
-    Bp = b.param("B", gptr, noalias=True, readonly=True, align=8)
+    A = b.param("A", gptr, noalias=True, readonly=True, align=al)
+    Bp = b.param("B", gptr, noalias=True, readonly=True, align=al)
     C = D = W = Cnt = None
     alpha, beta = [], []
     if partial_only:
         # Partial sums only: the reduce kernel reads C and applies alpha / beta.
-        W = b.param("W", gptr, noalias=True, align=8)
+        W = b.param("W", gptr, noalias=True, align=al)
     else:
-        C = b.param("C", gptr, readonly=True, align=8) if spec.bilinear else None
-        D = b.param("D", gptr, align=8)
-        alpha = [b.param("alpha_re" if cx else "alpha", F64)]
+        C = b.param("C", gptr, readonly=True, align=al) if spec.bilinear else None
+        D = b.param("D", gptr, align=al)
+        alpha = [b.param("alpha_re" if cx else "alpha", wty)]
         if cx:
-            alpha.append(b.param("alpha_im", F64))
+            alpha.append(b.param("alpha_im", wty))
         if spec.bilinear:
-            beta = [b.param("beta_re" if cx else "beta", F64)]
+            beta = [b.param("beta_re" if cx else "beta", wty)]
             if cx:
-                beta.append(b.param("beta_im", F64))
+                beta.append(b.param("beta_im", wty))
         if split:
-            W = b.param("W", gptr, noalias=True, align=8)
+            W = b.param("W", gptr, noalias=True, align=al)
             Cnt = b.param("Cnt", PtrType(I32, "global"), align=4)
     rt_args = None
     if spec.runtime_sizes:
@@ -1498,17 +1604,17 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
     ns = spec.lds_stages
     if spec.kmajor_lds:
         a_lds = b.smem_alloc(
-            F64, _lds_shape(spec, p.a_m, p.a_k, spec.tile_m), name_hint="a_lds"
+            wty, _lds_shape(spec, p.a_m, p.a_k, spec.tile_m), name_hint="a_lds"
         )
         b_lds = b.smem_alloc(
-            F64, _lds_shape(spec, p.b_n, p.b_k, spec.tile_n), name_hint="b_lds"
+            wty, _lds_shape(spec, p.b_n, p.b_k, spec.tile_n), name_hint="b_lds"
         )
     else:
         a_lds = b.smem_alloc(
-            F64, [ns * spec.tile_k, spec.tile_m * wpe + pad], name_hint="a_lds"
+            wty, [ns * spec.tile_k, spec.tile_m * wpe + pad], name_hint="a_lds"
         )
         b_lds = b.smem_alloc(
-            F64, [ns * spec.tile_k, spec.tile_n * wpe + pad], name_hint="b_lds"
+            wty, [ns * spec.tile_k, spec.tile_n * wpe + pad], name_hint="b_lds"
         )
     aptr = at_batch(A, p.a_l, "a_sl")
     opa = _Operand(
@@ -1579,7 +1685,7 @@ def build_gett_f64(spec: GettF64Spec, *, arch: str = "gfx950") -> KernelDef:
             op.kmap = kmap
             op.nk = nk
     n_acc = am_n * an_n * (spec.complex_accs if cx else 1)
-    zero = b.vec_pack([b.const_f64(0.0)] * atom.c_frag_len, F64)
+    zero = b.vec_pack([_wconst(b, p, 0.0)] * atom.c_frag_len, wty)
     if spec.acc_agpr:
         # AGPR-resident accumulators: reserve exactly their registers (the
         # attr's minimum also selects the AGPR form of every MFMA) and seed
@@ -2227,7 +2333,11 @@ def _k_loop_ilv(ctx: _LoopCtx, nx) -> List[Value]:
         # 0 .. nk - 2 have a successor, tile nk - 1 is the last
         pairs = (nk - 1) // 2
         loop = b.scf_for_iter(
-            b.const_i32(0), b.const_i32(pairs), b.const_i32(1), iter_args, iv_name="kil2"
+            b.const_i32(0),
+            b.const_i32(pairs),
+            b.const_i32(1),
+            iter_args,
+            iv_name="kil2",
         )
         with loop as (kt2, carried):
             carried = list(carried)
@@ -2298,12 +2408,12 @@ def _swz(b: IRBuilder, k: Value, mask: int, mode: int = 0) -> Value:
     return b.land(b.xor(odd, blk), b.const_i32(mask))
 
 
-def _frag(b, lds, row, col, cx):
-    """One operand fragment: an f64, or the (re, im) pair of a complex element."""
+def _frag(b, lds, row, col, cx, wty=F64):
+    """One operand fragment: a word, or the (re, im) pair of a complex element."""
     if cx:
-        v = b.smem_load_vN(lds, row, b.mul(col, b.const_i32(2)), dtype=F64, n=2)
+        v = b.smem_load_vN(lds, row, b.mul(col, b.const_i32(2)), dtype=wty, n=2)
         return (b.vec_extract(v, 0), b.vec_extract(v, 1))
-    return b.vec_extract(b.smem_load_vN(lds, row, col, dtype=F64, n=1), 0)
+    return b.vec_extract(b.smem_load_vN(lds, row, col, dtype=wty, n=1), 0)
 
 
 def _mma_step(b, atom, fa, fb, accs, p, complex_accs=2):
@@ -2351,9 +2461,9 @@ def _mma_step(b, atom, fa, fb, accs, p, complex_accs=2):
 class _Scalars:
     """alpha / beta and the uniform tests the epilogue selects on."""
 
-    def __init__(self, b, alpha, beta, cx):
+    def __init__(self, b, alpha, beta, cx, p=None):
         self.alpha, self.beta, self.cx = alpha, beta, cx
-        self.zero = b.const_f64(0.0)
+        self.zero = b.const_f64(0.0) if p is None else _wconst(b, p, 0.0)
         if cx:
             ar_z = b.fcmp("oeq", alpha[0], self.zero)
             self.ai_zero = b.fcmp("oeq", alpha[1], self.zero)
@@ -2367,6 +2477,8 @@ def _epilogue(b, spec, atom, accs, lane, wm, wn, m0, n0, rd, rc, alpha, beta, ge
     p = spec.problem
     cx = p.complex_
     es = p.elem_bytes
+    wty = _wty(p)
+    dw = p.word_bytes // 4
     am_n, an_n = spec.wave_m // atom.m, spec.wave_n // atom.n
     # Output coordinates of each accumulator slot from the atom's catalog
     # lane map: slot ``s`` of lane ``l`` holds (row, col) = c_layout(l, s).
@@ -2390,10 +2502,10 @@ def _epilogue(b, spec, atom, accs, lane, wm, wn, m0, n0, rd, rc, alpha, beta, ge
         cols.append((ok, dn, c_n))
     use_c = None
     if rc is not None:
-        use_c = b.lnot(b.fcmp("oeq", beta[0], b.const_f64(0.0)))
+        use_c = b.lnot(b.fcmp("oeq", beta[0], _wconst(b, p, 0.0)))
         if cx:
-            use_c = b.lor(use_c, b.lnot(b.fcmp("oeq", beta[1], b.const_f64(0.0))))
-    sc = _Scalars(b, alpha, beta, cx)
+            use_c = b.lor(use_c, b.lnot(b.fcmp("oeq", beta[1], _wconst(b, p, 0.0))))
+    sc = _Scalars(b, alpha, beta, cx, p)
     words = 2 if cx else 1
     # Per row group of atoms: every C load first, then the combines and the D
     # stores. C may be D itself (in place), so the compiler may not move a C
@@ -2416,8 +2528,8 @@ def _epilogue(b, spec, atom, accs, lane, wm, wn, m0, n0, rd, rc, alpha, beta, ge
                 if rc is not None:
                     coff = b.mul(b.add(c_m, c_n), b.const_i32(es))
                     coff = b.select(b.land(ok, use_c), coff, b.const_i32(_MASK_OFFSET))
-                    raw = b.buffer_load_vN(rc, coff, b.const_i32(0), I32, 2 * words)
-                    c_val = b.vec_bitcast(raw, VectorType(F64, words))
+                    raw = b.buffer_load_vN(rc, coff, b.const_i32(0), I32, dw * words)
+                    c_val = b.vec_bitcast(raw, VectorType(wty, words))
                 elems.append((slot, an, ok, dm, dn, c_val))
         for slot, an, ok, dm, dn, cv in elems:
             i = am * an_n + an
@@ -2447,8 +2559,10 @@ def _epilogue(b, spec, atom, accs, lane, wm, wn, m0, n0, rd, rc, alpha, beta, ge
             out = _combine(b, acc, c_val, sc)
             doff = b.mul(b.add(dm, dn), b.const_i32(es))
             doff = b.select(ok, doff, b.const_i32(_MASK_OFFSET))
-            vec = b.vec_bitcast(b.vec_pack(list(out), F64), VectorType(F32, 2 * words))
-            b.buffer_store_vN_f32(rd, doff, b.const_i32(0), vec, 2 * words)
+            vec = b.vec_pack(list(out), wty)
+            if wty is not F32:
+                vec = b.vec_bitcast(vec, VectorType(F32, dw * words))
+            b.buffer_store_vN_f32(rd, doff, b.const_i32(0), vec, dw * words)
 
 
 def _combine(b, acc, c_val, sc: _Scalars):
@@ -2647,10 +2761,14 @@ class _SerialReduce:
 
         wt = spec.split_serial == 2
         halves = [
-            (i, h, b.vec_bitcast(
-                b.vec_pack([b.vec_extract(acc, 2 * h + j) for j in range(2)], F64),
-                VectorType(F32, 4),
-            ))
+            (
+                i,
+                h,
+                b.vec_bitcast(
+                    b.vec_pack([b.vec_extract(acc, 2 * h + j) for j in range(2)], F64),
+                    VectorType(F32, 4),
+                ),
+            )
             for i, acc in enumerate(self.accs)
             for h in range(2)
         ]
@@ -2691,13 +2809,19 @@ class _SerialReduce:
         if wt:
             # write-through loads, up to 16 in flight per asm group, summed
             # in z order
-            lq = [(z, i, h) for z in range(spec.split_k) for i in range(len(self.accs))
-                  for h in range(2)]
+            lq = [
+                (z, i, h)
+                for z in range(spec.split_k)
+                for i in range(len(self.accs))
+                for h in range(2)
+            ]
             got = {}
             for g0 in range(0, len(lq), 16):
                 grp = lq[g0 : g0 + 16]
                 n = len(grp)
-                tmpl = [f"global_load_dwordx4 ${j}, ${n + j}, off sc1" for j in range(n)]
+                tmpl = [
+                    f"global_load_dwordx4 ${j}, ${n + j}, off sc1" for j in range(n)
+                ]
                 tmpl.append("s_waitcnt vmcnt(0)")
                 res = b.inline_asm_multi(
                     "\n".join(tmpl),
@@ -2711,8 +2835,12 @@ class _SerialReduce:
                     if (z, i, 0) in got and (z, i, 1) in got:
                         lo, hi = got.pop((z, i, 0)), got.pop((z, i, 1))
                         v = b.vec_pack(
-                            [b.vec_extract(lo, 0), b.vec_extract(lo, 1),
-                             b.vec_extract(hi, 0), b.vec_extract(hi, 1)],
+                            [
+                                b.vec_extract(lo, 0),
+                                b.vec_extract(lo, 1),
+                                b.vec_extract(hi, 0),
+                                b.vec_extract(hi, 1),
+                            ],
                             F64,
                         )
                         sums[i] = v if sums[i] is None else b.fadd(sums[i], v)
@@ -3713,10 +3841,7 @@ def gett_f64_pipe_class(
         and wave_eff >= PIPE_LONG_MIN_WAVE_EFF
         and (
             run_ab >= PIPE_LONG_RUN
-            or (
-                run_ab >= PIPE_MIN_RUN
-                and tiles >= PIPE_SHORT_MAX_TILES_PER_CU * cus
-            )
+            or (run_ab >= PIPE_MIN_RUN and tiles >= PIPE_SHORT_MAX_TILES_PER_CU * cus)
         )
     ):
         name = "long"
@@ -3777,24 +3902,25 @@ def gett_f64_grid(
 def gett_f64_signature(spec: GettF64Spec):
     """Kernel arguments of :func:`build_gett_f64` (``split_k``: ``A, B, W``
     and the size arguments)."""
-    sb = SignatureBuilder().ptr("A", "f64").ptr("B", "f64")
+    w = spec.problem.dtype
+    sb = SignatureBuilder().ptr("A", w).ptr("B", w)
     if spec.split_k > 1 and not spec.split_serial:
-        sb = sb.ptr("W", "f64")
+        sb = sb.ptr("W", w)
         if spec.runtime_sizes:
             for name, dtype in _runtime_arg_names(spec):
                 sb = sb.scalar(name, dtype)
         return sb.build()
     if spec.bilinear:
-        sb = sb.ptr("C", "f64")
-    sb = sb.ptr("D", "f64")
+        sb = sb.ptr("C", w)
+    sb = sb.ptr("D", w)
     if spec.problem.complex_:
-        sb = sb.scalar("alpha_re", "f64").scalar("alpha_im", "f64")
+        sb = sb.scalar("alpha_re", w).scalar("alpha_im", w)
         if spec.bilinear:
-            sb = sb.scalar("beta_re", "f64").scalar("beta_im", "f64")
+            sb = sb.scalar("beta_re", w).scalar("beta_im", w)
     else:
-        sb = sb.scalar("alpha", "f64")
+        sb = sb.scalar("alpha", w)
         if spec.bilinear:
-            sb = sb.scalar("beta", "f64")
+            sb = sb.scalar("beta", w)
     if spec.split_serial:
         sb = sb.ptr("W", "f64").ptr("Cnt", "i32")
     if spec.runtime_sizes:
@@ -3804,7 +3930,9 @@ def gett_f64_signature(spec: GettF64Spec):
 
 
 __all__ = [
+    "F32_GETT_ARCHS",
     "F64_GETT_ARCHS",
+    "GETT_DTYPES",
     "REDUCE_THREADS",
     "K_BLOCK_ELEMS",
     "K_BLOCK_MIN_K",
@@ -3829,6 +3957,8 @@ __all__ = [
     "build_gett_f64",
     "build_gett_f64_reduce",
     "digits_span",
+    "f32_atom",
+    "f32_gett_archs",
     "f64_atom",
     "f64_gett_archs",
     "gemm_problem",
@@ -3837,6 +3967,7 @@ __all__ = [
     "gett_f64_reduce_grid",
     "gett_f64_reduce_name",
     "gett_f64_reduce_signature",
+    "gett_atom",
     "gett_f64_workspace_bytes",
     "gett_f64_runtime_args",
     "gett_f64_pipe_class",

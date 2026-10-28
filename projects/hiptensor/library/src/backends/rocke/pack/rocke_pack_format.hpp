@@ -82,7 +82,7 @@ namespace hiptensor
             uint32_t    kind   = kArgKindValue;
         };
 
-        // The kernel description the pack records (make_rocke_pack.py _md_subset).
+        // The kernel description the pack records (the code object metadata subset).
         struct KernelMd
         {
             std::vector<MdArg> args;
@@ -117,9 +117,9 @@ namespace hiptensor
         // The pack's key of a kernel: "hiptensor-rocke/v<abi>|<family>|<arch>|<name>".
         std::string specKey(std::string const& arch, Attrs const& attrs, std::string const& name);
 
-        // Writes <dir>/rocke.htpk and <dir>/rocke.index.json, byte for byte the files
-        // make_rocke_pack.py writes for the same inputs. `kernels` sorted by name. Returns the
-        // pack id (hex) and the htpk size; false with `reason` set on an I/O error.
+        // Writes <dir>/rocke.htpk and <dir>/rocke.index.json, byte for byte the files rocKE's
+        // Python reference writer writes for the same inputs. `kernels` sorted by name. Returns
+        // the pack id (hex) and the htpk size; false with `reason` set on an I/O error.
         bool writePack(std::string const&                        dir,
                        std::string const&                        arch,
                        std::vector<PackEntry> const&             kernels,

@@ -550,10 +550,8 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("vp_tail_pack", 0),
     ("vp_pair_reads", 0),
     ("vp_mfma_first", 0),
-    # native NN / TN / TT (MN-contiguous operands), the
-    # scheduler-strategy knob and the guarded padded rows of the VGPR loader
-    ("mn_pad", 32),
-    ("mn_chunk", 0),
+    # the MN operand loads of the VGPR-staged loader, the scheduler-strategy
+    # knob and the guarded padded rows of the VGPR loader
     ("mn_vec", 8),
     ("sched_strategy", ""),
     ("kc_row_guard", False),
@@ -565,8 +563,6 @@ _PYTHON_ONLY_GEMM_LEVERS = (
     ("vp_mn_worder", 0),
     ("vp_mn_pipe", 0),
     ("vp_mn_wrap", 0),
-    # DTL-ring MN operands on any leading dimension
-    ("mn_ld_any", False),
 )
 
 
@@ -593,10 +589,14 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     tr = spec.trait
     d = spec.data
     _refuse_python_only_levers(tr)
-    if str(d.layout).upper() != "RCR":
+    ring = tr.direct_to_lds and tr.dtl_prefetch and int(tr.dtl_stages) >= 2
+    if str(d.layout).upper() != "RCR" and not ring:
+        # the C++ engine mirrors the MN-contiguous operands of the DTL ring
+        # (gemm_mn_operand.cpp); the VGPR-staged MN loader is Python-only
         raise NotImplementedError(
-            f"DataSpec layout {d.layout!r} (MN-contiguous operands): implemented by "
-            "the Python engine only (no C++ mirror yet); lower it with backend='python'"
+            f"DataSpec layout {d.layout!r} on a body without the DTL ring (the "
+            "VGPR-staged MN operand loader): implemented by the Python engine only "
+            "(no C++ mirror yet); lower it with backend='python'"
         )
     extra: Dict[str, Any] = {}
     pro = getattr(spec, "_prologue", None)
@@ -655,8 +655,6 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 # Prologue fields the C++ mirror (gemm_prologue.cpp) does not emit yet: a
 # prologue that sets one is refused rather than built without it.
 _PYTHON_ONLY_PROLOGUE = (
-    ("unary_a", ""),
-    ("unary_b", ""),
     ("stage", "lds"),
     ("epi", ""),
 )
@@ -883,6 +881,10 @@ def _gemm_lever_keys(tr: Any) -> Dict[str, Any]:
         rve_store_nt=tr.rve_store_nt,
         dtl_soff0=tr.dtl_soff0,
         wide_addr=tr.wide_addr,
+        # MN-contiguous operands on the DTL ring
+        mn_pad=tr.mn_pad,
+        mn_chunk=tr.mn_chunk,
+        mn_ld_any=tr.mn_ld_any,
     )
 
 

@@ -16,22 +16,22 @@ become ``arith.constant`` ops at the places the generic kernel reads them, and n
 changes for ``vec == 1``. So the kernel computes exactly what the generic kernel computes for the
 same argument values (the numeric tests check both against float64 references).
 
-Recipes. hipTensor builds no kernel in Python at run time: at its build time,
-:func:`roll_jit_ew` records this builder and rolls it (``rocke.portable_ir``) over every geometry
-constant into one parametric recipe per kernel class (:class:`EwJitSpec`); the recipes ship in
-a recipe bundle next to hipTensor's kernel pack, and its C++ runtime replays them with the recipe
-VM (``rocke_recipe_run_from_bundle_cbor``) for the values of a problem, lowers the kernel and
-compiles it with COMGR.
+hipTensor builds no kernel in Python: its C++ runtime builds the kernel of a problem with this
+builder's C++ twin (``rocke_build_htaot_ew_jit``, ``rocke/instance_hiptensor_aot.h``; the
+``hiptensor_aot_jit_ew`` parity family keeps the two byte-identical), lowers it and compiles it
+with COMGR. :func:`roll_jit_ew` rolls a class (:class:`EwJitSpec`) over every geometry constant
+into one parametric recipe of rocKE's recipe VM (``rocke.portable_ir``); hipTensor does not use
+the recipes.
 
-Geometry (the recipe's spec axes) has the argument names of :mod:`.ew`: ``opA [opB] [opC]
+Geometry (the class's axes) has the argument names of :mod:`.ew`: ``opA [opB] [opC]
 [opAB] [opABC]``, ``n_in, n_out, ystep``, ``e0..e7``, ``m0, s0, m1, s1, m3..m6, s3..s6``,
 ``s<T>0..s<T>7`` for every tensor ``T``, and for arity 1 ``lim0..lim7``. With ``vec > 1`` the
 thread space counts vectors: ``n_in``, ``e0`` and its magic pair ``m0, s0`` are those of
 ``e0 / vec``, the other values are unchanged.
 
-``vec > 1`` (real kernels; the ``math`` rows only with every input a vector, and the recipe
-files carry only that class of them, each input's math programs applied in a loop over the
-``vec`` values): D's stride of mode 0 is 1; a tensor marked in ``unit`` has stride 1 in
+``vec > 1`` (real kernels; the ``math`` rows only with every input a vector, the only class of
+them hipTensor's JIT takes, each input's math programs applied in a loop over the ``vec``
+values): D's stride of mode 0 is 1; a tensor marked in ``unit`` has stride 1 in
 mode 0 and is accessed with vector loads, the others with ``vec`` scalar loads ``s<T>0`` apart.
 The caller guarantees ``e0 % vec == 0``, ``lim0 % vec == 0`` (arity 1), that the strides of modes
 ``1..7`` of the vector tensors (and D) are multiples of ``vec`` and that their pointers are aligned
@@ -95,7 +95,7 @@ class EwJitSpec:
         )
 
     def key(self) -> str:
-        """The recipe key of the class in hipTensor's recipe bundle."""
+        """The key of the class (hipTensor's JIT names its kernel class by it)."""
         return "ew:" + self.kernel_name()
 
     def axes(self) -> List[Tuple[str, bool]]:
@@ -349,7 +349,7 @@ def jit_classes(bases: Sequence[EwSpec]) -> List[EwJitSpec]:
     for base in bases:
         if base.math:
             # the math rows: only the class of every input a vector (the class the JIT takes
-            # by default; their recipes carry the math programs, so they are kept few)
+            # by default; their kernels carry the math programs, so they are kept few)
             n_in = len(base.tensors()) - 1
             out.append(EwJitSpec(base, jit_vec(base.d), (True,) * n_in))
             continue

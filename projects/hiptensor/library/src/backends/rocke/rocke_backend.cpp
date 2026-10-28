@@ -129,7 +129,28 @@ namespace hiptensor
                 return !(value && *value == "static");
             }
 
-            CandidateOptions candidateOptions(Pack const& pack)
+            // HIPTENSOR_ROCKE_F32_RECIPE=native|x3|x4|x6|x9|f64: how contractions of f32 /
+            // complex f32 data with the 32F / C32F compute type multiply (rocke_plan.hpp
+            // F32Recipe). Unset or empty: native. Another value: native, and the plan log says
+            // so (no recipe less accurate than the default is taken by mistake).
+            F32Recipe f32Recipe(std::string& note)
+            {
+                auto value = getEnvironmentVariable("HIPTENSOR_ROCKE_F32_RECIPE");
+                if(!value || value->empty())
+                {
+                    return F32Recipe::Native;
+                }
+                F32Recipe recipe = F32Recipe::Native;
+                if(!parseF32Recipe(*value, recipe))
+                {
+                    note = "HIPTENSOR_ROCKE_F32_RECIPE=" + *value
+                           + " is not one of native, x3, x4, x6, x9, f64: native";
+                    return F32Recipe::Native;
+                }
+                return recipe;
+            }
+
+            CandidateOptions candidateOptions(Pack const& pack, std::string* note = nullptr)
             {
                 CandidateOptions options;
                 // HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64 (debug and test): only the F64 route.
@@ -137,6 +158,12 @@ namespace hiptensor
                 options.f64Only = route && *route == "f64";
                 options.disableTuned
                     = getEnvironmentVariable("HIPTENSOR_ROCKE_DISABLE_TUNED").has_value();
+                std::string recipeNote;
+                options.f32Recipe = f32Recipe(recipeNote);
+                if(note != nullptr)
+                {
+                    *note = recipeNote;
+                }
                 // the steps of a trinary contraction: the selection of a contraction
                 bool const model = useModel();
                 options.rankStep = [&pack, model](Problem const&                problem,
@@ -147,10 +174,16 @@ namespace hiptensor
             }
 
             // The plan-cache identity of a candidate: its key in this pack.
+            // The plan-cache identity of a candidate: the pack, the f32 recipe that listed it
+            // when not x6 (CandidateFacts::selectTag; a plan-cache line written under one recipe
+            // names no candidate of another) and its key.
             uint64_t candidateUid(Pack const& pack, Candidate const& candidate)
             {
-                return backend::kernelUid(
-                    backend::kRockeBackendName, pack.packId() + "|" + candidate.key, kKernelAbi);
+                auto const& tag = candidate.facts.selectTag;
+                return backend::kernelUid(backend::kRockeBackendName,
+                                          pack.packId() + "|" + (tag.empty() ? "" : tag + "|")
+                                              + candidate.key,
+                                          kKernelAbi);
             }
 
             std::string hexDigest(uint64_t value)
@@ -195,9 +228,10 @@ namespace hiptensor
                 {
                     return;
                 }
-                auto        tag   = getEnvironmentVariable("HIPTENSOR_ROCKE_SELECT_DUMP_TAG");
-                auto        cells = selectionCells(problem);
-                auto const& names = featureNames();
+                auto tag   = getEnvironmentVariable("HIPTENSOR_ROCKE_SELECT_DUMP_TAG");
+                auto cells = selectionCells(
+                    problem, candidates.empty() ? std::string() : candidates[0].facts.selectTag);
+                auto const&          names = featureNames();
                 std::vector<int64_t> x;
                 for(size_t i = 0; i < candidates.size(); i++)
                 {
@@ -271,9 +305,10 @@ namespace hiptensor
                         return HIPTENSOR_STATUS_ARCH_MISMATCH;
                     }
                     std::vector<Candidate> candidates;
+                    std::string            recipeNote;
                     if(auto status = enumerateCandidates(problem,
                                                          *pack,
-                                                         candidateOptions(*pack),
+                                                         candidateOptions(*pack, &recipeNote),
                                                          context.workspaceSizeLimit,
                                                          candidates,
                                                          reason);
@@ -298,8 +333,8 @@ namespace hiptensor
 
                     int         chosen = sel.order.front();
                     std::string source = sourceName(sel.source);
-                    std::string note;
-                    int const   rank = pref != nullptr ? pref->mKernelRank : 0;
+                    std::string note   = recipeNote;
+                    int const   rank   = pref != nullptr ? pref->mKernelRank : 0;
                     if(rank < 0 || size_t(rank) >= candidates.size())
                     {
                         reason = "KERNEL_RANK " + std::to_string(rank) + " is past the "
@@ -330,7 +365,8 @@ namespace hiptensor
                             }
                             if(!decided)
                             {
-                                note = "the plan cache line names no candidate of this pack";
+                                note += std::string(note.empty() ? "" : "; ")
+                                        + "the plan cache line names no candidate of this pack";
                             }
                         }
                     }
@@ -350,7 +386,9 @@ namespace hiptensor
                             reason = "the measured selection failed";
                             return status;
                         }
-                        note = result.note;
+                        note = recipeNote.empty() || result.note.empty()
+                                   ? recipeNote + result.note
+                                   : recipeNote + "; " + result.note;
                         if(result.winner >= 0)
                         {
                             chosen = result.winner;
@@ -385,7 +423,7 @@ namespace hiptensor
                     {
                         auto&     program = candidates[chosen].program;
                         JitReport report;
-                        specializeProgram(program, *pack, problem.device, report);
+                        specializeProgram(program, problem.device, report);
                         if(report.launches > 0)
                         {
                             char msg[256];
@@ -533,7 +571,15 @@ namespace hiptensor
                                                           : std::to_string(workspaceLimit))
                           + ")" + ", Source: " + source + " (" + sel.model + ")"
                           + ", Pick: " + candidates[chosen].key + ", Workspace: "
-                          + std::to_string(candidates[chosen].program.workspaceBytes) + ", Order:";
+                          + std::to_string(candidates[chosen].program.workspaceBytes)
+                          + ", Launches: ";
+                    // the kernel families of the program's launches, in order
+                    auto const& steps = candidates[chosen].program.steps;
+                    for(size_t i = 0; i < steps.size(); i++)
+                    {
+                        msg += (i ? "+" : "") + steps[i].kernel->family;
+                    }
+                    msg += ", Order:";
                     for(size_t i = 0; i < std::min<size_t>(sel.order.size(), 5); i++)
                     {
                         auto const k = sel.order[i];

@@ -63,6 +63,7 @@ namespace hiptensor
             constexpr char     kReduce[]        = "reduce";
             constexpr char     kGemm[]          = "gemm";
             constexpr char     kGett64[]        = "gett64";
+            constexpr char     kGett32[]        = "gett32";
 
             std::string dtypeName(hiptensorDataType_t type)
             {
@@ -292,6 +293,24 @@ namespace hiptensor
                     return HIPTENSOR_STATUS_INTERNAL_ERROR;
                 }
                 return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // Applies `remap` (buffer roles and offsets, scalar roles) to a launch and to every
+            // launch of its fallback, which execution takes in its place (the fallback list is
+            // shared between copies of a launch: the remapped launch gets its own).
+            template <typename Remap>
+            void remapLaunch(LaunchStep& step, Remap const& remap)
+            {
+                remap(step);
+                if(step.fallback != nullptr)
+                {
+                    auto fallback = std::make_shared<std::vector<LaunchStep>>(*step.fallback);
+                    for(auto& f : *fallback)
+                    {
+                        remapLaunch(f, remap);
+                    }
+                    step.fallback = std::move(fallback);
+                }
             }
 
             // One launch of the generic elementwise kernel over canonical modes `dims` whose
@@ -627,8 +646,48 @@ namespace hiptensor
                 return "rgett";
             case Route::DirectGett:
                 return "dgett";
+            case Route::Gett32:
+                return "gett32";
             }
             return "?";
+        }
+
+        char const* f32RecipeName(F32Recipe recipe)
+        {
+            switch(recipe)
+            {
+            case F32Recipe::Native:
+                return "native";
+            case F32Recipe::X3:
+                return "x3";
+            case F32Recipe::X4:
+                return "x4";
+            case F32Recipe::X6:
+                return "x6";
+            case F32Recipe::X9:
+                return "x9";
+            case F32Recipe::F64:
+                return "f64";
+            }
+            return "?";
+        }
+
+        bool parseF32Recipe(std::string const& text, F32Recipe& recipe)
+        {
+            for(auto r : {F32Recipe::Native,
+                          F32Recipe::X3,
+                          F32Recipe::X4,
+                          F32Recipe::X6,
+                          F32Recipe::X9,
+                          F32Recipe::F64})
+            {
+                if(text == f32RecipeName(r))
+                {
+                    recipe = r;
+                    return true;
+                }
+            }
+            return false;
         }
 
         namespace
@@ -1072,12 +1131,16 @@ namespace hiptensor
             // other modes the batch space. Each input is read through LDS along t (kind 2), with
             // vector loads along o (kind 1) or one load per element (kind 0). The generic program
             // is the fallback (buffers not aligned to the vectors).
+            // `transposed` false: also a layout whose inputs are all fastest along D's mode or
+            // gathered (the tile's other mode is then D's next fastest mode): one launch for the
+            // modes past the generic kernel's slots.
             hiptensorStatus_t planEwt(EwLayout const& lay,
                                       Pack const&     pack,
                                       Program const&  generic,
                                       Program&        program,
                                       CandidateFacts& facts,
-                                      std::string&    reason)
+                                      std::string&    reason,
+                                      bool            transposed = true)
             {
                 auto const& dims  = lay.dims;
                 int const   nt    = static_cast<int>(lay.operands.size());
@@ -1107,7 +1170,7 @@ namespace hiptensor
                     strs.emplace_back(std::string(1, char(std::tolower(op.name[0]))),
                                       dtype(op.name));
                 }
-                auto const* kernel = pack.find(kEwt, {{"arity", int64_t(nd)}}, strs);
+                auto const* kernel = pack.find(kEwt, {{"arity", int64_t(nd)}, {"fold", 0}}, strs);
                 if(kernel == nullptr)
                 {
                     reason = "the pack has no tiled elementwise kernel for this data type row";
@@ -1130,6 +1193,16 @@ namespace hiptensor
                         {
                             t = i;
                             break;
+                        }
+                    }
+                }
+                if(o >= 0 && t < 0 && !transposed)
+                {
+                    for(int i = 0; i < int(dims.size()); i++)
+                    {
+                        if(i != o && (t < 0 || dims[i].stride[nd] < dims[t].stride[nd]))
+                        {
+                            t = i;
                         }
                     }
                 }
@@ -1160,8 +1233,9 @@ namespace hiptensor
                     reason = "the output's layout does not keep the tiled kernel's vectors aligned";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                std::vector<int>                             kinds;
-                std::vector<std::pair<BufferRole, uint32_t>> align{{BufferRole::Out, 16u}};
+                std::vector<int> kinds;
+                // D's 16-byte stores (D in the workspace: an operand pack of a contraction)
+                std::vector<std::pair<BufferRole, uint32_t>> align{{lay.operands[nd].role, 16u}};
                 for(int k = 0; k < nd; k++)
                 {
                     auto const&   op = lay.operands[k];
@@ -1193,7 +1267,7 @@ namespace hiptensor
                     }
                     kinds.push_back(0);
                 }
-                if(std::find(kinds.begin(), kinds.end(), 2) == kinds.end())
+                if(transposed && std::find(kinds.begin(), kinds.end(), 2) == kinds.end())
                 {
                     reason = "no input is read along the transposed mode";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
@@ -1215,12 +1289,29 @@ namespace hiptensor
                     }
                 }
                 int64_t const tt = kernel->attr("tile_t"), to = kernel->attr("tile_o");
-                int64_t const tilesO = ceilDiv(eo, to), tilesT = ceilDiv(et, tt);
+                int64_t       tilesO = ceilDiv(eo, to), tilesT = ceilDiv(et, tt);
                 int64_t       nb = 1;
                 for(int i : others)
                 {
                     nb *= dims[i].extent;
                 }
+                // a plane smaller than half a tile: the folded class, fo x ft planes of
+                // consecutive batch indices per tile (kernels.common.hiptensor_aot.ewt.ewt_fold)
+                int64_t fo = 1, ft = 1;
+                if(eo <= to && et <= tt && (to / eo) * (tt / et) >= 2)
+                {
+                    auto const* folded
+                        = pack.find(kEwt, {{"arity", int64_t(nd)}, {"fold", 1}}, strs);
+                    if(folded != nullptr && (to / eo) * (tt / et) <= folded->attr("max_planes"))
+                    {
+                        kernel = folded;
+                        fo     = to / eo;
+                        ft     = tt / et;
+                        tilesO = tilesT = 1;
+                    }
+                }
+                bool const    fold   = fo * ft > 1;
+                int64_t const groups = fold ? ceilDiv(nb, fo * ft) : nb;
                 if(tilesO * tilesT > kI32Max || nb > kI32Max)
                 {
                     reason = "the tiled kernel's grid is past its limits";
@@ -1278,10 +1369,16 @@ namespace hiptensor
                         good = good && setMagic(w, ("bm" + n).c_str(), ("bs" + n).c_str(), e);
                     }
                 }
-                int64_t const ystep = std::min<int64_t>(nb, kGridYZMax);
+                int64_t const ystep = std::min<int64_t>(groups, kGridYZMax);
                 good = good && w.set("eo", eo) && w.set("et", et) && w.set("tiles_o", tilesO)
-                       && setMagic(w, "to_m", "to_s", tilesO) && w.set("nb", nb)
+                       && setMagic(w, "to_m", "to_s", tilesO) && w.set("nb", groups)
                        && w.set("ystep", ystep);
+                if(fold)
+                {
+                    good = good && w.set("fo", fo) && w.set("ft", ft)
+                           && setMagic(w, "eo_m", "eo_s", eo) && setMagic(w, "et_m", "et_s", et)
+                           && w.set("nbt", nb);
+                }
                 if(!good)
                 {
                     reason = "tiled elementwise arguments do not fit the kernel arguments";
@@ -1307,11 +1404,12 @@ namespace hiptensor
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
-            // The tiled kernel in place of the last launch of `steps`, when it is the only launch
-            // from `first` on and a launch of the generic kernel over `dims` (real data) that
-            // planEwt serves: an operand pack or epilogue of a contraction that reads an input
-            // along another mode than it writes. The generic launch is its fallback (pointers
-            // not aligned to the tiled kernel's vectors).
+            // The tiled kernel in place of the launches of `steps` from `first` on, the launches
+            // of the generic kernel over `dims` (real data; one per piece when the modes exceed
+            // its slots) when planEwt serves the layout: an operand pack or epilogue of a
+            // contraction that reads an input along another mode than it writes, or any layout
+            // the generic kernel needs several launches for. The generic launches are its
+            // fallback (pointers not aligned to the tiled kernel's vectors).
             void tileLaunch(Pack const&                                             pack,
                             std::vector<std::pair<std::string, std::string>> const& strs,
                             std::vector<Dim> const&                                 dims,
@@ -1321,10 +1419,16 @@ namespace hiptensor
                             std::vector<LaunchStep>&                                steps,
                             size_t                                                  first)
             {
-                if(cplx || steps.size() != first + 1 || steps.back().kernel == nullptr
-                   || steps.back().kernel->family != kEw)
+                if(cplx || steps.size() <= first)
                 {
                     return;
+                }
+                for(size_t i = first; i < steps.size(); i++)
+                {
+                    if(steps[i].kernel == nullptr || steps[i].kernel->family != kEw)
+                    {
+                        return;
+                    }
                 }
                 EwLayout lay;
                 lay.dims      = dims;
@@ -1333,11 +1437,13 @@ namespace hiptensor
                 lay.binaryOps = binaryOps;
                 Program generic;
                 generic.pack = &pack;
-                generic.steps.push_back(steps.back());
+                generic.steps.assign(steps.begin() + first, steps.end());
                 Program        tiled;
                 CandidateFacts facts;
                 std::string    why;
-                if(planEwt(lay, pack, generic, tiled, facts, why) != HIPTENSOR_STATUS_SUCCESS
+                bool const     pieces = generic.steps.size() > 1;
+                if(planEwt(lay, pack, generic, tiled, facts, why, !pieces)
+                       != HIPTENSOR_STATUS_SUCCESS
                    || tiled.steps.size() != 1)
                 {
                     return;
@@ -1353,8 +1459,10 @@ namespace hiptensor
                         }
                     }
                 }
-                step.fallback = std::make_shared<LaunchStep const>(steps.back());
-                steps.back()  = std::move(step);
+                step.fallback
+                    = std::make_shared<std::vector<LaunchStep> const>(std::move(generic.steps));
+                steps.resize(first);
+                steps.push_back(std::move(step));
             }
 
             // ------------------------------------------------------------------------ reduction
@@ -2096,10 +2204,10 @@ namespace hiptensor
                 in.scale = ScalarRole::One;
                 in.op    = static_cast<int>(X.unaryOp);
                 EwOperand out;
-                out.name     = "D";
-                out.role     = BufferRole::Workspace;
-                out.bytes    = offset;
-                size_t const first = program.steps.size();
+                out.name  = "D";
+                out.role  = BufferRole::Workspace;
+                out.bytes = offset;
+                size_t const                                           first = program.steps.size();
                 std::vector<std::pair<std::string, std::string>> const strs{
                     {"a", dtypeName(X.type)}, {"d", toType}};
                 auto status = ewSteps(pack,
@@ -2302,8 +2410,8 @@ namespace hiptensor
             // offsets (the 64-bit-address body may then serve it).
             constexpr char kPastGemmOffsets[]
                 = "operands past the 32-bit offsets of the GEMM bodies";
-            // The body of the 64-bit-address GEMM kernels in the pack (make_rocke_pack.py
-            // GEMM_WIDE_BODY).
+            // The body of the 64-bit-address GEMM kernels in the pack (pack/rocke_pack_builder.cpp
+            // kGemmWideBody).
             constexpr char kGemmWideBody[] = "RIW";
 
             // f16 / bf16 (and f32 with a 16-bit compute type), f32 and complex f32 contractions
@@ -2323,11 +2431,13 @@ namespace hiptensor
                                            CandidateFacts&    facts,
                                            std::string&       reason)
             {
-                bool const    cplx = route == "cf32";
+                // routes: h16, the real f32 recipes x3 / x4 / x6 / x9, and cf32 (x6) / cf32x3 /
+                // cf32x4 / cf32x9 for complex f32
+                bool const    cplx = route.compare(0, 4, "cf32") == 0;
                 int64_t const M = c.M.size(), N = c.N.size(), K = c.K.size(), L = c.L.size();
-                // kernel extents per problem element: K in 16-bit halves (f32 pairs for x6,
-                // complex quadruples for cf32), N doubled for complex
-                int64_t const kUnit = route == "h16" ? 1 : route == "x6" ? 2 : 4;
+                // kernel extents per problem element: K in 16-bit halves (f32 pairs for the real
+                // f32 recipes, complex quadruples for cf32), N doubled for complex
+                int64_t const kUnit = route == "h16" ? 1 : cplx ? 4 : 2;
                 int64_t const nUnit = cplx ? 2 : 1;
                 int const     cus   = std::max(1, p.device.cuCount);
                 auto const*   kernel
@@ -2530,12 +2640,12 @@ namespace hiptensor
                 uint64_t const esOut  = elementBytes(dtypeName(D.type), cplx);
                 uint64_t const tBytes = tElems * 4;
                 facts                 = contractionFacts(p, c, cplx);
-                facts.route = route == "h16" ? Route::H16 : route == "x6" ? Route::X6 : Route::CF32;
-                facts.body  = gemmBodyId(b);
-                facts.tileM = tm;
-                facts.tileN = tn;
-                facts.tileK = tk;
-                facts.block = kernel->attr("block", 256);
+                facts.route        = route == "h16" ? Route::H16 : cplx ? Route::CF32 : Route::X6;
+                facts.body         = gemmBodyId(b);
+                facts.tileM        = tm;
+                facts.tileN        = tn;
+                facts.tileK        = tk;
+                facts.block        = kernel->attr("block", 256);
                 facts.persistent   = P;
                 facts.streamK      = kernel->attr("streamk", 0) == 1;
                 facts.ctas         = ctas;
@@ -2613,19 +2723,22 @@ namespace hiptensor
                 int64_t     dsm = 0, dsn = 0, dsl = 0, csm = 0, csn = 0, csl = 0;
             };
 
-            Gett64Layout gett64Layout(Problem const& p, Classified const& c, bool cplx)
+            // `f32`: the f32 strided GEMM (f32 / complex f32 words), else the f64 one.
+            Gett64Layout gett64Layout(Problem const& p, Classified const& c, bool cplx, bool f32)
             {
                 auto const&   C = p.t[2];
                 auto const&   D = p.t[3];
                 int64_t const M = c.M.size(), N = c.N.size();
                 Gett64Layout  g;
-                bool const    realOut = D.type == HIPTENSOR_R_64F || D.type == HIPTENSOR_C_64F;
-                g.dsm                 = c.M.mergedStride(3);
-                g.dsn                 = c.N.mergedStride(3);
-                g.dsl                 = c.L.mergedStride(3);
-                g.csm                 = C.present ? c.M.mergedStride(2) : g.dsm;
-                g.csn                 = C.present ? c.N.mergedStride(2) : g.dsn;
-                g.csl                 = C.present ? c.L.mergedStride(2) : g.dsl;
+                // D has the kernel's word type
+                bool const realOut = f32 ? D.type == HIPTENSOR_R_32F || D.type == HIPTENSOR_C_32F
+                                         : D.type == HIPTENSOR_R_64F || D.type == HIPTENSOR_C_64F;
+                g.dsm              = c.M.mergedStride(3);
+                g.dsn              = c.N.mergedStride(3);
+                g.dsl              = c.L.mergedStride(3);
+                g.csm              = C.present ? c.M.mergedStride(2) : g.dsm;
+                g.csn              = C.present ? c.N.mergedStride(2) : g.dsn;
+                g.csl              = C.present ? c.L.mergedStride(2) : g.dsl;
                 auto unit
                     = [](int64_t stride, int64_t extent) { return stride == 1 && extent > 1; };
                 // the kernel reads C with D's data type
@@ -2634,7 +2747,7 @@ namespace hiptensor
                       && g.csl >= 0
                       && (!C.present || (C.unaryOp == HIPTENSOR_OP_IDENTITY && C.type == D.type))
                       && unit(g.dsm, M) == unit(g.csm, M) && unit(g.dsn, N) == unit(g.csn, N);
-                uint64_t const es0  = cplx ? 16 : 8;
+                uint64_t const es0  = (f32 ? 4 : 8) * (cplx ? 2 : 1);
                 auto           span = [&](int64_t sm, int64_t sn) {
                     return ((M - 1) * sm + (N - 1) * sn + 1) * int64_t(es0);
                 };
@@ -2646,18 +2759,19 @@ namespace hiptensor
                 return g;
             }
 
-            // The f64 GEMM kernels for a layout in the static order: the rule's class (with K
-            // blocks for a long K when the pack has them), the default configuration, then the
-            // other classes.
+            // The f64 (f32: f32) GEMM kernels for a layout in the static order: the rule's class
+            // (with K blocks for a long K when the pack has them), the default configuration,
+            // then the other classes.
             std::vector<PackKernel const*> gett64Kernels(Pack const&         pack,
                                                          Gett64Layout const& g,
                                                          bool                cplx,
                                                          std::string const&  ruleClass,
-                                                         bool                longK)
+                                                         bool                longK,
+                                                         bool                f32)
             {
                 std::vector<PackKernel const*> out;
                 auto                           matches = [&](PackKernel const& k) {
-                    return k.family == kGett64 && k.attr("cplx") == (cplx ? 1 : 0)
+                    return k.family == (f32 ? kGett32 : kGett64) && k.attr("cplx") == (cplx ? 1 : 0)
                            && k.attr("bilinear") == (g.bilinear ? 1 : 0)
                            && k.attrStr("dclass") == g.dclass;
                 };
@@ -2692,7 +2806,9 @@ namespace hiptensor
             }
 
             // A contraction on one f64 strided GEMM kernel (f64 / complex f64 data, and every
-            // data type on the F64 route). `c` is ordered by D.
+            // data type on the F64 route), or (`f32`) on one f32 strided GEMM kernel (the native
+            // route of f32 / complex f32 data: operands converted to f32 exactly, f32
+            // accumulation, the K-range partials f32). `c` is ordered by D.
             //
             // One launch addresses at most 2^31 bytes per operand buffer (packed A and B rows,
             // the result's rows) and 65535 batches. Past that the GEMM runs as host-iterated
@@ -2710,12 +2826,15 @@ namespace hiptensor
                                          uint64_t            workspaceLimit,
                                          Program&            program,
                                          CandidateFacts&     facts,
-                                         std::string&        reason)
+                                         std::string&        reason,
+                                         bool                f32 = false)
             {
-                int64_t const  M = c.M.size(), N = c.N.size(), K = c.K.size(), L = c.L.size();
-                int64_t const  Kp         = roundUp(K, 2); // even K: one layout class
-                uint64_t const es         = cplx ? 16 : 8;
-                std::string    pt         = "f64";
+                int64_t const M = c.M.size(), N = c.N.size(), K = c.K.size(), L = c.L.size();
+                // one layout class: even K (real f32: a multiple of 4, the 16-byte loads)
+                int64_t const  Kp         = roundUp(K, f32 && !cplx ? 4 : 2);
+                uint64_t const es         = (f32 ? 4 : 8) * (cplx ? 2 : 1);
+                std::string    pt         = f32 ? "f32" : "f64";
+                std::string    gemmName   = f32 ? "the f32 GEMM" : "the f64 GEMM";
                 int64_t const  spanLimit  = kernel.attr("limit_span_bytes", kGett64SpanLimit);
                 int64_t const  batchLimit = kernel.attr("limit_batch", kGridYZMax);
                 int64_t const  tm = kernel.attr("tile_m"), tn = kernel.attr("tile_n");
@@ -2742,7 +2861,7 @@ namespace hiptensor
                     nk = ceilDiv(Kp, kc);
                     if(nk > batchLimit + 1)
                     {
-                        reason = "the f64 GEMM needs more than " + std::to_string(batchLimit + 1)
+                        reason = gemmName + " needs more than " + std::to_string(batchLimit + 1)
                                  + " K ranges";
                         return HIPTENSOR_STATUS_NOT_SUPPORTED;
                     }
@@ -2785,7 +2904,7 @@ namespace hiptensor
                 int64_t const launches = ceilDiv(M, mc) * ceilDiv(N, nc) * ceilDiv(L, lc) * kLaunch;
                 if(launches > kMaxLaunches)
                 {
-                    reason = "the f64 GEMM needs more than " + std::to_string(kMaxLaunches)
+                    reason = gemmName + " needs more than " + std::to_string(kMaxLaunches)
                              + " launches for operands of this size";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
@@ -2816,12 +2935,12 @@ namespace hiptensor
                     backend::Problem r;
                     r.kind       = OpKind::Reduction;
                     r.opReduce   = HIPTENSOR_OP_ADD;
-                    r.compute    = HIPTENSOR_COMPUTE_DESC_64F;
-                    r.scalarType = HIPTENSOR_R_64F;
+                    r.compute    = f32 ? HIPTENSOR_COMPUTE_DESC_32F : HIPTENSOR_COMPUTE_DESC_64F;
+                    r.scalarType = f32 ? HIPTENSOR_R_32F : HIPTENSOR_R_64F;
                     r.device     = p.device;
                     TensorArg P, T;
                     P.present = T.present = true;
-                    P.type = T.type = HIPTENSOR_R_64F;
+                    P.type = T.type = f32 ? HIPTENSOR_R_32F : HIPTENSOR_R_64F;
                     auto add = [](TensorArg& t, int32_t mode, int64_t extent, int64_t stride) {
                         t.modes.push_back(mode);
                         t.extents.push_back(extent);
@@ -2855,7 +2974,8 @@ namespace hiptensor
                 uint64_t const total = alignUp(offW + sum.workspaceBytes, kWorkspaceAlign);
                 if(total > workspaceLimit)
                 {
-                    reason = "the f64 route needs more workspace than the limit";
+                    reason = std::string(f32 ? "the native f32 route" : "the f64 route")
+                             + " needs more workspace than the limit";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
                 Program prog;
@@ -2984,7 +3104,8 @@ namespace hiptensor
                                      && w.set("b_sl", s(kl, bSl));
                                 if(!ok)
                                 {
-                                    reason = "f64 GEMM arguments do not fit the kernel arguments";
+                                    reason = std::string(f32 ? "f32" : "f64")
+                                             + " GEMM arguments do not fit the kernel arguments";
                                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                                 }
                                 step.grid
@@ -3022,9 +3143,8 @@ namespace hiptensor
                         m.beforeStep += base;
                         prog.memsets.push_back(m);
                     }
-                    for(auto step : sum.steps)
-                    {
-                        for(auto& ptr : step.pointers)
+                    auto toWorkspace = [offP, offT, offW](LaunchStep& launch) {
+                        for(auto& ptr : launch.pointers)
                         {
                             switch(ptr.role)
                             {
@@ -3044,19 +3164,23 @@ namespace hiptensor
                                 break;
                             }
                         }
-                        for(auto& sc : step.scalars)
+                        for(auto& sc : launch.scalars)
                         {
                             sc.role = sc.role == ScalarRole::Alpha || sc.role == ScalarRole::One
                                           ? ScalarRole::One
                                           : ScalarRole::Zero;
                         }
+                    };
+                    for(auto step : sum.steps)
+                    {
+                        remapLaunch(step, toWorkspace);
                         prog.steps.push_back(std::move(step));
                     }
                     prog.description += "+k" + std::to_string(nk);
                 }
                 if(!direct)
                 {
-                    status = epilogue(pack, p, c, "f64", cplx, N, M * N, offT, false, prog, reason);
+                    status = epilogue(pack, p, c, pt, cplx, N, M * N, offT, false, prog, reason);
                     if(status != HIPTENSOR_STATUS_SUCCESS)
                     {
                         return status;
@@ -3067,17 +3191,18 @@ namespace hiptensor
                 uint64_t const esB   = elementBytes(dtypeName(p.t[1].type), cplx);
                 uint64_t const esOut = elementBytes(dtypeName(D.type), cplx);
                 facts                = contractionFacts(p, c, cplx);
-                facts.route          = Route::Gett64;
+                facts.route          = f32 ? Route::Gett32 : Route::Gett64;
                 facts.body           = gett64ClassId(kernel.attrStr("cls"));
-                facts.f64Route = p.t[0].type != HIPTENSOR_R_64F && p.t[0].type != HIPTENSOR_C_64F;
-                facts.direct   = direct;
-                facts.kBlock   = kernel.attr("kblock", 0) > 0;
-                facts.tileM    = tm;
-                facts.tileN    = tn;
-                facts.tileK    = kernel.attr("tile_k", 0);
-                facts.block    = kernel.attr("block", 256);
-                facts.ctas     = ctas;
-                facts.split    = nk;
+                facts.f64Route
+                    = !f32 && p.t[0].type != HIPTENSOR_R_64F && p.t[0].type != HIPTENSOR_C_64F;
+                facts.direct         = direct;
+                facts.kBlock         = kernel.attr("kblock", 0) > 0;
+                facts.tileM          = tm;
+                facts.tileN          = tn;
+                facts.tileK          = kernel.attr("tile_k", 0);
+                facts.block          = kernel.attr("block", 256);
+                facts.ctas           = ctas;
+                facts.split          = nk;
                 facts.paddedVolume   = M * N * Kp * L;
                 facts.main           = &kernel;
                 uint64_t const outIo = uint64_t(M * N * L) * esOut * (p.t[2].present ? 2 : 1);
@@ -3096,9 +3221,9 @@ namespace hiptensor
                 return hash;
             }
 
-            // The canonical key of a contraction for rocKE's tuned GETT route table, as
-            // make_rocke_pack.gett_problem_key writes it: D, A, B with extent-1 modes dropped,
-            // modes ordered by stride and named by first appearance.
+            // The canonical key of a contraction for rocKE's tuned GETT route table, as the pack
+            // builder writes it (pack/rocke_pack_builder.cpp gettProblemKey): D, A, B with
+            // extent-1 modes dropped, modes ordered by stride and named by first appearance.
             std::string gettProblemKey(Problem const& p, std::string const& dtype, bool bilinear)
             {
                 std::map<int32_t, std::string> names;
@@ -3149,9 +3274,9 @@ namespace hiptensor
                 }
             }
 
-            // A contraction of rocKE's tuned GETT route table: the launches of its record
-            // (see make_rocke_pack.build_gett_plan). False when the problem has no record or the
-            // record does not apply.
+            // A contraction of rocKE's tuned GETT route table: the launches of its record (see
+            // pack/rocke_pack_builder.cpp gettPlanDescriptors). False when the problem has no
+            // record or the record does not apply.
             bool planTunedGett(Problem const& p,
                                Pack const&    pack,
                                uint64_t       workspaceLimit,
@@ -3295,11 +3420,19 @@ namespace hiptensor
             struct ContractionRoutes
             {
                 // a universal GEMM route: h16 (operands rounded to f16 / bf16, `storage` fp16
-                // or bf16), x6 (operands as f32, split into three bf16 parts) or cf32
+                // or bf16), x3 / x4 / x6 / x9 (operands as f32, split into bf16 parts) or cf32 /
+                // cf32x3 / cf32x4 / cf32x9 (complex f32, the x6 / x3 / x4 / x9 recipes)
                 bool        gemm = false;
                 std::string route, storage;
+                // the f32 strided GEMM (operands converted to f32 exactly, f32 products and
+                // accumulation): the native route of f32 data
+                bool gett32 = false;
                 // the f64 strided GEMM (operands converted to f64 exactly)
                 bool f64 = false;
+                // only the f64 route (the f64 recipe): no tuned GETT route either
+                bool f64Only = false;
+                // the f32 recipe that decided the routes, when not x6 (CandidateFacts::selectTag)
+                std::string tag;
                 // why a route is missing
                 std::string why;
             };
@@ -3310,9 +3443,13 @@ namespace hiptensor
             // (it would skip the rounding); 32F / C32F f32 products: operands of f64 data take
             // the f64 route (more precise, and the only route that reads them without a first
             // rounding), f16 x f16 or bf16 x bf16 without an operand operator the h16 route
-            // (exact products), the other real operands the x6 route (their f32 values, every
-            // f16 / bf16 value is one), complex f32 the cf32 route; the f64 route as well.
-            ContractionRoutes contractionRoutes(Problem const& p)
+            // (exact products), the other real operands and complex f32 the route of the f32
+            // recipe (their f32 values, every f16 / bf16 value is one): native, the f32 strided
+            // GEMM (f32 products and accumulation); x3 / x4 / x6 / x9, the universal GEMM with
+            // the operands split into bf16 parts (cf32 routes for complex data); f64, the f64
+            // route only (also for 16-bit operands). The f64 route is a candidate of every
+            // recipe: no recipe admits a route less accurate than the one it names.
+            ContractionRoutes contractionRoutes(Problem const& p, F32Recipe recipe)
             {
                 ContractionRoutes r;
                 auto const&       A       = p.t[0];
@@ -3358,26 +3495,46 @@ namespace hiptensor
                         r.why = "operands of f64 data take the f64 route";
                         return r;
                     }
-                    r.gemm = true;
-                    if(cplx)
+                    if(recipe == F32Recipe::F64)
                     {
-                        r.route   = "cf32";
-                        r.storage = "bf16";
+                        r.f64Only = true;
+                        r.tag     = f32RecipeName(recipe);
+                        r.why     = "HIPTENSOR_ROCKE_F32_RECIPE=f64 takes the f64 route only";
                         return r;
                     }
                     bool const ops
                         = A.unaryOp != HIPTENSOR_OP_IDENTITY || B.unaryOp != HIPTENSOR_OP_IDENTITY;
-                    if(A.type == B.type && !ops
+                    if(!cplx && A.type == B.type && !ops
                        && (A.type == HIPTENSOR_R_16F || A.type == HIPTENSOR_R_16BF))
                     {
+                        r.gemm    = true;
                         r.route   = "h16";
                         r.storage = A.type == HIPTENSOR_R_16F ? "fp16" : "bf16";
                         return r;
                     }
                     // the operators of 16-bit operands run in f32 and their results stay f32
                     // (no rounding back to the 16-bit type), as do mixed 16-bit operands
-                    r.route   = "x6";
+                    if(recipe != F32Recipe::X6)
+                    {
+                        r.tag = f32RecipeName(recipe);
+                    }
+                    if(recipe == F32Recipe::Native)
+                    {
+                        r.gett32 = true;
+                        return r;
+                    }
+                    r.gemm    = true;
                     r.storage = "bf16";
+                    if(cplx)
+                    {
+                        r.route = recipe == F32Recipe::X6
+                                      ? std::string("cf32")
+                                      : "cf32" + std::string(f32RecipeName(recipe));
+                    }
+                    else
+                    {
+                        r.route = f32RecipeName(recipe);
+                    }
                     return r;
                 }
                 default:
@@ -4057,18 +4214,26 @@ namespace hiptensor
             }
 
             // A contraction on the direct GETT: one launch, the operands read and D written
-            // through their own strides, no workspace.
+            // through their own strides, no workspace. `f64Compute`: products and accumulation
+            // in f64 whatever the compute class (HIPTENSOR_ROCKE_F32_RECIPE=f64).
             hiptensorStatus_t planDgett(Problem const&    p,
                                         Pack const&       pack,
                                         Classified const& c,
                                         Program&          program,
                                         CandidateFacts&   facts,
-                                        std::string&      reason)
+                                        std::string&      reason,
+                                        bool              f64Compute = false)
             {
                 DgettClass cls;
                 if(!dgettClass(p, cls, reason))
                 {
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                if(f64Compute)
+                {
+                    // the operands' values exactly (a 32F / C32F compute type rounds nothing)
+                    cls.comp = "f64";
+                    cls.rnd  = 0;
                 }
                 auto const& A    = p.t[0];
                 auto const& C    = p.t[2];
@@ -4722,12 +4887,13 @@ namespace hiptensor
                              + " tensors is not supported by the rocKE kernels";
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
-                auto const routes = contractionRoutes(problem);
-                if(!routes.gemm && !routes.f64)
+                auto const routes = contractionRoutes(problem, options.f32Recipe);
+                if(!routes.gemm && !routes.gett32 && !routes.f64)
                 {
                     reason = routes.why;
                     return HIPTENSOR_STATUS_NOT_SUPPORTED;
                 }
+                bool const f64Only = options.f64Only || routes.f64Only;
                 for(auto const* t : {&A, &B})
                 {
                     bool okOp = t->unaryOp == HIPTENSOR_OP_IDENTITY
@@ -4774,16 +4940,17 @@ namespace hiptensor
                 auto add = [&](std::string key, Program&& program, CandidateFacts const& facts) {
                     contractionChecks(problem, program);
                     Candidate candidate;
-                    candidate.key        = std::move(key);
-                    candidate.program    = std::move(program);
-                    candidate.facts      = facts;
-                    candidate.staticRank = static_cast<int>(out.size());
-                    candidate.tuned      = facts.route == Route::TunedGett;
+                    candidate.key             = std::move(key);
+                    candidate.program         = std::move(program);
+                    candidate.facts           = facts;
+                    candidate.facts.selectTag = routes.tag;
+                    candidate.staticRank      = static_cast<int>(out.size());
+                    candidate.tuned           = facts.route == Route::TunedGett;
                     out.push_back(std::move(candidate));
                 };
 
                 // rocKE's tuned GETT route for the problems it measured
-                if(!options.f64Only && !options.disableTuned)
+                if(!f64Only && !options.disableTuned)
                 {
                     Program     program;
                     std::string why;
@@ -4825,8 +4992,9 @@ namespace hiptensor
                 }
 
                 // rocKE's ring GETT body with runtime index maps: the operands read and D
-                // written in place, ahead of the routes the selection models rank
-                if(!options.f64Only)
+                // written in place, ahead of the routes the selection models rank (f32
+                // accumulation: not under the f64 recipe)
+                if(!f64Only)
                 {
                     // the pack-hybrid form first (the operands with short runs packed), then the
                     // operands read in place; the first one that applies is preferred
@@ -4859,7 +5027,7 @@ namespace hiptensor
                 }
 
                 // the GEMM route of the data and compute types
-                if(!options.f64Only && routes.gemm)
+                if(!f64Only && routes.gemm)
                 {
                     std::string const& route   = routes.route;
                     std::string const& storage = routes.storage;
@@ -4907,29 +5075,27 @@ namespace hiptensor
                     }
                 }
 
-                // the f64 strided GEMM: the route of f64 / complex f64 data, and the F64 route of
-                // the other types (operands converted to f64, the result rounded once)
-                if(!routes.f64)
-                {
-                    note(routes.why);
-                }
-                else
-                {
+                // the strided GEMM with f32 words (`f32`: the native route of f32 data) or f64
+                // words (the route of f64 / complex f64 data, and the F64 route of the other
+                // types: operands converted to f64, the result rounded once); a status other
+                // than success ends the enumeration
+                auto stridedGemm = [&](bool f32) -> hiptensorStatus_t {
                     Classified cd = c;
                     cd.M.orderBy(3);
                     cd.N.orderBy(3);
                     cd.L.orderBy(3);
-                    auto const    layout = gett64Layout(problem, cd, cplx);
-                    int64_t const Kp     = roundUp(cd.K.size(), 2);
+                    auto const    layout = gett64Layout(problem, cd, cplx, f32);
+                    int64_t const Kp     = roundUp(cd.K.size(), f32 && !cplx ? 4 : 2);
                     int const     cus    = std::max(1, problem.device.cuCount);
                     int64_t const kbMin
                         = static_cast<int64_t>(pack.routeDouble("gett64.k_block_min_k", 4096));
                     auto const cls = gett64Class(
                         pack.arch(), cplx, cd.M.size(), cd.N.size(), Kp, cd.L.size(), cus);
-                    auto const kernels = gett64Kernels(pack, layout, cplx, cls, Kp >= kbMin);
+                    auto const kernels = gett64Kernels(pack, layout, cplx, cls, Kp >= kbMin, f32);
                     if(kernels.empty())
                     {
-                        note("the pack has no f64 GEMM kernel for this layout class");
+                        note(f32 ? "the pack has no f32 GEMM kernel for this layout class"
+                                 : "the pack has no f64 GEMM kernel for this layout class");
                     }
                     for(auto const* kernel : kernels)
                     {
@@ -4945,10 +5111,14 @@ namespace hiptensor
                                                  workspaceLimit,
                                                  program,
                                                  facts,
-                                                 why);
+                                                 why,
+                                                 f32);
                         if(status == HIPTENSOR_STATUS_SUCCESS)
                         {
-                            add((facts.f64Route ? "f64:" : "gett64:") + kernel->name,
+                            add((f32              ? "gett32:"
+                                 : facts.f64Route ? "f64:"
+                                                  : "gett64:")
+                                    + kernel->name,
                                 std::move(program),
                                 facts);
                         }
@@ -4962,6 +5132,22 @@ namespace hiptensor
                             return status;
                         }
                     }
+                    return HIPTENSOR_STATUS_SUCCESS;
+                };
+                if(!f64Only && routes.gett32)
+                {
+                    if(auto status = stridedGemm(true); status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return status;
+                    }
+                }
+                if(!routes.f64)
+                {
+                    note(routes.why);
+                }
+                else if(auto status = stridedGemm(false); status != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return status;
                 }
                 // the direct GETT: every contraction, in place, no workspace (after the others
                 // in the static order)
@@ -4970,7 +5156,7 @@ namespace hiptensor
                     Program        program;
                     CandidateFacts facts;
                     std::string    why;
-                    auto           status = planDgett(problem, pack, c, program, facts, why);
+                    auto status = planDgett(problem, pack, c, program, facts, why, routes.f64Only);
                     if(status == HIPTENSOR_STATUS_SUCCESS)
                     {
                         // on a target without the GEMM routes (gfx90a, gfx942: no GEMM kernel in
@@ -4978,8 +5164,14 @@ namespace hiptensor
                         // to the f64 route. A property of the target, not of the candidates
                         // within the workspace limit, so that a plan with the workspace of the
                         // estimate selects the estimate's kernel.
+                        // The native f32 route (gett32) of such a target (gfx942) is the
+                        // recipe's own route and stays ahead: the direct GETT is preferred to
+                        // the f64 route only (also a property of the target and the recipe).
                         bool const gemmTarget = pack.find(kGemm, {}, {}) != nullptr;
-                        bool const prefer     = !gemmTarget && facts.main->attrStr("comp") != "f64";
+                        bool const ownRoute
+                            = routes.gett32 && pack.find(kGett32, {}, {}) != nullptr;
+                        bool const prefer
+                            = !gemmTarget && !ownRoute && facts.main->attrStr("comp") != "f64";
                         add("dgett:" + facts.main->name, std::move(program), facts);
                         out.back().preferred = prefer;
                     }
@@ -5074,9 +5266,10 @@ namespace hiptensor
                         m.beforeStep += base;
                         out.memsets.push_back(m);
                     }
-                    for(auto step : from.steps)
-                    {
-                        for(auto& ptr : step.pointers)
+                    // the step's buffers and scalars in the trinary's roles, for its launches
+                    // and their fallbacks (taken at execution for misaligned buffers)
+                    auto toTrinary = [isFirst, tBytes](LaunchStep& launch) {
+                        for(auto& ptr : launch.pointers)
                         {
                             switch(ptr.role)
                             {
@@ -5102,13 +5295,17 @@ namespace hiptensor
                         }
                         if(isFirst)
                         {
-                            for(auto& s : step.scalars)
+                            for(auto& s : launch.scalars)
                             {
                                 s.role = s.role == ScalarRole::Alpha ? ScalarRole::One
                                              : s.role == ScalarRole::One ? ScalarRole::One
                                                                          : ScalarRole::Zero;
                             }
                         }
+                    };
+                    for(auto step : from.steps)
+                    {
+                        remapLaunch(step, toTrinary);
                         out.steps.push_back(std::move(step));
                     }
                 };
@@ -5429,6 +5626,23 @@ namespace hiptensor
                    status != HIPTENSOR_STATUS_SUCCESS)
                 {
                     return status;
+                }
+                // a launch's own fallback (the generic launches of a tiled pack or epilogue)
+                if(step.fallback != nullptr
+                   && std::any_of(step.fallback->begin(),
+                                  step.fallback->end(),
+                                  [](LaunchStep const& f) { return f.function == nullptr; }))
+                {
+                    auto fallback = std::make_shared<std::vector<LaunchStep>>(*step.fallback);
+                    for(auto& f : *fallback)
+                    {
+                        if(auto status = program.pack->function(*f.kernel, f.function);
+                           status != HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            return status;
+                        }
+                    }
+                    step.fallback = std::move(fallback);
                 }
             }
             if(program.fallback != nullptr)

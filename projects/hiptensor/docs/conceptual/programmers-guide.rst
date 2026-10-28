@@ -78,6 +78,11 @@ These environment variables, read at every plan creation and workspace estimate,
             only places the rocKE backend looks; otherwise it looks next to the library
             (``../share/hiptensor/rocke``), in the install prefix and in the build tree. Without a pack for the device,
             the rocKE backend declines every problem.
+    *   -   ``HIPTENSOR_ROCKE_F32_RECIPE``
+        -   ``native`` (default), ``x3``, ``x4``, ``x6``, ``x9`` or ``f64``: how the rocKE backend multiplies
+            contractions with ``HIPTENSOR_COMPUTE_DESC_32F`` or ``HIPTENSOR_COMPUTE_DESC_C32F`` whose operands are f32
+            or complex f32 (or mixed 16-bit and f32), see :ref:`rocke-f32-recipes`. Other values select ``native``,
+            and the plan log says so.
     *   -   ``HIPTENSOR_ROCKE_CONTRACTION_ROUTE``
         -   ``f64``, for debugging and testing: the rocKE backend runs every contraction in f64 (complex f64), with the
             operands converted to f64 and the result rounded once to the output type.
@@ -170,6 +175,10 @@ declined; the fallback backend serves what it supports of them. A contraction ru
   with C laid out as D.
 * The GEMM routes (gfx950): A and B are packed into the workspace, a GEMM computes an f32 result in the
   workspace, and an elementwise epilogue writes D.
+* The native f32 route (gfx942 and gfx950): contractions of f32 or complex f32 data with
+  ``HIPTENSOR_COMPUTE_DESC_32F`` or ``HIPTENSOR_COMPUTE_DESC_C32F`` (the default recipe, see
+  :ref:`rocke-f32-recipes`): A and B are packed into the workspace and an f32 strided GEMM with f32 products and
+  f32 accumulation writes D (or an f32 result that an epilogue writes to D).
 * The f64 route (every target): A and B are converted to f64 into the workspace and an f64 GEMM writes D (or
   an f64 result that an epilogue writes to D).
 * The direct GETT (every target): one launch reads A, B and C and writes D through their own strides, with no
@@ -186,7 +195,19 @@ in LDS and read back along the output's mode, and D is written with 16-byte stor
 extents and strides keep those vectors aligned (otherwise, and for buffers that are not aligned, the generic
 kernel runs). Otherwise, when an input is contiguous along the output's fastest mode, a vector form of the generic
 kernel handles 16 bytes of the output per thread, with vector loads of those inputs (the classes of the JIT's
-vector kernels, with the sizes and strides as kernel arguments).
+vector kernels, with the sizes and strides as kernel arguments). When the output's two tiled modes span less
+than half a tile, one workgroup of the tiled kernel computes the planes of several consecutive batch indices.
+
+The launches that pack a contraction's operands into the workspace and the epilogue that writes D from the GEMM
+result (real data) use the tiled kernel when they transpose a tensor, and also when the generic kernel would need
+several launches for them (more modes than its index slots): those run as one launch of the tiled kernel, with
+the output's two fastest modes as the tile. Each such launch keeps the generic launches it replaces, which
+execution runs instead when a buffer, or the workspace, is not aligned to the tiled kernel's 16-byte vectors.
+Kernels compiled by the JIT for a plan exist only on the device the plan was created on: executed on another
+device, the plan runs the kernel pack's launches they replace. The other kernels of the pack are loaded on the
+executing device. The workspace passed to ``hiptensorContract`` should be aligned to 256 bytes (as memory from
+``hipMalloc`` is): the rocKE backend places the packed operands and the GEMM result at multiples of 256 bytes
+from its start, and its GEMM routes read them with vector accesses.
 
 The data types of a contraction's A, B, C and D may differ: each is f16, bf16, f32 or f64, or each is complex f32
 or complex f64. The compute type sets the precision of the products. With ``HIPTENSOR_COMPUTE_DESC_16F`` and
@@ -208,16 +229,16 @@ once to that type). The trigonometric and hyperbolic operators, their inverses, 
 for f32 the result is rounded once to f32. The table gives the largest error of each operator in units in the last
 place (ulp) of the compute type, against the exact result of the operand. The f32 bounds hold for every one of the
 2^32 inputs; the f64-evaluated operators are correctly rounded in f32 except for at most six inputs per operator,
-which lie within 2^-29 ulp of the midpoint between two f32 values. The f64 bounds come from at least 100,000 inputs
-per operator over its domain, including its boundaries and, for sine, cosine and tangent, the arguments closest to
-multiples of pi/2.
+which lie within 2^-29 ulp of the midpoint between two f32 values. The f64 column is measured, not proven: it is
+the largest error over at least 100,000 inputs per operator over its domain, including its boundaries and, for
+sine, cosine and tangent, the arguments closest to multiples of pi/2.
 
 .. list-table::
    :header-rows: 1
 
    *   -   Operator
        -   f32
-       -   f64
+       -   f64 (measured)
    *   -   identity, conjugate (real data), negation, abs, ReLU, ceil, floor
        -   exact
        -   exact
@@ -246,6 +267,60 @@ atanh of +-1 is +-inf, sin, cos and tan of an infinity are NaN, and odd operator
 ``x > 0 ? x : 0``, so ReLU of NaN and of -0 is +0. Sigmoid is evaluated as ``1 / (1 + e^-x)`` for x >= 0 and
 ``e^x / (1 + e^x)`` below, so large negative arguments keep their small results.
 
+.. _rocke-f32-recipes:
+
+Contractions of f32 data on the rocKE backend
+"""""""""""""""""""""""""""""""""""""""""""""
+
+With ``HIPTENSOR_COMPUTE_DESC_32F`` or ``HIPTENSOR_COMPUTE_DESC_C32F``, the rocKE backend multiplies f32 and complex
+f32 operands (and mixed f16, bf16 and f32 operands) by the recipe ``HIPTENSOR_ROCKE_F32_RECIPE`` names. No recipe
+admits a kernel less accurate than its own: every recipe also lists the f64 route, which is at least as accurate,
+and a target without the recipe's kernels serves the contraction on the f64 route. The direct GETT is a candidate
+of every recipe too (f32 products and accumulation; under ``f64`` f64 products and accumulation), and the ring GETT
+of f16 and bf16 data (exact products, f32 accumulation) of every recipe but ``f64``. f16 or bf16 operands of the
+same type without an operator keep their 16-bit GEMM route (exact products) under every recipe but ``f64``.
+
+.. list-table::
+
+    *   -   **Recipe**
+        -   **Kernels**
+        -   **Products**
+        -   **Accuracy class**
+    *   -   ``native`` (default)
+        -   f32 (complex f32) strided GEMM on f32 matrix instructions, gfx942 and gfx950
+        -   every product enters unrounded into a chain of correctly rounded f32 fmas in K order; complex
+            products as four real products (4M)
+        -   f32
+    *   -   ``x9``
+        -   universal GEMM, every operand split into three bf16 parts, gfx950
+        -   all nine part products (each exact), summed in f32: a product carries a few f32 roundings
+        -   f32
+    *   -   ``x6``
+        -   as ``x9``, without the three smallest part products
+        -   the dropped part products are at most about 2^-23 of a product, summed in f32
+        -   f32
+    *   -   ``x4``
+        -   universal GEMM, every operand split into two bf16 parts, gfx950
+        -   operands kept to about 16 significant bits: relative error of a product at most about 2^-15
+        -   between bf16 and f32 (about 16 bits)
+    *   -   ``x3``
+        -   as ``x4``, without the product of the two low parts
+        -   about 2^-15, as ``x4``
+        -   between bf16 and f32 (about 16 bits)
+    *   -   ``f64``
+        -   f64 (complex f64) strided GEMM, every target with a kernel pack
+        -   operands converted to f64 exactly, f64 accumulation, the result rounded once to D's type
+        -   f64
+
+For the f32-class recipes, the error of an element of D against the exact result is at most
+``2 (n K + 4) u |alpha| sum |a b| + e |alpha| sum |a b| + 2 u_d |d| + 4 u |beta c|``, with ``u`` = 2^-24, ``n`` the part
+products per product (1 for ``native``, 9, 6, 4 or 3) and ``e`` the relative error of a product's representation (0
+for ``native`` and ``x9``, 2^-21 for ``x6``, 2^-14 for ``x4`` and ``x3``); for ``f64`` the bound above with
+``u_c`` = 2^-53 applies. ``x6`` ranks its candidates with the selection models of the kernel pack; the other recipes
+rank them by rocKE's rules (the models are trained on ``x6``). A plan-cache entry written under one recipe names a
+kernel the other recipes do not list, so plans under another recipe select their kernel as if the entry were not
+there.
+
 A trinary contraction runs as the library's two contractions: T = opA(A) opB(B), stored with E's data type at the
 start of the workspace (its size is part of the plan's required workspace), then
 E = alpha T opC(C) + beta opD(D). The first step writes all of T without reading it, so earlier contents of the
@@ -267,27 +342,31 @@ JIT and kernel cache
 ^^^^^^^^^^^^^^^^^^^^
 
 A build with ``-DHIPTENSOR_ENABLE_ROCKE_JIT=ON`` (the default when the rocKE backend is built) links the COMGR
-library and rocKE's recipe engine. Plans created on the rocKE backend with ``HIPTENSOR_JIT_MODE_DEFAULT`` then
+library and rocKE's C++ kernel builders. Plans created on the rocKE backend with ``HIPTENSOR_JIT_MODE_DEFAULT`` then
 replace the elementwise launches of the plan (permutations, elementwise binary and trinary operations, and the
 operand packing and epilogue launches of contractions) by kernels compiled for the problem at plan creation: every
 size, stride and operator a constant, and, when the output and an input are contiguous in the output's fastest
 mode, 16-byte vector loads and stores along that mode. A launch without such an input (every input gathered or
 broadcast along the output's fastest mode, for example a permutation that moves the fastest mode) keeps its
 kernel-pack kernel (``HIPTENSOR_ROCKE_JIT=all`` specializes it too). The choice is made when the plan is created
-and is kept by the plans the plan cache restores. The kernels come from recipes that the build records from
-rocKE's kernel builder (``share/hiptensor/rocke/rocke.recipes``); the library replays them in C++ and compiles the
-result with COMGR, without Python. A specialized launch keeps its kernel-pack launch, which execution takes when
-a buffer is not aligned to the vector width or the plan runs on another device than the one it was created on.
+and is kept by the plans the plan cache restores. The library builds the kernels with rocKE's C++ kernel builders
+(the same builders that wrote the kernel pack) and compiles them with COMGR, without Python and without any data
+file besides the kernel pack. The operand packing and epilogue launches of mixed-type contractions keep their
+kernel-pack kernels, and so do launches with the operators ``HIPTENSOR_OP_SIN`` to ``HIPTENSOR_OP_FLOOR`` unless
+the output and every input are contiguous in the output's fastest mode and addressed with 32-bit offsets. A
+specialized launch keeps its kernel-pack launch, which execution takes when a buffer is not aligned to the vector
+width or the plan runs on another device than the one it was created on.
 
 Plans created with ``HIPTENSOR_JIT_MODE_NONE`` (the default) never compile and never use JIT kernels; every
 problem the rocKE backend serves runs without JIT. Plan creation with ``HIPTENSOR_JIT_MODE_DEFAULT`` can take as
 long as the compiles of its new kernels and can't be captured in a HIP graph; execution can.
 
 Compiled kernels go to a process-wide kernel cache. An entry is identified by the SHA-256 of its LLVM IR, the
-target, the compile options and the compiler version, and is found again by its recipe and values, so a second
-plan of the same problem, from any handle, compiles nothing. ``hiptensorWriteKernelCacheToFile`` writes the entries
-of the handle's device class (architecture, target features, compute unit count) to a file, replacing it;
-``hiptensorReadKernelCacheFromFile`` adds the entries of a file to the cache. Reading returns
+target, the compile options and the compiler version, and is found again by its kernel class, the build of
+rocKE's kernel builders and the values, so a second plan of the same problem, from any handle, compiles nothing.
+``hiptensorWriteKernelCacheToFile`` writes the entries of the handle's device class (architecture, target features,
+compute unit count) to a file, replacing it; ``hiptensorReadKernelCacheFromFile`` adds the entries of a file to the
+cache. Reading returns
 ``HIPTENSOR_STATUS_INVALID_VALUE`` for a file of a newer format, another device class or another kernel ABI,
 ``HIPTENSOR_STATUS_IO_ERROR`` for a file that is missing, damaged in its header, not a kernel cache file, not owned
 by the user (or root), or writable by others, and ``HIPTENSOR_STATUS_SUCCESS`` for an empty file. Damaged entries

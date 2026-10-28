@@ -1,16 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Host side of the f64 GETT tests: buffers, launch, and exact references.
+"""Host side of the f64 / f32 GETT tests: buffers, launch, and exact references.
 
 The reference for an output is the correctly rounded exact sum
 ``sum_k a_k * b_k``: every product is split into two doubles without error
 (Veltkamp / Dekker), and ``math.fsum`` adds all of them exactly. The error
-bound the device must meet is the f64 MFMA (sequential RN fma chain) bound
+bound the device must meet is the MFMA (sequential RN fma chain) bound
 plus the single-rounding epilogue, per the precision contract:
 
 ``|d - t| <= u*|t| + (K + 2)*u*(|alpha| * sum|a||b| + |beta|*|c|)``
 
-(complex: ``2K + 4`` roundings per component).
+(complex: ``2K + 4`` roundings per component), with ``u`` the unit roundoff
+of the problem's words (``2^-53`` for f64 data, ``2^-24`` for f32 data; f32
+values are exact doubles, so the same exact reference applies).
 """
 
 from __future__ import annotations
@@ -39,6 +41,17 @@ from rocke.instances.common.gett_f64 import (
 )
 
 U = 2.0**-53
+U32 = 2.0**-24
+
+
+def unit_roundoff(problem: GettF64Problem) -> float:
+    """The unit roundoff of the problem's words."""
+    return U32 if getattr(problem, "dtype", "f64") == "f32" else U
+
+
+def np_word(problem: GettF64Problem):
+    """The numpy type of one real word of the problem's data."""
+    return np.float32 if getattr(problem, "dtype", "f64") == "f32" else np.float64
 
 
 def offsets(digits, n: int) -> np.ndarray:
@@ -68,7 +81,7 @@ def gather(problem: GettF64Problem, which: str, flat: np.ndarray) -> np.ndarray:
         + offsets(c, Cn)[None, None, :]
     )
     if p.complex_:
-        z = flat.view(np.complex128)
+        z = flat.view(np.complex64 if np_word(p) is np.float32 else np.complex128)
         return z[off]
     return flat[off]
 
@@ -100,9 +113,12 @@ def reference(
     problem, A, B, C, alpha, beta, samples
 ) -> List[Tuple[Tuple[int, int, int], complex, float]]:
     """(index, correctly rounded alpha*t + beta*c, bound) for each sample."""
-    Am, Bm = gather(problem, "A", A), gather(problem, "B", B)
-    Cm = gather(problem, "C", C) if C is not None else None
+    wide = np.complex128 if problem.complex_ else np.float64
+    Am = gather(problem, "A", A).astype(wide)
+    Bm = gather(problem, "B", B).astype(wide)
+    Cm = gather(problem, "C", C).astype(wide) if C is not None else None
     K = problem.K
+    U = unit_roundoff(problem)
     out = []
     for l, m, n in samples:
         a, b = Am[l, m], Bm[l, n]
@@ -325,7 +341,8 @@ def run_plan(plan, arch, A, B, C, D, alpha, beta, *, bilinear=True, **knobs):
             cx = ln.problem.complex_
             al = [alpha.real, alpha.imag] if cx else [float(alpha)]
             be = ([beta.real, beta.imag] if cx else [float(beta)]) if bilinear else []
-            args += struct.pack(f"{len(al) + len(be)}d", *al, *be)
+            fmt = "f" if getattr(ln.problem, "dtype", "f64") == "f32" else "d"
+            args += struct.pack(f"{len(al) + len(be)}{fmt}", *al, *be)
             rt.launch_blocking(
                 module.get_function(kernel.name),
                 gett_f64_grid(spec),
@@ -344,15 +361,17 @@ def run_plan(plan, arch, A, B, C, D, alpha, beta, *, bilinear=True, **knobs):
 
 
 def random_buffers(problem: GettF64Problem, rng, *, integer=False, bilinear=True):
+    w = np_word(problem)
+
     def buf(which):
         n = span_elems(problem, which) * (2 if problem.complex_ else 1)
         if integer:
-            return rng.integers(-8, 9, n).astype(np.float64)
-        return rng.uniform(-1.0, 1.0, n)
+            return rng.integers(-8, 9, n).astype(w)
+        return rng.uniform(-1.0, 1.0, n).astype(w)
 
     A, B = buf("A"), buf("B")
     C = buf("C") if bilinear else None
-    D = np.full(span_elems(problem, "D") * (2 if problem.complex_ else 1), np.nan)
+    D = np.full(span_elems(problem, "D") * (2 if problem.complex_ else 1), np.nan, w)
     return A, B, C, D
 
 

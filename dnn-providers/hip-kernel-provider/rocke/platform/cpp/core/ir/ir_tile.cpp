@@ -800,6 +800,20 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts)
 {
+    return rocke_b_inline_asm_named(
+        b, asm_template, constraints, operands, num_operands, result_types, num_results, opts, "asm");
+}
+
+rocke_op_t* rocke_b_inline_asm_named(rocke_ir_builder_t* b,
+                                     const char* asm_template,
+                                     const char* constraints,
+                                     rocke_value_t* const* operands,
+                                     int num_operands,
+                                     const rocke_type_t* const* result_types,
+                                     int num_results,
+                                     const rocke_inline_asm_opts_t* opts,
+                                     const char* result_name_hint)
+{
     rocke_attr_map_t attrs;
     bool sideeffect = true; /* Python default */
     bool convergent = false; /* Python default */
@@ -840,7 +854,7 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                       &attrs,
                       NULL,
                       0,
-                      "asm",
+                      result_name_hint ? result_name_hint : "asm",
                       NULL);
 }
 

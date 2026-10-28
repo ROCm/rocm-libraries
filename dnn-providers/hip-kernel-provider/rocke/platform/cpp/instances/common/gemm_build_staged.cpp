@@ -21,7 +21,10 @@
 #include "rocke/helper_rocke.helpers.grid.h"
 #include "rocke/helper_rocke.helpers.streamk.h"
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/instance_tensor_gett.h" /* the _gett side channel */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
+
+#include <vector>
 
 #define STG_MAX_STAGES 4
 #define STG_MAX_FRAGS 64
@@ -95,6 +98,12 @@ typedef struct staged_state
     int rbase_shift[2][STG_MAX_STAGES];
     rocke_value_t* rbase[2][STG_MAX_STAGES];
     int n_rbase[2];
+    /* MN-contiguous operands (gemm_mn_operand) and the tensor GETT hook */
+    rocke_value_t* wv; /* to_sgpr_u32(warp_id) (more than one wave), else NULL */
+    int op_pass_bytes[2]; /* Python _op_pass_bytes: DTL bytes of one pass per operand */
+    rocke_value_t* g_t0[2 * ROCKE_GEMM_MAX_DTL_PASSES]; /* GETT: A voffs, then B voffs */
+    rocke_value_t* mn_fbase[2][STG_MAX_STAGES]; /* Python _mn_fbase: lane base per stage */
+    int mn_fsh[2][STG_MAX_STAGES]; /* ... and its folded 64 KiB shift (elements) */
 } staged_state_t;
 
 /* The deferred issue closures of one `_dtl_issues(stage, k_ld, tile0s, valid)`
@@ -111,7 +120,30 @@ typedef struct staged_issue_set
     /* dtl_hoist: per-operand resource / soffset built with the set */
     rocke_value_t* h_rsrc[2];
     rocke_value_t* h_soff[2];
+    /* tensor GETT: the per-pass voffs (A then B), per operand resource and
+     * soffset (the K tile's mode offset) */
+    rocke_value_t* const* gt0;
+    rocke_value_t* g_rs[2];
+    rocke_value_t* g_so[2];
 } staged_issue_set_t;
+
+/* Python _org(nm, tile0, k): element offset of the operand tile at K offset
+ * k: tile0 + k (K-contiguous) or tile0 + k * ld (MN-contiguous). */
+static rocke_value_t* staged_org(staged_state_t* st, bool is_a, rocke_value_t* tile0, rocke_value_t* k)
+{
+    rocke_ir_builder_t* b = st->b;
+    rocke_gemm_build_ctx_t* ctx = st->ctx;
+    if(!(is_a ? ctx->has_mn_a : ctx->has_mn_b))
+        return rocke_b_add(b, tile0, k);
+    rocke_value_t* kl = rocke_b_mul(b, k, is_a ? ctx->M : ctx->N);
+    return rocke_b_add(b, tile0, kl);
+}
+
+/* the number of GETT passes of operand A / B (hook geometry) */
+static int staged_gpasses(const staged_state_t* st, bool is_a)
+{
+    return st->ctx->gett->passes(is_a ? 'A' : 'B');
+}
 
 /* _tight_rs(ptr, tile0, k_ld, ok, nbytes): a resource based at the tile origin
  * whose range ends at the operand's last byte, soffset 0 (dtl_tight_rsrc). */
@@ -140,7 +172,7 @@ static void staged_tight_rs(staged_state_t* st,
         *soff = st->c_zero_rec;
         return;
     }
-    rocke_value_t* sum = rocke_b_add(b, tile0, k_ld);
+    rocke_value_t* sum = staged_org(st, o == 0, tile0, k_ld);
     rocke_value_t* by = rocke_b_mul(b, sum, st->c2s);
     rocke_value_t* org = rocke_b_to_sgpr_u32(b, by);
     rocke_value_t* df = rocke_b_sub(b, nbytes, org);
@@ -170,6 +202,25 @@ static staged_issue_set_t staged_dtl_issues(staged_state_t* st,
     s.count = st->ctx->dtl_a_passes + st->ctx->dtl_b_passes;
     s.h_rsrc[0] = s.h_rsrc[1] = NULL;
     s.h_soff[0] = s.h_soff[1] = NULL;
+    s.gt0 = NULL;
+    s.g_rs[0] = s.g_rs[1] = NULL;
+    s.g_so[0] = s.g_so[1] = NULL;
+    if(st->ctx->gett_addr)
+    {
+        /* GETT: one resource + soffset (= the K tile's mode offset) per
+         * operand; tiles past K: zero-size resource, soffset 0 */
+        s.gt0 = tile0s != NULL ? tile0s : st->g_t0;
+        s.count = staged_gpasses(st, true) + staged_gpasses(st, false);
+        for(int o = 0; o < 2; ++o)
+        {
+            rocke_value_t* ptr = o == 0 ? st->ctx->A : st->ctx->Bp;
+            s.g_rs[o] = rocke_b_buffer_rsrc(b, ptr, s.nrec);
+            rocke_value_t* kt = st->ctx->gett->ktile_off_bytes(b, o == 0 ? 'A' : 'B', k_ld);
+            rocke_value_t* sel = rocke_b_select(b, s.ok, kt, st->c_zero_rec);
+            s.g_so[o] = rocke_b_to_sgpr_u32(b, sel);
+        }
+        return s;
+    }
     if(st->ctx->spec->trait.dtl_hoist)
     {
         int o;
@@ -206,7 +257,7 @@ static staged_issue_set_t staged_dtl_issues(staged_state_t* st,
                 }
                 else
                 {
-                    sum = rocke_b_add(b, tile0, k_ld);
+                    sum = staged_org(st, o == 0, tile0, k_ld);
                     by = rocke_b_mul(b, sum, st->c2s);
                     org = rocke_b_to_sgpr_u32(b, by);
                     gp = rocke_b_global_ptr_add(b, ptr, org);
@@ -216,7 +267,7 @@ static staged_issue_set_t staged_dtl_issues(staged_state_t* st,
                 continue;
             }
             s.h_rsrc[o] = rocke_b_buffer_rsrc(b, ptr, s.nrec);
-            sum = rocke_b_add(b, tile0, k_ld);
+            sum = staged_org(st, o == 0, tile0, k_ld);
             by = rocke_b_mul(b, sum, st->c2s);
             sel = rocke_b_select(b, s.ok, by, st->c_zero_rec);
             s.h_soff[o] = rocke_b_to_sgpr_u32(b, sel);
@@ -229,6 +280,34 @@ static void staged_issue_one(staged_state_t* st, const staged_issue_set_t* s, in
 {
     rocke_gemm_build_ctx_t* ctx = st->ctx;
     rocke_ir_builder_t* b = st->b;
+    if(s->gt0 != NULL)
+    {
+        /* GETT issue closure _one_g */
+        int na = staged_gpasses(st, true);
+        bool ga = idx < na;
+        int gp_ = ga ? idx : idx - na;
+        char nm = ga ? 'A' : 'B';
+        rocke_value_t* lds = ga ? st->a_wbase[s->stage] : st->b_wbase[s->stage];
+        rocke_value_t* so = s->g_so[ga ? 0 : 1];
+        int ps = ctx->gett->pass_soff_bytes(nm, gp_);
+        if(ps)
+        {
+            rocke_value_t* cps = rocke_b_const_i32(b, ps);
+            rocke_value_t* ad = rocke_b_add(b, so, cps);
+            so = rocke_b_to_sgpr_u32(b, ad);
+        }
+        if(gp_)
+        {
+            rocke_value_t* cst = rocke_b_const_i32(b, gp_ * ctx->gett->pass_bytes(nm));
+            rocke_value_t* z = rocke_b_zext(b, cst, rocke_i64());
+            lds = rocke_b_smem_ptr_add(b, lds, z);
+        }
+        rocke_value_t* vo = s->gt0[ga ? gp_ : na + gp_];
+        int coh = ga ? ctx->spec->trait.dtl_cache_a : ctx->spec->trait.dtl_cache_b;
+        rocke_b_async_buffer_load_lds_addr(
+            b, s->g_rs[ga ? 0 : 1], lds, vo, so, ctx->gett->lane_bytes(nm) / 4, coh);
+        return;
+    }
     bool is_a = idx < ctx->dtl_a_passes;
     int p = is_a ? idx : idx - ctx->dtl_a_passes;
     rocke_value_t* ptr = is_a ? ctx->A : ctx->Bp;
@@ -261,7 +340,7 @@ static void staged_issue_one(staged_state_t* st, const staged_issue_set_t* s, in
     {
         rsrc = rocke_b_buffer_rsrc(b, ptr, s->nrec);
         {
-            rocke_value_t* sum = rocke_b_add(b, tile0, s->k_ld);
+            rocke_value_t* sum = staged_org(st, is_a, tile0, s->k_ld);
             rocke_value_t* by = rocke_b_mul(b, sum, st->c2s);
             rocke_value_t* sel = rocke_b_select(b, s->ok, by, st->c_zero_rec);
             soff = rocke_b_to_sgpr_u32(b, sel);
@@ -270,7 +349,7 @@ static void staged_issue_one(staged_state_t* st, const staged_issue_set_t* s, in
     lds = wbase[s->stage];
     if(p)
     {
-        rocke_value_t* cst = rocke_b_const_i32(b, p * st->pass_bytes);
+        rocke_value_t* cst = rocke_b_const_i32(b, p * st->op_pass_bytes[is_a ? 0 : 1]);
         rocke_value_t* z = rocke_b_zext(b, cst, rocke_i64());
         lds = rocke_b_smem_ptr_add(b, lds, z);
     }
@@ -426,12 +505,30 @@ static rocke_value_t* staged_rbase_get(staged_state_t* st, bool is_a, int sh)
     return NULL;
 }
 
+/* _mn_frag(nm, stage, idx, kk): an MN-contiguous operand's fragment (two
+ * ds_read_b64_tr_b16 at the stage's lane base plus an immediate) */
+static rocke_value_t* staged_mn_frag(staged_state_t* st, bool is_a, int stage, int idx, int kk)
+{
+    rocke_gemm_build_ctx_t* ctx = st->ctx;
+    int o = is_a ? 0 : 1;
+    return rocke_gemm_mn_emit_tr_fragment(st->b,
+                                          is_a ? ctx->A_stg[stage] : ctx->B_stg[stage],
+                                          is_a ? &ctx->mn_lay_a : &ctx->mn_lay_b,
+                                          st->mn_fbase[o][stage],
+                                          idx,
+                                          kk,
+                                          ctx->storage_dtype,
+                                          st->mn_fsh[o][stage]);
+}
+
 /* _rilv_ld(nm, stage, idx, kk): one fragment of the row-interleaved LDS layout */
 static rocke_value_t* staged_rilv_ld(staged_state_t* st, bool is_a, int stage, int idx, int kk)
 {
     rocke_gemm_build_ctx_t* ctx = st->ctx;
     rocke_ir_builder_t* b = st->b;
     const rocke_gemm_tile_spec_t* t = &ctx->spec->tile;
+    if(is_a ? ctx->has_mn_a : ctx->has_mn_b)
+        return staged_mn_frag(st, is_a, stage, idx, kk);
     int sh = staged_rsh(st, is_a, stage);
     rocke_value_t* row = staged_rbase_get(st, is_a, sh);
     if(sh || idx / 8)
@@ -455,12 +552,56 @@ static int staged_frags(staged_state_t* st, int stage, int kk, rocke_value_t** o
     rocke_ir_builder_t* b = st->b;
     const rocke_gemm_tile_spec_t* t = &ctx->spec->tile;
     int mi, ni, n = 0;
+    if(ctx->gett_own_lds)
+    {
+        for(mi = 0; mi < ctx->mfmas_m; ++mi)
+            out[n++] = ctx->gett->frag(b, ctx->A_stg[stage], 'A', stage, mi, kk);
+        for(ni = 0; ni < ctx->mfmas_n; ++ni)
+            out[n++] = ctx->gett->frag(b, ctx->B_stg[stage], 'B', stage, ni, kk);
+        return n;
+    }
     if(ctx->rilv)
     {
         for(mi = 0; mi < ctx->mfmas_m; ++mi)
             out[n++] = staged_rilv_ld(st, true, stage, mi, kk);
         for(ni = 0; ni < ctx->mfmas_n; ++ni)
             out[n++] = staged_rilv_ld(st, false, stage, ni, kk);
+        return n;
+    }
+    if(ctx->has_mn_a || ctx->has_mn_b)
+    {
+        /* MN-contiguous operands: transpose fragments; a K-contiguous operand
+         * of the same body: _emit_smem_load at its swizzled column */
+        for(mi = 0; mi < ctx->mfmas_m; ++mi)
+        {
+            if(ctx->has_mn_a)
+            {
+                out[n++] = staged_mn_frag(st, true, stage, mi, kk);
+                continue;
+            }
+            rocke_value_t* row = staged_row_for(st, true, stage, mi);
+            rocke_value_t* ck = rocke_b_const_i32(b, kk * t->warp_tile_k);
+            rocke_value_t* col = rocke_b_add(b, st->k_blk_kbase, ck);
+            rocke_value_t* key = st->lane_key ? st->m_in_atom : st->a_row[mi];
+            rocke_value_t* sc = rocke_gemm_swz_col(ctx, col, key);
+            out[n++] = rocke_gemm_emit_smem_load(
+                b, ctx->A_stg[stage], row, sc, ctx->a_per_lane, ctx->storage_dtype);
+        }
+        for(ni = 0; ni < ctx->mfmas_n; ++ni)
+        {
+            if(ctx->has_mn_b)
+            {
+                out[n++] = staged_mn_frag(st, false, stage, ni, kk);
+                continue;
+            }
+            rocke_value_t* row = staged_row_for(st, false, stage, ni);
+            rocke_value_t* ck = rocke_b_const_i32(b, kk * t->warp_tile_k);
+            rocke_value_t* col = rocke_b_add(b, st->k_blk_kbase, ck);
+            rocke_value_t* key = st->lane_key ? st->n_in_atom : st->b_row[ni];
+            rocke_value_t* sc = rocke_gemm_swz_col(ctx, col, key);
+            out[n++] = rocke_gemm_emit_smem_load(
+                b, ctx->B_stg[stage], row, sc, ctx->b_per_lane, ctx->storage_dtype);
+        }
         return n;
     }
     rocke_value_t* col_base
@@ -583,6 +724,22 @@ static void staged_frag_one(staged_state_t* st, staged_frag_loader_t* fl, int q)
     rocke_value_t* key;
     rocke_value_t* col;
     staged_frag_order(ctx, q, &is_a, &i);
+    if(ctx->gett_own_lds)
+    {
+        fl->out[is_a ? i : ctx->mfmas_m + i]
+            = ctx->gett->frag(b,
+                              is_a ? ctx->A_stg[fl->stage] : ctx->B_stg[fl->stage],
+                              is_a ? 'A' : 'B',
+                              fl->stage,
+                              i,
+                              fl->kk);
+        return;
+    }
+    if(is_a ? ctx->has_mn_a : ctx->has_mn_b)
+    {
+        fl->out[is_a ? i : ctx->mfmas_m + i] = staged_mn_frag(st, is_a, fl->stage, i, fl->kk);
+        return;
+    }
     if(ctx->rilv)
     {
         fl->out[is_a ? i : ctx->mfmas_m + i] = staged_rilv_ld(st, is_a, fl->stage, i, fl->kk);
@@ -1280,6 +1437,13 @@ static void staged_kloop(staged_state_t* st,
             if(s_)
                 k_i = rocke_b_add(b, loop.iv, rocke_b_const_i32(b, s_ * ctx->block_k));
             staged_tile(st, s_, k_i, acc, fr, st->keep, true, tile0s);
+            if(ctx->gett != NULL)
+            {
+                std::vector<rocke_value_t*> av(acc, acc + na);
+                av = ctx->gett->tile_end(b, av);
+                for(i = 0; i < na; ++i)
+                    acc[i] = av[i];
+            }
         }
         for(i = 0; i < na; ++i)
             yv[ny++] = acc[i];
@@ -1402,8 +1566,34 @@ static void staged_tile_offs(staged_state_t* st,
     }
     *bm = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, row, ctx->c_block_m));
     *bn = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, col, ctx->c_block_n));
-    t0[0] = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, *bm, ctx->K));
-    t0[1] = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_gemm_brow(ctx, *bn), ctx->K));
+    if(tr->mn_ld_any && ctx->has_mn_a)
+    {
+        rocke_value_t* ct = rocke_b_const_i32(b, ctx->block_m);
+        rocke_value_t* lim = rocke_b_sub(b, ctx->M, ct);
+        *bm = rocke_b_to_sgpr_u32(b, rocke_b_smin(b, *bm, lim));
+    }
+    if(tr->mn_ld_any && ctx->has_mn_b)
+    {
+        rocke_value_t* ct = rocke_b_const_i32(b, ctx->block_n);
+        rocke_value_t* lim = rocke_b_sub(b, ctx->N, ct);
+        *bn = rocke_b_to_sgpr_u32(b, rocke_b_smin(b, *bn, lim));
+    }
+    if(ctx->gett_addr)
+    {
+        /* t0 = [A voffs..., B voffs...] */
+        std::vector<rocke_value_t*> va = ctx->gett->tile_voffs(b, 'A', *bm);
+        std::vector<rocke_value_t*> vb = ctx->gett->tile_voffs(b, 'B', *bn);
+        int n = 0;
+        for(rocke_value_t* v : va)
+            t0[n++] = v;
+        for(rocke_value_t* v : vb)
+            t0[n++] = v;
+        return;
+    }
+    t0[0] = ctx->has_mn_a ? *bm : rocke_b_to_sgpr_u32(b, rocke_b_mul(b, *bm, ctx->K));
+    t0[1] = ctx->has_mn_b
+                ? *bn
+                : rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_gemm_brow(ctx, *bn), ctx->K));
 }
 
 /* ===================================================================== *
@@ -1846,7 +2036,8 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
     st->ctx = ctx;
     st->b = b;
     st->S = ctx->stages;
-    st->L = ctx->dtl_a_passes + ctx->dtl_b_passes;
+    st->L = ctx->gett_addr ? ctx->gett->passes('A') + ctx->gett->passes('B')
+                           : ctx->dtl_a_passes + ctx->dtl_b_passes;
     st->keep = (st->S - 2) * st->L;
     st->fprf = spec->trait.dtl_frag_prefetch;
     st->instream = st->fprf || spec->trait.dtl_stream_barrier;
@@ -1875,24 +2066,131 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
             rocke_value_t* mu = rocke_b_mul(b, wv, cst);
             rocke_value_t* sg = rocke_b_to_sgpr_u32(b, mu);
             st->wpo = rocke_b_zext(b, sg, rocke_i64());
+            st->wv = wv;
         }
         else
         {
             st->wpo = NULL;
+            st->wv = NULL;
         }
     }
-    staged_stage_bases(st);
-    staged_lane_offs(st, ctx->dtl_a_passes, ctx->mfmas_m, false, st->a_voff);
-    staged_lane_offs(st, ctx->dtl_b_passes, ctx->mfmas_n, true, st->b_voff);
-    st->pers = spec->trait.persistent_ctas;
-    if(!st->pers)
+    st->op_pass_bytes[0] = st->op_pass_bytes[1] = st->pass_bytes;
+    if(ctx->gett_own_lds)
     {
-        rocke_value_t* ma = rocke_b_mul(b, ctx->block_m_off, ctx->K);
+        /* _gett_base(smem, nm): per-operand DTL width, the per-wave LDS slice
+         * is 64 lanes x the operand's bytes per lane */
+        for(int o = 0; o < 2; ++o)
+        {
+            for(j = 0; j < st->S; ++j)
+            {
+                rocke_value_t* base
+                    = rocke_b_smem_addr_of(b, o == 0 ? ctx->A_stg[j] : ctx->B_stg[j]);
+                if(t->warp_m * t->warp_n * t->warp_k > 1)
+                {
+                    int wb = ctx->gett->wave_bytes(o == 0 ? 'A' : 'B');
+                    rocke_value_t* cwb = rocke_b_const_i32(b, wb);
+                    rocke_value_t* mu = rocke_b_mul(b, st->wv, cwb);
+                    rocke_value_t* sg = rocke_b_to_sgpr_u32(b, mu);
+                    rocke_value_t* off = rocke_b_zext(b, sg, rocke_i64());
+                    base = rocke_b_smem_ptr_add(b, base, off);
+                }
+                if(o == 0)
+                    st->a_wbase[j] = base;
+                else
+                    st->b_wbase[j] = base;
+            }
+        }
+        ctx->gett->bind(b, ctx->tid, ctx->lane, ctx->warp_m_idx, ctx->warp_n_idx);
+    }
+    else
+    {
+        staged_stage_bases(st);
+        if(ctx->gett_addr)
+        {
+            /* MN-layout GETT: the hook's per-lane DTL geometry */
+            ctx->gett->bind(b, ctx->tid, ctx->lane, ctx->warp_m_idx, ctx->warp_n_idx);
+        }
+    }
+    /* MN-contiguous operands (gemm_mn_operand): per-operand LDS wave slice (one
+     * 1 KiB block + mn_pad) and pass stride */
+    for(int o = 0; o < 2; ++o)
+    {
+        bool has = o == 0 ? ctx->has_mn_a : ctx->has_mn_b;
+        if(!has)
+            continue;
+        const rocke_gemm_mn_layout_t* lay = o == 0 ? &ctx->mn_lay_a : &ctx->mn_lay_b;
+        if(rocke_gemm_mn_n_pass(lay) != (o == 0 ? ctx->dtl_a_passes : ctx->dtl_b_passes))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "MN operand %s: DTL pass count mismatch",
+                            o == 0 ? "A" : "B");
+            return;
+        }
+        st->op_pass_bytes[o] = rocke_gemm_mn_pass_bytes(lay);
+        rocke_value_t* wpo_mn = NULL;
+        if(t->warp_m * t->warp_n * t->warp_k > 1)
+        {
+            rocke_value_t* cwb = rocke_b_const_i32(b, rocke_gemm_mn_wave_bytes(lay));
+            rocke_value_t* mu = rocke_b_mul(b, st->wv, cwb);
+            rocke_value_t* sg = rocke_b_to_sgpr_u32(b, mu);
+            wpo_mn = rocke_b_zext(b, sg, rocke_i64());
+        }
+        for(j = 0; j < st->S; ++j)
+        {
+            rocke_value_t* base = rocke_b_smem_addr_of(b, o == 0 ? ctx->A_stg[j] : ctx->B_stg[j]);
+            if(wpo_mn != NULL)
+                base = rocke_b_smem_ptr_add(b, base, wpo_mn);
+            if(o == 0)
+                st->a_wbase[j] = base;
+            else
+                st->b_wbase[j] = base;
+        }
+    }
+    if(!ctx->gett_addr)
+    {
+        if(ctx->has_mn_a)
+        {
+            rocke_value_t* vo[ROCKE_GEMM_MAX_DTL_PASSES];
+            rocke_gemm_mn_emit_dtl_voffs(b, &ctx->mn_lay_a, ctx->tid, ctx->M, vo);
+            for(int p = 0; p < rocke_gemm_mn_n_pass(&ctx->mn_lay_a); ++p)
+                st->a_voff[p] = rocke_b_mul(b, vo[p], st->c2s);
+        }
+        else
+            staged_lane_offs(st, ctx->dtl_a_passes, ctx->mfmas_m, false, st->a_voff);
+        if(ctx->has_mn_b)
+        {
+            rocke_value_t* vo[ROCKE_GEMM_MAX_DTL_PASSES];
+            rocke_gemm_mn_emit_dtl_voffs(b, &ctx->mn_lay_b, ctx->tid, ctx->N, vo);
+            for(int p = 0; p < rocke_gemm_mn_n_pass(&ctx->mn_lay_b); ++p)
+                st->b_voff[p] = rocke_b_mul(b, vo[p], st->c2s);
+        }
+        else
+            staged_lane_offs(st, ctx->dtl_b_passes, ctx->mfmas_n, true, st->b_voff);
+    }
+    st->pers = spec->trait.persistent_ctas;
+    if(ctx->gett_addr && !st->pers)
+    {
+        /* GETT: the "tile origin" of an operand is its list of per-pass
+         * per-lane byte offsets; the K tile origin goes to soffset */
+        std::vector<rocke_value_t*> va = ctx->gett->tile_voffs(b, 'A', ctx->block_m_off);
+        std::vector<rocke_value_t*> vb = ctx->gett->tile_voffs(b, 'B', ctx->block_n_off);
+        int n = 0;
+        for(rocke_value_t* v : va)
+            st->g_t0[n++] = v;
+        for(rocke_value_t* v : vb)
+            st->g_t0[n++] = v;
+    }
+    else if(!st->pers)
+    {
+        /* (MN-contiguous operand: the tile origin is the MN offset itself) */
+        rocke_value_t* ma = ctx->has_mn_a ? ctx->block_m_off : rocke_b_mul(b, ctx->block_m_off, ctx->K);
         rocke_value_t* aa = rocke_b_add(b, ctx->batch_off_a, ma);
         rocke_value_t* mb;
         rocke_value_t* ab;
         st->a_tile0 = rocke_b_to_sgpr_u32(b, aa);
-        mb = rocke_b_mul(b, rocke_gemm_brow(ctx, ctx->block_n_off), ctx->K);
+        mb = ctx->has_mn_b ? ctx->block_n_off
+                           : rocke_b_mul(b, rocke_gemm_brow(ctx, ctx->block_n_off), ctx->K);
         ab = rocke_b_add(b, ctx->batch_off_b, mb);
         st->b_tile0 = rocke_b_to_sgpr_u32(b, ab);
     }
@@ -1980,17 +2278,43 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         for(j = 0; j < st->S; ++j)
         {
             st->offs_a[j] = o;
-            o += ctx->rilv ? (ctx->block_m / 8) * ctx->rilv_cols * elem
-                           : ctx->block_m * st->row_bytes;
+            o += ctx->has_mn_a ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_a)
+                 : ctx->rilv   ? (ctx->block_m / 8) * ctx->rilv_cols * elem
+                               : ctx->block_m * st->row_bytes;
         }
         for(j = 0; j < st->S; ++j)
         {
             st->offs_b[j] = o;
-            o += ctx->rilv ? (ctx->block_n / 8) * ctx->rilv_cols * elem
-                           : ctx->block_n * st->row_bytes;
+            o += ctx->has_mn_b ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_b)
+                 : ctx->rilv   ? (ctx->block_n / 8) * ctx->rilv_cols * elem
+                               : ctx->block_n * st->row_bytes;
         }
     }
-    if(st->lane_key && !ctx->rilv)
+    /* MN-contiguous operand fragments: ONE lane address per (operand, stage)
+     * plus an immediate; a stage the pool places at >= 64 KiB folds that
+     * multiple into the opaque lane address */
+    for(int o = 0; o < 2; ++o)
+    {
+        bool has = o == 0 ? ctx->has_mn_a : ctx->has_mn_b;
+        if(!has)
+            continue;
+        rocke_value_t* lane_e = rocke_gemm_mn_emit_read_lane_elems(
+            b, o == 0 ? &ctx->mn_lay_a : &ctx->mn_lay_b, ctx->lane, o == 0 ? ctx->warp_m_idx : ctx->warp_n_idx);
+        for(j = 0; j < st->S; ++j)
+        {
+            int off = o == 0 ? st->offs_a[j] : st->offs_b[j];
+            int sh = ((off / 65536) * 65536) / 2;
+            rocke_value_t* v = lane_e;
+            if(sh)
+            {
+                rocke_value_t* cs = rocke_b_const_i32(b, sh);
+                v = rocke_b_add(b, lane_e, cs);
+            }
+            st->mn_fbase[o][j] = rocke_b_optimization_barrier(b, v);
+            st->mn_fsh[o][j] = sh;
+        }
+    }
+    if(st->lane_key && !ctx->rilv && !ctx->gett_own_lds)
     {
         int op_i;
         for(op_i = 0; op_i < 2; ++op_i)
@@ -2030,16 +2354,18 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         for(j = 0; j < st->S; ++j)
         {
             st->roffs_a[j] = ro;
-            ro += (ctx->block_m / 8) * st->rb;
+            ro += ctx->has_mn_a ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_a) : (ctx->block_m / 8) * st->rb;
         }
         for(j = 0; j < st->S; ++j)
         {
             st->roffs_b[j] = ro;
-            ro += (ctx->block_n / 8) * st->rb;
+            ro += ctx->has_mn_b ? rocke_gemm_mn_stage_bytes(&ctx->mn_lay_b) : (ctx->block_n / 8) * st->rb;
         }
         for(int o = 0; o < 2; ++o)
         {
             bool is_a = o == 0;
+            if(is_a ? ctx->has_mn_a : ctx->has_mn_b)
+                continue;
             int mf = is_a ? ctx->mfmas_m : ctx->mfmas_n;
             rocke_value_t* w_off = is_a ? st->warp_m_off : st->warp_n_off;
             rocke_value_t* in_atom = is_a ? st->m_in_atom : st->n_in_atom;
@@ -2102,7 +2428,7 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* first;
         rocke_value_t* bm0;
         rocke_value_t* bn0;
-        rocke_value_t* t00[2];
+        rocke_value_t* t00[2 * ROCKE_GEMM_MAX_DTL_PASSES];
         rocke_value_t* hi;
         rocke_for_t pl;
 
@@ -2156,13 +2482,13 @@ void rocke_gemm_emit_kloop_staged(rocke_gemm_build_ctx_t* ctx)
         {
             rocke_value_t* bm;
             rocke_value_t* bn;
-            rocke_value_t* t0[2];
+            rocke_value_t* t0[2 * ROCKE_GEMM_MAX_DTL_PASSES];
             rocke_value_t* acc[ROCKE_GEMM_MAX_ACCS];
             rocke_value_t* tnext;
             rocke_value_t* has_next;
             rocke_value_t* bm1;
             rocke_value_t* bn1;
-            rocke_value_t* t01[2];
+            rocke_value_t* t01[2 * ROCKE_GEMM_MAX_DTL_PASSES];
             staged_tile_offs(st, pl.iv, n_pid_m, n_pid_n, &bm, &bn, t0);
             staged_kloop(st, ctx->acc_inits, t0, "p", acc, NULL, NULL, NULL);
             tnext = rocke_b_add(b, pl.iv, c_p);

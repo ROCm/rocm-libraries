@@ -94,11 +94,13 @@ DTL issue-economy and instruction-economy levers (`dtl_rsrc_word3`, `kloop_unrol
 `dtl_clamp_k`), the K start staggers (`stagger_u*`, `k_stagger*`, `k_stagger_rc`),
 the MFMA issue orders (`mfma_serpentine`, `mfma_order`), the hand-ordered loop
 (`asm_loop*`, `fr0_loop_order`), the wave-specialized ping-pong (`pingpong`, `pp_*`), `ilv_early_free` / `ilv_ef_spread` /
-`ilv_split_wait`, `sk_xcd_local`, `dtl_tight_ragged_only` and the MN-contiguous
-operand levers. The ring, AGPR / interleave, persistent / stream-K and early-release
-levers, the row-interleave LDS layout (`lds_row_interleave`, `rilv_pad`), its vector
-epilogue (`rilv_vec_epilogue`, `rve_store_nt`) and the DTL origin levers (`dtl_soff0`,
-`wide_addr`) are mirrored in the C++ builder.
+`ilv_split_wait`, `sk_xcd_local`, `dtl_tight_ragged_only` and the levers of the
+VGPR-staged MN-contiguous operand loader (`mn_vec`, `vp_mn_*`). The ring, AGPR /
+interleave, persistent / stream-K and early-release levers, the row-interleave LDS layout
+(`lds_row_interleave`, `rilv_pad`), its vector epilogue (`rilv_vec_epilogue`,
+`rve_store_nt`), the DTL origin levers (`dtl_soff0`, `wide_addr`) and the MN-contiguous
+operands of the DTL ring (layouts `RRR` / `CRR` / `CCR`, `mn_pad`, `mn_chunk`, `mn_ld_any`;
+`cpp/instances/common/gemm_mn_operand.cpp`) are mirrored in the C++ builder.
 
 - A kernel built with a Python-only lever is ordinary IR: it lowers through either
   engine via the IR seam (`cpp` / `both` backends, and the provider's Fast,
@@ -118,10 +120,13 @@ Some fused kernels are built by attaching a Python object to a spec (a side chan
 not a `TraitSpec` field) or by a Python-only family. Without the attachment the
 universal-GEMM / attention emission is byte-identical. The C++ engine mirrors
 `spec._prologue` (`rocke_gemm_universal_spec_t._prologue`,
-`cpp/instances/common/gemm_prologue.cpp`; the `gemm_cf32` parity family) except its
-unary opA / opB, `stage="vgpr"` and `epi`, which the converters refuse. It has no
-mirror for the others, so the C++ builder and the C-JIT mode cannot build those
-kernels; their IR lowers through either engine like any other (see above).
+`cpp/instances/common/gemm_prologue.cpp`; the `gemm_cf32` and `gemm_prologue_unary`
+parity families) except its `stage="vgpr"` and `epi`, which the converters refuse, and
+`spec._gett` for the ring and MN-layout GETT bodies (`rocke_gett_hooks`,
+`cpp/instances/common/tensor_gett_*.cpp`; the `tensor_gett` parity family; the K-contiguous
+bodies stay Python-only). It has no mirror for the others, so the C++ builder and the C-JIT
+mode cannot build those kernels; their IR lowers through either engine like any other (see
+above).
 
 | Side channel / family | Attached by | What it changes |
 |---|---|---|

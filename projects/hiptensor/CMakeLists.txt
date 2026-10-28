@@ -189,7 +189,7 @@ endif()
 message(STATUS "HIPTENSOR_INLINE_UNARY_OPS=${HIPTENSOR_INLINE_UNARY_OPS}")
 message(STATUS "HIPTENSOR_ENABLE_ROCKE_BACKEND=${HIPTENSOR_ENABLE_ROCKE_BACKEND}")
 if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
-    # Where the build-time pack builder imports rocKE from (a rocKE source tree).
+    # The rocKE source tree whose C++ engine builds the kernel packs (and the JIT).
     set(HIPTENSOR_ROCKE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../dnn-providers/hip-kernel-provider/rocke"
         CACHE PATH "rocKE source tree the rocKE kernel packs are built from")
     set(HIPTENSOR_ROCKE_PACK_DIR "" CACHE PATH

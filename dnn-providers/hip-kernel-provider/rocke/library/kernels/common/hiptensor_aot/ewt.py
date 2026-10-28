@@ -23,10 +23,18 @@ multiples of its vector width ``vt`` (16 bytes of its type), a ``V`` input's oth
 ``vo``; buffers aligned to the vectors (checked at execution: an unaligned buffer takes the
 generic kernel).
 
-Kernel ABI ``hiptensor-aot-ewt/v1``: ``A [B] [C] D``, ``alpha [beta] [gamma]``, ``opA [opB]
+Folded classes (``fold``): when the whole ``(o, t)`` plane is smaller than half a tile, one CTA
+stacks ``fo x ft`` planes of consecutive batch indices in its tile (``fo = TO // eo`` along ``o``,
+``ft = TT // et`` along ``t``): the batch offsets of its planes go to an LDS table first, then
+every lane finds its plane and position with magic-number divisions by ``eo`` and ``et``. A
+16 x 16 plane otherwise fills a sixteenth of the tile.
+
+Kernel ABI ``hiptensor-aot-ewt/v2`` (v1: 6 batch digits, no folded classes): ``A [B] [C] D``, ``alpha [beta] [gamma]``, ``opA [opB]
 [opC] [opAB] [opABC]``, ``kA [kB] [kC]``, ``eo, et, tiles_o, to_m, to_s, nb, ystep`` (i32),
-``s<T>o, s<T>t`` and the batch digits ``be<i>, bm<i>, bs<i>, s<T><i>`` (i32 element offsets).
-Launch: block 256, grid ``(tiles_o * tiles_t, min(nb, 65535), 1)``.
+``s<T>o, s<T>t`` and the batch digits ``be<i>, bm<i>, bs<i>, s<T><i>`` (i32 element offsets);
+folded classes also ``fo, ft, eo_m, eo_s, et_m, et_s, nbt`` (``nb``: groups of ``fo * ft`` batch
+indices, ``nbt``: batch indices). Launch: block 256, grid ``(tiles_o * tiles_t, min(nb, 65535),
+1)`` (folded: ``(1, min(nb, 65535), 1)``).
 """
 
 from __future__ import annotations
@@ -38,8 +46,10 @@ from rocke.core.ir import I32, IRBuilder, KernelDef, Value
 
 from .common import DTYPES, Emit, ptr
 
-EWT_ABI = "hiptensor-aot-ewt/v1"
-SLOTS_B = 6
+EWT_ABI = "hiptensor-aot-ewt/v2"
+#: batch digits: every mode of a contraction's operand pack or epilogue but the tile plane (at most
+#: 6 free and 6 contracted modes, or 6 + 6 free modes) in one launch
+SLOTS_B = 10
 THREADS = 256
 TILE_O = 64
 KIND_G, KIND_V, KIND_T = 0, 1, 2
@@ -52,6 +62,7 @@ class EwtSpec:
     d: str
     b: Optional[str] = None
     c: Optional[str] = None
+    fold: bool = False  # several small planes per tile (see the module docstring)
 
     @property
     def cdt(self) -> str:
@@ -88,7 +99,7 @@ class EwtSpec:
 
     def kernel_name(self) -> str:
         dts = "_".join(x for x in (self.a, self.b, self.c, self.d) if x)
-        return f"hiptensor_aot_ewt{self.arity}_{dts}"
+        return f"hiptensor_aot_ewt{self.arity}_{dts}" + ("_f" if self.fold else "")
 
 
 def build_ewt(spec: EwtSpec) -> KernelDef:
@@ -127,6 +138,12 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
             bmg.append((b.param(f"bm{i}", I32), b.param(f"bs{i}", I32)))
         for n in names:
             bst[n].append(b.param(f"s{n}{i}", I32))
+    if spec.fold:
+        fo = b.param("fo", I32)
+        ft = b.param("ft", I32)
+        eo_ms = (b.param("eo_m", I32), b.param("eo_s", I32))
+        et_ms = (b.param("et_m", I32), b.param("et_s", I32))
+        nbt = b.param("nbt", I32)
 
     c0 = b.const_i32(0)
     tid = b.thread_id_x()
@@ -165,12 +182,30 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
     p2_ts = [b.add(p2_t0, e.c32(q * tpp)) if q else p2_t0 for q in range(TT // tpp)]
     go = b.add(o0, p2_o)
     o_ok = b.cmp_lt(go, eo)  # whole vectors: eo is a multiple of vo
+    if spec.fold:
+        # the batch offsets of the tile's planes (column per tensor; D's -1: past the batches)
+        btab = b.smem_alloc(I32, [THREADS, len(names)], name_hint="btab")
+        nplanes = b.mul(fo, ft)
+
+        def plane_of(o_l, t_l):
+            """(plane index, in-plane o, in-plane t, in a plane) of tile position (o_l, t_l)."""
+            jo, oo = e.divmod(o_l, eo, *eo_ms)
+            jt, tt = e.divmod(t_l, et, *et_ms)
+            inside = b.land(b.cmp_lt(jo, fo), b.cmp_lt(jt, ft))
+            # a position outside every plane (eo or et does not divide the tile) reads table row
+            # 0 instead of a row past the table (its value is dropped by ``inside``)
+            pl = b.select(inside, b.add(jo, b.mul(jt, fo)), e.c32(0))
+            return pl, oo, tt, inside
+
+        def tab(plane, k):
+            v = b.smem_load_vN(btab, plane, e.c32(k), dtype=I32, n=1)
+            return b.vec_extract(v, 0)
 
     rows = b.scf_for(b.block_id_y(), nb, ystep, iv_name="bt")
     with rows as bi:
-        # batch offsets (wave-uniform)
+        # batch offsets (wave-uniform; folded: of the thread's plane, into the table)
         boff = {n: None for n in names}
-        r = bi
+        r = b.add(b.mul(bi, nplanes), tid) if spec.fold else bi
         for i in range(SLOTS_B):
             if i < SLOTS_B - 1:
                 r, d = e.divmod(r, bext[i], *bmg[i])
@@ -181,6 +216,15 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
                 boff[n] = t_ if boff[n] is None else b.add(boff[n], t_)
         # every wave done with the previous batch's LDS tiles
         b.sync()
+        if spec.fold:
+            with b.scf_if(b.cmp_lt(tid, nplanes)):
+                live_b = b.cmp_lt(b.add(b.mul(bi, nplanes), tid), nbt)
+                for k, n in enumerate(names):
+                    v = boff[n]
+                    if n == "D":
+                        v = b.select(live_b, v, e.c32(-1))
+                    b.smem_store_vN(btab, [tid, e.c32(k)], v, 1)
+            b.sync()
         # phase 1: the transposed inputs into LDS
         for n in ins:
             cond = b.land(b.cmp_eq(KIND[n], e.c32(KIND_T)), nz[n])
@@ -190,22 +234,42 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
                 gt = b.add(t0, tl)
                 t_ok = b.cmp_lt(gt, et)  # whole vectors: et is a multiple of vt
                 for orow in ors:
-                    g_o = b.add(o0, orow)
-                    ok = b.land(t_ok, b.cmp_lt(g_o, eo))
-                    off = b.add(b.add(boff[n], b.mul(g_o, so[n])), b.mul(gt, st[n]))
-                    off = b.select(ok, off, c0)
+                    if spec.fold:
+                        pl, oo, tt, inside = plane_of(orow, tl)
+                        k_ = names.index(n)
+                        ok = b.land(inside, b.cmp_ge(tab(pl, len(names) - 1), c0))
+                        off = b.add(
+                            b.add(tab(pl, k_), b.mul(oo, so[n])), b.mul(tt, st[n])
+                        )
+                        off = b.select(ok, off, c0)
+                    else:
+                        g_o = b.add(o0, orow)
+                        ok = b.land(t_ok, b.cmp_lt(g_o, eo))
+                        off = b.add(b.add(boff[n], b.mul(g_o, so[n])), b.mul(gt, st[n]))
+                        off = b.select(ok, off, c0)
                     v = b.global_load_vN(P[n], off, ty, vt, align=16)
                     v = b.select(ok, v, b.vec_pack([_zero(b, ty)] * vt, ty))
                     b.smem_store_vN(lds[n], [orow, tl], v, vt)
         b.sync()
         # phase 2: per lane vo consecutive o of each of its t rows
         for t_local in p2_ts:
-            gt = b.add(t0, t_local)
-            ok = b.land(o_ok, b.cmp_lt(gt, et))
+            if spec.fold:
+                pl, oo2, tt2, inside = plane_of(p2_o, t_local)
+                dbase = tab(pl, len(names) - 1)
+                ok = b.land(inside, b.cmp_ge(dbase, c0))
+            else:
+                gt = b.add(t0, t_local)
+                ok = b.land(o_ok, b.cmp_lt(gt, et))
             vals = {}
             for n in ins:
                 ty, nbytes = DTYPES[dts[n]]
-                base = b.add(b.add(boff[n], b.mul(go, so[n])), b.mul(gt, st[n]))
+                if spec.fold:
+                    base = b.add(
+                        b.add(tab(pl, names.index(n)), b.mul(oo2, so[n])),
+                        b.mul(tt2, st[n]),
+                    )
+                else:
+                    base = b.add(b.add(boff[n], b.mul(go, so[n])), b.mul(gt, st[n]))
                 base = b.select(ok, base, c0)
 
                 def from_lds(_c, n=n):
@@ -259,7 +323,12 @@ def build_ewt(spec: EwtSpec) -> KernelDef:
                     out.append(e.binary(ab, vals["C"][k], OPS["ABC"]))
             with b.scf_if(ok):
                 dty = DTYPES[spec.d][0]
-                doff = b.add(b.add(boff["D"], b.mul(go, so["D"])), b.mul(gt, st["D"]))
+                if spec.fold:
+                    doff = b.add(b.add(dbase, b.mul(oo2, so["D"])), b.mul(tt2, st["D"]))
+                else:
+                    doff = b.add(
+                        b.add(boff["D"], b.mul(go, so["D"])), b.mul(gt, st["D"])
+                    )
                 outs = [e.from_c(x, spec.d) for x in out]
                 b.global_store_vN(P["D"], doff, b.vec_pack(outs, dty), vo, align=16)
     return b.kernel
@@ -274,14 +343,28 @@ def _zero(b: IRBuilder, ty):
     return z if ty is F32 else b.cast_f32_to(z, ty)
 
 
-def ewt_plan(spec: EwtSpec, dims, limits=(1 << 31) - 1):
+def ewt_fold(spec: EwtSpec, eo: int, et: int):
+    """``(fo, ft)`` of a folded launch: the planes of an ``eo x et`` plane per tile, or None
+    when the plane is not smaller than half a tile or the tile would hold more planes than the
+    batch-offset table has rows (:data:`THREADS`, the pack attribute ``max_planes`` hipTensor's
+    planner checks)."""
+    if eo > TILE_O or et > spec.tile_t():
+        return None
+    fo, ft = TILE_O // eo, spec.tile_t() // et
+    return (fo, ft) if 2 <= fo * ft <= THREADS else None
+
+
+def ewt_plan(spec: EwtSpec, dims, limits=(1 << 31) - 1, transposed=True):
     """Arguments and grid of an :mod:`.ewt` launch (the rules hipTensor's C++ planner applies),
     or None when the layout is not one the kernel serves (no input fastest along another mode
     than D, D not fastest along a mode, extents or strides that do not keep the vectors aligned,
     more than :data:`SLOTS_B` batch modes).
 
     ``dims``: canonical modes ``(extent, [stride per tensor in spec.tensors() order])`` (extent-1
-    modes dropped, contiguous modes merged)."""
+    modes dropped, contiguous modes merged). ``transposed`` False: also layouts without an input
+    fastest along another mode (the tile's ``t`` is then D's next fastest mode; hipTensor uses
+    them for contraction packs and epilogues of more modes than the generic kernel's slots).
+    """
     from .common import as_i32_bits, magic_u31
 
     names = spec.tensors()
@@ -295,6 +378,9 @@ def ewt_plan(spec: EwtSpec, dims, limits=(1 << 31) - 1):
         if cand is not None:
             t = cand
             break
+    if t is None and not transposed:
+        rest = [i for i in range(len(dims)) if i != o]
+        t = min(rest, key=lambda i: dims[i][1][nd]) if rest else None
     if t is None:
         return None
     vo = spec.vo()
@@ -316,7 +402,7 @@ def ewt_plan(spec: EwtSpec, dims, limits=(1 << 31) - 1):
             kinds.append(KIND_V)
             continue
         kinds.append(KIND_G)
-    if KIND_T not in kinds:
+    if transposed and KIND_T not in kinds:
         return None
     for k in range(len(names)):
         span = sum((e - 1) * abs(s[k]) for e, s in dims)
@@ -341,6 +427,32 @@ def ewt_plan(spec: EwtSpec, dims, limits=(1 << 31) - 1):
     nbatch = 1
     for i in others:
         nbatch *= dims[i][0]
+    if spec.fold:
+        f = ewt_fold(spec, eo, et)
+        if f is None:
+            return None
+        fo, ft = f
+        groups = -(-nbatch // (fo * ft))
+        mo, so_ = magic_u31(eo)
+        mt, st_ = magic_u31(et)
+        m1, s1 = magic_u31(1)
+        vals.update(
+            eo=eo,
+            et=et,
+            tiles_o=1,
+            to_m=as_i32_bits(m1),
+            to_s=s1,
+            nb=groups,
+            ystep=min(groups, 65535),
+            fo=fo,
+            ft=ft,
+            eo_m=as_i32_bits(mo),
+            eo_s=so_,
+            et_m=as_i32_bits(mt),
+            et_s=st_,
+            nbt=nbatch,
+        )
+        return vals, (1, min(groups, 65535), 1), kinds
     m, sh = magic_u31(tiles_o)
     vals.update(
         eo=eo,
@@ -361,7 +473,9 @@ __all__ = [
     "KIND_T",
     "KIND_V",
     "SLOTS_B",
+    "THREADS",
     "TILE_O",
     "build_ewt",
+    "ewt_fold",
     "ewt_plan",
 ]

@@ -1,8 +1,8 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT */
 /*
- * tests/parity/gett_f64_pack_emit.c -- C-side emitter for the f64 GETT kernels
- * of hipTensor's kernel pack. Resolves every spec of gett_f64_pack_emit.py
+ * tests/parity/gett_f64_pack_emit.c -- C-side emitter for the f64 and f32 GETT
+ * kernels of hipTensor's kernel pack. Resolves every spec of gett_f64_pack_emit.py
  * (same order) through the C spec policy (rocke_gett_f64_gemm_problem,
  * rocke_gett_f64_arch_spec, rocke_gett_f64_tuned_config,
  * rocke_gett_f64_runtime_template, rocke_gett_f64_with_k_block) and builds it
@@ -22,47 +22,53 @@ static const char* const k_arches[] = {"gfx950", "gfx942", "gfx90a"};
 static const char* const k_dclass = "mnx";
 
 /* The idx-th pack descriptor: arch, complex, class, D layout, bilinear,
- * k_block. Returns 0 past the end. */
+ * k_block, f32 words. The f64 kernels on gfx950 / gfx942 / gfx90a, then the
+ * f32 kernels on gfx950 / gfx942. Returns 0 past the end. */
 static int entry(int idx,
                  const char** arch,
                  int* cplx,
                  const char** cls,
                  char* dclass,
                  int* bilinear,
-                 int* kblock)
+                 int* kblock,
+                 int* f32)
 {
     int i = 0;
-    for(int a = 0; a < 3; ++a)
+    for(int w = 0; w < 2; ++w)
     {
-        for(int c = 0; c < 2; ++c)
+        for(int a = 0; a < (w ? 2 : 3); ++a)
         {
-            const char* kind = c ? "complex" : "real";
-            for(int ci = 0;; ++ci)
+            for(int c = 0; c < 2; ++c)
             {
-                const char* name = rocke_gett_f64_tuned_class_at(k_arches[a], kind, ci);
-                if(name == NULL)
-                    name = "default";
-                for(int d = 0; d < 3; ++d)
+                const char* kind = c ? "complex" : "real";
+                for(int ci = 0;; ++ci)
                 {
-                    for(int bl = 0; bl < 2; ++bl)
+                    const char* name = rocke_gett_f64_tuned_class_at(k_arches[a], kind, ci);
+                    if(name == NULL)
+                        name = "default";
+                    for(int d = 0; d < 3; ++d)
                     {
-                        for(int kb = 0; kb < 2; ++kb)
+                        for(int bl = 0; bl < 2; ++bl)
                         {
-                            if(i++ == idx)
+                            for(int kb = 0; kb < 2; ++kb)
                             {
-                                *arch = k_arches[a];
-                                *cplx = c;
-                                *cls = name;
-                                *dclass = k_dclass[d];
-                                *bilinear = bl;
-                                *kblock = kb;
-                                return 1;
+                                if(i++ == idx)
+                                {
+                                    *arch = k_arches[a];
+                                    *cplx = c;
+                                    *cls = name;
+                                    *dclass = k_dclass[d];
+                                    *bilinear = bl;
+                                    *kblock = kb;
+                                    *f32 = w;
+                                    return 1;
+                                }
                             }
                         }
                     }
+                    if(strcmp(name, "default") == 0)
+                        break;
                 }
-                if(strcmp(name, "default") == 0)
-                    break;
             }
         }
     }
@@ -76,6 +82,7 @@ static int pack_spec(const char* arch,
                      char dclass,
                      int bilinear,
                      int kblock,
+                     int f32,
                      rocke_gett_f64_spec_t* out)
 {
     const int64_t M = 64, N = 64, K = 64, L = 2;
@@ -111,6 +118,7 @@ static int pack_spec(const char* arch,
                                                                 cplx != 0,
                                                                 false,
                                                                 false);
+    prob.f32 = f32 != 0;
     rocke_gett_f64_knobs_t knobs;
     memset(&knobs, 0, sizeof knobs);
     if(strcmp(cls, "default") != 0
@@ -153,16 +161,16 @@ int main(int argc, char** argv)
         return 2;
     }
     const char* arch;
-    int cplx, bilinear, kblock;
+    int cplx, bilinear, kblock, f32;
     const char* cls;
     char dclass;
-    if(!entry(idx, &arch, &cplx, &cls, &dclass, &bilinear, &kblock))
+    if(!entry(idx, &arch, &cplx, &cls, &dclass, &bilinear, &kblock, &f32))
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
     rocke_gett_f64_spec_t spec;
-    if(!pack_spec(arch, cplx, cls, dclass, bilinear, kblock, &spec))
+    if(!pack_spec(arch, cplx, cls, dclass, bilinear, kblock, f32, &spec))
     {
         fprintf(stderr, "config does not apply\n");
         return 1;

@@ -407,7 +407,8 @@ mode. The missing selector and precision contract are described in §2.5.
   (`DOUBLE`) but rejected by the MIOpen provider. gfx90a, gfx942 and gfx950
   declare `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; the
   [f64 GETT family](../instances/gett_f64.md) (strided GEMM and tensor
-  contraction, real and interleaved complex) uses the 16x16x4 atom (§4C.6).
+  contraction, real and interleaved complex) uses the 16x16x4 atom (§4C.6);
+  its f32 form uses gfx942 / gfx950's `mfma_f32_16x16x4_f32`.
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 

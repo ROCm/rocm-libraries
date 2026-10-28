@@ -50,10 +50,10 @@ Special values follow C: NaN in gives NaN; ``sin`` / ``cos`` / ``tan`` of an inf
 ``acosh`` below 1 and ``atanh`` outside ``[-1, 1]`` are NaN; ``atanh(+-1) = +-inf``;
 ``atan(+-inf) = +-pi/2``; odd functions keep the sign of zero.
 
-Placement: Python-only. The kernels that use it are built by the Python engine (hipTensor's
-``kernels.common.hiptensor_aot`` family and the operand operators of
-:mod:`rocke.instances.common.gemm_prologue`, which the C++ engine refuses), so no kernel the
-C++ engine emits changes.
+Placement: both engines. The C++ engine mirrors it (``cpp/helpers/elementary.cpp``,
+``rocke/elementary.h``; the ``elementary`` parity family keeps the two byte-identical) for its
+users, hipTensor's ``kernels.common.hiptensor_aot`` family and the operand operators of
+:mod:`rocke.instances.common.gemm_prologue`.
 """
 
 from __future__ import annotations

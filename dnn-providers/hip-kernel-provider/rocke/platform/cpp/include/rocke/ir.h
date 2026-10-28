@@ -1194,6 +1194,16 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const rocke_type_t* const* result_types,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts);
+/* inline_asm with Python's result_name_hint (rocke_b_inline_asm uses "asm"). */
+rocke_op_t* rocke_b_inline_asm_named(rocke_ir_builder_t* b,
+                                     const char* asm_template,
+                                     const char* constraints,
+                                     rocke_value_t* const* operands,
+                                     int num_operands,
+                                     const rocke_type_t* const* result_types,
+                                     int num_results,
+                                     const rocke_inline_asm_opts_t* opts,
+                                     const char* result_name_hint);
 void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_clause(rocke_ir_builder_t* b, int imm);

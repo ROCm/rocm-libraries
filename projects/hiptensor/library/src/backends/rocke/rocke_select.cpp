@@ -412,11 +412,20 @@ namespace hiptensor
             put(cus);
         }
 
-        std::vector<std::string> selectionCells(Problem const& problem)
+        std::vector<std::string> selectionCells(Problem const& problem, std::string const& tag)
         {
             auto const type = problem.t[0].type;
             if(problem.kind == OpKind::Contraction)
             {
+                if(!tag.empty())
+                {
+                    auto cells = selectionCells(problem);
+                    for(auto& cell : cells)
+                    {
+                        cell += "." + tag;
+                    }
+                    return cells;
+                }
                 bool const c16 = problem.compute == HIPTENSOR_COMPUTE_DESC_16F
                                  || problem.compute == HIPTENSOR_COMPUTE_DESC_16BF;
                 char const* cls = type == HIPTENSOR_R_16F || type == HIPTENSOR_R_16BF ? "h"
@@ -493,8 +502,10 @@ namespace hiptensor
                 return sel;
             }
 
-            // 2. the model of the problem's cell
-            auto const cells = selectionCells(problem);
+            // 2. the model of the problem's cell (an f32 recipe other than x6: cells no pack has
+            // a model for, so 3.)
+            auto const cells
+                = selectionCells(problem, n > 0 ? candidates[0].facts.selectTag : std::string());
             if(cells.empty() || n < 2)
             {
                 sel.model = n < 2 ? "one candidate" : "no model for this operation";

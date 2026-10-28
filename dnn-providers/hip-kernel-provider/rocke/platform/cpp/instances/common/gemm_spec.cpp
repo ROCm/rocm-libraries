@@ -274,7 +274,12 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.rve_store_nt = false;
     s.trait.dtl_soff0 = false;
     s.trait.wide_addr = false;
+    s.trait.mn_pad_set = false; /* MN-contiguous operands: Python mn_pad 32 */
+    s.trait.mn_pad = 32;
+    s.trait.mn_chunk = 0;
+    s.trait.mn_ld_any = false;
     s._prologue = NULL; /* no fused operand prologue */
+    s._gett = NULL; /* no tensor GETT hooks */
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
@@ -344,9 +349,12 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_rs[32];
     char part_ds[32];
     char part_rp[32];
+    char part_lay[32];
+    char part_mnp[32];
+    char part_mnc[32];
     const char* parts[5];
-    const char* flag_names[45];
-    int flag_on[45];
+    const char* flag_names[49];
+    int flag_on[49];
     const rocke_gemm_tile_spec_t* t;
     const rocke_gemm_trait_spec_t* tr;
 
@@ -446,6 +454,16 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_names[42] = "rvnt";
     flag_names[43] = "so0";
     flag_names[44] = "w64";
+    /* native NN / TN / TT (MN-contiguous operands): Python f"L{layout}",
+     * f"mnp{mn_pad}", f"mnc{mn_chunk}", "mnla" (f"mnv{mn_vec}" is a Python-engine
+     * lever, never on here) */
+    snprintf(part_lay, sizeof(part_lay), "L%s", spec->data.layout);
+    flag_names[45] = part_lay;
+    snprintf(part_mnp, sizeof(part_mnp), "mnp%d", tr->mn_pad_set ? tr->mn_pad : 32);
+    flag_names[46] = part_mnp;
+    snprintf(part_mnc, sizeof(part_mnc), "mnc%d", tr->mn_chunk);
+    flag_names[47] = part_mnc;
+    flag_names[48] = "mnla";
 
     flag_on[0] = (tr->pad_m || tr->pad_n || tr->pad_k) ? 1 : 0;
     flag_on[1] = tr->persistent ? 1 : 0;
@@ -493,9 +511,16 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     flag_on[42] = tr->rve_store_nt ? 1 : 0;
     flag_on[43] = tr->dtl_soff0 ? 1 : 0;
     flag_on[44] = tr->wide_addr ? 1 : 0;
+    {
+        bool rcr = strcmp(spec->data.layout, "RCR") == 0;
+        flag_on[45] = !rcr ? 1 : 0;
+        flag_on[46] = (!rcr && (tr->mn_pad_set ? tr->mn_pad : 32) != 32) ? 1 : 0;
+        flag_on[47] = (!rcr && tr->mn_chunk > 0) ? 1 : 0;
+        flag_on[48] = tr->mn_ld_any ? 1 : 0;
+    }
 
     return rocke_kernel_name_join(
-        spec->name, parts, 5, flag_names, flag_on, 45, out, out_cap, NULL);
+        spec->name, parts, 5, flag_names, flag_on, 49, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -559,13 +584,14 @@ static const rocke_type_t*
         }
         return NULL;
     }
-    if(strcmp(d->layout, "RCR") != 0)
+    if(strcmp(d->layout, "RCR") != 0 && strcmp(d->layout, "RRR") != 0
+       && strcmp(d->layout, "CRR") != 0 && strcmp(d->layout, "CCR") != 0)
     {
         if(reason != NULL && reason_cap > 0)
         {
             snprintf(reason,
                      reason_cap,
-                     "UniversalGemmSpec only supports RCR layout, got '%s'",
+                     "UniversalGemmSpec supports layouts ('RCR', 'RRR', 'CRR', 'CCR'), got '%s'",
                      d->layout);
         }
         return NULL;
@@ -1225,7 +1251,8 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(tr->wide_addr
            && !(tr->direct_to_lds && tr->dtl_hoist && (tr->dtl_soff0 || tr->dtl_tight_rsrc)
                 && tr->rilv_vec_epilogue && !tr->persistent_ctas && !tr->streamk && tr->split_k <= 1
-                && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched))
+                && strcmp(spec->data.layout, "RCR") == 0 && !spec->batched
+                && spec->_gett == NULL))
         {
             CK_GEMM_REJECT("wide_addr requires the direct-to-LDS ring with dtl_hoist and "
                            "dtl_soff0 or dtl_tight_rsrc, the row-interleave vector epilogue, a "
@@ -1376,11 +1403,31 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     {
         bytes_lds = (ab_bytes > c_bytes) ? ab_bytes : c_bytes;
     }
+    {
+        /* mn_layout_error(spec, arch) */
+        char mn_reason[512] = {0};
+        if(rocke_gemm_mn_layout_error(spec, arch, mn_reason, sizeof mn_reason))
+        {
+            CK_GEMM_REJECT("%s", mn_reason);
+        }
+    }
+    if(strcmp(spec->data.layout, "RCR") != 0)
+    {
+        /* the 1 KiB-block pad of the MN-contiguous operand stages */
+        ab_bytes += rocke_gemm_mn_lds_extra_bytes(spec);
+        bytes_lds = spec->trait.cshuffle_no_alias ? ab_bytes + c_bytes
+                                                  : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
+    }
     if(spec->trait.lds_row_interleave)
     {
-        /* rilv_pad bytes of padding per 8 LDS rows, per operand and stage */
+        /* rilv_pad bytes of padding per 8 LDS rows, per operand and stage (an
+         * MN-contiguous operand's stages are gemm_mn_operand blocks, counted
+         * above) */
         int rpad = spec->trait.rilv_pad ? spec->trait.rilv_pad : 16;
-        ab_bytes += ((t->tile_m + t->tile_n) / 8) * rpad * spec->trait.dtl_stages;
+        bool a_mn = false, b_mn = false;
+        rocke_gemm_mn_layout_letters(spec->data.layout, &a_mn, &b_mn);
+        ab_bytes += (((a_mn ? 0 : t->tile_m) + (b_mn ? 0 : t->tile_n)) / 8) * rpad
+                    * spec->trait.dtl_stages;
         bytes_lds = spec->trait.cshuffle_no_alias ? ab_bytes + c_bytes
                                                   : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
     }

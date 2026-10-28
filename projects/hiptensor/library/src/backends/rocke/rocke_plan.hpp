@@ -50,7 +50,8 @@ namespace hiptensor
             // contraction: a launch record of rocKE's tuned GETT route table
             TunedGett = 2,
             // contraction: pack -> universal GEMM with an f32 output -> epilogue; operands f16 or
-            // bf16 (H16), f32 split into three bf16 parts (X6), complex f32 (CF32)
+            // bf16 (H16), f32 split into bf16 parts (X6: the x3 / x4 / x6 / x9 recipes), complex
+            // f32 (CF32, the same recipes)
             H16  = 3,
             X6   = 4,
             CF32 = 5,
@@ -63,7 +64,32 @@ namespace hiptensor
             // contraction: the direct GETT (any data type, operator and layout), the operands
             // read and D written in place, one launch, no workspace
             DirectGett = 8,
+            // contraction: the f64 strided GEMM with f32 / complex f32 words (f32 MFMA products,
+            // f32 accumulation): the native route of f32 data with the 32F / C32F compute type
+            Gett32 = 9,
         };
+
+        // How contractions of f32 / complex f32 (and mixed real) data with the 32F / C32F compute
+        // type multiply (HIPTENSOR_ROCKE_F32_RECIPE): Native, the f32 strided GEMM (f32 products
+        // and accumulation); X3 / X4 / X6 / X9, the universal GEMM with every operand split into
+        // bf16 parts (x3 and x4: two parts, 3 or 4 products; x6: three parts, 6 products; x9:
+        // three parts, every product); F64, the f64 strided GEMM (operands converted exactly,
+        // f64 accumulation). The f64 route stays a candidate of every recipe (it is at least as
+        // accurate as each of them).
+        enum class F32Recipe : uint8_t
+        {
+            Native,
+            X3,
+            X4,
+            X6,
+            X9,
+            F64,
+        };
+
+        char const* f32RecipeName(F32Recipe recipe);
+
+        // Parses a recipe name (native, x3, x4, x6, x9, f64); false for any other text.
+        bool parseF32Recipe(std::string const& text, F32Recipe& recipe);
 
         // What the selector knows of a candidate besides its program: the facts its features
         // are computed from. Contraction extents are the M, N, K, L group sizes; reduction
@@ -91,6 +117,10 @@ namespace hiptensor
             uint64_t          bytes = 0; // estimated device bytes read and written by all steps
             uint64_t          flops = 0;
             PackKernel const* main  = nullptr; // the kernel that does most of the work
+            // The f32 recipe that decided the routes of a contraction, when it is not x6: the
+            // pack's selection models were trained on the x6 route set, so these candidates are
+            // ranked by the static order (selection cells <cell>.<tag>, which no pack has).
+            std::string selectTag;
         };
 
         // One way to run a problem: a complete program (kernel functions not loaded yet, see
@@ -115,6 +145,9 @@ namespace hiptensor
             bool f64Only = false;
             // Contractions: skip rocKE's tuned GETT route table (HIPTENSOR_ROCKE_DISABLE_TUNED).
             bool disableTuned = false;
+            // Contractions of f32 / complex f32 data with the 32F / C32F compute type: the recipe
+            // (HIPTENSOR_ROCKE_F32_RECIPE; native by default).
+            F32Recipe f32Recipe = F32Recipe::Native;
             // Trinary contractions: orders the candidates of one of the two steps (indices, best
             // first; the selection of rocke_select.hpp). Empty: the static order.
             std::function<std::vector<int>(backend::Problem const&, std::vector<Candidate> const&)>

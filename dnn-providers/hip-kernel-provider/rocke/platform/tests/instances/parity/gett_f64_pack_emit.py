@@ -3,17 +3,18 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/gett_f64_pack_emit.py -- Python reference emitter for the f64
-# GETT kernels of hipTensor's kernel pack, resolved through the gett_f64 spec
-# policy (gemm_problem, arch_spec, TUNED_CONFIGS, runtime_template,
-# _with_k_block). gett_f64_pack_emit.c resolves the same specs through the C
-# policy API (gett_f64_policy.cpp), so run_diff.py proves the policy and the
-# builder byte-identical together.
+# and f32 GETT kernels of hipTensor's kernel pack, resolved through the
+# gett_f64 spec policy (gemm_problem, arch_spec, TUNED_CONFIGS,
+# runtime_template, _with_k_block). gett_f64_pack_emit.c resolves the same
+# specs through the C policy API (gett_f64_policy.cpp), so run_diff.py proves
+# the policy and the builder byte-identical together.
 #
-# Config order: per arch (gfx950, gfx942, gfx90a), real then complex, every
-# tuned shape class (sorted) then "default", D layout m / n / x, scale /
-# bilinear, without / with k_block -- the pack's descriptor order. A config
-# whose k_block variant does not exist (or whose spec is invalid) is rejected
-# by both engines.
+# Config order: the f64 kernels per arch (gfx950, gfx942, gfx90a), then the
+# f32 kernels per arch (gfx950, gfx942: the targets with the f32 atom); per
+# arch real then complex, every tuned shape class (sorted) then "default", D
+# layout m / n / x, scale / bilinear, without / with k_block -- the pack's
+# descriptor order. A config whose k_block variant does not exist (or whose
+# spec is invalid) is rejected by both engines.
 import sys
 from dataclasses import replace
 
@@ -30,25 +31,29 @@ from rocke.instances.common.gett_f64 import (
 from _emit_common import run_emit
 
 ARCHES = ("gfx950", "gfx942", "gfx90a")
+F32_ARCHES = ("gfx950", "gfx942")
 
 
 def entries():
     out = []
-    for arch in ARCHES:
-        for cplx in (False, True):
-            kind = "complex" if cplx else "real"
-            classes = sorted(
-                c for (a, k, c) in TUNED_CONFIGS if a == arch and k == kind
-            )
-            for cls in classes + ["default"]:
-                for dclass in ("m", "n", "x"):
-                    for bilinear in (False, True):
-                        for kblock in (False, True):
-                            out.append((arch, cplx, cls, dclass, bilinear, kblock))
+    for dtype, arches in (("f64", ARCHES), ("f32", F32_ARCHES)):
+        for arch in arches:
+            for cplx in (False, True):
+                kind = "complex" if cplx else "real"
+                classes = sorted(
+                    c for (a, k, c) in TUNED_CONFIGS if a == arch and k == kind
+                )
+                for cls in classes + ["default"]:
+                    for dclass in ("m", "n", "x"):
+                        for bilinear in (False, True):
+                            for kblock in (False, True):
+                                out.append(
+                                    (arch, cplx, cls, dclass, bilinear, kblock, dtype)
+                                )
     return out
 
 
-def pack_spec(arch, cplx, cls, dclass, bilinear, kblock):
+def pack_spec(arch, cplx, cls, dclass, bilinear, kblock, dtype="f64"):
     """The spec of one pack descriptor, or None when it does not apply."""
     M, N, K, L = 64, 64, 64, 2
     d_strides = {"m": (1, M), "n": (N, 1), "x": (2, 2 * M)}[dclass]
@@ -62,6 +67,7 @@ def pack_spec(arch, cplx, cls, dclass, bilinear, kblock):
         batch=L,
         batch_strides=(M * K, N * K, 4 * M * N),
         complex_=cplx,
+        dtype=dtype,
     )
     kind = "complex" if cplx else "real"
     cfg = {} if cls == "default" else dict(TUNED_CONFIGS[(arch, kind, cls)])

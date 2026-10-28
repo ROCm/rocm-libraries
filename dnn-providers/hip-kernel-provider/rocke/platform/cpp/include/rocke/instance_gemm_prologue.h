@@ -15,10 +15,11 @@
  *   out_f32     the epilogue stores the f32 accumulators;
  *   cplx_b      complex-f32 B through its real embedding (conj_a / conj_b).
  *
- * Mirrored fields: src, recipe, out_f32, cap, order, split_at, pin_v, psub,
- * cplx_b, conj_a, conj_b, agpr_out. Not mirrored yet (rocke_gemm_prologue_check
- * refuses them, so the C++ engine never builds a different kernel than Python):
- * unary_a / unary_b (operand ops), stage "vgpr", epi "alpha" / "bilinear".
+ * Mirrored fields: src, recipe, unary_a, unary_b, unary_impl, out_f32, cap,
+ * order, split_at, pin_v, fast_exp, psub, cplx_b, conj_a, conj_b, agpr_out.
+ * Not mirrored yet (rocke_gemm_prologue_check refuses them, so the C++ engine
+ * never builds a different kernel than Python): stage "vgpr", epi "alpha" /
+ * "bilinear".
  */
 #ifndef ROCKE_INSTANCE_GEMM_PROLOGUE_H
 #define ROCKE_INSTANCE_GEMM_PROLOGUE_H
@@ -35,7 +36,7 @@ typedef struct rocke_gemm_prologue
 {
     const char* src; /* "same" | "f32"                      (default "same") */
     const char* recipe; /* "cvt" | "x3" | "x4" | "x6" | "x9"  (default "cvt")  */
-    const char* unary_a; /* "" (only "" is mirrored)                          */
+    const char* unary_a; /* "" | an operand op (relu, exp, sigmoid, ...)      */
     const char* unary_b; /* ""                                                */
     const char* unary_impl; /* "f32" | "bits"                   (default "f32") */
     bool out_f32;

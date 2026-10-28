@@ -25,6 +25,7 @@
 
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/instance_gemm_universal.h"
+#include "rocke/instance_tensor_gett.h" /* the _gett side channel */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
@@ -101,7 +102,9 @@ static const rocke_type_t* rocke_gemm_storage_dtype(rocke_ir_builder_t* b,
     {
         return rocke_b_io_ir_type(b, "");
     }
-    if(strcmp(d->layout, "RCR") != 0)
+    /* GEMM_LAYOUTS: RCR and the MN-contiguous RRR / CRR / CCR */
+    if(strcmp(d->layout, "RCR") != 0 && strcmp(d->layout, "RRR") != 0
+       && strcmp(d->layout, "CRR") != 0 && strcmp(d->layout, "CCR") != 0)
     {
         return rocke_b_io_ir_type(b, "");
     }
@@ -994,6 +997,18 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue: split_k unsupported");
             return NULL;
         }
+        if(strcmp(spec->data.layout, "RCR") != 0 || spec->_gett != NULL)
+        {
+            /* MN-contiguous operand / GETT fragments bypass the prologue's
+             * fragment transform (they would be used untransformed) */
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "prologue: K-contiguous (RCR) operands only");
+            return NULL;
+        }
+    }
+    if(spec->_gett != NULL && spec->_fused_epilogue != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "the GETT epilogue does not support a fused epilogue");
+        return NULL;
     }
 
     /* Python build_universal_gemm opens with `b = IRBuilder(spec.kernel_name())`,
@@ -1053,6 +1068,21 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     {
         return NULL;
     }
+    /* native NN / TN / TT (gemm_mn_operand): the LDS block layout of each
+     * MN-contiguous operand (has_mn_* false: K-contiguous, the RCR path) */
+    if(!rocke_gemm_spec_mn_layouts(
+           spec, &ctx.mn_lay_a, &ctx.has_mn_a, &ctx.mn_lay_b, &ctx.has_mn_b, reason, sizeof reason))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
+    /* _gett (native GETT, rocke/instance_tensor_gett.h): a side channel like
+     * _fused_epilogue; the MN-layout hook keeps the MN operand path's LDS
+     * stages and replaces only the operand addressing and the epilogue, the
+     * ring-body hook owns all four */
+    ctx.gett = const_cast<struct rocke_gett_hooks*>(spec->_gett);
+    ctx.gett_addr = ctx.gett != NULL && ctx.gett->addr;
+    ctx.gett_own_lds = ctx.gett_addr && !ctx.gett->mn;
 
     /* ---- kernel params (Values) -- */
     {
@@ -1103,6 +1133,10 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.M = rocke_b_param(b, "M", rocke_i32(), NULL);
         ctx.N = rocke_b_param(b, "N", rocke_i32(), NULL);
         ctx.K = rocke_b_param(b, "K", rocke_i32(), NULL);
+        if(ctx.gett != NULL)
+        {
+            ctx.gett->add_params(b);
+        }
         if(spec->trait.streamk)
         {
             /* stream-K fixup workspace (Python streamk_workspace_bytes) */
@@ -1263,6 +1297,22 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.block_n_off
             = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_block_id_x(b), ctx.c_block_n));
     }
+    /* mn_ld_any: the last tile along an MN-contiguous operand's dimension ends
+     * at the extent (origin ld - tile) */
+    if(spec->trait.mn_ld_any && ctx.has_mn_a)
+    {
+        rocke_value_t* ct = rocke_b_const_i32(b, ctx.block_m);
+        rocke_value_t* lim = rocke_b_sub(b, ctx.M, ct);
+        rocke_value_t* mn = rocke_b_smin(b, ctx.block_m_off, lim);
+        ctx.block_m_off = rocke_b_to_sgpr_u32(b, mn);
+    }
+    if(spec->trait.mn_ld_any && ctx.has_mn_b)
+    {
+        rocke_value_t* ct = rocke_b_const_i32(b, ctx.block_n);
+        rocke_value_t* lim = rocke_b_sub(b, ctx.N, ct);
+        rocke_value_t* mn = rocke_b_smin(b, ctx.block_n_off, lim);
+        ctx.block_n_off = rocke_b_to_sgpr_u32(b, mn);
+    }
 
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
     ctx.prefetch = spec->trait.dtl_prefetch;
@@ -1307,16 +1357,38 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         int a_shape[2] = {ctx.block_m, ctx.block_k};
         int b_shape[2] = {ctx.block_n, ctx.block_k};
         int j;
-        if(ctx.rilv)
+        if(ctx.gett_own_lds)
+        {
+            /* GETT: K-outer stages in the hook's padded block layout */
+            ctx.gett->lds_shape('A', a_shape);
+            ctx.gett->lds_shape('B', b_shape);
+        }
+        else if(ctx.rilv)
         {
             /* lds_row_interleave: rows of 8 x block_k elements + rilv_pad bytes of
-             * pad (one DTL instruction per wave fills exactly one such row) */
+             * pad (one DTL instruction per wave fills exactly one such row; an
+             * MN-contiguous operand keeps its gemm_mn_operand block layout) */
             int rpad = spec->trait.rilv_pad ? spec->trait.rilv_pad : 16;
             ctx.rilv_cols = 8 * ctx.block_k + rpad / (rocke_i_type_bits(ctx.storage_dtype) / 8);
             a_shape[0] = ctx.block_m / 8;
             a_shape[1] = ctx.rilv_cols;
             b_shape[0] = ctx.block_n / 8;
             b_shape[1] = ctx.rilv_cols;
+        }
+        if(!ctx.gett_own_lds)
+        {
+            /* MN-contiguous operand (layout RRR / CRR / CCR): its stage is the
+             * gemm_mn_operand block layout (1 KiB blocks + mn_pad bytes) */
+            if(ctx.has_mn_a)
+            {
+                a_shape[0] = rocke_gemm_mn_n_blocks(&ctx.mn_lay_a);
+                a_shape[1] = rocke_gemm_mn_block_bytes(&ctx.mn_lay_a) / 2;
+            }
+            if(ctx.has_mn_b)
+            {
+                b_shape[0] = rocke_gemm_mn_n_blocks(&ctx.mn_lay_b);
+                b_shape[1] = rocke_gemm_mn_block_bytes(&ctx.mn_lay_b) / 2;
+            }
         }
         if(ctx.stages > 4)
         {

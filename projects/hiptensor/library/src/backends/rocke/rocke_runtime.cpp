@@ -49,7 +49,7 @@ namespace hiptensor
     {
         namespace
         {
-            // Pack format, see pack/make_rocke_pack.py.
+            // Pack format, see pack/rocke_pack_format.hpp.
             constexpr char     kPackMagic[8]       = {'H', 'T', 'P', 'K', 'I', 'D', 'X', '\0'};
             constexpr uint32_t kPackReaderVersion  = 1u;
             constexpr size_t   kHeaderSize         = 160;
@@ -952,9 +952,11 @@ namespace hiptensor
                 }
                 auto const&       planned = program.steps[index];
                 LaunchStep const* chosen  = &planned;
-                if(planned.fallback != nullptr)
+                size_t            count   = 1;
+                if(planned.fallback != nullptr && !planned.fallback->empty())
                 {
-                    bool use = device != program.device;
+                    // a pack kernel loads on any device (below); a JIT kernel only on its own
+                    bool use = planned.deviceBound && device != program.device;
                     for(auto const& p : planned.pointers)
                     {
                         auto const* base = bufferOf(p.role, buffers, workspace);
@@ -964,72 +966,77 @@ namespace hiptensor
                     }
                     if(use)
                     {
-                        chosen = planned.fallback.get();
+                        chosen = planned.fallback->data();
+                        count  = planned.fallback->size();
                     }
                 }
-                LaunchStep const& step = *chosen;
-                if(step.args.size() > kMaxKernargBytes || step.kernel->args.size() > kMaxKernelArgs)
+                for(size_t piece = 0; piece < count; piece++)
                 {
-                    return HIPTENSOR_STATUS_INTERNAL_ERROR;
-                }
-                alignas(16) uint8_t args[kMaxKernargBytes];
-                std::memcpy(args, step.args.data(), step.args.size());
-                for(auto const& p : step.pointers)
-                {
-                    auto const* base
-                        = static_cast<uint8_t const*>(bufferOf(p.role, buffers, workspace));
-                    uint64_t address
-                        = base == nullptr ? 0 : reinterpret_cast<uint64_t>(base) + p.bytes;
-                    std::memcpy(args + p.offset, &address, 8);
-                }
-                for(auto const& s : step.scalars)
-                {
-                    auto const& v     = values[static_cast<int>(s.role)];
-                    double      value = s.imag ? v.im : v.re;
-                    if(s.f64)
+                    LaunchStep const& step = chosen[piece];
+                    if(step.args.size() > kMaxKernargBytes
+                       || step.kernel->args.size() > kMaxKernelArgs)
                     {
-                        std::memcpy(args + s.offset, &value, 8);
+                        return HIPTENSOR_STATUS_INTERNAL_ERROR;
                     }
-                    else
+                    alignas(16) uint8_t args[kMaxKernargBytes];
+                    std::memcpy(args, step.args.data(), step.args.size());
+                    for(auto const& p : step.pointers)
                     {
-                        float f = static_cast<float>(value);
-                        std::memcpy(args + s.offset, &f, 4);
+                        auto const* base
+                            = static_cast<uint8_t const*>(bufferOf(p.role, buffers, workspace));
+                        uint64_t address
+                            = base == nullptr ? 0 : reinterpret_cast<uint64_t>(base) + p.bytes;
+                        std::memcpy(args + p.offset, &address, 8);
                     }
-                }
-                void* params[kMaxKernelArgs];
-                for(size_t i = 0; i < step.kernel->args.size(); i++)
-                {
-                    params[i] = args + step.kernel->args[i].offset;
-                }
-                hipFunction_t function = step.function;
-                if(device != program.device && program.pack != nullptr)
-                {
-                    // Executed on another device than the plan was created on: use (and load
-                    // once) the kernel's code object there.
-                    if(auto status = program.pack->function(*step.kernel, function);
-                       status != HIPTENSOR_STATUS_SUCCESS)
+                    for(auto const& s : step.scalars)
                     {
-                        return status;
+                        auto const& v     = values[static_cast<int>(s.role)];
+                        double      value = s.imag ? v.im : v.re;
+                        if(s.f64)
+                        {
+                            std::memcpy(args + s.offset, &value, 8);
+                        }
+                        else
+                        {
+                            float f = static_cast<float>(value);
+                            std::memcpy(args + s.offset, &f, 4);
+                        }
                     }
-                }
-                if(function == nullptr)
-                {
-                    return HIPTENSOR_STATUS_INTERNAL_ERROR;
-                }
-                auto status = hipModuleLaunchKernel(function,
-                                                    step.grid.x,
-                                                    step.grid.y,
-                                                    step.grid.z,
-                                                    step.block.x,
-                                                    step.block.y,
-                                                    step.block.z,
-                                                    0,
-                                                    stream,
-                                                    params,
-                                                    nullptr);
-                if(status != hipSuccess)
-                {
-                    return HIPTENSOR_STATUS_HIP_ERROR;
+                    void* params[kMaxKernelArgs];
+                    for(size_t i = 0; i < step.kernel->args.size(); i++)
+                    {
+                        params[i] = args + step.kernel->args[i].offset;
+                    }
+                    hipFunction_t function = step.function;
+                    if(device != program.device && program.pack != nullptr)
+                    {
+                        // Executed on another device than the plan was created on: use (and load
+                        // once) the kernel's code object there.
+                        if(auto status = program.pack->function(*step.kernel, function);
+                           status != HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            return status;
+                        }
+                    }
+                    if(function == nullptr)
+                    {
+                        return HIPTENSOR_STATUS_INTERNAL_ERROR;
+                    }
+                    auto status = hipModuleLaunchKernel(function,
+                                                        step.grid.x,
+                                                        step.grid.y,
+                                                        step.grid.z,
+                                                        step.block.x,
+                                                        step.block.y,
+                                                        step.block.z,
+                                                        0,
+                                                        stream,
+                                                        params,
+                                                        nullptr);
+                    if(status != hipSuccess)
+                    {
+                        return HIPTENSOR_STATUS_HIP_ERROR;
+                    }
                 }
             }
             return HIPTENSOR_STATUS_SUCCESS;

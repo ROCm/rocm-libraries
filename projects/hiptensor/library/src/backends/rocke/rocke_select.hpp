@@ -74,7 +74,10 @@ namespace hiptensor
 
         // The model cells a problem's selection looks up, most specific first (route table
         // keys select.model.<cell>). Empty for operations without a model (elementwise).
-        std::vector<std::string> selectionCells(backend::Problem const& problem);
+        // `tag`: the candidates' CandidateFacts::selectTag (an f32 recipe other than x6); every
+        // cell then gets the suffix ".<tag>", for which the pack has no model (static order).
+        std::vector<std::string> selectionCells(backend::Problem const& problem,
+                                                std::string const&      tag = {});
 
         enum class SelectSource : uint8_t
         {

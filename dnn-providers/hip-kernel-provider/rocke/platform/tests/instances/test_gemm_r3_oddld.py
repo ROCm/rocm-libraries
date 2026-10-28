@@ -158,10 +158,20 @@ class TestSpecRules(_Clean):
         off = replace(s, trait=replace(s.trait, mn_ld_any=False))
         self.assertGreaterEqual(_n_smin(s) - _n_smin(off), 2)
 
-    def test_python_engine_only(self):
+    def test_cpp_engine_mirrors_the_lever(self):
+        # gemm_mn_operand.cpp / gemm_build_staged.cpp mirror the DTL-ring MN
+        # operands (mn_pad / mn_chunk / mn_ld_any); the binding receives them
         from rocke.core import backend as _be
 
-        self.assertIn(("mn_ld_any", False), _be._PYTHON_ONLY_GEMM_LEVERS)
+        keys = {k for k, _ in _be._PYTHON_ONLY_GEMM_LEVERS}
+        for k in ("mn_ld_any", "mn_pad", "mn_chunk"):
+            self.assertNotIn(k, keys)
+        s = _native(_req(4100, 3000, 4096, "CCR"))
+        d = _be.universal_gemm_spec_to_dict(s)
+        self.assertEqual(d["layout"], "CCR")
+        self.assertEqual(d["mn_ld_any"], s.trait.mn_ld_any)
+        self.assertEqual(d["mn_pad"], s.trait.mn_pad)
+        self.assertEqual(d["mn_chunk"], s.trait.mn_chunk)
 
 
 class TestDispatch(_Clean):

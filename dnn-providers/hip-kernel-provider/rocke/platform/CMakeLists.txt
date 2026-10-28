@@ -177,6 +177,22 @@ target_include_directories(rocke_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
+# The tuned GETT route table (python/rocke/dispatch/families/tensor_gett_tuned.json)
+# compiled into the engine: rocke_tensor_gett_tuned_json() (instance_tensor_gett.h)
+# serves C++ consumers (hipTensor's pack builder) without the Python tree.
+set(_ROCKE_TG_JSON
+    "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/dispatch/families/tensor_gett_tuned.json")
+set(_ROCKE_TG_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/tensor_gett_tuned_table.cpp")
+add_custom_command(
+  OUTPUT "${_ROCKE_TG_CPP}"
+  COMMAND "${CMAKE_COMMAND}" "-DIN=${_ROCKE_TG_JSON}" "-DOUT=${_ROCKE_TG_CPP}"
+          "-DSYMBOL=rocke_tensor_gett_tuned_json"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_embed_json.cmake"
+  DEPENDS "${_ROCKE_TG_JSON}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_embed_json.cmake"
+  COMMENT "Embedding the tuned GETT route table"
+  VERBATIM)
+target_sources(rocke_core_objects PRIVATE "${_ROCKE_TG_CPP}")
+
 # --- Portable-IR bundle freshness / provenance stamp -------------------------
 # Generate a deterministic, git-independent provenance header from the engine
 # and replay CLI sources plus their CMake build recipes. This common bundle ID is

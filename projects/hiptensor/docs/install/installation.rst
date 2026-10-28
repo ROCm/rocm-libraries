@@ -202,13 +202,15 @@ Here are the available options to build the hipTensor library, with or without c
         -   ``OFF``
     *   -   ``HIPTENSOR_ENABLE_ROCKE_JIT``
         -   Build the rocKE backend's JIT and kernel cache (with ``HIPTENSOR_ENABLE_ROCKE_BACKEND``): compiles rocKE's
-            recipe engine from ``HIPTENSOR_ROCKE_SOURCE_DIR`` into the library and links the COMGR library
+            C++ kernel builders from ``HIPTENSOR_ROCKE_SOURCE_DIR`` into the library and links the COMGR library
         -   ``ON``
     *   -   ``HIPTENSOR_ROCKE_SOURCE_DIR``
-        -   rocKE source tree the rocKE kernel packs are built from (build time only; needs a Python 3 interpreter)
+        -   rocKE source tree whose C++ engine builds the rocKE kernel packs and the JIT (build time only). A C++ host
+            tool of the build writes the packs; the build runs no Python
         -   ``../../dnn-providers/hip-kernel-provider/rocke``
     *   -   ``HIPTENSOR_ROCKE_PACK_DIR``
-        -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``); when set, no pack is built and no Python runs
+        -   Directory of prebuilt rocKE kernel packs (``<target>/rocke.htpk``, ``<target>/rocke.index.json``); when
+            set, no pack is built
         -   Empty
     *   -   ``HIPTENSOR_ROCKE_PACK_TARGETS``
         -   GPU targets to build rocKE kernel packs for

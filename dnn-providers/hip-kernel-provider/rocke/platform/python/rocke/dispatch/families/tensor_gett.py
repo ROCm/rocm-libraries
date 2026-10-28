@@ -48,7 +48,10 @@ search engine. Measured winners ship in the tuned route table
 
 The candidate's ``sweep_space`` is its knob neighbourhood (K tile, stage
 count, persistent grid, paired 16-byte epilogue stores), for the tuning
-engine to search. Python engine only (no C++ builder).
+engine to search. The C++ engine mirrors the route key and the single-launch
+MN routes of the tuned table (``rocke::gett::tuned_plan``; the table is compiled
+into the engine); the cost-model routes, the pack hybrid and the tuning flow are
+Python engine only.
 """
 
 from __future__ import annotations

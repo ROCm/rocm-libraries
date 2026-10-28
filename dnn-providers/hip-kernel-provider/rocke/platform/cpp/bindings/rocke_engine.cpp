@@ -323,7 +323,10 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "rilv_vec_epilogue",
                               "rve_store_nt",
                               "dtl_soff0",
-                              "wide_addr"};
+                              "wide_addr",
+                              "mn_pad",
+                              "mn_chunk",
+                              "mn_ld_any"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -419,6 +422,13 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
         spec->trait.rve_store_nt = dict_bool(tr, "rve_store_nt", spec->trait.rve_store_nt);
         spec->trait.dtl_soff0 = dict_bool(tr, "dtl_soff0", spec->trait.dtl_soff0);
         spec->trait.wide_addr = dict_bool(tr, "wide_addr", spec->trait.wide_addr);
+        if(tr.contains("mn_pad"))
+        {
+            spec->trait.mn_pad_set = true;
+            spec->trait.mn_pad = dict_int(tr, "mn_pad", spec->trait.mn_pad);
+        }
+        spec->trait.mn_chunk = dict_int(tr, "mn_chunk", spec->trait.mn_chunk);
+        spec->trait.mn_ld_any = dict_bool(tr, "mn_ld_any", spec->trait.mn_ld_any);
     }
 
     /* ---- data ---- */
@@ -569,7 +579,10 @@ SpecHolder build_spec(const py::dict& root)
                               "rilv_vec_epilogue",
                               "rve_store_nt",
                               "dtl_soff0",
-                              "wide_addr"};
+                              "wide_addr",
+                              "mn_pad",
+                              "mn_chunk",
+                              "mn_ld_any"};
         for(const char* k : keys)
         {
             py::dict got = pick(trait, k);
@@ -668,6 +681,13 @@ SpecHolder build_spec(const py::dict& root)
         h.spec.trait.rve_store_nt = dict_bool(tr, "rve_store_nt", h.spec.trait.rve_store_nt);
         h.spec.trait.dtl_soff0 = dict_bool(tr, "dtl_soff0", h.spec.trait.dtl_soff0);
         h.spec.trait.wide_addr = dict_bool(tr, "wide_addr", h.spec.trait.wide_addr);
+        if(tr.contains("mn_pad"))
+        {
+            h.spec.trait.mn_pad_set = true;
+            h.spec.trait.mn_pad = dict_int(tr, "mn_pad", h.spec.trait.mn_pad);
+        }
+        h.spec.trait.mn_chunk = dict_int(tr, "mn_chunk", h.spec.trait.mn_chunk);
+        h.spec.trait.mn_ld_any = dict_bool(tr, "mn_ld_any", h.spec.trait.mn_ld_any);
     }
 
     /* ---- data ---- */

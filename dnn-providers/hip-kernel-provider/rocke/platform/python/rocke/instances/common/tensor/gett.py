@@ -5,10 +5,13 @@ permuted alpha / beta epilogue on the gfx950 direct-to-LDS GEMM bodies.
 
 One launch computes a hipTensor-style contraction
 ``D[modes_d] = alpha * sum_k A[modes_a] B[modes_b] (+ beta * C[modes_d])``
-with arbitrary mode orders straight from the user's tensors. Python engine
-only: the GEMM body is ``gemm_universal`` with the ``spec._gett`` side channel
-(:class:`GettHooks`; absent -> every universal GEMM kernel is byte-identical),
-and the side channel has no C++ mirror. Three body kinds:
+with arbitrary mode orders straight from the user's tensors. The GEMM body is
+``gemm_universal`` with the ``spec._gett`` side channel (:class:`GettHooks`;
+absent -> every universal GEMM kernel is byte-identical). The C++ engine
+mirrors the ring and MN-layout bodies (``cpp/instances/common/tensor_gett_*.cpp``,
+``rocke_gett_hooks``; the ``tensor_gett`` parity family keeps the two engines
+byte-identical); the K-contiguous bodies and ``knobs.llvm_opts`` are Python
+engine only. Three body kinds:
 
 * the ring body (:data:`BODY_TRAIT`, the default ``TensorGettSpec``): the hook
   owns the operand addressing, the K-outer LDS layout below, the fragment

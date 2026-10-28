@@ -15,5 +15,7 @@
 * :mod:`.gett_host` -- the planner rules of the two GETT kernels.
 
 Every kernel takes its problem as kernel arguments (rank bucket R8), so one compiled kernel
-serves every problem of its dtype row. Python engine only, like the other library kernels.
+serves every problem of its dtype row. The C++ engine mirrors every builder
+(``rocke/instance_hiptensor_aot.h``; the ``hiptensor_aot_*`` parity families keep the two engines
+byte-identical), so hipTensor builds its kernel pack and JIT kernels without Python.
 """

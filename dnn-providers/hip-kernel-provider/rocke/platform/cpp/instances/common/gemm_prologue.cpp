@@ -11,6 +11,7 @@
  */
 #include "rocke/instance_gemm_prologue.h"
 
+#include "rocke/elementary.h"
 #include "rocke/instance_gemm_internal.h"
 #include "rocke/ir_internal.h"
 
@@ -63,6 +64,45 @@ const recipe_t* find_recipe(const char* name)
 /* Python _BF16_SAT: the largest f32 whose RNE bf16 rounding is finite. */
 constexpr double k_bf16_sat = 3.3895313892515355e38;
 
+/* Python 1.0 / math.log(2.0) */
+constexpr double k_log2e = 0x1.71547652b82fep+0;
+
+/* Python _ELEMENTARY: the operators of rocke.helpers.elementary */
+const char* const k_elementary[] = {"sin",
+                                    "cos",
+                                    "tan",
+                                    "sinh",
+                                    "cosh",
+                                    "asin",
+                                    "acos",
+                                    "atan",
+                                    "asinh",
+                                    "acosh",
+                                    "atanh",
+                                    "ceil",
+                                    "floor"};
+
+bool is_elementary(const char* u)
+{
+    for(const char* e : k_elementary)
+        if(eq(u, e))
+            return true;
+    return false;
+}
+
+/* Python UNARY: "", the basic operators and _ELEMENTARY */
+bool is_unary(const char* u)
+{
+    static const char* const basic[]
+        = {"relu", "abs", "neg", "exp", "sq", "sigmoid", "sqrt", "rcp", "tanh", "log"};
+    if(empty(u))
+        return true;
+    for(const char* x : basic)
+        if(eq(u, x))
+            return true;
+    return is_elementary(u);
+}
+
 } // namespace
 
 extern "C" {
@@ -100,6 +140,10 @@ bool rocke_gemm_prologue_check(const rocke_gemm_prologue_t* p, char* reason, siz
         return fail("prologue recipe '%s'", p->recipe);
     if(!eq(p->src, "f32") && !eq(p->recipe, "cvt"))
         return fail("%s", "split recipes need src='f32'");
+    if(!is_unary(p->unary_a))
+        return fail("prologue unary '%s'", p->unary_a);
+    if(!is_unary(p->unary_b))
+        return fail("prologue unary '%s'", p->unary_b);
     if(!eq(p->unary_impl, "f32") && !eq(p->unary_impl, "bits"))
         return fail("prologue unary_impl '%s'", p->unary_impl);
     if(!eq(p->order, "small_first") && !eq(p->order, "big_first"))
@@ -119,10 +163,6 @@ bool rocke_gemm_prologue_check(const rocke_gemm_prologue_t* p, char* reason, siz
     if(!empty(p->epi) && !p->out_f32)
         return fail("%s", "prologue epi (alpha / bilinear) needs out_f32");
     /* the mirror's scope: refuse what the C++ emitter does not build */
-    if(!empty(p->unary_a) || !empty(p->unary_b))
-        return fail("%s",
-                    "prologue unary_a / unary_b: implemented by the Python engine only "
-                    "(no C++ mirror yet)");
     if(eq(p->stage, "vgpr"))
         return fail("%s",
                     "prologue stage='vgpr': implemented by the Python engine only "
@@ -171,7 +211,9 @@ int rocke_gemm_prologue_suffix(const rocke_gemm_prologue_t* p, char* out, size_t
         s += "_pk";
     if(!eq(p->stage, "lds"))
         s += "_vg";
-    if(!p->fast_exp && (eq(p->unary_a, "exp") || eq(p->unary_b, "exp")))
+    if(!p->fast_exp
+       && (eq(p->unary_a, "exp") || eq(p->unary_b, "exp") || eq(p->unary_a, "sigmoid")
+           || eq(p->unary_b, "sigmoid")))
         s += "_gexp";
     if(p->pin_v)
         s += "_pv";
@@ -285,6 +327,124 @@ struct rocke_gemm_pro_emitter
         return rocke_b_vec_pack(b, outs.data(), (int)outs.size(), rocke_f32());
     }
 
+    /* Python _unary_f32: hipTensor operator u on an f32 value */
+    rocke_value_t* unary_f32(rocke_value_t* x, const char* u)
+    {
+        if(eq(u, "relu"))
+        {
+            rocke_value_t* z = rocke_b_const_f32(b, 0.0);
+            return rocke_b_fmax(b, x, z);
+        }
+        if(eq(u, "abs"))
+            return rocke_b_fabs(b, x);
+        if(eq(u, "neg"))
+            return rocke_b_fneg(b, x);
+        if(eq(u, "exp"))
+        {
+            if(!pro->fast_exp)
+                return rocke_b_exp(b, x);
+            /* one v_exp_f32 (no range-reduction guard: overflow gives inf, as exp does) */
+            rocke_value_t* c = rocke_b_const_f32(b, k_log2e);
+            rocke_value_t* e = rocke_b_fmul(b, x, c);
+            return rocke_b_exp2_fast(b, e);
+        }
+        if(eq(u, "sq"))
+            return rocke_b_fmul(b, x, x);
+        if(eq(u, "sigmoid"))
+        {
+            if(!pro->fast_exp)
+            {
+                /* t = e^-|x| never overflows: 1 / (1 + t) for x >= 0, t / (1 + t) below */
+                rocke_value_t* one = rocke_b_const_f32(b, 1.0);
+                rocke_value_t* ax = rocke_b_fabs(b, x);
+                rocke_value_t* nx = rocke_b_fneg(b, ax);
+                rocke_value_t* t = rocke_b_exp(b, nx);
+                rocke_value_t* z = rocke_b_const_f32(b, 0.0);
+                rocke_value_t* pos = rocke_b_fcmp(b, "oge", x, z);
+                rocke_value_t* num = rocke_b_select(b, pos, one, t);
+                rocke_value_t* den = rocke_b_fadd(b, one, t);
+                return rocke_b_fdiv(b, num, den);
+            }
+            rocke_value_t* c = rocke_b_const_f32(b, -k_log2e);
+            rocke_value_t* m = rocke_b_fmul(b, x, c);
+            rocke_value_t* e = rocke_b_exp2(b, m);
+            rocke_value_t* one = rocke_b_const_f32(b, 1.0);
+            rocke_value_t* one2 = rocke_b_const_f32(b, 1.0);
+            rocke_value_t* den = rocke_b_fadd(b, one2, e);
+            return rocke_b_fdiv(b, one, den);
+        }
+        if(eq(u, "sqrt"))
+            return rocke_b_sqrt(b, x);
+        if(eq(u, "rcp"))
+        {
+            rocke_value_t* one = rocke_b_const_f32(b, 1.0);
+            return rocke_b_fdiv(b, one, x);
+        }
+        if(eq(u, "tanh"))
+            return rocke_b_tanh(b, x);
+        if(eq(u, "log"))
+            return rocke_b_log(b, x);
+        if(is_elementary(u))
+            return rocke_elementary_emit(b, u, x, true);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", u != nullptr ? u : "(null)");
+        return nullptr;
+    }
+
+    /* Python _unary16: elementwise u on a <n x bf16/f16> fragment, rounded once */
+    rocke_value_t* unary16(rocke_value_t* v, const char* u)
+    {
+        int cnt = v->type->count;
+        if(eq(pro->unary_impl, "bits") && (eq(u, "abs") || eq(u, "neg") || eq(u, "relu")))
+        {
+            rocke_value_t* w
+                = rocke_b_vec_bitcast(b, v, rocke_vector_type(b, rocke_i32(), cnt / 2));
+            std::vector<rocke_value_t*> outs;
+            for(int i = 0; i < cnt / 2; ++i)
+            {
+                rocke_value_t* d = rocke_b_vec_extract(b, w, i);
+                if(eq(u, "abs"))
+                {
+                    rocke_value_t* m = rocke_b_const_i32(b, 0x7FFF7FFF);
+                    d = rocke_b_land(b, d, m);
+                }
+                else if(eq(u, "neg"))
+                {
+                    rocke_value_t* m = rocke_b_const_i32(b, -0x7FFF8000); /* 0x80008000 */
+                    d = rocke_b_xor(b, d, m);
+                }
+                else
+                {
+                    const rocke_type_t* rt = rocke_i32();
+                    rocke_inline_asm_opts_t opts;
+                    memset(&opts, 0, sizeof opts);
+                    opts.sideeffect = false;
+                    opts.sideeffect_set = true;
+                    rocke_op_t* op = rocke_b_inline_asm(
+                        b, "v_pk_max_i16 $0, $1, 0", "=v,v", &d, 1, &rt, 1, &opts);
+                    d = op != nullptr ? op->results[0] : nullptr;
+                }
+                outs.push_back(d);
+            }
+            rocke_value_t* pk = rocke_b_vec_pack(b, outs.data(), (int)outs.size(), rocke_i32());
+            return rocke_b_vec_bitcast(b, pk, v->type);
+        }
+        std::vector<rocke_value_t*> xs;
+        for(int i = 0; i < cnt; ++i)
+        {
+            rocke_value_t* e = rocke_b_vec_extract(b, v, i);
+            rocke_value_t* f = rocke_b_cast_to_f32(b, e);
+            xs.push_back(unary_f32(f, u));
+        }
+        rocke_value_t* pk = rocke_b_vec_pack(b, xs.data(), cnt, rocke_f32());
+        return rocke_b_vec_cast_f32_to(b, pk, v->type->elem);
+    }
+
+    const char* unary_of(char which_op) const
+    {
+        const char* u = which_op == 'A' ? pro->unary_a : pro->unary_b;
+        return u != nullptr ? u : "";
+    }
+
     /* Python _split */
     std::vector<rocke_value_t*> split(rocke_value_t* x)
     {
@@ -368,23 +528,37 @@ struct rocke_gemm_pro_emitter
         return rocke_b_vec_pack(b, outs.data(), (int)outs.size(), rocke_f32());
     }
 
-    /* Python _convert_raw0 (no unary op: refused by check) */
-    std::vector<rocke_value_t*> convert_raw0(rocke_value_t* raw, int par_int, rocke_value_t* par_v)
+    /* Python _convert_raw0 */
+    std::vector<rocke_value_t*>
+        convert_raw0(rocke_value_t* raw, const char* unary, int par_int, rocke_value_t* par_v)
     {
         if(eq(pro->src, "f32"))
         {
             rocke_value_t* x = rocke_b_vec_bitcast(b, raw, rocke_vector_type(b, rocke_f32(), n));
+            if(!empty(unary))
+            {
+                std::vector<rocke_value_t*> xs;
+                for(int i = 0; i < n; ++i)
+                {
+                    rocke_value_t* e = rocke_b_vec_extract(b, x, i);
+                    xs.push_back(unary_f32(e, unary));
+                }
+                x = rocke_b_vec_pack(b, xs.data(), n, rocke_f32());
+            }
             if(par_int >= 0 || par_v != nullptr)
                 x = cplx_fix(x, par_int, par_v);
             return split(x);
         }
+        if(!empty(unary))
+            return {unary16(raw, unary)};
         return {raw};
     }
 
     /* Python _convert_raw */
-    std::vector<rocke_value_t*> convert_raw(rocke_value_t* raw, int par_int, rocke_value_t* par_v)
+    std::vector<rocke_value_t*>
+        convert_raw(rocke_value_t* raw, const char* unary, int par_int, rocke_value_t* par_v)
     {
-        std::vector<rocke_value_t*> parts = convert_raw0(raw, par_int, par_v);
+        std::vector<rocke_value_t*> parts = convert_raw0(raw, unary, par_int, par_v);
         for(auto& p : parts)
             p = pin(p);
         return parts;
@@ -393,15 +567,16 @@ struct rocke_gemm_pro_emitter
     /* Python after_load */
     rocke_value_t* after_load(rocke_value_t* raw, char which_op)
     {
+        const char* unary = unary_of(which_op);
         if(eq(pro->split_at, "use"))
         {
-            if(!eq(pro->src, "f32"))
+            if(!eq(pro->src, "f32") && empty(unary))
                 return raw;
             memo[raw]; /* tagged: converted at its first MFMA use */
             which[raw] = which_op;
             return raw;
         }
-        std::vector<rocke_value_t*> parts = convert_raw(raw, -1, nullptr);
+        std::vector<rocke_value_t*> parts = convert_raw(raw, unary, -1, nullptr);
         rocke_value_t* v = parts[0];
         for(size_t i = 1; i < parts.size(); ++i)
             v = rocke_b_vec_concat(b, v, parts[i]);
@@ -416,7 +591,8 @@ struct rocke_gemm_pro_emitter
             return hit->second;
         int P = rocke_gemm_prologue_parts(pro);
         std::vector<rocke_value_t*> parts;
-        if(eq(pro->split_at, "use") && eq(pro->src, "f32"))
+        const char* unary = unary_of(which_op);
+        if(eq(pro->split_at, "use") && (eq(pro->src, "f32") || !empty(unary)))
         {
             int par_int = -1;
             rocke_value_t* par_v = nullptr;
@@ -443,7 +619,7 @@ struct rocke_gemm_pro_emitter
                     par_v = cplx_lane_odd;
                 }
             }
-            parts = convert_raw(frag, par_int, par_v);
+            parts = convert_raw(frag, unary, par_int, par_v);
         }
         else if(P == 1)
         {

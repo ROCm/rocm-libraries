@@ -34,24 +34,32 @@
 //     <out>/<arch>/rocke.htpk          binary pack (read by rocke_runtime.cpp)
 //     <out>/<arch>/rocke.index.json    the same index as JSON (tooling only)
 //
-// The pack is the one pack/make_rocke_pack.py writes for the same rocKE sources: same kernels,
-// code objects, kernel records, routes and selection models; only the two header strings
-// (compiler id, rocKE version) name this builder's toolchain unless --compiler-id /
-// --rocke-version override them.
+// The pack is the one rocKE's Python reference writer (library/builders/hiptensor/
+// make_rocke_pack.py of the rocKE tree, "the Python reference" below) writes for the same rocKE
+// sources: same kernels, code objects, kernel records, routes and selection models; only the two
+// header strings (compiler id, rocKE version) name this builder's toolchain unless --compiler-id /
+// --rocke-version override them. rocKE's tests assert that equality
+// (library/tests/test_hiptensor_pack_cross_check.py); hipTensor's build never runs Python.
 //
-// Kernel families built natively: gemm (the emulated-f32 GEMM bodies with their operand
-// prologue: rocke_gemm_cf32_body, rocke_build_universal_gemm) and gett64 (rocke_build_gett_f64
-// through the gett_f64 spec policy). The other families (ew, reduce, gett_plan) are read from a
-// kernel manifest of rocKE portable IR (--ir-manifest) until their builders have C++ twins; the
-// kernels still go through this builder's lowering, compile and pack writer.
+// Every kernel family is built with rocKE's C++ builders (the descriptor tables of the Python
+// reference): ew, reduce, ewt, ewv, dgett and rgett (rocke/instance_hiptensor_aot.h),
+// gemm (the emulated-f32 GEMM bodies with their operand prologue: rocke_gemm_cf32_body,
+// rocke_build_universal_gemm), gett (the tuned GETT route table the engine carries:
+// rocke/instance_tensor_gett.h) and gett64 / gett32 (rocke_build_gett_f64 through the gett_f64
+// spec policy, f64 and f32 words).
+//
+// hipTensor's build compiles this tool against rocke_core and the COMGR library and runs it to
+// write the packs it ships (cmake/Functions/hiptensorRockePack.cmake). The packs carry no JIT
+// input: the backend's JIT builds its kernels with the same C++ builders (rocke_jit.cpp).
 //
 // Usage:
 //     rocke_pack_builder --arch gfx950 [--arch gfx942 ...] --out DIR [--jobs N]
 //                        [--cache-dir DIR] [--compile-timeout S] [--num-cus N]
-//                        [--select-models DIR] [--ir-manifest DIR] [--only REGEX]
+//                        [--select-models DIR] [--only REGEX]
 //                        [--compiler-id STR] [--rocke-version STR]
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -67,6 +75,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -78,6 +87,7 @@
 #endif
 
 #include "../rocke_comgr.hpp"
+#include "../rocke_ew_rows.hpp"
 #include "rocke_pack_format.hpp"
 
 #include "rocke/arch_num_cus.h"
@@ -86,9 +96,10 @@
 #include "rocke/instance_gemm_prologue.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/instance_gett_f64.h"
+#include "rocke/instance_hiptensor_aot.h"
+#include "rocke/instance_tensor_gett.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
-#include "rocke/json_dom.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/rocke_build_id.h"
 
@@ -102,12 +113,14 @@ using hiptensor::rockepack::PackEntry;
 namespace
 {
     // ---------------------------------------------------------------------------------------------
-    // Descriptor tables (make_rocke_pack.py)
+    // Descriptor tables (the Python reference)
     // ---------------------------------------------------------------------------------------------
 
     // The arches with GEMM bodies (GEMM_ARCHES) and f64 GETT kernels (GETT64_CLASS_ARCHES).
     char const* const kGemmArches[]   = {"gfx950"};
     char const* const kGett64Arches[] = {"gfx90a", "gfx942", "gfx950"};
+    // the native f32 strided GEMM (the Python reference's GETT32_CLASS_ARCHES)
+    char const* const kGett32Arches[] = {"gfx942", "gfx950"};
 
     bool contains(char const* const* begin, char const* const* end, std::string const& arch)
     {
@@ -224,8 +237,8 @@ namespace
         }
     };
 
-    // ---- gett64: rocke_build_gett_f64 through the gett_f64 spec policy (make_rocke_pack.py
-    // _gett64_spec) ----
+    // ---- gett64 / gett32: rocke_build_gett_f64 through the gett_f64 spec policy
+    // (the Python reference's _gett64_spec; f32: f32 / complex f32 words) ----
 
     bool gett64Spec(std::string const&     arch,
                     bool                   cplx,
@@ -233,6 +246,7 @@ namespace
                     char                   dclass,
                     bool                   bilinear,
                     bool                   kblock,
+                    bool                   f32,
                     rocke_gett_f64_spec_t& out,
                     std::string&           why)
     {
@@ -266,7 +280,8 @@ namespace
                                                                     cplx,
                                                                     false,
                                                                     false);
-        rocke_gett_f64_knobs_t   knobs{};
+        prob.f32                                 = f32;
+        rocke_gett_f64_knobs_t knobs{};
         if(cls != "default"
            && !rocke_gett_f64_tuned_config(
                arch.c_str(), cplx ? "complex" : "real", cls.c_str(), &knobs))
@@ -279,6 +294,10 @@ namespace
         knobs.runtime_sizes        = true;
         rocke_gett_f64_spec_t spec = rocke_gett_f64_arch_spec(&prob, arch.c_str(), &knobs);
         spec.split_k               = 1;
+        if(f32)
+        {
+            spec.name = "rocke_gett";
+        }
         if(!rocke_gett_f64_runtime_template(&prob, &spec.problem))
         {
             why = "no runtime template";
@@ -304,9 +323,10 @@ namespace
         return true;
     }
 
-    void gett64Descriptors(Context const& ctx, std::vector<Descriptor>& out)
+    void gett64Descriptors(Context const& ctx, std::vector<Descriptor>& out, bool f32 = false)
     {
-        if(!contains(kGett64Arches, ctx.arch))
+        std::string const family = f32 ? "gett32" : "gett64";
+        if(!(f32 ? contains(kGett32Arches, ctx.arch) : contains(kGett64Arches, ctx.arch)))
         {
             return;
         }
@@ -334,13 +354,20 @@ namespace
                         for(bool kblock : {false, true})
                         {
                             Descriptor d;
-                            d.family = "gett64";
+                            d.family = family;
                             d.label  = std::string("cplx=") + (cplx ? "1" : "0") + " cls=" + cls
                                       + " dclass=" + dclass + " bilinear=" + (bilinear ? "1" : "0")
                                       + " kblock=" + (kblock ? "1" : "0");
                             rocke_gett_f64_spec_t spec;
-                            if(!gett64Spec(
-                                   ctx.arch, cplx, cls, dclass, bilinear, kblock, spec, d.reason))
+                            if(!gett64Spec(ctx.arch,
+                                           cplx,
+                                           cls,
+                                           dclass,
+                                           bilinear,
+                                           kblock,
+                                           f32,
+                                           spec,
+                                           d.reason))
                             {
                                 d.applies = false;
                                 out.push_back(std::move(d));
@@ -351,14 +378,15 @@ namespace
                                 = rocke_build_gett_f64(&b.b, &spec, ctx.arch.c_str());
                             if(kd == nullptr)
                             {
-                                throw std::runtime_error("gett64 " + d.label + ": "
+                                throw std::runtime_error(family + " " + d.label + ": "
                                                          + rocke_ir_builder_error(&b.b));
                             }
                             Kernel k;
                             k.name  = kd->name;
                             k.attrs = {
-                                {"family", std::string("gett64")},
-                                {"abi", std::string("rocke-gett-f64/v2")},
+                                {"family", family},
+                                {"abi",
+                                 std::string(f32 ? "rocke-gett-f32/v1" : "rocke-gett-f64/v2")},
                                 {"cplx", int64_t(cplx)},
                                 {"cls", cls},
                                 {"dclass", std::string(1, dclass)},
@@ -375,7 +403,7 @@ namespace
                             std::string why;
                             if(!lower(ctx, kd, k, why))
                             {
-                                throw std::runtime_error("gett64 " + d.label + ": " + why);
+                                throw std::runtime_error(family + " " + d.label + ": " + why);
                             }
                             d.kernels.push_back(std::move(k));
                             out.push_back(std::move(d));
@@ -387,7 +415,7 @@ namespace
     }
 
     // ---- gemm: the universal GEMM bodies of the emulated-f32 routes (rocKE dispatch/gemm/cf32
-    // cf32_body) with their fused operand prologue (make_rocke_pack.py _gemm_spec) ----
+    // cf32_body) with their fused operand prologue (the Python reference's _gemm_spec) ----
 
     // route: bodies (GEMM_BODIES); the 64-bit-address body (GEMM_WIDE_BODY)
     struct GemmRoute
@@ -403,6 +431,13 @@ namespace
             {"h16", {"RIW", "RIW_SK", "C3", "Q3_SK"}, {"fp16", "bf16"}},
             {"x6", {"RIW", "RIW_SK", "C3"}, {"bf16"}},
             {"cf32", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
+            // the other f32 recipes (HIPTENSOR_ROCKE_F32_RECIPE), on the bodies of x6 / cf32
+            {"x3", {"RIW", "RIW_SK", "C3"}, {"bf16"}},
+            {"x4", {"RIW", "RIW_SK", "C3"}, {"bf16"}},
+            {"x9", {"RIW", "RIW_SK", "C3"}, {"bf16"}},
+            {"cf32x3", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
+            {"cf32x4", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
+            {"cf32x9", {"RIW", "RIW_SK", "Q3_SK"}, {"bf16"}},
         };
         return routes;
     }
@@ -478,12 +513,20 @@ namespace
                     }
                     rocke_gemm_prologue_t pro = rocke_gemm_prologue_default();
                     pro.out_f32               = true;
+                    // real routes name their recipe; complex routes are cf32 (x6) or
+                    // cf32<recipe>
+                    bool const  cplx   = route.compare(0, 4, "cf32") == 0;
+                    std::string recipe = cplx ? route.substr(4) : route;
+                    if(recipe.empty())
+                    {
+                        recipe = "x6";
+                    }
                     if(route != "h16")
                     {
                         pro.src      = "f32";
-                        pro.recipe   = "x6";
+                        pro.recipe   = recipe.c_str();
                         pro.split_at = "use";
-                        pro.cplx_b   = route == "cf32";
+                        pro.cplx_b   = cplx;
                         pro.psub     = true;
                     }
                     if(!rocke_gemm_prologue_check(&pro, reason, sizeof reason))
@@ -547,7 +590,676 @@ namespace
         }
     }
 
-    // ---- manifest families: kernels exported as rocKE portable IR ----
+    // ---- ew / reduce / ewt / ewv / dgett / rgett: the shape-generic hipTensor kernels of rocKE's
+    // library/kernels/common/hiptensor_aot (rocke/instance_hiptensor_aot.h) ----
+
+    // the Python reference's EW_ROWS_*: unary (A, D), binary (A, C, D), trinary (A, B, C, D),
+    // complex (component types) unary / binary, and the mixed-type rows of contractions
+    char const* const kReal[4] = {"f16", "bf16", "f32", "f64"};
+
+    using Row2 = hiptensor::rockebackend::EwRow2;
+    using Row3 = hiptensor::rockebackend::EwRow3;
+    using Row4 = hiptensor::rockebackend::EwRow4;
+
+    // the rows of the API's operations (rocke_ew_rows.hpp, shared with the JIT)
+    std::vector<Row2> const kEwRows1(hiptensor::rockebackend::kEwRows1.begin(),
+                                     hiptensor::rockebackend::kEwRows1.end());
+    std::vector<Row3> const kEwRows2(hiptensor::rockebackend::kEwRows2.begin(),
+                                     hiptensor::rockebackend::kEwRows2.end());
+    std::vector<Row4> const kEwRows3(hiptensor::rockebackend::kEwRows3.begin(),
+                                     hiptensor::rockebackend::kEwRows3.end());
+    std::vector<Row2> const kEwRowsC1(hiptensor::rockebackend::kEwRowsC1.begin(),
+                                      hiptensor::rockebackend::kEwRowsC1.end());
+    std::vector<Row3> const kEwRowsC2(hiptensor::rockebackend::kEwRowsC2.begin(),
+                                      hiptensor::rockebackend::kEwRowsC2.end());
+    std::vector<Row2> const kReduceRows
+        = {{"f16", "f16"}, {"bf16", "bf16"}, {"f32", "f32"}, {"f64", "f64"}};
+
+    template <typename R>
+    bool hasRow(std::vector<R> const& rows, R const& r)
+    {
+        return hiptensor::rockebackend::hasEwRow(rows, r);
+    }
+
+    // EW_ROWS_1_MIXED / EW_ROWS_2_MIXED / EW_ROWS_C2_MIXED
+    std::vector<Row2> ewRows1Mixed()
+    {
+        std::vector<Row2> out;
+        for(char const* d : {"f16", "bf16"})
+        {
+            for(char const* a : kReal)
+            {
+                if(!hasRow(kEwRows1, Row2{a, d}))
+                {
+                    out.push_back({a, d});
+                }
+            }
+        }
+        return out;
+    }
+
+    std::vector<Row3> ewRows2Mixed(bool cplx)
+    {
+        std::vector<Row3>        out;
+        std::vector<char const*> types = cplx ? std::vector<char const*>{"f32", "f64"}
+                                              : std::vector<char const*>(kReal, kReal + 4);
+        for(char const* t : {"f32", "f64"})
+        {
+            for(char const* c : types)
+            {
+                for(char const* d : types)
+                {
+                    if(!hasRow(cplx ? kEwRowsC2 : kEwRows2, Row3{t, c, d}))
+                    {
+                        out.push_back({t, c, d});
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // the Python reference's ew_params(idx64, mixed): the rows of the generic elementwise kernel
+    std::vector<rocke_htaot_ew_spec_t> ewParams(bool idx64, bool mixed)
+    {
+        std::vector<Row2> rows1  = kEwRows1;
+        std::vector<Row3> rows2  = kEwRows2;
+        std::vector<Row3> rowsc2 = kEwRowsC2;
+        if(mixed)
+        {
+            auto m1 = ewRows1Mixed();
+            auto m2 = ewRows2Mixed(false);
+            auto mc = ewRows2Mixed(true);
+            rows1.insert(rows1.end(), m1.begin(), m1.end());
+            rows2.insert(rows2.end(), m2.begin(), m2.end());
+            rowsc2.insert(rowsc2.end(), mc.begin(), mc.end());
+        }
+        std::vector<rocke_htaot_ew_spec_t> out;
+        auto                               row =
+            [&](int arity, char const* a, char const* b, char const* c, char const* d, bool cplx) {
+                rocke_htaot_ew_spec_t s = rocke_htaot_ew_spec_default();
+                s.arity                 = arity;
+                s.a                     = a;
+                s.b                     = b;
+                s.c                     = c;
+                s.d                     = d;
+                s.cplx                  = cplx;
+                s.idx64                 = idx64;
+                out.push_back(s);
+            };
+        for(auto const& r : rows1)
+            row(1, r[0], nullptr, nullptr, r[1], false);
+        for(auto const& r : rows2)
+            row(2, r[0], nullptr, r[1], r[2], false);
+        for(auto const& r : kEwRows3)
+            row(3, r[0], r[1], r[2], r[3], false);
+        for(auto const& r : kEwRowsC1)
+            row(1, r[0], nullptr, nullptr, r[1], true);
+        for(auto const& r : rowsc2)
+            row(2, r[0], nullptr, r[1], r[2], true);
+        // the same real rows with the math operators: separate kernels
+        size_t n = out.size();
+        for(size_t i = 0; i < n; ++i)
+        {
+            if(!out[i].cplx)
+            {
+                rocke_htaot_ew_spec_t s = out[i];
+                s.math                  = true;
+                out.push_back(s);
+            }
+        }
+        return out;
+    }
+
+    std::string str(char const* s)
+    {
+        return s == nullptr ? std::string() : std::string(s);
+    }
+
+    int64_t const kLimitIndex = (int64_t(1) << 31) - 1;
+
+    // Builds `kd` (NULL: the builder's error), lowers it and adds it to `d`.
+    void addKernel(
+        Context const& ctx, Descriptor& d, Builder& b, rocke_kernel_def_t* kd, Attrs attrs)
+    {
+        if(kd == nullptr)
+        {
+            throw std::runtime_error(d.family + " " + d.label + ": "
+                                     + rocke_ir_builder_error(&b.b));
+        }
+        Kernel k;
+        k.name  = kd->name;
+        k.attrs = std::move(attrs);
+        std::string why;
+        if(!lower(ctx, kd, k, why))
+        {
+            throw std::runtime_error(d.family + " " + d.label + ": " + why);
+        }
+        d.kernels.push_back(std::move(k));
+    }
+
+    std::string ewLabel(rocke_htaot_ew_spec_t const& s)
+    {
+        return "arity=" + std::to_string(s.arity) + " a=" + str(s.a) + " b=" + str(s.b)
+               + " c=" + str(s.c) + " d=" + str(s.d) + " cplx=" + (s.cplx ? "1" : "0")
+               + " idx64=" + (s.idx64 ? "1" : "0") + " math=" + (s.math ? "1" : "0");
+    }
+
+    void ewDescriptor(Context const&               ctx,
+                      rocke_htaot_ew_spec_t const& s,
+                      std::vector<Descriptor>&     out)
+    {
+        Descriptor d;
+        d.family = "ew";
+        d.label  = ewLabel(s);
+        Builder b;
+        addKernel(ctx,
+                  d,
+                  b,
+                  rocke_build_htaot_ew(&b.b, &s),
+                  {
+                      {"family", std::string("ew")},
+                      {"abi", std::string(ROCKE_HTAOT_EW_ABI)},
+                      {"arity", int64_t(s.arity)},
+                      {"cplx", int64_t(s.cplx)},
+                      {"idx64", int64_t(s.idx64)},
+                      {"math", int64_t(s.math)},
+                      {"a", str(s.a)},
+                      {"b", str(s.b)},
+                      {"c", str(s.c)},
+                      {"d", str(s.d)},
+                      {"block", int64_t(s.block)},
+                      // capability: rank bucket R8, i32 coordinates
+                      {"max_rank", int64_t(ROCKE_HTAOT_MAX_RANK)},
+                      {"limit_index", kLimitIndex},
+                  });
+        out.push_back(std::move(d));
+    }
+
+    void reduceDescriptor(Context const&                   ctx,
+                          rocke_htaot_reduce_spec_t const& s,
+                          std::vector<Descriptor>&         out)
+    {
+        Descriptor d;
+        d.family = "reduce";
+        d.label  = std::string("mode=") + s.mode + " a=" + s.a + " d=" + s.d
+                  + " idx64=" + (s.idx64 ? "1" : "0") + " math=" + (s.math ? "1" : "0");
+        Builder b;
+        addKernel(ctx,
+                  d,
+                  b,
+                  rocke_build_htaot_reduce(&b.b, &s),
+                  {
+                      {"family", std::string("reduce")},
+                      {"abi", std::string(ROCKE_HTAOT_REDUCE_ABI)},
+                      {"mode", str(s.mode)},
+                      {"a", str(s.a)},
+                      {"d", str(s.d)},
+                      {"idx64", int64_t(s.idx64)},
+                      {"math", int64_t(s.math)},
+                      {"block", int64_t(s.block)},
+                      {"max_rank", int64_t(ROCKE_HTAOT_MAX_RANK)},
+                      {"limit_index", kLimitIndex},
+                  });
+        out.push_back(std::move(d));
+    }
+
+    // ew and reduce: for each offset width the elementwise rows, then the reduction rows
+    void ewReduceDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        for(bool idx64 : {false, true})
+        {
+            for(auto const& s : ewParams(idx64, true))
+            {
+                ewDescriptor(ctx, s, out);
+            }
+            for(bool math : {false, true})
+            {
+                for(auto const& r : kReduceRows)
+                {
+                    for(char const* mode : {"row", "col", "final"})
+                    {
+                        rocke_htaot_reduce_spec_t s = rocke_htaot_reduce_spec_default();
+                        s.mode                      = mode;
+                        s.a                         = r[0];
+                        s.d                         = r[1];
+                        s.idx64                     = idx64;
+                        s.math                      = math;
+                        reduceDescriptor(ctx, s, out);
+                    }
+                }
+            }
+        }
+    }
+
+    // the real rows of the API's elementwise operations (32-bit offsets, no math operators)
+    std::vector<rocke_htaot_ew_spec_t> plainRows()
+    {
+        std::vector<rocke_htaot_ew_spec_t> out;
+        for(auto const& s : ewParams(false, false))
+        {
+            if(!s.cplx && !s.math)
+            {
+                out.push_back(s);
+            }
+        }
+        return out;
+    }
+
+    void ewtDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        // every plain row and its folded class (several small planes per tile)
+        for(auto const& p : plainRows())
+        {
+            for(bool fold : {false, true})
+            {
+                rocke_htaot_ewt_spec_t s{};
+                s.arity = p.arity;
+                s.a     = p.a;
+                s.b     = p.b;
+                s.c     = p.c;
+                s.d     = p.d;
+                s.fold  = fold;
+                Descriptor d;
+                d.family = "ewt";
+                d.label  = "arity=" + std::to_string(s.arity) + " a=" + str(s.a) + " b=" + str(s.b)
+                          + " c=" + str(s.c) + " d=" + str(s.d) + " fold=" + (fold ? "1" : "0");
+                Builder b;
+                addKernel(ctx,
+                          d,
+                          b,
+                          rocke_build_htaot_ewt(&b.b, &s),
+                          {
+                              {"family", std::string("ewt")},
+                              {"abi", std::string(ROCKE_HTAOT_EWT_ABI)},
+                              {"arity", int64_t(s.arity)},
+                              {"a", str(s.a)},
+                              {"b", str(s.b)},
+                              {"c", str(s.c)},
+                              {"d", str(s.d)},
+                              {"block", int64_t(ROCKE_HTAOT_EWT_THREADS)},
+                              {"tile_o", int64_t(ROCKE_HTAOT_EWT_TILE_O)},
+                              {"tile_t", int64_t(rocke_htaot_ewt_tile_t(&s))},
+                              {"fold", int64_t(fold)},
+                              // capability: batch digit slots, i32 element offsets; folded: planes
+                              // per tile (the LDS table of batch offsets)
+                              {"slots_b", int64_t(ROCKE_HTAOT_EWT_SLOTS_B)},
+                              {"max_planes", int64_t(ROCKE_HTAOT_EWT_THREADS)},
+                              {"limit_index", kLimitIndex},
+                          });
+                out.push_back(std::move(d));
+            }
+        }
+    }
+
+    // the vector classes of the plain rows (jit_ew.jit_classes with vec > 1: the output's
+    // vector width and every combination of vector / gathered inputs)
+    void ewvDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        for(auto const& p : plainRows())
+        {
+            int nIn = p.arity; // A, then C (arity 2) or B and C (arity 3)
+            for(int mask = 0; mask < (1 << nIn); ++mask)
+            {
+                rocke_htaot_ew_jit_spec_t s{};
+                s.base   = p;
+                s.vec    = rocke_htaot_ew_jit_vec(p.d);
+                s.n_unit = nIn;
+                std::string unit;
+                for(int i = 0; i < nIn; ++i)
+                {
+                    s.unit[i] = (mask >> i & 1) != 0;
+                    unit += s.unit[i] ? "u" : "g";
+                }
+                if(s.vec <= 1)
+                {
+                    continue;
+                }
+                Descriptor d;
+                d.family = "ewv";
+                d.label  = ewLabel(p) + " vec=" + std::to_string(s.vec) + " unit=" + unit;
+                Builder b;
+                addKernel(ctx,
+                          d,
+                          b,
+                          rocke_build_htaot_ew_jit(&b.b, &s, nullptr, 0),
+                          {
+                              {"family", std::string("ewv")},
+                              {"abi", std::string("hiptensor-aot-ewv/v1")},
+                              {"arity", int64_t(p.arity)},
+                              {"cplx", int64_t(0)},
+                              {"idx64", int64_t(0)},
+                              {"math", int64_t(0)},
+                              {"a", str(p.a)},
+                              {"b", str(p.b)},
+                              {"c", str(p.c)},
+                              {"d", str(p.d)},
+                              {"block", int64_t(p.block)},
+                              {"vec", int64_t(s.vec)},
+                              {"unit", unit},
+                              {"max_rank", int64_t(ROCKE_HTAOT_MAX_RANK)},
+                              {"limit_index", kLimitIndex},
+                          });
+                out.push_back(std::move(d));
+            }
+        }
+    }
+
+    // The direct GETT (every target with MFMA) and the ring GETT classes (gfx950).
+    char const* const kDgettArches[] = {"gfx90a", "gfx942", "gfx950"};
+    char const* const kRgettArches[] = {"gfx950"};
+
+    void dgettDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        if(!contains(kDgettArches, ctx.arch))
+        {
+            return;
+        }
+        for(bool cplx : {false, true})
+        {
+            std::vector<char const*> comps = cplx ? std::vector<char const*>{"f32", "f64"}
+                                                  : std::vector<char const*>(kReal, kReal + 4);
+            for(char const* comp : comps)
+            {
+                for(char const* aFast : {"k", "r"})
+                {
+                    for(char const* bFast : {"k", "r"})
+                    {
+                        for(bool math :
+                            cplx ? std::vector<bool>{false} : std::vector<bool>{false, true})
+                        {
+                            for(bool idx64 : {false, true})
+                            {
+                                rocke_htaot_dgett_spec_t s = rocke_htaot_dgett_spec_default();
+                                s.comp                     = comp;
+                                s.cplx                     = cplx;
+                                s.a_fast                   = aFast;
+                                s.b_fast                   = bFast;
+                                s.math                     = math;
+                                s.idx64                    = idx64;
+                                Descriptor d;
+                                d.family = "dgett";
+                                d.label  = std::string("comp=") + comp
+                                          + " cplx=" + (cplx ? "1" : "0") + " a_fast=" + aFast
+                                          + " b_fast=" + bFast + " math=" + (math ? "1" : "0")
+                                          + " idx64=" + (idx64 ? "1" : "0");
+                                char reason[512] = {0};
+                                if(!rocke_htaot_dgett_check(
+                                       &s, ctx.arch.c_str(), reason, sizeof reason))
+                                {
+                                    d.applies = false;
+                                    d.reason  = reason;
+                                    out.push_back(std::move(d));
+                                    continue;
+                                }
+                                rocke_htaot_dgett_config_t cfg = rocke_htaot_dgett_config(&s);
+                                Builder                    b;
+                                addKernel(
+                                    ctx,
+                                    d,
+                                    b,
+                                    rocke_build_htaot_dgett(&b.b, &s, ctx.arch.c_str()),
+                                    {
+                                        {"family", std::string("dgett")},
+                                        {"abi", std::string(ROCKE_HTAOT_DGETT_ABI)},
+                                        {"comp", std::string(comp)},
+                                        {"cplx", int64_t(cplx)},
+                                        {"a_fast", std::string(aFast)},
+                                        {"b_fast", std::string(bFast)},
+                                        {"math", int64_t(math)},
+                                        {"idx64", int64_t(idx64)},
+                                        {"tile_m", int64_t(cfg.tm)},
+                                        {"tile_n", int64_t(cfg.tn)},
+                                        {"tile_k", int64_t(cfg.tk)},
+                                        {"block", int64_t(ROCKE_HTAOT_DGETT_THREADS)},
+                                        // capability: digit slots of the M / N spaces, the K
+                                        // tiles, the in-tile K digits and the batch space; i32
+                                        // coordinates; 32-bit offsets unless idx64
+                                        {"slots_mn", int64_t(ROCKE_HTAOT_DGETT_SLOTS_MN)},
+                                        {"slots_kt", int64_t(ROCKE_HTAOT_DGETT_SLOTS_KT)},
+                                        {"slots_kl", int64_t(ROCKE_HTAOT_DGETT_SLOTS_KL)},
+                                        {"slots_l", int64_t(ROCKE_HTAOT_DGETT_SLOTS_L)},
+                                        {"limit_index", kLimitIndex},
+                                        {"limit_grid_yz", int64_t(65535)},
+                                    });
+                                out.push_back(std::move(d));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    void rgettDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        if(!contains(kRgettArches, ctx.arch))
+        {
+            return;
+        }
+        int                                   n = rocke_htaot_rgett_classes(nullptr, nullptr, 0);
+        std::vector<rocke_htaot_rgett_spec_t> classes(static_cast<size_t>(n));
+        rocke_htaot_rgett_classes(nullptr, classes.data(), n);
+        for(auto const& s : classes)
+        {
+            Descriptor d;
+            d.family = "rgett";
+            char name[256];
+            if(rocke_htaot_rgett_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+            {
+                throw std::runtime_error("rgett: kernel name");
+            }
+            d.label = name;
+            Builder b;
+            addKernel(ctx,
+                      d,
+                      b,
+                      rocke_build_htaot_rgett(&b.b, &s, ctx.arch.c_str(), nullptr),
+                      {
+                          {"family", std::string("rgett")},
+                          {"abi", std::string(ROCKE_HTAOT_RGETT_ABI)},
+                          {"dtype", str(s.dtype)},
+                          {"bilinear", int64_t(s.bilinear)},
+                          {"vec_a", int64_t(s.vec_a)},
+                          {"vec_b", int64_t(s.vec_b)},
+                          {"vec_d", int64_t(s.vec_d)},
+                          {"pair", int64_t(s.epi_pair)},
+                          {"wide", int64_t(s.wide_d)},
+                          // digits per digit space the class decomposes (0: every slot), C
+                          // prefetch distance
+                          {"slots", int64_t(s.slots)},
+                          {"cp", int64_t(s.c_prefetch)},
+                          {"tile_m", int64_t(256)},
+                          {"tile_n", int64_t(256)},
+                          {"tile_k", int64_t(s.tile_k)},
+                          {"block", int64_t(256)},
+                          {"slots_row", int64_t(ROCKE_HTAOT_RGETT_SLOTS_ROW)},
+                          {"slots_kt", int64_t(ROCKE_HTAOT_RGETT_SLOTS_KT)},
+                          {"slots_kl", int64_t(ROCKE_HTAOT_RGETT_SLOTS_KL)},
+                          // capability: operands within the DMA buffer range, D and C within the
+                          // epilogue's 32-bit offsets (the wide classes: masked summed offsets),
+                          // rows of tiles on grid y
+                          {"limit_operand_bytes", int64_t(0x7FFF0000)},
+                          {"limit_d_bytes",
+                           s.wide_d ? int64_t(rocke::gett::MAX_D_BYTES) : int64_t(0x7FFFFFF0)},
+                          {"limit_grid_yz", int64_t(65535)},
+                      });
+            out.push_back(std::move(d));
+        }
+    }
+
+    // ---- gett_plan: the launches of rocKE's tuned GETT route table (the Python reference's
+    // build_gett_plan): per tuned problem the GETT kernel and its launch record ----
+
+    std::string fnv1a64(std::string const& text)
+    {
+        uint64_t h = 0xCBF29CE484222325ull;
+        for(unsigned char c : text)
+        {
+            h = (h ^ c) * 0x100000001B3ull;
+        }
+        char buf[17];
+        std::snprintf(buf, sizeof buf, "%016llx", static_cast<unsigned long long>(h));
+        return buf;
+    }
+
+    // the Python reference's gett_problem_key (hipTensor's rocke_plan.cpp builds the same
+    // string):
+    // tensors D, A, B as (mode, extent, stride) lists
+    using ModeExt = std::tuple<std::string, int64_t, int64_t>;
+
+    std::string gettProblemKey(std::string const&                       dtype,
+                               bool                                     bilinear,
+                               std::vector<std::vector<ModeExt>> const& tensors)
+    {
+        std::map<std::string, std::string> names;
+        std::string                        key    = dtype + "|" + (bilinear ? "bilinear" : "scale");
+        char const*                        labels = "DAB";
+        for(size_t t = 0; t < tensors.size(); ++t)
+        {
+            std::vector<ModeExt> ms;
+            for(auto const& m : tensors[t])
+            {
+                if(std::get<1>(m) != 1)
+                {
+                    ms.push_back(m);
+                }
+            }
+            std::stable_sort(ms.begin(), ms.end(), [](ModeExt const& x, ModeExt const& y) {
+                return std::get<2>(x) < std::get<2>(y);
+            });
+            std::string part = std::string(1, labels[t]) + ":";
+            for(size_t i = 0; i < ms.size(); ++i)
+            {
+                auto const& m = std::get<0>(ms[i]);
+                if(!names.count(m))
+                {
+                    std::string x = "x" + std::to_string(names.size());
+                    names[m]      = x;
+                }
+                part += (i ? "," : "") + names[m] + ":" + std::to_string(std::get<1>(ms[i])) + ":"
+                        + std::to_string(std::get<2>(ms[i]));
+            }
+            key += "|" + part;
+        }
+        return key;
+    }
+
+    void gettPlanDescriptors(Context const& ctx, std::vector<Descriptor>& out)
+    {
+        std::vector<rocke::gett::TunedEntry> entries;
+        std::string                          why;
+        if(!rocke::gett::tuned_entries(rocke_tensor_gett_tuned_json(), ctx.arch, &entries, &why))
+        {
+            throw std::runtime_error("gett_plan: " + why);
+        }
+        for(auto const& e : entries)
+        {
+            Descriptor d;
+            d.family                         = "gett_plan";
+            d.label                          = "key=" + e.key;
+            rocke::gett::TensorGettSpec prob = rocke::gett::tuned_problem(e);
+            if(rocke::gett::route_key(prob) != e.key)
+            {
+                d.applies = false;
+                d.reason  = "the tuned entry's key does not reproduce";
+                out.push_back(std::move(d));
+                continue;
+            }
+            rocke::gett::TensorGettSpec spec;
+            if(!rocke::gett::tuned_plan(e, ctx.arch, &spec, &why))
+            {
+                // the Python planner would fall back to its untuned routes (pack hybrid / ring
+                // body): not mirrored, so the pack would differ
+                throw std::runtime_error("gett_plan " + d.label + ": " + why);
+            }
+            Builder             b;
+            rocke_kernel_def_t* kd = rocke::gett::build_tensor_gett(&b.b, spec, ctx.arch.c_str());
+            if(kd == nullptr)
+            {
+                throw std::runtime_error("gett_plan " + d.label + ": "
+                                         + rocke_ir_builder_error(&b.b));
+            }
+            rocke::gett::Plan pl;
+            if(!spec.plan(&pl, &why))
+            {
+                throw std::runtime_error("gett_plan " + d.label + ": " + why);
+            }
+            std::map<std::string, std::string> binds = {
+                {"C", "O+0"},
+                {"M", "#" + std::to_string(pl.M)},
+                {"N", "#" + std::to_string(pl.N)},
+                {"K", "#" + std::to_string(pl.K)},
+                {"alpha", "@a"},
+            };
+            if(spec.knobs.bilinear)
+            {
+                binds["Cin"]  = "C+0";
+                binds["beta"] = "@b";
+            }
+            auto ops   = rocke::gett::launch_operands(spec);
+            binds["A"] = ops.first + "+0";
+            binds["B"] = ops.second + "+0";
+            std::set<std::string> params;
+            for(int i = 0; i < kd->num_params; ++i)
+            {
+                params.insert(kd->params[i]->name);
+            }
+            std::set<std::string> bound;
+            for(auto const& kv : binds)
+            {
+                bound.insert(kv.first);
+            }
+            if(params != bound)
+            {
+                throw std::runtime_error("gett_plan " + d.label
+                                         + ": the GETT kernel params are not the bound ones");
+            }
+            int grid[3];
+            rocke::gett::tensor_gett_grid(spec, grid);
+            int block = rocke::gett::tensor_gett_block(spec);
+            // the canonical key with the packed row-major strides the tuned problem was measured
+            // with (in hipTensor: the same memory layout, mode lists reversed and column-major
+            // strides)
+            std::vector<std::vector<ModeExt>> tensors;
+            for(auto const* modes : {&e.modes_d, &e.modes_a, &e.modes_b})
+            {
+                auto                 st = rocke::gett::packed_strides(*modes, e.extents);
+                std::vector<ModeExt> t;
+                for(auto const& m : *modes)
+                {
+                    t.emplace_back(m, e.extents.at(m), st.at(m));
+                }
+                tensors.push_back(std::move(t));
+            }
+            std::string pkey = gettProblemKey(
+                spec.dtype == "fp16" ? "f16" : spec.dtype, spec.knobs.bilinear, tensors);
+            std::string record = "v1;ws=0;steps=1|k=" + std::string(kd->name) + ";g="
+                                 + std::to_string(grid[0]) + "," + std::to_string(grid[1]) + ","
+                                 + std::to_string(grid[2]) + ";b=" + std::to_string(block) + ";a=";
+            bool first = true;
+            for(auto const& kv : binds)
+            {
+                record += (first ? "" : ",") + kv.first + "=" + kv.second;
+                first = false;
+            }
+            Kernel k;
+            k.name  = kd->name;
+            k.attrs = {
+                {"family", std::string("gett")},
+                {"abi", std::string("rocke-tensor-gett/v1")},
+            };
+            if(!lower(ctx, kd, k, why))
+            {
+                throw std::runtime_error("gett_plan " + d.label + ": " + why);
+            }
+            d.kernels.push_back(std::move(k));
+            std::string route                        = fnv1a64(pkey);
+            d.routes["gett.tuned." + route]          = record;
+            d.routes["gett.tuned." + route + ".key"] = pkey;
+            out.push_back(std::move(d));
+        }
+    }
 
     std::string slurp(fs::path const& p)
     {
@@ -557,154 +1269,6 @@ namespace
             throw std::runtime_error("cannot read " + p.string());
         }
         return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-    }
-
-    struct Arena
-    {
-        rocke_arena_t a{};
-        Arena()
-        {
-            rocke_arena_init(&a, size_t(1) << 20);
-        }
-        ~Arena()
-        {
-            rocke_arena_destroy(&a);
-        }
-    };
-
-    std::string jstr(jd_val_t const* o, char const* key)
-    {
-        char const* s = rocke_jstr(rocke_jget(o, key));
-        if(s == nullptr)
-        {
-            throw std::runtime_error(std::string("manifest: missing string ") + key);
-        }
-        return s;
-    }
-
-    // Reads <dir>/<arch>.json: the descriptors of the families in `families`.
-    void manifestDescriptors(Context const&               ctx,
-                             fs::path const&              dir,
-                             std::set<std::string> const& families,
-                             std::vector<Descriptor>&     out)
-    {
-        fs::path    path = dir / (ctx.arch + ".json");
-        std::string text = slurp(path);
-        Arena       arena;
-        char        err[512] = {0};
-        jd_val_t*   root     = rocke_json_parse(text.c_str(), &arena.a, err, sizeof err);
-        if(root == nullptr)
-        {
-            throw std::runtime_error(path.string() + ": " + err);
-        }
-        if(jstr(root, "arch") != ctx.arch)
-        {
-            throw std::runtime_error(path.string() + ": manifest of another arch");
-        }
-        jd_val_t const* descs = rocke_jget(root, "descriptors");
-        if(descs == nullptr || descs->kind != JD_ARR)
-        {
-            throw std::runtime_error(path.string() + ": no descriptors");
-        }
-        // the families the manifest holds every descriptor of
-        std::set<std::string> listed;
-        jd_val_t const*       jf = rocke_jget(root, "families");
-        for(int i = 0; jf != nullptr && jf->kind == JD_ARR && i < jf->arr_len; ++i)
-        {
-            if(rocke_jstr(jf->arr[i]) != nullptr)
-            {
-                listed.insert(rocke_jstr(jf->arr[i]));
-            }
-        }
-        for(auto const& f : families)
-        {
-            if(!listed.count(f))
-            {
-                throw std::runtime_error(path.string() + ": the manifest has no " + f + " kernels");
-            }
-        }
-        for(int i = 0; i < descs->arr_len; ++i)
-        {
-            jd_val_t const* jd     = descs->arr[i];
-            std::string     family = jstr(jd, "family");
-            if(!families.count(family))
-            {
-                continue;
-            }
-            Descriptor d;
-            d.family  = family;
-            d.label   = jstr(jd, "label");
-            d.applies = jstr(jd, "status") == "ok";
-            if(!d.applies)
-            {
-                d.reason = jstr(jd, "reason");
-                out.push_back(std::move(d));
-                continue;
-            }
-            jd_val_t const* ks = rocke_jget(jd, "kernels");
-            for(int j = 0; ks != nullptr && ks->kind == JD_ARR && j < ks->arr_len; ++j)
-            {
-                jd_val_t const* jk = ks->arr[j];
-                Kernel          k;
-                k.name             = jstr(jk, "name");
-                jd_val_t const* ja = rocke_jget(jk, "attrs");
-                if(ja == nullptr || ja->kind != JD_OBJ)
-                {
-                    throw std::runtime_error(path.string() + ": " + k.name + " has no attrs");
-                }
-                for(int m = 0; m < ja->obj_len; ++m)
-                {
-                    jd_val_t const* v = ja->obj[m].val;
-                    if(v->kind == JD_STR)
-                    {
-                        k.attrs[ja->obj[m].key] = std::string(v->str);
-                    }
-                    else if(v->kind == JD_NUM && v->num == double(int64_t(v->num)))
-                    {
-                        k.attrs[ja->obj[m].key] = int64_t(v->num);
-                    }
-                    else
-                    {
-                        throw std::runtime_error(path.string() + ": " + k.name + " attr "
-                                                 + ja->obj[m].key + " is not an int or a string");
-                    }
-                }
-                std::string ir = slurp(dir / jstr(jk, "ir"));
-                Builder     b;
-                if(rocke_ir_builder_init(&b.b, k.name.c_str()) != ROCKE_OK)
-                {
-                    throw std::runtime_error("builder init failed");
-                }
-                rocke_kernel_def_t* kd = nullptr;
-                if(rocke_ir_parse(ir.c_str(), &b.b, &kd) != ROCKE_OK || kd == nullptr)
-                {
-                    throw std::runtime_error(path.string() + ": " + k.name + ": IR parse failed: "
-                                             + rocke_ir_builder_error(&b.b));
-                }
-                if(k.name != kd->name)
-                {
-                    throw std::runtime_error(path.string() + ": " + k.name
-                                             + ": the IR names another kernel");
-                }
-                std::string why;
-                if(!lower(ctx, kd, k, why))
-                {
-                    throw std::runtime_error(why);
-                }
-                d.kernels.push_back(std::move(k));
-            }
-            jd_val_t const* jr = rocke_jget(jd, "routes");
-            for(int m = 0; jr != nullptr && jr->kind == JD_OBJ && m < jr->obj_len; ++m)
-            {
-                char const* v = rocke_jstr(jr->obj[m].val);
-                if(v == nullptr)
-                {
-                    throw std::runtime_error(path.string() + ": route values are strings");
-                }
-                d.routes[jr->obj[m].key] = v;
-            }
-            out.push_back(std::move(d));
-        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -944,7 +1508,6 @@ namespace
         int                      numCus         = 0;
         std::string              only;
         std::string              selectModels;
-        std::string              irManifest;
         std::string              compilerId;
         std::string              rockeVersion;
     };
@@ -955,7 +1518,7 @@ namespace
             stderr,
             "%s\nusage: rocke_pack_builder --arch GFX [--arch GFX ...] --out DIR [--jobs N]\n"
             "       [--cache-dir DIR] [--compile-timeout S] [--num-cus N]\n"
-            "       [--select-models DIR] [--ir-manifest DIR] [--only REGEX]\n"
+            "       [--select-models DIR] [--only REGEX]\n"
             "       [--compiler-id STR] [--rocke-version STR]\n",
             msg);
         std::exit(2);
@@ -990,8 +1553,6 @@ namespace
                 o.only = val();
             else if(a == "--select-models")
                 o.selectModels = val();
-            else if(a == "--ir-manifest")
-                o.irManifest = val();
             else if(a == "--compiler-id")
                 o.compilerId = val();
             else if(a == "--rocke-version")
@@ -1031,7 +1592,7 @@ namespace
         if(jobs <= 0)
         {
             // the CPUs this process may run on (a batch job's cgroup can be far below the
-            // host's count), as make_rocke_pack.py does
+            // host's count), as the Python reference does
             int cpus = int(std::thread::hardware_concurrency());
 #if !defined(_WIN32)
             cpu_set_t set;
@@ -1052,9 +1613,6 @@ namespace
                     jobs);
         std::fflush(stdout);
 
-        // Families without a C++ builder yet: from the kernel manifest.
-        std::set<std::string> manifestFamilies = {"ew", "reduce", "gett_plan"};
-
         int status = 0;
         for(auto const& arch : o.arches)
         {
@@ -1069,30 +1627,16 @@ namespace
             std::vector<Descriptor> descs;
             try
             {
-                if(o.irManifest.empty())
-                {
-                    throw std::runtime_error("families ew, reduce and gett_plan need --ir-manifest "
-                                             "(their builders have no C++ twin yet)");
-                }
-                // make_rocke_pack.py's descriptor order: ew / reduce, gemm, gett_plan, gett64
-                std::vector<Descriptor> man;
-                manifestDescriptors(ctx, o.irManifest, manifestFamilies, man);
-                for(auto& m : man)
-                {
-                    if(m.family != "gett_plan")
-                    {
-                        descs.push_back(std::move(m));
-                    }
-                }
+                // the Python reference's descriptor order
+                ewReduceDescriptors(ctx, descs);
+                ewtDescriptors(ctx, descs);
+                ewvDescriptors(ctx, descs);
                 gemmDescriptors(ctx, descs);
-                for(auto& m : man)
-                {
-                    if(m.family == "gett_plan")
-                    {
-                        descs.push_back(std::move(m));
-                    }
-                }
+                gettPlanDescriptors(ctx, descs);
+                dgettDescriptors(ctx, descs);
+                rgettDescriptors(ctx, descs);
                 gett64Descriptors(ctx, descs);
+                gett64Descriptors(ctx, descs, true);
             }
             catch(std::exception const& e)
             {

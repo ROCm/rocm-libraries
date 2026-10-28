@@ -8,9 +8,9 @@ channel as ``_fused_epilogue``). Without it the GEMM emission is unchanged:
 :func:`build_universal_gemm` only reads the attribute and every hook below is
 skipped, so default kernels stay byte-identical (no TraitSpec field). The C++
 engine mirrors it (``cpp/instances/common/gemm_prologue.cpp``,
-``rocke_gemm_universal_spec_t._prologue``) except the operand ops
-(``unary_a`` / ``unary_b``), ``stage="vgpr"`` and ``epi``, which it refuses;
-the ``gemm_cf32`` parity family keeps the two engines byte-identical.
+``rocke_gemm_universal_spec_t._prologue``) except ``stage="vgpr"`` and ``epi``,
+which it refuses; the ``gemm_cf32`` and ``gemm_prologue_unary`` parity families
+keep the two engines byte-identical.
 
 What a prologue does, per operand fragment, between the LDS ``ds_read`` and the
 MFMA:

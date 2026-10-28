@@ -79,9 +79,15 @@ const digits_t& c_l_of(const rocke_gett_f64_problem_t& p)
     return p.has_c ? p.c_l : p.d_l;
 }
 
+/* Python GettF64Problem.word_bytes: bytes of one real word (f64 or f32). */
+int word_bytes(const rocke_gett_f64_problem_t& p)
+{
+    return p.f32 ? 4 : 8;
+}
+
 int elem_bytes(const rocke_gett_f64_problem_t& p)
 {
-    return p.complex_ ? 16 : 8;
+    return word_bytes(p) * (p.complex_ ? 2 : 1);
 }
 
 /* Python f64_atom. */
@@ -94,6 +100,36 @@ const rocke_mma_op_t* f64_atom(const char* arch)
         return nullptr;
     return rocke_mma_catalog_op_for_shape(
         &target->mma, "mma", "fp64", "fp64", "fp64", 16, 16, 4, NULL);
+}
+
+/* Python f32_atom. */
+const rocke_mma_op_t* f32_atom(const char* arch)
+{
+    if(arch == nullptr)
+        return nullptr;
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
+    if(target == nullptr)
+        return nullptr;
+    return rocke_mma_catalog_op_for_shape(
+        &target->mma, "mma", "fp32", "fp32", "fp32", 16, 16, 4, NULL);
+}
+
+/* Python gett_atom(arch, dtype). */
+const rocke_mma_op_t* gett_atom(const char* arch, bool f32)
+{
+    return f32 ? f32_atom(arch) : f64_atom(arch);
+}
+
+/* Python _wty: the IR type of one real word. */
+const rocke_type_t* word_type(const rocke_gett_f64_problem_t& p)
+{
+    return p.f32 ? rocke_f32() : rocke_f64();
+}
+
+/* Python _wconst: a constant word of the problem's data type. */
+rocke_value_t* wconst(rocke_ir_builder_t* b, const rocke_gett_f64_problem_t& p, double x)
+{
+    return p.f32 ? rocke_b_const_f32(b, x) : rocke_b_const_f64(b, x);
 }
 
 /* Python k_split: (local, tiled) or false. */
@@ -178,10 +214,17 @@ bool runtime_template(const rocke_gett_f64_problem_t& p, rocke_gett_f64_problem_
         if(d->n != 1)
             return false;
     auto unit = [](const digits_t& d) { return d.stride[0] == 1 && d.extent[0] > 1; };
-    /* 3 for an odd run an operand loads along (no two-element vectors), else 2. */
-    int64_t em = unit(p.a_m) && p.M % 2 ? 3 : 2;
-    int64_t en = unit(p.b_n) && p.N % 2 ? 3 : 2;
-    int64_t ek = (unit(p.a_k) || unit(p.b_k)) && p.K % 2 ? 3 : 2;
+    /* 3 for an odd run an operand loads along (no two-element vectors), else 2;
+     * real f32 data: 4 for such a run that is a multiple of 4 (four-element loads). */
+    bool quad = p.f32 && !p.complex_;
+    auto parity = [quad](bool loaded, int64_t extent) -> int64_t {
+        if(quad && loaded && extent % 4 == 0)
+            return 4;
+        return loaded && extent % 2 ? 3 : 2;
+    };
+    int64_t em = parity(unit(p.a_m), p.M);
+    int64_t en = parity(unit(p.b_n), p.N);
+    int64_t ek = parity(unit(p.a_k) || unit(p.b_k), p.K);
     auto dig = [&](const digits_t& d, int64_t ext) { return one_digit(ext, unit(d) ? 1 : 2); };
     rocke_gett_f64_problem_t t = {};
     t.M = em;
@@ -204,6 +247,7 @@ bool runtime_template(const rocke_gett_f64_problem_t& p, rocke_gett_f64_problem_
     t.complex_ = p.complex_;
     t.conj_a = p.conj_a;
     t.conj_b = p.conj_b;
+    t.f32 = p.f32;
     *out = t;
     return true;
 }
@@ -217,7 +261,7 @@ bool problems_equal(const rocke_gett_f64_problem_t& x, const rocke_gett_f64_prob
            && digits_equal(x.d_n, y.d_n) && digits_equal(x.d_l, y.d_l)
            && digits_equal(c_m_of(x), c_m_of(y)) && digits_equal(c_n_of(x), c_n_of(y))
            && digits_equal(c_l_of(x), c_l_of(y)) && x.complex_ == y.complex_ && x.conj_a == y.conj_a
-           && x.conj_b == y.conj_b;
+           && x.conj_b == y.conj_b && x.f32 == y.f32;
 }
 
 int threads(const rocke_gett_f64_spec_t& s)
@@ -242,6 +286,16 @@ int resolved_pad(const rocke_gett_f64_spec_t& s)
     if(s.problem.complex_ || uses_swizzle(s))
         return 0;
     const int pads[] = {0, 16, 8, 24};
+    if(s.problem.f32)
+    {
+        /* four 64-byte K-row pieces of a ds_read_b32 wave on distinct bank groups */
+        for(int pad : pads)
+        {
+            if(((s.tile_m + pad) * 4) % 128 == 64 && ((s.tile_n + pad) * 4) % 128 == 64)
+                return pad;
+        }
+        return 16;
+    }
     for(int pad : pads)
     {
         if(((s.tile_m + pad) * 8) % 256 == 128 && ((s.tile_n + pad) * 8) % 256 == 128)
@@ -290,6 +344,14 @@ load_plan_t load_plan(const rocke_gett_f64_spec_t& spec,
     else
     {
         int run_s = contiguous(side_digits), run_k = contiguous(k_digits);
+        if(p.f32)
+        {
+            /* 16-byte loads: four f32 */
+            if(run_s && run_s % 4 == 0)
+                cands.push_back({false, 4});
+            if(run_k && run_k % 4 == 0 && spec.tile_k % 4 == 0)
+                cands.push_back({true, 4});
+        }
         if(run_s && run_s % 2 == 0)
             cands.push_back({false, 2});
         if(run_k && run_k % 2 == 0 && spec.tile_k % 2 == 0)
@@ -379,11 +441,17 @@ bool valid(const rocke_gett_f64_spec_t& spec_in, const char* arch, std::string* 
         spec.problem = tp;
     }
     const rocke_gett_f64_problem_t& p = spec.problem;
-    const rocke_mma_op_t* atom = f64_atom(arch);
+    const rocke_mma_op_t* atom = gett_atom(arch, p.f32);
     if(atom == nullptr)
     {
-        *why = std::string("'") + (arch ? arch : "")
-               + "' has no 16x16x4 f64 MMA atom in its catalog";
+        *why = std::string("'") + (arch ? arch : "") + "' has no 16x16x4 " + (p.f32 ? "f32" : "f64")
+               + " MMA atom in its catalog";
+        return false;
+    }
+    if(p.f32 && spec.split_k > 1)
+    {
+        /* (the other levers Python refuses for f32 data are Python-engine only) */
+        *why = "split_k is not built for f32 data";
         return false;
     }
     if(!spec.runtime_sizes && p.L > ROCKE_GETT_F64_MAX_GRID_Y)
@@ -482,9 +550,10 @@ bool valid(const rocke_gett_f64_spec_t& spec_in, const char* arch, std::string* 
     int acc_words = (spec.tile_m / spec.warps_m / atom->m) * (spec.tile_n / spec.warps_n / atom->n)
                     * atom->c_frag_len * (p.complex_ ? spec.complex_accs : 1)
                     * (spec.k_block ? 2 : 1);
-    if(acc_words * 2 > 384)
+    int dw = word_bytes(p) / 4; /* registers per accumulator word */
+    if(acc_words * dw > 384)
     {
-        *why = "accumulator needs " + std::to_string(acc_words * 2)
+        *why = "accumulator needs " + std::to_string(acc_words * dw)
                + " registers per lane (max 384)";
         return false;
     }
@@ -511,7 +580,7 @@ bool valid(const rocke_gett_f64_spec_t& spec_in, const char* arch, std::string* 
     }
     int words = p.complex_ ? 2 : 1;
     int lds = spec.lds_stages * spec.tile_k
-              * ((spec.tile_m + spec.tile_n) * words + 2 * resolved_pad(spec)) * 8;
+              * ((spec.tile_m + spec.tile_n) * words + 2 * resolved_pad(spec)) * word_bytes(p);
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
     int cap = target ? target->lds_capacity_bytes : 0;
     if(lds > cap)
@@ -895,6 +964,8 @@ struct operand_t
     const rocke_gett_f64_spec_t* spec;
     bool cx;
     int es;
+    const rocke_type_t* wty; /* the word type (f64 or f32) */
+    int dw; /* dwords per word */
     V* base_ptr;
     bool rt;
     int64_t span;
@@ -931,6 +1002,8 @@ struct operand_t
         const rocke_gett_f64_problem_t& p = sp->problem;
         cx = p.complex_;
         es = elem_bytes(p);
+        wty = word_type(p);
+        dw = word_bytes(p) / 4;
         base_ptr = bptr;
         k_digits = kd.d;
         side_tile = st;
@@ -1076,7 +1149,7 @@ struct operand_t
         }
         std::vector<V*> vals;
         int words = plan.vec * (cx ? 2 : 1);
-        const rocke_type_t* vty = rocke_vector_type(b, rocke_f64(), words);
+        const rocke_type_t* vty = rocke_vector_type(b, wty, words);
         for(const coord_t& co : coords)
         {
             V* kg = rocke_b_add(b, k0, co.k_loc);
@@ -1100,7 +1173,7 @@ struct operand_t
             V* cmask = ci(b, k_mask_offset);
             voff = rocke_b_select(b, ok, voff, cmask);
             V* c0s = ci(b, 0);
-            V* raw = rocke_b_buffer_load_vN(b, rs, voff, c0s, rocke_i32(), 2 * words);
+            V* raw = rocke_b_buffer_load_vN(b, rs, voff, c0s, rocke_i32(), dw * words);
             vals.push_back(rocke_b_vec_bitcast(b, raw, vty));
         }
         return vals;
@@ -1245,21 +1318,21 @@ void raster_rt(B* b, const rocke_gett_f64_spec_t& spec, V* bid, const geo_t& geo
     *tn = rocke_b_div(b, r, size);
 }
 
-/* Python _frag: one f64, or the (re, im) pair of a complex element. */
-void frag(B* b, V* lds, V* row, V* col, bool cx, V** re, V** im)
+/* Python _frag: one word, or the (re, im) pair of a complex element. */
+void frag(B* b, V* lds, V* row, V* col, bool cx, const rocke_type_t* wty, V** re, V** im)
 {
     if(cx)
     {
         V* c2 = ci(b, 2);
         V* col2 = rocke_b_mul(b, col, c2);
         V* idx[2] = {row, col2};
-        V* v = rocke_b_smem_load_vN(b, lds, idx, 2, rocke_f64(), 2);
+        V* v = rocke_b_smem_load_vN(b, lds, idx, 2, wty, 2);
         *re = rocke_b_vec_extract(b, v, 0);
         *im = rocke_b_vec_extract(b, v, 1);
         return;
     }
     V* idx[2] = {row, col};
-    V* v = rocke_b_smem_load_vN(b, lds, idx, 2, rocke_f64(), 1);
+    V* v = rocke_b_smem_load_vN(b, lds, idx, 2, wty, 1);
     *re = rocke_b_vec_extract(b, v, 0);
     *im = nullptr;
 }
@@ -1367,7 +1440,7 @@ struct loop_ctx
             for(V* col : fa.cols[ks])
             {
                 V *re, *im;
-                frag(b, a_lds, row_a, col, cx, &re, &im);
+                frag(b, a_lds, row_a, col, cx, word_type(s.problem), &re, &im);
                 far.push_back(re);
                 fai.push_back(im);
             }
@@ -1381,7 +1454,7 @@ struct loop_ctx
             for(V* col : fb.cols[ks])
             {
                 V *re, *im;
-                frag(b, b_lds, row_b, col, cx, &re, &im);
+                frag(b, b_lds, row_b, col, cx, word_type(s.problem), &re, &im);
                 fbr.push_back(re);
                 fbi.push_back(im);
             }
@@ -1691,13 +1764,17 @@ struct scalars_t
     V* bi_zero;
 };
 
-scalars_t make_scalars(B* b, const std::vector<V*>& alpha, const std::vector<V*>& beta, bool cx)
+scalars_t make_scalars(B* b,
+                       const std::vector<V*>& alpha,
+                       const std::vector<V*>& beta,
+                       bool cx,
+                       const rocke_gett_f64_problem_t* p = nullptr)
 {
     scalars_t sc = {};
     sc.cx = cx;
     sc.alpha = alpha;
     sc.beta = beta;
-    sc.zero = rocke_b_const_f64(b, 0.0);
+    sc.zero = p == nullptr ? rocke_b_const_f64(b, 0.0) : wconst(b, *p, 0.0);
     if(cx)
     {
         V* ar_z = rocke_b_fcmp(b, "oeq", alpha[0], sc.zero);
@@ -1787,6 +1864,8 @@ void epilogue(B* b,
     const rocke_gett_f64_problem_t& p = spec.problem;
     bool cx = p.complex_;
     int es = elem_bytes(p);
+    const rocke_type_t* wty = word_type(p);
+    int dw = word_bytes(p) / 4;
     int wave_m = spec.tile_m / spec.warps_m, wave_n = spec.tile_n / spec.warps_n;
     int am_n = wave_m / atom->m, an_n = wave_n / atom->n;
     /* Output coordinates of each accumulator slot from the catalog lane map. */
@@ -1834,21 +1913,21 @@ void epilogue(B* b,
     V* use_c = nullptr;
     if(rc != nullptr)
     {
-        V* z = rocke_b_const_f64(b, 0.0);
+        V* z = wconst(b, p, 0.0);
         V* eq = rocke_b_fcmp(b, "oeq", beta[0], z);
         use_c = rocke_b_lnot(b, eq);
         if(cx)
         {
-            V* z2 = rocke_b_const_f64(b, 0.0);
+            V* z2 = wconst(b, p, 0.0);
             V* eq2 = rocke_b_fcmp(b, "oeq", beta[1], z2);
             V* ne2 = rocke_b_lnot(b, eq2);
             use_c = rocke_b_lor(b, use_c, ne2);
         }
     }
-    scalars_t sc = make_scalars(b, alpha, beta, cx);
+    scalars_t sc = make_scalars(b, alpha, beta, cx, &p);
     int words = cx ? 2 : 1;
-    const rocke_type_t* cvty = rocke_vector_type(b, rocke_f64(), words);
-    const rocke_type_t* svty = rocke_vector_type(b, rocke_f32(), 2 * words);
+    const rocke_type_t* cvty = rocke_vector_type(b, wty, words);
+    const rocke_type_t* svty = rocke_vector_type(b, rocke_f32(), dw * words);
     /* Per row group of atoms: every C load first, then the combines and the D
      * stores. C may be D itself (in place), so the compiler may not move a C
      * load above an earlier D store; issuing the loads of a group first keeps
@@ -1896,7 +1975,7 @@ void epilogue(B* b,
                     V* cmask = ci(b, k_mask_offset);
                     coff = rocke_b_select(b, okc, coff, cmask);
                     V* c0s = ci(b, 0);
-                    V* raw = rocke_b_buffer_load_vN(b, rc, coff, c0s, rocke_i32(), 2 * words);
+                    V* raw = rocke_b_buffer_load_vN(b, rc, coff, c0s, rocke_i32(), dw * words);
                     cv = rocke_b_vec_bitcast(b, raw, cvty);
                 }
                 elems.push_back({slot, an, ok, dm, col.dn, cv});
@@ -1942,10 +2021,11 @@ void epilogue(B* b,
             V* doff = rocke_b_mul(b, ds, ces2);
             V* cmask2 = ci(b, k_mask_offset);
             doff = rocke_b_select(b, e.ok, doff, cmask2);
-            V* packed = rocke_b_vec_pack(b, out, words, rocke_f64());
-            V* vec = rocke_b_vec_bitcast(b, packed, svty);
+            V* packed = rocke_b_vec_pack(b, out, words, wty);
+            /* f32 words are stored as they are; f64 words as pairs of dwords */
+            V* vec = p.f32 ? packed : rocke_b_vec_bitcast(b, packed, svty);
             V* c0s2 = ci(b, 0);
-            rocke_b_buffer_store_vN_f32(b, rd, doff, c0s2, vec, 2 * words);
+            rocke_b_buffer_store_vN_f32(b, rd, doff, c0s2, vec, dw * words);
         }
     }
 }
@@ -2199,6 +2279,11 @@ bool rocke_gett_f64_arch_supported(const char* arch)
     return f64_atom(arch) != nullptr;
 }
 
+bool rocke_gett_f32_arch_supported(const char* arch)
+{
+    return f32_atom(arch) != nullptr;
+}
+
 int64_t
     rocke_gett_f64_addr_span_bytes(const rocke_gett_f64_problem_t* problem, char which, int tile_k)
 {
@@ -2297,7 +2382,10 @@ rocke_status_t
         return ROCKE_ERR_VALUE;
     const rocke_gett_f64_problem_t& p = spec->problem;
     std::string parts[18];
-    parts[0] = p.complex_ ? "c128" : "f64";
+    if(p.f32)
+        parts[0] = p.complex_ ? "c64" : "f32";
+    else
+        parts[0] = p.complex_ ? "c128" : "f64";
     std::string h;
     if(spec->runtime_sizes)
     {
@@ -2402,7 +2490,8 @@ rocke_kernel_def_t*
         bool cx = p.complex_;
         int es = elem_bytes(p);
         int wpe = cx ? 2 : 1;
-        const rocke_mma_op_t* atom = f64_atom(arch);
+        const rocke_type_t* wty = word_type(p);
+        const rocke_mma_op_t* atom = gett_atom(arch, p.f32);
         int nt = threads(s);
         int wave_m = s.tile_m / s.warps_m, wave_n = s.tile_n / s.warps_n;
         int am_n = wave_m / atom->m, an_n = wave_n / atom->n;
@@ -2412,24 +2501,26 @@ rocke_kernel_def_t*
         rocke_attr_set_int(b, &k->attrs, "max_workgroup_size", (int64_t)nt);
         if(s.waves_per_eu)
             rocke_attr_set_int(b, &k->attrs, "waves_per_eu", (int64_t)s.waves_per_eu);
-        const rocke_type_t* gptr = rocke_ptr_type(b, rocke_f64(), "global");
+        const rocke_type_t* gptr = rocke_ptr_type(b, wty, "global");
         /* A and B never overlap D. C may be D itself (in-place update), so
          * neither carries noalias. 8-byte alignment: an f64 subtensor view need
-         * not be 16-byte aligned (the buffer loads only need 4). */
+         * not be 16-byte aligned (the buffer loads only need 4). f32 data: 4-byte
+         * alignment. */
+        int al = word_bytes(p);
         rocke_param_opts_t ab = {};
         ab.noalias = true;
         ab.noalias_set = true;
         ab.readonly = true;
         ab.readonly_set = true;
-        ab.align = 8;
+        ab.align = al;
         ab.align_set = true;
         rocke_param_opts_t co = {};
         co.readonly = true;
         co.readonly_set = true;
-        co.align = 8;
+        co.align = al;
         co.align_set = true;
         rocke_param_opts_t dopt = {};
-        dopt.align = 8;
+        dopt.align = al;
         dopt.align_set = true;
         bool split = s.split_k > 1;
         V* A = rocke_b_param(b, "A", gptr, &ab);
@@ -2442,7 +2533,7 @@ rocke_kernel_def_t*
             rocke_param_opts_t wo = {};
             wo.noalias = true;
             wo.noalias_set = true;
-            wo.align = 8;
+            wo.align = al;
             wo.align_set = true;
             W = rocke_b_param(b, "W", gptr, &wo);
         }
@@ -2450,14 +2541,14 @@ rocke_kernel_def_t*
         {
             C = s.bilinear ? rocke_b_param(b, "C", gptr, &co) : nullptr;
             D = rocke_b_param(b, "D", gptr, &dopt);
-            alpha.push_back(rocke_b_param(b, cx ? "alpha_re" : "alpha", rocke_f64(), NULL));
+            alpha.push_back(rocke_b_param(b, cx ? "alpha_re" : "alpha", wty, NULL));
             if(cx)
-                alpha.push_back(rocke_b_param(b, "alpha_im", rocke_f64(), NULL));
+                alpha.push_back(rocke_b_param(b, "alpha_im", wty, NULL));
             if(s.bilinear)
             {
-                beta.push_back(rocke_b_param(b, cx ? "beta_re" : "beta", rocke_f64(), NULL));
+                beta.push_back(rocke_b_param(b, cx ? "beta_re" : "beta", wty, NULL));
                 if(cx)
-                    beta.push_back(rocke_b_param(b, "beta_im", rocke_f64(), NULL));
+                    beta.push_back(rocke_b_param(b, "beta_im", wty, NULL));
             }
         }
         /* Size / stride arguments (runtime_sizes), by name. */
@@ -2586,8 +2677,8 @@ rocke_kernel_def_t*
         int ns = s.lds_stages;
         int a_shape[2] = {ns * s.tile_k, s.tile_m * wpe + pad};
         int b_shape[2] = {ns * s.tile_k, s.tile_n * wpe + pad};
-        V* a_lds = rocke_b_smem_alloc(b, rocke_f64(), a_shape, 2, "a_lds");
-        V* b_lds = rocke_b_smem_alloc(b, rocke_f64(), b_shape, 2, "b_lds");
+        V* a_lds = rocke_b_smem_alloc(b, wty, a_shape, 2, "a_lds");
+        V* b_lds = rocke_b_smem_alloc(b, wty, b_shape, 2, "b_lds");
         operand_t opa, opb;
         V* aptr = at_batch(A, p.a_l, geo.batch_a);
         opa.init(b, &s, 'A', aptr, geo.a_m, geo.a_k, s.tile_m, m0, geo.M, a_lds, geo);
@@ -2690,9 +2781,9 @@ rocke_kernel_def_t*
             opb.nk = nk;
         }
         int n_acc = am_n * an_n * (cx ? s.complex_accs : 1);
-        V* z = rocke_b_const_f64(b, 0.0);
+        V* z = wconst(b, p, 0.0);
         std::vector<V*> zs(atom->c_frag_len, z);
-        V* zero = rocke_b_vec_pack(b, zs.data(), atom->c_frag_len, rocke_f64());
+        V* zero = rocke_b_vec_pack(b, zs.data(), atom->c_frag_len, wty);
 
         /* split_k: this CTA's K tiles are [lo, hi), lo = z*nk/S, hi = (z+1)*nk/S. */
         V* k_lo = nullptr;

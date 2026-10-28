@@ -226,6 +226,17 @@ typedef struct rocke_gemm_trait_spec
      * non-persistent, RCR, not batched) 64-bit tile origins: operands past the
      * i32 element offsets / buffer range and C past 2^31 elements. */
     bool wide_addr;
+    /* ---- MN-contiguous operands (DataSpec.layout RRR / CRR / CCR) on the DTL
+     * ring (gemm_mn_operand; see rocke/instance_gemm_mn_operand.h) ---- */
+    /* pad bytes after every 1 KiB LDS block of an MN-contiguous operand:
+     * 0 / 16 / 32 / 64. mn_pad_set == false reads as the Python default 32. */
+    bool mn_pad_set;
+    int mn_pad;
+    /* MN chunk width of the LDS block layout (0: default_mn_chunk). */
+    int mn_chunk;
+    /* the last tile along an MN-contiguous operand's dimension ends at the
+     * extent (origin ld - tile), so no DMA row runs past the operand. */
+    bool mn_ld_any;
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */
@@ -261,6 +272,11 @@ typedef struct rocke_gemm_universal_spec
      * gemm_prologue.attach_prologue): the fused operand prologue, or NULL (the
      * default: every kernel unchanged). See rocke/instance_gemm_prologue.h. */
     const struct rocke_gemm_prologue* _prologue;
+    /* object.__setattr__(spec, "_gett", hooks) side channel (Python
+     * rocke.instances.common.tensor.gett.GettHooks): the native tensor
+     * contraction hooks, or NULL (the default: every kernel unchanged). See
+     * rocke/instance_tensor_gett.h. */
+    const struct rocke_gett_hooks* _gett;
 } rocke_gemm_universal_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The

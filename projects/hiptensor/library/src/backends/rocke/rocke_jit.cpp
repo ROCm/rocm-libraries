@@ -48,9 +48,10 @@
 #endif
 
 #include "rocke/abi.h"
+#include "rocke/instance_hiptensor_aot.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
-#include "rocke/recipe_vm.h"
+#include "rocke/rocke_build_id.h"
 
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
@@ -59,6 +60,7 @@
 #include "rocke_backend.hpp"
 #include "rocke_codeobject.hpp"
 #include "rocke_comgr.hpp"
+#include "rocke_ew_rows.hpp"
 #include "rocke_jit.hpp"
 
 namespace hiptensor
@@ -69,17 +71,20 @@ namespace hiptensor
         {
             using Digest = std::array<uint8_t, 32>;
 
-            // Recipe file, written by pack/make_rocke_pack.py.
-            constexpr char     kRecipesMagic[8]    = {'H', 'T', 'J', 'I', 'T', 'R', 'C', '\0'};
-            constexpr uint32_t kRecipesReader      = 1u;
-            constexpr char     kRecipesFileName[]  = "rocke.recipes";
-            constexpr char     kRecipesRouteSha[]  = "jit.recipes.sha256";
-            constexpr char     kEwJitFamily[]      = "hiptensor-jit-ew/v1";
-            constexpr char     kSpecKeyPrefix[]    = "hiptensor-rocke-jit/v1";
-            constexpr char     kCacheMagic[8]      = {'H', 'T', 'K', 'C', 'A', 'C', 'H', '\0'};
-            constexpr uint32_t kCacheFormat        = 1u;
-            constexpr uint32_t kCacheReader        = 1u;
-            constexpr uint8_t  kGeometryRecipe     = 0;
+            // The kernel family of the specialized kernels (rocKE's jit_ew.EW_JIT_ABI) and the
+            // pack kernels they replace.
+            constexpr char kEwJitFamily[] = ROCKE_HTAOT_EW_JIT_ABI;
+            constexpr char kEwAbi[]       = ROCKE_HTAOT_EW_ABI;
+            constexpr char kEwvAbi[]      = "hiptensor-aot-ewv/v1";
+            // v2: the kernels come from rocKE's C++ builder, named by the engine's build id (v1
+            // named a recipe of a recipe file)
+            constexpr char     kSpecKeyPrefix[] = "hiptensor-rocke-jit/v2";
+            constexpr char     kCacheMagic[8]   = {'H', 'T', 'K', 'C', 'A', 'C', 'H', '\0'};
+            constexpr uint32_t kCacheFormat     = 1u;
+            constexpr uint32_t kCacheReader     = 1u;
+            // The geometry kind of an entry: a kernel class (its key) specialized to constant
+            // values (the only kind of format 1)
+            constexpr uint8_t  kGeometryClass      = 0;
             constexpr uint8_t  kArgPointer         = 0;
             constexpr uint8_t  kArgValue           = 1;
             constexpr uint64_t kMaxCacheEntryBytes = uint64_t(1) << 30;
@@ -238,161 +243,6 @@ namespace hiptensor
                 }
             };
 
-            // ------------------------------------------------------------------ recipes
-
-            struct Recipe
-            {
-                std::string              key;
-                std::string              family;
-                std::vector<std::string> axes;
-                uint64_t                 offset = 0;
-                uint64_t                 size   = 0;
-                Digest                   sha{};
-                mutable bool             verified = false;
-            };
-
-            // The recipes of rocke.recipes, read once per file.
-            class RecipeStore
-            {
-            public:
-                static std::unique_ptr<RecipeStore> load(std::string const& path,
-                                                         std::string const& expectedSha,
-                                                         std::string&       reason)
-                {
-                    std::ifstream file(path, std::ios::binary);
-                    if(!file)
-                    {
-                        reason = "no recipe file " + path;
-                        return nullptr;
-                    }
-                    auto store   = std::make_unique<RecipeStore>();
-                    store->mPath = path;
-                    store->mBytes.assign(std::istreambuf_iterator<char>(file),
-                                         std::istreambuf_iterator<char>());
-                    auto const& bytes = store->mBytes;
-                    if(hex(sha256(bytes.data(), bytes.size())) != expectedSha)
-                    {
-                        reason = "the recipe file " + path + " does not belong to the kernel pack";
-                        return nullptr;
-                    }
-                    Reader r{bytes.data(), bytes.size()};
-                    if(!r.need(8) || std::memcmp(bytes.data(), kRecipesMagic, 8) != 0)
-                    {
-                        reason = "the recipe file " + path + " has no recipe file header";
-                        return nullptr;
-                    }
-                    r.at = 8;
-                    r.u32(); // format version
-                    uint32_t const minReader = r.u32();
-                    uint32_t const count     = r.u32();
-                    uint32_t const recipeAbi = r.u32();
-                    uint64_t const table     = r.u64();
-                    uint64_t const data      = r.u64();
-                    if(!r.ok || minReader > kRecipesReader || recipeAbi > ROCKE_RECIPE_ABI
-                       || count > kMaxListLength || table > bytes.size() || data > bytes.size())
-                    {
-                        reason = "the recipe file " + path + " needs a newer reader (recipe ABI "
-                                 + std::to_string(recipeAbi) + ")";
-                        return nullptr;
-                    }
-                    r.at = size_t(table);
-                    for(uint32_t i = 0; i < count && r.ok; i++)
-                    {
-                        Recipe rec;
-                        rec.key    = r.str();
-                        rec.family = r.str();
-                        rec.axes   = r.strs();
-                        rec.offset = r.u64();
-                        rec.size   = r.u64();
-                        r.digest(rec.sha);
-                        if(!r.ok || rec.offset > bytes.size() - data
-                           || rec.size > bytes.size() - data - rec.offset)
-                        {
-                            r.ok = false;
-                            break;
-                        }
-                        rec.offset += data;
-                        store->mRecipes.emplace(rec.key, std::move(rec));
-                    }
-                    if(!r.ok)
-                    {
-                        reason = "the recipe file " + path + " is damaged";
-                        return nullptr;
-                    }
-                    return store;
-                }
-
-                Recipe const* find(std::string const& key) const
-                {
-                    auto it = mRecipes.find(key);
-                    return it == mRecipes.end() ? nullptr : &it->second;
-                }
-
-                // The recipe's CBOR bytes (SHA-256 checked on first use).
-                bool blob(Recipe const& rec, uint8_t const*& data, size_t& size) const
-                {
-                    data = mBytes.data() + rec.offset;
-                    size = size_t(rec.size);
-                    std::scoped_lock lock(mMutex);
-                    if(!rec.verified)
-                    {
-                        if(sha256(data, size) != rec.sha)
-                        {
-                            return false;
-                        }
-                        rec.verified = true;
-                    }
-                    return true;
-                }
-
-            private:
-                std::string                   mPath;
-                std::vector<uint8_t>          mBytes;
-                std::map<std::string, Recipe> mRecipes;
-                mutable std::mutex            mMutex;
-            };
-
-            // The recipe file of a pack: next to the target directories of the pack root.
-            RecipeStore const* recipesFor(Pack const& pack, std::string& reason)
-            {
-                static std::mutex                                          mutex;
-                static std::map<std::string, std::unique_ptr<RecipeStore>> stores;
-                static std::map<std::string, std::string>                  reasons;
-                auto const expected = pack.route(kRecipesRouteSha);
-                if(expected.empty())
-                {
-                    reason = "the kernel pack has no JIT recipes";
-                    return nullptr;
-                }
-                std::string dir = pack.path();
-                for(int up = 0; up < 2; up++)
-                {
-                    auto slash = dir.find_last_of("/\\");
-                    dir        = slash == std::string::npos ? "." : dir.substr(0, slash);
-                }
-                std::string const path = dir + "/" + kRecipesFileName;
-                std::scoped_lock  lock(mutex);
-                if(auto it = stores.find(path); it != stores.end())
-                {
-                    return it->second.get();
-                }
-                if(auto it = reasons.find(path); it != reasons.end())
-                {
-                    reason = it->second;
-                    return nullptr;
-                }
-                auto store = RecipeStore::load(path, expected, reason);
-                if(store == nullptr)
-                {
-                    reasons[path] = reason;
-                    logJit("hiptensorCreatePlan", "rocKE JIT: " + reason);
-                    return nullptr;
-                }
-                auto const* out = store.get();
-                stores[path]    = std::move(store);
-                return out;
-            }
-
             // ------------------------------------------------------------------ kernel cache
 
             struct DeviceClass
@@ -432,7 +282,7 @@ namespace hiptensor
                 Digest                   llvmSha{};
                 std::vector<std::string> specKeys;
                 std::string              family;
-                std::string              recipeKey;
+                std::string              classKey;
                 std::vector<uint8_t>     code;
                 Digest                   codeSha{};
                 PackKernel               kernel;
@@ -853,7 +703,7 @@ namespace hiptensor
                       + std::to_string(HIPTENSOR_MINOR_VERSION) + "."
                       + std::to_string(HIPTENSOR_PATCH_VERSION));
                 w.u32(ROCKE_ABI_VERSION);
-                w.u32(ROCKE_RECIPE_ABI);
+                w.u32(0); // recipe ABI: none (the kernels come from rocKE's C++ builders)
                 w.str(ci.id);
                 auto digest = sha256(w.b.data(), w.b.size());
                 w.raw(digest.data(), digest.size());
@@ -887,8 +737,8 @@ namespace hiptensor
                         w.strs({e->kernel.name});
                         writeLayout(w, e->kernel);
                         w.str(e->family);
-                        w.u8(kGeometryRecipe);
-                        w.str(e->recipeKey);
+                        w.u8(kGeometryClass);
+                        w.str(e->classKey);
                         w.u32(0); // dynamic LDS
                         w.u64(e->code.size());
                         w.raw(e->codeSha.data(), 32);
@@ -952,7 +802,7 @@ namespace hiptensor
                 std::string    backend  = r.str();
                 r.str(); // hipTensor version
                 r.u32(); // rocKE ABI
-                r.u32(); // recipe ABI
+                r.u32(); // recipe ABI (written by earlier versions)
                 std::string  writerCompiler = r.str();
                 size_t const headerEnd      = r.at;
                 Digest       headerSha{};
@@ -1026,11 +876,11 @@ namespace hiptensor
                     stored_layout.kernargSize = e.u32();
                     entry->family             = e.str();
                     uint8_t const geometry    = e.u8();
-                    entry->recipeKey          = e.str();
+                    entry->classKey           = e.str();
                     e.u32(); // dynamic LDS
                     uint64_t const coSize = e.u64();
                     e.digest(entry->codeSha);
-                    if(!e.ok || geometry != kGeometryRecipe || symbols.size() != 1
+                    if(!e.ok || geometry != kGeometryClass || symbols.size() != 1
                        || coSize != e.n - e.at)
                     {
                         skipped++;
@@ -1054,7 +904,7 @@ namespace hiptensor
                         continue;
                     }
                     entry->kernel.family  = kEwJitFamily;
-                    entry->kernel.specKey = entry->recipeKey;
+                    entry->kernel.specKey = entry->classKey;
                     entry->fromFile       = true;
                     stale += entry->compilerId != ci.id ? 1 : 0;
                     entry->dormant = entry->compilerId != ci.id && !acceptStale;
@@ -1138,27 +988,119 @@ namespace hiptensor
                 return "";
             }
 
-            // The JIT class of a generic elementwise launch: the recipe key and the vector width.
+            // The dtype names of rocKE's builders (static storage): nullptr for "" (an absent B or
+            // C); an unknown name sets `bad`.
+            char const* dtypeName(std::string const& dt, bool& bad)
+            {
+                for(char const* name : {"f16", "bf16", "f32", "f64"})
+                {
+                    if(dt == name)
+                    {
+                        return name;
+                    }
+                }
+                bad = bad || !dt.empty();
+                return nullptr;
+            }
+
+            // The row of a pack kernel of the generic elementwise kernel or of one of its vector
+            // classes (its attributes), checked by rocKE's builder.
+            bool rowOf(PackKernel const& k, rocke_htaot_ew_spec_t& s)
+            {
+                s             = rocke_htaot_ew_spec_default();
+                bool bad      = false;
+                s.arity       = static_cast<int>(k.attr("arity"));
+                s.a           = dtypeName(k.attrStr("a"), bad);
+                s.b           = dtypeName(k.attrStr("b"), bad);
+                s.c           = dtypeName(k.attrStr("c"), bad);
+                s.d           = dtypeName(k.attrStr("d"), bad);
+                s.cplx        = k.attr("cplx") == 1;
+                s.idx64       = k.attr("idx64") == 1;
+                s.math        = k.attr("math") == 1;
+                s.block       = static_cast<int>(k.attr("block"));
+                char why[160] = {0};
+                return !bad && rocke_htaot_ew_check(&s, why, sizeof(why));
+            }
+
+            // The rows the JIT specializes: the rows of the API's operations (rocke_ew_rows.hpp)
+            // with the default block size, the math rows with 32-bit offsets only. The rows of
+            // mixed-type contractions and the 64-bit-offset math rows keep their pack kernels.
+            bool jitRow(rocke_htaot_ew_spec_t const& s)
+            {
+                auto const name = [](char const* dt) { return dt != nullptr ? dt : ""; };
+                if((s.math && s.idx64) || s.block != rocke_htaot_ew_spec_default().block)
+                {
+                    return false;
+                }
+                if(s.cplx)
+                {
+                    return s.arity == 1 ? hasEwRow(kEwRowsC1, EwRow2{name(s.a), name(s.d)})
+                                        : s.arity == 2
+                                              && hasEwRow(kEwRowsC2,
+                                                          EwRow3{name(s.a), name(s.c), name(s.d)});
+                }
+                switch(s.arity)
+                {
+                case 1:
+                    return hasEwRow(kEwRows1, EwRow2{name(s.a), name(s.d)});
+                case 2:
+                    return hasEwRow(kEwRows2, EwRow3{name(s.a), name(s.c), name(s.d)});
+                case 3:
+                    return hasEwRow(kEwRows3, EwRow4{name(s.a), name(s.b), name(s.c), name(s.d)});
+                default:
+                    return false;
+                }
+            }
+
+            // A name written by one of rocKE's name functions.
+            template <typename Spec>
+            std::string builderName(rocke_status_t (*fn)(Spec const*, char*, size_t),
+                                    Spec const& spec)
+            {
+                char name[256] = {0};
+                return fn(&spec, name, sizeof(name)) == ROCKE_OK ? std::string(name)
+                                                                 : std::string();
+            }
+
+            // The JIT class of a generic elementwise launch: rocKE's kernel class (the pack
+            // kernel's row, the vector width, the inputs read with vector loads) and its key.
             struct EwClass
             {
-                std::string              key;
-                int                      vec = 1;
-                std::vector<std::string> tensors; // inputs in kernel order, then D
-                std::vector<bool>        vectorTensor;
-                std::vector<size_t>      bytes;
+                rocke_htaot_ew_jit_spec_t spec{};
+                std::string               key;
+                int                       vec = 1;
+                std::vector<std::string>  tensors; // inputs in kernel order, then D
+                std::vector<bool>         vectorTensor;
+                std::vector<size_t>       bytes;
             };
 
             // Decides the class of `step` (a launch of the pack's generic elementwise kernel, or of
             // one of its vector classes, family "ewv", whose arguments are the class geometry).
+            // The pack kernel must be the one rocKE's builder names for its row (a pack of
+            // another rocKE version keeps its kernels).
             bool classify(LaunchStep const& step, EwClass& out, std::string& reason)
             {
-                auto const& k     = *step.kernel;
-                int const   arity = static_cast<int>(k.attr("arity"));
-                bool const  cplx  = k.attr("cplx") == 1;
+                auto const&           k = *step.kernel;
+                rocke_htaot_ew_spec_t base{};
+                if(!rowOf(k, base))
+                {
+                    reason = "not a generic elementwise kernel";
+                    return false;
+                }
+                int const  arity = base.arity;
+                bool const cplx  = base.cplx;
+                out.spec.base    = base;
                 if(k.family == "ewv")
                 {
-                    std::string const aot = "hiptensor_aot_ewv";
-                    if(k.name.rfind(aot, 0) != 0 || arity < 1 || arity > 3)
+                    auto const unit = k.attrStr("unit");
+                    out.spec.vec    = static_cast<int>(k.attr("vec"));
+                    out.spec.n_unit = arity;
+                    for(int t = 0; t < arity && t < int(unit.size()); t++)
+                    {
+                        out.spec.unit[t] = unit[t] == 'u';
+                    }
+                    if(k.attrStr("abi") != kEwvAbi || int(unit.size()) != arity
+                       || builderName(rocke_htaot_ewv_kernel_name, out.spec) != k.name)
                     {
                         reason = "not a vector class of the elementwise kernel";
                         return false;
@@ -1171,17 +1113,17 @@ namespace hiptensor
                         std::string lower(1, char(std::tolower(t[0])));
                         out.bytes.push_back(elementBytes(k.attrStr(lower)));
                     }
-                    out.vec   = static_cast<int>(k.attr("vec"));
-                    auto unit = k.attrStr("unit");
+                    out.vec = out.spec.vec;
                     out.vectorTensor.assign(out.tensors.size(), true);
-                    for(size_t t = 0; t + 1 < out.tensors.size() && t < unit.size(); t++)
+                    for(size_t t = 0; t + 1 < out.tensors.size(); t++)
                     {
-                        out.vectorTensor[t] = unit[t] == 'u';
+                        out.vectorTensor[t] = out.spec.unit[t];
                     }
-                    out.key = "ew:hiptensor_jit_ew" + k.name.substr(aot.size());
+                    out.key = "ew:" + builderName(rocke_htaot_ew_jit_kernel_name, out.spec);
                     return true;
                 }
-                if(arity < 1 || arity > 3)
+                if(k.attrStr("abi") != kEwAbi
+                   || builderName(rocke_htaot_ew_kernel_name, base) != k.name)
                 {
                     reason = "not a generic elementwise kernel";
                     return false;
@@ -1194,14 +1136,7 @@ namespace hiptensor
                     std::string lower(1, char(std::tolower(t[0])));
                     out.bytes.push_back(elementBytes(k.attrStr(lower)) * (cplx ? 2 : 1));
                 }
-                std::string const prefix = "hiptensor_aot_ew";
-                if(k.name.rfind(prefix, 0) != 0)
-                {
-                    reason = "not a generic elementwise kernel";
-                    return false;
-                }
-                std::string const base = "hiptensor_jit_ew" + k.name.substr(prefix.size());
-                out.vec                = 1;
+                out.vec = 1;
                 out.vectorTensor.assign(out.tensors.size(), false);
                 if(!cplx)
                 {
@@ -1246,7 +1181,7 @@ namespace hiptensor
                     // 64-bit offset rows and the rows with the math operators have vector
                     // classes only with every input a vector (the math rows have no other
                     // class: their other launches keep the pack kernel)
-                    if(ok && (k.attr("idx64") == 1 || k.attr("math") == 1))
+                    if(ok && (base.idx64 || base.math))
                     {
                         ok = std::all_of(vector.begin(), vector.end(), [](bool v) { return v; });
                     }
@@ -1256,65 +1191,44 @@ namespace hiptensor
                         out.vectorTensor = vector;
                     }
                 }
-                std::string flags;
-                if(out.vec > 1)
+                out.spec.vec    = out.vec;
+                out.spec.n_unit = out.vec > 1 ? arity : 0;
+                for(int t = 0; out.vec > 1 && t < arity; t++)
                 {
-                    for(size_t t = 0; t + 1 < out.tensors.size(); t++)
-                    {
-                        flags += out.vectorTensor[t] ? 'u' : 'g';
-                    }
+                    out.spec.unit[t] = out.vectorTensor[t];
                 }
-                out.key = "ew:" + base + "_v" + std::to_string(out.vec)
-                          + (flags.empty() ? "" : "_" + flags);
+                out.key = "ew:" + builderName(rocke_htaot_ew_jit_kernel_name, out.spec);
                 return true;
             }
 
-            // Replays, lowers and compiles one recipe (no lock held). nullptr with `reason`.
-            std::unique_ptr<Entry> build(Recipe const&                                       recipe,
-                                         RecipeStore const&                                  store,
-                                         std::vector<std::pair<std::string, int64_t>> const& values,
-                                         std::string const&                                  arch,
-                                         std::string const& specKey,
-                                         std::string&       reason,
-                                         Digest&            id,
-                                         double&            frontMs,
-                                         double&            compileMs)
+            // Builds the kernel of class `cls` for the geometry `values` (in the order of the
+            // class's axes) with rocKE's C++ builder, lowers it for the linked compiler's flavor
+            // and compiles it (no lock held). nullptr with `reason`; nullptr without a reason when
+            // the kernel cache holds the kernel's identity already (the caller looks it up).
+            std::unique_ptr<Entry> build(EwClass const&              cls,
+                                         std::vector<int64_t> const& values,
+                                         std::string const&          arch,
+                                         std::string const&          specKey,
+                                         std::string&                reason,
+                                         Digest&                     id,
+                                         double&                     frontMs,
+                                         double&                     compileMs)
             {
-                using Clock         = std::chrono::steady_clock;
-                auto const&    ci   = compilerInfo();
-                uint8_t const* data = nullptr;
-                size_t         size = 0;
-                if(!store.blob(recipe, data, size))
+                using Clock            = std::chrono::steady_clock;
+                auto const&         ci = compilerInfo();
+                auto const          t0 = Clock::now();
+                rocke_ir_builder_t  builder{};
+                rocke_kernel_def_t* kernel = rocke_build_htaot_ew_jit(
+                    &builder, &cls.spec, values.data(), static_cast<int>(values.size()));
+                if(kernel == nullptr)
                 {
-                    reason = "recipe " + recipe.key + " is damaged";
+                    char const* error = rocke_ir_builder_error(&builder);
+                    reason = std::string("rocKE builder: ") + (error != nullptr ? error : "");
+                    rocke_ir_builder_free(&builder);
                     return nullptr;
                 }
-                auto const                           t0 = Clock::now();
-                std::vector<rocke_recipe_spec_int_t> ints;
-                for(auto const& [name, value] : values)
-                {
-                    ints.push_back({name.c_str(), static_cast<long>(value)});
-                }
-                rocke_ir_builder_t  builder;
-                rocke_kernel_def_t* kernel    = nullptr;
-                char                err[1024] = {0};
-                if(rocke_recipe_run_from_cbor(data,
-                                              size,
-                                              ints.data(),
-                                              static_cast<int>(ints.size()),
-                                              nullptr,
-                                              0,
-                                              &builder,
-                                              &kernel,
-                                              err,
-                                              sizeof(err))
-                       != ROCKE_OK
-                   || kernel == nullptr)
-                {
-                    reason = std::string("recipe VM: ") + err;
-                    return nullptr;
-                }
-                char*          text = nullptr;
+                char           err[1024] = {0};
+                char*          text      = nullptr;
                 rocke_status_t st
                     = rocke_lower_kernel_to_llvm_ex(kernel,
                                                     rocke_llvm_flavor_from_name(ci.flavor.c_str()),
@@ -1366,11 +1280,11 @@ namespace hiptensor
                 entry->compilerId     = ci.id;
                 entry->options        = opts;
                 entry->llvmSha        = llSha;
-                entry->family         = recipe.family;
-                entry->recipeKey      = recipe.key;
+                entry->family         = kEwJitFamily;
+                entry->classKey       = cls.key;
                 entry->codeSha        = sha256(entry->code.data(), entry->code.size());
-                entry->kernel.family  = recipe.family;
-                entry->kernel.specKey = recipe.key;
+                entry->kernel.family  = kEwJitFamily;
+                entry->kernel.specKey = cls.key;
                 return entry;
             }
 
@@ -1397,7 +1311,6 @@ namespace hiptensor
 
             // The specialized launch of `step`, or false (the launch keeps its pack kernel).
             bool specializeStep(LaunchStep&        step,
-                                RecipeStore const& store,
                                 std::string const& arch,
                                 DeviceClass const& dc,
                                 bool               promoteAll,
@@ -1424,15 +1337,18 @@ namespace hiptensor
                                  : "no input is read with vector loads (gathered or broadcast)";
                     return false;
                 }
-                auto const* recipe = store.find(cls.key);
-                if(recipe == nullptr || recipe->family != kEwJitFamily)
+                // the JIT's kernel classes: the rows of jitRow; a math row only with every input
+                // a vector
+                char why[160] = {0};
+                if(!jitRow(cls.spec.base) || (cls.spec.base.math && cls.vec == 1)
+                   || !rocke_htaot_ew_jit_check(&cls.spec, why, sizeof(why)))
                 {
-                    reason = "no recipe " + cls.key;
+                    reason = "no JIT class " + cls.key;
                     return false;
                 }
-                // the values of the recipe's axes: the launch's arguments, with the thread
-                // space of a vector class counted in vectors (a vector class launch counts in
-                // vectors already)
+                // the values of the class's axes: the launch's arguments, with the thread space
+                // of a vector class counted in vectors (a vector class launch counts in vectors
+                // already)
                 bool const classLaunch = step.kernel->family == "ewv";
                 int64_t    nIn = 0, e0 = 0;
                 if(!readArg(step, "n_in", nIn) || !readArg(step, "e0", e0))
@@ -1440,18 +1356,28 @@ namespace hiptensor
                     reason = "the launch has no thread space";
                     return false;
                 }
-                std::vector<std::pair<std::string, int64_t>> values;
-                std::string specKey = std::string(kSpecKeyPrefix) + "|" + arch + "|" + recipe->key
-                                      + "|" + hex(recipe->sha.data(), 8) + "|";
-                auto const vecMagic = magicU31(static_cast<uint32_t>(e0 / cls.vec));
-                for(auto const& axis : recipe->axes)
+                char      axes[ROCKE_HTAOT_EW_JIT_MAX_AXES][16];
+                int const nAxes = rocke_htaot_ew_jit_axes(
+                    &cls.spec, axes, nullptr, ROCKE_HTAOT_EW_JIT_MAX_AXES);
+                if(nAxes <= 0 || nAxes > ROCKE_HTAOT_EW_JIT_MAX_AXES)
                 {
-                    int64_t v = 0;
+                    reason = "no geometry of class " + cls.key;
+                    return false;
+                }
+                // the spec key: the class, the builder (rocKE's engine build) and the values
+                std::vector<int64_t> values;
+                std::string specKey = std::string(kSpecKeyPrefix) + "|" + arch + "|" + cls.key + "|"
+                                      + rocke_build_id() + "|";
+                auto const vecMagic = magicU31(static_cast<uint32_t>(e0 / cls.vec));
+                for(int a = 0; a < nAxes; a++)
+                {
+                    std::string const axis = axes[a];
+                    int64_t           v    = 0;
                     if(classLaunch)
                     {
                         if(!readArg(step, axis, v))
                         {
-                            reason = "the launch has no value for recipe axis " + axis;
+                            reason = "the launch has no value for axis " + axis;
                             return false;
                         }
                     }
@@ -1473,10 +1399,10 @@ namespace hiptensor
                     }
                     else if(!readArg(step, axis, v))
                     {
-                        reason = "the launch has no value for recipe axis " + axis;
+                        reason = "the launch has no value for axis " + axis;
                         return false;
                     }
-                    values.emplace_back(axis, v);
+                    values.push_back(v);
                     specKey += std::to_string(v) + ",";
                 }
 
@@ -1510,8 +1436,7 @@ namespace hiptensor
                         std::unique_ptr<Entry> built;
                         if(entry == nullptr)
                         {
-                            built = build(
-                                *recipe, store, values, arch, specKey, why, id, frontMs, compileMs);
+                            built = build(cls, values, arch, specKey, why, id, frontMs, compileMs);
                         }
                         if(built != nullptr)
                         {
@@ -1523,15 +1448,13 @@ namespace hiptensor
                             }
                             report.compiled++;
                             char msg[160];
-                            snprintf(
-                                msg,
-                                sizeof(msg),
-                                " in %.2f ms (recipe replay and lowering %.2f ms, COMGR %.2f ms)",
-                                frontMs + compileMs,
-                                frontMs,
-                                compileMs);
-                            logJit("hiptensorCreatePlan",
-                                   "rocKE JIT: compiled " + recipe->key + msg);
+                            snprintf(msg,
+                                     sizeof(msg),
+                                     " in %.2f ms (build and lowering %.2f ms, COMGR %.2f ms)",
+                                     frontMs + compileMs,
+                                     frontMs,
+                                     compileMs);
+                            logJit("hiptensorCreatePlan", "rocKE JIT: compiled " + cls.key + msg);
                         }
                         else if(entry == nullptr && why.empty())
                         {
@@ -1542,7 +1465,7 @@ namespace hiptensor
                         {
                             reason = why;
                             logJit("hiptensorCreatePlan",
-                                   "rocKE JIT: " + recipe->key + " not specialized: " + why);
+                                   "rocKE JIT: " + cls.key + " not specialized: " + why);
                             // a disabled compile is a test setting, not a property of the kernel
                             remember = !envFlag("HIPTENSOR_ROCKE_JIT_NO_COMPILE");
                         }
@@ -1604,16 +1527,15 @@ namespace hiptensor
                     reason = "the specialized kernel takes smaller workgroups";
                     return false;
                 }
-                js.fallback = std::make_shared<LaunchStep const>(step);
-                step        = std::move(js);
+                js.fallback    = std::make_shared<std::vector<LaunchStep> const>(1, step);
+                js.deviceBound = true;
+                step           = std::move(js);
                 return true;
             }
         } // namespace
 
-        void specializeProgram(Program&                  program,
-                               Pack const&               pack,
-                               backend::DeviceKey const& device,
-                               JitReport&                report)
+        void
+            specializeProgram(Program& program, backend::DeviceKey const& device, JitReport& report)
         {
             using Clock     = std::chrono::steady_clock;
             auto const t0   = Clock::now();
@@ -1643,12 +1565,6 @@ namespace hiptensor
                 return;
             }
             std::string reason;
-            auto const* store = recipesFor(pack, reason);
-            if(store == nullptr)
-            {
-                report.note = reason;
-                return;
-            }
             // HIPTENSOR_JIT_MAX_MS: compile budget of one plan; past it, the remaining launches
             // keep their pack kernels (cache hits are still taken)
             double budget = 0.0;
@@ -1668,8 +1584,7 @@ namespace hiptensor
                 double const spent
                     = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
                 bool const allow = budget <= 0.0 || spent < budget;
-                if(specializeStep(
-                       step, *store, device.baseArch, dc, promoteAll, allow, report, reason))
+                if(specializeStep(step, device.baseArch, dc, promoteAll, allow, report, reason))
                 {
                     report.specialized++;
                 }

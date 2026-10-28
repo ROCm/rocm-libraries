@@ -25,7 +25,9 @@ f64 and complex-f64 GEMM / tensor contraction:
 [`gett_f64.py`](../../python/rocke/instances/common/gett_f64.py) (`GettF64Problem`,
 `GettF64Spec`) and its host planner
 [`gett_f64_plan.py`](../../python/rocke/instances/common/gett_f64_plan.py); doc
-`instances/gett_f64.md`. gfx90a / gfx942 / gfx950.
+`instances/gett_f64.md`. gfx90a / gfx942 / gfx950. The same kernels with f32 /
+complex-f32 words (`dtype="f32"`, f32 MFMA products, f32 accumulation): gfx942 /
+gfx950.
 
 f16 / bf16 tensor contraction (native GETT, no permute pass):
 [`tensor/gett.py`](../../python/rocke/instances/common/tensor/gett.py) (`TensorGettSpec`,
@@ -39,14 +41,16 @@ cost model). Autotune mode: `plan_tensor_gett_candidates` lists the candidate ro
 (the selector's best both-MN-contiguous and RCR bodies plus one-step body mutations) and
 `tune_tensor_gett` measures them with the search engine; measured winners ship in the
 tuned route table `tensor_gett_tuned.json`, which `plan_tensor_gett` consults first.
-gfx950; Python engine only.
+gfx950. The C++ engine mirrors the ring and MN-layout bodies and the tuned
+table's single-launch routes (`cpp/instances/common/tensor_gett_*.cpp`); the
+K-contiguous bodies, the pack hybrid and the tuning flow are Python engine only.
 
 Fused operand prologues for the universal GEMM (f32 operands with bf16 split
 emulation, unary opA / opB, interleaved complex-f32 B):
 [`gemm_prologue.py`](../../python/rocke/instances/common/gemm_prologue.py)
 (`Prologue`, `attach_prologue`); mirrored by the C++ engine
-(`cpp/instances/common/gemm_prologue.cpp`) except unary opA / opB, `stage="vgpr"` and
-`epi` (Python engine only).
+(`cpp/instances/common/gemm_prologue.cpp`) except `stage="vgpr"` and `epi` (Python
+engine only).
 Emulated-f32 GEMM routes on gfx950 built on the prologue:
 [`dispatch/gemm/cf32.py`](../../python/rocke/dispatch/gemm/cf32.py)
 (`plan_cf32_gemm`: interleaved complex f32 as one fused kernel; `plan_f32_gemm`:
@@ -68,7 +72,10 @@ with a tuned table). The tensor GETT family can use it for its operand packs
 
 Atom set: `16x16x16`, `16x16x32`, `32x32x8`, `32x32x16` f16.
 
-Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layout: `RCR`.
+Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layouts: `RCR`,
+and on gfx950 the MN-contiguous `RRR` / `CRR` / `CCR` (`gemm_mn_operand.py`; the C++ engine
+mirrors the direct-to-LDS ring form, `cpp/instances/common/gemm_mn_operand.cpp`; the
+VGPR-staged MN loader is Python engine only).
 
 Quantized-weight GEMM:
 [`matmul_nbits.py`](../../python/rocke/instances/common/matmul_nbits.py) ships

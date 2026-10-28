@@ -32,6 +32,7 @@
 //    (integer-valued data, exact in the compute and output types), including buffers that are
 //    not aligned for the specialized kernels' vector accesses;
 //  - a second plan of a problem takes the kernel cache, concurrent plans compile a kernel once;
+//  - the JIT needs no file besides the kernel pack (it builds with rocKE's C++ kernel builders);
 //  - hiptensorWriteKernelCacheToFile / hiptensorReadKernelCacheFromFile: a fresh process that may
 //    not compile serves the plans from the file; files of another format version, device class
 //    or kernel ABI are refused with HIPTENSOR_STATUS_INVALID_VALUE, unreadable, damaged or
@@ -1250,6 +1251,114 @@ TEST(RockeJitChild, ServesFromTheDirectory)
     EXPECT_EQ(j.specialized, 1);
     EXPECT_EQ(j.compiled, 0);
     EXPECT_EQ(j.fileHits, 1);
+}
+
+#ifndef _WIN32
+// The JIT builds its kernels with rocKE's C++ kernel builders and needs no file besides the kernel
+// pack: a fresh process whose pack directory (HIPTENSOR_ROCKE_PACK_PATH) holds only
+// <target>/rocke.htpk specializes its plans and computes exact results.
+TEST(RockeJitPack, SpecializesFromThePackAlone)
+{
+    auto exe = selfExecutable();
+    if(exe.empty())
+    {
+        GTEST_SKIP() << "needs /proc/self/exe";
+    }
+    // the pack this library loads: a fresh process prints its path
+    std::string printed;
+    {
+        ScopedEnvironmentVariable child("HIPTENSOR_ROCKE_TEST_PRINT_PACK", "1");
+        std::string cmd  = "\"" + exe + "\" --gtest_filter=RockeJitChild.PrintsThePack";
+        FILE*       pipe = popen(cmd.c_str(), "r");
+        ASSERT_NE(pipe, nullptr);
+        char buf[4096];
+        while(std::fgets(buf, sizeof(buf), pipe) != nullptr)
+        {
+            printed += buf;
+        }
+        ASSERT_EQ(pclose(pipe), 0) << printed;
+    }
+    std::string const tag = "ROCKE-PACK-PATH=";
+    auto              at  = printed.find(tag);
+    ASSERT_NE(at, std::string::npos) << printed;
+    std::string pack = printed.substr(at + tag.size());
+    pack             = pack.substr(0, pack.find('\n'));
+    // <dir>/<target>/rocke.htpk
+    auto const slash  = pack.find_last_of('/');
+    auto const slash2 = slash == std::string::npos ? slash : pack.find_last_of('/', slash - 1);
+    ASSERT_NE(slash2, std::string::npos) << pack;
+    std::string const target = pack.substr(slash2 + 1, slash - slash2 - 1);
+
+    std::string dir = ::testing::TempDir() + "hiptensor_rocke_jit_pack_" + std::to_string(getpid());
+    ASSERT_EQ(mkdir(dir.c_str(), 0700), 0);
+    ASSERT_EQ(mkdir((dir + "/" + target).c_str(), 0700), 0);
+    writeBytes(dir + "/" + target + "/rocke.htpk", readBytes(pack));
+    {
+        ScopedEnvironmentVariable packPath("HIPTENSOR_ROCKE_PACK_PATH", dir.c_str());
+        ScopedEnvironmentVariable child("HIPTENSOR_ROCKE_TEST_PACK_ALONE", "1");
+        std::string cmd = "\"" + exe + "\" --gtest_filter=RockeJitChild.SpecializesFromThePack";
+        EXPECT_EQ(std::system(cmd.c_str()), 0);
+    }
+    std::string rm = "rm -rf \"" + dir + "\"";
+    EXPECT_EQ(std::system(rm.c_str()), 0);
+}
+#endif
+
+// The children of RockeJitPack.SpecializesFromThePackAlone (skipped when run on their own).
+TEST(RockeJitChild, PrintsThePack)
+{
+    if(std::getenv("HIPTENSOR_ROCKE_TEST_PRINT_PACK") == nullptr)
+    {
+        GTEST_SKIP() << "run by RockeJitPack.SpecializesFromThePackAlone";
+    }
+    LogCapture                     log;
+    ApiObjects                     api;
+    auto                           a  = api.tensor({8, 8}, {}, HIPTENSOR_R_32F);
+    auto                           d  = api.tensor({8, 8}, {}, HIPTENSOR_R_32F);
+    auto const                     m  = iota32(2);
+    hiptensorOperationDescriptor_t op = nullptr;
+    ASSERT_EQ(hiptensorCreatePermutation(api.handle,
+                                         &op,
+                                         a,
+                                         m.data(),
+                                         HIPTENSOR_OP_IDENTITY,
+                                         d,
+                                         m.data(),
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    api.keep(op);
+    ASSERT_NE(makePlan(api, op, HIPTENSOR_JIT_MODE_NONE), nullptr) << log.all();
+    // "rocKE pack <path>: <n> kernels, pack id ..." (logged when the process loads the pack)
+    for(auto const& l : log.lines())
+    {
+        auto at  = l.find("rocKE pack ");
+        auto end = l.find(": ", at == std::string::npos ? 0 : at);
+        if(at != std::string::npos && end != std::string::npos
+           && l.find(" kernels, pack id ", end) != std::string::npos)
+        {
+            std::printf("ROCKE-PACK-PATH=%s\n", l.substr(at + 11, end - at - 11).c_str());
+            return;
+        }
+    }
+    ADD_FAILURE() << "no pack line\n" << log.all();
+}
+
+TEST(RockeJitChild, SpecializesFromThePack)
+{
+    if(std::getenv("HIPTENSOR_ROCKE_TEST_PACK_ALONE") == nullptr)
+    {
+        GTEST_SKIP() << "run by RockeJitPack.SpecializesFromThePackAlone";
+    }
+    std::mt19937 rng(61);
+    for(auto const& c : cases())
+    {
+        auto j = runCase(c, HIPTENSOR_JIT_MODE_DEFAULT, rng);
+        ASSERT_TRUE(j.found) << c.name;
+        bool const promoted = c.name.find("odd") == std::string::npos
+                              && c.name.find("transposing") == std::string::npos;
+        EXPECT_EQ(j.specialized, promoted ? 1 : 0) << c.name;
+        EXPECT_EQ(j.compiled, promoted ? 1 : 0) << c.name;
+    }
 }
 
 // Entries another compiler wrote are kept but not used: a fresh process that may not compile

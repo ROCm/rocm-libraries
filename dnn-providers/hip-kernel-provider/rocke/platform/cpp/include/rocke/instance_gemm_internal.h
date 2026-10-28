@@ -53,6 +53,7 @@
 #include "rocke/helper_rocke.core.arch.h" /* rocke_mmaop_t, rocke_archtarget_t */
 #include "rocke/helper_rocke.helpers.schedule.h" /* rocke_hotloop_inst_list_t, policy */
 #include "rocke/helper_rocke.helpers.tensor_view.h" /* rocke_tensor_view_t, descriptors */
+#include "rocke/instance_gemm_mn_operand.h"
 #include "rocke/instance_gemm_prologue.h"
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/ir.h"
@@ -266,6 +267,16 @@ typedef struct rocke_gemm_build_ctx
     /* ---- row-interleave LDS layout (trait.lds_row_interleave) -- */
     bool rilv; /* _rilv                                           */
     int rilv_cols; /* _rilv_cols: 8 * block_k + rilv_pad / elem bytes */
+    /* ---- MN-contiguous operands (_mn_lay_a / _mn_lay_b; has_* false for a
+     * K-contiguous operand) -- */
+    bool has_mn_a;
+    bool has_mn_b;
+    rocke_gemm_mn_layout_t mn_lay_a;
+    rocke_gemm_mn_layout_t mn_lay_b;
+    /* ---- native tensor GETT side channel (_gett; NULL = none) -- */
+    struct rocke_gett_hooks* gett; /* _gett                              */
+    bool gett_addr; /* _gett_addr: the hook owns the operand addressing */
+    bool gett_own_lds; /* _gett_own_lds: ... and the LDS stages too       */
 } rocke_gemm_build_ctx_t;
 
 /* ===================================================================== *

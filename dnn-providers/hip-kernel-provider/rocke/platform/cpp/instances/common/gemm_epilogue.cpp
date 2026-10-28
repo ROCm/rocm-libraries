@@ -24,7 +24,10 @@
 #include "rocke/helper_rocke.helpers.fuse.h" /* FusedEpilogue apply/decl */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type           */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/instance_tensor_gett.h" /* the _gett epilogue hook */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
+
+#include <vector>
 
 /* Dispatch helpers for the attached fused epilogue (Python's runtime method
  * resolution on the _fused_epilogue object). The pointer is the FusedEpilogue
@@ -119,7 +122,10 @@ static const rocke_type_t* gemm_storage_dtype(rocke_ir_builder_t* b,
     ab_ne = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
     ac_ne = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
     acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
-    layout_ok = d->layout != NULL && strcmp(d->layout, "RCR") == 0;
+    /* GEMM_LAYOUTS: RCR and the MN-contiguous RRR / CRR / CCR */
+    layout_ok = d->layout != NULL
+                && (strcmp(d->layout, "RCR") == 0 || strcmp(d->layout, "RRR") == 0
+                    || strcmp(d->layout, "CRR") == 0 || strcmp(d->layout, "CCR") == 0);
 
     if(ab_ne || ac_ne || !acc_ok || !layout_ok)
     {
@@ -1321,6 +1327,21 @@ void rocke_gemm_ep_default(rocke_gemm_build_ctx_t* ctx,
     rocke_value_t* full = NULL;
     rocke_gemm_universal_spec_t nopad;
     rocke_if_else_t ie;
+    if(ctx->gett != NULL && !spec->trait.rilv_vec_epilogue)
+    {
+        /* the tensor GETT hook owns the epilogue (alpha / beta, permuted D) */
+        std::vector<rocke_value_t*> v(vals, vals + num_vals);
+        ctx->gett->epilogue(b,
+                            v,
+                            bm,
+                            bn,
+                            ctx->C,
+                            ctx->warp_m_idx,
+                            ctx->warp_n_idx,
+                            ctx->lane,
+                            [b, spec](rocke_value_t* a) { return rocke_gemm_acc_agpr_out(b, spec, a); });
+        return;
+    }
     if(!spec->trait.pad_fast_tile)
     {
         rocke_gemm_emit_epilogue_default(b,

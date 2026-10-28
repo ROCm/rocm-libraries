@@ -3,7 +3,8 @@
 /*
  * instance_gett_f64.h -- C++ mirror of instances/common/gett_f64.py: the f64 /
  * complex-f64 GETT (strided GEMM and tensor contraction, every operand read
- * through its own strides). Builds IR byte-identical to the Python builder for
+ * through its own strides), and the same kernel with f32 / complex-f32 words
+ * (problem.f32). Builds IR byte-identical to the Python builder for
  * the same spec. This API takes a resolved problem (digits) and a resolved
  * spec; contraction planning and the tuned selection live in the Python
  * dispatch layer (gett_f64_plan.py, dispatch/families/gett_f64.py).
@@ -38,7 +39,8 @@ typedef struct rocke_gett_digits
 } rocke_gett_digits_t;
 
 /* GettF64Problem. Digits are normalized as in Python (extent-1 digits dropped,
- * an empty space is the single digit (1, 0)); use rocke_gett_digits_norm. */
+ * an empty space is the single digit (1, 0)); use rocke_gett_digits_norm.
+ * f32: f32 / complex-f32 words (Python dtype "f32"); false: f64 (dtype "f64"). */
 typedef struct rocke_gett_f64_problem
 {
     int64_t M, N, K, L;
@@ -50,6 +52,7 @@ typedef struct rocke_gett_f64_problem
     bool complex_;
     bool conj_a;
     bool conj_b;
+    bool f32;
 } rocke_gett_f64_problem_t;
 
 /* GettF64Spec (lds_pad < 0 means None, waves_per_eu 0 means None). lds_swizzle_mode,
@@ -94,6 +97,10 @@ rocke_gett_f64_spec_t rocke_gett_f64_spec_default(const rocke_gett_f64_problem_t
 
 /* Python f64_atom(arch) is not None: the catalog has the 16x16x4 f64 atom. */
 bool rocke_gett_f64_arch_supported(const char* arch);
+
+/* Python f32_atom(arch) is not None: the catalog has the 16x16x4 f32 atom
+ * (the kernel of an f32 problem). */
+bool rocke_gett_f32_arch_supported(const char* arch);
 
 /* Python runtime_template: the canonical layout class of a strided batched
  * GEMM. False when an index space has more than one digit. */

@@ -172,6 +172,39 @@ Conjugation is an exact sign flip, so `CONJ(A)` gives the same bits as
 conjugating A on the host; scaling an operand by a power of two scales D
 exactly, and negating A (and C) negates D exactly.
 
+## f32 / complex-f32 words (`dtype="f32"`)
+
+`GettF64Problem(dtype="f32")` (`gemm_problem(..., dtype="f32")`) builds the
+same kernel with f32 words: the catalog's `v_mfma_f32_16x16x4_f32` atom with an
+f32 accumulator (`gett_atom(arch, "f32")`; `F32_GETT_ARCHS`: gfx942 and gfx950),
+f32 LDS tiles and fragments (`ds_read_b32`; complex `ds_read_b64` of the
+interleaved pair), f32 pointers, f32 `alpha` / `beta` and the epilogue in f32.
+The f32 atom has the same A / B lane maps as the f64 one; the accumulator slots
+follow its own catalog map. Loads: a real operand contiguous along a run that is
+a multiple of 4 loads 16 bytes (four f32) per lane, an even run 8 bytes, an
+odd run one f32; complex operands load one element (8 bytes) per lane. The
+runtime-size template of real f32 data therefore keeps a third run class
+(extent 4: a multiple of 4), next to the even / odd classes. The kernel name
+carries `f32` (`c64` for complex) instead of `f64` / `c128`. LDS and
+accumulator registers are half those of the f64 kernel, so tiles that do not
+fit with f64 words can (a 256 x 256 tile, or a 32-row K tile on the 64 KiB-LDS
+parts).
+
+Both engines build the f32 form with every knob of the C++ mirror (tiles,
+swizzle modes, LDS stages, prefetch depth, `unroll2`, `k_stagger`, `k_block`,
+complex accumulators, runtime sizes); `split_k` / `split_serial` and the
+Python-only schedule levers (`acc_agpr`, `frag_pipe`, `k_inner`,
+`mfma_fence`, `ilv`, `kmajor_lds`) are refused for f32 data.
+
+Numerics: like the f64 atom, `v_mfma_f32_16x16x4_f32` accumulates as four
+sequential correctly rounded f32 fmas per step: on gfx942 and gfx950 the
+device result is bit-identical to a host chain of correctly rounded f32 fmas in
+K order (each product enters unrounded). The error bound is the one above with
+`u = 2^-24` (and the same knobs reorder the sum within it). Integer-valued
+inputs whose products and partial sums are exact in f32 give exact results.
+hipTensor uses this form as the native route of f32 contractions with the 32F
+compute type.
+
 ## Knobs (`GettF64Spec`)
 
 | knob | default | meaning |
@@ -346,6 +379,14 @@ contraction planner and the tuned selection stay in the Python dispatch layer.
   workspace and counters and its fences / write-through accesses, the AGPR
   reservation, the K-major LDS tile sizes, the `ilv` barriers, builds on
   every target, and the pipelined classes and dispatch candidate.
+* `tests/numeric/test_gett_f32_numeric.py` (every target with the f32 atom):
+  the f32 form on every layout and load width (runs of 4k, 4k + 2 and odd),
+  tails, tiles, schedule knobs, blocked K, complex with every conjugation and
+  four accumulators, the tuned tile shapes, the runtime-size kernels of
+  hipTensor's pack on problems of other sizes, scale / `beta == 0`, exact
+  integer results, NaN / Inf propagation and the BLAS rules, one
+  full-mantissa product per output rounded once (no bf16 split), and bitwise
+  equality with a host chain of correctly rounded f32 fmas in K order.
 * `tests/numeric/test_gett_f64_numeric.py` (every target with the atom):
   every layout, tails, tiles and knobs, scale and `beta == 0` with NaN C, C with
   its own strides and batch, exact integer results, complex with every
@@ -363,5 +404,7 @@ contraction planner and the tuned selection stay in the Python dispatch layer.
   C++ mirror `cpp/instances/common/gett_f64.cpp`, API
   `rocke/instance_gett_f64.h`): every load direction and knob, blocked K,
   split K (partial-sum and reduce kernels), runtime sizes, and every `TUNED_CONFIGS` entry on a problem of its own shape
-  class. The C cases are generated from the Python specs
+  class, then the f32 form (every load width, knob, complex, runtime sizes).
+  `gett_f64_pack_emit.{py,c}` compares hipTensor's pack descriptors (f64 and
+  f32) resolved through the Python and the C spec policy. The C cases are generated from the Python specs
   (`python gett_f64_emit.py --c-cases`).

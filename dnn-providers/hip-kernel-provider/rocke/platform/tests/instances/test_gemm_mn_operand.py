@@ -356,3 +356,50 @@ def test_binding_stores_mn_operands_transposed():
     _, p0 = gemm_rcr_binding(r0, verify=False, dtype="fp16").make_args(rt0)
     a0 = np.frombuffer(bytes(rt0.bufs[p0[0]]), dtype=np.float16)
     assert np.array_equal(a.reshape(576, 1536), a0.reshape(1536, 576).T)
+
+
+def _engine():
+    try:
+        import rocke_engine  # type: ignore  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _engine(), reason="rocke_engine (C++ pybind engine) not built")
+@pytest.mark.parametrize("dt", ["fp16", "bf16"])
+@pytest.mark.parametrize("lay", ["RRR", "CRR", "CCR"])
+def test_cpp_engine_builds_the_mn_ring_bodies(lay, dt):
+    # the binding's spec dict (layout, mn_pad / mn_chunk / mn_ld_any) and the C++
+    # builder (gemm_mn_operand.cpp) give Python's kernel for the DTL-ring MN bodies
+    from rocke.core.backend import lower_universal_gemm
+
+    f = dispatch_gemm_fp16 if dt == "fp16" else dispatch_gemm_bf16
+    base = f(_req(3000, 2000, 1024, "RCR", dt)).spec
+    s = dataclasses.replace(base, data=dataclasses.replace(base.data, layout=lay))
+    assert is_valid_spec(s, "gfx950")[0]
+    for t in (
+        s.trait,
+        dataclasses.replace(s.trait, mn_pad=16, mn_chunk=128),
+        dataclasses.replace(s.trait, mn_ld_any=True),
+    ):
+        sp = dataclasses.replace(s, trait=t)
+        assert is_valid_spec(sp, "gfx950")[0]
+        r = lower_universal_gemm(sp, arch="gfx950", backend="both", want_ir=True)
+        assert sp.kernel_name() in r.llvm_text
+
+
+def test_cpp_engine_refuses_the_vgpr_staged_mn_loader():
+    # the MN operands of bodies without the DTL ring stay Python-only
+    from rocke.core.backend import universal_gemm_spec_to_dict
+
+    cs = dispatch_gemm_fp16(_req(3000, 2000, 1024, "RCR")).spec
+    cs = dataclasses.replace(
+        cs,
+        trait=dataclasses.replace(
+            cs.trait, direct_to_lds=False, dtl_prefetch=False, dtl_stages=0
+        ),
+        data=dataclasses.replace(cs.data, layout="RRR"),
+    )
+    with pytest.raises(NotImplementedError):
+        universal_gemm_spec_to_dict(cs)

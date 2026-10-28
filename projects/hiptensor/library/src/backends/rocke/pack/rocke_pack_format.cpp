@@ -611,7 +611,8 @@ namespace hiptensor
                 }
             }
 
-            // json.dump(..., indent=1, sort_keys=True) of make_rocke_pack.py (ensure_ascii).
+            // json.dump(..., indent=1, sort_keys=True) of rocKE's Python reference writer
+            // (ensure_ascii).
             class Json
             {
             public:

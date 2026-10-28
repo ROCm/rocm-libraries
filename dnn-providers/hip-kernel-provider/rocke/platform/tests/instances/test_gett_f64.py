@@ -880,3 +880,124 @@ def test_split_k_is_checked(kw, needle):
     assert is_valid_spec(
         GettF64Spec(_rcr(K=1024), split_k=4, k_block=2), arch="gfx950"
     )[0]
+
+
+# ------------------------------------------------- f32 / complex f32 words
+
+
+def _rcr32(M=256, N=256, K=128, **kw):
+    return _rcr(M, N, K, dtype="f32", **kw)
+
+
+def test_f32_archs_come_from_the_catalog():
+    from rocke.core.arch import known_arches
+    from rocke.instances.common.gett_f64 import (
+        F32_GETT_ARCHS,
+        f32_atom,
+        f32_gett_archs,
+    )
+
+    assert F32_GETT_ARCHS == f32_gett_archs()
+    assert {"gfx942", "gfx950"} <= set(F32_GETT_ARCHS)
+    for arch in known_arches():
+        assert (arch in F32_GETT_ARCHS) == (f32_atom(arch) is not None)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+def test_f32_kernel_structure(arch, flavor):
+    tile_k = 16 if arch == "gfx950" else 8
+    spec = GettF64Spec(_rcr32(K=100), tile_k=tile_k)
+    ll = _kernel_text(spec, arch, flavor)
+    body = ll.split("define")[1]
+    # 4x4 f32 atoms per wave, tile_k / 4 k-steps per K tile; the loop body
+    # and the last K tile after it; no f64 anywhere.
+    assert body.count("@llvm.amdgcn.mfma.f32.16x16x4f32(") == 2 * 16 * (tile_k // 4)
+    assert "double" not in body and "mfma.f64" not in body
+    assert "fcmp oeq float %beta" in body and "fcmp oeq float %alpha," in body
+    params = _params(spec, arch)
+    for name in ("%A", "%B", "%C", "%D"):
+        assert "align 4" in params[name]
+    assert "float %alpha" in params["%alpha"]
+
+
+def test_f32_complex_kernel_is_fused_4m():
+    p = _rcr32(M=128, N=64, K=32, complex_=True, conj_a=True)
+    spec = GettF64Spec(p, tile_m=64, tile_n=64)
+    body = _kernel_text(spec, "gfx950").split("define")[1]
+    per_tile = 2 * 2 * 4 * 4
+    assert body.count("@llvm.amdgcn.mfma.f32.16x16x4f32(") in (per_tile, 2 * per_tile)
+    assert "fneg float" in body and "double" not in body
+    assert "_c64_" in spec.kernel_name()
+
+
+def test_f32_names_and_signature():
+    s32 = GettF64Spec(_rcr32())
+    assert "_f32_M" in s32.kernel_name()
+    assert s32.kernel_name() != GettF64Spec(_rcr()).kernel_name()
+    sig = gett_f64_signature(s32)
+    types = {a["name"]: a["type"] for a in sig}
+    assert types["A"] == types["B"] == types["D"] == "ptr<f32, global>"
+    assert types["alpha"] == types["beta"] == "f32"
+    assert s32.problem.elem_bytes == 4
+    assert _rcr32(complex_=True).elem_bytes == 8
+
+
+def test_f32_loads_take_four_words_on_runs_of_four():
+    for K, vec in ((128, 4), (130, 2), (129, 1)):
+        p = _rcr32(K=K)
+        s = GettF64Spec(p)
+        plan = _load_plan(s, p.a_m, p.a_k, s.tile_m)
+        assert plan.along_k and plan.vec == vec, (K, plan)
+    pc = _rcr32(K=128, complex_=True)
+    sc = GettF64Spec(pc, tile_m=64, tile_n=64)
+    assert _load_plan(sc, pc.a_m, pc.a_k, sc.tile_m).vec == 1
+
+
+def test_f32_runtime_template_keeps_runs_of_four():
+    from rocke.instances.common.gett_f64 import runtime_template
+
+    t = {K: runtime_template(_rcr32(K=K)) for K in (128, 130, 129, 64)}
+    assert t[128] == t[64] and t[128].K == 4
+    assert t[130].K == 2 and t[129].K == 3
+    assert t[128].dtype == "f32"
+    # f64 templates are unchanged (runs of four are not a class there)
+    assert runtime_template(_rcr(K=128)).K == 2
+    assert runtime_template(_rcr(K=128)) != runtime_template(_rcr32(K=128))
+
+
+@pytest.mark.parametrize(
+    "kw,needle",
+    [
+        ({"split_k": 2}, "split_k is not built for f32"),
+        ({"acc_agpr": True}, "acc_agpr is not built for f32"),
+        ({"k_inner": 2}, "k_inner is not built for f32"),
+        ({"kmajor_lds": True}, "kmajor_lds is not built for f32"),
+    ],
+)
+def test_f32_refuses_the_f64_only_levers(kw, needle):
+    ok, why = is_valid_spec(GettF64Spec(_rcr32(K=1024), **kw), arch="gfx950")
+    assert not ok and needle in why
+
+
+def test_f32_needs_the_f32_atom():
+    ok, why = is_valid_spec(GettF64Spec(_rcr32()), arch="gfx90a")
+    assert not ok and "has no 16x16x4 f32 MMA atom" in why
+    bad = _rcr32()
+    from dataclasses import replace as _rp
+
+    ok, why = _rp(bad, dtype="f16").check()
+    assert not ok and "dtype must be one of" in why
+
+
+def test_f32_lds_and_registers_halve():
+    # a tile whose f64 form does not fit gfx942's LDS fits with f32 words
+    assert not is_valid_spec(GettF64Spec(_rcr(), tile_k=32), arch="gfx942")[0]
+    assert is_valid_spec(GettF64Spec(_rcr32(), tile_k=32), arch="gfx942")[0]
+    # 256 x 256 tile: the f64 accumulator does not fit, the f32 one does
+    assert not is_valid_spec(
+        GettF64Spec(_rcr(), tile_m=256, tile_n=256), arch="gfx950"
+    )[0]
+    assert is_valid_spec(GettF64Spec(_rcr32(), tile_m=256, tile_n=256), arch="gfx950")[
+        0
+    ]

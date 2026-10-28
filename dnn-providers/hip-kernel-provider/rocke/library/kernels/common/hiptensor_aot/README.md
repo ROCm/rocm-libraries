@@ -1,8 +1,11 @@
 # hiptensor_aot: shape-generic kernels for hipTensor's rocKE backend
 
 hipTensor (`projects/hiptensor`, option `HIPTENSOR_ENABLE_ROCKE_BACKEND=ON`) builds these kernels
-at its build time into a kernel pack (`library/src/backends/rocke/pack/make_rocke_pack.py`) and launches them from C++ without
-Python. Every kernel reads its problem (extents, strides, scalars, operator codes) from kernel
+at its build time into a kernel pack with their C++ twins (`rocke/instance_hiptensor_aot.h`; the
+pack builder `library/src/backends/rocke/pack/rocke_pack_builder.cpp` of hipTensor) and launches
+them from C++ without Python. `builders/hiptensor/make_rocke_pack.py` writes the same pack from
+these Python builders: rocKE's cross-check of the C++ pack builder
+(`tests/test_hiptensor_pack_cross_check.py`). Every kernel reads its problem (extents, strides, scalars, operator codes) from kernel
 arguments, so one compiled kernel serves every problem of its data-type row.
 
 | Module | Kernels | ABI |
@@ -13,8 +16,8 @@ arguments, so one compiled kernel serves every problem of its data-type row.
 | `dgett.py` | the direct GETT: `D = alpha * sum_K opA(A) opB(B) + beta * opC(C)` read and written in place (every data type, compute type, operator and layout; no workspace), register-staged MFMA tiles; the host plan in `gett_host.py` | `hiptensor-aot-dgett/v1` |
 | `rgett.py` | rocKE's ring GETT body (`rocke.instances.common.tensor.gett`, f16 / bf16, gfx950) with its index maps as kernel arguments (one kernel per lane-width / D-vector class and digit-slot bucket: classes for problems of at most 2 or 4 digits per digit space skip the division of the unused slots), or as constants for a problem (the JIT form); the host plan in `gett_host.py` | `hiptensor-aot-rgett/v1` |
 | `gett_host.py` | Python statement of the planner rules of `dgett` and `rgett` (K plans: in-tile and tile digits, padding of the K space) | - |
-| `ewt.py` | tiled elementwise kernel for transposing layouts: inputs fastest along another mode than D read through an LDS tile, 16-byte vectors on both sides | `hiptensor-aot-ewt/v1` |
-| `jit_ew.py` | the JIT form of `ew.py`: every integer argument (operator codes, sizes, magic numbers, strides, limits) a compile-time constant, and `vec` elements of mode 0 per thread with vector accesses where the layout allows; rolled at hipTensor's build time into one parametric recipe per kernel class (`roll_jit_ew`), which hipTensor's C++ runtime replays with the recipe VM for `HIPTENSOR_JIT_MODE_DEFAULT` plans; with no geometry, the same class with the geometry as kernel arguments (`hiptensor_aot_ewv...`, the vector classes of the kernel pack) | `hiptensor-jit-ew/v1`, `hiptensor-aot-ewv/v1` |
+| `ewt.py` | tiled elementwise kernel for transposing layouts: inputs fastest along another mode than D read through an LDS tile, 16-byte vectors on both sides; 10 batch digits; folded classes for planes smaller than half a tile | `hiptensor-aot-ewt/v2` |
+| `jit_ew.py` | the JIT form of `ew.py`: every integer argument (operator codes, sizes, magic numbers, strides, limits) a compile-time constant, and `vec` elements of mode 0 per thread with vector accesses where the layout allows; hipTensor builds it for the problem of each `HIPTENSOR_JIT_MODE_DEFAULT` plan with its C++ twin (`rocke_build_htaot_ew_jit`, linked into the library); `roll_jit_ew` rolls a class into a parametric recipe of rocKE's recipe VM (tested here, not used by hipTensor); with no geometry, the same class with the geometry as kernel arguments (`hiptensor_aot_ewv...`, the vector classes of the kernel pack) | `hiptensor-jit-ew/v1`, `hiptensor-aot-ewv/v1` |
 
 Rank bucket R8: at most 8 modes per index space after the host drops extent-1 modes and merges
 contiguous modes. Coordinates are i32 (magic-number division); offsets i32 or i64 (`idx64`).
@@ -28,7 +31,7 @@ one wave-uniform branch per program group, constants anchored on an opaque zero 
 kernels' loops do not hoist them into VGPRs (the anchored bit patterns are built from 32-bit
 halves: recipes carry integers as doubles, exact to 2^53). The plain rows keep their code and
 registers; a math row has one JIT class, every input a vector (its other layouts classify to vec 1,
-which has no recipe: those launches keep the pack kernel). SIGMOID is `1 / (1 + t)` for x >= 0 and `t / (1 + t)`
+which is no JIT class: those launches keep the pack kernel). SIGMOID is `1 / (1 + t)` for x >= 0 and `t / (1 + t)`
 below, `t = e^-|x|` (no overflow of `e^-x`, so large negative arguments keep their small
 results). A tensor whose scale is zero is not read and its operator's result is dropped.
 

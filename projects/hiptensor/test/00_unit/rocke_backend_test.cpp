@@ -186,6 +186,55 @@ namespace
         return name.substr(0, name.find(':'));
     }
 
+    // Another device of the current device's architecture (-1: none), to execute plans on a
+    // device other than the one they were created on.
+    int otherDevice()
+    {
+        int current = 0, count = 0;
+        if(hipGetDevice(&current) != hipSuccess || hipGetDeviceCount(&count) != hipSuccess)
+        {
+            return -1;
+        }
+        hipDeviceProp_t mine, other;
+        if(hipGetDeviceProperties(&mine, current) != hipSuccess)
+        {
+            return -1;
+        }
+        for(int d = 0; d < count; d++)
+        {
+            if(d != current && hipGetDeviceProperties(&other, d) == hipSuccess
+               && std::string(other.gcnArchName) == std::string(mine.gcnArchName))
+            {
+                return d;
+            }
+        }
+        return -1;
+    }
+
+    // Makes `device` current for the scope's lifetime (nothing for -1), then restores the
+    // device it found.
+    struct DeviceScope
+    {
+        int previous = -1;
+        explicit DeviceScope(int device)
+        {
+            if(device >= 0)
+            {
+                EXPECT_EQ(hipGetDevice(&previous), hipSuccess);
+                EXPECT_EQ(hipSetDevice(device), hipSuccess);
+            }
+        }
+        ~DeviceScope()
+        {
+            if(previous >= 0)
+            {
+                static_cast<void>(hipSetDevice(previous));
+            }
+        }
+        DeviceScope(DeviceScope const&)            = delete;
+        DeviceScope& operator=(DeviceScope const&) = delete;
+    };
+
     bool isComplex(hiptensorDataType_t t)
     {
         return t == HIPTENSOR_C_32F || t == HIPTENSOR_C_64F;
@@ -462,14 +511,18 @@ namespace
                 static_cast<void>(hipFree(p));
             }
         }
-        void* upload(Tensor const& t)
+        // `skew`: the tensor starts that many elements past the allocation (misaligned for
+        // vector accesses)
+        void* upload(Tensor const& t, size_t skew = 0)
         {
-            auto  b = t.bytes();
-            void* p = nullptr;
-            EXPECT_EQ(hipMalloc(&p, std::max<size_t>(b.size(), 16)), hipSuccess);
-            EXPECT_EQ(hipMemcpy(p, b.data(), b.size(), hipMemcpyHostToDevice), hipSuccess);
+            auto         b   = t.bytes();
+            size_t const pre = skew * sizeOf(t.type);
+            void*        p   = nullptr;
+            EXPECT_EQ(hipMalloc(&p, std::max<size_t>(b.size() + pre, 16)), hipSuccess);
+            auto* const data = static_cast<uint8_t*>(p) + pre;
+            EXPECT_EQ(hipMemcpy(data, b.data(), b.size(), hipMemcpyHostToDevice), hipSuccess);
             buffers.push_back(p);
-            return p;
+            return data;
         }
         void download(void* p, Tensor& t)
         {
@@ -596,6 +649,11 @@ namespace
         ApiObjects*                   api       = nullptr;
         // plan with a workspace limit of zero (the estimate is still queried)
         bool zeroWorkspace = false;
+        // A, B, C and D one element past aligned addresses
+        size_t skew = 0;
+        // execute on this device (buffers, workspace and stream there; -1: the device the plan
+        // is created on)
+        int device = -1;
     };
 
     // What the rocKE backend's selection log line says about a plan, and its workspace.
@@ -604,6 +662,8 @@ namespace
         int         candidates = 0;
         std::string pick;
         std::string source;
+        std::string reason; // what decided the source (the rule, the model, ...)
+        std::string launches; // kernel families of the program's launches, '+'-separated
         uint64_t    estimate = 0;
         uint64_t    required = 0;
     };
@@ -637,6 +697,14 @@ namespace
         out.candidates = std::atoi(field(line, "Candidates").c_str());
         out.pick       = field(line, "Pick");
         out.source     = field(line, "Source");
+        out.launches   = field(line, "Launches");
+        // "Source: <source> (<reason>), Pick: ..."
+        auto const open  = line.find("(", line.find("Source: "));
+        auto const close = line.rfind("), Pick: ");
+        if(open != std::string::npos && close != std::string::npos && close > open)
+        {
+            out.reason = line.substr(open + 1, close - open - 1);
+        }
         return out;
     }
 
@@ -761,6 +829,8 @@ namespace
         // (A = m0 k0 m1 k1 ..., B = n0 k0 n1 k1 ..., D = m0 n0 m1 n1 ...): more modes than the
         // generic kernels' slots
         int groupRank = 0;
+        // > 0: the extent of m0, n0 and k0 (groupRank)
+        int64_t groupFirst = 0;
     };
 
     void runContraction(ContractionCase const& c,
@@ -801,6 +871,10 @@ namespace
                 ext[m]          = e;
                 ext[n]          = i == 0 ? 3 : 2;
                 ext[k]          = i == c.groupRank - 1 ? 3 : 2;
+                if(i == 0 && c.groupFirst > 0)
+                {
+                    ext[m] = ext[n] = ext[k] = c.groupFirst;
+                }
                 ma.insert(ma.end(), {m, k});
                 mb.insert(mb.end(), {n, k});
                 md.insert(md.end(), {m, n});
@@ -871,12 +945,13 @@ namespace
         {
             return;
         }
-        Device dev;
-        void*  pA = dev.upload(A);
-        void*  pB = dev.upload(B);
-        void*  pC = c.scale ? nullptr : dev.upload(C);
-        void*  pD = dev.upload(D);
-        void*  ws = nullptr;
+        DeviceScope onDevice(choice.device);
+        Device      dev;
+        void*       pA = dev.upload(A, choice.skew);
+        void*       pB = dev.upload(B, choice.skew);
+        void*       pC = c.scale ? nullptr : dev.upload(C, choice.skew);
+        void*       pD = dev.upload(D, choice.skew);
+        void*       ws = nullptr;
         if(workspaceSize > 0)
         {
             ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
@@ -1870,8 +1945,9 @@ namespace
         }
         ASSERT_GE(first.candidates, 1);
         std::set<std::string> picks{first.pick};
-        bool                  gemm = first.pick.rfind("gemm:", 0) == 0;
-        bool                  f64  = first.pick.rfind("f64:", 0) == 0;
+        bool                  gemm   = first.pick.rfind("gemm:", 0) == 0;
+        bool                  gett32 = first.pick.rfind("gett32:", 0) == 0;
+        bool                  f64    = first.pick.rfind("f64:", 0) == 0;
         for(int32_t r = 1; r < first.candidates; r++)
         {
             Choice choice = all;
@@ -1882,13 +1958,27 @@ namespace
             EXPECT_EQ(s.source, "KERNEL_RANK");
             EXPECT_EQ(s.candidates, first.candidates);
             picks.insert(s.pick);
-            gemm = gemm || s.pick.rfind("gemm:", 0) == 0;
-            f64  = f64 || s.pick.rfind("f64:", 0) == 0;
+            gemm   = gemm || s.pick.rfind("gemm:", 0) == 0;
+            gett32 = gett32 || s.pick.rfind("gett32:", 0) == 0;
+            f64    = f64 || s.pick.rfind("f64:", 0) == 0;
         }
         EXPECT_EQ(picks.size(), size_t(first.candidates));
         bool const native16 = c.type == HIPTENSOR_R_32F && c.compute != HIPTENSOR_COMPUTE_DESC_32F;
         bool const real64   = c.type == HIPTENSOR_R_64F || c.type == HIPTENSOR_C_64F;
-        if(deviceArch() == "gfx950" && !real64)
+        // f32 / complex f32 data (and 16-bit data with an operand operator) with the 32F / C32F
+        // compute type: the native f32 route (the default HIPTENSOR_ROCKE_F32_RECIPE) where the
+        // pack has it, and the f64 route
+        bool const f32Recipe = (c.type == HIPTENSOR_R_32F || c.type == HIPTENSOR_C_32F
+                                || c.opA != HIPTENSOR_OP_IDENTITY)
+                               && !native16 && !real64;
+        bool const nativeF32 = f32Recipe && std::getenv("HIPTENSOR_ROCKE_F32_RECIPE") == nullptr;
+        if(nativeF32)
+        {
+            EXPECT_EQ(gett32, deviceArch() == "gfx950" || deviceArch() == "gfx942");
+            EXPECT_FALSE(gemm);
+            EXPECT_TRUE(f64);
+        }
+        else if(deviceArch() == "gfx950" && !real64)
         {
             // the GEMM route of the type and (except for 16-bit compute) the f64 route
             EXPECT_TRUE(gemm);
@@ -2005,18 +2095,32 @@ namespace
         }
         EXPECT_EQ(a.pick, b.pick);
         EXPECT_TRUE(a.source == "MODEL" || a.source == "STATIC" || a.source == "RULE") << a.source;
-        // on gfx950 the ring GETT wins by rule when the layout admits it, else the model decides
-        bool const ring = a.pick.rfind("rgett:", 0) == 0;
-        if(deviceArch() == "gfx950")
+        // a rule names itself and picks its route: the ring GETT when the layout admits it, the
+        // direct GETT on targets without the GEMM routes; otherwise the model decides (gfx950
+        // has a model for this problem class)
+        bool const rule = a.source == "RULE";
+        if(rule)
         {
-            EXPECT_EQ(a.source, ring ? "RULE" : "MODEL");
+            bool const ring = a.reason == "the ring GETT rule";
+            EXPECT_TRUE(ring || a.reason == "the direct GETT rule") << a.reason;
+            EXPECT_EQ(a.pick.rfind(ring ? "rgett:" : "dgett:", 0), 0u)
+                << a.pick << " (" << a.reason << ")";
+        }
+        else if(deviceArch() == "gfx950")
+        {
+            EXPECT_EQ(a.source, "MODEL") << a.reason;
         }
         SelectionLog st;
         {
             ScopedEnv env("HIPTENSOR_ROCKE_SELECT", "static");
             runContraction(c, all, &st);
         }
-        EXPECT_EQ(st.source, ring ? "RULE" : "STATIC");
+        // the rules apply to the static selection too
+        EXPECT_EQ(st.source, rule ? "RULE" : "STATIC");
+        if(rule)
+        {
+            EXPECT_EQ(st.pick, a.pick);
+        }
         EXPECT_EQ(st.candidates, a.candidates);
 
         // reductions have models too
@@ -2264,6 +2368,435 @@ namespace
         default:
             return x;
         }
+    }
+
+    // ---------------------------------------------------------------------- f32 recipes
+
+    // HIPTENSOR_ROCKE_F32_RECIPE: the routes each recipe admits (the candidate of every
+    // KERNEL_RANK) and the accuracy class of its results against a loop reference in double, for
+    // f32, complex f32 and mixed real data with the 32F / C32F compute type.
+    struct RecipeCase
+    {
+        char const*         recipe; // nullptr: the variable unset (native)
+        hiptensorDataType_t a, b, d;
+        bool                scale; // no C
+        int                 seed;
+    };
+
+    std::ostream& operator<<(std::ostream& os, RecipeCase const& c)
+    {
+        return os << (c.recipe != nullptr ? c.recipe : "unset") << "_" << int(c.a) << "_"
+                  << int(c.b) << "_" << int(c.d) << (c.scale ? "_scale" : "_bilinear");
+    }
+
+    // The accuracy class of a recipe (programmers-guide.rst): products per element product,
+    // the relative error of a product's representation, the accumulation's unit roundoff.
+    struct RecipeClass
+    {
+        int    products;
+        double rep;
+        double uc;
+    };
+
+    RecipeClass recipeClass(std::string const& recipe)
+    {
+        double const u = std::ldexp(1.0, -24);
+        if(recipe == "f64")
+        {
+            return {1, 0.0, std::ldexp(1.0, -53)};
+        }
+        if(recipe == "x9")
+        {
+            // three bf16 parts, every part product (each exact, summed in f32)
+            return {9, 0.0, u};
+        }
+        if(recipe == "x6")
+        {
+            // three bf16 parts (|a - hi - mid - lo| <= 2^-24 |a|), the three smallest products
+            // (at most 2^-23 |a b|) dropped
+            return {6, std::ldexp(1.0, -21), u};
+        }
+        if(recipe == "x3" || recipe == "x4")
+        {
+            // two bf16 parts: |a - hi - mid| <= 2^-16 |a| per operand; x3 also drops mid * mid
+            return {recipe == "x3" ? 3 : 4, std::ldexp(1.0, -14), u};
+        }
+        return {1, 0.0, u}; // native: f32 products
+    }
+
+    // The direct GETT's compute class in a candidate key (dgett:hiptensor_aot_dgett_<r|c>_<comp>_...).
+    bool dgettComputesF64(std::string const& key)
+    {
+        return key.find("_dgett_r_f64_") != std::string::npos
+               || key.find("_dgett_c_f64_") != std::string::npos;
+    }
+
+    // The candidate keys a recipe admits for the case's data (the f64 route always; the direct
+    // GETT, f32 products and accumulation, under every recipe of the f32 class or below, f64
+    // under the f64 recipe).
+    bool recipeAdmits(std::string const& recipe, bool cx, std::string const& key)
+    {
+        if(key.rfind("f64:", 0) == 0)
+        {
+            return true;
+        }
+        if(key.rfind("dgett:", 0) == 0)
+        {
+            return recipe != "f64" || dgettComputesF64(key);
+        }
+        if(recipe == "f64")
+        {
+            return false;
+        }
+        if(recipe == "native")
+        {
+            return key.rfind("gett32:", 0) == 0;
+        }
+        std::string const route = cx ? (recipe == "x6" ? "cf32" : "cf32" + recipe) : recipe;
+        return key.rfind("gemm:hiptensor_" + route + "_", 0) == 0;
+    }
+
+    void runRecipe(RecipeCase const& c, Choice const& choice, SelectionLog* selection)
+    {
+        ScopedEnv env("HIPTENSOR_ROCKE_F32_RECIPE", c.recipe);
+        // unset or an unknown value: native
+        std::string recipe = c.recipe != nullptr ? c.recipe : "native";
+        if(recipe != "x3" && recipe != "x4" && recipe != "x6" && recipe != "x9" && recipe != "f64")
+        {
+            recipe = "native";
+        }
+        bool const                cx = isComplex(c.d);
+        std::mt19937              rng(c.seed);
+        std::optional<ApiObjects> own;
+        if(choice.api == nullptr)
+        {
+            own.emplace();
+        }
+        ApiObjects& api = choice.api != nullptr ? *choice.api : *own;
+        for(auto t : {c.a, c.b, c.d})
+        {
+            if(!api.supports(t))
+            {
+                GTEST_SKIP() << "data type not supported on this device";
+            }
+        }
+        LogCapture                 log;
+        std::map<int32_t, int64_t> ext{{'m', 33}, {'p', 5}, {'n', 70}, {'k', 96}, {'q', 3}};
+        std::vector<int32_t> ma = {'m', 'k', 'p', 'q'}, mb = {'k', 'n', 'q'}, md = {'n', 'm', 'p'},
+                             kmodes = {'k', 'q'};
+        std::shuffle(ma.begin(), ma.end(), rng);
+        std::shuffle(mb.begin(), mb.end(), rng);
+        std::shuffle(md.begin(), md.end(), rng);
+        auto A    = makeTensor(c.a, ma, ext, rng, false);
+        auto B    = makeTensor(c.b, mb, ext, rng, false);
+        auto C    = makeTensor(c.d, md, ext, rng, false);
+        auto D    = makeTensor(c.d, md, ext, rng, false);
+        D.strides = C.strides;
+        D.values.assign(C.values.size(), cplx(0, 0));
+        auto const compute    = cx ? HIPTENSOR_COMPUTE_DESC_C32F : HIPTENSOR_COMPUTE_DESC_32F;
+        auto       scalarType = scalarTypeOf(compute);
+        Scalar     alpha, beta;
+        alpha.re = 0.75;
+        beta.re  = c.scale ? 0.0 : 0.5;
+        if(cx)
+        {
+            alpha.im = 1.0;
+            beta.im  = c.scale ? 0.0 : -0.25;
+        }
+        hiptensorOperationDescriptor_t desc = nullptr;
+        auto dA = describe(api, A), dB = describe(api, B), dD = describe(api, D);
+        auto dC = c.scale ? nullptr : describe(api, C);
+        ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                             &desc,
+                                             dA,
+                                             A.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dB,
+                                             B.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dC,
+                                             c.scale ? nullptr : C.modes.data(),
+                                             HIPTENSOR_OP_IDENTITY,
+                                             dD,
+                                             D.modes.data(),
+                                             compute),
+                  HIPTENSOR_STATUS_SUCCESS);
+        api.keep(desc);
+        uint64_t     workspaceSize = 0;
+        SelectionLog sel;
+        auto         plan = planWith(api, desc, choice, log, workspaceSize, &sel);
+        if(plan == nullptr)
+        {
+            return;
+        }
+        if(selection != nullptr)
+        {
+            *selection = sel;
+        }
+        // the recipe's routes only (and the f64 route), never a less accurate one
+        EXPECT_TRUE(recipeAdmits(recipe, cx, sel.pick)) << recipe << ": " << sel.pick;
+        Device dev;
+        void*  pA = dev.upload(A);
+        void*  pB = dev.upload(B);
+        void*  pC = c.scale ? nullptr : dev.upload(C);
+        void*  pD = dev.upload(D);
+        void*  ws = nullptr;
+        if(workspaceSize > 0)
+        {
+            ASSERT_EQ(hipMalloc(&ws, workspaceSize), hipSuccess);
+            dev.buffers.push_back(ws);
+        }
+        Stream stream;
+        ASSERT_EQ(hiptensorContract(api.handle,
+                                    plan,
+                                    alpha.as(scalarType),
+                                    pA,
+                                    pB,
+                                    beta.as(scalarType),
+                                    pC,
+                                    pD,
+                                    ws,
+                                    workspaceSize,
+                                    stream.s),
+                  HIPTENSOR_STATUS_SUCCESS)
+            << log.all();
+        ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        Tensor got = D;
+        dev.download(pD, got);
+
+        // the class bound: (2 (n K + 4) u_c + rep) |alpha| S + 2 u_d |d| + 4 u_c |beta c|, K the
+        // real products per component (2 per complex product), n the products per product
+        auto const          cls   = recipeClass(recipe);
+        double const        uo    = unitRoundoff(c.d);
+        int64_t             kSize = ext['k'] * ext['q'] * (cx ? 2 : 1);
+        std::vector<cplx>   want(D.values.size(), cplx(0, 0));
+        std::vector<double> bound(D.values.size(), 0.0);
+        std::vector<bool>   written(D.values.size(), false);
+        forEachIndex(md, ext, [&](auto index) {
+            cplx   sum  = 0;
+            double mags = 0;
+            forEachIndex(kmodes, ext, [&](auto kindex) {
+                auto full = index;
+                for(auto& kv : kindex)
+                {
+                    full[kv.first] = kv.second;
+                }
+                cplx const a = A.values[A.offset(full)];
+                cplx const b = B.values[B.offset(full)];
+                sum += a * b;
+                mags += (std::fabs(a.real()) + std::fabs(a.imag()))
+                        * (std::fabs(b.real()) + std::fabs(b.imag()));
+            });
+            auto off   = D.offset(index);
+            cplx cval  = c.scale ? cplx(0, 0) : C.values[C.offset(index)];
+            want[off]  = alpha.value() * sum + beta.value() * cval;
+            bound[off] = (2 * (cls.products * kSize + 4) * cls.uc + cls.rep)
+                             * std::abs(alpha.value()) * mags
+                         + 2 * uo * std::abs(want[off])
+                         + 4 * cls.uc * std::abs(beta.value() * cval);
+            written[off] = true;
+        });
+        compare(got, want, bound, written, false, recipe + " contraction (" + sel.pick + ")");
+    }
+
+    class RockeF32Recipe : public ::testing::TestWithParam<RecipeCase>
+    {
+    };
+
+    // Every candidate of the recipe (KERNEL_RANK 0, 1, ...) is one of its routes or the f64
+    // route, and meets the recipe's accuracy class.
+    TEST_P(RockeF32Recipe, EveryCandidateWithinItsClass)
+    {
+        auto const c = GetParam();
+        Choice     all;
+        all.workspace = HIPTENSOR_WORKSPACE_MAX;
+        SelectionLog first;
+        runRecipe(c, all, &first);
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        ASSERT_GE(first.candidates, 1);
+        std::string const recipe = c.recipe != nullptr ? c.recipe : "native";
+        bool const        gemm   = deviceArch() == "gfx950";
+        bool const        f32    = deviceArch() == "gfx950" || deviceArch() == "gfx942";
+        bool const        own    = recipe == "native" ? f32 : recipe != "f64" && gemm;
+        // the recipe's own routes (not the f64 route or the direct GETT, which every recipe
+        // lists)
+        auto const ownRoute = [](std::string const& pick) {
+            return pick.rfind("f64:", 0) != 0 && pick.rfind("dgett:", 0) != 0;
+        };
+        // rocKE's rules order the candidates of every recipe but x6 (whose selection model may
+        // rank the f64 route first): the recipe's own route first where the pack has it
+        if(recipe != "x6")
+        {
+            EXPECT_EQ(ownRoute(first.pick), own) << recipe << ": " << first.pick;
+        }
+        bool                  ownSeen = ownRoute(first.pick);
+        std::set<std::string> picks{first.pick};
+        for(int32_t r = 1; r < first.candidates; r++)
+        {
+            Choice choice = all;
+            choice.rank   = r;
+            SelectionLog s;
+            runRecipe(c, choice, &s);
+            ASSERT_FALSE(HasFailure()) << "KERNEL_RANK " << r << ": " << s.pick;
+            EXPECT_EQ(s.candidates, first.candidates);
+            picks.insert(s.pick);
+            ownSeen = ownSeen || ownRoute(s.pick);
+        }
+        EXPECT_EQ(picks.size(), size_t(first.candidates));
+        // the recipe's own route is a candidate exactly where the pack has its kernels
+        EXPECT_EQ(ownSeen, own) << recipe;
+    }
+
+    std::vector<RecipeCase> recipeCases()
+    {
+        auto const              r16 = HIPTENSOR_R_16F, r32 = HIPTENSOR_R_32F, c32 = HIPTENSOR_C_32F;
+        std::vector<RecipeCase> out;
+        int                     seed = 4100;
+        for(char const* recipe : {(char const*)nullptr, "native", "x3", "x4", "x6", "x9", "f64"})
+        {
+            for(bool scale : {false, true})
+            {
+                out.push_back({recipe, r32, r32, r32, scale, seed++});
+                out.push_back({recipe, c32, c32, c32, scale, seed++});
+            }
+            out.push_back({recipe, r16, r32, r16, false, seed++});
+        }
+        return out;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke, RockeF32Recipe, ::testing::ValuesIn(recipeCases()));
+
+    // One full-mantissa product per element (f32 values in [1, 2) with random low bits, the
+    // other K terms zero): native and f64 store the product rounded once, x9 and x6 within a
+    // few f32 roundings of it, and x3 / x4 visibly lose low bits (the recipes really differ),
+    // within 2^-14.
+    TEST(RockeF32Recipes, OneProductPerElement)
+    {
+        ApiObjects                             api;
+        int64_t const                          M = 64, N = 48, K = 4;
+        std::mt19937                           rng(4200);
+        std::uniform_int_distribution<int64_t> mant(1, (int64_t(1) << 23) - 1);
+        std::vector<float>                     a(M * K, 0.0f), b(N * K, 0.0f);
+        for(int64_t m = 0; m < M; m++)
+        {
+            a[m * K] = float(1.0 + std::ldexp(double(mant(rng)), -23));
+        }
+        for(int64_t n = 0; n < N; n++)
+        {
+            b[n * K] = float(1.0 + std::ldexp(double(mant(rng)), -23));
+        }
+        // A [K][M] -> modes (k, m) with k fastest: A[k + m K]; B (k, n); D (m, n), m fastest
+        std::vector<int32_t> ma{'k', 'm'}, mb{'k', 'n'}, md{'m', 'n'};
+        std::vector<int64_t> ea{K, M}, eb{K, N}, ed{M, N};
+        auto                 dA = api.tensor(ea, {}, HIPTENSOR_R_32F);
+        auto                 dB = api.tensor(eb, {}, HIPTENSOR_R_32F);
+        auto                 dD = api.tensor(ed, {}, HIPTENSOR_R_32F);
+        float *              pA = nullptr, *pB = nullptr, *pD = nullptr;
+        ASSERT_EQ(hipMalloc(&pA, a.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pB, b.size() * 4), hipSuccess);
+        ASSERT_EQ(hipMalloc(&pD, M * N * 4), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pA, a.data(), a.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(pB, b.data(), b.size() * 4, hipMemcpyHostToDevice), hipSuccess);
+        bool const gemm = deviceArch() == "gfx950";
+        for(char const* recipe : {"native", "x9", "f64", "x6", "x4", "x3"})
+        {
+            ScopedEnv                      env("HIPTENSOR_ROCKE_F32_RECIPE", recipe);
+            LogCapture                     log;
+            hiptensorOperationDescriptor_t desc = nullptr;
+            ASSERT_EQ(hiptensorCreateContraction(api.handle,
+                                                 &desc,
+                                                 dA,
+                                                 ma.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dB,
+                                                 mb.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 nullptr,
+                                                 nullptr,
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dD,
+                                                 md.data(),
+                                                 HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+            api.keep(desc);
+            uint64_t     ws = 0;
+            SelectionLog sel;
+            auto         plan = planWith(api, desc, Choice{}, log, ws, &sel);
+            ASSERT_NE(plan, nullptr);
+            void* work = nullptr;
+            if(ws > 0)
+            {
+                ASSERT_EQ(hipMalloc(&work, ws), hipSuccess);
+            }
+            float  one = 1.0f, zero = 0.0f;
+            Stream stream;
+            ASSERT_EQ(hiptensorContract(
+                          api.handle, plan, &one, pA, pB, &zero, nullptr, pD, work, ws, stream.s),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << log.all();
+            ASSERT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            std::vector<float> d(M * N);
+            ASSERT_EQ(hipMemcpy(d.data(), pD, d.size() * 4, hipMemcpyDeviceToHost), hipSuccess);
+            if(work != nullptr)
+            {
+                static_cast<void>(hipFree(work));
+            }
+            std::string const r       = recipe;
+            bool const        ownGemm = r != "native" && r != "f64" && gemm;
+            int64_t           inexact = 0;
+            double            worst   = 0.0;
+            for(int64_t n = 0; n < N; n++)
+            {
+                for(int64_t m = 0; m < M; m++)
+                {
+                    double const exact = double(a[m * K]) * double(b[n * K]); // exact in double
+                    double const once  = double(float(exact));
+                    double const g     = double(d[m + n * M]);
+                    inexact += g != once;
+                    worst = std::max(worst, std::fabs(g - exact) / exact);
+                }
+            }
+            if(r == "native" || r == "f64" || !ownGemm)
+            {
+                // f32 products, f64 (or the f64 route standing in): one rounding
+                EXPECT_EQ(inexact, 0) << r << ": " << sel.pick;
+            }
+            else if(r == "x9" || r == "x6")
+            {
+                // the part products summed in f32 (x6: without the three smallest)
+                EXPECT_LE(worst, std::ldexp(1.0, -20)) << r << ": " << sel.pick;
+            }
+            else
+            {
+                // two bf16 parts: about 16 significant bits per operand
+                EXPECT_GT(inexact, 0) << r << ": " << sel.pick;
+                EXPECT_GT(worst, std::ldexp(1.0, -22)) << r << ": " << sel.pick;
+                EXPECT_LE(worst, std::ldexp(1.0, -14)) << r << ": " << sel.pick;
+            }
+        }
+        for(auto* p : {pA, pB, pD})
+        {
+            static_cast<void>(hipFree(p));
+        }
+    }
+
+    // An unknown recipe is the default (native), and the plan log says so.
+    TEST(RockeF32Recipes, UnknownRecipeIsNative)
+    {
+        RecipeCase   c{"x7", HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F, false, 4300};
+        LogCapture   outer;
+        SelectionLog sel;
+        runRecipe(c, Choice{}, &sel);
+        if(IsSkipped())
+        {
+            return;
+        }
+        bool const f32 = deviceArch() == "gfx950" || deviceArch() == "gfx942";
+        EXPECT_EQ(sel.pick.rfind("gett32:", 0) == 0, f32) << sel.pick;
+        EXPECT_TRUE(outer.contains("HIPTENSOR_ROCKE_F32_RECIPE=x7 is not one of")) << outer.all();
     }
 
     // ---------------------------------------------------------------------- mixed data types
@@ -2678,6 +3211,8 @@ namespace
         hiptensorOperator_t          opC     = HIPTENSOR_OP_IDENTITY;
         hiptensorOperator_t          opD     = HIPTENSOR_OP_IDENTITY;
         bool                         inPlace = false; // D is E's buffer
+        // extents of m, k, j, u, n (empty: drawn from the seed)
+        std::vector<int64_t> extents = {};
     };
 
     void runTrinary(TrinaryCase const& c,
@@ -2710,6 +3245,14 @@ namespace
         {
             ext['k'] = 48;
             ext['u'] = 6;
+        }
+        if(c.extents.size() == 5)
+        {
+            ext = {{'m', c.extents[0]},
+                   {'k', c.extents[1]},
+                   {'j', c.extents[2]},
+                   {'u', c.extents[3]},
+                   {'n', c.extents[4]}};
         }
         std::vector<int32_t> ma = {'m', 'k', 'j'}, mb = {'k', 'u'}, mc = {'u', 'j', 'n'},
                              me = {'m', 'n'};
@@ -2769,13 +3312,14 @@ namespace
         // the intermediate T needs workspace whatever the steps run on
         int64_t tCount = ext['m'] * ext['j'] * ext['u'];
         EXPECT_GE(workspaceSize, uint64_t(tCount) * sizeOf(c.type));
-        Device dev;
-        void*  pA = dev.upload(A);
-        void*  pB = dev.upload(B);
-        void*  pC = dev.upload(C);
-        void*  pE = dev.upload(E);
-        void*  pD = c.inPlace ? pE : (c.bilinear ? dev.upload(D) : nullptr);
-        void*  ws = nullptr;
+        DeviceScope onDevice(choice.device);
+        Device      dev;
+        void*       pA = dev.upload(A, choice.skew);
+        void*       pB = dev.upload(B, choice.skew);
+        void*       pC = dev.upload(C, choice.skew);
+        void*       pE = dev.upload(E, choice.skew);
+        void*       pD = c.inPlace ? pE : (c.bilinear ? dev.upload(D, choice.skew) : nullptr);
+        void*       ws = nullptr;
         if(workspaceSize > 0)
         {
             // NaN in every byte: nothing of the workspace's earlier contents may reach E
@@ -2897,7 +3441,9 @@ namespace
         runTrinary(GetParam());
     }
 
-    // Every candidate (a pair of a candidate of each step) computes the exact result.
+    // Every candidate (a pair of a candidate of each step) computes the exact result, with
+    // aligned buffers and with A, B, C, D and E one element past aligned addresses (the
+    // fallbacks of the steps' launches and programs).
     TEST_P(RockeTrinaryContraction, EveryCandidateExact)
     {
         auto const c = GetParam();
@@ -2905,28 +3451,33 @@ namespace
         {
             GTEST_SKIP() << "random data: covered by MatchesLoopReference";
         }
-        Choice all;
-        all.workspace = HIPTENSOR_WORKSPACE_MAX;
-        SelectionLog first;
-        runTrinary(c, all, &first);
-        if(HasFatalFailure() || IsSkipped())
+        for(size_t skew : {size_t(0), size_t(1)})
         {
-            return;
+            Choice all;
+            all.workspace = HIPTENSOR_WORKSPACE_MAX;
+            all.skew      = skew;
+            SelectionLog first;
+            runTrinary(c, all, &first);
+            if(HasFatalFailure() || IsSkipped())
+            {
+                return;
+            }
+            ASSERT_GE(first.candidates, 1);
+            EXPECT_EQ(first.pick.rfind("tri:", 0), 0u) << first.pick;
+            std::set<std::string> picks{first.pick};
+            for(int32_t r = 1; r < first.candidates; r++)
+            {
+                Choice choice = all;
+                choice.rank   = r;
+                SelectionLog s;
+                runTrinary(c, choice, &s);
+                ASSERT_FALSE(HasFailure())
+                    << "KERNEL_RANK " << r << " skew " << skew << ": " << s.pick;
+                EXPECT_EQ(s.candidates, first.candidates);
+                picks.insert(s.pick);
+            }
+            EXPECT_EQ(picks.size(), size_t(first.candidates));
         }
-        ASSERT_GE(first.candidates, 1);
-        EXPECT_EQ(first.pick.rfind("tri:", 0), 0u) << first.pick;
-        std::set<std::string> picks{first.pick};
-        for(int32_t r = 1; r < first.candidates; r++)
-        {
-            Choice choice = all;
-            choice.rank   = r;
-            SelectionLog s;
-            runTrinary(c, choice, &s);
-            ASSERT_FALSE(HasFailure()) << "KERNEL_RANK " << r << ": " << s.pick;
-            EXPECT_EQ(s.candidates, first.candidates);
-            picks.insert(s.pick);
-        }
-        EXPECT_EQ(picks.size(), size_t(first.candidates));
     }
 
     std::vector<TrinaryCase> trinaryCases()
@@ -3045,6 +3596,69 @@ namespace
         {
             static_cast<void>(hipFree(p));
         }
+    }
+
+    // Trinary contractions whose steps run tiled operand packs and epilogues (extents and strides
+    // that keep the tiled kernel's vectors aligned, on the emulated-f32 and 16-bit GEMM routes of
+    // gfx950): every candidate is exact with aligned buffers, with every buffer one element past
+    // an aligned address (each tiled launch then runs the generic launches it replaced, which
+    // address T in the workspace and the trinary's tensors exactly as the tiled launch does), and
+    // executed on another device of the same architecture than the plan was created on, when the
+    // machine has one.
+    TEST(RockeTrinary, TiledStepLaunches)
+    {
+        int const        other   = otherDevice();
+        std::vector<int> devices = {-1};
+        if(other >= 0)
+        {
+            devices.push_back(other);
+        }
+        bool tiled = false;
+        int  seed  = 4300;
+        for(auto [type, compute] : {std::pair{HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F},
+                                    std::pair{HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F}})
+        {
+            for(int layout = 0; layout < 3; layout++)
+            {
+                TrinaryCase c{type, compute, seed++, true, layout != 1};
+                c.extents = {32, 16, 16, 8, 32};
+                for(int device : devices)
+                {
+                    for(size_t skew : {size_t(0), size_t(1)})
+                    {
+                        for(int32_t rank = 0;; rank++)
+                        {
+                            Choice choice;
+                            choice.rank      = rank;
+                            choice.skew      = skew;
+                            choice.device    = device;
+                            choice.workspace = HIPTENSOR_WORKSPACE_MAX;
+                            SelectionLog sel;
+                            runTrinary(c, choice, &sel);
+                            if(IsSkipped())
+                            {
+                                return;
+                            }
+                            ASSERT_FALSE(HasFailure())
+                                << "seed " << c.seed << " KERNEL_RANK " << rank << " skew " << skew
+                                << " device " << device << ": " << sel.pick;
+                            tiled = tiled || sel.launches.find("ewt") != std::string::npos;
+                            if(rank + 1 >= sel.candidates)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // gfx950's GEMM routes run tiled packs and epilogues (other targets may too: the packs
+        // and epilogues of the f64 and native f32 routes)
+        if(deviceArch() == "gfx950")
+        {
+            EXPECT_TRUE(tiled);
+        }
+        RecordProperty("executed_on_another_device", other >= 0 ? 1 : 0);
     }
 
     // The intermediate T has E's data type: with f32 A and B and an f16 E, T = A * B is rounded
@@ -3314,12 +3928,14 @@ namespace
         hiptensorComputeDescriptor_t compute;
         int64_t                      M, N, K;
         bool                         bilinear;
+        char const*                  recipe = nullptr; // HIPTENSOR_ROCKE_F32_RECIPE
     };
 
     // D[m, n] = alpha * sum_k A[k, m] B[k, n] + beta * C[m, n], packed column-major, every
     // candidate; 512 sampled outputs against the loop reference (exact).
     void runHugeContraction(HugeContractionCase const& c)
     {
+        ScopedEnv  recipe("HIPTENSOR_ROCKE_F32_RECIPE", c.recipe);
         ApiObjects api;
         if(!api.supports(c.type))
         {
@@ -3536,16 +4152,22 @@ namespace
             // A of 2.15 GB: the 64-bit-address h16 body and the f64 route in row ranges
             HugeContractionCase{
                 HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 65536, 256, 16400, true},
-            // A of 2.16 GB: the 64-bit-address x6 body
+            // A of 2.16 GB: the native f32 GEMM in row ranges (and the f64 route)
             HugeContractionCase{
                 HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 33000, 64, 16384, true},
+            // the same with HIPTENSOR_ROCKE_F32_RECIPE=x6: the 64-bit-address x6 body
+            HugeContractionCase{
+                HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 33000, 64, 16384, true, "x6"},
             // D and C of 2.24 GB: the ring GETT's classes for D past 2^31 bytes (A packed), the
             // direct GETT with 64-bit offsets, the 64-bit-address h16 body
             HugeContractionCase{
                 HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 34000, 33000, 64, true},
-            // A of 2.68 GB: the 64-bit-address cf32 body
+            // A of 2.68 GB: the native complex f32 GEMM in row ranges
             HugeContractionCase{
                 HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 20480, 64, 16384, true},
+            // the same with HIPTENSOR_ROCKE_F32_RECIPE=x6: the 64-bit-address cf32 body
+            HugeContractionCase{
+                HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 20480, 64, 16384, true, "x6"},
             // D and C of more than 2^30 complex elements (8.6 GB): the complex elementwise
             // launches with 64-bit offsets (their 32-bit offsets index components)
             HugeContractionCase{
@@ -5065,7 +5687,8 @@ namespace
                                         double                       alphaRe,
                                         double                       betaRe,
                                         int64_t                      offset,
-                                        bool                         specials)
+                                        bool                         specials,
+                                        std::vector<std::string>*    launches = nullptr)
     {
         std::vector<std::string> picks;
         ApiObjects               probe;
@@ -5186,6 +5809,10 @@ namespace
             api.plans.push_back(plan);
             auto const sel = selectionOf(log);
             picks.push_back(sel.pick);
+            if(launches != nullptr)
+            {
+                launches->push_back(sel.launches);
+            }
             uint64_t required = 0;
             EXPECT_EQ(hiptensorPlanGetAttribute(api.handle,
                                                 plan,
@@ -5305,6 +5932,120 @@ namespace
         runInPlace(HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 2.0, -1.0, 1, false);
         runInPlace(HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 2.0, -1.0, 1, false);
     }
+    // The operand packs and the epilogue of the emulated-f32 GEMM route read their input along
+    // another mode than they write (A and B fastest along M and N, packed fastest along K; the
+    // result fastest along N, D along M): they run on the tiled elementwise kernel, with the
+    // generic launch as the fallback of buffers not aligned to its vectors. Every candidate is
+    // exact with aligned and unaligned buffers.
+    TEST(RockeInPlaceGett, TiledPackAndEpilogueLaunches)
+    {
+        // the emulated-f32 GEMM route (f32 data takes the native route by default)
+        ScopedEnv recipe("HIPTENSOR_ROCKE_F32_RECIPE", "x6");
+        for(int64_t offset : {int64_t(0), int64_t(1)})
+        {
+            std::vector<std::string> launches;
+            auto                     picks = runInPlace(
+                HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 2.0, -1.0, offset, false, &launches);
+            ASSERT_FALSE(HasFailure());
+            ASSERT_EQ(picks.size(), launches.size());
+            bool tiledGemm = false;
+            for(size_t i = 0; i < picks.size(); i++)
+            {
+                if(picks[i].rfind("gemm:", 0) == 0)
+                {
+                    // pack A, pack B, the GEMM, the epilogue
+                    EXPECT_EQ(launches[i].rfind("ewt+ewt+gemm+ewt", 0), 0u)
+                        << picks[i] << ": " << launches[i];
+                    tiledGemm = true;
+                }
+            }
+            // the GEMM routes are gfx950's
+            EXPECT_EQ(tiledGemm, deviceArch() == "gfx950");
+        }
+    }
+    // Plans executed on another device of the same architecture than the one they were created
+    // on: every candidate of a contraction with tiled packs and epilogues of many modes (the
+    // pack kernels load on the executing device; their generic fallbacks run only for unaligned
+    // buffers) and of a 16-bit contraction (every route of its data type), exact, aligned and
+    // not; with the JIT (HIPTENSOR_ROCKE_TEST_JIT=1) the specialized launches run the pack
+    // launches they replaced.
+    TEST(RockeInPlaceGett, OtherDevice)
+    {
+        int const other = otherDevice();
+        if(other < 0)
+        {
+            GTEST_SKIP() << "one device of this architecture";
+        }
+        ContractionCase many{HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 4100, true, true, false};
+        many.groupRank  = 6;
+        many.groupFirst = 4;
+        ContractionCase const half{
+            HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 1501, true, true, false};
+        for(auto const& c : {many, half})
+        {
+            for(size_t skew : {size_t(0), size_t(1)})
+            {
+                for(int32_t rank = 0;; rank++)
+                {
+                    Choice choice;
+                    choice.rank      = rank;
+                    choice.skew      = skew;
+                    choice.device    = other;
+                    choice.workspace = HIPTENSOR_WORKSPACE_MAX;
+                    SelectionLog sel;
+                    runContraction(c, choice, &sel);
+                    ASSERT_FALSE(HasFailure()) << "seed " << c.seed << " KERNEL_RANK " << rank
+                                               << " skew " << skew << ": " << sel.pick;
+                    if(rank + 1 >= sel.candidates)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Operands and D of 12 interleaved modes (6 per group, none merge): a pack or epilogue of the
+    // emulated-f32 GEMM route that the generic kernel needs several launches for (more modes than
+    // its slots) runs as one launch of the tiled kernel, with those launches as the fallback of
+    // buffers not aligned to its vectors. Every candidate is exact, aligned and not.
+    TEST(RockeInPlaceGett, TiledLaunchesOfManyModes)
+    {
+        // the emulated-f32 GEMM route (f32 data takes the native route by default)
+        ScopedEnv       recipe("HIPTENSOR_ROCKE_F32_RECIPE", "x6");
+        ContractionCase c{HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 4100, true, true, false};
+        c.groupRank  = 6;
+        c.groupFirst = 4;
+        for(size_t skew : {size_t(0), size_t(1)})
+        {
+            bool tiledGemm = false;
+            for(int32_t rank = 0;; rank++)
+            {
+                Choice choice;
+                choice.rank      = rank;
+                choice.skew      = skew;
+                choice.workspace = HIPTENSOR_WORKSPACE_MAX;
+                SelectionLog sel;
+                runContraction(c, choice, &sel);
+                ASSERT_FALSE(HasFailure()) << "KERNEL_RANK " << rank << " skew " << skew;
+                if(sel.pick.rfind("gemm:", 0) == 0)
+                {
+                    // one launch per operand pack and for the epilogue (the generic kernel
+                    // would need a launch per index of the modes past its slots)
+                    EXPECT_EQ(std::count(sel.launches.begin(), sel.launches.end(), '+'), 3)
+                        << sel.pick << ": " << sel.launches;
+                    EXPECT_NE(sel.launches.find("ewt"), std::string::npos) << sel.launches;
+                    tiledGemm = true;
+                }
+                if(rank + 1 >= sel.candidates)
+                {
+                    break;
+                }
+            }
+            EXPECT_EQ(tiledGemm, deviceArch() == "gfx950");
+        }
+    }
+
     // ---------------------------------------------------------------- tiled elementwise
 
     // An elementwise case for the tiled kernel: D[a, b, c, d] (mode a fastest) with input 0
@@ -5324,6 +6065,8 @@ namespace
         // false: input 0 laid out as D (the vector class of the generic kernel, not the tiled
         // kernel)
         bool transposed = true;
+        // extents of a (D's fastest mode) and b (input 0's fastest mode) and of the batch mode c
+        int64_t ea = 72, eb = 40, ec = 3;
     };
 
     // A packed tensor stored in `order` (fastest first), integer values in [-3, 3].
@@ -5367,7 +6110,7 @@ namespace
             return "";
         }
         LogCapture                        log;
-        std::map<int32_t, int64_t>        ext   = {{'a', 72}, {'b', 40}, {'c', 3}, {'d', 5}};
+        std::map<int32_t, int64_t>        ext   = {{'a', c.ea}, {'b', c.eb}, {'c', c.ec}, {'d', 5}};
         std::vector<int32_t>              modes = {'a', 'b', 'c', 'd'};
         std::vector<Tensor>               ins;
         std::vector<std::vector<int32_t>> orders
@@ -5546,6 +6289,48 @@ namespace
         });
         compare(got, want, bound, written, true, "tiled elementwise " + sel.pick);
         return sel.pick;
+    }
+
+    // Planes smaller than half a tile (16 x 16, 8 x 24): the folded tiled kernel (several planes
+    // of consecutive batch indices per tile, a batch count that is not a multiple of them), with
+    // aligned and unaligned buffers and an input whose scale is zero; exact.
+    TEST(RockeTiledElementwise, FoldedSmallPlanes)
+    {
+        struct Row
+        {
+            int                 arity;
+            hiptensorDataType_t in, out, scalar;
+        };
+        Row const rows[] = {{1, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                            {1, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                            {3, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F}};
+        int       seed   = 3100;
+        for(auto const& r : rows)
+        {
+            for(auto [ea, eb] : {std::pair<int64_t, int64_t>{16, 16}, {8, 24}})
+            {
+                for(size_t skew : {size_t(0), size_t(1)})
+                {
+                    TiledCase c{r.arity, r.in, r.out, r.scalar, seed++, 0, skew};
+                    c.ea      = ea;
+                    c.eb      = eb;
+                    c.ec      = 7;
+                    auto pick = runTiled(c);
+                    if(skew == 0)
+                    {
+                        EXPECT_EQ(pick.rfind("ewt:", 0), 0u) << pick;
+                        EXPECT_EQ(pick.substr(pick.size() - 2), "_f") << pick;
+                    }
+                }
+                TiledCase z{r.arity, r.in, r.out, r.scalar, seed++, 0, 0, r.arity - 1};
+                z.ea = ea;
+                z.eb = eb;
+                z.ec = 7;
+                runTiled(z);
+            }
+        }
     }
 
     // The tiled kernel (KERNEL_RANK 0) and the generic one (1) compute the same exact results for

@@ -13,7 +13,8 @@
 # kernel and the reduce kernel), on gfx950 / gfx942 / gfx90a.
 # _TUNED adds every TUNED_CONFIGS entry on a problem of its own shape class (the
 # configuration tuned_spec selects for it), so each shipped configuration is
-# compared as dispatch builds it.
+# compared as dispatch builds it. _F32_CONFIGS follow: the kernel with f32 /
+# complex-f32 words.
 #
 # The C cases are generated from these specs: `python gett_f64_emit.py
 # --c-cases` prints the body of make_spec() in gett_f64_emit.c.
@@ -482,6 +483,228 @@ _TUNED_PROBLEMS = {
 # Every shipped configuration, in a stable order.
 _TUNED = tuple(sorted(TUNED_CONFIGS))
 
+# f32 / complex-f32 words (problem dtype "f32"): the same kernel family with
+# the f32 atom (gfx950 / gfx942). Four-, two- and one-element loads (K runs of
+# 4k, 4k + 2 and odd), both load directions, complex with conjugation, the
+# padding and swizzle paths, one and two LDS stages, every schedule knob both
+# engines build, blocked K, runtime sizes and a tile only f32 accumulators fit.
+_F32_CONFIGS = (
+    # f0: A and B K-contiguous, K run of 4k (four-element loads along K).
+    (_gemm(256, 192, 100, (100, 1), (100, 1), (192, 1), dtype="f32"), {}, "gfx950"),
+    # f1: both M/N-contiguous (four-element loads along M / N), XCD remap.
+    (
+        _gemm(256, 256, 64, (1, 256), (1, 256), (256, 1), dtype="f32"),
+        dict(tile_m=64, tile_n=64, group_m=1, xcds=8),
+        "gfx950",
+    ),
+    # f2: complex, A conjugated.
+    (
+        _gemm(
+            96,
+            64,
+            36,
+            (36, 1),
+            (1, 64),
+            (64, 1),
+            complex_=True,
+            conj_a=True,
+            dtype="f32",
+        ),
+        dict(tile_m=64, tile_n=64),
+        "gfx950",
+    ),
+    # f3: complex, both conjugated, scale only, gfx942 K tile 8.
+    (
+        _gemm(
+            64,
+            64,
+            32,
+            (1, 64),
+            (32, 1),
+            (64, 1),
+            complex_=True,
+            conj_a=True,
+            conj_b=True,
+            dtype="f32",
+        ),
+        dict(tile_m=64, tile_n=64, tile_k=8, bilinear=False),
+        "gfx942",
+    ),
+    # f4: multi-digit; K digits (6, 8) do not split at 8.
+    (
+        dict(
+            M=84,
+            N=120,
+            K=48,
+            a_m=((14, 1), (6, 84)),
+            a_k=((6, 14), (8, 504)),
+            b_n=((12, 1), (10, 72)),
+            b_k=((6, 12), (8, 720)),
+            d_m=((14, 12), (6, 1680)),
+            d_n=((12, 1), (10, 168)),
+            dtype="f32",
+        ),
+        dict(tile_m=64, tile_n=64, tile_k=8),
+        "gfx942",
+    ),
+    # f5: batched, C with its own strides.
+    (
+        _gemm(
+            64,
+            48,
+            32,
+            (32, 1),
+            (1, 48),
+            (48, 1),
+            L=3,
+            a_l=((3, 2048),),
+            b_l=((3, 1536),),
+            d_l=((3, 3072),),
+            c_m=((64, 1),),
+            c_n=((48, 64),),
+            c_l=((3, 3072),),
+            dtype="f32",
+        ),
+        dict(tile_m=64, tile_n=64),
+        "gfx950",
+    ),
+    # f6: padding instead of swizzle, no prefetch, no fences, occupancy hint.
+    (
+        _gemm(256, 256, 64, (64, 1), (1, 256), (256, 1), dtype="f32"),
+        dict(lds_swizzle=False, prefetch=False, sched_fence=False, waves_per_eu=2),
+        "gfx950",
+    ),
+    # f7: 48-row tiles (pad path), explicit pad, K tile 8 on gfx942.
+    (
+        _gemm(200, 136, 68, (68, 1), (68, 1), (136, 1), dtype="f32"),
+        dict(tile_m=48, tile_n=64, warps_m=1, warps_n=2, tile_k=8, lds_pad=8),
+        "gfx942",
+    ),
+    # f8: K run of 4k + 2 (two-element loads), one LDS stage, 8 waves.
+    (
+        _gemm(256, 128, 98, (98, 1), (98, 1), (1, 256), dtype="f32"),
+        dict(lds_stages=1, tile_k=16, warps_m=4, warps_n=2, group_m=4),
+        "gfx942",
+    ),
+    # f9: odd K run (one-element loads along K), swizzle mode 1, one stage.
+    (
+        _gemm(128, 192, 97, (97, 1), (1, 128), (192, 1), dtype="f32"),
+        dict(lds_swizzle_mode=1, lds_stages=1, tile_k=16, tile_n=64),
+        "gfx950",
+    ),
+    # f10: swizzle mode 2, two stages, B along K.
+    (
+        _gemm(128, 128, 48, (1, 128), (48, 1), (1, 128), dtype="f32"),
+        dict(lds_swizzle_mode=2, tile_k=8, waves_per_eu=4),
+        "gfx942",
+    ),
+    # f11: prefetch two K tiles ahead, one stage.
+    (
+        _gemm(256, 128, 96, (96, 1), (1, 256), (1, 256), dtype="f32"),
+        dict(prefetch_depth=2, lds_stages=1, tile_k=16),
+        "gfx950",
+    ),
+    # f12: complex with four accumulators, both conjugated, prefetch depth 2.
+    (
+        _gemm(
+            64,
+            64,
+            40,
+            (40, 1),
+            (1, 64),
+            (1, 64),
+            complex_=True,
+            conj_a=True,
+            conj_b=True,
+            dtype="f32",
+        ),
+        dict(tile_m=64, tile_n=64, tile_k=8, complex_accs=4, prefetch_depth=2),
+        "gfx942",
+    ),
+    # f13: K loop unrolled by two tiles, odd tile count.
+    (
+        _gemm(128, 128, 80, (1, 128), (80, 1), (1, 128), dtype="f32"),
+        dict(unroll2=True, tile_k=16, lds_swizzle_mode=1),
+        "gfx950",
+    ),
+    # f14: K stagger with the unrolled loop.
+    (
+        _gemm(128, 128, 48, (1, 128), (1, 128), (1, 128), dtype="f32"),
+        dict(k_stagger=1, unroll2=True, tile_k=16),
+        "gfx942",
+    ),
+    # f15: blocked K accumulation, odd block count.
+    (
+        _gemm(256, 192, 200, (200, 1), (200, 1), (192, 1), dtype="f32"),
+        dict(k_block=3),
+        "gfx950",
+    ),
+    # f16: runtime sizes, both K-contiguous, four-element loads.
+    (
+        _gemm(256, 192, 100, (100, 1), (100, 1), (192, 1), dtype="f32"),
+        dict(runtime_sizes=True),
+        "gfx950",
+    ),
+    # f17: runtime sizes, odd M and K runs, XCD remap, groups, stagger, unroll2.
+    (
+        _gemm(255, 193, 99, (1, 255), (99, 1), (1, 255), dtype="f32"),
+        dict(runtime_sizes=True, xcds=8, group_m=16, k_stagger=1, unroll2=True),
+        "gfx942",
+    ),
+    # f18: runtime sizes, batched with C strides, blocked K, prefetch depth 2.
+    (
+        _gemm(
+            64,
+            48,
+            32,
+            (32, 1),
+            (1, 48),
+            (48, 1),
+            L=3,
+            a_l=((3, 2048),),
+            b_l=((3, 1536),),
+            d_l=((3, 3072),),
+            c_m=((64, 1),),
+            c_n=((48, 64),),
+            c_l=((3, 3072),),
+            dtype="f32",
+        ),
+        dict(
+            runtime_sizes=True,
+            tile_m=64,
+            tile_n=64,
+            group_m=1,
+            k_block=2,
+            prefetch_depth=2,
+            lds_stages=1,
+        ),
+        "gfx950",
+    ),
+    # f19: runtime sizes, complex, both conjugated, four accumulators.
+    (
+        _gemm(
+            96,
+            64,
+            40,
+            (40, 1),
+            (1, 64),
+            (1, 96),
+            complex_=True,
+            conj_a=True,
+            conj_b=True,
+            dtype="f32",
+        ),
+        dict(runtime_sizes=True, tile_m=64, tile_n=64, tile_k=8, complex_accs=4),
+        "gfx942",
+    ),
+    # f20: a 256 x 256 tile (only the f32 accumulators fit).
+    (
+        _gemm(512, 512, 64, (64, 1), (64, 1), (512, 1), dtype="f32"),
+        dict(tile_m=256, tile_n=256),
+        "gfx950",
+    ),
+)
+
 
 def _tuned_problem(key) -> GettF64Problem:
     M, N, K, layout = _TUNED_PROBLEMS[key]
@@ -507,6 +730,10 @@ def _entry(idx: int):
     if 0 <= j < len(_TUNED):
         spec, arch = _tuned_spec(_TUNED[j])
         return spec, arch, "gett"
+    j -= len(_TUNED)
+    if 0 <= j < len(_F32_CONFIGS):
+        prob, kw, arch = _F32_CONFIGS[j]
+        return GettF64Spec(GettF64Problem(**prob), **kw), arch, "gett"
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -524,7 +751,11 @@ def _build(sel, arch):
 
 def all_specs():
     """Every (spec, arch) the family compares, in index order."""
-    return [_entry(i)[:2] for i in range(len(_CONFIGS) + len(_TUNED))]
+    return [_entry(i)[:2] for i in range(_count())]
+
+
+def _count() -> int:
+    return len(_CONFIGS) + len(_TUNED) + len(_F32_CONFIGS)
 
 
 def _c_digits(d) -> str:
@@ -539,7 +770,7 @@ def c_cases() -> str:
     """The switch cases of make_spec() in gett_f64_emit.c."""
     out = []
     b = lambda v: "true" if v else "false"  # noqa: E731
-    for i in range(len(_CONFIGS) + len(_TUNED)):
+    for i in range(_count()):
         s, arch, which = _entry(i)
         p = s.problem
         lines = [f"    case {i}:", "        memset(&p, 0, sizeof p);"]
@@ -555,6 +786,10 @@ def c_cases() -> str:
             f"        p.complex_ = {b(p.complex_)};",
             f"        p.conj_a = {b(p.conj_a)};",
             f"        p.conj_b = {b(p.conj_b)};",
+        ]
+        if p.dtype == "f32":
+            lines.append("        p.f32 = true;")
+        lines += [
             "        *s = rocke_gett_f64_spec_default(&p);",
         ]
         for name in (

@@ -1,41 +1,27 @@
 #!/usr/bin/env python3
-###############################################################################
-#
-# MIT License
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-###############################################################################
-"""Builds the rocKE kernel pack of hipTensor's rocKE backend.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Builds the rocKE kernel pack of hipTensor's rocKE backend with rocKE's Python engine.
 
-Runs at hipTensor build time only (HIPTENSOR_ENABLE_ROCKE_BACKEND=ON). It imports rocKE from a
-source tree, builds the shape-generic kernels the backend launches, compiles them with the COMGR
-library rocKE loads, reads every kernel's argument layout from its code object metadata and
-writes one pack per GPU target:
+The Python reference of hipTensor's C++ pack builder (hipTensor's
+library/src/backends/rocke/pack/rocke_pack_builder.cpp, which hipTensor's build runs; the build
+needs no Python). Both write the same packs for the same rocKE sources: only the two header
+strings that name the toolchain (compiler id, rocKE version) differ unless the C++ builder is
+given this script's strings (--compiler-id, --rocke-version).
+library/tests/test_hiptensor_pack_cross_check.py asserts that equality; hipTensor's build never
+runs this script.
+
+It imports rocKE from a source tree (by default the one this file belongs to), builds the
+shape-generic kernels the backend launches, compiles them with the COMGR library rocKE loads,
+reads every kernel's argument layout from its code object metadata and writes one pack per GPU
+target:
 
     <out>/<arch>/rocke.htpk          binary pack: header, kernel table, argument and attribute
                                      tables, route table, string table, code objects
     <out>/<arch>/rocke.index.json    the same index as JSON (tooling only, never read at run time)
 
-hipTensor's C++ runtime reads the binary pack (rocke_pack.cpp); it never needs Python.
+hipTensor's C++ runtime reads the binary pack (rocke_runtime.cpp, rocke_pack_format.cpp); it
+never needs Python.
 
 Kernel families (attribute "family"):
 
@@ -43,9 +29,13 @@ Kernel families (attribute "family"):
              operand packing and epilogue); attribute math=1: the rows that also implement the
              trigonometric and hyperbolic operators, their inverses, ceil and floor
     reduce   strided reduction kernels (row, col) and the split finalize kernel (math as for ew)
-    gemm     universal GEMM bodies with an f32 output (routes h16: f16 / bf16 operands,
-             x6: f32 operands split into three bf16 parts, cf32: complex f32 operands)
+    gemm     universal GEMM bodies with an f32 output (routes h16: f16 / bf16 operands;
+             x3 / x4 / x6 / x9: f32 operands split into bf16 parts, the recipes of
+             rocke.instances.common.gemm_prologue; cf32 (x6) and cf32x3 / cf32x4 / cf32x9:
+             complex f32 operands)
     gett64   f64 / complex f64 strided batched GEMM with runtime sizes
+    gett32   the same strided GEMM with f32 / complex f32 words (f32 products, f32
+             accumulation): the native route of f32 contractions
     gett     the launches of rocKE's tuned GETT route table (f16 / bf16 contractions of fixed
              shapes): pack kernels and the GETT kernel, with a launch record per problem
     rgett    rocKE's ring GETT body (f16 / bf16 contractions on gfx950) with its index maps as
@@ -61,13 +51,9 @@ Kernel families (attribute "family"):
              are fastest along another mode than the output (an LDS tile per transposed input,
              16-byte vectors on both sides; kernels.common.hiptensor_aot.ewt)
 
-With --jit-recipes it also writes the recipes of the backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT):
-
-    <out>/rocke.recipes              one parametric rocKE recipe (CBOR, rocke.recipe/v1) per
-                                     problem-specialized elementwise kernel class
-                                     (kernels.common.hiptensor_aot.jit_ew), rolled over every
-                                     geometry constant; every pack's route table records the
-                                     file's SHA-256 (jit.recipes.sha256)
+The backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT) needs nothing from this script: hipTensor builds
+the problem-specialized kernels (kernels.common.hiptensor_aot.jit_ew) at run time with their C++
+twins, which it links.
 
 The route table carries the tuning constants of rocKE's body rules and, per tuned GETT problem,
 ``gett.tuned.<hash>`` (the launch record) and ``gett.tuned.<hash>.key`` (the canonical problem,
@@ -76,9 +62,9 @@ of the target, ``select.model.<cell>`` (``<dir>/<arch>/<cell>.model``, written b
 training flow; see rocke_select.hpp for the format).
 
 Usage:
-    make_rocke_pack.py --rocke-src DIR --arch gfx950 [--arch gfx942] --out DIR
-                        [--jobs N] [--cache-dir DIR] [--compile-timeout S]
-                        [--select-models DIR] [--jit-recipes]
+    make_rocke_pack.py --arch gfx950 [--arch gfx942] --out DIR [--rocke-src DIR]
+                        [--jobs N] [--cache-dir DIR] [--compile-timeout S] [--num-cus N]
+                        [--select-models DIR] [--only REGEX]
 """
 
 import argparse
@@ -91,7 +77,8 @@ import struct
 import sys
 import time
 
-# Must match hiptensor::rockebackend::kKernelAbi and the reader in rocke_pack.cpp.
+# Must match hiptensor::rockebackend::kKernelAbi and hipTensor's pack reader and writer
+# (rocke_runtime.cpp, pack/rocke_pack_format.cpp).
 KERNEL_ABI = 1
 PACK_FORMAT_VERSION = 1
 PACK_MIN_READER = 1
@@ -106,11 +93,6 @@ ROUTE_RECORD_SIZE = 8
 ARG_KIND_POINTER = 0
 ARG_KIND_VALUE = 1
 
-# Must match the reader in rocke_jit.cpp.
-RECIPES_MAGIC = b"HTJITRC\0"
-RECIPES_FORMAT_VERSION = 1
-RECIPES_MIN_READER = 1
-RECIPES_HEADER_SIZE = 40
 ATTR_KIND_INT = 0
 ATTR_KIND_STRING = 1
 
@@ -124,6 +106,12 @@ def _scrub_env():
         if k.startswith(_SCRUB_PREFIXES):
             del os.environ[k]
     os.environ["ROCKE_BACKEND"] = "python"
+
+
+# rocke/library/builders/hiptensor/make_rocke_pack.py -> rocke
+_DEFAULT_ROCKE_SRC = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 
 def _setup_paths(src):
@@ -182,7 +170,7 @@ EW_ROWS_C2 = [("f32", "f32", "f32"), ("f64", "f64", "f64"), ("f64", "f32", "f32"
 # the pack step (to f16 / bf16 for the 16-bit compute types: one rounding to nearest even from
 # any type) and the epilogue rows of every C / D type pair, after an f32 (GEMM routes) or an
 # f64 (F64 route) result. Kernels of the pack only: the JIT keeps their launches on the pack
-# kernel (no recipe classes).
+# kernel (no JIT classes).
 _REAL = ("f16", "bf16", "f32", "f64")
 EW_ROWS_1_MIXED = [
     (a, d) for d in ("f16", "bf16") for a in _REAL if (a, d) not in EW_ROWS_1
@@ -208,12 +196,22 @@ GEMM_BODIES = {
     "h16": ("RIW", "RIW_SK", "C3", "Q3_SK"),
     "x6": ("RIW", "RIW_SK", "C3"),
     "cf32": ("RIW", "RIW_SK", "Q3_SK"),
+    # the other f32 recipes (HIPTENSOR_ROCKE_F32_RECIPE), on the bodies of x6 / cf32
+    "x3": ("RIW", "RIW_SK", "C3"),
+    "x4": ("RIW", "RIW_SK", "C3"),
+    "x9": ("RIW", "RIW_SK", "C3"),
+    "cf32x3": ("RIW", "RIW_SK", "Q3_SK"),
+    "cf32x4": ("RIW", "RIW_SK", "Q3_SK"),
+    "cf32x9": ("RIW", "RIW_SK", "Q3_SK"),
 }
 GEMM_ARCHES = ("gfx950",)
 # The body of the 64-bit-address GEMM kernels (rocke.dispatch.gemm.cf32 picks it for operands
 # past the DMA buffer range: 64-bit tile origins need the non-persistent grid).
 GEMM_WIDE_BODY = "RIW"
 GETT64_CLASS_ARCHES = ("gfx90a", "gfx942", "gfx950")
+# The native f32 strided GEMM (gett32): the pack targets whose MMA catalog has the f32 atom, with
+# the shape classes of the f64 GEMM's tuned configurations.
+GETT32_CLASS_ARCHES = ("gfx942", "gfx950")
 # The direct GETT (every target with MFMA) and the ring GETT classes (gfx950: ds_read_b64_tr_b16).
 DGETT_ARCHES = ("gfx90a", "gfx942", "gfx950")
 RGETT_ARCHES = ("gfx950",)
@@ -267,6 +265,14 @@ def rocke_features():
     except (ImportError, AttributeError) as e:
         out["gett64"] = f"no runtime-size f64 GETT ({e})"
     try:
+        from rocke.instances.common import gett_f64 as g
+
+        for name in ("GETT_DTYPES", "f32_atom", "runtime_template", "TUNED_CONFIGS"):
+            getattr(g, name)
+        out["gett32"] = ""
+    except (ImportError, AttributeError) as e:
+        out["gett32"] = f"no f32 GETT ({e})"
+    try:
         from kernels.common.hiptensor_aot import dgett
 
         for name in ("DgettSpec", "build_dgett", "dgett_config", "DGETT_ABI"):
@@ -293,11 +299,11 @@ def rocke_features():
     try:
         from kernels.common.hiptensor_aot import jit_ew
 
-        for name in ("EwJitSpec", "jit_classes", "roll_jit_ew", "EW_JIT_ABI"):
+        for name in ("EwJitSpec", "jit_classes", "EW_JIT_ABI"):
             getattr(jit_ew, name)
         out["jit"] = ""
     except (ImportError, AttributeError) as e:
-        out["jit"] = f"no JIT recipes of the elementwise kernel ({e})"
+        out["jit"] = f"no vector classes of the elementwise kernel ({e})"
     return out
 
 
@@ -341,12 +347,12 @@ def kernel_descriptors(arch, num_cus):
         for p in ew_params(False, mixed=False):
             if p.get("cplx") or p.get("math"):
                 continue
-            out.append(
-                (
-                    "ewt",
-                    {k: v for k, v in p.items() if k in ("arity", "a", "b", "c", "d")},
-                )
-            )
+            # and their folded classes (several small planes per tile)
+            for fold in (False, True):
+                q = {k: v for k, v in p.items() if k in ("arity", "a", "b", "c", "d")}
+                if fold:
+                    q["fold"] = True
+                out.append(("ewt", q))
     if not features["jit"]:
         # the vector classes of the same rows (every combination of vector / gathered inputs)
         from kernels.common.hiptensor_aot.ew import EwSpec
@@ -414,7 +420,12 @@ def kernel_descriptors(arch, num_cus):
         from kernels.common.hiptensor_aot.rgett import rgett_classes
 
         out.extend(("rgett", asdict(c)) for c in rgett_classes())
-    if arch in GETT64_CLASS_ARCHES and not features["gett64"]:
+    for family, arches in (
+        ("gett64", GETT64_CLASS_ARCHES),
+        ("gett32", GETT32_CLASS_ARCHES),
+    ):
+        if arch not in arches or features[family]:
+            continue
         from rocke.instances.common.gett_f64 import TUNED_CONFIGS
 
         for cplx in (False, True):
@@ -428,7 +439,7 @@ def kernel_descriptors(arch, num_cus):
                         for kblock in (False, True):
                             out.append(
                                 (
-                                    "gett64",
+                                    family,
                                     dict(
                                         cplx=cplx,
                                         cls=cls,
@@ -478,12 +489,15 @@ def _gemm_spec(params, arch):
     if route == "h16":
         pro = Prologue(src="same", recipe="cvt", out_f32=True)
     else:
+        # real routes name their recipe; complex routes are cf32 (x6) or cf32<recipe>
+        cplx = route.startswith("cf32")
+        recipe = (route[len("cf32") :] or "x6") if cplx else route
         pro = Prologue(
             src="f32",
-            recipe="x6",
+            recipe=recipe,
             out_f32=True,
             split_at="use",
-            cplx_b=(route == "cf32"),
+            cplx_b=cplx,
             psub=True,
         )
     attach_prologue(spec, pro)
@@ -491,7 +505,8 @@ def _gemm_spec(params, arch):
     return spec, "ok"
 
 
-def _gett64_spec(params, arch, num_cus):
+def _gett64_spec(params, arch, num_cus, dtype="f64"):
+    """The spec of a gett64 (``dtype`` "f64") or gett32 (``dtype`` "f32") descriptor."""
     from dataclasses import replace
 
     from rocke.instances.common.gett_f64 import (
@@ -518,6 +533,7 @@ def _gett64_spec(params, arch, num_cus):
         batch=L,
         batch_strides=(M * K, N * K, 4 * M * N),
         complex_=cplx,
+        dtype=dtype,
     )
     kind = "complex" if cplx else "real"
     cfg = (
@@ -526,6 +542,8 @@ def _gett64_spec(params, arch, num_cus):
         else dict(TUNED_CONFIGS[(arch, kind, params["cls"])])
     )
     cfg.pop("split_k", None)
+    if dtype == "f32":
+        cfg["name"] = "rocke_gett"
     spec = arch_spec(
         prob, arch, bilinear=bool(params["bilinear"]), runtime_sizes=True, **cfg
     )
@@ -795,8 +813,11 @@ def build_kernel(family, params, arch, num_cus):
             block=et.THREADS,
             tile_o=et.TILE_O,
             tile_t=spec.tile_t(),
-            # capability: batch digit slots, i32 element offsets
+            fold=int(spec.fold),
+            # capability: batch digit slots, i32 element offsets; folded: planes per tile (the
+            # LDS table of batch offsets)
             slots_b=et.SLOTS_B,
+            max_planes=et.THREADS,
             limit_index=(1 << 31) - 1,
         )
         return et.build_ewt(spec), attrs
@@ -863,16 +884,17 @@ def build_kernel(family, params, arch, num_cus):
             limit_grid_yz=65535,
         )
         return rg.build_rgett(spec, arch=arch), attrs
-    if family == "gett64":
+    if family in ("gett64", "gett32"):
         from rocke.instances.common import gett_f64 as g64
         from rocke.instances.common.gett_f64 import build_gett_f64
 
-        spec, why = _gett64_spec(params, arch, num_cus)
+        f32 = family == "gett32"
+        spec, why = _gett64_spec(params, arch, num_cus, "f32" if f32 else "f64")
         if spec is None:
             return None, why
         attrs = dict(
-            family="gett64",
-            abi="rocke-gett-f64/v2",
+            family=family,
+            abi="rocke-gett-f32/v1" if f32 else "rocke-gett-f64/v2",
             cplx=int(params["cplx"]),
             cls=params["cls"],
             dclass=params["dclass"],
@@ -1110,164 +1132,6 @@ def _md_subset(md):
 
 
 # ------------------------------------------------------------------------------------------------
-# JIT recipes
-# ------------------------------------------------------------------------------------------------
-
-
-def jit_class_params():
-    """The JIT kernel classes of every generic elementwise row: picklable (base, vec, unit)."""
-    from kernels.common.hiptensor_aot.ew import EwSpec
-    from kernels.common.hiptensor_aot.jit_ew import jit_classes
-
-    # the math rows (one vec-1 class each) only with 32-bit offsets: their recipes carry the
-    # f64 programs of every math operator per input, and a launch of the 64-bit-offset math
-    # rows keeps its kernel-pack kernel
-    bases = [
-        EwSpec(**p)
-        for idx64 in (False, True)
-        for p in ew_params(idx64, mixed=False)
-        if not (idx64 and p.get("math"))
-    ]
-    return [(dict(c.base.__dict__), c.vec, tuple(c.unit)) for c in jit_classes(bases)]
-
-
-def _recipe_source_hash(src):
-    """What a rolled recipe depends on: the kernel builders, the IR builder and the roller."""
-    h = hashlib.sha256()
-    for sub in (
-        "library/kernels/common/hiptensor_aot",
-        "platform/python/rocke/portable_ir/src",
-        "platform/python/rocke/portable_ir/utils",
-    ):
-        d = os.path.join(src, sub)
-        for root, _dirs, files in sorted(os.walk(d)):
-            for fn in sorted(files):
-                if fn.endswith(".py"):
-                    with open(os.path.join(root, fn), "rb") as f:
-                        h.update(fn.encode() + f.read().replace(b"\r\n", b"\n"))
-    for name in ("core/ir.py", "helpers/elementary.py"):
-        path = os.path.join(src, "platform/python/rocke", name)
-        if os.path.isfile(path):
-            with open(path, "rb") as f:
-                h.update(f.read().replace(b"\r\n", b"\n"))
-    return h.hexdigest()
-
-
-def _roll_one(job):
-    """Rolls one JIT class into a recipe (CBOR). Returns a result dict (never raises)."""
-    base, vec, unit, cache_dir, source_hash = job
-    t0 = time.time()
-    try:
-        from kernels.common.hiptensor_aot.ew import EwSpec
-        from kernels.common.hiptensor_aot.jit_ew import (
-            EW_JIT_ABI,
-            EwJitSpec,
-            roll_jit_ew,
-        )
-        from rocke.portable_ir.src import abi as recipe_abi
-        from rocke.portable_ir.src.recipe_bundle import cbor_decode, cbor_encode
-
-        spec = EwJitSpec(EwSpec(**base), vec, tuple(unit))
-        key = spec.key()
-        axes = [name for name, _ in spec.axes()]
-        cached = None
-        if cache_dir:
-            digest = hashlib.sha256((source_hash + "|" + key).encode()).hexdigest()
-            cached = os.path.join(cache_dir, "jit-" + digest + ".cbor")
-        blob = None
-        if cached and os.path.isfile(cached):
-            with open(cached, "rb") as f:
-                blob = f.read()
-        if blob is None:
-            recipe = recipe_abi.stamp(roll_jit_ew(spec))
-            blob = cbor_encode(recipe)
-            if cached:
-                tmp = cached + f".{os.getpid()}.tmp"
-                with open(tmp, "wb") as f:
-                    f.write(blob)
-                os.replace(tmp, cached)
-        need = recipe_abi.recipe_min_reader(cbor_decode(blob))
-        return dict(
-            status="ok",
-            key=key,
-            family=EW_JIT_ABI,
-            axes=axes,
-            cbor=blob,
-            min_reader=need,
-            seconds=time.time() - t0,
-        )
-    except Exception as e:  # noqa: BLE001 - reported by the caller
-        import traceback
-
-        return dict(
-            status="error",
-            reason=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
-            key=str(base),
-        )
-
-
-def write_recipes(path, entries):
-    """Writes rocke.recipes: header, table (key, family, axes, offset, size, SHA-256), CBOR
-    recipes. Returns the file's SHA-256 and size."""
-
-    def s(text):
-        b = text.encode()
-        return struct.pack("<I", len(b)) + b
-
-    table = bytearray()
-    data = bytearray()
-    for e in entries:
-        table += s(e["key"]) + s(e["family"]) + struct.pack("<I", len(e["axes"]))
-        for a in e["axes"]:
-            table += s(a)
-        table += struct.pack("<QQ", len(data), len(e["cbor"]))
-        table += hashlib.sha256(e["cbor"]).digest()
-        data += e["cbor"]
-    need = max([1] + [e["min_reader"] for e in entries])
-    data_off = RECIPES_HEADER_SIZE + len(table)
-    out = bytearray(RECIPES_MAGIC)
-    out += struct.pack(
-        "<IIII", RECIPES_FORMAT_VERSION, RECIPES_MIN_READER, len(entries), need
-    )
-    out += struct.pack("<QQ", RECIPES_HEADER_SIZE, data_off)
-    assert len(out) == RECIPES_HEADER_SIZE
-    out += table + data
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(out)
-    os.replace(tmp, path)
-    return hashlib.sha256(out).hexdigest(), len(out)
-
-
-def build_recipes(src, out_dir, jobs, cache_dir):
-    """Rolls every JIT class in a process pool and writes <out_dir>/rocke.recipes. Returns
-    (sha256, count); exits on a class that does not roll."""
-    t0 = time.time()
-    source_hash = _recipe_source_hash(src)
-    work = [(b, v, u, cache_dir, source_hash) for b, v, u in jit_class_params()]
-    ctx = multiprocessing.get_context("spawn")
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=jobs, mp_context=ctx, initializer=_worker_init, initargs=(src,)
-    ) as pool:
-        results = list(pool.map(_roll_one, work))
-    errors = [r for r in results if r["status"] != "ok"]
-    for r in errors:
-        print(f"rocKE pack ERROR recipe {r['key']}: {r['reason']}", file=sys.stderr)
-    if errors:
-        raise SystemExit(2)
-    entries = sorted(results, key=lambda r: r["key"])
-    sha, size = write_recipes(os.path.join(out_dir, "rocke.recipes"), entries)
-    secs = sum(r["seconds"] for r in results)
-    print(
-        f"rocKE pack: {len(entries)} JIT recipes, {size} bytes, sha256 {sha[:16]}, "
-        f"{secs:.0f} CPU-s, wall {time.time() - t0:.0f} s",
-        flush=True,
-    )
-    return sha, len(entries)
-
-
-# ------------------------------------------------------------------------------------------------
 # Pack writer
 # ------------------------------------------------------------------------------------------------
 
@@ -1500,8 +1364,12 @@ def select_models(model_dir, arch):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--rocke-src", required=True)
-    ap.add_argument("--arch", action="append", required=True)
+    ap.add_argument(
+        "--rocke-src",
+        default=_DEFAULT_ROCKE_SRC,
+        help="rocKE source tree (default: the tree of this script)",
+    )
+    ap.add_argument("--arch", action="append", default=[])
     ap.add_argument("--out", required=True)
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--cache-dir", default="")
@@ -1517,12 +1385,9 @@ def main(argv=None):
         default="",
         help="directory of kernel selection models (<dir>/<arch>/<cell>.model)",
     )
-    ap.add_argument(
-        "--jit-recipes",
-        action="store_true",
-        help="also write the JIT recipes (<out>/rocke.recipes)",
-    )
     a = ap.parse_args(argv)
+    if not a.arch:
+        ap.error("--arch is required")
 
     src = os.path.abspath(a.rocke_src)
     _scrub_env()
@@ -1544,18 +1409,6 @@ def main(argv=None):
             print(
                 f"rocKE pack WARNING: family {family} not built: {missing}", flush=True
             )
-
-    jit_routes = {}
-    if a.jit_recipes:
-        missing = rocke_features()["jit"]
-        if missing:
-            # an older rocKE tree: an empty recipe file, so the JIT declines every launch
-            print(f"rocKE pack WARNING: no JIT recipes: {missing}", flush=True)
-            sha, _ = write_recipes(os.path.join(a.out, "rocke.recipes"), [])
-            count = 0
-        else:
-            sha, count = build_recipes(src, a.out, jobs, a.cache_dir)
-        jit_routes = {"jit.recipes.sha256": sha, "jit.recipes.count": str(count)}
 
     status = 0
     for arch in a.arch:
@@ -1620,7 +1473,6 @@ def main(argv=None):
         kernels = sorted(names.values(), key=lambda r: r["name"])
         routes = routes_for(arch, num_cus)
         routes.update(extra_routes)
-        routes.update(jit_routes)
         models = select_models(a.select_models, arch)
         routes.update(models)
         pack_id, size = write_pack(

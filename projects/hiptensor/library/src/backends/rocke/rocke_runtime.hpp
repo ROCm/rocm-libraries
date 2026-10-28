@@ -27,7 +27,7 @@
 // The Python-free runtime of the rocKE backend: the kernel pack reader, the code object loader
 // and the launch program a plan holds.
 //
-// A kernel pack (rocke.htpk, written by pack/make_rocke_pack.py at build time) holds the code
+// A kernel pack (rocke.htpk, written by pack/rocke_pack_builder.cpp at build time) holds the code
 // objects of one GPU target, the argument layout of every kernel (read from the code object
 // metadata), kernel attributes the planner selects by, and a route table of tuning constants.
 // The runtime maps a pack once per target, loads a code object with hipModuleLoadData the first
@@ -213,10 +213,14 @@ namespace hiptensor
             };
             std::vector<PointerPatch> pointers;
             std::vector<ScalarPatch>  scalars;
-            // A specialized (JIT) launch: the pack launch it replaces, which execution takes when
-            // a pointer misses its alignment or the plan runs on another device than the one it
-            // was created on.
-            std::shared_ptr<LaunchStep const> fallback;
+            // The launches this one replaces (a specialized JIT launch: the pack launch; a tiled
+            // pack or epilogue of a contraction: the generic launches, one per piece), which
+            // execution takes instead when a pointer misses its alignment, or, for a launch whose
+            // code exists only on the device the plan was created on (`deviceBound`: a JIT
+            // kernel), when the plan runs on another device. A program that moves a launch's
+            // buffers (the steps of a trinary contraction) moves its fallback's the same way.
+            std::shared_ptr<std::vector<LaunchStep> const> fallback;
+            bool                                           deviceBound = false;
         };
 
         // Zero-fills a strided region of the workspace (padding of packed contraction operands,

@@ -30,17 +30,19 @@
 // elementwise kernel (permutations, elementwise binary / trinary operations, the operand packing
 // and epilogues of contractions) by kernels specialized to the problem: every size, stride and
 // operator code a constant, and vector accesses along the output's fastest mode where the layout
-// allows them. A specialized kernel comes from a recipe (rocke.recipes, recorded from the rocKE
-// builder at build time) that the rocKE recipe VM replays for the problem's values; it is lowered
-// to LLVM IR for the linked compiler's flavor and compiled with COMGR (rocke_comgr.hpp). No Python
-// runs. Plans created with HIPTENSOR_JIT_MODE_NONE never reach this code.
+// allows them. A specialized kernel is built for the problem's values by rocKE's C++ kernel
+// builder (rocke/instance_hiptensor_aot.h, the twin of rocKE's jit_ew.py, linked into the
+// library), lowered to LLVM IR for the linked compiler's flavor and compiled with COMGR
+// (rocke_comgr.hpp). No Python runs, and the JIT needs no data file of its own. Plans created with
+// HIPTENSOR_JIT_MODE_NONE never reach this code.
 //
 // Kernel cache: process-wide, content addressed. An entry's identity is the SHA-256 of (ISA, the
-// SHA-256 of the LLVM IR, compile options, fresh-process flag, compiler id); the recipe key and
-// its values (the spec key) are aliases that find it without replaying the recipe. The cache
-// files (hiptensorWriteKernelCacheToFile / hiptensorReadKernelCacheFromFile) hold the entries of
-// one device class (architecture, target features, compute unit count, partition modes); reading
-// merges, writing overwrites. Entries compiled by another compiler are kept but not served.
+// SHA-256 of the LLVM IR, compile options, fresh-process flag, compiler id); the kernel class, the
+// rocKE engine build and the values (the spec key) are aliases that find it without building the
+// kernel. The cache files (hiptensorWriteKernelCacheToFile / hiptensorReadKernelCacheFromFile)
+// hold the entries of one device class (architecture, target features, compute unit count,
+// partition modes); reading merges, writing overwrites. Entries compiled by another compiler are
+// kept but not served.
 
 #ifndef HIPTENSOR_BACKENDS_ROCKE_ROCKE_JIT_HPP
 #define HIPTENSOR_BACKENDS_ROCKE_ROCKE_JIT_HPP
@@ -75,7 +77,6 @@ namespace hiptensor
         // kernel. Every specialized launch keeps its pack launch as the fallback execution takes
         // when a buffer is not aligned for the vector accesses, or on another device.
         void specializeProgram(Program&                  program,
-                               Pack const&               pack,
                                backend::DeviceKey const& device,
                                JitReport&                report);
 

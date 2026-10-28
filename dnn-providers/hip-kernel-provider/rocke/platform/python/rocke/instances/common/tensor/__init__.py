@@ -4,7 +4,8 @@
 
 * :mod:`.gett` -- native GETT: one launch reads both operands in place
   through per-mode strides and writes D through a permuted alpha / beta
-  epilogue (gfx950, f16 / bf16; Python engine only).
+  epilogue (gfx950, f16 / bf16; the ring and MN-layout bodies are mirrored by the C++
+  engine, ``rocke/instance_tensor_gett.h``).
 * :mod:`.gett_plan` -- the host-side planner (mode orders, K split, mixed-radix
   row / column digits).
 """

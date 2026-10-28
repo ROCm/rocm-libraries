@@ -51,9 +51,11 @@ activations (`gelu_tanh`, `quick_gelu`, `silu` / `swish`, `swiglu`, `geglu`):
 | Instance | gfx90a | gfx942 | gfx950 |
 |---|:--:|:--:|:--:|
 | `gett_f64` (real and interleaved complex) | ✅ | ✅ | ✅ |
+| `gett_f64` with f32 words (`dtype="f32"`, real and interleaved complex) | ❌ | ✅ | ✅ |
 
 `v_mfma_f64_16x16x4_f64`, f64 accumulator, every operand read through its own
-strides; see `dsl_docs/instances/gett_f64.md`.
+strides (f32 words: `v_mfma_f32_16x16x4_f32`, f32 accumulator; gfx90a's
+catalog has no f32 atom); see `dsl_docs/instances/gett_f64.md`.
 
 ## f16 / bf16 tensor contraction (native GETT)
 
@@ -64,7 +66,9 @@ strides; see `dsl_docs/instances/gett_f64.md`.
 One launch reads both operands in place through their mode strides and writes the
 permuted D; gfx950 only (`ds_read_b64_tr_b16`). Operands need an even fastest free
 run (16-byte DTL lanes when it is a multiple of 8, else 4-byte lanes); batch /
-Hadamard modes are not supported. Python engine only.
+Hadamard modes are not supported. Both engines build the ring and MN-layout bodies and the
+tuned route table's launches (`cpp/instances/common/tensor_gett_*.cpp`); the K-contiguous
+bodies, the pack hybrid and the tuning flow are Python engine only.
 
 ---
 

@@ -32,7 +32,7 @@ must span less than 2^31 bytes, each operand less than the DMA buffer range.
 
 Kernel ABI ``hiptensor-aot-rgett/v1``: ``A, B, C`` (D, the output), ``M, N, K``, ``alpha``
 [``Cin, beta``], then the geometry. Launch: grid ``(ceil(N / 256), ceil(M / 256), 1)``, block
-256. Python engine only.
+256. Mirrored by the C++ engine (``rocke_build_htaot_rgett``).
 """
 
 from __future__ import annotations
