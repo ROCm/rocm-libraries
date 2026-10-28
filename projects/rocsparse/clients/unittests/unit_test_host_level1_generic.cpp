@@ -346,42 +346,50 @@ TEST_F(HostLevel1, axpby_ok_and_quick_return)
 // ---------------------------------------------------------------------------
 TEST_F(HostLevel1, spvv_dispatch_i32_base_zero)
 {
-    spvv_run<float, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
-    spvv_run<double, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
-    spvv_run<rocsparse_float_complex, int32_t>(
-        handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
-    spvv_run<rocsparse_double_complex, int32_t>(
-        handle, rocsparse_indextype_i32, rocsparse_index_base_zero);
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<float, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_zero)));
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<double, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_zero)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_float_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_zero)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_double_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_zero)));
 }
 
 TEST_F(HostLevel1, spvv_dispatch_i32_base_one)
 {
-    spvv_run<float, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_one);
-    spvv_run<double, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_one);
-    spvv_run<rocsparse_float_complex, int32_t>(
-        handle, rocsparse_indextype_i32, rocsparse_index_base_one);
-    spvv_run<rocsparse_double_complex, int32_t>(
-        handle, rocsparse_indextype_i32, rocsparse_index_base_one);
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<float, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_one)));
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<double, int32_t>(handle, rocsparse_indextype_i32, rocsparse_index_base_one)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_float_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_one)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_double_complex, int32_t>(
+        handle, rocsparse_indextype_i32, rocsparse_index_base_one)));
 }
 
 TEST_F(HostLevel1, spvv_dispatch_i64_base_zero)
 {
-    spvv_run<float, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
-    spvv_run<double, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
-    spvv_run<rocsparse_float_complex, int64_t>(
-        handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
-    spvv_run<rocsparse_double_complex, int64_t>(
-        handle, rocsparse_indextype_i64, rocsparse_index_base_zero);
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<float, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_zero)));
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<double, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_zero)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_float_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_zero)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_double_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_zero)));
 }
 
 TEST_F(HostLevel1, spvv_dispatch_i64_base_one)
 {
-    spvv_run<float, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_one);
-    spvv_run<double, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_one);
-    spvv_run<rocsparse_float_complex, int64_t>(
-        handle, rocsparse_indextype_i64, rocsparse_index_base_one);
-    spvv_run<rocsparse_double_complex, int64_t>(
-        handle, rocsparse_indextype_i64, rocsparse_index_base_one);
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<float, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_one)));
+    ASSERT_NO_FATAL_FAILURE(
+        (spvv_run<double, int64_t>(handle, rocsparse_indextype_i64, rocsparse_index_base_one)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_float_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_one)));
+    ASSERT_NO_FATAL_FAILURE((spvv_run<rocsparse_double_complex, int64_t>(
+        handle, rocsparse_indextype_i64, rocsparse_index_base_one)));
 }
 
 // ---------------------------------------------------------------------------
