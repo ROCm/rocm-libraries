@@ -2238,9 +2238,8 @@ class TestSpecializationDeclaration:
         _check_specialization_declaration(config)  # does not raise
 
     def test_an_authored_consumer_identity_is_rejected(self):
-        """Ids are minted, never authored. One config declares one engine and one KMD,
-        so an authored id would be a second source of truth pointing at whatever engine
-        shared a name."""
+        """Ids are assigned at generation, never authored. A config declares exactly one
+        engine and one KMD, and a 'consumers' list belongs to the emitted contract."""
         from codegen.config_loader import _check_specialization_declaration
 
         config = make_minimal_config(
@@ -2252,7 +2251,7 @@ class TestSpecializationDeclaration:
                 "engine_id": "00000000-0000-0000-0000-000000000000",
             }
         )
-        with pytest.raises(ConfigError, match="minted"):
+        with pytest.raises(ConfigError, match="assigned at generation"):
             _check_specialization_declaration(config)
 
     def test_a_vocabulary_entry_for_an_unchecked_field_is_rejected(self):

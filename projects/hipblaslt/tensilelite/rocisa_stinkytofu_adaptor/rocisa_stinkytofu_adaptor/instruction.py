@@ -3387,7 +3387,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
             inst.add_src(_to_stinky_register(self.srcs[1]))
         # rocisa (mem.hpp MUBUFReadInstruction::getArgStr) renders a soffset
         # whose operand string is "0" as ``null`` when HasMUBUFConst is false
-        # (true for gfx12+). Tensile passes literal 0 for "no scalar offset",
+        # (true for gfx12+). TensileLite passes literal 0 for "no scalar offset",
         # which otherwise assembles to the invalid operand ``0``.
         _soffset = self.srcs[2]
         if _soffset is not None and _input_to_str(_soffset) != "0":
@@ -3445,7 +3445,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
             comment=self.comment)
         # rocisa (mem.hpp MUBUFReadInstruction::getArgStr) renders a soffset
         # whose operand string is "0" as ``null`` when HasMUBUFConst is false
-        # (true for gfx12+). Tensile passes literal 0 for "no scalar offset",
+        # (true for gfx12+). TensileLite passes literal 0 for "no scalar offset",
         # which otherwise assembles to the invalid operand ``0``.
         _soffset = self.srcs[2]
         if _soffset is not None and _input_to_str(_soffset) != "0":
@@ -4481,8 +4481,20 @@ def _init_wmma_matrix_fmt() -> None:
 
 _WMMA_TYPE_CONVERT_KNOWN = None
 
+_WMMA_FP8_TYPES = frozenset({
+    InstType.INST_F8, InstType.INST_BF8, InstType.INST_F8_BF8, InstType.INST_BF8_F8,
+})
 
-def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> str:
+
+def _use_native_fp8_wmma(k: int, has_wmma_v3: bool, force_scaled: bool) -> bool:
+    """Port of rocisa ``MFMAInstruction::useNativeFp8WMMA``: gfx1250 K=128 FP8/BF8
+    uses the dedicated ``v_wmma_*_16x16x128_{fp8,bf8}_{fp8,bf8}`` opcodes. They are
+    absent on gfx1250 (gfx1250v0), so strict/v0 builds keep scaled f8f6f4."""
+    return has_wmma_v3 and k == 128 and not force_scaled
+
+
+def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool,
+                       native_fp8: bool = False) -> str:
     """Port of rocisa ``MFMAInstruction::typeConvert`` for the low-precision
     (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`.
 
@@ -4498,16 +4510,17 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
 
     f8f6f4_k = 128 if has_wmma_v3 else 64
     f4_t = 32 if has_wmma_v3 else 0
+    use_f8f6f4 = k >= f8f6f4_k and not native_fp8
     if it in _WMMA_F8F6F4_ALWAYS:
         return "f8f6f4"
     if it == InstType.INST_F8:
-        return "f8f6f4" if k >= f8f6f4_k else "fp8_fp8"
+        return "f8f6f4" if use_f8f6f4 else "fp8_fp8"
     if it == InstType.INST_BF8:
-        return "f8f6f4" if k >= f8f6f4_k else "bf8_bf8"
+        return "f8f6f4" if use_f8f6f4 else "bf8_bf8"
     if it == InstType.INST_F8_BF8:
-        return "f8f6f4" if k >= f8f6f4_k else "fp8_bf8"
+        return "f8f6f4" if use_f8f6f4 else "fp8_bf8"
     if it == InstType.INST_BF8_F8:
-        return "f8f6f4" if k >= f8f6f4_k else "bf8_fp8"
+        return "f8f6f4" if use_f8f6f4 else "bf8_fp8"
     if it == InstType.INST_F4:
         return "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
     # rocisa MFMAInstruction::typeConvert maps the 8-bit integer inputs to the
@@ -4522,10 +4535,13 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
     raise RuntimeError(f"Type not found: {it}")
 
 
-def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
+def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool,
+                      native_fp8: bool = False):
     """Port of rocisa ``getArgStr`` (HasWMMA_f8f6f4 branch): the matrix_*_fmt
     tokens, gated by the same K/tile condition rocisa uses."""
     _init_wmma_matrix_fmt()
+    if native_fp8 and it in _WMMA_FP8_TYPES:
+        return ("", "")
     f4_t = 32 if has_wmma_v3 else 0
     if it == InstType.INST_F4:
         if m < f4_t and n < f4_t:
@@ -4578,7 +4594,6 @@ class MFMAInstruction(Instruction):
         instruction_name = "mfma" if is_mfma else "wmma"
         instruction_step = "" if is_mfma else "_"
         mfma_1k = "_1k" if self.mfma1k else ""
-        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
 
         # forceScaledWMMA: gfx1250 low-precision WMMA must use v_wmma_scale_*.
         # Mirror rocisa MFMAInstruction::forceScaledWMMA (mfma.hpp): gate on the
@@ -4591,6 +4606,8 @@ class MFMAInstruction(Instruction):
         # workaround -- matching native forceScaledWMMA, which does not catch.
         from . import rocIsa  # noqa: WPS433
         force_scaled = bool(rocIsa.getInstance().getForceScaledWMMA())
+        native_fp8 = _use_native_fp8_wmma(k, has_wmma_v3, force_scaled)
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3, native_fp8)
         if not is_mfma and force_scaled and type_str in ("f8f6f4", "f4"):
             return (f"v_wmma_scale_{_inst_type_to_str(self.accType)}_{variant_str}"
                     f"{instruction_step}{type_str}")
@@ -4620,7 +4637,8 @@ class MFMAInstruction(Instruction):
         # rocisa MFMAInstruction::typeConvert + forceScaledWMMA (mfma.hpp).
         # gfx1250 low-precision (f8f6f4/f4) WMMA uses the v_wmma_scale_* encoding
         # with zero scales, plus per-matrix input formats.
-        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
+        native_fp8 = _use_native_fp8_wmma(k, has_wmma_v3, force_scaled)
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3, native_fp8)
         # forceScaledWMMA() gates only the mnemonic via the rocIsa toggle (set
         # true only for gfx1250-strict / gfx1250v0), not the shared ISA (12,5,0).
         scaled = is_wmma and force_scaled and type_str in ("f8f6f4", "f4")
@@ -4631,7 +4649,7 @@ class MFMAInstruction(Instruction):
         matrix_b_fmt = ""
         if has_wmma_f8f6f4:
             matrix_a_fmt, matrix_b_fmt = _wmma_matrix_fmts(
-                self.instType, m, n, k, has_wmma_v3)
+                self.instType, m, n, k, has_wmma_v3, native_fp8)
 
         acc2_reg = None
         if self.acc2_imm is not None:
@@ -5359,4 +5377,3 @@ def VCvtBF16toFP32(dst: Any, src: Any, vgprMask: Any, vi: int,
         dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel),
         comment="cvt bf16 to fp32. " + comment,
     )
-

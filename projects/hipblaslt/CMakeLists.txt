@@ -77,6 +77,11 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_DEVICE)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_DEVICE=ON")
 endif()
 
+option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel registration." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
+endif()
+
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
@@ -334,8 +339,8 @@ target_include_directories(hipblaslt-headers
 )
 target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 
-# The measurement engine and candidate search the benchmark clients use, header-only.
-# Build tree only: nothing outside this project includes it.
+# The measurement engine and candidate search hipblaslt-bench and tune mode share,
+# header-only. Build tree only: nothing outside this project includes it.
 add_library(hipblaslt-benchmark INTERFACE)
 target_include_directories(hipblaslt-benchmark
     INTERFACE
@@ -460,6 +465,7 @@ if(HIPBLASLT_ENABLE_HOST)
         PRIVATE
             hip::device
             roc::tensilelite-host
+            $<BUILD_INTERFACE:hipblaslt-benchmark>
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
@@ -777,7 +783,7 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
@@ -785,7 +791,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 
-    # Tensile Python package
+    # TensileLite Python package
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/"
         DESTINATION "${_tensilelite_install_dest}/tensilelite"
@@ -793,6 +799,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
+        PATTERN "source_only" EXCLUDE
     )
     install(
         FILES "${_tensilelite_src}/Tensile/__init__.py"
