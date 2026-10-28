@@ -1195,7 +1195,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
                         const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
                         constexpr auto i_j_idx = make_tuple(idx0, idx1);
                         s_acc(i_j_idx) *= scale_s;
-                        position_encoding.update(s_acc(i_j_idx), row, col);
+                        // position_encoding accepts only logical coordinates
+                        position_encoding.update(s_acc(i_j_idx), row, col - kv_l2p_offset);
                     });
                 });
             }
@@ -1233,14 +1234,18 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                bool need_perpixel_check =
-                    mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                // mask accepts only logical coordinates, do conversion here
+                bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(I0),
+                                                           k_origin.at(I0) - kv_l2p_offset,
+                                                           number<kM0>{},
+                                                           number<kN0>{});
                 if(need_perpixel_check)
                 {
                     set_tile_if(
                         s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                             const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                            const auto col =
+                                k_origin.at(I0) + tile_idx.at(I1) - kv_l2p_offset;
                             if constexpr(kHasSink)
                                 return mask.IsOutOfSinkBound(row, col);
                             else
@@ -1523,9 +1528,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     //
     // Unlike the qr_tdm_sched split copy, this one needs no LDS carving here: the
     // single-V path already takes one arena pointer and slices it itself through
-    // Policy::LdsArenaLayout. bias / variant / block_indices / kv_l2p_offset have
-    // no consumer -- bias is asserted away, the variant hooks are not part of this
-    // pipeline, and the other two are paged-kv only.
+    // Policy::LdsArenaLayout. The variant hooks are not part of this pipeline and
+    // block_indices has no consumer; everything else is forwarded and used.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
               typename KPageBlockNavigator,
