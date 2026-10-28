@@ -823,6 +823,11 @@ INSTANTIATE_TEST_SUITE_P(
         // A dense V sets the extent (6) when only K is paged; the bias must still match it.
         PagedApplicabilityCase{
             "PagedKOnlyNarrowBias", {true, false, true, DataType::INT32, std::nullopt, 4}, false},
+        // The dense side must span the extent: max_seq_len_kv 5 fits K's table (3 blocks of 2)
+        // but the dense V has 6 keys.
+        PagedApplicabilityCase{"PagedKOnlyDenseVBeyondMaxSeqLen",
+                               {true, false, true, DataType::INT32, 5, std::nullopt},
+                               false},
         // Each page table is [B, 1, tableSize, 1] with B the query batch (2).
         PagedApplicabilityCase{
             "TableBatchDiffersFromQuery",
@@ -1135,6 +1140,23 @@ INSTANTIATE_TEST_SUITE_P(
            FwdDropoutFieldCase{
                "MaskRowsDifferFromSq",
                [](SdpaAttributesT&, std::vector<RawExtraTensor>& e) { e[0].dims = {1, 2, 3, 4}; },
+               false},
+           // The no-mask rule: a dropout_scale with no mask to scale is declined.
+           FwdDropoutFieldCase{"ScaleWithoutMask",
+                               [](SdpaAttributesT& a, std::vector<RawExtraTensor>& e) {
+                                   a.dropout_mask_tensor_uid.reset();
+                                   e.erase(e.begin());
+                               },
+                               false},
+           // The element-count rule: a FLOAT dropout_scale must hold one element.
+           FwdDropoutFieldCase{
+               "MultiElementScale",
+               [](SdpaAttributesT&, std::vector<RawExtraTensor>& e) { e[1].dims = {2}; },
+               false},
+           // The broadcast rule: the mask's head dim is neither H (2) nor 1.
+           FwdDropoutFieldCase{
+               "MaskHeadsNeitherHNorOne",
+               [](SdpaAttributesT&, std::vector<RawExtraTensor>& e) { e[0].dims = {1, 3, 4, 4}; },
                false}),
     [](const TestParamInfo<FwdDropoutFieldCase>& info) { return std::string(info.param.name); });
 

@@ -997,6 +997,28 @@ INSTANTIATE_TEST_SUITE_P(
                                    a.dropout_scale_tensor_uid.reset();
                                    e.erase(e.begin(), e.begin() + 2);
                                },
+                               false},
+           // The shared gate's no-mask rule: a dropout_scale with no mask to scale is declined
+           // (dropout_scale_inv is dropped too, so its own mask rule cannot decline first).
+           BwdDropoutFieldCase{"ScaleWithoutMask",
+                               [](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
+                                   a.dropout_mask_tensor_uid.reset();
+                                   a.dropout_scale_inv_tensor_uid.reset();
+                                   e.pop_back();
+                                   e.erase(e.begin());
+                               },
+                               false},
+           // The shared gate's element-count rule: dropout_scale must hold one element.
+           BwdDropoutFieldCase{"MultiElementScale",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>& e) {
+                                   e[1].dims = {1, 1, 1, 2};
+                               },
+                               false},
+           // The shared gate's broadcast rule: the mask's head dim is neither H (2) nor 1.
+           BwdDropoutFieldCase{"MaskHeadsNeitherHNorOne",
+                               [](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>& e) {
+                                   e[0].dims = {1, 3, 4, 4};
+                               },
                                false}),
     [](const TestParamInfo<BwdDropoutFieldCase>& info) { return std::string(info.param.name); });
 
