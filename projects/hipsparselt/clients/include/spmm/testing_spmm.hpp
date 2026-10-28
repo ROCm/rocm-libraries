@@ -40,7 +40,9 @@
 #include "utility.hpp"
 #include <cstddef>
 #include <hipsparselt/hipsparselt.h>
+#include <memory>
 #include <omp.h>
+#include <type_traits>
 
 template <typename T, typename Tb = T, typename To = T, hipsparseOrder_t order>
 void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
@@ -319,6 +321,8 @@ void testing_spmm(const Arguments& arg)
     hipsparselt_local_handle handle{arg};
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
 
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
@@ -1252,7 +1256,7 @@ void testing_spmm(const Arguments& arg)
                                                                ArgumentLogging::NA_value,
                                                                selected_config_id);
     }
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }
 
 template <typename Ti,
