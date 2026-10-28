@@ -17,7 +17,8 @@ import sys
 import pytest
 from trtest import ROCKE, TR, platform_probe, strip_holes
 
-# probe_valid is refused (validate_io has no rule) and filled; probe_build
+# probe_valid is refused (no rule sets the sequence field allowed_vecs of
+# IOSpecRule's C struct) and filled; probe_build
 # calls it and the filled method BatchedTranspose2DSpec.kernel_name, made
 # untranslatable by a flags dict (kernel_name_join has no rule for one)
 EDITS = [
@@ -29,7 +30,9 @@ EDITS = [
 PROBE = """\
 def probe_valid(spec: BatchedTranspose2DSpec, arch: str = "gfx950") -> tuple[bool, str]:
     ok, why = validate_io(
-        IOSpecRule(dtype=spec.dtype, block_size=spec.block_size, vec=spec.vec)
+        IOSpecRule(
+            dtype=spec.dtype, block_size=spec.block_size, vec=spec.vec, allowed_vecs=(2, 4, 8)
+        )
     )
     if not ok:
         return ok, why
@@ -46,7 +49,7 @@ def probe_build(spec: BatchedTranspose2DSpec, arch: str = "gfx950") -> int:
 
 FILLS = {
     "probe_valid": """\
-/* probe_valid: validate_io(IOSpecRule(...)), then (True, "ok") */
+/* probe_valid: validate_io(IOSpecRule(..., allowed_vecs=(2, 4, 8))), then (True, "ok") */
 bool rocke_batched_transpose_probe_valid(const rocke_batched_transpose_spec_t* spec,
                                          const char* arch,
                                          char* reason,

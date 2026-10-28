@@ -238,13 +238,13 @@ class Abi:
         if m:
             x = self.parse_text(m.group(1))
             return ("seq", x) if x else None
-        if t in ("Sequence", "list", "tuple"):
+        if t in ("Sequence", "list", "tuple", "Tuple"):
             return None  # element type comes from the recorded facts
-        m = re.fullmatch(r"tuple\[(.+),\s*\.\.\.\]", t)
+        m = re.fullmatch(r"(?:tuple|Tuple)\[(.+),\s*\.\.\.\]", t)
         if m:
             x = self.parse_text(m.group(1))
             return ("seq", x) if x else None
-        m = re.fullmatch(r"tuple\[(.+)\]", t)
+        m = re.fullmatch(r"(?:tuple|Tuple)\[(.+)\]", t)
         if m:
             xs = [self.parse_text(p) for p in _split(m.group(1))]
             return ("tuple", tuple(xs)) if None not in xs else None

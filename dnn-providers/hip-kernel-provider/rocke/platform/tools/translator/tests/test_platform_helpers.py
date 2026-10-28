@@ -12,7 +12,10 @@
 - any IR scalar type constant of rocke.core.ir with a C singleton (FP8E4M3);
 - float arithmetic with an int operand, and true division;
 - a platform struct's documented C getter / predicate for a member it has
-  no field for (ArchTarget.max_threads_per_block, ArchTarget.fits_lds)."""
+  no field for (ArchTarget.max_threads_per_block, ArchTarget.fits_lds);
+- a dataclass of another rocke module built through its C init (IOSpecRule);
+- a builder-free helper returning Tuple[bool, ...] through its C return and
+  out parameters, its strings in a scratch arena (validate_io)."""
 
 from __future__ import annotations
 
@@ -41,6 +44,18 @@ def probe_fp8(spec: BatchedTranspose2DSpec) -> int:
 
 def probe_float(spec: BatchedTranspose2DSpec) -> float:
     return 1.0 / spec.tile_m + spec.vec * 0.5 - 2
+
+
+def probe_io(spec: BatchedTranspose2DSpec) -> Tuple[bool, str]:
+    return validate_io(
+        IOSpecRule(
+            dtype=spec.dtype,
+            block_size=spec.block_size,
+            vec=spec.vec,
+            n_per_block=spec.tile_m * spec.tile_n,
+            max_elems_per_thread=None,
+        )
+    )
 
 
 def probe_arch(spec: BatchedTranspose2DSpec, arch: str = "gfx950") -> int:
@@ -125,7 +140,9 @@ def _body(cpp: str, fn: str) -> str:
         "probe_params",
         "probe_fp8",
         "probe_float",
+        "probe_io",
         "probe_arch",
+        "is_valid_spec",
     ],
 )
 def test_translates(probe, name):
@@ -192,6 +209,36 @@ def test_documented_getter_and_predicate(probe):
     body = _body(probe[1], "py_probe_arch")
     assert re.search(r"rocke_arch_fits_lds\(target, \(long\)", body), body
     assert "return rocke_arch_max_threads_per_block(target);" in body, body
+
+
+def test_dataclass_through_its_c_init(probe):
+    """IOSpecRule(dtype=.., block_size=.., vec=.., n_per_block=..,
+    max_elems_per_thread=None): the sigmap's struct twin, its C init with the
+    required fields (the dataclass defaults for the rest), then the Optional
+    field passed through its _set flag; None leaves the init's unset."""
+    body = _body(probe[1], "py_probe_io")
+    assert re.search(
+        r"rocke_io_spec_rule_t (\w+)\{\}; rocke_io_spec_rule_init\(&\1, "
+        r"spec->dtype, \(int\)\w+, spec->vec\); \1\.n_per_block_set = 1; "
+        r"\1\.n_per_block = \(int\)",
+        body,
+    ), body
+    assert "max_elems_per_thread" not in body, body
+
+
+def test_flag_tuple_helper_with_scratch_arena(probe):
+    """validate_io(rule) -> Tuple[bool, str]: the C return is the bool, the
+    reason comes through out_reason from a scratch arena of this scope and is
+    copied into an owned string before the arena goes."""
+    body = _body(probe[1], "py_probe_io")
+    m = re.search(
+        r"const char\* (\w+)\{\}; py_adapt::scratch_arena (\w+); "
+        r"const bool (\w+) = rocke_validate_io\(&\2\.a, &\(?\w+\)?, &\1\) != 0; "
+        r"const std::string (\w+)\(\1 != nullptr \? \1 : \"\"\);",
+        body,
+    )
+    assert m, body
+    assert f"std::tuple<bool, std::string>{{{m.group(3)}, {m.group(4)}}}" in body
 
 
 def test_source_compiles(probe, tmp_path):

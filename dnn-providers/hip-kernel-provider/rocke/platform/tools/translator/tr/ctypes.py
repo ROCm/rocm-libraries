@@ -151,6 +151,7 @@ def from_annotation(text: str, structs: dict | None = None) -> str | None:
     """Map a Python annotation to a C++ type, or None when the table has no row."""
     t = text.replace("typing.", "").strip().strip("'\"")
     t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"\bTuple\[", "tuple[", t)  # typing.Tuple is tuple
     if structs and t in structs:
         return structs[t]
     table = {

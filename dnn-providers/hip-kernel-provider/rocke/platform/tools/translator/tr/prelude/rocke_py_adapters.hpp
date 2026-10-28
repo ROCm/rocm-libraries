@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "rocke/arch_target.h"
+#include "rocke/arena.h"
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
@@ -64,6 +65,26 @@ rocke_kernel_def_t* kernel_entry(rocke_ir_builder_t* b, Fn&& fn)
         return nullptr;
     }
 }
+
+/* A scratch arena for a C helper that formats its result strings into one
+ * (validate_io's reject reason), freed at the end of the caller's scope. Copy
+ * those strings out before then. Python has no arena: a failed init is the
+ * MemoryError Python would raise. */
+struct scratch_arena
+{
+    rocke_arena_t a{};
+    scratch_arena()
+    {
+        if(rocke_arena_init(&a, 4096) != 0)
+            throw ckc::OOMError("out of memory");
+    }
+    ~scratch_arena()
+    {
+        rocke_arena_destroy(&a);
+    }
+    scratch_arena(const scratch_arena&) = delete;
+    scratch_arena& operator=(const scratch_arena&) = delete;
+};
 
 /* ArchTarget.from_gfx(gfx): KeyError for an unknown target. Its message is
  * Python's str(e) ("\"unknown gfx target '<gfx>'; known: [...]. ...\""), so a

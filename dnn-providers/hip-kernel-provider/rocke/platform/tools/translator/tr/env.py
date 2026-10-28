@@ -326,7 +326,8 @@ class SigMap:
         here from the C declaration alone:
         - `char* X` then `size_t X_cap` (or `out_cap`), for a Python `-> str`:
           the string result written into a caller buffer (str_out, str_cap);
-        - `size_t* X_len` right after it: the result's length, not wanted (null).
+        - `size_t* X_len` right after it: the result's length, not wanted (null);
+        - `rocke_arena_t*` of a helper with no builder: a scratch arena (arena).
         None when the module or name has no C function twin."""
         e = self.external.get(module, {}).get("symbols", {}).get(name)
         if not e or e.get("kind") != "function":
@@ -336,8 +337,21 @@ class SigMap:
             return None
         extra = [dict(x) for x in c.get("extra_c", [])]
         returns = e.get("returns") or ""
+        takes_b = any(
+            p_.get("type", "").replace(" ", "") == "rocke_ir_builder_t*"
+            for p_ in c.get("params", [])
+        )
         for i, x in enumerate(extra):
             nxt = extra[i + 1] if i + 1 < len(extra) else None
+            if (
+                x["c_type"].replace(" ", "") == "rocke_arena_t*"
+                and x.get("role") == "extra"
+                and not takes_b
+            ):
+                # the arena a builder-free helper formats its strings into: a
+                # scratch arena of the caller's scope
+                x["role"] = "arena"
+                continue
             if (
                 returns == "str"
                 and x["c_type"].replace(" ", "") == "char*"

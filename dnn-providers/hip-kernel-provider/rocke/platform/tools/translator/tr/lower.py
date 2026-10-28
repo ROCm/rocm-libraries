@@ -5478,7 +5478,16 @@ class Fn:
         snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", cls).lower()
         sname = f"rocke_{snake}_t"
         if sname not in self.env.headers.structs:
-            return None
+            # the sigmap's struct twin of a class of another rocke module
+            # (IOSpecRule -> rocke_io_spec_rule_t)
+            src, attr = self.mod.imports.get(cls, ("", ""))
+            e = self.env.sig.external.get(src, {}).get("symbols", {}).get(attr) or {}
+            c = e.get("c") or {}
+            if e.get("kind") != "class" or c.get("kind") != "struct":
+                return None
+            sname = c["name"] + "_t"
+            if sname not in self.env.headers.structs:
+                return None
         return sname, pycls
 
     def construct_platform(self, cls: str, sname: str, pycls, node) -> CE:
@@ -5497,6 +5506,17 @@ class Fn:
                 [{"name": f_.name, "kind": "pos", "default": None} for f_ in fields],
             )
             st = self.env.headers.structs[sname]
+            if any(
+                f_.name not in bound
+                and not (
+                    f_.default is not dataclasses.MISSING
+                    and isinstance(f_.default, (bool, int, float, str))
+                )
+                for f_ in fields
+            ):
+                init = self.construct_by_init(cls, sname, pycls, fields, bound, node)
+                if init is not None:
+                    return init
             items = []
             for f_ in fields:
                 cf = f_.name if f_.name in st.fields else f_.name.lstrip("_")
@@ -5584,6 +5604,68 @@ class Fn:
         if ha is None:
             return CE(obj, sname)
         return self.fill_host_image(cls, sname, obj, ha[1], args[ha[0]], pycls)
+
+    def construct_by_init(self, cls, sname, pycls, fields, bound, node):
+        """X(...) of a dataclass whose other fields have no literal default
+        (None, a tuple): its C init when the init's parameters after the
+        struct are exactly the dataclass's required fields, in order
+        (rocke_io_spec_rule_init(rule, dtype, block_size, vec): the
+        dataclass defaults and those fields). Each other field passed is
+        set after it: a scalar C field of the same name, an Optional one through
+        its `<field>_set` flag (None leaves the init's unset). None when the
+        struct has no such init."""
+        import dataclasses
+
+        cf = self.env.c_func(f"{sname[:-2]}_init")
+        required = [
+            f_.name
+            for f_ in fields
+            if f_.default is dataclasses.MISSING
+            and f_.default_factory is dataclasses.MISSING
+        ]
+        if (
+            cf is None
+            or cf.ret != "void"
+            or not cf.params
+            or cf.params[0][0] != f"{sname}*"
+            or [n for _t, n in cf.params[1:]] != required
+            or hasattr(pycls, "__post_init__")
+            or any(r not in bound for r in required)
+        ):
+            return None
+        st = self.env.headers.structs[sname]
+        obj = self.tmp(cls.lower())
+        args = [f"&{obj}"]
+        for ct, cn in cf.params[1:]:
+            args.append(self.coerce(bound[cn], ct, node))
+        sets = []
+        for f_ in fields:
+            if f_.name in required or f_.name not in bound:
+                continue
+            v = bound[f_.name]
+            cf_ = f_.name
+            if cf_ not in st.fields or st.fields[cf_] not in (
+                T.INT_TYPES | {T.BOOL, T.F64, "float", T.STR}
+            ):
+                # only a scalar: a sequence field would point at a temporary
+                raise Refuse(node, f"{cls}({f_.name}=...): no scalar C field for it")
+            flag = f"{cf_}_set"
+            if v.t == T.NONE:
+                if flag not in st.fields:
+                    raise Refuse(node, f"{cls}({f_.name}=None): no {flag}")
+                continue
+            if T.optional_inner(v.t):
+                raise Refuse(node, f"{cls}({f_.name}=...): an optional value")
+            if flag in st.fields:
+                sets.append(f"{obj}.{flag} = 1;")
+            elif "Optional" in str(f_.type):
+                raise Refuse(node, f"{cls}({f_.name}=...): no {flag}")
+            sets.append(f"{obj}.{cf_} = {self.coerce(v, st.fields[cf_], node)};")
+        self.emit(f"{sname} {obj}{{}};")
+        self.emit(f"{cf.name}({', '.join(args)});")
+        for line in sets:
+            self.emit(line)
+        return CE(obj, sname)
 
     def image_host(self, t: str):
         """The host builder class of a host image type, if t is one."""
@@ -6799,6 +6881,12 @@ class Fn:
         if role == "str_cap":
             args.append(f"sizeof({g['str']})")
             return True
+        if role == "arena":
+            # the helper's string results live in it until the end of this scope
+            ar = self.tmp("arena")
+            self.emit(f"py_adapt::scratch_arena {ar};")
+            args.append(f"&{ar}.a")
+            return True
         if role == "null":
             # an optional output the Python result has no use for
             args.append("nullptr")
@@ -7348,6 +7436,18 @@ class Fn:
             # a builder helper may return its success flag (1 / 0 with the
             # builder's sticky error set) beside the out parameters
             checked = cf.ret in ("int", "bool") and any(t == T.B for t, _ in cf.params)
+            ann_t = T.from_annotation(ret_ann)
+            items_ = T.tuple_items(ann_t) if ann_t else None
+            if (
+                cf.ret in ("int", "bool")
+                and not checked
+                and items_ is not None
+                and len(items_) == len(outs) + 1
+                and items_[0] == T.BOOL
+            ):
+                return self.helper_flag_tuple(
+                    cf, bound, slots, extra, outs, items_, node
+                )
             if (cf.ret != "void" and not checked) or not (
                 ret_ann.lower().startswith("tuple") or (not ret_ann and len(outs) >= 2)
             ):
@@ -7386,6 +7486,45 @@ class Fn:
             )
         args = self.c_args(cf, bound, slots, extra, node)
         return self.gen_call(cf, args, attr, node)
+
+    def helper_flag_tuple(self, cf, bound, slots, extra, outs, items, node) -> CE:
+        """A builder-free helper returning Tuple[bool, ...] whose C twin
+        returns the bool (int 1 / 0) and the other items through out
+        parameters (validate_io: ok, then *out_reason). A C string result is
+        copied into an owned string right away: it may live in a scratch
+        arena of this scope."""
+        ctys = dict((n, t) for t, n in cf.params)
+        names = []
+        for o, it in zip(outs, items[1:]):
+            el = ctys[o][:-1].strip()
+            if not (el == it or (el == T.STR and T.is_str(it))):
+                raise Refuse(node, f"{cf.name}: out parameter {o} is not a {it}")
+            nm = self.tmp(o.replace("out_", ""))
+            self.emit(f"{decl_type(el)} {nm}{{}};")
+            names.append((o, nm, el))
+        args = self.c_args(
+            cf,
+            bound,
+            slots,
+            {k: v for k, v in extra.items() if v != "out"},
+            node,
+            outs={o: "&" + nm for o, nm, _ in names},
+        )
+        ok = self.tmp("ok")
+        call = self.err_wrap(f"{cf.name}({', '.join(args)})", cf.ret)
+        self.emit(f"const bool {ok} = {call} != 0;")
+        vals, ts = [ok], [T.BOOL]
+        for _o, nm, el in names:
+            if el == T.STR:
+                own = self.tmp(nm)
+                self.emit(f'const std::string {own}({nm} != nullptr ? {nm} : "");')
+                vals.append(own)
+                ts.append(T.SSTR)
+            else:
+                vals.append(nm)
+                ts.append(el)
+        tt = f"std::tuple<{', '.join(ts)}>"
+        return CE(f"{tt}{{{', '.join(vals)}}}", tt, True)
 
     def call_internal(self, name, node) -> CE:
         from .adapters import function_adapter
