@@ -1899,7 +1899,18 @@ struct ConvFwdDataImplicitGemmInTransform
     {
         LowerIndex idx_low;
         CalculateLowerIndex(idx_low, idx_up);
-        return idx_low[I1] >= 0 && idx_low[I1] < Hi_ && idx_low[I2] >= 0 && idx_low[I2] < Wi_;
+        // Previously:
+        // bool valid = idx_low[I1] >= 0;
+        // valid &= idx_low[I1] < Hi_;
+        // valid &= idx_low[I2] >= 0;
+        // valid &= idx_low[I2] < Wi_;
+        // Indices are signed 32-bit values and lengths are nonnegative. Converting a negative
+        // index to uint32_t produces a value >= 2^31, larger than any valid signed length;
+        // nonnegative indices retain their value. Each unsigned comparison therefore checks
+        // both bounds, eliminating separate sign checks and their instruction dependencies.
+        bool valid = static_cast<uint32_t>(idx_low[I1]) < static_cast<uint32_t>(Hi_);
+        valid &= static_cast<uint32_t>(idx_low[I2]) < static_cast<uint32_t>(Wi_);
+        return valid;
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }
