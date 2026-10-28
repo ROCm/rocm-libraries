@@ -78,6 +78,8 @@ def _quantize_fp8(t):
     """Per-tensor fp8 e4m3 quantization. Returns ``(fp8_tensor, scale)`` where
     ``fp8_tensor.float() * scale`` reconstructs ``t`` up to fp8 rounding. The
     scale maps the tensor's max-abs onto the fp8 dynamic range."""
+    import torch
+
     amax = t.abs().max().clamp(min=1e-8)
     scale = (amax / _FP8_E4M3_MAX).item()
     q = (t.float() / scale).clamp(-_FP8_E4M3_MAX, _FP8_E4M3_MAX).to(torch.float8_e4m3fn)
