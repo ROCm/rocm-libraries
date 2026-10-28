@@ -11,8 +11,13 @@
 
 #include <cmath>
 #include <numbers>
+#include <type_traits>
 #include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
+#include <miopen/batchnorm/invoke_params.hpp>
+#include <miopen/batchnorm/problem_description.hpp>
+#include <miopen/batchnorm/solvers.hpp>
+#include <miopen/execution_context.hpp>
 
 #include <gtest/gtest.h>
 
@@ -1875,3 +1880,252 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BN_Fwd_Spatial_Welford_FP32,
                          GetCasesFwdSpatialPerVariant(1),
                          [](const auto& info_) { return NameGenerator(info_); });
+
+using GPU_BN_Spatial_BFP16 = testing::TestWithParam<size_t>;
+using GPU_BN_Spatial_FP16  = testing::TestWithParam<size_t>;
+
+TEST_P(GPU_BN_Spatial_BFP16, NhwcConfiguredOutputRounding)
+{
+    auto&& handle      = get_handle();
+    const size_t n     = GetParam();
+    constexpr size_t c = 2, h = 24, w = 16;
+    constexpr size_t spatial = h * w, guard_count = 32;
+    const size_t count       = n * c * spatial;
+    constexpr double epsilon = 0.25;
+    const bfloat16 canary{123.0f};
+    constexpr float stats_canary = -321.0f;
+    const std::vector<size_t> lengths{n, c, h, w};
+    const std::vector<size_t> stats_lengths{1, c, 1, 1};
+    tensor<bfloat16> input{miopenTensorNHWC, lengths};
+    tensor<bfloat16> output{miopenTensorNHWC, lengths};
+    tensor<float> scale{miopenTensorNHWC, stats_lengths};
+    tensor<float> bias{miopenTensorNHWC, stats_lengths};
+    tensor<float> saved_mean{miopenTensorNHWC, stats_lengths};
+    tensor<float> saved_inv_var{miopenTensorNHWC, stats_lengths};
+    scale[0] = 1.123f;
+    scale[1] = -0.873f;
+    bias[0]  = 0.023f;
+    bias[1]  = -0.117f;
+
+    // Each channel has exactly balanced, BF16-exact +/-1 values. Batch/channel
+    // offsets distinguish NHWC indexing while keeping mean=0 and variance=1.
+    for(size_t batch = 0; batch < n; ++batch)
+        for(size_t hw = 0; hw < spatial; ++hw)
+            for(size_t channel = 0; channel < c; ++channel)
+                input[(batch * spatial + hw) * c + channel] =
+                    bfloat16{(batch + hw + channel) % 2 == 0 ? -1.0f : 1.0f};
+
+    std::vector<double> means(c, 0), variances(c, 0), inv_vars(c, 0);
+    std::vector<bfloat16> expected(2 * c);
+    for(size_t channel = 0; channel < c; ++channel)
+    {
+        // Independent double-precision, two-pass population statistics.
+        for(size_t batch = 0; batch < n; ++batch)
+            for(size_t hw = 0; hw < spatial; ++hw)
+                means[channel] += double(input[(batch * spatial + hw) * c + channel]);
+        means[channel] /= double(n * spatial);
+        for(size_t batch = 0; batch < n; ++batch)
+            for(size_t hw = 0; hw < spatial; ++hw)
+            {
+                const double delta =
+                    double(input[(batch * spatial + hw) * c + channel]) - means[channel];
+                variances[channel] += delta * delta;
+            }
+        variances[channel] /= double(n * spatial);
+        inv_vars[channel] = 1.0 / std::sqrt(variances[channel] + epsilon);
+        for(size_t sign = 0; sign < 2; ++sign)
+        {
+            const float value      = sign == 0 ? -1.0f : 1.0f;
+            const float normalized = (value - float(means[channel])) * float(inv_vars[channel]);
+            const float reference  = std::fma(scale[channel], normalized, bias[channel]);
+            // Use the configured host BF16 conversion, not a BF16-sized tolerance.
+            // The four FP32 values are at least 9.7e-5 from both BF16 values and
+            // their midpoints, leaving a margin for small GPU rsqrt/reduction
+            // errors. Three values distinguish RNE from RTZ.
+            expected[sign * c + channel] = bfloat16{reference};
+        }
+    }
+
+    auto padded_input = input.data;
+    padded_input.resize(count + guard_count, canary);
+    const auto input_dev   = handle.Write(padded_input);
+    const auto scale_dev   = handle.Write(scale.data);
+    const auto bias_dev    = handle.Write(bias.data);
+    const auto output_dev  = handle.Write(std::vector<bfloat16>(count + guard_count, canary));
+    const auto mean_dev    = handle.Write(std::vector<float>(c + guard_count, stats_canary));
+    const auto inv_var_dev = handle.Write(std::vector<float>(c + guard_count, stats_canary));
+    float alpha            = 1.0f;
+    float beta             = 0.0f;
+    ASSERT_EQ(miopenBatchNormalizationForwardTraining_V2(&handle,
+                                                         miopenBNSpatial,
+                                                         &alpha,
+                                                         &beta,
+                                                         &input.desc,
+                                                         input_dev.get(),
+                                                         &output.desc,
+                                                         output_dev.get(),
+                                                         &scale.desc,
+                                                         &bias.desc,
+                                                         &saved_mean.desc,
+                                                         &saved_inv_var.desc,
+                                                         scale_dev.get(),
+                                                         bias_dev.get(),
+                                                         MIO_BN_TEST_EXPAVGFACTOR,
+                                                         nullptr,
+                                                         nullptr,
+                                                         epsilon,
+                                                         mean_dev.get(),
+                                                         inv_var_dev.get()),
+              miopenStatusSuccess);
+    handle.Finish();
+    const auto gpu_output  = handle.Read<bfloat16>(output_dev, count + guard_count);
+    const auto gpu_mean    = handle.Read<float>(mean_dev, c + guard_count);
+    const auto gpu_inv_var = handle.Read<float>(inv_var_dev, c + guard_count);
+    for(size_t channel = 0; channel < c; ++channel)
+    {
+        ASSERT_NEAR(gpu_mean[channel], means[channel], 1e-6) << "mean channel " << channel;
+        ASSERT_NEAR(gpu_inv_var[channel], inv_vars[channel], 1e-6)
+            << "inverse standard deviation channel " << channel;
+    }
+    for(size_t i = 0; i < count; ++i)
+    {
+        const size_t channel = i % c;
+        const size_t sign    = float(input[i]) < 0 ? 0 : 1;
+        ASSERT_EQ(float(gpu_output[i]), float(expected[sign * c + channel]))
+            << "output index " << i << ", channel " << channel;
+    }
+    for(size_t i = count; i < gpu_output.size(); ++i)
+        ASSERT_EQ(float(gpu_output[i]), float(canary)) << "output guard " << i;
+    for(size_t i = c; i < gpu_mean.size(); ++i)
+    {
+        ASSERT_EQ(gpu_mean[i], stats_canary) << "mean guard " << i;
+        ASSERT_EQ(gpu_inv_var[i], stats_canary) << "inverse standard deviation guard " << i;
+    }
+}
+
+template <class T>
+void RunNhwcOddVectorChannelStash(size_t n)
+{
+    auto&& handle      = get_handle();
+    constexpr size_t c = 40, h = 96, w = 64;
+    constexpr size_t spatial = h * w;
+    const size_t nhw = n * spatial, count = nhw * c;
+    constexpr size_t guard       = 32;
+    constexpr double epsilon     = 0.25;
+    constexpr float stats_canary = -321.0f;
+    const T output_canary{123.0f};
+    const std::vector<size_t> lengths{n, c, h, w}, stats_lengths{1, c, 1, 1};
+    tensor<T> input{miopenTensorNHWC, lengths};
+    tensor<T> output{miopenTensorNHWC, lengths};
+    tensor<float> scale{miopenTensorNHWC, stats_lengths};
+    tensor<float> bias{miopenTensorNHWC, stats_lengths};
+    tensor<float> mean{miopenTensorNHWC, stats_lengths};
+    tensor<float> inv_var{miopenTensorNHWC, stats_lengths};
+    // Exact quarter-integer channel offsets with balanced +/-1 yield independently
+    // known mean=channel/4 and variance=1 in both FP16 and BF16.
+    for(size_t channel = 0; channel < c; ++channel)
+    {
+        scale[channel] = channel % 2 == 0 ? 1.0f : -0.5f;
+        bias[channel]  = float(channel) / 8.0f;
+        for(size_t sample = 0; sample < nhw; ++sample)
+            input[sample * c + channel] =
+                T{float(channel) / 4.0f + (sample % 2 == 0 ? -1.0f : 1.0f)};
+    }
+    const auto ctx     = miopen::ExecutionContext{&handle};
+    const auto problem = miopen::batchnorm::ProblemDescription{
+        miopenBNSpatial,
+        input.desc,
+        output.desc,
+        scale.desc,
+        bias.desc,
+        mean.desc,
+        inv_var.desc,
+        0.25,
+        epsilon,
+        true,
+        true,
+        size_t{1},
+        miopen::ActivationDescriptor{miopenActivationPASTHRU, 0.0, 0.0, 0.0}};
+    const auto solver = miopen::solver::batchnorm::BnFwdTrainingSpatial{};
+    // C/vector_size=5 exercises the odd-channel-vector FP32 stash layout.
+    const auto config =
+        miopen::solver::batchnorm::PerformanceConfigBnFwdTraining{0, "Variant2-8-8-32-2-8"};
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+    ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, config));
+    const auto solution = solver.GetSolution(ctx, problem, config);
+    ASSERT_TRUE(solution.Succeeded());
+    ASSERT_TRUE(solution.invoker_factory);
+    const auto invoker =
+        handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    const auto input_dev = handle.Write(input.data);
+    const auto scale_dev = handle.Write(scale.data), bias_dev = handle.Write(bias.data);
+    const auto output_dev        = handle.Write(std::vector<T>(count + guard, output_canary));
+    const auto mean_dev          = handle.Write(std::vector<float>(c + guard, stats_canary));
+    const auto inv_dev           = handle.Write(std::vector<float>(c + guard, stats_canary));
+    const auto run_mean_dev      = handle.Write(std::vector<float>(c + guard, stats_canary));
+    const auto run_var_dev       = handle.Write(std::vector<float>(c + guard, stats_canary));
+    auto params                  = miopen::batchnorm::FwdTrainInvokeParams{};
+    params.type                  = miopen::InvokeType::Run;
+    params.x                     = input_dev.get();
+    params.y                     = output_dev.get();
+    params.bnScale               = scale_dev.get();
+    params.bnBias                = bias_dev.get();
+    params.epsilon               = epsilon;
+    params.prevResultRunningMean = params.nextResultRunningMean = run_mean_dev.get();
+    params.prevResultRunningVariance = params.nextResultRunningVariance = run_var_dev.get();
+    params.resultSaveMean                                               = mean_dev.get();
+    params.resultSaveInvVariance                                        = inv_dev.get();
+    for(size_t iteration = 0; iteration < 10; ++iteration)
+    {
+        SCOPED_TRACE(iteration);
+        params.expAvgFactor = 1.0 / double(iteration + 1);
+        invoker(handle, params);
+        handle.Finish();
+        const auto gpu_mean     = handle.Read<float>(mean_dev, c + guard);
+        const auto gpu_inv      = handle.Read<float>(inv_dev, c + guard);
+        const auto gpu_run_mean = handle.Read<float>(run_mean_dev, c + guard);
+        const auto gpu_run_var  = handle.Read<float>(run_var_dev, c + guard);
+        for(size_t channel = 0; channel < c; ++channel)
+        {
+            ASSERT_NEAR(gpu_mean[channel], double(channel) / 4.0, 1e-5) << channel;
+            ASSERT_NEAR(gpu_inv[channel], 1.0 / std::sqrt(1.0 + epsilon), 1e-5) << channel;
+            ASSERT_NEAR(gpu_run_mean[channel], double(channel) / 4.0, 1e-5) << channel;
+            ASSERT_NEAR(gpu_run_var[channel], double(nhw) / double(nhw - 1), 1e-5) << channel;
+        }
+        for(size_t channel = c; channel < c + guard; ++channel)
+        {
+            ASSERT_EQ(gpu_mean[channel], stats_canary);
+            ASSERT_EQ(gpu_inv[channel], stats_canary);
+            ASSERT_EQ(gpu_run_mean[channel], stats_canary);
+            ASSERT_EQ(gpu_run_var[channel], stats_canary);
+        }
+    }
+    const auto gpu_output = handle.Read<T>(output_dev, count + guard);
+    double max_error      = 0;
+    for(size_t sample = 0; sample < nhw; ++sample)
+        for(size_t channel = 0; channel < c; ++channel)
+        {
+            const float sign = sample % 2 == 0 ? -1.0f : 1.0f;
+            const T expected{sign * float(1.0 / std::sqrt(1.0 + epsilon)) * scale[channel] +
+                             bias[channel]};
+            const double actual = double(gpu_output[sample * c + channel]);
+            ASSERT_TRUE(std::isfinite(actual)) << "output index " << sample * c + channel;
+            max_error = std::max(max_error, std::abs(actual - double(expected)));
+        }
+    ASSERT_LE(max_error, (std::is_same<T, bfloat16>::value ? 0.032 : 0.004));
+    for(size_t i = count; i < count + guard; ++i)
+        ASSERT_EQ(float(gpu_output[i]), float(output_canary));
+}
+
+TEST_P(GPU_BN_Spatial_BFP16, NhwcOddVectorChannelStash)
+{
+    RunNhwcOddVectorChannelStash<bfloat16>(GetParam());
+}
+
+TEST_P(GPU_BN_Spatial_FP16, NhwcOddVectorChannelStash)
+{
+    RunNhwcOddVectorChannelStash<half_float::half>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_BFP16, testing::Values(size_t{16}));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP16, testing::Values(size_t{16}));
