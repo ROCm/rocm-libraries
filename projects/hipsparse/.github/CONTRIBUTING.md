@@ -72,6 +72,18 @@ Also, githooks can be installed to format the code per-commit:
 ./.githooks/install
 ```
 
+## Documenting Routine Families ##
+
+The S/D/C/Z variants of a routine are grouped between `/**@{*/` and `/**@}*/` in `library/include/internal/`. Edit only the documentation block directly before `/**@{*/`. Every other declaration in the group carries a generated copy of it, so libclang, clangd, binding generators and the published pages (which render the last variant in full) all show the same text. After editing that block, update the copies with:
+
+```
+python3 scripts/sync_group_docs.py --write
+```
+
+The `hipsparse-group-docs` pre-commit hook runs the same script without `--write` on every pull request that touches these headers, and fails if a copy is missing or differs.
+
+To check that Clang attaches a comment to every declaration, as libclang and clangd see them, run `python3 scripts/audit_doc_attachment.py`. It parses `hipsparse.h` with ROCm clang (`/opt/rocm/llvm/bin/clang`, or set `HIPSPARSE_CLANG`) and the HIP headers (`$ROCM_PATH`, default `/opt/rocm`), and fails if any function in `library/include/internal/` is undocumented. Keep each documentation block directly above its declaration: Clang does not attach it across a `#if` or other preprocessor line.
+
 ## Pull Request Guidelines ##
 
 When you create a pull request, you should target the default branch. Our current default branch is the **develop** branch, which serves as our integration branch.
