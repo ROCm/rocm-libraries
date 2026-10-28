@@ -503,6 +503,11 @@ A/B/C encodings are the **baseline/fallback** layout — a starting place, NOT a
 hand-roll valid non-canonical (interleaved / custom) layouts (canonical is never required — `mma_is_machinery.md`).
 Whether the resolved instruction is issued on the target, and with which backend op (`mma.emit_op()`), follows the
 measured backend coverage record; its classes are described in `traits/README.md` "Backend coverage".
+The driver feeds each instruction its A and B operands from the fragments' storage registers (whole
+32-bit words for a packed dtype); a TF32 instruction reads TF32 fragments or F32 fragments, whose low
+mantissa bits it drops (when to convert to TF32 first: `dsl_docs/optimization/arch/gfx942.md` sec 21.1).
+A hand-written `b.mma(mma.emit_op(), ...)` call passes operands of the instruction's operand type
+itself, e.g. `b.bitcast(value, VectorType(TF32, 2))` for TF32 registers held as `i32`.
 
 ### Default: single MMA, everything resolved from traits
 ```python
