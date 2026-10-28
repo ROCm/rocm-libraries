@@ -57,6 +57,12 @@ namespace hiptensor
             // contraction: pack -> f64 / complex f64 strided GEMM with runtime sizes (-> epilogue
             // unless it writes D directly); also the F64 route of the other data types
             Gett64 = 6,
+            // contraction: rocKE's ring GETT body with runtime index maps (f16 / bf16, gfx950):
+            // the operands read and D written in place, one launch, no workspace
+            RingGett = 7,
+            // contraction: the direct GETT (any data type, operator and layout), the operands
+            // read and D written in place, one launch, no workspace
+            DirectGett = 8,
         };
 
         // What the selector knows of a candidate besides its program: the facts its features
@@ -98,6 +104,9 @@ namespace hiptensor
             // position in the static order (0 = the rule's choice)
             int  staticRank = 0;
             bool tuned      = false;
+            // a candidate the rules put first when no tuned candidate exists (the ring GETT:
+            // the selection models were not trained on its route)
+            bool preferred = false;
         };
 
         struct CandidateOptions

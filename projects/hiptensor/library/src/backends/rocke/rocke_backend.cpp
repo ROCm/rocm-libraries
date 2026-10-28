@@ -363,6 +363,13 @@ namespace hiptensor
                         }
                     }
 
+                    // the plan's kernel goes to the plan cache (PEDANTIC), as the measured winner
+                    // does: later plans of the problem on the handle, or on a handle that reads
+                    // the plan cache file, take it without selecting again
+                    if(!decided && source != "AUTOTUNE" && cache != nullptr)
+                    {
+                        cache->addCacheLine(hash, candidateUid(*pack, candidates[chosen]));
+                    }
                     logSelection(
                         problem, candidates, sel, chosen, source, note, context.workspaceSizeLimit);
                     if(auto status = loadFunctions(candidates[chosen].program);

@@ -891,6 +891,25 @@ namespace hiptensor
                 {1.0, 0.0},
                 {0.0, 0.0},
             };
+            if(program.fallback != nullptr)
+            {
+                bool use = false;
+                for(auto role : program.fallbackOnZero)
+                {
+                    auto const& v = values[static_cast<int>(role)];
+                    use           = use || (v.re == 0.0 && v.im == 0.0);
+                }
+                for(auto const& [role, align] : program.fallbackAlign)
+                {
+                    auto const* base = bufferOf(role, buffers, workspace);
+                    use = use || (base != nullptr && reinterpret_cast<uint64_t>(base) % align != 0);
+                }
+                if(use)
+                {
+                    return runProgram(
+                        *program.fallback, scalars, buffers, workspace, workspaceSize, stream);
+                }
+            }
             for(auto const& [role, scale] : program.requiredBuffers)
             {
                 bool const needed = scale < 0 || values[scale].re != 0.0 || values[scale].im != 0.0;

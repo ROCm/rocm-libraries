@@ -97,6 +97,7 @@ TRIG_LARGE = 2.0**30  # Payne-Hanek reduction from here
 _M52 = 1.5 * 2.0**52  # add and subtract: round an |x| < 2^51 to an integer (RNE)
 _SIGN = -(1 << 63)  # f64 sign bit as a signed i64
 _ABS = (1 << 63) - 1
+_EXACT = 1 << 53  # integers a double holds exactly (see IRMath.k64)
 _EXP_MASK = 0x7FF0000000000000
 _MANT_MASK = 0x000FFFFFFFFFFFFF
 _ONE_BITS = 0x3FF0000000000000
@@ -243,7 +244,7 @@ class IRMath:
         if key in self.pool:
             return self.pool[key]
         # built at its use (a value defined in one branch must not be used in another)
-        return self.b.bitcast(self.b.lor(self.b.const_i64(key), self.anchor), F64)
+        return self.b.bitcast(self.b.lor(self.k64(key), self.anchor), F64)
 
     def materialize(self, constants: Sequence[float]) -> None:
         """Build the anchored ``constants`` here, once (they then dominate every later use,
@@ -253,11 +254,27 @@ class IRMath:
             key = _bits(float(c))
             if key not in self.pool:
                 self.pool[key] = self.b.bitcast(
-                    self.b.lor(self.b.const_i64(key), self.anchor), F64
+                    self.b.lor(self.k64(key), self.anchor), F64
                 )
 
+    def k64(self, v: int) -> Value:
+        """The i64 constant ``v``. Past 2^53 in magnitude it is built from its two 32-bit
+        halves (``(zext hi << 32) | zext lo``, folded by the compiler to the same constant):
+        portable recipes carry integers as doubles, which keep 53 bits."""
+        v = int(v)
+        if -_EXACT <= v <= _EXACT:
+            return self.b.const_i64(v)
+        u = v % (1 << 64)
+        hi, lo = u >> 32, u & 0xFFFFFFFF
+        b = self.b
+
+        def half(h: int) -> Value:
+            return b.zext(b.const_i32(h - (1 << 32) if h >= 1 << 31 else h), I64)
+
+        return b.lor(b.shl(half(hi), b.const_i64(32)), half(lo))
+
     def i(self, v) -> Value:
-        return self.b.const_i64(int(v)) if isinstance(v, int) else v
+        return self.k64(v) if isinstance(v, int) else v
 
     def add(self, a, c):
         return self.b.fadd(self.f(a), self.f(c))

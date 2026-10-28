@@ -686,9 +686,11 @@ namespace
             {"permute_f32_transposing", 1, {48, 40, 3}, {{2, 1, 0}}, Type::F32, Type::F32});
         out.push_back(
             {"permute_f16_inner_kept", 1, {64, 9, 11}, {{0, 2, 1}}, Type::F16, Type::F16});
+        // B is gathered (fastest along mode 1, an extent that is no multiple of the vector
+        // width: the tiled transposing kernel does not take it, the JIT's vector form does)
         out.push_back({"trinary_f32",
                        3,
-                       {24, 20, 3},
+                       {24, 21, 3},
                        {{0, 1, 2}, {1, 0, 2}, {0, 1, 2}},
                        Type::F32,
                        Type::F32,
@@ -1102,7 +1104,7 @@ namespace
             {"file_permute_f32", 1, {40, 36, 4}, {{0, 2, 1}}, Type::F32, Type::F32},
             {"file_trinary_f32",
              3,
-             {36, 28, 2},
+             {36, 27, 2},
              {{0, 1, 2}, {0, 1, 2}, {1, 0, 2}},
              Type::F32,
              Type::F32},

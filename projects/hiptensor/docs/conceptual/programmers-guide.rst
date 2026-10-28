@@ -122,16 +122,21 @@ The selected backend and kernel of every plan are logged at the ``HIPTENSOR_LOG_
 
 The rocKE backend selects kernels when the plan is created. It lists the candidates of the problem, the
 programs that its kernel pack can run the problem with within the plan's workspace limit (for a contraction, the
-universal GEMM bodies of the data type's route and the f64 strided GEMM classes; for a reduction, the row and
-column kernels with several splits of the reduced modes), checking every capability on the host without
+ring GETT, the universal GEMM bodies of the data type's route, the f64 strided GEMM classes and the direct GETT;
+for a reduction, the row and column kernels with several splits of the reduced modes; for a permutation or an
+elementwise operation, the tiled kernel and the generic kernel), checking every capability on the host without
 launching anything. It then orders them:
 
 1. A contraction of rocKE's tuned route table takes the launches of that table.
-2. Otherwise, the selection model of the kernel pack for the problem's class (gradient-boosted trees over
+2. Otherwise, a contraction the ring GETT serves takes it (with the operands whose fastest free run is not a
+   multiple of 8 elements first packed into the workspace when the limit allows, else read in place), and on a
+   target without the GEMM routes (gfx90a, gfx942) the direct GETT of a 16-bit or f32 compute class takes it.
+3. Otherwise, the selection model of the kernel pack for the problem's class (gradient-boosted trees over
    integer features of the problem and the candidate, trained on measured timings of every candidate) ranks
-   the candidates. Selection takes no timing, no allocation and no device call, and is the same on every host
-   for the same problem, device and pack.
-3. Without a model for the class, rocKE's rules order the candidates.
+   the candidates of the routes it was trained on; the direct GETT follows them. Selection takes no timing, no
+   allocation and no device call, and is the same on every host for the same problem, device and pack.
+4. Without a model for the class, rocKE's rules order the candidates (a permutation or elementwise operation:
+   the tiled kernel, then the vector form of the generic kernel, then the generic kernel).
 
 The plan preference changes this:
 
@@ -139,9 +144,12 @@ The plan preference changes this:
   default). A rank past the candidates the plan admits returns ``HIPTENSOR_STATUS_NOT_SUPPORTED``.
 * ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times the first candidates of the order on the device at plan creation
   (on buffers it allocates and initializes, which it frees before ``hiptensorCreatePlan`` returns) and keeps
-  the fastest one. With ``HIPTENSOR_CACHE_MODE_PEDANTIC`` (the default) the winner is stored in the handle's plan
-  cache, and later plans of the same problem on that handle, or on a handle that read the plan cache file,
-  take it from there without timing, as long as their workspace limit admits it.
+  the fastest one.
+
+With ``HIPTENSOR_CACHE_MODE_PEDANTIC`` (the default) the kernel a plan takes (the winner of the timing, or the
+selected candidate) is stored in the handle's plan cache, and later plans of the same problem on that handle, or on
+a handle that read the plan cache file, take it from there without timing or selecting again, as long as their
+workspace limit admits it.
 
 ``hiptensorEstimateWorkspaceSize`` reports, for ``HIPTENSOR_WORKSPACE_DEFAULT``, the workspace of the candidate
 a plan selects (of the candidates ``HIPTENSOR_ALGO_DEFAULT_PATIENT`` times, of every candidate for a
@@ -150,22 +158,45 @@ least workspace some candidate runs with; for ``HIPTENSOR_WORKSPACE_MAX``, the w
 The plan's ``HIPTENSOR_PLAN_REQUIRED_WORKSPACE`` is the workspace of the selected candidate.
 
 The rocKE backend serves contractions and trinary contractions, permutations, elementwise binary and trinary
-operations, and reductions on the GPU targets it has a kernel pack for (gfx90a and gfx942: every contraction on the
-f64 route; gfx950: the routes of each data type, and the f64 route when those decline). Its kernels take their
-sizes and strides at run time. Every unary operator is served on real tensors (see "Unary operators" below); on
-complex tensors identity and conjugate. Contractions of real with complex tensors and other operators of complex
-tensors are declined; the fallback backend serves what it supports of them. Contractions need workspace for packed
-copies of A and B and an f32 (f64) result.
+operations, and reductions on the GPU targets it has a kernel pack for. Its kernels take their sizes and strides
+at run time. Every unary operator is served on real tensors (see "Unary operators" below); on complex tensors
+identity and conjugate. Contractions of real with complex tensors and other operators of complex tensors are
+declined; the fallback backend serves what it supports of them. A contraction runs on one of these routes:
+
+* The ring GETT (gfx950): rocKE's tensor-contraction body reads A and B and writes D (and reads C) through their
+  own strides in one launch, with no workspace. It serves f16 or bf16 data (A, B, C and D of one type) with f32
+  accumulation and no operators, when each operand's fastest free mode runs over an even number of elements and
+  the K modes split at its K tile of 32 elements (one K mode may be padded inside the tile), without batch modes,
+  with C laid out as D.
+* The GEMM routes (gfx950): A and B are packed into the workspace, a GEMM computes an f32 result in the
+  workspace, and an elementwise epilogue writes D.
+* The f64 route (every target): A and B are converted to f64 into the workspace and an f64 GEMM writes D (or
+  an f64 result that an epilogue writes to D).
+* The direct GETT (every target): one launch reads A, B and C and writes D through their own strides, with no
+  workspace, for every data type, compute type, operator and layout.
+
+A plan created with a workspace limit of zero takes the ring GETT or the direct GETT. The ring GETT and rocKE's
+tuned plans run the direct GETT instead when alpha is zero, or beta is zero for a contraction with C (their
+epilogue would combine the term of the zero scale, so that a NaN or an infinity of a tensor that is not read would
+reach D), and when a buffer is not aligned to their vector accesses.
+
+A permutation or an elementwise operation whose output is fastest along one mode and an input along another
+runs on a tiled kernel: the inputs that are fastest along the other mode are read with 16-byte loads into a tile
+in LDS and read back along the output's mode, and D is written with 16-byte stores. It applies when the output's
+extents and strides keep those vectors aligned (otherwise, and for buffers that are not aligned, the generic
+kernel runs). Otherwise, when an input is contiguous along the output's fastest mode, a vector form of the generic
+kernel handles 16 bytes of the output per thread, with vector loads of those inputs (the classes of the JIT's
+vector kernels, with the sizes and strides as kernel arguments).
 
 The data types of a contraction's A, B, C and D may differ: each is f16, bf16, f32 or f64, or each is complex f32
 or complex f64. The compute type sets the precision of the products. With ``HIPTENSOR_COMPUTE_DESC_16F`` and
 ``HIPTENSOR_COMPUTE_DESC_16BF`` every operand is rounded once to that type (to nearest even, from any type
-including f64; values past its range become infinities; on gfx90a and gfx942, only operands that already have that
-type are served). With ``HIPTENSOR_COMPUTE_DESC_32F`` and
+including f64; values past its range become infinities). With ``HIPTENSOR_COMPUTE_DESC_32F`` and
 ``HIPTENSOR_COMPUTE_DESC_C32F`` the operands keep their values (every f16 and bf16 value is an f32 value) and
 operands of f64 data run on the f64 route. With ``HIPTENSOR_COMPUTE_DESC_64F`` and ``HIPTENSOR_COMPUTE_DESC_C64F``
-every contraction runs on the f64 route. Products accumulate in f32 (f64 on the f64 route), C is read with its own
-type, and the result is rounded once to D's type. The error of an element of D against the exact result of the
+every contraction runs on the f64 route or, in the direct GETT, in f64. Products accumulate in f32 (f64 on the
+f64 route, in the direct GETT's f64 kernels, which also take f32 data on gfx90a, and for f64 operands with a
+16-bit compute type), C is read with its own type, and the result is rounded once to D's type. The error of an element of D against the exact result of the
 rounded operands is then at most ``2 (K + 4) u_c |alpha| sum |a b| + 2 u_d |d| + 4 u_c |beta c|``, with K the
 number of products, ``u_c`` the unit roundoff of the accumulation (2^-24 for f32, 2^-53 for f64) and ``u_d`` that
 of D's type.

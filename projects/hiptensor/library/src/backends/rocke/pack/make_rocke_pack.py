@@ -48,6 +48,18 @@ Kernel families (attribute "family"):
     gett64   f64 / complex f64 strided batched GEMM with runtime sizes
     gett     the launches of rocKE's tuned GETT route table (f16 / bf16 contractions of fixed
              shapes): pack kernels and the GETT kernel, with a launch record per problem
+    rgett    rocKE's ring GETT body (f16 / bf16 contractions on gfx950) with its index maps as
+             kernel arguments: the operands read and D written in place, one class per lane
+             width / D vector width (kernels.common.hiptensor_aot.rgett)
+    dgett    the direct GETT: any contraction (every data type, operator, layout) read and
+             written in place with no workspace, register-staged MFMA tiles
+             (kernels.common.hiptensor_aot.dgett)
+    ewv      the vector classes of the elementwise kernel (kernels.common.hiptensor_aot.jit_ew with
+             its geometry as kernel arguments): each thread handles a 16-byte vector of D's fastest
+             mode, the inputs that are contiguous along it read with vector loads
+    ewt      the tiled elementwise kernel of permutations and elementwise operations whose inputs
+             are fastest along another mode than the output (an LDS tile per transposed input,
+             16-byte vectors on both sides; kernels.common.hiptensor_aot.ewt)
 
 With --jit-recipes it also writes the recipes of the backend's JIT (HIPTENSOR_ENABLE_ROCKE_JIT):
 
@@ -202,6 +214,9 @@ GEMM_ARCHES = ("gfx950",)
 # past the DMA buffer range: 64-bit tile origins need the non-persistent grid).
 GEMM_WIDE_BODY = "RIW"
 GETT64_CLASS_ARCHES = ("gfx90a", "gfx942", "gfx950")
+# The direct GETT (every target with MFMA) and the ring GETT classes (gfx950: ds_read_b64_tr_b16).
+DGETT_ARCHES = ("gfx90a", "gfx942", "gfx950")
+RGETT_ARCHES = ("gfx950",)
 # The thresholds of rocKE's emulated-f32 body rule (rocke.dispatch.gemm.cf32), shipped in the
 # route table so the C++ runtime picks the body the rocKE rule picks.
 GEMM_ROUTE_KEYS = (
@@ -252,6 +267,30 @@ def rocke_features():
     except (ImportError, AttributeError) as e:
         out["gett64"] = f"no runtime-size f64 GETT ({e})"
     try:
+        from kernels.common.hiptensor_aot import dgett
+
+        for name in ("DgettSpec", "build_dgett", "dgett_config", "DGETT_ABI"):
+            getattr(dgett, name)
+        out["dgett"] = ""
+    except (ImportError, AttributeError) as e:
+        out["dgett"] = f"no direct GETT ({e})"
+    try:
+        from kernels.common.hiptensor_aot import rgett
+
+        for name in ("RgettSpec", "build_rgett", "rgett_classes", "RGETT_ABI"):
+            getattr(rgett, name)
+        out["rgett"] = ""
+    except (ImportError, AttributeError) as e:
+        out["rgett"] = f"no ring GETT classes ({e})"
+    try:
+        from kernels.common.hiptensor_aot import ewt
+
+        for name in ("EwtSpec", "build_ewt", "EWT_ABI", "SLOTS_B"):
+            getattr(ewt, name)
+        out["ewt"] = ""
+    except (ImportError, AttributeError) as e:
+        out["ewt"] = f"no tiled elementwise kernel ({e})"
+    try:
         from kernels.common.hiptensor_aot import jit_ew
 
         for name in ("EwJitSpec", "jit_classes", "roll_jit_ew", "EW_JIT_ABI"):
@@ -297,6 +336,30 @@ def kernel_descriptors(arch, num_cus):
                     if math:
                         p["math"] = True
                     out.append(("reduce", p))
+    if not features["ewt"]:
+        # the real rows of the API's elementwise operations (32-bit offsets, no math operators)
+        for p in ew_params(False, mixed=False):
+            if p.get("cplx") or p.get("math"):
+                continue
+            out.append(
+                (
+                    "ewt",
+                    {k: v for k, v in p.items() if k in ("arity", "a", "b", "c", "d")},
+                )
+            )
+    if not features["jit"]:
+        # the vector classes of the same rows (every combination of vector / gathered inputs)
+        from kernels.common.hiptensor_aot.ew import EwSpec
+        from kernels.common.hiptensor_aot.jit_ew import jit_classes
+
+        for p in ew_params(False, mixed=False):
+            if p.get("cplx") or p.get("math"):
+                continue
+            for c in jit_classes([EwSpec(**p)]):
+                if c.vec > 1:
+                    out.append(
+                        ("ewv", dict(base=dict(p), vec=c.vec, unit=tuple(c.unit)))
+                    )
     if arch in GEMM_ARCHES and not features["gemm"]:
         for route, bodies in GEMM_BODIES.items():
             dts = ("fp16", "bf16") if route == "h16" else ("bf16",)
@@ -325,6 +388,32 @@ def kernel_descriptors(arch, num_cus):
                 )
     for key in tuned_gett_keys(arch) if not features["gett"] else []:
         out.append(("gett_plan", dict(key=key)))
+    if arch in DGETT_ARCHES and not features["dgett"]:
+        for cplx in (False, True):
+            for comp in ("f32", "f64") if cplx else ("f16", "bf16", "f32", "f64"):
+                for a_fast in ("k", "r"):
+                    for b_fast in ("k", "r"):
+                        for math in (False,) if cplx else (False, True):
+                            for idx64 in (False, True):
+                                out.append(
+                                    (
+                                        "dgett",
+                                        dict(
+                                            comp=comp,
+                                            cplx=cplx,
+                                            a_fast=a_fast,
+                                            b_fast=b_fast,
+                                            math=math,
+                                            idx64=idx64,
+                                        ),
+                                    )
+                                )
+    if arch in RGETT_ARCHES and not features["rgett"]:
+        from dataclasses import asdict
+
+        from kernels.common.hiptensor_aot.rgett import rgett_classes
+
+        out.extend(("rgett", asdict(c)) for c in rgett_classes())
     if arch in GETT64_CLASS_ARCHES and not features["gett64"]:
         from rocke.instances.common.gett_f64 import TUNED_CONFIGS
 
@@ -667,6 +756,110 @@ def build_kernel(family, params, arch, num_cus):
             limit_grid_yz=65535,
         )
         return build_universal_gemm(spec, arch), attrs
+    if family == "ewv":
+        from kernels.common.hiptensor_aot.ew import EwSpec
+        from kernels.common.hiptensor_aot.jit_ew import EwJitSpec, build_ew_jit
+
+        base = EwSpec(**params["base"])
+        spec = EwJitSpec(base, params["vec"], tuple(params["unit"]))
+        attrs = dict(
+            family="ewv",
+            abi="hiptensor-aot-ewv/v1",
+            arity=base.arity,
+            cplx=0,
+            idx64=0,
+            math=0,
+            a=base.a,
+            b=base.b or "",
+            c=base.c or "",
+            d=base.d,
+            block=base.block,
+            vec=spec.vec,
+            unit="".join("u" if x else "g" for x in spec.unit),
+            max_rank=8,
+            limit_index=(1 << 31) - 1,
+        )
+        return build_ew_jit(spec, None), attrs
+    if family == "ewt":
+        from kernels.common.hiptensor_aot import ewt as et
+
+        spec = et.EwtSpec(**params)
+        attrs = dict(
+            family="ewt",
+            abi=et.EWT_ABI,
+            arity=spec.arity,
+            a=spec.a,
+            b=spec.b or "",
+            c=spec.c or "",
+            d=spec.d,
+            block=et.THREADS,
+            tile_o=et.TILE_O,
+            tile_t=spec.tile_t(),
+            # capability: batch digit slots, i32 element offsets
+            slots_b=et.SLOTS_B,
+            limit_index=(1 << 31) - 1,
+        )
+        return et.build_ewt(spec), attrs
+    if family == "dgett":
+        from kernels.common.hiptensor_aot import dgett as dg
+
+        spec = dg.DgettSpec(**params)
+        try:
+            spec.check(arch)
+        except ValueError as e:
+            return None, str(e)
+        cfg = dg.dgett_config(spec)
+        attrs = dict(
+            family="dgett",
+            abi=dg.DGETT_ABI,
+            comp=spec.comp,
+            cplx=int(spec.cplx),
+            a_fast=spec.a_fast,
+            b_fast=spec.b_fast,
+            math=int(spec.math),
+            idx64=int(spec.idx64),
+            tile_m=cfg.tm,
+            tile_n=cfg.tn,
+            tile_k=cfg.tk,
+            block=dg.THREADS,
+            # capability: digit slots of the M / N spaces, the K tiles, the in-tile K digits and
+            # the batch space; i32 coordinates; 32-bit offsets unless idx64
+            slots_mn=dg.SLOTS_MN,
+            slots_kt=dg.SLOTS_KT,
+            slots_kl=dg.SLOTS_KL,
+            slots_l=dg.SLOTS_L,
+            limit_index=(1 << 31) - 1,
+            limit_grid_yz=65535,
+        )
+        return dg.build_dgett(spec, arch=arch), attrs
+    if family == "rgett":
+        from kernels.common.hiptensor_aot import rgett as rg
+
+        spec = rg.RgettSpec(**params)
+        attrs = dict(
+            family="rgett",
+            abi=rg.RGETT_ABI,
+            dtype=spec.dtype,
+            bilinear=int(spec.bilinear),
+            vec_a=spec.vec_a,
+            vec_b=spec.vec_b,
+            vec_d=spec.vec_d,
+            pair=int(spec.epi_pair),
+            wide=int(spec.wide_d),
+            tile_m=256,
+            tile_n=256,
+            tile_k=spec.tile_k,
+            block=256,
+            slots_row=rg.SLOTS_ROW,
+            slots_kt=rg.SLOTS_KT,
+            slots_kl=rg.SLOTS_KL,
+            # capability: operands within the DMA buffer range, D and C within the epilogue's
+            # 32-bit offsets (the wide classes: masked summed offsets), rows of tiles on grid y
+            limit_operand_bytes=0x7FFF0000,
+            limit_d_bytes=rg.MAX_D_BYTES if spec.wide_d else 0x7FFFFFF0,
+            limit_grid_yz=65535,
+        )
+        return rg.build_rgett(spec, arch=arch), attrs
     if family == "gett64":
         from rocke.instances.common import gett_f64 as g64
         from rocke.instances.common.gett_f64 import build_gett_f64

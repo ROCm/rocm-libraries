@@ -379,3 +379,64 @@ def test_native_engine_lowers_the_same_text(name):
         py = _lower_kernel_to_llvm_python(k, arch="gfx950")
         cpp = native.lower_serialized_ir(serialize(k), arch="gfx950")
         assert py == cpp, name
+
+
+def _integers_past_2_53(o, out: set) -> set:
+    if isinstance(o, bool):
+        return out
+    if isinstance(o, int):
+        if abs(o) > 1 << 53:
+            out.add(o)
+    elif isinstance(o, dict):
+        for v in o.values():
+            _integers_past_2_53(v, out)
+    elif isinstance(o, (list, tuple)):
+        for v in o:
+            _integers_past_2_53(v, out)
+    return out
+
+
+@pytest.mark.parametrize("name", el.FUNCTIONS)
+def test_recipe_integers_are_exact_doubles(name):
+    """Portable recipes (the form hipTensor's JIT replays) carry integers as doubles: every
+    integer of a program is at most 2^53 in magnitude (wider i64 constants, such as the
+    anchored f64 bit patterns and the sign / magnitude masks, are built from 32-bit halves)."""
+    from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+    for ty in (F64, F32):
+        recipe = kerneldef_to_recipe(_kernel(name, ty))
+        assert not _integers_past_2_53(recipe, set()), name
+
+
+class _IntBuilder:
+    """Evaluates the integer ops :meth:`IRMath.k64` emits (i32 constants as signed values)."""
+
+    def const_i32(self, v):
+        assert -(1 << 31) <= v < 1 << 31
+        return ("i32", v)
+
+    def const_i64(self, v):
+        assert abs(v) <= 1 << 53
+        return ("i64", v % (1 << 64))
+
+    def zext(self, v, _ty):
+        assert v[0] == "i32"
+        return ("i64", v[1] % (1 << 32))
+
+    def shl(self, a, s):
+        return ("i64", (a[1] << s[1]) % (1 << 64))
+
+    def lor(self, a, c):
+        return ("i64", a[1] | c[1])
+
+
+@pytest.mark.parametrize(
+    "v",
+    [0, 1, -1, 1 << 53, -(1 << 53), (1 << 53) + 1, el._ABS, el._SIGN, el._EXP_MASK]
+    + [el._bits(c) for c in (el.PI_H, -el.PI_H, el.LOG2E, 0.1, -3.5e-300)],
+)
+def test_wide_integer_constants_are_their_value(v):
+    """:meth:`IRMath.k64`: constants past 2^53 from two 32-bit halves whose combination is
+    the constant (the compiler folds it back to one: the code objects are unchanged)."""
+    kind, got = el.IRMath(_IntBuilder()).k64(v)
+    assert kind == "i64" and got == v % (1 << 64)

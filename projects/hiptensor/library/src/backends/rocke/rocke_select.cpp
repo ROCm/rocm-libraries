@@ -442,6 +442,8 @@ namespace hiptensor
                 return "MODEL";
             case SelectSource::Tuned:
                 return "TUNED";
+            case SelectSource::Rule:
+                return "RULE";
             default:
                 return "STATIC";
             }
@@ -470,6 +472,24 @@ namespace hiptensor
                 std::rotate(sel.order.begin(), tuned, tuned + 1);
                 sel.source = SelectSource::Tuned;
                 sel.model  = "tuned route table";
+                return sel;
+            }
+            // 1b. the routes the selection models were not trained on (the ring GETT, the direct
+            // GETT) keep the static order after the others; a preferred one goes first
+            auto modelRoute = [&candidates](int i) {
+                auto r = candidates[i].facts.route;
+                return r != Route::RingGett && r != Route::DirectGett;
+            };
+            std::stable_partition(sel.order.begin(), sel.order.end(), modelRoute);
+            auto preferred = std::find_if(sel.order.begin(),
+                                          sel.order.end(),
+                                          [&candidates](int i) { return candidates[i].preferred; });
+            if(preferred != sel.order.end())
+            {
+                bool const ring = candidates[*preferred].facts.route == Route::RingGett;
+                std::rotate(sel.order.begin(), preferred, preferred + 1);
+                sel.source = SelectSource::Rule;
+                sel.model  = ring ? "the ring GETT rule" : "the direct GETT rule";
                 return sel;
             }
 
@@ -507,10 +527,14 @@ namespace hiptensor
             std::vector<int64_t> x;
             for(size_t i = 0; i < n; i++)
             {
-                features(problem, candidates[i], x);
-                sel.scores[i] = model->predict(x);
+                if(modelRoute(static_cast<int>(i)))
+                {
+                    features(problem, candidates[i], x);
+                    sel.scores[i] = model->predict(x);
+                }
             }
-            std::stable_sort(sel.order.begin(), sel.order.end(), [&](int a, int b) {
+            auto const scored = std::find_if_not(sel.order.begin(), sel.order.end(), modelRoute);
+            std::stable_sort(sel.order.begin(), scored, [&](int a, int b) {
                 if(sel.scores[a] != sel.scores[b])
                 {
                     return sel.scores[a] < sel.scores[b];

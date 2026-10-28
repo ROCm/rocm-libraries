@@ -1148,12 +1148,39 @@ namespace hiptensor
                 std::vector<size_t>      bytes;
             };
 
-            // Decides the class of `step` (a launch of the pack's generic elementwise kernel).
+            // Decides the class of `step` (a launch of the pack's generic elementwise kernel, or of
+            // one of its vector classes, family "ewv", whose arguments are the class geometry).
             bool classify(LaunchStep const& step, EwClass& out, std::string& reason)
             {
                 auto const& k     = *step.kernel;
                 int const   arity = static_cast<int>(k.attr("arity"));
                 bool const  cplx  = k.attr("cplx") == 1;
+                if(k.family == "ewv")
+                {
+                    std::string const aot = "hiptensor_aot_ewv";
+                    if(k.name.rfind(aot, 0) != 0 || arity < 1 || arity > 3)
+                    {
+                        reason = "not a vector class of the elementwise kernel";
+                        return false;
+                    }
+                    out.tensors = arity == 1   ? std::vector<std::string>{"A", "D"}
+                                  : arity == 2 ? std::vector<std::string>{"A", "C", "D"}
+                                               : std::vector<std::string>{"A", "B", "C", "D"};
+                    for(auto const& t : out.tensors)
+                    {
+                        std::string lower(1, char(std::tolower(t[0])));
+                        out.bytes.push_back(elementBytes(k.attrStr(lower)));
+                    }
+                    out.vec   = static_cast<int>(k.attr("vec"));
+                    auto unit = k.attrStr("unit");
+                    out.vectorTensor.assign(out.tensors.size(), true);
+                    for(size_t t = 0; t + 1 < out.tensors.size() && t < unit.size(); t++)
+                    {
+                        out.vectorTensor[t] = unit[t] == 'u';
+                    }
+                    out.key = "ew:hiptensor_jit_ew" + k.name.substr(aot.size());
+                    return true;
+                }
                 if(arity < 1 || arity > 3)
                 {
                     reason = "not a generic elementwise kernel";
@@ -1404,8 +1431,10 @@ namespace hiptensor
                     return false;
                 }
                 // the values of the recipe's axes: the launch's arguments, with the thread
-                // space of a vector class counted in vectors
-                int64_t nIn = 0, e0 = 0;
+                // space of a vector class counted in vectors (a vector class launch counts in
+                // vectors already)
+                bool const classLaunch = step.kernel->family == "ewv";
+                int64_t    nIn = 0, e0 = 0;
                 if(!readArg(step, "n_in", nIn) || !readArg(step, "e0", e0))
                 {
                     reason = "the launch has no thread space";
@@ -1418,7 +1447,15 @@ namespace hiptensor
                 for(auto const& axis : recipe->axes)
                 {
                     int64_t v = 0;
-                    if(cls.vec > 1 && axis == "n_in")
+                    if(classLaunch)
+                    {
+                        if(!readArg(step, axis, v))
+                        {
+                            reason = "the launch has no value for recipe axis " + axis;
+                            return false;
+                        }
+                    }
+                    else if(cls.vec > 1 && axis == "n_in")
                     {
                         v = nIn / cls.vec;
                     }
@@ -1559,7 +1596,7 @@ namespace hiptensor
                     return false;
                 }
                 uint32_t const block = step.block.x;
-                int64_t const  vecIn = nIn / cls.vec;
+                int64_t const  vecIn = classLaunch ? nIn : nIn / cls.vec;
                 js.block             = step.block;
                 js.grid = dim3(static_cast<uint32_t>((vecIn + block - 1) / block), step.grid.y, 1);
                 if(entry->kernel.maxWorkgroup != 0 && block > entry->kernel.maxWorkgroup)
@@ -1589,7 +1626,11 @@ namespace hiptensor
             bool const promoteAll = mode && *mode == "all";
             for(auto const& step : program.steps)
             {
-                report.launches += step.kernel != nullptr && step.kernel->family == "ew" ? 1 : 0;
+                report.launches += step.kernel != nullptr
+                                           && (step.kernel->family == "ew"
+                                               || step.kernel->family == "ewv")
+                                       ? 1
+                                       : 0;
             }
             if(report.launches == 0)
             {
@@ -1619,7 +1660,8 @@ namespace hiptensor
             std::string firstReason;
             for(auto& step : program.steps)
             {
-                if(step.kernel == nullptr || step.kernel->family != "ew")
+                if(step.kernel == nullptr
+                   || (step.kernel->family != "ew" && step.kernel->family != "ewv"))
                 {
                     continue;
                 }

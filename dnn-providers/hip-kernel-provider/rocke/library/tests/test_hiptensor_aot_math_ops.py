@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 
 import pytest
 
@@ -50,7 +51,8 @@ def test_math_rows():
     with pytest.raises(ValueError):
         EwSpec(arity=1, a="f32", d="f32", cplx=True, math=True).check()
     with pytest.raises(ValueError):
-        EwJitSpec(EwSpec(arity=1, a="f32", d="f32", math=True), 4, (True,)).check()
+        EwJitSpec(EwSpec(arity=1, a="f32", d="f32", math=True), 4, (False,)).check()
+    EwJitSpec(EwSpec(arity=1, a="f32", d="f32", math=True), 4, (True,)).check()
     assert set(C.UNARY_OPS) == set(range(1, 39)) - {3, 4, 5, 6, 7} - set(range(13, 22))
     assert C.MATH_OPS[C.OP_SIN] == "sin" and C.MATH_OPS[C.OP_FLOOR] == "floor"
 
@@ -92,6 +94,73 @@ def test_math_class_rolls(base):
     spec = jit_classes([base])[0]
     recipe = roll_jit_ew(spec, verify=2)
     assert recipe["kernel_name_fmt"] == spec.kernel_name()
+
+
+def _wide_integers(o, out: set) -> set:
+    if isinstance(o, bool):
+        return out
+    if isinstance(o, int):
+        if abs(o) > 1 << 53:
+            out.add(o)
+    elif isinstance(o, dict):
+        for v in o.values():
+            _wide_integers(v, out)
+    elif isinstance(o, (list, tuple)):
+        for v in o:
+            _wide_integers(v, out)
+    return out
+
+
+# the A operand pack of a contraction on the f64 route (f32 -> f64, k contiguous)
+_PACK_DIMS = [(40, [1, 1]), (3, [840, 40]), (21, [40, 120])]
+
+
+def _pack_class(op, a="f32", d="f64"):
+    vals, _, _ = ew_args(canonicalize(_PACK_DIMS, 1), ["A", "D"])
+    vals["opA"] = op
+    return jit_class_of(EwSpec(arity=1, a=a, d=d, math=True), vals)
+
+
+def test_math_recipes_carry_exact_integers():
+    """The C++ recipe reader holds integers as doubles: no integer of a math class's recipe
+    is past 2^53 (the f64 constants' bit patterns once were, and the JIT's kernels computed
+    with corrupted constants)."""
+    spec, _, _ = _pack_class(C.OP_ATAN)
+    assert not _wide_integers(roll_jit_ew(spec, verify=1), set())
+
+
+@pytest.mark.parametrize("a,d", [("f32", "f64"), ("f16", "f16"), ("f64", "f64")])
+def test_math_recipe_replay_lowers_like_the_builder(a, d):
+    """The hipTensor JIT path (the recipe replayed and lowered by the C++ engine) prints the
+    LLVM IR of the Python builder's kernel up to SSA value names (the replay numbers the
+    values of loops with carried values differently), for every math operator (skipped
+    without the portable engine library)."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+    from rocke.portable_ir.src import online
+    from rocke.portable_ir.src.recipe_bundle import cbor_encode
+
+    try:
+        lib = online.resolve_library_path(build=False)
+    except (FileNotFoundError, RuntimeError) as err:  # pragma: no cover - depends on the host
+        pytest.skip(f"portable engine library: {err}")
+    if lib is None:
+        pytest.skip("the portable engine library is not built")
+    recipe = None
+    for op in MATH:
+        spec, geom, _ = _pack_class(op, a, d)
+        if recipe is None:
+            recipe = cbor_encode(roll_jit_ew(spec, verify=1))
+        cpp, _ = online.recipe_cbor_to_llvm(recipe, arch="gfx942", ints=geom)
+        py = _lower_kernel_to_llvm_python(build_ew_jit(spec, geom), arch="gfx942")
+        assert _ssa_free(cpp) == _ssa_free(py), (spec.key(), op)
+
+
+def _ssa_free(ll: str) -> str:
+    """``ll`` with its local value and label names numbered in order of appearance."""
+    names: dict = {}
+    return re.sub(
+        r"%[A-Za-z_.0-9]+", lambda m: names.setdefault(m.group(0), f"%v{len(names)}"), ll
+    )
 
 
 def _vgprs(kernel, arch="gfx950"):

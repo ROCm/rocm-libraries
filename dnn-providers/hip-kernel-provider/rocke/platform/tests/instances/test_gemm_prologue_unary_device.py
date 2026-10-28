@@ -21,12 +21,16 @@ import math
 
 import pytest
 
+# The device through torch (the references are torch tensors), before rocKE's runtime starts: a
+# HIP runtime started first by rocKE can leave torch's own without a visible device, while rocKE
+# reuses the HIP library of an imported torch.
 _ARCH = None
 try:
-    from rocke.runtime.hip_module import get_device_arch
+    import torch as _torch
 
-    _ARCH = get_device_arch(0)
-except Exception:  # noqa: BLE001 - no runtime / no device
+    if _torch.cuda.is_available():
+        _ARCH = _torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+except Exception:  # noqa: BLE001 - no torch / no device
     _ARCH = None
 
 pytestmark = pytest.mark.skipif(
@@ -185,7 +189,8 @@ def test_operators_on_both_f32(ua, ub):
 
 @pytest.mark.parametrize("op", ["sin", "sigmoid", "acos", "ceil", "log"])
 def test_operator_on_a_bf16(op):
-    bad, worst = _run(op, "", bf16=True, seed=5)
+    # bf16 pairs: K a multiple of the route's K tile in both views (no K padding)
+    bad, worst = _run(op, "", bf16=True, K=128, seed=5)
     assert bad == 0, (op, worst)
 
 

@@ -28,6 +28,11 @@
 // (enumerateCandidates admits only candidates the pack can run, without launching anything):
 //
 //   1. rocKE's tuned route table: a candidate from it (an exact problem rocKE measured) wins;
+//      otherwise the ring GETT (rocKE's native contraction body reading the operands in place)
+//      wins when the problem has one, and on a target without the GEMM routes the direct GETT
+//      of a 16-bit or f32 compute class. The routes the models were not trained on (the ring
+//      GETT, the direct GETT) are not scored: they follow the scored candidates in the static
+//      order;
 //   2. the selection model of the problem's cell in the pack: gradient-boosted trees that
 //      predict each candidate's slowdown against the best candidate (log2) from integer
 //      features of the problem and the candidate; the lowest prediction wins, ties by the
@@ -76,6 +81,7 @@ namespace hiptensor
             Static,
             Model,
             Tuned,
+            Rule, // a candidate the rules put first (the ring GETT, the direct GETT)
         };
 
         char const* sourceName(SelectSource source);

@@ -165,6 +165,14 @@ namespace
     };
 
     // The base name of the current device's architecture, e.g. "gfx950".
+    // HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64: contractions on the f64 route only (no GEMM routes,
+    // no GETT routes)
+    bool f64RouteOnly()
+    {
+        char const* route = std::getenv("HIPTENSOR_ROCKE_CONTRACTION_ROUTE");
+        return route != nullptr && std::string(route) == "f64";
+    }
+
     std::string deviceArch()
     {
         int             device = 0;
@@ -586,6 +594,8 @@ namespace
         hiptensorCacheMode_t          cacheMode = HIPTENSOR_CACHE_MODE_PEDANTIC;
         hiptensorWorksizePreference_t workspace = HIPTENSOR_WORKSPACE_DEFAULT;
         ApiObjects*                   api       = nullptr;
+        // plan with a workspace limit of zero (the estimate is still queried)
+        bool zeroWorkspace = false;
     };
 
     // What the rocKE backend's selection log line says about a plan, and its workspace.
@@ -663,6 +673,10 @@ namespace
                       api.handle, desc, pref, choice.workspace, &workspaceSize),
                   HIPTENSOR_STATUS_SUCCESS)
             << log.all();
+        if(choice.zeroWorkspace)
+        {
+            workspaceSize = 0;
+        }
         hiptensorPlan_t plan   = nullptr;
         auto            status = hiptensorCreatePlan(api.handle, &plan, desc, pref, workspaceSize);
         static_cast<void>(hiptensorDestroyPlanPreference(pref));
@@ -764,10 +778,9 @@ namespace
         {
             GTEST_SKIP() << "data type not supported on this device";
         }
-        char const* route    = std::getenv("HIPTENSOR_ROCKE_CONTRACTION_ROUTE");
-        bool const  f64Route = (route != nullptr && std::string(route) == "f64")
-                              || deviceArch() != "gfx950"; // the 16-bit GEMM routes are gfx950's
-        if(f64Route && c.type == HIPTENSOR_R_32F && c.compute != HIPTENSOR_COMPUTE_DESC_32F)
+        // the direct GETT rounds operands to a 16-bit compute type on every target; the f64 route
+        // alone declines them
+        if(f64RouteOnly() && c.type == HIPTENSOR_R_32F && c.compute != HIPTENSOR_COMPUTE_DESC_32F)
         {
             GTEST_SKIP() << "the f64 route declines f32 data with a 16-bit compute type";
         }
@@ -1991,17 +2004,20 @@ namespace
             return;
         }
         EXPECT_EQ(a.pick, b.pick);
-        EXPECT_TRUE(a.source == "MODEL" || a.source == "STATIC") << a.source;
+        EXPECT_TRUE(a.source == "MODEL" || a.source == "STATIC" || a.source == "RULE")
+            << a.source;
+        // on gfx950 the ring GETT wins by rule when the layout admits it, else the model decides
+        bool const ring = a.pick.rfind("rgett:", 0) == 0;
         if(deviceArch() == "gfx950")
         {
-            EXPECT_EQ(a.source, "MODEL");
+            EXPECT_EQ(a.source, ring ? "RULE" : "MODEL");
         }
         SelectionLog st;
         {
             ScopedEnv env("HIPTENSOR_ROCKE_SELECT", "static");
             runContraction(c, all, &st);
         }
-        EXPECT_EQ(st.source, "STATIC");
+        EXPECT_EQ(st.source, ring ? "RULE" : "STATIC");
         EXPECT_EQ(st.candidates, a.candidates);
 
         // reductions have models too
@@ -2281,10 +2297,10 @@ namespace
                 GTEST_SKIP() << "data type not supported on this device";
             }
         }
-        if(deviceArch() != "gfx950"
+        if(f64RouteOnly()
            && (c.compute == HIPTENSOR_COMPUTE_DESC_16F || c.compute == HIPTENSOR_COMPUTE_DESC_16BF))
         {
-            GTEST_SKIP() << "16-bit compute types of mixed operands run on gfx950's GEMM routes";
+            GTEST_SKIP() << "the f64 route declines 16-bit compute types of mixed operands";
         }
         LogCapture                 log;
         std::vector<int64_t>       pick = {1, 3, 5, 8, 17, 33, 64, 70};
@@ -2510,9 +2526,9 @@ namespace
     // D[m, n] = A[m, 0] * 1 + A[m, 1] * 0 with A's values next to the rounding boundaries.
     TEST(RockeMixed, OperandsRoundOnceToTheComputeType)
     {
-        if(deviceArch() != "gfx950")
+        if(f64RouteOnly())
         {
-            GTEST_SKIP() << "16-bit compute types of mixed operands run on gfx950's GEMM routes";
+            GTEST_SKIP() << "the f64 route declines 16-bit compute types of mixed operands";
         }
         for(auto compute : {HIPTENSOR_COMPUTE_DESC_16F, HIPTENSOR_COMPUTE_DESC_16BF})
         {
@@ -2680,10 +2696,7 @@ namespace
         {
             GTEST_SKIP() << "data type not supported on this device";
         }
-        char const* route = std::getenv("HIPTENSOR_ROCKE_CONTRACTION_ROUTE");
-        bool const  f64Route
-            = (route != nullptr && std::string(route) == "f64") || deviceArch() != "gfx950";
-        if(f64Route && c.type == HIPTENSOR_R_32F && c.compute != HIPTENSOR_COMPUTE_DESC_32F)
+        if(f64RouteOnly() && c.type == HIPTENSOR_R_32F && c.compute != HIPTENSOR_COMPUTE_DESC_32F)
         {
             GTEST_SKIP() << "the f64 route declines f32 data with a 16-bit compute type";
         }
@@ -3527,6 +3540,10 @@ namespace
             // A of 2.16 GB: the 64-bit-address x6 body
             HugeContractionCase{
                 HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 33000, 64, 16384, true},
+            // D and C of 2.24 GB: the ring GETT's classes for D past 2^31 bytes (A packed), the
+            // direct GETT with 64-bit offsets, the 64-bit-address h16 body
+            HugeContractionCase{
+                HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F, 34000, 33000, 64, true},
             // A of 2.68 GB: the 64-bit-address cf32 body
             HugeContractionCase{
                 HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 20480, 64, 16384, true},
@@ -4666,9 +4683,9 @@ namespace
             GTEST_SKIP() << "data type not supported on this device";
         }
         if((c.compute == HIPTENSOR_COMPUTE_DESC_16F || c.compute == HIPTENSOR_COMPUTE_DESC_16BF)
-           && deviceArch() != "gfx950")
+           && f64RouteOnly())
         {
-            GTEST_SKIP() << "16-bit compute types round operands only on gfx950's GEMM routes";
+            GTEST_SKIP() << "the f64 route declines 16-bit compute types of other operand types";
         }
         std::mt19937               rng(c.seed);
         std::map<int32_t, int64_t> ext = {{'m', 21}, {'n', 17}, {'k', 40}, {'q', 3}};
@@ -4974,6 +4991,620 @@ namespace
                 }
             });
             EXPECT_EQ(bad, 0) << log.all();
+        }
+    }
+    // ---------------------------------------------------------- in place, without workspace
+
+    // Every contraction plans with a workspace limit of zero: the direct GETT (or the ring GETT)
+    // reads the operands and writes D through their own strides, against the loop reference of
+    // each case (every data type and compute type, scale and bilinear, conjugate, 10 and 12
+    // modes per tensor).
+    class RockeZeroWorkspaceContraction : public ::testing::TestWithParam<ContractionCase>
+    {
+    };
+
+    TEST_P(RockeZeroWorkspaceContraction, MatchesLoopReference)
+    {
+        if(f64RouteOnly())
+        {
+            GTEST_SKIP() << "the f64 route needs workspace";
+        }
+        Choice none;
+        none.zeroWorkspace = true;
+        SelectionLog s;
+        runContraction(GetParam(), none, &s);
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        EXPECT_EQ(s.required, 0u);
+        EXPECT_TRUE(s.pick.rfind("dgett:", 0) == 0 || s.pick.rfind("rgett:", 0) == 0) << s.pick;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke,
+                             RockeZeroWorkspaceContraction,
+                             ::testing::ValuesIn(contractionCases()));
+
+    // Mixed data types (A, B, C, D of different types, 16-bit compute types from f32 and f64)
+    // without workspace.
+    class RockeZeroWorkspaceMixed : public ::testing::TestWithParam<MixedCase>
+    {
+    };
+
+    TEST_P(RockeZeroWorkspaceMixed, MatchesLoopReference)
+    {
+        if(f64RouteOnly())
+        {
+            GTEST_SKIP() << "the f64 route needs workspace";
+        }
+        Choice none;
+        none.zeroWorkspace = true;
+        SelectionLog s;
+        runMixed(GetParam(), none, &s);
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        EXPECT_EQ(s.required, 0u);
+        EXPECT_TRUE(s.pick.rfind("dgett:", 0) == 0 || s.pick.rfind("rgett:", 0) == 0) << s.pick;
+    }
+
+    INSTANTIATE_TEST_SUITE_P(Rocke, RockeZeroWorkspaceMixed, ::testing::ValuesIn(mixedCases()));
+
+    // D[m, n] = alpha * sum_k A[m, k] B[n, k] + beta * C[m, n], every tensor packed column-major
+    // (the ring GETT's layout on gfx950), integer data with a NaN in A, an infinity in B and a
+    // NaN in C; `offset` elements past each allocation's start (the buffers then miss the
+    // alignment of vector accesses). Runs every candidate (KERNEL_RANK) with the given scalars
+    // and compares with the IEEE reference bit for bit (NaN positions included). Returns the
+    // picks.
+    std::vector<std::string> runInPlace(hiptensorDataType_t          type,
+                                        hiptensorComputeDescriptor_t compute,
+                                        double                       alphaRe,
+                                        double                       betaRe,
+                                        int64_t                      offset,
+                                        bool                         specials)
+    {
+        std::vector<std::string> picks;
+        ApiObjects               probe;
+        if(!probe.supports(type))
+        {
+            return picks;
+        }
+        int64_t const        M = 264, N = 200, K = 96;
+        std::mt19937         rng(int(type) * 7 + int(offset));
+        auto                 make = [&](std::vector<int32_t> modes, std::vector<int64_t> ext) {
+            Tensor t;
+            t.type    = type;
+            t.modes   = modes;
+            t.extents = ext;
+            t.strides = {1, ext[0]};
+            t.values.resize(ext[0] * ext[1]);
+            std::uniform_int_distribution<int> ints(-3, 3);
+            for(auto& v : t.values)
+            {
+                v = cplx(ints(rng), isComplex(type) ? ints(rng) : 0);
+            }
+            return t;
+        };
+        auto A = make({'m', 'k'}, {M, K});
+        auto B = make({'n', 'k'}, {N, K});
+        auto C = make({'m', 'n'}, {M, N});
+        auto D = make({'m', 'n'}, {M, N});
+        if(specials)
+        {
+            // a NaN in A and C; an infinity in B only where it is not used (alpha == 0): the
+            // emulated-f32 GEMM route splits an infinity into parts whose sum is NaN
+            double const nan = std::numeric_limits<double>::quiet_NaN();
+            A.values[5]      = cplx(nan, 0);
+            C.values[11]     = cplx(nan, 0);
+            if(alphaRe == 0.0)
+            {
+                B.values[7] = cplx(std::numeric_limits<double>::infinity(), 0);
+            }
+        }
+        auto const scalarType = scalarTypeOf(compute);
+        Scalar     alpha, beta;
+        alpha.re = alphaRe;
+        beta.re  = betaRe;
+        // reference (IEEE double; integer data: exact)
+        std::vector<cplx> want(D.values.size());
+        for(int64_t m = 0; m < M; m++)
+        {
+            for(int64_t n = 0; n < N; n++)
+            {
+                // the components' products written out (no recovery of infinities); real scales
+                double sr = 0, si = 0;
+                for(int64_t k = 0; k < K; k++)
+                {
+                    auto const a = A.values[m + k * M], b = B.values[n + k * N];
+                    if(!isComplex(type))
+                    {
+                        sr += a.real() * b.real();
+                        continue;
+                    }
+                    sr += a.real() * b.real() - a.imag() * b.imag();
+                    si += a.real() * b.imag() + a.imag() * b.real();
+                }
+                cplx       v = alphaRe == 0.0 ? cplx(0, 0) : cplx(alphaRe * sr, alphaRe * si);
+                cplx const c = C.values[m + n * M];
+                v = betaRe == 0.0 ? v : cplx(v.real() + betaRe * c.real(), v.imag() + betaRe * c.imag());
+                want[m + n * M] = cplx(roundTo(v.real(), type), roundTo(v.imag(), type));
+            }
+        }
+        for(int32_t rank = 0;; rank++)
+        {
+            ApiObjects                     api;
+            LogCapture                     log;
+            hiptensorOperationDescriptor_t desc = nullptr;
+            auto dA = describe(api, A), dB = describe(api, B), dC = describe(api, C),
+                 dD = describe(api, D);
+            EXPECT_EQ(hiptensorCreateContraction(api.handle,
+                                                 &desc,
+                                                 dA,
+                                                 A.modes.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dB,
+                                                 B.modes.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dC,
+                                                 C.modes.data(),
+                                                 HIPTENSOR_OP_IDENTITY,
+                                                 dD,
+                                                 D.modes.data(),
+                                                 compute),
+                      HIPTENSOR_STATUS_SUCCESS);
+            api.keep(desc);
+            hiptensorPlanPreference_t pref = nullptr;
+            EXPECT_EQ(hiptensorCreatePlanPreference(
+                          api.handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+                      HIPTENSOR_STATUS_SUCCESS);
+            EXPECT_EQ(hiptensorPlanPreferenceSetAttribute(api.handle,
+                                                          pref,
+                                                          HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK,
+                                                          &rank,
+                                                          sizeof(rank)),
+                      HIPTENSOR_STATUS_SUCCESS);
+            uint64_t ws = 0;
+            EXPECT_EQ(hiptensorEstimateWorkspaceSize(
+                          api.handle, desc, pref, HIPTENSOR_WORKSPACE_MAX, &ws),
+                      HIPTENSOR_STATUS_SUCCESS);
+            hiptensorPlan_t plan   = nullptr;
+            auto            status = hiptensorCreatePlan(api.handle, &plan, desc, pref, ws);
+            static_cast<void>(hiptensorDestroyPlanPreference(pref));
+            if(status == HIPTENSOR_STATUS_NOT_SUPPORTED && rank > 0)
+            {
+                break; // past the candidates
+            }
+            EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << log.all();
+            if(plan == nullptr)
+            {
+                break;
+            }
+            api.plans.push_back(plan);
+            auto const sel = selectionOf(log);
+            picks.push_back(sel.pick);
+            uint64_t required = 0;
+            EXPECT_EQ(hiptensorPlanGetAttribute(api.handle,
+                                                plan,
+                                                HIPTENSOR_PLAN_REQUIRED_WORKSPACE,
+                                                &required,
+                                                sizeof(required)),
+                      HIPTENSOR_STATUS_SUCCESS);
+            // buffers `offset` elements past their allocation
+            Device dev;
+            auto   at = [&](Tensor const& t) {
+                Tensor s = t;
+                s.values.insert(s.values.begin(), offset, cplx(0, 0));
+                return static_cast<uint8_t*>(dev.upload(s)) + offset * sizeOf(type);
+            };
+            void* pA = at(A);
+            void* pB = at(B);
+            void* pC = at(C);
+            void* pD = at(D);
+            void* w  = nullptr;
+            if(required > 0)
+            {
+                EXPECT_EQ(hipMalloc(&w, required), hipSuccess);
+                dev.buffers.push_back(w);
+            }
+            Stream stream;
+            EXPECT_EQ(hiptensorContract(api.handle,
+                                        plan,
+                                        alpha.as(scalarType),
+                                        pA,
+                                        pB,
+                                        beta.as(scalarType),
+                                        pC,
+                                        pD,
+                                        w,
+                                        required,
+                                        stream.s),
+                      HIPTENSOR_STATUS_SUCCESS)
+                << sel.pick;
+            EXPECT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+            Tensor got = D;
+            got.values.insert(got.values.begin(), offset, cplx(0, 0));
+            dev.download(static_cast<uint8_t*>(pD) - offset * sizeOf(type), got);
+            got.values.erase(got.values.begin(), got.values.begin() + offset);
+            int64_t bad = 0;
+            for(size_t i = 0; i < want.size(); i++)
+            {
+                auto const g = got.values[i], x = want[i];
+                bool const same
+                    = (std::isnan(g.real()) == std::isnan(x.real()))
+                      && (std::isnan(g.imag()) == std::isnan(x.imag()))
+                      && (std::isnan(x.real()) || g.real() == x.real())
+                      && (std::isnan(x.imag()) || g.imag() == x.imag());
+                if(!same && bad++ < 5)
+                {
+                    ADD_FAILURE() << sel.pick << " alpha " << alphaRe << " beta " << betaRe
+                                  << " offset " << offset << ": element " << i << " got " << g
+                                  << " want " << x;
+                }
+            }
+            EXPECT_EQ(bad, 0) << sel.pick;
+        }
+        return picks;
+    }
+
+    // Zero scales: alpha == 0 does not use A and B (a NaN or infinity in them does not reach D),
+    // beta == 0 does not read C (its NaN does not reach D); with both scales nonzero the NaN and
+    // the infinity reach exactly their outputs. Every candidate: the ring GETT and the tuned
+    // plans, whose kernels read every term, take the direct GETT for zero scales.
+    TEST(RockeInPlaceGett, ZeroScalesDoNotReadTheirTerms)
+    {
+        struct Row
+        {
+            hiptensorDataType_t          type;
+            hiptensorComputeDescriptor_t compute;
+        };
+        for(auto const& r : {Row{HIPTENSOR_R_16F, HIPTENSOR_COMPUTE_DESC_32F},
+                             Row{HIPTENSOR_R_16BF, HIPTENSOR_COMPUTE_DESC_32F},
+                             Row{HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F},
+                             Row{HIPTENSOR_R_64F, HIPTENSOR_COMPUTE_DESC_64F},
+                             Row{HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F}})
+        {
+            for(auto [alpha, beta] :
+                {std::pair{0.0, 2.0}, std::pair{2.0, 0.0}, std::pair{2.0, -1.0}})
+            {
+                auto picks = runInPlace(r.type, r.compute, alpha, beta, 0, true);
+                if(r.type == HIPTENSOR_R_16F || r.type == HIPTENSOR_R_16BF)
+                {
+                    bool ring = false;
+                    for(auto const& p : picks)
+                    {
+                        ring = ring || p.rfind("rgett:", 0) == 0;
+                    }
+                    EXPECT_EQ(ring, deviceArch() == "gfx950");
+                }
+                ASSERT_FALSE(HasFailure()) << "type " << int(r.type);
+            }
+        }
+    }
+
+    // Buffers that miss the alignment of the ring GETT's vector accesses (one element past an
+    // aligned address): the plan's fallback (the direct GETT) runs, with the same results.
+    TEST(RockeInPlaceGett, UnalignedBuffers)
+    {
+        for(auto type : {HIPTENSOR_R_16F, HIPTENSOR_R_16BF})
+        {
+            auto picks = runInPlace(type, HIPTENSOR_COMPUTE_DESC_32F, 2.0, -1.0, 1, false);
+            ASSERT_FALSE(picks.empty());
+            if(deviceArch() == "gfx950")
+            {
+                EXPECT_EQ(picks.front().rfind("rgett:", 0), 0u) << picks.front();
+            }
+        }
+        // the other data types: every candidate with element-aligned buffers
+        runInPlace(HIPTENSOR_R_32F, HIPTENSOR_COMPUTE_DESC_32F, 2.0, -1.0, 1, false);
+        runInPlace(HIPTENSOR_C_32F, HIPTENSOR_COMPUTE_DESC_C32F, 2.0, -1.0, 1, false);
+    }
+    // ---------------------------------------------------------------- tiled elementwise
+
+    // An elementwise case for the tiled kernel: D[a, b, c, d] (mode a fastest) with input 0
+    // fastest along b (read along the transposed mode), the other inputs fastest along a, b or a
+    // batch mode; extents of a and b multiples of every vector width. `rank`: KERNEL_RANK (0 the
+    // tiled kernel, 1 the generic one); `skew`: every buffer one element past an aligned address
+    // (the tiled program then runs its fallback); `zeroScale`: an input whose scale is zero and
+    // holds a NaN (it must not be read).
+    struct TiledCase
+    {
+        int                 arity;
+        hiptensorDataType_t in, out, scalar;
+        int                 seed;
+        int32_t             rank      = 0;
+        size_t              skew      = 0;
+        int                 zeroScale = -1;
+        // false: input 0 laid out as D (the vector class of the generic kernel, not the tiled
+        // kernel)
+        bool transposed = true;
+    };
+
+    // A packed tensor stored in `order` (fastest first), integer values in [-3, 3].
+    Tensor packedTensor(hiptensorDataType_t               type,
+                        std::vector<int32_t> const&       modes,
+                        std::vector<int32_t> const&       order,
+                        std::map<int32_t, int64_t> const& ext,
+                        std::mt19937&                     rng)
+    {
+        Tensor t;
+        t.type  = type;
+        t.modes = modes;
+        for(auto m : modes)
+        {
+            t.extents.push_back(ext.at(m));
+        }
+        t.strides.assign(modes.size(), 0);
+        int64_t s = 1;
+        for(auto m : order)
+        {
+            auto i       = std::find(modes.begin(), modes.end(), m) - modes.begin();
+            t.strides[i] = s;
+            s *= ext.at(m);
+        }
+        t.values.resize(s);
+        std::uniform_int_distribution<int> ints(-3, 3);
+        for(auto& v : t.values)
+        {
+            v = cplx(ints(rng), 0);
+        }
+        return t;
+    }
+
+    // Returns the pick.
+    std::string runTiled(TiledCase const& c)
+    {
+        std::mt19937 rng(c.seed);
+        ApiObjects   api;
+        if(!api.supports(c.in))
+        {
+            return "";
+        }
+        LogCapture                 log;
+        std::map<int32_t, int64_t> ext = {{'a', 72}, {'b', 40}, {'c', 3}, {'d', 5}};
+        std::vector<int32_t>       modes = {'a', 'b', 'c', 'd'};
+        std::vector<Tensor>        ins;
+        std::vector<std::vector<int32_t>> orders
+            = {{'b', 'a', 'd', 'c'}, {'a', 'c', 'b', 'd'}, {'c', 'b', 'a', 'd'}};
+        for(int i = 0; i < c.arity; i++)
+        {
+            auto order = orders[i == 0 ? 0 : 1 + rng() % 2];
+            if(i > 0 && rng() % 3 == 0)
+            {
+                order = orders[0];
+            }
+            if(!c.transposed)
+            {
+                order = i == 0 ? std::vector<int32_t>{'a', 'b', 'c', 'd'} : orders[1 + rng() % 2];
+            }
+            ins.push_back(packedTensor(c.in, modes, order, ext, rng));
+        }
+        auto D = packedTensor(c.out, modes, {'a', 'b', 'c', 'd'}, ext, rng);
+        std::fill(D.values.begin(), D.values.end(), cplx(0, 0));
+        if(c.zeroScale >= 0)
+        {
+            ins[c.zeroScale].values[3] = cplx(std::numeric_limits<double>::quiet_NaN(), 0);
+        }
+        hiptensorOperator_t const ops[]
+            = {HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_NEG, HIPTENSOR_OP_ABS, HIPTENSOR_OP_RELU};
+        hiptensorOperator_t const bops[]
+            = {HIPTENSOR_OP_ADD, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MAX, HIPTENSOR_OP_MIN};
+        std::vector<hiptensorOperator_t> uop;
+        for(int i = 0; i < c.arity; i++)
+        {
+            uop.push_back(ops[rng() % 4]);
+        }
+        auto   opAB = bops[rng() % 4], opABC = bops[rng() % 4];
+        Scalar s[3];
+        for(int i = 0; i < 3; i++)
+        {
+            s[i].re = (i + c.seed) % 3 == 0 ? 2.0 : (i + c.seed) % 3 == 1 ? -1.0 : 0.5;
+        }
+        // the scale of input i: alpha (A), beta (trinary B) or gamma (C)
+        auto scaleOf = [&](int i) -> Scalar& { return c.arity == 2 && i == 1 ? s[2] : s[i]; };
+        if(c.zeroScale >= 0)
+        {
+            scaleOf(c.zeroScale).re = 0.0;
+        }
+        auto compute = c.scalar == HIPTENSOR_R_64F    ? HIPTENSOR_COMPUTE_DESC_64F
+                       : c.scalar == HIPTENSOR_R_16F  ? HIPTENSOR_COMPUTE_DESC_16F
+                       : c.scalar == HIPTENSOR_R_16BF ? HIPTENSOR_COMPUTE_DESC_16BF
+                                                      : HIPTENSOR_COMPUTE_DESC_32F;
+        hiptensorOperationDescriptor_t           desc = nullptr;
+        std::vector<hiptensorTensorDescriptor_t> d;
+        for(auto const& t : ins)
+        {
+            d.push_back(describe(api, t));
+        }
+        auto dD = describe(api, D);
+        if(c.arity == 1)
+        {
+            EXPECT_EQ(hiptensorCreatePermutation(
+                          api.handle, &desc, d[0], modes.data(), uop[0], dD, modes.data(), compute),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        else if(c.arity == 2)
+        {
+            EXPECT_EQ(hiptensorCreateElementwiseBinary(api.handle,
+                                                       &desc,
+                                                       d[0],
+                                                       modes.data(),
+                                                       uop[0],
+                                                       d[1],
+                                                       modes.data(),
+                                                       uop[1],
+                                                       dD,
+                                                       modes.data(),
+                                                       opAB,
+                                                       compute),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        else
+        {
+            EXPECT_EQ(hiptensorCreateElementwiseTrinary(api.handle,
+                                                        &desc,
+                                                        d[0],
+                                                        modes.data(),
+                                                        uop[0],
+                                                        d[1],
+                                                        modes.data(),
+                                                        uop[1],
+                                                        d[2],
+                                                        modes.data(),
+                                                        uop[2],
+                                                        dD,
+                                                        modes.data(),
+                                                        opAB,
+                                                        opABC,
+                                                        compute),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        api.keep(desc);
+        Choice choice;
+        choice.rank = c.rank;
+        uint64_t     ws = 0;
+        SelectionLog sel;
+        auto         plan = planWith(api, desc, choice, log, ws, &sel);
+        if(plan == nullptr)
+        {
+            return "";
+        }
+        Device dev;
+        auto   at = [&](Tensor const& t) {
+            Tensor x = t;
+            x.values.insert(x.values.begin(), c.skew, cplx(0, 0));
+            return static_cast<uint8_t*>(dev.upload(x)) + c.skew * sizeOf(t.type);
+        };
+        std::vector<void*> p;
+        for(auto const& t : ins)
+        {
+            p.push_back(at(t));
+        }
+        void*             pD = at(D);
+        Stream            stream;
+        hiptensorStatus_t status;
+        if(c.arity == 1)
+        {
+            status = hiptensorPermute(api.handle, plan, s[0].as(c.scalar), p[0], pD, stream.s);
+        }
+        else if(c.arity == 2)
+        {
+            status = hiptensorElementwiseBinaryExecute(
+                api.handle, plan, s[0].as(c.scalar), p[0], s[2].as(c.scalar), p[1], pD, stream.s);
+        }
+        else
+        {
+            Scalar a = s[0], b = s[1], g = s[2];
+            status   = hiptensorElementwiseTrinaryExecute(api.handle,
+                                                        plan,
+                                                        a.as(c.scalar),
+                                                        p[0],
+                                                        b.as(c.scalar),
+                                                        p[1],
+                                                        g.as(c.scalar),
+                                                        p[2],
+                                                        pD,
+                                                        stream.s);
+        }
+        EXPECT_EQ(status, HIPTENSOR_STATUS_SUCCESS) << log.all();
+        EXPECT_EQ(hipStreamSynchronize(stream.s), hipSuccess);
+        Tensor got = D;
+        got.values.insert(got.values.begin(), c.skew, cplx(0, 0));
+        dev.download(static_cast<uint8_t*>(pD) - c.skew * sizeOf(D.type), got);
+        got.values.erase(got.values.begin(), got.values.begin() + c.skew);
+        std::vector<cplx>   want(D.values.size(), 0);
+        std::vector<double> bound(D.values.size(), 0);
+        std::vector<bool>   written(D.values.size(), false);
+        forEachIndex(modes, ext, [&](auto index) {
+            std::vector<double> t;
+            for(int i = 0; i < c.arity; i++)
+            {
+                double const sc = scaleOf(i).re;
+                // an input whose scale is zero is not read (its NaN does not reach D)
+                t.push_back(sc == 0.0 ? 0.0
+                                      : sc * unaryRef(uop[i], ins[i].values[ins[i].offset(index)].real()));
+            }
+            double r = t[0];
+            if(c.arity >= 2)
+            {
+                r = binaryRef(opAB, t[0], t[1]);
+            }
+            if(c.arity == 3)
+            {
+                r = binaryRef(opABC, r, t[2]);
+            }
+            auto off     = D.offset(index);
+            want[off]    = r;
+            written[off] = true;
+        });
+        compare(got, want, bound, written, true, "tiled elementwise " + sel.pick);
+        return sel.pick;
+    }
+
+    // The tiled kernel (KERNEL_RANK 0) and the generic one (1) compute the same exact results for
+    // every data type row, with aligned and unaligned buffers (the tiled program's fallback) and
+    // with an input whose scale is zero.
+    TEST(RockeTiledElementwise, EveryCandidateExact)
+    {
+        struct Row
+        {
+            int                 arity;
+            hiptensorDataType_t in, out, scalar;
+        };
+        Row const rows[] = {{1, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                            {1, HIPTENSOR_R_16F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {1, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {1, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                            {2, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {2, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F},
+                            {3, HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
+                            {3, HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
+                            {3, HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}};
+        int seed = 2900;
+        for(auto const& r : rows)
+        {
+            for(size_t skew : {size_t(0), size_t(1)})
+            {
+                // the tiled kernel, then (when another input is read along D's fastest mode) the
+                // vector class of the generic kernel, then the generic kernel itself
+                for(int32_t rank = 0; rank < 3; rank++)
+                {
+                    TiledCase c{r.arity, r.in, r.out, r.scalar, seed, rank, skew};
+                    auto      pick = runTiled(c);
+                    if(rank == 0 && skew == 0)
+                    {
+                        EXPECT_EQ(pick.rfind("ewt:", 0), 0u) << pick;
+                    }
+                    if(rank > 0 && pick.rfind("ewv:", 0) != 0)
+                    {
+                        EXPECT_EQ(pick.rfind("ew:", 0), 0u) << pick;
+                        break;
+                    }
+                    EXPECT_TRUE(rank < 2) << pick;
+                }
+                seed++;
+            }
+            for(int z = 0; z < r.arity; z++)
+            {
+                TiledCase c{r.arity, r.in, r.out, r.scalar, seed++, 0, 0, z};
+                runTiled(c);
+            }
+            // input 0 laid out as D: the vector class (rank 0) and the generic kernel (1)
+            for(int32_t rank : {0, 1})
+            {
+                for(size_t skew : {size_t(0), size_t(1)})
+                {
+                    TiledCase c{r.arity, r.in, r.out, r.scalar, seed++, rank, skew, -1, false};
+                    auto      pick = runTiled(c);
+                    if(rank == 0 && skew == 0)
+                    {
+                        EXPECT_EQ(pick.rfind("ewv:", 0), 0u) << pick;
+                    }
+                }
+            }
+            ASSERT_FALSE(HasFailure()) << "arity " << r.arity << " type " << int(r.in);
         }
     }
 } // namespace

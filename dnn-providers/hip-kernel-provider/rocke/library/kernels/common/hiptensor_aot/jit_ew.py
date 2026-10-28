@@ -44,7 +44,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef
+from rocke.core.ir import I32, I64, IRBuilder, KernelDef
 
 from .common import (
     DTYPES,
@@ -122,13 +122,15 @@ def _runs(n: int, nbytes: int) -> List[int]:
     return [w] * (n // w)
 
 
-def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
+def build_ew_jit(spec: EwJitSpec, geom: Optional[Dict[str, int]]) -> KernelDef:
     """The kernel of class ``spec`` for the geometry values ``geom`` (every name of
-    :meth:`EwJitSpec.axes`)."""
+    :meth:`EwJitSpec.axes`). With ``geom`` None, the class kernel of hipTensor's kernel pack
+    instead (:func:`ewv_kernel_name`): every geometry value is a kernel argument of that name,
+    declared after the scalars in the order of :meth:`EwJitSpec.axes`."""
     spec.check()
     base = spec.base
     vec = spec.vec
-    b = IRBuilder(spec.kernel_name())
+    b = IRBuilder(spec.kernel_name() if geom is not None else ewv_kernel_name(spec))
     b.kernel.attrs["max_workgroup_size"] = base.block
     e = Emit(b, base.idx64, base.cdt, base.math)
     names = base.tensors()
@@ -146,13 +148,21 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
         else:
             S[n] = (e.scalar_param(scal_of[n]),)
 
+    pv = {}
+    if geom is None:
+        pv = {n: b.param(n, I64 if is64 else I32) for n, is64 in spec.axes()}
+
     def k32(name: str):
+        if geom is None:
+            return pv[name]
         return b.const_i32(int(geom[name]))
 
     def koff(v: int):
         return b.const_i64(v) if base.idx64 else b.const_i32(v)
 
     def kst(name: str):
+        if geom is None:
+            return pv[name]
         return (
             b.const_i64(int(geom[name])) if base.idx64 else b.const_i32(int(geom[name]))
         )
@@ -318,6 +328,11 @@ def build_ew_jit(spec: EwJitSpec, geom: Dict[str, int]) -> KernelDef:
 # ------------------------------------------------------------------------------------------------
 # Kernel classes and recipes
 # ------------------------------------------------------------------------------------------------
+
+
+def ewv_kernel_name(spec: EwJitSpec) -> str:
+    """The name of a class's kernel in hipTensor's kernel pack (its geometry as arguments)."""
+    return spec.kernel_name().replace("hiptensor_jit_ew", "hiptensor_aot_ewv", 1)
 
 
 def jit_vec(d: str) -> int:

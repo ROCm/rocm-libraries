@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -616,6 +617,10 @@ namespace hiptensor
                 return "cf32";
             case Route::Gett64:
                 return "gett64";
+            case Route::RingGett:
+                return "rgett";
+            case Route::DirectGett:
+                return "dgett";
             }
             return "?";
         }
@@ -624,11 +629,22 @@ namespace hiptensor
         {
             // ---------------------------------------------------------------------- elementwise
 
+            // The canonical problem of an elementwise operation, as planElementwise built it
+            // (inputs in kernel order, then D).
+            struct EwLayout
+            {
+                std::vector<Dim>                                 dims;
+                std::vector<EwOperand>                           operands;
+                std::vector<std::pair<std::string, std::string>> strs;
+                std::array<int, 2>                               binaryOps{};
+            };
+
             hiptensorStatus_t planElementwise(Problem const&  problem,
                                               Pack const&     pack,
                                               Program&        program,
                                               CandidateFacts& facts,
-                                              std::string&    reason)
+                                              std::string&    reason,
+                                              EwLayout*       layout = nullptr)
             {
                 // Kernel tensor names and problem slots: permute A -> B, binary A, C -> D, trinary
                 // A, B, C -> D.
@@ -814,6 +830,474 @@ namespace hiptensor
                 {
                     program.steps.push_back(std::move(s));
                 }
+                if(layout != nullptr)
+                {
+                    layout->dims      = dims;
+                    layout->operands  = operands;
+                    layout->strs      = strs;
+                    layout->binaryOps = {static_cast<int>(problem.opAB),
+                                         static_cast<int>(problem.opABC)};
+                }
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            constexpr char kEwt[] = "ewt";
+            constexpr char kEwv[] = "ewv";
+
+            // The value of integer argument `name` of a prepared launch.
+            bool stepArg(LaunchStep const& step, std::string const& name, int64_t& value)
+            {
+                int const index = step.kernel->argIndex(name);
+                if(index < 0)
+                {
+                    return false;
+                }
+                auto const& a = step.kernel->args[index];
+                if(a.pointer || a.offset + uint64_t(a.size) > step.args.size())
+                {
+                    return false;
+                }
+                if(a.size == 4)
+                {
+                    int32_t v;
+                    std::memcpy(&v, step.args.data() + a.offset, 4);
+                    value = v;
+                    return true;
+                }
+                if(a.size == 8)
+                {
+                    std::memcpy(&value, step.args.data() + a.offset, 8);
+                    return true;
+                }
+                return false;
+            }
+
+            std::string argNameAtOffset(PackKernel const& kernel, uint32_t offset)
+            {
+                for(auto const& a : kernel.args)
+                {
+                    if(a.offset == offset)
+                    {
+                        return a.name;
+                    }
+                }
+                return "";
+            }
+
+            // The vector class of a launch of the generic elementwise kernel (the kernel pack's
+            // ewv kernels: kernels.common.hiptensor_aot.jit_ew with its geometry as arguments, the
+            // rule of the JIT's vector classes): each thread handles `vec` elements of D's fastest
+            // mode (16 bytes of D's type) when D's stride there is 1, the extent of that mode a
+            // multiple of `vec`, and the other strides of D and of every input read with vector
+            // loads (stride 1 along that mode) multiples of `vec`. At least one input must be read
+            // with vector loads. The generic launch is the fallback (unaligned buffers).
+            hiptensorStatus_t planEwv(EwLayout const& lay,
+                                      Pack const&     pack,
+                                      Program const&  generic,
+                                      Program&        program,
+                                      CandidateFacts& facts,
+                                      std::string&    reason)
+            {
+                if(generic.steps.size() != 1)
+                {
+                    reason = "the generic program has several launches";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const& g     = generic.steps.front();
+                auto const& k     = *g.kernel;
+                int const   nt    = static_cast<int>(lay.operands.size());
+                int const   arity = nt - 1;
+                if(k.attr("idx64") != 0 || k.attr("math") != 0 || k.attr("cplx") != 0)
+                {
+                    reason = "no vector class of 64-bit-offset, math or complex rows";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                std::vector<int64_t> bytes;
+                for(auto const& op : lay.operands)
+                {
+                    std::string const key(1, char(std::tolower(op.name[0])));
+                    bytes.push_back(int64_t(elementBytes(k.attrStr(key))));
+                }
+                int64_t const vec = 16 / bytes.back();
+                int64_t       e0 = 0, sD0 = 0, lim0 = 0, nIn = 0;
+                bool ok = stepArg(g, "e0", e0) && stepArg(g, "sD0", sD0) && stepArg(g, "n_in", nIn)
+                          && sD0 == 1 && e0 % vec == 0 && e0 >= vec;
+                if(ok && arity == 1)
+                {
+                    ok = stepArg(g, "lim0", lim0) && lim0 % vec == 0;
+                }
+                std::vector<bool> vector(nt, false);
+                vector.back() = true;
+                for(int t = 0; ok && t < nt; t++)
+                {
+                    auto const& n  = lay.operands[t].name;
+                    int64_t     s0 = 0;
+                    ok             = stepArg(g, "s" + n + "0", s0);
+                    if(t + 1 < nt)
+                    {
+                        vector[t] = s0 == 1;
+                    }
+                    for(int i = 1; ok && vector[t] && i < kMaxRank; i++)
+                    {
+                        int64_t si = 0;
+                        ok         = stepArg(g, "s" + n + std::to_string(i), si) && si % vec == 0;
+                    }
+                }
+                for(auto const& p : g.pointers)
+                {
+                    auto const name = argNameAtOffset(k, p.offset);
+                    for(int t = 0; ok && t < nt; t++)
+                    {
+                        if(name == lay.operands[t].name && vector[t])
+                        {
+                            ok = p.bytes % uint64_t(bytes[t] * vec) == 0;
+                        }
+                    }
+                }
+                bool const vectorInput = std::find(vector.begin(), vector.end() - 1, true)
+                                         != vector.end() - 1;
+                if(!ok || !vectorInput)
+                {
+                    reason = "no vector class for this layout";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                std::string unit;
+                for(int t = 0; t + 1 < nt; t++)
+                {
+                    unit += vector[t] ? 'u' : 'g';
+                }
+                std::vector<std::pair<std::string, std::string>> strs = lay.strs;
+                strs.emplace_back("unit", unit);
+                auto const* kernel = pack.find(kEwv, {{"arity", int64_t(arity)}}, strs);
+                if(kernel == nullptr)
+                {
+                    reason = "the pack has no vector class " + unit + " for this data type row";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                LaunchStep step;
+                step.kernel = kernel;
+                ArgWriter w(step);
+                bool      good = true;
+                std::vector<std::pair<BufferRole, uint32_t>> align;
+                for(auto const& p : g.pointers)
+                {
+                    auto const name = argNameAtOffset(k, p.offset);
+                    good            = good && w.pointer(name, p.role, p.bytes);
+                    for(int t = 0; t < nt; t++)
+                    {
+                        if(name == lay.operands[t].name && vector[t])
+                        {
+                            align.emplace_back(p.role, uint32_t(bytes[t] * vec));
+                        }
+                    }
+                }
+                for(auto const& sc : g.scalars)
+                {
+                    good = good && w.scalar(argNameAtOffset(k, sc.offset), sc.role, sc.imag);
+                }
+                auto const magic = magicU31(static_cast<uint32_t>(e0 / vec));
+                for(auto const& a : kernel->args)
+                {
+                    if(a.pointer || a.name == "alpha" || a.name == "beta" || a.name == "gamma")
+                    {
+                        continue;
+                    }
+                    int64_t v = 0;
+                    if(a.name == "n_in")
+                    {
+                        v = nIn / vec;
+                    }
+                    else if(a.name == "e0")
+                    {
+                        v = e0 / vec;
+                    }
+                    else if(a.name == "m0")
+                    {
+                        good = good && w.setU32("m0", magic.first);
+                        continue;
+                    }
+                    else if(a.name == "s0")
+                    {
+                        v = magic.second;
+                    }
+                    else if(!stepArg(g, a.name, v))
+                    {
+                        good = false;
+                        break;
+                    }
+                    good = good && w.set(a.name, v);
+                }
+                if(!good)
+                {
+                    reason = "vector class arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                uint32_t const block = static_cast<uint32_t>(kernel->attr("block", 256));
+                step.block           = dim3(block, 1, 1);
+                step.grid            = dim3(
+                    static_cast<uint32_t>(ceilDiv(nIn / vec, block)), g.grid.y, g.grid.z);
+                if(auto st = finishStep(step, w, reason); st != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return st;
+                }
+                Program prog;
+                prog.pack            = &pack;
+                prog.scalarType      = generic.scalarType;
+                prog.nullStatus      = generic.nullStatus;
+                prog.requiredScalars = generic.requiredScalars;
+                prog.requiredBuffers = generic.requiredBuffers;
+                prog.steps.push_back(std::move(step));
+                prog.description   = kernel->name;
+                prog.fallback      = std::make_shared<Program>(generic);
+                prog.fallbackAlign = align;
+                facts              = CandidateFacts{};
+                facts.route        = Route::Elementwise;
+                facts.main         = kernel;
+                facts.ctas = int64_t(prog.steps[0].grid.x) * prog.steps[0].grid.y * prog.steps[0].grid.z;
+                facts.block = block;
+                program     = std::move(prog);
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // The tiled kernel of elementwise operations whose inputs are fastest along another
+            // mode than D (kernels.common.hiptensor_aot.ewt, ewt_plan): D's stride-1 mode o and
+            // the stride-1 mode t of the first input fastest elsewhere form the tile plane, the
+            // other modes the batch space. Each input is read through LDS along t (kind 2), with
+            // vector loads along o (kind 1) or one load per element (kind 0). The generic program
+            // is the fallback (buffers not aligned to the vectors).
+            hiptensorStatus_t planEwt(EwLayout const& lay,
+                                      Pack const&     pack,
+                                      Program const&  generic,
+                                      Program&        program,
+                                      CandidateFacts& facts,
+                                      std::string&    reason)
+            {
+                auto const& dims  = lay.dims;
+                int const   nt    = static_cast<int>(lay.operands.size());
+                int const   nd    = nt - 1;
+                auto        dtype = [&lay](std::string const& name) {
+                    std::string const key(1, char(std::tolower(name[0])));
+                    for(auto const& s : lay.strs)
+                    {
+                        if(s.first == key)
+                        {
+                            return s.second;
+                        }
+                    }
+                    return std::string();
+                };
+                for(int k = 0; k < nd; k++)
+                {
+                    if(mathUnary(lay.operands[k].op))
+                    {
+                        reason = "the tiled elementwise kernel has no math operators";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                std::vector<std::pair<std::string, std::string>> strs;
+                for(auto const& op : lay.operands)
+                {
+                    strs.emplace_back(std::string(1, char(std::tolower(op.name[0]))),
+                                      dtype(op.name));
+                }
+                auto const* kernel = pack.find(kEwt, {{"arity", int64_t(nd)}}, strs);
+                if(kernel == nullptr)
+                {
+                    reason = "the pack has no tiled elementwise kernel for this data type row";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int o = -1, t = -1;
+                for(int i = 0; i < int(dims.size()); i++)
+                {
+                    if(dims[i].stride[nd] == 1)
+                    {
+                        o = i;
+                        break;
+                    }
+                }
+                for(int k = 0; o >= 0 && t < 0 && k < nd; k++)
+                {
+                    for(int i = 0; i < int(dims.size()); i++)
+                    {
+                        if(i != o && dims[i].stride[k] == 1)
+                        {
+                            t = i;
+                            break;
+                        }
+                    }
+                }
+                if(o < 0 || t < 0)
+                {
+                    reason = "no input is fastest along another mode than the output";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t const    vo = 16 / int64_t(elementBytes(dtype("D")));
+                int64_t const    eo = dims[o].extent, et = dims[t].extent;
+                std::vector<int> others;
+                for(int i = 0; i < int(dims.size()); i++)
+                {
+                    if(i != o && i != t)
+                    {
+                        others.push_back(i);
+                    }
+                }
+                int const slots = int(kernel->attr("slots_b"));
+                bool      ok    = int(others.size()) <= slots && eo % vo == 0
+                          && dims[t].stride[nd] % vo == 0;
+                for(int i : others)
+                {
+                    ok = ok && dims[i].stride[nd] % vo == 0;
+                }
+                if(!ok)
+                {
+                    reason = "the output's layout does not keep the tiled kernel's vectors aligned";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                std::vector<int>                             kinds;
+                std::vector<std::pair<BufferRole, uint32_t>> align{{BufferRole::Out, 16u}};
+                for(int k = 0; k < nd; k++)
+                {
+                    auto const&   op = lay.operands[k];
+                    int64_t const es = int64_t(elementBytes(dtype(op.name)));
+                    int64_t const vt = 16 / es;
+                    auto          st = [&dims, k](int i) { return dims[i].stride[k]; };
+                    bool          tk = st(t) == 1 && et % vt == 0 && st(o) % vt == 0;
+                    for(int i : others)
+                    {
+                        tk = tk && st(i) % vt == 0;
+                    }
+                    if(tk)
+                    {
+                        kinds.push_back(2);
+                        align.emplace_back(op.role, 16u);
+                        continue;
+                    }
+                    int64_t const wv = std::min(vo, vt);
+                    bool          vk = st(o) == 1 && st(t) % wv == 0;
+                    for(int i : others)
+                    {
+                        vk = vk && st(i) % wv == 0;
+                    }
+                    if(vk)
+                    {
+                        kinds.push_back(1);
+                        align.emplace_back(op.role, uint32_t(wv * es));
+                        continue;
+                    }
+                    kinds.push_back(0);
+                }
+                if(std::find(kinds.begin(), kinds.end(), 2) == kinds.end())
+                {
+                    reason = "no input is read along the transposed mode";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                for(int k = 0; k < nt; k++)
+                {
+                    if(spanOf(dims, k) > kI32Max)
+                    {
+                        reason = "a tensor past the tiled kernel's 32-bit offsets";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                    for(auto const& d : dims)
+                    {
+                        if(d.stride[k] < 0)
+                        {
+                            reason = "a negative stride";
+                            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                        }
+                    }
+                }
+                int64_t const tt     = kernel->attr("tile_t"), to = kernel->attr("tile_o");
+                int64_t const tilesO = ceilDiv(eo, to), tilesT = ceilDiv(et, tt);
+                int64_t       nb     = 1;
+                for(int i : others)
+                {
+                    nb *= dims[i].extent;
+                }
+                if(tilesO * tilesT > kI32Max || nb > kI32Max)
+                {
+                    reason = "the tiled kernel's grid is past its limits";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                Program prog;
+                prog.pack            = &pack;
+                prog.scalarType      = generic.scalarType;
+                prog.nullStatus      = generic.nullStatus;
+                prog.requiredScalars = generic.requiredScalars;
+                prog.requiredBuffers = generic.requiredBuffers;
+                LaunchStep step;
+                step.kernel = kernel;
+                ArgWriter   w(step);
+                char const* scal[] = {"alpha", "beta", "gamma"};
+                bool        good   = true;
+                for(int k = 0; k < nt; k++)
+                {
+                    auto const& op = lay.operands[k];
+                    good           = good && w.pointer(op.name, op.role, op.bytes)
+                           && w.set("s" + op.name + "o", dims[o].stride[k])
+                           && w.set("s" + op.name + "t", dims[t].stride[k]);
+                    for(int i = 0; i < slots; i++)
+                    {
+                        int64_t const s = i < int(others.size()) && dims[others[i]].extent != 1
+                                              ? dims[others[i]].stride[k]
+                                              : 0;
+                        good            = good && w.set("s" + op.name + std::to_string(i), s);
+                    }
+                    if(k == nd)
+                    {
+                        continue;
+                    }
+                    std::string const sname = op.name == "A"   ? scal[0]
+                                              : op.name == "B" ? scal[1]
+                                                               : scal[2];
+                    good = good && w.scalar(sname, op.scale) && w.set("op" + op.name, op.op)
+                           && w.set("k" + op.name, kinds[k]);
+                }
+                if(nd >= 2)
+                {
+                    good = good && w.set("opAB", lay.binaryOps[0]);
+                }
+                if(nd == 3)
+                {
+                    good = good && w.set("opABC", lay.binaryOps[1]);
+                }
+                for(int i = 0; i < slots; i++)
+                {
+                    int64_t const e = i < int(others.size()) ? dims[others[i]].extent : 1;
+                    auto const    n = std::to_string(i);
+                    good            = good && w.set("be" + n, e);
+                    if(i < slots - 1)
+                    {
+                        good = good && setMagic(w, ("bm" + n).c_str(), ("bs" + n).c_str(), e);
+                    }
+                }
+                int64_t const ystep = std::min<int64_t>(nb, kGridYZMax);
+                good = good && w.set("eo", eo) && w.set("et", et) && w.set("tiles_o", tilesO)
+                       && setMagic(w, "to_m", "to_s", tilesO) && w.set("nb", nb)
+                       && w.set("ystep", ystep);
+                if(!good)
+                {
+                    reason = "tiled elementwise arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                step.grid  = dim3(static_cast<uint32_t>(tilesO * tilesT),
+                                 static_cast<uint32_t>(ystep),
+                                 1);
+                step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
+                if(auto st = finishStep(step, w, reason); st != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return st;
+                }
+                prog.steps.push_back(std::move(step));
+                prog.description   = kernel->name;
+                prog.fallback      = std::make_shared<Program>(generic);
+                prog.fallbackAlign = align;
+                facts              = CandidateFacts{};
+                facts.route        = Route::Elementwise;
+                facts.main         = kernel;
+                facts.ctas         = tilesO * tilesT * ystep;
+                facts.block        = kernel->attr("block", 256);
+                program            = std::move(prog);
                 return HIPTENSOR_STATUS_SUCCESS;
             }
 
@@ -2851,6 +3335,1256 @@ namespace hiptensor
                        || status == HIPTENSOR_STATUS_ARCH_MISMATCH;
             }
 
+        // ------------------------------------------------- contractions read and written in place
+
+            constexpr char kDgett[] = "dgett";
+            constexpr char kRgett[] = "rgett";
+
+            // A contraction mode: its extent and its strides in the kernel's A, B, C and D (0
+            // where the tensor does not have it).
+            struct GMode
+            {
+                int64_t                extent = 1;
+                std::array<int64_t, 4> stride{};
+            };
+
+            std::vector<GMode> modesOf(Group const& g)
+            {
+                std::vector<GMode> out;
+                for(size_t i = 0; i < g.modes.size(); i++)
+                {
+                    if(g.extent[i] != 1)
+                    {
+                        out.push_back({g.extent[i], g.stride[i]});
+                    }
+                }
+                return out;
+            }
+
+            // Orders modes by tensor t's strides (innermost first, stable).
+            void sortBy(std::vector<GMode>& modes, int t)
+            {
+                std::stable_sort(modes.begin(), modes.end(), [t](GMode const& a, GMode const& b) {
+                    return std::llabs(a.stride[t]) < std::llabs(b.stride[t]);
+                });
+            }
+
+            // Consecutive modes (innermost first) contiguous in every tensor of `tensors` merge
+            // into one digit while the extent stays below 2^31 (gett_host.merge_modes).
+            std::vector<GMode> mergeModes(std::vector<GMode> const& modes, std::vector<int> const& tensors)
+            {
+                std::vector<GMode> out;
+                for(auto const& m : modes)
+                {
+                    if(!out.empty())
+                    {
+                        auto& last = out.back();
+                        bool  ok   = last.extent * m.extent <= kI32Max;
+                        for(int t : tensors)
+                        {
+                            ok = ok && m.stride[t] == last.stride[t] * last.extent;
+                        }
+                        if(ok)
+                        {
+                            last.extent *= m.extent;
+                            continue;
+                        }
+                    }
+                    out.push_back(m);
+                }
+                return out;
+            }
+
+            int64_t spanElems(std::vector<GMode> const& modes, int t)
+            {
+                int64_t span = 1;
+                for(auto const& m : modes)
+                {
+                    span += (m.extent - 1) * std::llabs(m.stride[t]);
+                }
+                return span;
+            }
+
+            // A digit of a K plan: radix (extent), mode index, multiplier.
+            struct KTriple
+            {
+                int64_t radix = 1;
+                int     mode  = 0;
+                int64_t mult  = 1;
+            };
+
+            // gett_host.k_split: the in-tile and tile digits of K extents `exts` (innermost
+            // first) at the K tile `tk`, or false when the K space does not split there.
+            bool kSplit(std::vector<int64_t> const& exts,
+                        int64_t                     tk,
+                        std::vector<KTriple>&       local,
+                        std::vector<KTriple>&       tile)
+            {
+                local.clear();
+                tile.clear();
+                int64_t rem = tk;
+                for(int i = 0; i < int(exts.size()); i++)
+                {
+                    int64_t const e = exts[i];
+                    if(rem == 1)
+                    {
+                        tile.push_back({e, i, 1});
+                    }
+                    else if(e <= rem)
+                    {
+                        if(rem % e != 0)
+                        {
+                            return false;
+                        }
+                        local.push_back({e, i, 1});
+                        rem /= e;
+                    }
+                    else
+                    {
+                        if(e % rem != 0)
+                        {
+                            return false;
+                        }
+                        local.push_back({rem, i, 1});
+                        tile.push_back({e / rem, i, rem});
+                        rem = 1;
+                    }
+                }
+                return rem == 1;
+            }
+
+            // gett_host.k_split_padded: one mode padded to the smallest extent that splits, the
+            // padded mode an in-tile digit; the least padded K.
+            bool kSplitPadded(std::vector<int64_t> const& exts,
+                              int64_t                     tk,
+                              std::vector<KTriple>&       local,
+                              std::vector<KTriple>&       tile,
+                              int&                        padMode,
+                              int64_t&                    padReal,
+                              int64_t&                    padVolume)
+            {
+                bool found = false;
+                for(int j = 0; j < int(exts.size()); j++)
+                {
+                    int64_t rem = tk;
+                    for(int x = 0; x < j; x++)
+                    {
+                        if(exts[x] > rem || rem % exts[x] != 0)
+                        {
+                            rem = 0;
+                            break;
+                        }
+                        rem /= exts[x];
+                    }
+                    if(rem == 0 || exts[j] >= rem)
+                    {
+                        continue;
+                    }
+                    int64_t d = exts[j] + 1;
+                    while(rem % d != 0)
+                    {
+                        d++;
+                    }
+                    auto padded = exts;
+                    padded[j]   = d;
+                    std::vector<KTriple> lo, ti;
+                    if(!kSplit(padded, tk, lo, ti))
+                    {
+                        continue;
+                    }
+                    bool inTile = false;
+                    for(auto const& x : lo)
+                    {
+                        inTile = inTile || (x.mode == j && x.radix == d);
+                    }
+                    if(!inTile)
+                    {
+                        continue;
+                    }
+                    int64_t vol = 1;
+                    for(auto e : padded)
+                    {
+                        vol *= e;
+                    }
+                    if(!found || vol < padVolume)
+                    {
+                        found     = true;
+                        padVolume = vol;
+                        local     = lo;
+                        tile      = ti;
+                        padMode   = j;
+                        padReal   = exts[j];
+                    }
+                }
+                return found;
+            }
+
+            struct KDigit
+            {
+                int64_t extent = 1;
+                int64_t sA = 0, sB = 0;
+            };
+
+            // How a kernel walks the K modes with its K tile (gett_host.k_plan).
+            struct KPlan
+            {
+                std::vector<KDigit> local, tile;
+                int                 padSlot  = -1; // in-tile digit that must stay below padLimit
+                int64_t             padLimit = 0;
+                int64_t             ragged   = -1; // kl + tk * (first tile digit) < ragged
+                int64_t             tiles    = 1;
+            };
+
+            constexpr int kKOrderSearch = 6;
+
+            // `kmodes`: strides of the kernel's A in slot 0 and B in slot 1. Orders tried: every
+            // order of at most kKOrderSearch merged modes (else A's and B's memory orders); an
+            // exact split first (smallest strides innermost), then one padded in-tile mode (least
+            // padded K), then (`ragged`) the innermost mode of A's order in tiles of tk, the
+            // last one cut at its extent.
+            bool kPlan(std::vector<GMode> kmodes,
+                       int64_t            tk,
+                       size_t             slotsLocal,
+                       size_t             slotsTile,
+                       bool               ragged,
+                       KPlan&             out,
+                       std::string&       reason)
+            {
+                kmodes.erase(std::remove_if(kmodes.begin(),
+                                            kmodes.end(),
+                                            [](GMode const& m) { return m.extent == 1; }),
+                             kmodes.end());
+                if(kmodes.empty())
+                {
+                    kmodes.push_back(GMode{});
+                }
+                sortBy(kmodes, 0);
+                auto const byA = mergeModes(kmodes, {0, 1});
+                std::vector<std::vector<GMode>> orders;
+                if(byA.size() <= size_t(kKOrderSearch))
+                {
+                    std::vector<int> idx(byA.size());
+                    std::iota(idx.begin(), idx.end(), 0);
+                    do
+                    {
+                        std::vector<GMode> o;
+                        for(int i : idx)
+                        {
+                            o.push_back(byA[i]);
+                        }
+                        orders.push_back(std::move(o));
+                    } while(std::next_permutation(idx.begin(), idx.end()));
+                }
+                else
+                {
+                    orders.push_back(byA);
+                    auto byB = kmodes;
+                    sortBy(byB, 1);
+                    orders.push_back(mergeModes(byB, {0, 1}));
+                }
+                auto key = [](std::vector<GMode> const& o) {
+                    std::vector<int64_t> k;
+                    for(auto const& m : o)
+                    {
+                        k.push_back(std::min(std::llabs(m.stride[0]), std::llabs(m.stride[1])));
+                    }
+                    return k;
+                };
+                auto extsOf = [](std::vector<GMode> const& o) {
+                    std::vector<int64_t> e;
+                    for(auto const& m : o)
+                    {
+                        e.push_back(m.extent);
+                    }
+                    return e;
+                };
+                int                  best = -1;
+                std::vector<int64_t> bestKey;
+                std::vector<KTriple> bestLocal, bestTile;
+                int                  padMode = -1;
+                int64_t              padReal = 0;
+                for(int o = 0; o < int(orders.size()); o++)
+                {
+                    std::vector<KTriple> lo, ti;
+                    if(!kSplit(extsOf(orders[o]), tk, lo, ti) || lo.size() > slotsLocal
+                       || ti.size() > slotsTile)
+                    {
+                        continue;
+                    }
+                    auto k = key(orders[o]);
+                    if(best < 0 || k < bestKey)
+                    {
+                        best      = o;
+                        bestKey   = k;
+                        bestLocal = lo;
+                        bestTile  = ti;
+                    }
+                }
+                if(best < 0)
+                {
+                    for(int o = 0; o < int(orders.size()); o++)
+                    {
+                        std::vector<KTriple> lo, ti;
+                        int                  j    = -1;
+                        int64_t              real = 0, vol = 0;
+                        if(!kSplitPadded(extsOf(orders[o]), tk, lo, ti, j, real, vol)
+                           || lo.size() > slotsLocal || ti.size() > slotsTile)
+                        {
+                            continue;
+                        }
+                        auto k = key(orders[o]);
+                        k.insert(k.begin(), vol);
+                        if(best < 0 || k < bestKey)
+                        {
+                            best      = o;
+                            bestKey   = k;
+                            bestLocal = lo;
+                            bestTile  = ti;
+                            padMode   = j;
+                            padReal   = real;
+                        }
+                    }
+                }
+                out = KPlan{};
+                if(best >= 0)
+                {
+                    auto const& order = orders[best];
+                    auto        digit = [&order](KTriple const& x) {
+                        return KDigit{x.radix,
+                                      x.mult * order[x.mode].stride[0],
+                                      x.mult * order[x.mode].stride[1]};
+                    };
+                    for(size_t s = 0; s < bestLocal.size(); s++)
+                    {
+                        out.local.push_back(digit(bestLocal[s]));
+                        if(padMode >= 0 && bestLocal[s].mode == padMode && out.padSlot < 0)
+                        {
+                            out.padSlot  = static_cast<int>(s);
+                            out.padLimit = padReal;
+                        }
+                    }
+                    for(auto const& x : bestTile)
+                    {
+                        out.tile.push_back(digit(x));
+                        out.tiles *= x.radix;
+                    }
+                    return true;
+                }
+                if(!ragged)
+                {
+                    reason = "the K extents do not split at the K tile";
+                    return false;
+                }
+                auto const& m0 = byA[0];
+                out.local.push_back({tk, m0.stride[0], m0.stride[1]});
+                out.tile.push_back({ceilDiv(m0.extent, tk), tk * m0.stride[0], tk * m0.stride[1]});
+                for(size_t i = 1; i < byA.size(); i++)
+                {
+                    out.tile.push_back({byA[i].extent, byA[i].stride[0], byA[i].stride[1]});
+                }
+                if(out.tile.size() > slotsTile)
+                {
+                    reason = "too many K digits";
+                    return false;
+                }
+                for(auto const& x : out.tile)
+                {
+                    out.tiles *= x.extent;
+                }
+                out.ragged = m0.extent;
+                return true;
+            }
+
+            // The kernel arguments of a digit space: <prefix>e<i>, the magic pair <prefix>m<i>,
+            // <prefix>s<i> of every slot but the last, the strides <prefix><name><i>.
+            bool setDigits(ArgWriter&                                   w,
+                           std::string const&                           prefix,
+                           std::vector<std::pair<int64_t, std::vector<int64_t>>> const& digits,
+                           std::vector<std::string> const&              names,
+                           int                                          slots)
+            {
+                if(int(digits.size()) > slots)
+                {
+                    return false;
+                }
+                bool ok = true;
+                for(int i = 0; ok && i < slots; i++)
+                {
+                    int64_t const e  = i < int(digits.size()) ? digits[i].first : 1;
+                    auto const    is = std::to_string(i);
+                    ok               = ok && w.set(prefix + "e" + is, e);
+                    if(i < slots - 1)
+                    {
+                        ok = ok
+                             && setMagic(w,
+                                         (prefix + "m" + is).c_str(),
+                                         (prefix + "s" + is).c_str(),
+                                         e);
+                    }
+                    for(size_t n = 0; ok && n < names.size(); n++)
+                    {
+                        int64_t const s = e != 1 ? digits[i].second[n] : 0;
+                        ok              = w.set(prefix + names[n] + is, s);
+                    }
+                }
+                return ok;
+            }
+
+            std::vector<std::pair<int64_t, std::vector<int64_t>>>
+                digitsOf(std::vector<GMode> const& modes, std::vector<int> const& tensors)
+            {
+                std::vector<std::pair<int64_t, std::vector<int64_t>>> out;
+                for(auto const& m : modes)
+                {
+                    std::vector<int64_t> s;
+                    for(int t : tensors)
+                    {
+                        s.push_back(m.stride[t]);
+                    }
+                    out.emplace_back(m.extent, s);
+                }
+                return out;
+            }
+
+            std::vector<std::pair<int64_t, std::vector<int64_t>>>
+                digitsOf(std::vector<KDigit> const& ks)
+            {
+                std::vector<std::pair<int64_t, std::vector<int64_t>>> out;
+                for(auto const& k : ks)
+                {
+                    out.emplace_back(k.extent, std::vector<int64_t>{k.sA, k.sB});
+                }
+                return out;
+            }
+
+            bool f64Type(hiptensorDataType_t t)
+            {
+                return t == HIPTENSOR_R_64F || t == HIPTENSOR_C_64F;
+            }
+
+            int dtCode(hiptensorDataType_t t)
+            {
+                switch(t)
+                {
+                case HIPTENSOR_R_16F:
+                    return 0;
+                case HIPTENSOR_R_16BF:
+                    return 1;
+                case HIPTENSOR_R_32F:
+                case HIPTENSOR_C_32F:
+                    return 2;
+                default:
+                    return 3;
+                }
+            }
+
+            // ---------------------------------------------------------------- direct GETT
+
+            // The direct GETT kernel's compute class (kernels.common.hiptensor_aot.dgett): the
+            // MFMA operand type and the rounding of f64 operands to a 16-bit compute type.
+            struct DgettClass
+            {
+                std::string comp;
+                bool        cplx = false;
+                int         rnd  = 0; // 1 f16, 2 bf16
+                bool        math = false;
+            };
+
+            bool dgettClass(Problem const& p, DgettClass& out, std::string& reason)
+            {
+                auto const& A    = p.t[0];
+                auto const& B    = p.t[1];
+                auto const& C    = p.t[2];
+                auto const& D    = p.t[3];
+                out              = DgettClass{};
+                out.cplx         = isComplex(D.type);
+                bool const f64In = f64Type(A.type) || f64Type(B.type);
+                for(auto const* t : {&A, &B, &C})
+                {
+                    out.math = out.math || (t->present && mathUnary(t->unaryOp));
+                }
+                switch(p.compute)
+                {
+                case HIPTENSOR_COMPUTE_DESC_64F:
+                case HIPTENSOR_COMPUTE_DESC_C64F:
+                    out.comp = "f64";
+                    return true;
+                case HIPTENSOR_COMPUTE_DESC_16F:
+                case HIPTENSOR_COMPUTE_DESC_16BF:
+                {
+                    if(out.cplx)
+                    {
+                        reason = "a 16-bit compute type is not supported for complex data";
+                        return false;
+                    }
+                    bool const f16 = p.compute == HIPTENSOR_COMPUTE_DESC_16F;
+                    if(f64In)
+                    {
+                        // f64 operands rounded once to the compute type, products in f64
+                        out.comp = "f64";
+                        out.rnd  = f16 ? 1 : 2;
+                    }
+                    else
+                    {
+                        out.comp = f16 ? "f16" : "bf16";
+                    }
+                    return true;
+                }
+                case HIPTENSOR_COMPUTE_DESC_32F:
+                case HIPTENSOR_COMPUTE_DESC_C32F:
+                {
+                    bool const anyF64 = f64In || (out.cplx && (f64Type(C.type) || f64Type(D.type)));
+                    if(anyF64)
+                    {
+                        out.comp = "f64";
+                        return true;
+                    }
+                    bool const ops
+                        = A.unaryOp != HIPTENSOR_OP_IDENTITY || B.unaryOp != HIPTENSOR_OP_IDENTITY;
+                    if(!out.cplx && A.type == B.type && !ops
+                       && (A.type == HIPTENSOR_R_16F || A.type == HIPTENSOR_R_16BF))
+                    {
+                        // exact products of the 16-bit values, accumulated in f32
+                        out.comp = A.type == HIPTENSOR_R_16F ? "f16" : "bf16";
+                        return true;
+                    }
+                    out.comp = "f32";
+                    return true;
+                }
+                default:
+                    reason = "compute type not supported by the rocKE kernels";
+                    return false;
+                }
+            }
+
+            // The arrangement of a contraction on the direct GETT (gett_host.dgett_plan).
+            struct DgettLayout
+            {
+                bool               swapped = false;
+                char               aFast = 'k', bFast = 'k';
+                std::vector<GMode> M, N, L; // merged, innermost first; strides of A, B, C, D
+                KPlan              k;
+                int64_t            m = 1, n = 1, l = 1;
+                bool               idx64 = false;
+                std::array<int64_t, 4> spanBytes{};
+            };
+
+            bool dgettLayout(Problem const&           p,
+                             Classified const&        c,
+                             int64_t                  tk,
+                             std::array<int64_t, 4>   es,
+                             PackKernel const&        anyKernel,
+                             DgettLayout&             out,
+                             std::string&             reason)
+            {
+                bool const bilinear = p.t[2].present;
+                auto       grab     = [bilinear](Group const& g) {
+                    auto ms = modesOf(g);
+                    if(!bilinear)
+                    {
+                        for(auto& m : ms)
+                        {
+                            m.stride[2] = m.stride[3];
+                        }
+                    }
+                    return ms;
+                };
+                auto M = grab(c.M), N = grab(c.N), K = grab(c.K), L = grab(c.L);
+                out    = DgettLayout{};
+                for(auto const& m : M)
+                {
+                    out.swapped = out.swapped || m.stride[3] == 1;
+                }
+                if(out.swapped)
+                {
+                    for(auto* g : {&M, &N, &K, &L})
+                    {
+                        for(auto& m : *g)
+                        {
+                            std::swap(m.stride[0], m.stride[1]);
+                        }
+                    }
+                    std::swap(M, N);
+                    std::swap(es[0], es[1]);
+                }
+                auto fast = [&K](std::vector<GMode> const& rows, int t) {
+                    for(auto const& m : K)
+                    {
+                        if(m.stride[t] == 1)
+                        {
+                            return 'k';
+                        }
+                    }
+                    for(auto const& m : rows)
+                    {
+                        if(m.stride[t] == 1)
+                        {
+                            return 'r';
+                        }
+                    }
+                    return 'k';
+                };
+                out.aFast = fast(M, 0);
+                out.bFast = fast(N, 1);
+                auto all  = M;
+                all.insert(all.end(), N.begin(), N.end());
+                all.insert(all.end(), K.begin(), K.end());
+                all.insert(all.end(), L.begin(), L.end());
+                for(int t = 0; t < 4; t++)
+                {
+                    for(auto const& m : all)
+                    {
+                        if(m.stride[t] < 0)
+                        {
+                            reason = "a negative stride";
+                            return false;
+                        }
+                    }
+                    out.spanBytes[t] = spanElems(all, t) * es[t];
+                    out.idx64        = out.idx64 || out.spanBytes[t] > kI32Max;
+                }
+                sortBy(M, out.aFast == 'r' ? 0 : 3);
+                sortBy(N, out.bFast == 'r' ? 1 : 3);
+                sortBy(L, 3);
+                out.M = mergeModes(M, {0, 2, 3});
+                out.N = mergeModes(N, {1, 2, 3});
+                out.L = mergeModes(L, {0, 1, 2, 3});
+                if(out.M.size() > size_t(anyKernel.attr("slots_mn", 0))
+                   || out.N.size() > size_t(anyKernel.attr("slots_mn", 0))
+                   || out.L.size() > size_t(anyKernel.attr("slots_l", 0)))
+                {
+                    reason = "more index digits than the direct GETT's slots";
+                    return false;
+                }
+                if(!kPlan(K,
+                          tk,
+                          size_t(anyKernel.attr("slots_kl", 0)),
+                          size_t(anyKernel.attr("slots_kt", 0)),
+                          true,
+                          out.k,
+                          reason))
+                {
+                    return false;
+                }
+                for(auto const& g : out.M)
+                {
+                    out.m *= g.extent;
+                }
+                for(auto const& g : out.N)
+                {
+                    out.n *= g.extent;
+                }
+                for(auto const& g : out.L)
+                {
+                    out.l *= g.extent;
+                }
+                if(out.m > kI32Max || out.n > kI32Max || out.k.tiles * tk > kI32Max)
+                {
+                    reason = "an index space past 2^31";
+                    return false;
+                }
+                return true;
+            }
+
+            // A contraction on the direct GETT: one launch, the operands read and D written
+            // through their own strides, no workspace.
+            hiptensorStatus_t planDgett(Problem const&    p,
+                                        Pack const&       pack,
+                                        Classified const& c,
+                                        Program&          program,
+                                        CandidateFacts&   facts,
+                                        std::string&      reason)
+            {
+                DgettClass cls;
+                if(!dgettClass(p, cls, reason))
+                {
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const& A = p.t[0];
+                auto const& C = p.t[2];
+                auto const& D = p.t[3];
+                auto        find
+                    = [&](std::string const& comp, int idx64, char af, char bf) {
+                          return pack.find(kDgett,
+                                           {{"cplx", cls.cplx ? 1 : 0},
+                                            {"math", cls.math ? 1 : 0},
+                                            {"idx64", idx64}},
+                                           {{"comp", comp},
+                                            {"a_fast", std::string(1, af)},
+                                            {"b_fast", std::string(1, bf)}});
+                      };
+                // a target without the f32 atom (gfx90a) computes f32 in f64
+                if(cls.comp == "f32" && find("f32", 0, 'k', 'k') == nullptr)
+                {
+                    cls.comp = "f64";
+                }
+                auto const* any = find(cls.comp, 0, 'k', 'k');
+                if(any == nullptr)
+                {
+                    reason = "the pack has no direct GETT kernel for this compute class";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t const          tk = any->attr("tile_k"), tm = any->attr("tile_m"),
+                              tn          = any->attr("tile_n");
+                std::array<int64_t, 4> es{};
+                for(int t = 0; t < 4; t++)
+                {
+                    auto const& x = p.t[t == 2 && !C.present ? 3 : t];
+                    es[t]         = int64_t(elementBytes(dtypeName(x.type), cls.cplx));
+                }
+                DgettLayout lay;
+                if(!dgettLayout(p, c, tk, es, *any, lay, reason))
+                {
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const* kernel = find(cls.comp, lay.idx64 ? 1 : 0, lay.aFast, lay.bFast);
+                if(kernel == nullptr)
+                {
+                    reason = "the pack has no direct GETT kernel for this layout";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t const tilesM = ceilDiv(lay.m, tm), tilesN = ceilDiv(lay.n, tn);
+                if(tilesM * tilesN > kI32Max || lay.l > kernel->attr("limit_grid_yz", kGridYZMax))
+                {
+                    reason = "the direct GETT's grid is past its limits";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                Program prog;
+                prog.pack           = &pack;
+                prog.scalarType     = p.scalarType;
+                prog.complexScalars = cls.cplx;
+                prog.workspaceBytes = 0;
+                LaunchStep step;
+                step.kernel = kernel;
+                ArgWriter  w(step);
+                auto const ka = lay.swapped ? 1 : 0, kb = lay.swapped ? 0 : 1;
+                bool       ok = w.pointer("A", ka == 0 ? BufferRole::A : BufferRole::B)
+                          && w.pointer("B", kb == 0 ? BufferRole::A : BufferRole::B)
+                          && w.pointer("C", C.present ? BufferRole::C : BufferRole::Out)
+                          && w.pointer("D", BufferRole::Out);
+                if(cls.cplx)
+                {
+                    ok = ok && w.scalar("alpha_re", ScalarRole::Alpha, false)
+                         && w.scalar("alpha_im", ScalarRole::Alpha, true)
+                         && w.scalar("beta_re", C.present ? ScalarRole::Beta : ScalarRole::Zero)
+                         && w.scalar(
+                             "beta_im", C.present ? ScalarRole::Beta : ScalarRole::Zero, true);
+                }
+                else
+                {
+                    ok = ok && w.scalar("alpha", ScalarRole::Alpha)
+                         && w.scalar("beta", C.present ? ScalarRole::Beta : ScalarRole::Zero);
+                }
+                auto const& kA = p.t[ka];
+                auto const& kB = p.t[kb];
+                auto const  cType = C.present ? C.type : D.type;
+                ok = ok && w.set("dtA", dtCode(kA.type)) && w.set("dtB", dtCode(kB.type))
+                     && w.set("dtC", dtCode(cType)) && w.set("dtD", dtCode(D.type))
+                     && w.set("opA", kA.unaryOp) && w.set("opB", kB.unaryOp)
+                     && w.set("opC", C.present ? C.unaryOp : HIPTENSOR_OP_IDENTITY)
+                     && w.set("rnd", cls.rnd) && w.set("M", lay.m) && w.set("N", lay.n)
+                     && w.set("nk", lay.k.tiles) && w.set("tiles_n", tilesN)
+                     && setMagic(w, "tn_m", "tn_s", tilesN);
+                for(int t = 0; t < 4; t++)
+                {
+                    char const* names[] = {"a_bytes", "b_bytes", "c_bytes", "d_bytes"};
+                    ok = ok && w.set(names[t], std::min<int64_t>(lay.spanBytes[t], kI32Max));
+                }
+                int const mn = int(kernel->attr("slots_mn")), kt = int(kernel->attr("slots_kt")),
+                          kl = int(kernel->attr("slots_kl")), sl = int(kernel->attr("slots_l"));
+                ok = ok && setDigits(w, "m", digitsOf(lay.M, {0, 2, 3}), {"A", "C", "D"}, mn)
+                     && setDigits(w, "n", digitsOf(lay.N, {1, 2, 3}), {"B", "C", "D"}, mn)
+                     && setDigits(w, "kl", digitsOf(lay.k.local), {"A", "B"}, kl)
+                     && setDigits(w, "kt", digitsOf(lay.k.tile), {"A", "B"}, kt)
+                     && setDigits(
+                         w, "l", digitsOf(lay.L, {0, 1, 2, 3}), {"A", "B", "C", "D"}, sl)
+                     && w.set("kps", lay.k.padSlot) && w.set("kpl", lay.k.padLimit)
+                     && w.set("krl", lay.k.ragged >= 0 ? lay.k.ragged : (int64_t(1) << 30));
+                if(!ok)
+                {
+                    reason = "direct GETT arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                step.grid  = dim3(static_cast<uint32_t>(tilesM * tilesN),
+                                 1,
+                                 static_cast<uint32_t>(lay.l));
+                step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
+                if(auto s = finishStep(step, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return s;
+                }
+                prog.steps.push_back(std::move(step));
+                prog.description = kernel->name;
+                contractionChecks(p, prog);
+                facts              = contractionFacts(p, c, cls.cplx);
+                facts.route        = Route::DirectGett;
+                facts.direct       = true;
+                facts.f64Route     = cls.comp == "f64" && !f64Type(A.type);
+                facts.tileM        = tm;
+                facts.tileN        = tn;
+                facts.tileK        = tk;
+                facts.block        = kernel->attr("block", 256);
+                facts.ctas         = tilesM * tilesN * lay.l;
+                facts.paddedVolume = tilesM * tm * tilesN * tn * lay.k.tiles * tk * lay.l;
+                facts.main         = kernel;
+                facts.bytes        = uint64_t(lay.spanBytes[0] + lay.spanBytes[1]
+                                       + lay.spanBytes[3] * (C.present ? 2 : 1));
+                program            = std::move(prog);
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
+            // ---------------------------------------------------------------- ring GETT
+
+            // A contraction on rocKE's ring GETT body with runtime index maps
+            // (gett_host.rgett_plan): f16 / bf16 data and output of one type, f32 accumulation,
+            // no operators, no batch modes, the operands' fastest free runs even, K splitting at
+            // the K tile (one padded in-tile mode allowed), C laid out as D. The direct GETT is
+            // the program's fallback for zero scales (the ring body's epilogue reads every term)
+            // and for buffers not aligned to its vector accesses.
+            //
+            // `packing`: the operands whose fastest free run is not a multiple of 8 elements (or
+            // not even, or whose fastest mode is a K mode) are first copied into the workspace
+            // with their free modes as one run (padded to a multiple of 8) followed by their K
+            // modes, so that the ring body reads them with 16-byte lanes (rocKE's pack-hybrid
+            // plan); the other operands are read in place.
+            hiptensorStatus_t planRgett(Problem const&    p,
+                                        Pack const&       pack,
+                                        Classified const& c,
+                                        bool              packing,
+                                        uint64_t          workspaceLimit,
+                                        Program&          program,
+                                        CandidateFacts&   facts,
+                                        std::string&      reason)
+            {
+                auto const& A = p.t[0];
+                auto const& B = p.t[1];
+                auto const& C = p.t[2];
+                auto const& D = p.t[3];
+                auto const  T = D.type;
+                if(T != HIPTENSOR_R_16F && T != HIPTENSOR_R_16BF)
+                {
+                    reason = "the ring GETT serves f16 and bf16 data";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                bool const computeOk
+                    = p.compute == HIPTENSOR_COMPUTE_DESC_32F
+                      || (p.compute == HIPTENSOR_COMPUTE_DESC_16F && T == HIPTENSOR_R_16F)
+                      || (p.compute == HIPTENSOR_COMPUTE_DESC_16BF && T == HIPTENSOR_R_16BF);
+                if(!computeOk || A.type != T || B.type != T || (C.present && C.type != T)
+                   || A.unaryOp != HIPTENSOR_OP_IDENTITY || B.unaryOp != HIPTENSOR_OP_IDENTITY
+                   || (C.present && C.unaryOp != HIPTENSOR_OP_IDENTITY))
+                {
+                    reason = "the ring GETT needs one 16-bit type, f32 accumulation and no "
+                             "operators";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto M = modesOf(c.M), N = modesOf(c.N), K = modesOf(c.K);
+                if(!modesOf(c.L).empty() || M.empty() || N.empty() || K.empty())
+                {
+                    reason = "the ring GETT needs M, N and K modes and no batch modes";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                bool const bilinear = C.present;
+                for(auto const* g : {&M, &N, &K})
+                {
+                    for(auto const& m : *g)
+                    {
+                        for(int t = 0; t < 4; t++)
+                        {
+                            if(m.stride[t] < 0)
+                            {
+                                reason = "a negative stride";
+                                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                            }
+                        }
+                        if(g != &K && bilinear && m.stride[2] != m.stride[3])
+                        {
+                            reason = "the ring GETT reads C with D's strides";
+                            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                        }
+                    }
+                }
+                // the kernel's A owns D's fastest mode
+                bool    swapped = false;
+                int64_t dmin    = INT64_MAX;
+                for(auto const* g : {&M, &N})
+                {
+                    for(auto const& m : *g)
+                    {
+                        if(m.stride[3] < dmin)
+                        {
+                            dmin    = m.stride[3];
+                            swapped = g == &N;
+                        }
+                    }
+                }
+                int const ga = swapped ? 1 : 0, gb = swapped ? 0 : 1;
+                auto      rowsA = swapped ? N : M;
+                auto      rowsB = swapped ? M : N;
+                // the operand's DTL lane width: 8 (16 bytes) or 2 (4 bytes) elements
+                auto vecOf = [&K](std::vector<GMode> const& dig, int t) {
+                    if(dig[0].stride[t] != 1)
+                    {
+                        return int64_t(1);
+                    }
+                    for(int64_t v = 8; v > 1; v /= 2)
+                    {
+                        bool ok = dig[0].extent % v == 0;
+                        for(size_t i = 1; ok && i < dig.size(); i++)
+                        {
+                            ok = dig[i].stride[t] % v == 0;
+                        }
+                        for(auto const& m : K)
+                        {
+                            ok = ok && m.stride[t] % v == 0;
+                        }
+                        if(ok)
+                        {
+                            return v;
+                        }
+                    }
+                    return int64_t(1);
+                };
+                std::stable_sort(rowsA.begin(), rowsA.end(), [ga](GMode const& a, GMode const& b) {
+                    return a.stride[ga] < b.stride[ga];
+                });
+                std::stable_sort(rowsB.begin(), rowsB.end(), [gb](GMode const& a, GMode const& b) {
+                    return a.stride[gb] < b.stride[gb];
+                });
+                auto       digA = mergeModes(rowsA, {ga});
+                auto       digB = mergeModes(rowsB, {gb});
+                int64_t    vecA = vecOf(digA, ga), vecB = vecOf(digB, gb);
+                bool const packA = packing && vecA < 8, packB = packing && vecB < 8;
+                if(packing && !packA && !packB)
+                {
+                    reason = "both operands are read in place";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                if((!packA && vecA < 2) || (!packB && vecB < 2))
+                {
+                    reason = "an operand's fastest free run is not a multiple of 2";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                vecA = packA || vecA >= 8 ? 8 : 2;
+                vecB = packB || vecB >= 8 ? 8 : 2;
+                // the packed copy of an operand: its free modes (in the ring body's row order)
+                // as one run padded to a multiple of 8, then its K modes in its memory order
+                struct Packed
+                {
+                    int64_t              rows = 1, rowsPadded = 1;
+                    std::vector<int64_t> kStride; // per K mode (K's order)
+                    uint64_t             offset = 0, bytes = 0;
+                };
+                Packed     pk[2];
+                uint64_t   workspace = 0;
+                auto const packOf = [&](int role, std::vector<GMode> const& rows, int t) {
+                    Packed out;
+                    for(auto const& x : rows)
+                    {
+                        out.rows *= x.extent;
+                    }
+                    out.rowsPadded = roundUp(out.rows, 8);
+                    std::vector<size_t> order(K.size());
+                    std::iota(order.begin(), order.end(), 0);
+                    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+                        return K[a].stride[t] < K[b].stride[t];
+                    });
+                    out.kStride.assign(K.size(), 0);
+                    int64_t s = out.rowsPadded;
+                    for(auto i : order)
+                    {
+                        out.kStride[i] = s;
+                        s *= K[i].extent;
+                    }
+                    out.offset = workspace;
+                    out.bytes  = uint64_t(s) * 2;
+                    workspace  = alignUp(workspace + out.bytes, kWorkspaceAlign);
+                    static_cast<void>(role);
+                    return out;
+                };
+                if(packA)
+                {
+                    pk[0] = packOf(0, rowsA, ga);
+                    digA  = {GMode{pk[0].rowsPadded, {1, 1, 1, 1}}};
+                }
+                if(packB)
+                {
+                    pk[1] = packOf(1, rowsB, gb);
+                    digB  = {GMode{pk[1].rowsPadded, {1, 1, 1, 1}}};
+                }
+                if(workspace > workspaceLimit)
+                {
+                    reason = "the packed operands of the ring GETT need more workspace than the "
+                             "limit";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                std::vector<GMode> kmodes;
+                for(size_t i = 0; i < K.size(); i++)
+                {
+                    GMode k;
+                    k.extent    = K[i].extent;
+                    k.stride[0] = packA ? pk[0].kStride[i] : K[i].stride[ga];
+                    k.stride[1] = packB ? pk[1].kStride[i] : K[i].stride[gb];
+                    kmodes.push_back(k);
+                }
+                // any class of the pack: its slot counts and K tile
+                auto const* any = pack.find(kRgett, {{"wide", 0}}, {{"dtype", dtypeName(T)}});
+                if(any == nullptr)
+                {
+                    reason = "the pack has no ring GETT kernels";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t const tk = any->attr("tile_k");
+                KPlan         kp;
+                if(!kPlan(kmodes,
+                          tk,
+                          size_t(any->attr("slots_kl")),
+                          size_t(any->attr("slots_kt")),
+                          false,
+                          kp,
+                          reason))
+                {
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const dRow = mergeModes(rowsA, {3});
+                auto const dCol = mergeModes(rowsB, {3});
+                auto       dvec = [&](int64_t v) {
+                    if(dRow[0].stride[3] != 1 || dRow[0].extent % v != 0)
+                    {
+                        return false;
+                    }
+                    for(size_t i = 1; i < dRow.size(); i++)
+                    {
+                        if(dRow[i].stride[3] % v != 0)
+                        {
+                            return false;
+                        }
+                    }
+                    for(auto const& m : dCol)
+                    {
+                        if(m.stride[3] % v != 0)
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+                int64_t const vecD = dvec(4) ? 4 : dvec(2) ? 2 : 1;
+                bool const    pair = vecD == 4 && dvec(8);
+                size_t const  rows = size_t(any->attr("slots_row"));
+                if(digA.size() > rows || digB.size() > rows || dRow.size() > rows
+                   || dCol.size() > rows)
+                {
+                    reason = "more row digits than the ring GETT's slots";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                std::vector<GMode> all = M;
+                all.insert(all.end(), N.begin(), N.end());
+                all.insert(all.end(), K.begin(), K.end());
+                int64_t const es = 2;
+                for(int t : {0, 1})
+                {
+                    bool const packed = t == ga ? packA : packB;
+                    uint64_t   bytes  = packed ? pk[t == ga ? 0 : 1].bytes : spanElems(all, t) * es;
+                    if(bytes > uint64_t(any->attr("limit_operand_bytes")))
+                    {
+                        reason = "an operand past the ring GETT's buffer range";
+                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                    }
+                }
+                // D (and C) past the narrow classes' offsets: the wide classes (masked offsets)
+                bool const wideD
+                    = spanElems(all, 3) * es > any->attr("limit_d_bytes")
+                      || (bilinear && spanElems(all, 2) * es > any->attr("limit_d_bytes"));
+                auto const* anyWide = pack.find(kRgett, {{"wide", 1}}, {{"dtype", dtypeName(T)}});
+                if(wideD
+                   && (anyWide == nullptr
+                       || spanElems(all, 3) * es > anyWide->attr("limit_d_bytes")
+                       || (bilinear && spanElems(all, 2) * es > anyWide->attr("limit_d_bytes"))))
+                {
+                    reason = "D past the ring GETT's 32-bit offsets";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t m = 1, n = 1;
+                for(auto const& x : rowsA)
+                {
+                    m *= x.extent;
+                }
+                for(auto const& x : rowsB)
+                {
+                    n *= x.extent;
+                }
+                int64_t const kPadded = kp.tiles * tk;
+                if(m > kI32Max || n > kI32Max || kPadded > kI32Max
+                   || ceilDiv(m, any->attr("tile_m")) > any->attr("limit_grid_yz"))
+                {
+                    reason = "the ring GETT's index spaces or grid are past their limits";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                auto const* kernel = pack.find(kRgett,
+                                               {{"bilinear", bilinear ? 1 : 0},
+                                                {"vec_a", vecA},
+                                                {"vec_b", vecB},
+                                                {"vec_d", vecD},
+                                                {"pair", pair ? 1 : 0},
+                                                {"wide", wideD ? 1 : 0}},
+                                               {{"dtype", dtypeName(T)}});
+                if(kernel == nullptr)
+                {
+                    reason = "the pack has no ring GETT class for this layout";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                // the fallback: the direct GETT (zero scales, unaligned buffers)
+                Program        fallback;
+                CandidateFacts fbFacts;
+                std::string    why;
+                if(planDgett(p, pack, c, fallback, fbFacts, why) != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    reason = "the ring GETT has no direct GETT fallback: " + why;
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                Program prog;
+                prog.pack           = &pack;
+                prog.scalarType     = p.scalarType;
+                prog.workspaceBytes = workspace;
+                // the pack launches (the generic elementwise kernel): the free modes, then the K
+                // modes, into the workspace
+                for(int r = 0; r < 2; r++)
+                {
+                    if(!(r == 0 ? packA : packB))
+                    {
+                        continue;
+                    }
+                    int const        t    = r == 0 ? ga : gb;
+                    auto const&      rows = r == 0 ? rowsA : rowsB;
+                    std::vector<Dim> dims;
+                    int64_t          s = 1;
+                    for(auto const& x : rows)
+                    {
+                        Dim d;
+                        d.extent    = x.extent;
+                        d.stride[0] = x.stride[t];
+                        d.stride[1] = s;
+                        s *= x.extent;
+                        dims.push_back(d);
+                    }
+                    for(size_t i = 0; i < K.size(); i++)
+                    {
+                        Dim d;
+                        d.extent    = K[i].extent;
+                        d.stride[0] = K[i].stride[t];
+                        d.stride[1] = pk[r].kStride[i];
+                        dims.push_back(d);
+                    }
+                    canonicalize(dims, 2, 1);
+                    EwOperand in;
+                    in.name  = "A";
+                    in.role  = t == 0 ? BufferRole::A : BufferRole::B;
+                    in.scale = ScalarRole::One;
+                    EwOperand out;
+                    out.name    = "D";
+                    out.role    = BufferRole::Workspace;
+                    out.bytes   = pk[r].offset;
+                    auto status = ewSteps(pack,
+                                          {{"arity", 1}, {"cplx", 0}},
+                                          {{"a", dtypeName(T)}, {"d", dtypeName(T)}},
+                                          dims,
+                                          {in, out},
+                                          {0, 0},
+                                          false,
+                                          prog.steps,
+                                          reason);
+                    if(status != HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        return status;
+                    }
+                }
+                LaunchStep step;
+                step.kernel = kernel;
+                ArgWriter  w(step);
+                auto const roleOf
+                    = [](int t) { return t == 0 ? BufferRole::A : BufferRole::B; };
+                bool ok = (packA ? w.pointer("A", BufferRole::Workspace, pk[0].offset)
+                                 : w.pointer("A", roleOf(ga)))
+                          && (packB ? w.pointer("B", BufferRole::Workspace, pk[1].offset)
+                                    : w.pointer("B", roleOf(gb)))
+                          && w.pointer("C", BufferRole::Out) && w.set("M", m) && w.set("N", n)
+                          && w.set("K", kPadded) && w.scalar("alpha", ScalarRole::Alpha);
+                if(bilinear)
+                {
+                    ok = ok && w.pointer("Cin", BufferRole::C) && w.scalar("beta", ScalarRole::Beta);
+                }
+                auto rowDigits = [](std::vector<GMode> const& g, int t) {
+                    std::vector<std::pair<int64_t, std::vector<int64_t>>> out;
+                    for(auto const& x : g)
+                    {
+                        out.emplace_back(x.extent, std::vector<int64_t>{x.stride[t]});
+                    }
+                    return out;
+                };
+                int const kl = int(kernel->attr("slots_kl")), kt = int(kernel->attr("slots_kt"));
+                ok = ok && setDigits(w, "ra", rowDigits(digA, ga), {"S"}, int(rows))
+                     && setDigits(w, "rb", rowDigits(digB, gb), {"S"}, int(rows))
+                     && setDigits(w, "dr", rowDigits(dRow, 3), {"S"}, int(rows))
+                     && setDigits(w, "dc", rowDigits(dCol, 3), {"S"}, int(rows))
+                     && setDigits(w, "kl", digitsOf(kp.local), {"A", "B"}, kl)
+                     && setDigits(w, "kt", digitsOf(kp.tile), {"A", "B"}, kt)
+                     && w.set("kps", kp.padSlot) && w.set("kpl", kp.padLimit);
+                if(!ok)
+                {
+                    reason = "ring GETT arguments do not fit the kernel arguments";
+                    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                int64_t const tilesM = ceilDiv(m, kernel->attr("tile_m"));
+                int64_t const tilesN = ceilDiv(n, kernel->attr("tile_n"));
+                step.grid            = dim3(static_cast<uint32_t>(tilesN),
+                                 static_cast<uint32_t>(tilesM),
+                                 1);
+                step.block = dim3(static_cast<uint32_t>(kernel->attr("block", 256)), 1, 1);
+                if(auto s = finishStep(step, w, reason); s != HIPTENSOR_STATUS_SUCCESS)
+                {
+                    return s;
+                }
+                prog.steps.push_back(std::move(step));
+                prog.description = (packA || packB ? "pk:" : "") + kernel->name;
+                contractionChecks(p, prog);
+                prog.fallback       = std::make_shared<Program>(std::move(fallback));
+                prog.fallbackOnZero = {ScalarRole::Alpha};
+                if(bilinear)
+                {
+                    prog.fallbackOnZero.push_back(ScalarRole::Beta);
+                }
+                uint32_t const outAlign = pair ? 16u : uint32_t(2 * vecD);
+                prog.fallbackAlign      = {{BufferRole::Out, outAlign}};
+                if(!packA)
+                {
+                    prog.fallbackAlign.emplace_back(roleOf(ga), uint32_t(2 * vecA));
+                }
+                if(!packB)
+                {
+                    prog.fallbackAlign.emplace_back(roleOf(gb), uint32_t(2 * vecB));
+                }
+                if(bilinear)
+                {
+                    prog.fallbackAlign.emplace_back(BufferRole::C, outAlign);
+                }
+                facts              = contractionFacts(p, c, false);
+                facts.route        = Route::RingGett;
+                facts.direct       = true;
+                facts.tileM        = kernel->attr("tile_m");
+                facts.tileN        = kernel->attr("tile_n");
+                facts.tileK        = tk;
+                facts.block        = kernel->attr("block", 256);
+                facts.ctas         = tilesM * tilesN;
+                facts.paddedVolume = tilesM * facts.tileM * tilesN * facts.tileN * kPadded;
+                facts.main         = kernel;
+                facts.bytes        = uint64_t(spanElems(all, 0) + spanElems(all, 1)
+                                       + spanElems(all, 3) * (bilinear ? 2 : 1))
+                              * 2;
+                program = std::move(prog);
+                return HIPTENSOR_STATUS_SUCCESS;
+            }
+
             hiptensorStatus_t enumerateContraction(Problem const&          problem,
                                                    Pack const&             pack,
                                                    CandidateOptions const& options,
@@ -2978,11 +4712,64 @@ namespace hiptensor
                         facts.paddedVolume = facts.M * facts.N * facts.K * facts.L;
                         auto const& d      = program.description;
                         auto        hex    = d.substr(0, d.rfind(':'));
+                        // the direct GETT for zero scales (the tuned epilogue reads every term)
+                        // and buffers not aligned to the tuned kernels' 16-byte accesses
+                        Program        fallback;
+                        CandidateFacts fbFacts;
+                        std::string    fbWhy;
+                        if(planDgett(problem, pack, c, fallback, fbFacts, fbWhy)
+                           == HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            program.fallback       = std::make_shared<Program>(std::move(fallback));
+                            program.fallbackOnZero = {ScalarRole::Alpha};
+                            program.fallbackAlign  = {{BufferRole::A, 16u},
+                                                     {BufferRole::B, 16u},
+                                                     {BufferRole::Out, 16u}};
+                            if(C.present)
+                            {
+                                program.fallbackOnZero.push_back(ScalarRole::Beta);
+                                program.fallbackAlign.emplace_back(BufferRole::C, 16u);
+                            }
+                        }
                         add("tuned:" + hex.substr(hex.find(':') + 1), std::move(program), facts);
                     }
                     else if(!why.empty())
                     {
                         note(why);
+                    }
+                }
+
+                // rocKE's ring GETT body with runtime index maps: the operands read and D
+                // written in place, ahead of the routes the selection models rank
+                if(!options.f64Only)
+                {
+                    // the pack-hybrid form first (the operands with short runs packed), then the
+                    // operands read in place; the first one that applies is preferred
+                    bool preferred = false;
+                    for(bool packing : {true, false})
+                    {
+                        Program        program;
+                        CandidateFacts facts;
+                        std::string    why;
+                        auto           status = planRgett(
+                            problem, pack, c, packing, workspaceLimit, program, facts, why);
+                        if(status == HIPTENSOR_STATUS_SUCCESS)
+                        {
+                            add(std::string(packing ? "rgett:pk:" : "rgett:") + facts.main->name,
+                                std::move(program),
+                                facts);
+                            out.back().preferred = !preferred;
+                            preferred            = true;
+                        }
+                        else if(isDecline(status))
+                        {
+                            note(why);
+                        }
+                        else
+                        {
+                            reason = why;
+                            return status;
+                        }
                     }
                 }
 
@@ -3089,6 +4876,39 @@ namespace hiptensor
                             reason = why;
                             return status;
                         }
+                    }
+                }
+                // the direct GETT: every contraction, in place, no workspace (after the others
+                // in the static order)
+                if(!options.f64Only)
+                {
+                    Program        program;
+                    CandidateFacts facts;
+                    std::string    why;
+                    auto status = planDgett(problem, pack, c, program, facts, why);
+                    if(status == HIPTENSOR_STATUS_SUCCESS)
+                    {
+                        // on a target without the GEMM routes (gfx90a, gfx942) the direct GETT
+                        // of a 16-bit or f32 compute class is preferred to the f64 route
+                        bool const gemmRoute
+                            = std::any_of(out.begin(), out.end(), [](Candidate const& x) {
+                                  return x.facts.route == Route::H16 || x.facts.route == Route::X6
+                                         || x.facts.route == Route::CF32
+                                         || x.facts.route == Route::RingGett
+                                         || x.facts.route == Route::TunedGett;
+                              });
+                        bool const prefer = !gemmRoute && facts.main->attrStr("comp") != "f64";
+                        add("dgett:" + facts.main->name, std::move(program), facts);
+                        out.back().preferred = prefer;
+                    }
+                    else if(isDecline(status))
+                    {
+                        note(why);
+                    }
+                    else
+                    {
+                        reason = why;
+                        return status;
                     }
                 }
                 if(out.empty())
@@ -3223,6 +5043,37 @@ namespace hiptensor
                 {
                     out.requiredScalars.push_back(1);
                     out.requiredBuffers.emplace_back(BufferRole::D, 1);
+                }
+                // a step with a fallback program: the trinary program falls back to the pair of
+                // fallbacks (the conditions in the trinary's roles; T, at the workspace's start,
+                // is aligned; the first step's scalars are one and zero)
+                if(first.fallback != nullptr || second.fallback != nullptr)
+                {
+                    auto const& f1 = first.fallback != nullptr ? *first.fallback : first;
+                    auto const& f2 = second.fallback != nullptr ? *second.fallback : second;
+                    out.fallback   = std::make_shared<Program>(combineTrinary(problem, f1, f2, tBytes));
+                    for(auto const& [role, align] : first.fallbackAlign)
+                    {
+                        if(role == BufferRole::A || role == BufferRole::B)
+                        {
+                            out.fallbackAlign.emplace_back(role, align);
+                        }
+                    }
+                    for(auto role : second.fallbackOnZero)
+                    {
+                        out.fallbackOnZero.push_back(role);
+                    }
+                    for(auto const& [role, align] : second.fallbackAlign)
+                    {
+                        auto r = role == BufferRole::B   ? BufferRole::C
+                                 : role == BufferRole::C ? BufferRole::D
+                                 : role == BufferRole::Out ? BufferRole::Out
+                                                           : BufferRole::None;
+                        if(r != BufferRole::None)
+                        {
+                            out.fallbackAlign.emplace_back(r, align);
+                        }
+                    }
                 }
                 return out;
             }
@@ -3375,13 +5226,36 @@ namespace hiptensor
             case OpKind::ElementwiseTrinary:
             {
                 Candidate candidate;
-                auto      status
-                    = planElementwise(problem, pack, candidate.program, candidate.facts, reason);
-                if(status == HIPTENSOR_STATUS_SUCCESS)
+                EwLayout  layout;
+                auto      status = planElementwise(
+                    problem, pack, candidate.program, candidate.facts, reason, &layout);
+                if(status != HIPTENSOR_STATUS_SUCCESS)
                 {
-                    candidate.key = "ew:" + candidate.program.description;
-                    out.push_back(std::move(candidate));
+                    return status;
                 }
+                candidate.key = "ew:" + candidate.program.description;
+                // the tiled kernel first when an input is fastest along another mode than the
+                // output (the generic program is its fallback)
+                Candidate   tiled;
+                std::string why;
+                if(planEwt(layout, pack, candidate.program, tiled.program, tiled.facts, why)
+                   == HIPTENSOR_STATUS_SUCCESS)
+                {
+                    tiled.key = "ewt:" + tiled.program.description;
+                    out.push_back(std::move(tiled));
+                }
+                // then the vector class of the generic kernel when an input is read with vector
+                // loads along D's fastest mode
+                Candidate vector;
+                if(planEwv(layout, pack, candidate.program, vector.program, vector.facts, why)
+                   == HIPTENSOR_STATUS_SUCCESS)
+                {
+                    vector.key        = "ewv:" + vector.program.description;
+                    vector.staticRank = static_cast<int>(out.size());
+                    out.push_back(std::move(vector));
+                }
+                candidate.staticRank = static_cast<int>(out.size());
+                out.push_back(std::move(candidate));
                 return status;
             }
             case OpKind::Reduction:
@@ -3473,6 +5347,10 @@ namespace hiptensor
                 {
                     return status;
                 }
+            }
+            if(program.fallback != nullptr)
+            {
+                return loadFunctions(*program.fallback);
             }
             return HIPTENSOR_STATUS_SUCCESS;
         }

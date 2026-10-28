@@ -253,6 +253,13 @@ namespace hiptensor
             std::vector<int>                        requiredScalars;
             std::vector<std::pair<BufferRole, int>> requiredBuffers;
             hiptensorStatus_t                       nullStatus = HIPTENSOR_STATUS_NOT_INITIALIZED;
+            // Another program of the same problem, with no more workspace, that execution runs
+            // instead when a host scalar of `fallbackOnZero` is zero (a kernel that combines the
+            // terms of zero scales would let a NaN or Inf of a tensor it should not read reach
+            // the result) or a buffer of `fallbackAlign` is not a multiple of its alignment.
+            std::shared_ptr<Program>                     fallback;
+            std::vector<ScalarRole>                      fallbackOnZero;
+            std::vector<std::pair<BufferRole, uint32_t>> fallbackAlign;
         };
 
         // Builds argument buffers of one kernel by argument name.

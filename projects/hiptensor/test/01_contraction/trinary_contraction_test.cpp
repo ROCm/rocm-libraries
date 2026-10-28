@@ -33,6 +33,7 @@
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
 
+#include "backend/backend.hpp"
 #include "contraction/contraction_cpu_reference.hpp"
 #include "contraction_test_utils.hpp"
 #include "trinary_contraction_test.hpp"
@@ -791,6 +792,32 @@ namespace hiptensor
                 {
                     const double epsilon = std::pow(2, -10);
                     tolerance += epsilon * 2;
+                }
+
+                // The CPU reference applies alpha and beta as float, as the Composable Kernel
+                // instances do. A backend that applies them in the 64-bit compute type differs
+                // from it by the float rounding of the scalars.
+                bool const servedByCk
+                    = plan->mBackend == nullptr || plan->mBackend->primary == nullptr
+                      || plan->mBackend->primary->kernelId().backend == backend::kCkBackendName;
+                if(!servedByCk
+                   && (computeType == HIPTENSOR_COMPUTE_DESC_64F
+                       || computeType == HIPTENSOR_COMPUTE_DESC_C64F))
+                {
+                    auto floatRounding = [](std::vector<double> const& scalar) {
+                        double rounding = 0.0;
+                        for(double part : scalar)
+                        {
+                            if(part != 0.0)
+                            {
+                                rounding = std::max(rounding,
+                                                    std::fabs(part - static_cast<float>(part))
+                                                        / std::fabs(part));
+                            }
+                        }
+                        return rounding;
+                    };
+                    tolerance += 2 * (floatRounding(alpha) + floatRounding(beta));
                 }
 
                 if(EDataType == HIPTENSOR_R_16F)
