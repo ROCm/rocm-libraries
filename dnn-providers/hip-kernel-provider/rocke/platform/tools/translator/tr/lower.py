@@ -5109,7 +5109,10 @@ class Fn:
             ha = self.host_arg(node)
             if ha is not None:
                 return self.host_fold_call(recv, st, attr, node, *ha)
-            return self.call_platform_method(recv, st, attr, node)
+            got = self.call_platform_method(recv, st, attr, node)
+            if got is None:
+                got = self.call_rocke_method(recv, st, attr, node)
+            return got
         cls, dsig = self.family_resolve(recv, cls, attr, node)
         sig = dsig or self.mod.sigs.get(f"{cls}.{attr}")
         fn = self.mod.methods.get((cls, attr)) or (dsig.py if dsig else None)
@@ -5179,6 +5182,19 @@ class Fn:
             return None
         arg = obj.code if is_p else f"&{paren(obj.code)}"
         return CE(f"{cf.name}({arg})", cf.ret, obj.pure)
+
+    def call_rocke_method(self, recv: CE, st, attr, node):
+        """obj.method(...) on the C struct of a rocke.* class (TensorView,
+        TileWindow): the C twin rocke_method_entry finds, called like a
+        helper with self passed by address. None when there is no twin."""
+        got = rocke_method_entry(self.env, st[0], attr)
+        if got is None:
+            return None
+        e, self_c = got
+        if st[1] and not recv.code.isidentifier():
+            recv = self.bind(CE(recv.code, recv.t, False), attr + "_self")
+        self_arg = recv.code if st[1] else f"&{paren(recv.code)}"
+        return self.call_c_twin(e, attr, node, fixed={self_c: self_arg})
 
     def call_platform_method(self, recv: CE, st, attr, node):
         """PM-R1: obj.method(...) on a platform struct with no twin_map class.
@@ -6735,7 +6751,11 @@ class Fn:
         py_b=True,
         outs=None,
         self_arg=None,
+        fixed=None,
     ) -> list[str]:
+        if fixed:
+            # C parameters the caller supplies (a method's self, anywhere in the list)
+            outs = {**fixed, **(outs or {})}
         self._err = None
         self._gen = {}  # generated-ABI outputs of this call (gen_call reads them)
         has_of = {sl.get("has"): sl for sl in slots.values() if sl.get("has")}
@@ -7397,6 +7417,12 @@ class Fn:
             e = self.env.sig.external_function(src, attr)
         if e is None:
             raise Refuse(node, f"helper {modstem}:{attr} not in sigmap")
+        return self.call_c_twin(e, attr, node)
+
+    def call_c_twin(self, e: dict, attr: str, node, fixed=None) -> CE:
+        """A call through a C twin described as a sigmap entry ({"python":
+        {"params", "returns"}, "c": {"name", "slots", "extra_c"}}): a helper,
+        or a method of a rocke.* class (fixed: its self parameter)."""
         c = e["c"]
         cf = self.env.c_func(c["name"])
         if cf is None:
@@ -7404,7 +7430,23 @@ class Fn:
         pyparams = e["python"]["params"]
         bound = self.bind_call_args(node, pyparams)
         bound.pop("b", None)
-        slots = {s["c"]: s for s in c["slots"]}
+        for s_ in c["slots"]:
+            # a Python argument the C twin has no parameter for: only its default
+            ce_ = bound.get(s_["py"])
+            if s_.get("c") or ce_ is None:
+                continue
+            d_ = s_.get("default")
+            same = (d_ == "None" and ce_.t == T.NONE) or (
+                d_ not in (None, "None")
+                and ce_.lit is not None
+                and ce_.lit == ast.literal_eval(d_)
+                and type(ce_.lit) is type(ast.literal_eval(d_))
+            )
+            if not same:
+                raise Refuse(
+                    node, f"{c['name']} has no C parameter for {attr}({s_['py']}=)"
+                )
+        slots = {s["c"]: s for s in c["slots"] if s.get("c")}
         extra = {x["c"]: x["role"] for x in c.get("extra_c", [])}
         outs = [n for n, r in extra.items() if r == "out"]
         ctys0 = dict((n, t) for t, n in cf.params)
@@ -7425,6 +7467,7 @@ class Fn:
                 {k: v for k, v in extra.items() if v != "out"},
                 node,
                 outs={outs[0]: f"&{tmp}"},
+                fixed=fixed,
             )
             call = self.err_wrap(f"{cf.name}({', '.join(args)})", cf.ret)
             if cf.ret == "rocke_status_t":
@@ -7453,7 +7496,7 @@ class Fn:
                 and items_[0] == T.BOOL
             ):
                 return self.helper_flag_tuple(
-                    cf, bound, slots, extra, outs, items_, node
+                    cf, bound, slots, extra, outs, items_, node, fixed=fixed
                 )
             if (cf.ret != "void" and not checked) or not (
                 ret_ann.lower().startswith("tuple") or (not ret_ann and len(outs) >= 2)
@@ -7475,6 +7518,7 @@ class Fn:
                 {k: v for k, v in extra.items() if v != "out"},
                 node,
                 outs={o: "&" + names[o][0] for o in outs},
+                fixed=fixed,
             )
             if checked:
                 call = self.err_wrap(f"{cf.name}({', '.join(args)})", cf.ret)
@@ -7491,10 +7535,12 @@ class Fn:
                 True,
                 meta={"items": [names[o][0] for o in outs]},
             )
-        args = self.c_args(cf, bound, slots, extra, node)
+        args = self.c_args(cf, bound, slots, extra, node, fixed=fixed)
         return self.gen_call(cf, args, attr, node)
 
-    def helper_flag_tuple(self, cf, bound, slots, extra, outs, items, node) -> CE:
+    def helper_flag_tuple(
+        self, cf, bound, slots, extra, outs, items, node, fixed=None
+    ) -> CE:
         """A builder-free helper returning Tuple[bool, ...] whose C twin
         returns the bool (int 1 / 0) and the other items through out
         parameters (validate_io: ok, then *out_reason). A C string result is
@@ -7516,6 +7562,7 @@ class Fn:
             {k: v for k, v in extra.items() if v != "out"},
             node,
             outs={o: "&" + nm for o, nm, _ in names},
+            fixed=fixed,
         )
         ok = self.tmp("ok")
         call = self.err_wrap(f"{cf.name}({', '.join(args)})", cf.ret)
@@ -8193,6 +8240,75 @@ def platform_c_method(env: Env, sname: str, attr: str):
     ):
         return None
     return cf
+
+
+def rocke_method_entry(env: Env, sname: str, attr: str) -> tuple | None:
+    """The C twin of method attr of a rocke.* class whose C struct is sname,
+    as a sigmap entry plus the C name of its self parameter.
+
+    The twin is rocke_<stem>_<attr> for sname rocke_<stem>_t, declared in
+    helper_<python module>.h, with exactly one parameter that points to sname
+    (self, in any position: rocke_tensor_view_tile(out, view, ...),
+    rocke_tile_window_load_vec(b, w, ...)), and its doc comment names the
+    method "<Class>.<attr>". The Python method is <Class>.<attr> of that
+    module; its parameters are paired with the C ones as mine_maps pairs a
+    helper's (by name, then by position; out, count and builder parameters
+    by role). None when any of this does not hold."""
+    cache = env.__dict__.setdefault("_rocke_methods", {})
+    key = (sname, attr)
+    if key in cache:
+        return cache[key]
+    cache[key] = None
+    if not (sname.startswith("rocke_") and sname.endswith("_t")):
+        return None
+    cf = env.c_func(f"{sname[:-2]}_{attr}")
+    m_ = re.fullmatch(r"helper_(rocke(?:\.\w+)+)\.h", cf.file) if cf else None
+    if m_ is None:
+        return None
+    selfs = [n for t, n in cf.params if T.struct_of(t) == (sname, True)]
+    if len(selfs) != 1:
+        return None
+    dm = re.search(r"\b([A-Z]\w*)\." + re.escape(attr) + r"\b", c_doc(env, cf))
+    if dm is None:
+        return None
+    import importlib
+    import inspect
+    import textwrap
+
+    import mine_maps  # tools/, on the path through env
+    import rsrc
+
+    try:
+        pycls = getattr(importlib.import_module(m_.group(1)), dm.group(1), None)
+    except ImportError:
+        return None
+    fn = inspect.getattr_static(pycls, attr, None) if inspect.isclass(pycls) else None
+    if not inspect.isfunction(fn):
+        return None  # a property, classmethod or staticmethod: not this rule
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    fdef = tree.body[0]
+    if not isinstance(fdef, ast.FunctionDef):
+        return None
+    params = rsrc._params(fdef)
+    if not params or params[0]["name"] != "self":
+        return None
+    params = params[1:]
+    if any(p_["kind"] == "varkw" for p_ in params):
+        return None
+    cps = [{"type": t, "name": n} for t, n in cf.params if n != selfs[0]]
+    sm = mine_maps.slot_map(params, cps, drop_self=False, builder_c=True)
+    if not sm["monotonic"]:
+        return None
+    ret = fdef.returns
+    e = {
+        "python": {
+            "params": params,
+            "returns": ast.unparse(ret).strip("'\"") if ret is not None else "",
+        },
+        "c": {"name": cf.name, "slots": sm["slots"], "extra_c": sm["extra_c"]},
+    }
+    cache[key] = (e, selfs[0])
+    return cache[key]
 
 
 def py_params(fn: ast.FunctionDef) -> list[dict]:

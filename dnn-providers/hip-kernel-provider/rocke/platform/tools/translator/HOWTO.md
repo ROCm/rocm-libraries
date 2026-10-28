@@ -253,8 +253,13 @@ as not mechanical.
   needs its own entry before the translator pairs its functions with the C
   twins.
 - Platform helpers: the maps list the `rocke.helpers` functions a package
-  imports and their C twins, but a call to one is still a hole unless it has
-  an adapter (for example `kernel_name_join`).
+  imports and their C twins, and a call to one goes through its twin when
+  the Python and C parameters pair up (by name, then position; out, count
+  and builder parameters by role). A method of the rocke.* class such a
+  helper returns (`TensorView.tile`, `TileWindow.load_vec`) goes through
+  `rocke_<stem>_<method>` when its header documents it as
+  `<Class>.<method>`. A Python argument with no C parameter (for example
+  `make_lds_view(exclusive=True)`) is a hole unless it is the default.
 - Types come from a parity driver `<module>_emit` (`tr.record`); a module
   with no driver cannot be recorded.
 - Not handled yet: mixed-arity tuples, `next()` over a generator, a
