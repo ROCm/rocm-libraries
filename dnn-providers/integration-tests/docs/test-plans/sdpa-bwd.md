@@ -6,7 +6,7 @@
 > exist yet. The bundles also depend on #14312, which derives O and Stats from the forward and
 > has not merged either. The generator is the source of truth for counts and
 > budgets: `generate_sdpa_bwd_bundles.py --dry-run --report` declares 580 cases, 500 written
-> (quick 57, PR 151, nightly 222, full 70) and 80 gated. The engine defects DEF-01 to DEF-08
+> (quick 57, PR 148, nightly 220, full 75) and 80 gated. The engine defects DEF-01 to DEF-08
 > (§4.2) are tracked under ALMIOPEN-3035: DEF-01 is ALMIOPEN-3036, DEF-02 ALMIOPEN-3037,
 > DEF-03 ALMIOPEN-3046, DEF-04 ALMIOPEN-3039, DEF-05 and DEF-08 ALMIOPEN-3038, DEF-06
 > ALMIOPEN-3043 and DEF-07 ALMIOPEN-3044.
@@ -353,7 +353,7 @@ The first failing WF rule names the reason; the third column says when a graph o
 
 **What the generator writes.** Claim, regression and probe cases are in (WF ∪ EXT) ∩ F_active; a
 rejection probe is in U; a graph outside F_active is a frontend unit test, never a case. The case
-list holds 447 WF, 113 EXT and 23 U cases under develop semantics, and 40 claim or regression cases
+list holds 444 WF, 113 EXT and 23 U cases under develop semantics, and 40 claim or regression cases
 are EXT (mostly dead rows). Under F_R13R14, PRB-M02 and PRB-M02f (`right_bound = −2`) become illegal
 and leave the bundles for unit test IV14. Bands are written from (W, R), so every case is legal under
 both window meanings. The generator writes what the frontend would infer and the bundle path skips:
@@ -582,7 +582,7 @@ axes:** everything else in §2.
 | All-pairs | By the end of nightly, every value of the 10 axes below meets every value of every other axis. A seeded generator writes the cases and a checker proves the cover. |
 | Probes and regressions | Every unsupported feature, awkward combination and hazard has a probe, and every level holds rejection probes. Each escaped bug's reproducer is a case in the lowest level that affords it (§4.2). |
 | Oracle gate | A case whose oracle is not ready is gated: level `notrun`, a target level and its gate. The generator does not write it (P7). |
-| Entry gate | A DEF case (§4.2), and H61, which shares DEF-05's hazard, enters a lane only after its engine disposition lands. |
+| Entry gate | A DEF case (§4.2), and H61, which shares DEF-05's hazard, sits in its level. An engine that accepts it and computes it wrongly skips it in its TOML, naming the defect and its ticket, until the engine's disposition lands. |
 | Concrete graphs | Each level runs checked-in cases only. Random sampling belongs to the exhaustive tool (§7). |
 | Size and budget | Per-case ceilings (§3); cumulative budgets with a 5 % reserve that includes every gated case whose gate can open before #14358 (§4.4). |
 
@@ -636,7 +636,7 @@ blobs attach unchanged), Scale 16, Seed 17, Offset 18, ragged offsets 19–22 (p
 
 | Topology | Tensors | Status | Runnable / gated cases |
 |---|---|---|---|
-| `Default` | Q, K, V, O, dO, Stats, dQ, dK, dV | exists; template rewritten, sweeps overwritten, the 16 inherited ids deleted | 440 / 62 |
+| `Default` | Q, K, V, O, dO, Stats, dQ, dK, dV | exists; template rewritten, sweeps overwritten, the 16 inherited ids deleted | 438 / 61 |
 | `AdditiveMask` | Default + Bias | as #14358's; its literal scale becomes a placeholder | 34 / 1 |
 | `AdditiveMaskDBias` | Default + Bias + dBias | new | 0 / 6 |
 | `DBiasOnly`, `DropoutScaleInv`, `SeqLenQOnly` | Default + dBias; + DropoutScaleInv; + SeqLenQ | new; rejection probes only | 2, 1, 1 / 0 |
@@ -676,7 +676,7 @@ Each level answers one question (RFC 0022 §8.2); a case sits in the lowest leve
 | Masks and bands | H65, REG-01–03, REG-13a/c/d/e | S25–S32, H19, H20, H24, H25, H27, H66, H68, H69, H72–H74, H100 | H26, H32, H67, H71, H98 | TP-D |
 | Head grouping | REG-05a–c, H50 | PRB-H01–H08, H46, H49; DEF-04 (entry) | TP-C, S11, H47 | M variants at model ratios |
 | Head dims | S17.q | TP-E, S15, S16.c, S21, S23, H33–H39, H43–H45 | TP-A, S16–S20, S22, H40–H42, H99 | TP-D, S24 |
-| Layouts and strides | S40.q, S42.q | S42, S43, H58, H61 (entry), PRB-L01, TP-Bs05, TP-Bs11; DEF-01, -02, -05, -08 (entry) | S40, S41, S44, H60, TP-B | TP-D |
+| Layouts and strides | S40.q, S42.q | S42, S43, H58, H61 (entry), PRB-L01, TP-Bs05, TP-Bs11; DEF-01, -02, -05 (entry) | S40, S41, S44, H60, TP-B | TP-D |
 | Scale | REG-04, CLM-S1, H90 | CLM-S2, CLM-S3, H83, H84; DEF-06 (entry) | S37, S38 | — |
 | Bias | REG-07a–c | H75, H76 | PRB-B01–B07, H77, H78, H101, H102 | — |
 | Sequence hazards | H08, H11, PRB-G01 | S13, S57, H02–H04, H07, H09, H10, H12, H17–H22, H28, H31, H97 | S14, H05, H06, H23 | H94, H95 |
@@ -696,12 +696,12 @@ Cases generated (own level / cumulative):
 | Level | `Default` | Other topologies | Own | Cumulative | Claim | Probe | Regression | Distinct geometries |
 |---|---|---|---|---|---|---|---|---|
 | quick | 54 | 3 | **57** | 57 | 38 | 3 | 16 | 21 |
-| PR | 139 | 12 | **151** | 208 | 69 | 79 | 3 | 84 |
-| nightly | 175 | 47 | **222** | 430 | 109 | 113 | 0 | 105 |
-| full | 70 | 0 | **70** | 500 | 45 | 25 | 0 | 22 |
+| PR | 136 | 12 | **148** | 205 | 69 | 76 | 3 | 81 |
+| nightly | 173 | 47 | **220** | 425 | 109 | 111 | 0 | 102 |
+| full | 75 | 0 | **75** | 500 | 45 | 30 | 0 | 27 |
 
-Probes include the rejection probes (1, 17, 3, 2). By size class: quick S 31, H 26; PR S 37, M 9,
-H 105; nightly S 125, L 36, M 28, H 33; full S 54, M 5, H 5, X 6. 204 distinct geometries in all.
+Probes include the rejection probes (1, 17, 3, 2). By size class: quick S 31, H 26; PR S 37, M 6,
+H 105; nightly S 125, L 36, M 26, H 33; full S 54, M 10, H 5, X 6. 204 distinct geometries in all.
 `--report` prints these counts; the measured run (§4.5) fixes them.
 
 **Gated cases** have level `notrun`, a target level and a gate, and are written when it opens.
@@ -775,9 +775,11 @@ dBias by #14358's unit tests (ALMIOPEN-2695); frontend-rule probes by §2.9.
 
 **Open engine defects.** Each DEF case is a valid graph that an engine accepts and computes wrongly
 today (the gfx942 pilot and follow-up diagnoses on develop + #14312). Its purpose is `probe`, its
-metadata names the `defect`, and it becomes a `regression` when an engine gets it right. It enters a
-lane only after its disposition lands; a typed decline in a companion engine PR is the disposition
-for every class an engine can detect from the graph. Widening a tolerance class never is.
+metadata names the `defect`, and it becomes a `regression` when an engine gets it right. It sits in
+its level from the start. Until its disposition lands, an engine that has the defect skips the case in
+its TOML (`[[test_skips]]`), naming the defect and its ticket; the pull request that lands the
+disposition deletes the skip. A typed decline in a companion engine PR is the disposition for every
+class an engine can detect from the graph. Widening a tolerance class never is.
 
 | Defect | What an engine gets wrong today | Cases | Disposition (entry gate) |
 |---|---|---|---|
@@ -788,15 +790,18 @@ for every class an engine can detect from the graph. Widening a tolerance class 
 | DEF-05 | an odd element stride on the sequence axis of Q, K, V, dO, dK or dV, or the head axis of dK or dV: rows start mid-dword and are read one element early | DEF-05 (dO row pitch D + 1); H61 (claim, random gaps) | typed decline, PR 1 |
 | DEF-06 | scale 0 gives NaN; a negative scale gives Inf and NaN | DEF-06a–c | typed decline, companion PR 2; a runtime scale needs an execute-time check |
 | DEF-07 | the ODO kernel forms the O and dO batch offset in 32 bits: dQ and dK are wrong past a 4 GiB span | X15 | typed decline, a later companion PR; X15 also waits for HG22 |
-| DEF-08 | a sequence stride below D, also on a length-1 axis: each (b, h) buffer ends S·stride bytes in, so the end of the last row reads as 0 and writes there are dropped | DEF-08a (Q and K sequence stride D/2), DEF-08b (Sq 1, sequence stride 1 on Q, O, dO, dQ) | typed decline, PR 1 |
+| DEF-08 | a sequence stride below D, also on a length-1 axis: each (b, h) buffer ends S·stride bytes in, so the end of the last row reads as 0 and writes there are dropped | DEF-08a (Q and K sequence stride D/2), DEF-08b (Sq 1, sequence stride 1 on Q, O, dO, dQ): listed, not generated yet | typed decline, PR 1 |
 
 DEF-03 is a precision defect in a prebuilt kernel, so no decline rule describes it. Its cases stay
 in their levels and the engine TOML skips the three ids: other engines still execute them, the skip
 names the defect and its ticket, and REG-18c and X07 bf16 keep executing. This gives less false
 coverage than moving them out of the levels, which would hide the class from every engine.
 
-*Non-normative:* on ASM_SDPA_ENGINE (gfx942), the one implementing engine today, the DEF cases and H61
-fail until companion PR 1 merges and are typed declines after it; the analysis doc tracks outcomes.
+*Non-normative:* ASM_SDPA_ENGINE, the one implementing engine today, accepts the written DEF cases
+and H61 and computes them wrongly. Its TOML skips them, one entry per defect with its ticket
+(DEF-01 ALMIOPEN-3036, DEF-02 ALMIOPEN-3037, DEF-04 ALMIOPEN-3039, DEF-05 and H61
+ALMIOPEN-3038, DEF-06 ALMIOPEN-3043). Companion PR 1 (DEF-01, -02, -04, -05) and PR 2 (DEF-06)
+add the declines and delete those entries; the analysis doc tracks outcomes.
 
 ### 4.3 Products deliberately not run
 
@@ -840,10 +845,10 @@ The build fails when a level crosses 95 % of its budget with the reserve.
 
 | Level | s, own | s, cumulative | + reserved gates | Budget less 5 % | GPU-reference era, cumulative |
 |---|---|---|---|---|---|
-| quick | 18.7 | 18.7 | 18.7 | 19.0 | 5.7 |
-| PR | 91.2 | 110.0 | 113.2 | 114.0 | 24.3 |
-| nightly | 341.0 | 451.0 | 454.6 | 456.0 | 74.8 |
-| full | 1247.8 | 1698.8 | 1702.4 | 1710.0 | 194.3 |
+| quick | 18.4 | 18.4 | 18.4 | 19.0 | 5.6 |
+| PR | 90.6 | 109.0 | 112.2 | 114.0 | 23.9 |
+| nightly | 341.6 | 450.6 | 454.3 | 456.0 | 74.6 |
+| full | 1247.8 | 1698.4 | 1702.1 | 1710.0 | 194.1 |
 
 - Gates that open with #14358 also make the GPU reference the oracle; all gated cases then add 3.1,
   6.6 and 11.0 s to the GPU-era column of PR, nightly and full.
@@ -852,8 +857,8 @@ The build fails when a level crosses 95 % of its budget with the reserve.
   This plan applied it once: M09.pr, M28.pr and M31.pr (6.6 s) moved from PR to nightly; M03.n,
   M12.n, M20.n, M36.n and M43.n (25.4 s) moved from nightly to full (register R-M6).
 - **Shards.** Each level lane runs two GTest shards in a 30-minute step; cases are ordered by
-  descending cost so heavy ones alternate: quick 9.7 / 9.1 s, PR 55.8 / 54.2 s, nightly 227 / 224 s,
-  full 896 / 803 s. In TheRock prerelease the full lane shares each step with other suites (HIP_MLOPS
+  descending cost so heavy ones alternate: quick 9.6 / 8.8 s, PR 53.9 / 55.0 s, nightly 228 / 223 s,
+  full 805 / 894 s. In TheRock prerelease the full lane shares each step with other suites (HIP_MLOPS
   took 631–641 s per shard on 2026-10-25); the lane owner signs off on that share.
 
 ### 4.5 Measured run
