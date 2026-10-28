@@ -193,7 +193,7 @@ jobs:
 
       - name: Install bench input conversion dependency
         if: inputs.random_gemm_count > 0
-        run: python -m pip install PyYAML
+        run: uv pip install PyYAML
 
       - name: Run rocjitsu race check
         timeout-minutes: 75
