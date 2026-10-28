@@ -6,7 +6,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Optimizations
 
-* Reduced branching in `device_search` and `device_find_end`.
+* Improved performance of `device_search` and `device_find_end` by reducing branches.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
