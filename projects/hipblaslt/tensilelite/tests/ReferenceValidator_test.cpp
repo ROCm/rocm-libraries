@@ -197,3 +197,62 @@ TEST_F(ReferenceValidatorTest, OneShotValidatesOnlyTheFirstRun)
     EXPECT_EQ(validation(), "PASSED");
     EXPECT_EQ(validator->error(), 0);
 }
+
+TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+        GTEST_SKIP() << "needs a device";
+
+    auto args = makeValidatorArgs();
+    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "world", std::vector<int>{1});
+    setOption(args, "fused-a2a-extent", std::vector<int>{64});
+    setOption(args, "bounds-check", BoundsCheckMode::NaN);
+    setOption(args, "rotating-buffer-size", 1);
+    ClientProblemFactory factory(args);
+    auto                 dataInit = std::make_shared<DataInitialization>(args, factory);
+    auto* problem    = dynamic_cast<ContractionProblemGemm*>(factory.problems()[0].get());
+    auto  device     = std::make_shared<DeviceContext>(0, true);
+    device->dataInit = dataInit;
+    std::vector<std::shared_ptr<DeviceContext>> devices{device};
+    auto                                        reporter = std::make_shared<CapturingReporter>();
+    ReferenceValidator                          validator(args);
+    validator.setDevices(&devices);
+    validator.setReporter(reporter);
+    validator.preProblem(problem);
+    ContractionSolution solution;
+    solution.problemType.fusedGemmA2A = true;
+    validator.preSolution(&solution);
+
+    auto inputs      = dataInit->prepareGPUInputs(problem);
+    device->inputArr = dataInit->prepareRotatingGPUOutput(2, problem, inputs, nullptr);
+    ASSERT_EQ(device->inputArr.size(), 2u);
+    auto const& reference = dynamic_cast<ContractionInputs const&>(*validator.referenceInputs(0));
+    auto&       rotated   = dynamic_cast<ContractionInputs&>(*device->inputArr[1]);
+    auto const& recv      = problem->tensors()[ContractionProblemGemm::TENSOR::A2A_RECV];
+    HIP_CHECK_EXC(hipMemcpy(
+        rotated.d, reference.d, problem->d().totalAllocatedBytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_EXC(
+        hipMemcpy(rotated.a2aRecv, reference.d, recv.totalAllocatedBytes(), hipMemcpyHostToDevice));
+    EXPECT_EQ(rotated.maxElements[ContractionProblemGemm::TENSOR::A2A_RECV],
+              recv.totalAllocatedElements());
+    TimingEvents events({}, 1, 1);
+    validator.validateWarmups({1}, events, events);
+    validator.postWarmup(events, events);
+    validator.postSolution();
+    EXPECT_EQ(reporter->strings.at(ResultKey::Validation), "PASSED");
+    EXPECT_EQ(validator.error(), 0);
+
+    validator.preSolution(&solution);
+    float bad = static_cast<float const*>(reference.d)[recv.totalLogicalElements() - 1] + 100.0f;
+    HIP_CHECK_EXC(hipMemcpy(static_cast<float*>(rotated.a2aRecv) + recv.totalLogicalElements() - 1,
+                            &bad,
+                            sizeof(bad),
+                            hipMemcpyHostToDevice));
+    validator.validateWarmups({1}, events, events);
+    validator.postWarmup(events, events);
+    validator.postSolution();
+    EXPECT_EQ(reporter->strings.at(ResultKey::Validation), "FAILED");
+    EXPECT_EQ(validator.error(), 1);
+}
