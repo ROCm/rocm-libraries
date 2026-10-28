@@ -112,6 +112,7 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/loaded_model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/sha256.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/boost/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_boost.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
@@ -164,6 +165,7 @@ target_sources(
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/library_stamp.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/orr_loader.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/boost/sha256.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_boost.cpp"
 )
 
 if(ORIGAMI_ENABLE_NN)
