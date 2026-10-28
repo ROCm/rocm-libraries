@@ -194,6 +194,37 @@ TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
     EXPECT_TRUE(std::find(applicableIds.begin(), applicableIds.end(), 2) == applicableIds.end());
 }
 
+// An engine whose applicability check throws is treated as inapplicable; it must not
+// hide the plugin's other engines. ROCm/rocm-libraries#14266.
+TEST(TestEngineManager, GetApplicableEngineIdsSkipsEngineThatThrows)
+{
+    class ThrowingEngine : public TestEngine
+    {
+    public:
+        using TestEngine::TestEngine;
+
+        bool isApplicable(
+            TestHandle& /*handle*/,
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                        "no applicable solver");
+        }
+    };
+
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true));
+    manager.addEngine(std::make_unique<ThrowingEngine>(2, true));
+    manager.addEngine(createTestEngine(3, true));
+
+    TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    auto applicableIds = manager.getApplicableEngineIds(handle, mockGraph);
+    std::sort(applicableIds.begin(), applicableIds.end());
+
+    EXPECT_EQ(applicableIds, (std::vector<int64_t>{1, 3}));
+}
+
 TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
 {
     TestEngineManager manager;

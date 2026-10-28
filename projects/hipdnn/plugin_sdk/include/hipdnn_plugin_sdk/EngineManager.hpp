@@ -91,7 +91,20 @@ public:
         std::vector<int64_t> applicable;
         for(const auto& [id, engine] : _engines)
         {
-            if(engine->isApplicable(handle, opGraph))
+            bool isApplicable = false;
+            try
+            {
+                isApplicable = engine->isApplicable(handle, opGraph);
+            }
+            catch(const std::exception& e)
+            {
+                // One engine failing its check must not hide the plugin's other engines.
+                HIPDNN_PLUGIN_LOG_WARN("engine manager: "
+                                       << describeEngine(id, {})
+                                       << " threw from isApplicable and is skipped: " << e.what());
+            }
+
+            if(isApplicable)
             {
                 applicable.push_back(id);
             }
