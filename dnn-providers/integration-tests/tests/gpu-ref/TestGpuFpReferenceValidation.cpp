@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Allocators.hpp>
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -16,7 +17,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -498,10 +501,50 @@ const std::vector<int64_t> K_RAGGED_DIMS = {2, 2, 3, 2};
 const std::vector<int64_t> K_RAGGED_STRIDES = {12, 2, 4, 1};
 // Batch 0 stores 2 sequence rows and batch 1 stores 3, so batch 0's third row is out of block.
 const std::vector<int32_t> K_RAGGED_OFFSETS = {0, 8, 20};
+// Batch 0 stores all 3 sequence rows and batch 1 stores 2, so the out-of-block third row of
+// the last batch lies past the end of the 20-element buffer instead of aliasing another
+// batch's rows.
+const std::vector<int32_t> K_SHORT_LAST_BATCH_OFFSETS = {0, 12, 20};
 
-template <typename T>
-RaggedTensor<T> makeRaggedTensor(const std::vector<int32_t>& offsets = K_RAGGED_OFFSETS,
-                                 const std::vector<int64_t>& strides = K_RAGGED_STRIDES)
+// One sequence row of K_RAGGED_DIMS in the K_RAGGED_STRIDES layout (the sequence stride).
+constexpr size_t K_TAIL_ELEMENTS = 4;
+
+// Device allocator that over-allocates by one sequence row and sets every byte of the
+// allocation to FillByte. The tensor copies only its stored elements to the device, so the
+// slack past them keeps FillByte, and a kernel that reads past the stored elements sees a
+// value the test chose instead of whatever the allocation happened to hold.
+template <typename T, unsigned char FillByte>
+class TailFilledDeviceAllocator : public IDeviceAllocator<T>
+{
+public:
+    [[nodiscard]] T* allocate(std::size_t n) override
+    {
+        const size_t bytes = (n + K_TAIL_ELEMENTS) * sizeof(T);
+        void* ptr = nullptr;
+        if(hipMalloc(&ptr, bytes) != hipSuccess)
+        {
+            throw std::bad_alloc();
+        }
+        // Synchronize so the fill cannot land after the tensor's host-to-device copy, which
+        // may run on another stream.
+        if(hipMemset(ptr, FillByte, bytes) != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+        {
+            std::ignore = hipFree(ptr);
+            throw std::bad_alloc();
+        }
+        return static_cast<T*>(ptr);
+    }
+
+    void deallocate(T* p, [[maybe_unused]] std::size_t n) noexcept override
+    {
+        std::ignore = hipFree(p);
+    }
+};
+
+template <typename T, typename DeviceAlloc = DeviceAllocator<T>>
+RaggedTensor<T, HostAllocator<T>, DeviceAlloc>
+    makeRaggedTensor(const std::vector<int32_t>& offsets = K_RAGGED_OFFSETS,
+                     const std::vector<int64_t>& strides = K_RAGGED_STRIDES)
 {
     auto offsetTensor = std::make_shared<Tensor<int32_t>>(
         std::vector<int64_t>{static_cast<int64_t>(offsets.size()), 1, 1, 1});
@@ -509,13 +552,14 @@ RaggedTensor<T> makeRaggedTensor(const std::vector<int32_t>& offsets = K_RAGGED_
     {
         offsetTensor->setHostValue(offsets[i], static_cast<int64_t>(i), 0, 0, 0);
     }
-    return RaggedTensor<T>(K_RAGGED_DIMS, strides, SDPA_SEQ_AXIS, offsetTensor);
+    return RaggedTensor<T, HostAllocator<T>, DeviceAlloc>(
+        K_RAGGED_DIMS, strides, SDPA_SEQ_AXIS, offsetTensor);
 }
 
 // Writes value(i) to the i-th stored element. A ragged buffer is packed by batch, so every
 // stored element is an in-block logical position.
 template <typename T, typename ValueFn>
-void fillStored(RaggedTensor<T>& tensor, ValueFn value)
+void fillStored(RaggedTensorBase<T>& tensor, ValueFn value)
 {
     auto* host = tensor.memory().hostData();
     for(size_t i = 0; i < tensor.elementCount(); ++i)
@@ -623,6 +667,25 @@ TYPED_TEST(TestGpuFpRaggedValidation, EmptyBatchPasses)
     EXPECT_TRUE(validator.allClose(ref, impl));
 }
 
+// With a short last batch, an out-of-block position has no batch after it to alias: reading
+// it would run past the stored elements. The slack there holds 0 in the reference and a
+// nonzero value in the implementation, so the comparison passes only if those positions are
+// skipped rather than read.
+TYPED_TEST(TestGpuFpRaggedValidation, ShortLastBatchDoesNotReadPastBuffer)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x00>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    auto impl = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x40>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    fillStored(ref, [](size_t i) { return static_cast<float>(i) * 0.25f; });
+    fillStored(impl, [](size_t i) { return static_cast<float>(i) * 0.25f; });
+
+    const GpuFpReferenceValidation<TypeParam> validator(0.0f, 0.0f);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
 // Same ragged layout (row offsets and sequence stride) but H and D strides swapped: the
 // kernel must pair elements by logical index, not by stored position.
 TYPED_TEST(TestGpuFpRaggedValidation, DifferentInnerStridesCompareLogically)
@@ -723,6 +786,22 @@ TYPED_TEST(TestGpuIntRaggedValidation, MatchPassesAndMismatchFails)
     impl.memory().hostData()[impl.elementCount() - 1] = static_cast<TypeParam>(42);
     impl.markHostModified();
     EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+// Integer counterpart of ShortLastBatchDoesNotReadPastBuffer for validateExact.
+TYPED_TEST(TestGpuIntRaggedValidation, ShortLastBatchDoesNotReadPastBuffer)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto ref = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x00>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    auto impl = makeRaggedTensor<TypeParam, TailFilledDeviceAllocator<TypeParam, 0x40>>(
+        K_SHORT_LAST_BATCH_OFFSETS);
+    fillStored(ref, [](size_t i) { return i % 10; });
+    fillStored(impl, [](size_t i) { return i % 10; });
+
+    const GpuIntReferenceValidation<TypeParam> validator;
+    EXPECT_TRUE(validator.allClose(ref, impl));
 }
 
 TYPED_TEST(TestGpuIntRaggedValidation, DifferentRaggedLayoutsFail)
