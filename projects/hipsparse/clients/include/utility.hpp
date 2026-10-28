@@ -272,6 +272,27 @@ inline void
 #define CHECK_GENERATE_MATRIX_ERROR(ERROR) \
     throw_on_generate_matrix_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
+// A pivot position of -1 requires success. Any other position requires zero pivot.
+inline void
+    throw_on_zero_pivot_status(hipsparseStatus_t status, int pivot, const char* file, int line)
+{
+    const hipsparseStatus_t expected
+        = (pivot == -1) ? HIPSPARSE_STATUS_SUCCESS : HIPSPARSE_STATUS_ZERO_PIVOT;
+    if(status == expected)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": zero pivot status failed: received "
+            << hipsparseStatusToString(status) << ", expected " << hipsparseStatusToString(expected)
+            << ".";
+    throw std::runtime_error(message.str());
+}
+
+#define CHECK_HIPSPARSE_ZERO_PIVOT(STATUS, PIVOT) \
+    throw_on_zero_pivot_status((STATUS), (PIVOT), __FILE__, __LINE__)
+
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)
 {
