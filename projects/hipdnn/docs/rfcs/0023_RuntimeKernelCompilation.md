@@ -115,26 +115,26 @@ selection. **Should** distinguishes between options that meet every Must.
 | A4 | Must | Safe to call concurrently from parallel plan builds. | Parallel plan-build stress test. |
 | A5 | Must | Deterministic: identical inputs give identical code objects, and the compiler reports a version usable in a cache key. | Repeat-compile comparison. |
 | A6 | Must | A named owning team and a release cadence aligned with ROCm. | Recorded support agreement. |
-| A7 | Should | Resource usage is readable from the compiled code object without loading it or using a GPU, so a kernel that does not fit is declined at plan build. See [Resource usage](#resource-usage). | Over-budget kernel is declined on a CPU-only machine. |
+| A7 | Should | After compiling, hipDNN can confirm from the code object alone, without loading it or using a GPU, that the kernel is valid for the plan's target. See [Kernel validity](#kernel-validity). | A kernel built for the wrong target or over the LDS limit is rejected at plan build on a CPU-only machine. |
 
-#### Resource usage
+#### Kernel validity
 
-A7 covers the per-kernel values that AMDGPU code objects already record in their metadata:
+A7 uses values that AMDGPU code objects already record in their metadata. A kernel is valid
+for a plan when every check below passes:
 
-| Value | Code-object metadata field |
+| Check | Code-object metadata field |
 |---|---|
-| Vector, scalar and accumulation registers (VGPR, SGPR, AGPR) | `.vgpr_count`, `.sgpr_count`, `.agpr_count` |
-| Register spills | `.vgpr_spill_count`, `.sgpr_spill_count` |
-| Static LDS per workgroup | `.group_segment_fixed_size` |
-| Scratch (private) memory per work-item, and dynamic stack use | `.private_segment_fixed_size`, `.uses_dynamic_stack` |
-| Maximum workgroup size and wavefront size | `.max_flat_workgroup_size`, `.wavefront_size` |
-| Kernel argument size | `.kernarg_segment_size` |
+| Built for the plan's target | `amdhsa.target` |
+| Entry symbol is present | `.name`, `.symbol` |
+| Static LDS plus any dynamic LDS the plan requests fits the target's limit | `.group_segment_fixed_size` |
+| The plan's workgroup size is within the kernel's maximum, and the wavefront size matches | `.max_flat_workgroup_size`, `.wavefront_size` |
+| The arguments hipDNN passes match the kernel's argument size | `.kernarg_segment_size` |
+| Scratch memory per work-item is within the plan's budget | `.private_segment_fixed_size`, `.uses_dynamic_stack` |
 
 These are readable on the CPU with amd-comgr (`amd_comgr_get_data_metadata`). A code object
 compiled by hipRTC for gfx950, without using a GPU, carries all of them, so the requirement is
-realistic for any compiler that emits standard code objects. Two limits apply: dynamic LDS
-requested at launch is not in the metadata, so hipDNN adds it; and occupancy is not recorded,
-so hipDNN derives it from these values and the target's limits.
+realistic for any compiler that emits standard code objects. The same metadata also records
+register counts and spills; those affect performance, not validity.
 
 ### Compile time
 
