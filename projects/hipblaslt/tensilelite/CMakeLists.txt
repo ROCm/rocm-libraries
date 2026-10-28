@@ -47,6 +47,7 @@ cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
 option(TENSILELITE_ENABLE_JIT "Build the COMGR-based TensileLite JIT library." ON)
 cmake_dependent_option(TENSILELITE_ENABLE_JIT_PYTHON
     "Build the nanobind Python module for the TensileLite JIT library." OFF "TENSILELITE_ENABLE_JIT" OFF)
+option(TENSILELITE_ENABLE_CODEGEN "Build the TensileLite C++ kernel code generation library." ON)
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
 if(TENSILELITE_STANDALONE)
@@ -96,6 +97,9 @@ add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_JIT)
     find_package(amd_comgr CONFIG REQUIRED)
+endif()
+
+if(TENSILELITE_ENABLE_JIT OR TENSILELITE_ENABLE_CODEGEN)
     add_subdirectory(src/tensilelite)
 endif()
 
