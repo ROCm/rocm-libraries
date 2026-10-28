@@ -1771,10 +1771,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 )
             return result
         elif dtype in cls._DT_FP8_FP8BF16:
-            # bk0max is the head dim each tile holds. fp8 WMMA has K = 64 or 128 only, so
-            # d32 is the one head dim that takes the padded (dpad/dvpad) path. Every head dim
-            # pairs a bm0=64 tile below the crossover max_seqlen_q with a bm0=128 fallback;
-            # fp8 uses d128's crossover for all of them until each is measured.
+            # bk0max is the head dim each tile holds, rounded up to a whole gemm0 K step: fp8
+            # WMMA has K = 64 or 128 only, so d32 (-> 64), d96 (-> 128) and d160 (-> 192) take
+            # the padded (dpad/dvpad) path. Every head dim but d512 pairs a bm0=64 tile below
+            # the crossover max_seqlen_q with a bm0=128 fallback; fp8 uses d128's crossover for
+            # all of them until each is measured. d512 is bm0=64 only: bm0=128 spills most of
+            # its VGPRs and fills the whole LDS.
             m64 = _gfx125_qr_tdm_crossover_constraint((128, 128))
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
@@ -1783,11 +1785,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
                               FmhaFwdTileSize(128, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
                               FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
+                ( 96,  96) : [FmhaFwdTileSize( 64, 128, 128,  96, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 128,  96, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, m64),
                               FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (160, 160) : [FmhaFwdTileSize( 64, 128, 192, 160, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 192, 160, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                (192, 128) : [FmhaFwdTileSize( 64, 128, 192, 128, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 192, 128, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
                               FmhaFwdTileSize(128, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (512, 512) : [FmhaFwdTileSize( 64, 128, 512, 512, 128,  512,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8FP32:
             m64 = _gfx125_qr_tdm_crossover_constraint((128, 128))
@@ -1797,11 +1806,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128, 128,  64,  32, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
                               FmhaFwdTileSize(128, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                ( 96,  96) : [FmhaFwdTileSize( 64, 128, 128,  96, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 128,  96, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1, m64),
                               FmhaFwdTileSize(128, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (160, 160) : [FmhaFwdTileSize( 64, 128, 192, 160, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 192, 160, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
+                (192, 128) : [FmhaFwdTileSize( 64, 128, 192, 128, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1, m64),
+                              FmhaFwdTileSize(128, 128, 192, 128, 128,  192,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, m64),
                               FmhaFwdTileSize(128, 128, 256, 256, 128,  256,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
+                (512, 512) : [FmhaFwdTileSize( 64, 128, 512, 512, 128,  512,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1)],
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
@@ -1900,7 +1916,16 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
-            if (hdim, hdim_v) in ((32, 32), (64, 64), (128, 128), (256, 256)):
+            if (hdim, hdim_v) in (
+                (32, 32),
+                (64, 64),
+                (96, 96),
+                (128, 128),
+                (160, 160),
+                (192, 128),
+                (256, 256),
+                (512, 512),
+            ):
                 # The simplified mask keeps both window bounds live in the mainloop, so plain
                 # causal gets the one-bound kernel. t:l,r and b:l,r also arrive as
                 # top-left/bottom-right; the constraint sends those windows to s_mask.
@@ -1928,10 +1953,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint, F_use_double_kv_lds_buffer="t"))  # fmt: skip
 
+            # qr only serves head dims that are not a multiple of 8, which qr_tdm's padded
+            # dcheck rejects; every other combo it covers is dispatched to qr_tdm first. So only
+            # the padded qr variant is reachable.
             for logits, qscale, mask, bias in itertools.product(
                 ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
             ):
-                pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
         return pipelines
 
