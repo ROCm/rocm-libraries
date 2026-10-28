@@ -41,7 +41,7 @@ Everything below runs from the provider's `flydsl/` directory.
 | Python | 3.12 | — |
 | `flydsl` | **0.3.4** (pip wheel) | `generators/_flydsl_env.py` `FLYDSL_VERSION` |
 | FlyDSL kernel sources | commit `89ad52fbbb9e…` (`v0.3.4.1-19-g89ad52f`) | `_flydsl_env.py` `FLYDSL_KERNELS_*`, and vendored under `kernels_src/` |
-| ROCm | 7.13.0 | read at runtime from `$ROCM_PATH/.info/version` |
+| ROCm | 7.13.0 (the `sdpa_bwd_*` ops: 10.2.0) | read at runtime from `$ROCM_PATH/.info/version` |
 | `torch` | any ROCm build | imported by the vendored kernel sources |
 | `msgpack` | any (the tree was built with 1.2.2) | reads the AMDGPU metadata note out of each object |
 
@@ -135,9 +135,14 @@ for op in $OPS; do
 done
 ```
 
-The four `sdpa_bwd_{prep,dkdv,dq,merged}` generators exit 1 without `--reference-dir`: their
-pinned objects are the `<hash>.hsaco` files of a reference directory, and the rebuild is
-checked against them. `REFERENCE_DIR` is the directory the SDPA backward S1 snapshot
+The four `sdpa_bwd_{prep,dkdv,dq,merged}` generators exit 1 without `--reference-dir`, the
+directory of the sweep's pinned `<hash>.hsaco` objects. They ship their own build, which
+matches the pin byte for byte on every row but the rows of
+`tests/data/sdpa_bwd_pinned_exceptions.csv` (nondeterministic, known-bad or failing rebuilds,
+append-only): those ship the pin, and their `manifest.json` entry and the `Pinned objects`
+table of `<arch>.SOURCE.md` say so. A row outside that list that does not build, or whose
+build spills (R-MIR), stops the run. The backward generators refuse an unrecorded ROCm
+version, so `ROCM_PATH` must be set. `REFERENCE_DIR` is the directory the SDPA backward S1 snapshot
 produces: `python tools/sdpa_bwd_s1.py --sweep-repo <sweep git dir> --ref <git ref>
 --selection selection.toml --out <S1 dir> --reference-dir "$REFERENCE_DIR"` (it fails while
 any member lacks a binary; see that tool's docstring). `sdpa_bwd_dbias_reduce`, `sdpa_bwd_dsink_reduce` and every other `OPS` entry take none, so
