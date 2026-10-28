@@ -5611,7 +5611,8 @@ namespace
     // (rocblaslt::adaptive_sm::tagAlgo) for the solution the heuristic picks
     // at the adaptive launch's hint, when the two hints differ. Memoised per
     // TensileDataGemm. Returns the algo to launch: `algo`, or `reselectedAlgo`
-    // holding the swapped solution.
+    // holding the swapped solution. `atQueryHint` is the hint the launch must
+    // run at instead of its own, or -1 for none.
     const rocblaslt_matmul_algo* reselectForAdaptiveHint(
         rocblaslt_handle                                                               handle,
         const rocblaslt_matmul_algo*                                                   algo,
@@ -5619,8 +5620,11 @@ namespace
         std::shared_ptr<void>                                                          gemmData,
         const TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>& library,
         const TensileLite::Hardware&                                                   hardware,
-        rocblaslt_matmul_algo& reselectedAlgo)
+        rocblaslt_matmul_algo& reselectedAlgo,
+        int*                   atQueryHint)
     {
+        *atQueryHint = -1;
+
         const auto* launch    = prob.adaptive_launch;
         uint32_t    queryHint = 0;
         if(!launch || !rocblaslt::adaptive_sm::algoTag(algo->data, &queryHint)
@@ -5628,20 +5632,24 @@ namespace
             return algo;
 
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        // Ranked with the workspace limit the query used.
-        AdaptiveReselectionKey key{data->problem,
-                                   *(const int*)algo->data,
-                                   queryHint,
-                                   std::max(prob.workspaceSize, algo->max_workspace_bytes)};
+        // Ranked with the workspace limit the query used, which hipblasLtMatmul
+        // clamps the caller's workspace to.
+        AdaptiveReselectionKey key{
+            data->problem, *(const int*)algo->data, queryHint, algo->max_workspace_bytes};
 
         const AdaptiveReselection* choice = data->adaptiveReselections.find(key);
         if(!choice)
             choice = &data->adaptiveReselections.insert(
                 chooseForLaunchHint(handle, prob, gemmData, library, hardware, std::move(key)));
 
-        // The only launch whose hint is not its Launch's.
+        // Neither the heuristic's pick nor the tagged solution fits at the
+        // launch hint, so the tagged solution runs at the hint it was queried
+        // under: the only launch whose hint is not its Launch's.
         if(choice->atQueryHint)
-            data->problem.setParams().setSmCountTarget(int(queryHint));
+        {
+            *atQueryHint = int(queryHint);
+            data->problem.setParams().setSmCountTarget(*atQueryHint);
+        }
         if(choice->solution == choice->key.taggedSolution)
             return algo;
         reselectedAlgo             = *algo;
@@ -5749,8 +5757,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // A re-selected solution runs through a copy of the caller's algo with
         // its index replaced; the caller's algo stays as queried.
         rocblaslt_matmul_algo reselectedAlgo;
+        int                   atQueryHint = -1;
+
         algo = reselectForAdaptiveHint(
-            handle, algo, prob, gemmData, *library, *hardware, reselectedAlgo);
+            handle, algo, prob, gemmData, *library, *hardware, reselectedAlgo, &atQueryHint);
 
         // Get the values of static member variables flush and rotating size from UserClientArguments
         UserClientArguments ClientArguments;
@@ -6077,8 +6087,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // Whether or not a winner emerged. isSolutionSupported rewrites
             // data->problem from whatever it is handed, so after benchmarking it
             // describes the scratch problem, whose D and possibly C point
-            // elsewhere.
+            // elsewhere. That also resets the hint a re-selection pinned.
             updateTensileProblem(prob, data->problem);
+            if(atQueryHint >= 0)
+                data->problem.setParams().setSmCountTarget(atQueryHint);
         }
 
         if(!callerSuppliedAlgo && tunedIndex >= 0)

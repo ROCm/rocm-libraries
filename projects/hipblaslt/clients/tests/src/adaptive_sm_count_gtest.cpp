@@ -543,6 +543,48 @@ namespace
         EXPECT_EQ(reselections(), 1u);
     }
 
+    // A result ranked at the full device and tagged as an adaptive query with
+    // no hint is swapped for the solution the heuristic picks at the forced
+    // hint, and that solution is the one that launches. Skips when the pick
+    // does not change at this hint.
+    TEST_F(AdaptiveSmCount_pre_checkin, LaunchSwapsToTheSolutionPickedAtTheLaunchHint)
+    {
+        if(!cfg.force)
+            GTEST_SKIP() << "set HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE";
+        auto setTarget = [&](int32_t target) {
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                          r.desc, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &target, sizeof(target)),
+                      HIPBLAS_STATUS_SUCCESS);
+        };
+        // An explicit descriptor hint disables adaptive mode, so this query is
+        // untagged and ranked at the full device.
+        setTarget(1024);
+        if(HasFatalFailure())
+            return;
+        const auto atFull = query();
+        setTarget(0);
+        if(HasFatalFailure())
+            return;
+        const auto atLaunch = query();
+        if(atFull.empty() || atLaunch.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
+        hipblasLtMatmulHeuristicResult_t result   = atFull[0];
+        hipblasLtMatmulHeuristicResult_t pick     = atLaunch[0];
+        const int                        tagged   = hipblaslt_ext::getIndexFromAlgo(result.algo);
+        const int                        expected = hipblaslt_ext::getIndexFromAlgo(pick.algo);
+        if(tagged == expected)
+            GTEST_SKIP() << "the heuristic picks solution " << tagged << " at both hints";
+
+        uint32_t tag = 0;
+        ASSERT_FALSE(algoTag(result.algo.data, &tag));
+        tagAlgo(result.algo.data, 0);
+        static_cast<void>(hipblaslt_tuning_last_launch_for_test());
+        ASSERT_EQ(run(result.algo, kWsBudgetBytes), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+        EXPECT_EQ(hipblaslt_tuning_last_launch_for_test(), expected);
+        EXPECT_NE(expected, tagged);
+    }
+
     // A launch on a capturing stream runs a result tagged with another hint
     // as given; the next live launch re-selects it.
     TEST_F(AdaptiveSmCount_pre_checkin, CapturedLaunchDoesNotReselect)

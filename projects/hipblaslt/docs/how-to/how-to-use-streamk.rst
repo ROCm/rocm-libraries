@@ -190,9 +190,12 @@ Behavior notes
 *  **Re-selection**: Only the top heuristic result is re-selected. An algorithm obtained by solution index
    or from a lower-ranked heuristic result is never replaced, and neither is the algorithm of a launch
    on a capturing stream. With uniform summation order, a
-   re-selected solution must also keep that order at the launch hint.
+   re-selected solution must also keep that order at the launch hint. If neither the
+   heuristic's pick nor the algorithm fits the workspace at the launch hint, the algorithm
+   launches at the hint it was queried under.
 *  **Precedence**: An explicit ``sm_count_target`` on the descriptor or handle always wins over the adaptive hint.
-   A ``HIPBLASLT_TUNING_OVERRIDE_FILE`` entry also wins: its solution is never re-selected.
+   A ``HIPBLASLT_TUNING_OVERRIDE_FILE`` entry or a tuning-cache result
+   (``HIPBLASLT_TUNING_MODE=cache|tune``) also wins: its solution is never re-selected.
 *  **Probing cost**: GEMMs below ``HIPBLASLT_ADAPTIVE_SM_COUNT_TINY_MFLOPS`` never probe.
    Each probe records an event on the stream. While one thread launches a probe, other threads'
    launches on the same stream run without updating the estimate.
