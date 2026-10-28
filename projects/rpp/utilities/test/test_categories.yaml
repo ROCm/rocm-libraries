@@ -3,7 +3,7 @@
 
 test_categories:
   quick:
-    description: "Core tests plus one config per op and backend (target: < 5 min)"
+    description: "Core tests plus one config per op and backend"
     test_patterns:
       - "HandleTest.*"
       - "RoiTest.*"
@@ -23,7 +23,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Full correctness grid (target: < 30 min)"
+    description: "Full correctness grid"
     test_patterns:
       - "*"
     labels:
@@ -32,7 +32,7 @@ test_categories:
 
   # No extended grid yet, so comprehensive and full match standard.
   comprehensive:
-    description: "Same as standard until an extended grid exists (target: < 2 h)"
+    description: "Same as standard until an extended grid exists"
     test_patterns:
       - "*"
     labels:
@@ -40,7 +40,7 @@ test_categories:
       - "nightly"
 
   full:
-    description: "Same as comprehensive (2 h+)"
+    description: "Same as comprehensive"
     test_patterns:
       - "*"
     labels:
