@@ -20,6 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# DO NOT MERGE: no-op marker so this PR's diff is exactly one rocPRIM file.
+# It exists to prove that configure_external_repo_ci.py narrows the run to
+# changed_projects="projects/rocprim" and that setup_multi_arch.yml derives
+# test_type="standard" from the same diff.
+
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
