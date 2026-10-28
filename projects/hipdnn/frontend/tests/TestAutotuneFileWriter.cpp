@@ -3,10 +3,9 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+#include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
-#include <nlohmann/json_fwd.hpp>
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>

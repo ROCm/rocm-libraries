@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "Container.hpp"
+#include "Handle.hpp"
 #include "version.h"
 
 using namespace hip_kernel_provider::core;

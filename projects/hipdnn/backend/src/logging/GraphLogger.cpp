@@ -5,17 +5,15 @@
 #include "Logging.hpp"
 
 #include <atomic>
-#include <flatbuffers/buffer.h>
 #include <flatbuffers/flatbuffers.h>
-#include <flatbuffers/verifier.h>
 #include <fstream>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <nlohmann/json_fwd.hpp>
 
 namespace hipdnn_backend::logging
 {
