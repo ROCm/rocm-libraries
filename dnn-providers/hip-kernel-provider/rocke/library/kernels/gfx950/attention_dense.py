@@ -2879,11 +2879,10 @@ def run_attention_dense_torch(
         # as OCP. A bf16 or FNUZ tensor would be misread and silently produce wrong
         # output. Validate here too, not only in the dispatch binding: direct callers
         # of this runner bypass that guard. (kernels cannot import the dispatch
-        # helper -- that would invert the layering -- so check torch dtype inline.)
-        import torch
-
+        # helper -- that would invert the layering -- so the dtype is compared by
+        # name, which needs no torch import and rejects float8_e4m3fnuz too.)
         for name, t in (("k", k), ("v", v)):
-            if getattr(t, "dtype", None) != torch.float8_e4m3fn:
+            if str(getattr(t, "dtype", None)) != "torch.float8_e4m3fn":
                 raise ValueError(
                     f"fp8 dense expects OCP fp8 {name} (torch.float8_e4m3fn), got "
                     f"{getattr(t, 'dtype', None)!r}; a bf16 or FNUZ tensor is read as "

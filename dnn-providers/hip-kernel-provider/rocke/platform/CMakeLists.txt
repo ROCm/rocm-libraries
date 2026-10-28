@@ -657,7 +657,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
         "tests/library/tests/dispatch/attention/test_review_followups.py"
-        "tests/library/tests/test_attention_dense_gfx942.py")
+        "tests/library/tests/test_attention_dense_gfx942.py"
+        "tests/library/tests/test_attention_combo_sweep_fp8.py")
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
     foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

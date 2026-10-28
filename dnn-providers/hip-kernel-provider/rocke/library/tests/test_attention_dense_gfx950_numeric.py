@@ -345,8 +345,8 @@ class TestDenseNumeric:
         self, d, hq, hkv, dtype, causal, sliding_window
     ):
         """fp8 KV-dequant dense: the kernel reads float8_e4m3fn K/V and dequants
-        with per-tensor k_scale/v_scale into the bf16 or fp16 (AICK-1932 fp16
-        output) compute path; the reference attends over the SAME dequantized K/V,
+        with per-tensor k_scale/v_scale into the bf16 or fp16 compute/output
+        path; the reference attends over the SAME dequantized K/V,
         so this isolates kernel error from quantization loss (the convention the
         live bench uses). Covered over the causal, sliding-window and non-causal
         masks the grid variant serves for fp8."""
@@ -965,6 +965,83 @@ class TestDenseBottomRightNumeric:
         assert top_left_err > 1e-3, (
             f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
         )
+
+    # fp8 KV is aligned-only and has no sink path, so only aligned, sink-free
+    # moving diagonals apply. D128 and D64 cover both K layouts of the fp8 loader.
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,sq,skv",
+        [
+            pytest.param(128, 256, 512, id="d128-256x512"),
+            pytest.param(128, 512, 1024, id="d128-512x1024"),
+            pytest.param(64, 512, 1024, id="d64-512x1024"),
+        ],
+    )
+    def test_fp8_kv_matches_shifted_diagonal_not_top_left(self, d, sq, skv):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=d,
+            causal=True,
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            persistent=False,
+            causal_bottom_right=True,
+            kv_storage_dtype="fp8e4m3",
+        )
+        assert skv > sq, "every case must exercise a moving diagonal"
+
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        # The oracle attends over the same dequantized K/V the kernel reads, so
+        # the check isolates kernel error from quantization loss.
+        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
+        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+        label = f"fp8 D{d} {sq}x{skv}"
+        assert (
+            shifted_err < _BOTTOM_RIGHT_TOL
+        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        assert (
+            top_left_err > 1e-3
+        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
 
 
 # The wide-DMA candidate admits every mask the persistent body implements, not
