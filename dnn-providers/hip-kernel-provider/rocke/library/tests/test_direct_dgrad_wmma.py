@@ -232,7 +232,7 @@ class TestDgradWmmaSpec(unittest.TestCase):
             specs.append(DirectDgradWmmaSpec(problem=_problem(**pkw), **knobs))
         n_rejected = 0
         for arch in ("gfx1250", "gfx950"):
-            for spec in specs:
+            for i, spec in enumerate(specs):
                 ok, _, name, grid, lds = eng.conv_direct_dgrad_wmma_describe(
                     conv_direct_dgrad_wmma_spec_to_dict(spec), arch
                 )
@@ -243,8 +243,15 @@ class TestDgradWmmaSpec(unittest.TestCase):
                 if why is None:
                     self.assertEqual(tuple(grid), spec.grid())
                 elif arch == "gfx1250":
-                    n_rejected += 1
-        # Every AOT knob builds on gfx1250; every extra spec is a reject.
+                    if i < n_grid:
+                        # The AOT grid drops these: a dilation above 2 widens
+                        # the dY halo past the LDS of the largest tiles.
+                        p = spec.problem
+                        self.assertGreater(max(p.dil_h, p.dil_w), 2, why)
+                        self.assertIn("LDS", why)
+                    else:
+                        n_rejected += 1
+        # Every extra spec is a reject on gfx1250.
         self.assertEqual(n_rejected, len(specs) - n_grid)
 
     def test_binding_rejects_bad_input(self):
@@ -309,6 +316,11 @@ class TestDgradWmmaSpec(unittest.TestCase):
             DIRECT_CAPABILITIES,
             _caps_jobs,
             _knob_grid,
+            probe_problem,
+        )
+        from kernels.conv.direct_variants import (
+            make_direct_spec,
+            validate_direct_spec,
         )
 
         direction, caps_list = DIRECT_CAPABILITIES["direct_dgrad_wmma"]
@@ -316,14 +328,31 @@ class TestDgradWmmaSpec(unittest.TestCase):
         for arch, wave in (("gfx1250", 32), ("gfx950", 64)):
             for caps in caps_list:
                 # Every knob of the cell's table builds on gfx1250 (none on
-                # a wave64 arch).
-                want = len(list(_knob_grid("direct_dgrad_wmma", arch, "bf16", caps)))
+                # a wave64 arch), except that a dilation above 2 widens the
+                # dY halo past the LDS budget of the largest tiles.
+                grid = list(_knob_grid("direct_dgrad_wmma", arch, "bf16", caps))
                 if arch == "gfx950":
-                    self.assertEqual(want, 0)
+                    self.assertEqual(grid, [])
                 _, jobs = _caps_jobs(
                     arch, wave, "direct_dgrad_wmma", "dgrad", caps, "bf16"
                 )
-                self.assertEqual(len(jobs), want, (arch, caps))
+                if arch == "gfx950" or max(caps.dil_h, caps.dil_w) <= 2:
+                    self.assertEqual(len(jobs), len(grid), (arch, caps))
+                    continue
+                self.assertTrue(jobs, (arch, caps))
+                probe = probe_problem(caps, "bf16", "direct_dgrad_wmma")
+                checks = [
+                    validate_direct_spec(
+                        "direct_dgrad_wmma",
+                        make_direct_spec("direct_dgrad_wmma", probe, k, wave),
+                        arch,
+                    )
+                    for k in grid
+                ]
+                self.assertEqual(sum(ok for ok, *_ in checks), len(jobs), (arch, caps))
+                for ok, why, *_ in checks:
+                    if not ok:
+                        self.assertIn("LDS", why, (arch, caps))
 
     def test_spec_for_problem_filters_padding(self):
         from kernels.conv.direct_variants import direct_spec_for_problem
@@ -401,9 +430,9 @@ def _ceil(a, b):
         (dict(C=64, K=64, groups=2), 1),
         (dict(C=64, K=64, stride=2), 1),
         (dict(C=64, K=64, KH=2, PAD=0, stride=2), 1),
-        (dict(C=64, K=64, PAD=2, dil_w=2), 1),
-        (dict(C=64, K=64, PAD=1, dil_h=3), 1),
         (dict(C=64, K=64, PAD=2, dil_h=2, dil_w=2), 1),
+        (dict(C=64, K=64, PAD=4, dil_h=4, dil_w=4), 1),
+        (dict(C=64, K=64, PAD=6, dil_h=6, dil_w=6), 1),
         (dict(C=128, K=128, groups=32), 8),
         (dict(C=256, K=256, groups=32), 4),
         (dict(C=256, K=256, groups=16), 2),
@@ -489,6 +518,8 @@ def test_aot_cache_rejects_unpackable_group_counts(wmma_cache, pkw, needle):
         # Dilations the cache has no binary for.
         dict(C=64, K=64, PAD=3, dil_h=3, dil_w=3),
         dict(C=64, K=64, PAD=2, dil_h=2),
+        dict(C=64, K=64, PAD=2, dil_w=2),
+        dict(C=64, K=64, PAD=1, dil_h=3),
         # A strided dilated dgrad is not supported.
         dict(C=64, K=64, PAD=2, dil_h=2, dil_w=2, stride=2),
         # Stride 2 with "valid" padding: only "same" 3x3 is cached.
@@ -567,6 +598,12 @@ _CASES = (
     (dict(N=2, H=13, W=21, C=32, K=64, PAD=2, dil_w=2), dict(tiles_c=1, tiles_p=2)),
     (dict(N=2, H=13, W=11, C=32, K=64, PAD=1, dil_h=3), dict(tiles_c=1, tiles_p=2)),
     (dict(N=1, H=16, W=16, C=64, K=32, PAD=0, dil_h=2, dil_w=2), dict(tiles_c=2)),
+    # The symmetric "same" dilations the AOT cache carries beyond 2.
+    (dict(N=2, H=20, W=19, C=64, K=64, PAD=4, dil_h=4, dil_w=4), dict(tiles_c=2)),
+    (
+        dict(N=1, H=26, W=23, C=32, K=64, PAD=6, dil_h=6, dil_w=6),
+        dict(tiles_c=1, tiles_p=2),
+    ),
     # Split barrier over a 3-deep ring (4 chunks), and with prefetch.
     (
         dict(N=1, H=18, W=33, C=256, K=128),

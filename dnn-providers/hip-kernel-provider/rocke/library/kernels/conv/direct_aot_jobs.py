@@ -402,8 +402,11 @@ DGRAD_WMMA_PATCH2_KNOBS = (
     (2, 4, 2, 4, 16, 1, 64, 2, True),
     (4, 2, 2, 2, 8, 1, 64, 2, False),
 )
-# Dilated 3x3 rows the cache carries: (PAD, dil_h, dil_w).
-DGRAD_WMMA_DILATIONS = ((2, 1, 2), (1, 3, 1), (2, 2, 2))
+# Dilated 3x3 rows the cache carries: (PAD, dil_h, dil_w). The symmetric
+# "same" layers of the reference workloads: DeepLabv3 ASPP / dilated ResNet
+# backbones (2, 4) and SSD300 fc6 (6). Dilation 12 and up does not fit the
+# dY halo in LDS with these tiles.
+DGRAD_WMMA_DILATIONS = ((2, 2, 2), (4, 4, 4), (6, 6, 6))
 DGRAD_WMMA_DILATED_KNOBS = (
     (1, 4, 4, 4, 16, 1, 32, 2, True),
     (1, 4, 4, 4, 16, 1, 64, 2, True),
