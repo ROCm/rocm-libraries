@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.3.0 for ROCm 10.3.0
+
+### Optimized
+
+* Updated auto tuned configs for `gfx950` on all available engines.
+
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
 ### Optimized
