@@ -155,11 +155,10 @@ static bool reject_tiled_2d_not_ported(const rocke_unified_attention_problem_t* 
 {
     if(streq(arch, "gfx942"))
     {
+        /* Built by rocke_build_gfx942_4warp_gqa. The cohort excludes i64 KV
+         * caches, so it never reaches the i64 reject below. */
         if(rocke_unified_attn_gfx942_4warp_fast(p, arch))
-        {
-            gate_reason(reason, reason_cap, "gfx942 4-warp GQA tiled 2D is not ported to C++ yet");
-            return true;
-        }
+            return false;
         if(rocke_unified_attn_enable_i64_kv_addr(p)
            && rocke_unified_attn_enable_gfx942_flash_k_sliced_ring(p, arch))
         {
