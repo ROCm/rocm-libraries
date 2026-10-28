@@ -10620,7 +10620,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSA > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Reads narrower than one MX unit give a ratio below 1, which the
+            # inner floor-divide truncates to 0 and then divides by. Keep the
+            # ratio fractional: such a read covers a fraction of a tile and
+            # needs proportionally more reads, not an error.
+            tilePerReadMXSA = tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSA = int(numMXSA / tilePerReadMXSA)
           else:
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
@@ -10658,7 +10663,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.lrvwTileMXSB > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Reads narrower than one MX unit give a ratio below 1, which the
+            # inner floor-divide truncates to 0 and then divides by. Keep the
+            # ratio fractional: such a read covers a fraction of a tile and
+            # needs proportionally more reads, not an error.
+            tilePerReadMXSB = tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSB = int(numMXSB / tilePerReadMXSB)
           else:
             numMXSB = numMXSB // kernel["VectorWidthB"]
 
@@ -11097,6 +11107,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       swz = swizzleGeometry(kernel, cM)
       tP["swizzlePackK"]        = swz["packK"]
       tP["swizzleK"]            = swz["swizzleK"]
+      tP["swizzleLayoutK"]      = swz["layoutK"]
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
