@@ -92,7 +92,7 @@ different `STRIDE`/`INNER_SIZE` defines. Both keep both layouts.
 | Resample `AVGPOOL_*` x `NEG_INF_PAD` (`makeResampleTestCases`) | `PADDING_MODE` is read only for `MAXPOOL` (`GpuRefResampleFwd.cpp:114`; CPU `CpuFpReferenceResampleFwd.hpp:81-84`; the bwd kernel and the bwd CPU reference never read it). It is still a `-D` define, so the average-pool, negative-infinity case compiled a byte-identical second kernel. `MAXPOOL` keeps both modes, and backward keeps both modes for the index-generating forward pass. |
 | Resample `OptionalArgs.AverageExcludePadding` / `AvgPoolIncludePadding` (fwd and bwd) | Same mode, padding and dtype as parameterized cases. The parameterized shapes already include asymmetric padding. |
 | Layernorm `getLayernormMedium5DTestCases`: 11 shapes cut to 3 | The kernel's only shape-dependent code is `for(i = lid; i < INNER_SIZE; i += LOCAL_SIZE)`, with `LOCAL_SIZE=1024`. The 11 MIOpen shapes fall into three classes: inner size below 1024 (the quick tier covers it), an exact multiple of 1024, or above 1024 and not a multiple. The kept shapes are `{32,32,6,4,12}` (9216, a multiple), `{32,32,6,6,6}` (6912) and `{32,1,14,14,14}` (C=1, where NDHWC is memory-identical to NCDHW). Each of the 8 dropped shapes was 6 to 12 compiles. |
-| Conv medium catalogs | Group count, depthwise, pointwise kernels, kernel size and padding are runtime loop bounds and index math (`cPerGroup = C/groups`). The small (smoke) shapes already cover G>1, depthwise, 1x1 and padding. The kept medium shapes are multi-block with stride+pad (`ResNetStem7x7`), dilation+pad (`Dilation2MedScale`), non-cube 3D and the 1D stride, dilation and depthwise cases. |
+| Conv medium catalogs | Group count, depthwise, pointwise kernels, kernel size and padding are runtime loop bounds and index math (`cPerGroup = C/groups`, `kPerGroup = K/groups`). The small (smoke) shapes cover G>1 with K == C and with K != C (`GroupedChanMult1d`, `GroupedChanMult2d`, `Grouped2x3d`), depthwise, 1x1 and padding. K != C matters: a kernel that mixes up K and C in the per-group index passes every K == C case. The kept medium shapes are multi-block with stride+pad (`ResNetStem7x7`), dilation+pad (`Dilation2MedScale`), non-cube 3D and the 1D stride, dilation and depthwise cases. |
 | SDPA `LargerShape` [2,8,512,128] x 3 dtypes | About 6 s of CPU reference. Its multi-block launch is covered by `RealisticHeadDim`, which has 65536 outputs (256 blocks), and its long softmax reduction by `LongSequence` (Skv=256). The kernel has no branch on Skv or on the grid size. |
 | SDPA `MaskDtype` float-mask instances | A float mask is the `Plain` additive-mask test again. `MatchesFloatMaskBitwise<float>` compared a run against itself. The fp16 and bf16 masks, which take a separate `MASK_TYPE` cast, stay. |
 | SDPA `ExplicitScaleCausal`, `MixedPrecision.HalfInputsFloatOutputCausal` / `HalfInputsFloatOutputGqa` | The scale is a runtime scalar, and causal masking and GQA do not depend on the datatype. `ExplicitScaleAdditiveMask`, `HalfInputsFloatOutput`, the causal and GQA typed tests, and `MaskCartesian` cover each part. |
@@ -106,6 +106,8 @@ binary.
 |---|---|
 | quick | fp32 smoke: every op and kernel variant (mode, rank, direction) on small shapes in fp32, plus validation, channel-last, optional-argument and broadcast tests. Layernorm 5D fp32 small shapes are in standard (prefix `StandardSmall`) |
 | standard | fp32 medium shapes, plus every reduced-precision and mixed-type case on small shapes: instantiation prefix `Standard*`, and by name pattern the `*Fp16.*`, `*Bfp16.*`, `*Fp8.*`, `*Int8.*`, `*Tf32.*`, `*MixedType(s).*`, `*MixedPrecision.*` tests and the half/bfloat16 SDPA typed instances |
+| comprehensive | `Comprehensive*` instantiations: large edge-case shapes, fp32 only (plus batchnorm bwd `ComprehensiveDouble`). Nightly runs `ctest -L comprehensive` |
+| full | `Full*` instantiations: large stress shapes, fp32 only. Prerelease runs `ctest -L full` |
 
 A new reduced-precision or mixed-type case belongs in standard. Give a
 parameterized suite a `Standard` prefix. A plain `TEST` is placed by its suite
@@ -127,10 +129,15 @@ name, so name it with the datatype token (`...Fp16`, `...MixedType`).
 - Conv and batchnorm `Full` blocks: they use their own large "stress" catalogs
   (`getLargeStress*`, `getBatchnormLargeStress*`), not copies of other tiers.
 
-## Comprehensive and Full (nightly)
+## Comprehensive and Full
 
-The nightly run executes the `Comprehensive*` and `Full*` instantiations. The
-same rules apply:
+Before this change no ctest category selected the `Comprehensive*` and `Full*`
+instantiations: the `comprehensive` and `full` categories of
+`test_categories.yaml` matched only the lowercase golden-data names, so the
+nightly `ctest -L comprehensive` ran a gpu-ref comprehensive suite of zero
+cases. `test_categories_gpu_ref.yaml` now selects them in the `comprehensive`
+(nightly) and `full` (prerelease) categories. Before enabling them, the same
+rules cut them down:
 
 | Cut | Why |
 |---|---|

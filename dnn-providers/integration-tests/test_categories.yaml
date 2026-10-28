@@ -10,24 +10,20 @@
 # becomes one CTest suite whose --gtest_filter is built from test_patterns/exclude;
 # labels are cumulative so `ctest -L standard` runs quick + standard, etc.
 #
-# Tier prefixes: gpu-ref conv tests use "Smoke", RMSNorm uses "Quick", plus
-# "Standard"/"Comprehensive"/"Full"; framework unit tests carry no tier prefix
-# and are caught by the quick catch-all (everything not Standard/Comprehensive/
-# Full). hipdnn_golden_data_tests names its tests after the bundle's path, so
-# their tier prefix is the lowercase data directory: "standard_", "comprehensive_"
-# or "full_" (quick-tier bundles start "quick_" and fall into the catch-all).
+# Tier prefixes: framework unit tests carry no tier prefix and are caught by the
+# quick catch-all (everything not Standard/Comprehensive/Full).
+# hipdnn_golden_data_tests names its tests after the bundle's path, so their tier
+# prefix is the lowercase data directory: "standard_", "comprehensive_" or
+# "full_" (quick-tier bundles start "quick_" and fall into the catch-all).
 # GTest filters are case-sensitive, so every tier is excluded from the catch-all
 # in both spellings; miss one and that tier's bundles run in the quick lanes.
-# The PascalCase patterns are the legacy hand-written convention.
 # The external hipdnn_integration_tests bundle binary is categorized by each
 # provider's test_categories_integration.yaml, not this file.
 #
-# The "comprehensive" and "full" tiers select ONLY the lowercase bundle-named
-# golden-data tests ("comprehensive_*", "full_*"): the PascalCase
-# Comprehensive*/Full* GTest cases require ROCm-side (rock) changes that haven't
-# landed yet and would fail without them, so they stay out of every category
-# (they are still excluded from the quick catch-all). Add "Comprehensive*" /
-# "Full*" to those two blocks once those changes land.
+# The "comprehensive" and "full" tiers here select the lowercase bundle-named
+# golden-data tests ("comprehensive_*", "full_*"). The PascalCase
+# Comprehensive*/Full* GPU reference cases are selected by
+# test_categories_gpu_ref.yaml.
 # Tiers cascade through labels: quick carries quick+standard+comprehensive+full,
 # standard carries standard+comprehensive+full, comprehensive carries
 # comprehensive+full, so `ctest -L standard` selects quick + standard,
@@ -66,7 +62,7 @@ test_categories:
       - "slow"
 
   comprehensive:
-    description: "Comprehensive-tier golden-data bundle cases (PascalCase Comprehensive* GPU reference cases still disabled: see header comment)"
+    description: "Comprehensive-tier golden-data bundle cases"
     test_patterns:
       - "comprehensive_*"
     exclude:
@@ -77,7 +73,7 @@ test_categories:
       - "slow"
 
   full:
-    description: "Full-tier golden-data bundle cases (PascalCase Full* GPU reference cases still disabled: see header comment)"
+    description: "Full-tier golden-data bundle cases"
     test_patterns:
       - "full_*"
     exclude:

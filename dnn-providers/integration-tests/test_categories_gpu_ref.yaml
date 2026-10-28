@@ -15,8 +15,10 @@
 # change: TestGpuSdpaFwdPlain/1 and /2 are the half and bfloat16 typed instances.
 # GTest filters are case-sensitive.
 #
-# Comprehensive*/Full* PascalCase cases stay out of every category (see the
-# header of test_categories.yaml).
+# Comprehensive*/Full* PascalCase cases (large shapes, fp32 only) run in the
+# comprehensive (nightly) and full (prerelease) categories below. Through
+# test_categories.yaml they selected nothing: those categories matched only the
+# lowercase golden-data names.
 test_categories:
   quick:
     description: "fp32 smoke GPU reference cases and validation tests (catch-all minus Standard/Comprehensive/Full and reduced-precision/mixed-type cases)"
@@ -78,6 +80,27 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
+  comprehensive:
+    description: "Comprehensive-tier GPU reference cases: large edge-case shapes, fp32 only"
+    test_patterns:
+      - "Comprehensive*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "slow"
+
+  full:
+    description: "Full-tier GPU reference cases: large stress shapes, fp32 only"
+    test_patterns:
+      - "Full*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "full"
+      - "slow"
+
 execution_settings:
   default_timeout: 600
   timeout_multiplier: 1
@@ -85,3 +108,5 @@ execution_settings:
     quick: 600
     standard: 1800
     ffm-quick: 7200
+    comprehensive: 3600
+    full: 7200

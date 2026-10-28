@@ -80,6 +80,8 @@ inline std::vector<ConvShapeCase> getSmall1dConvCases()
         {{2, 1, 8}, {1, 1, 3}, {1}, {1}, {0}, 1, "MultiBatch1d"},
         // 1D grouped (2 groups)
         {{1, 4, 8}, {4, 2, 3}, {1}, {1}, {0}, 2, "Grouped2x1d"},
+        // 1D grouped with a channel multiplier (C=4, K=8, G=2): the only K != C grouped 1D case
+        {{1, 4, 8}, {8, 2, 3}, {1}, {1}, {0}, 2, "GroupedChanMult1d"},
         // 1D pointwise (kernel=1)
         {{1, 3, 8}, {2, 3, 1}, {1}, {1}, {0}, 1, "Pointwise1d"},
     };
@@ -95,6 +97,9 @@ inline std::vector<ConvShapeCase> getSmall2dConvCases()
         {{1, 3, 8, 8}, {6, 3, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 1, "MultiChanPad"},
         // 2-group convolution with multi-batch
         {{2, 4, 8, 8}, {4, 2, 3, 3}, {1, 1}, {1, 1}, {0, 0}, 2, "Grouped2Batch2"},
+        // 2-group convolution with a channel multiplier (C=4, K=8): the only K != C grouped 2D
+        // case, so a K/C mix-up in the per-group channel index fails
+        {{1, 4, 6, 6}, {8, 2, 3, 3}, {1, 1}, {1, 1}, {0, 0}, 2, "GroupedChanMult2d"},
         // Stride=2 downsampling
         {{1, 1, 8, 8}, {2, 1, 3, 3}, {2, 2}, {1, 1}, {0, 0}, 1, "Stride2"},
         // Dilation=2 (expanded receptive field)
