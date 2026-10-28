@@ -21,7 +21,7 @@ static const ckc::rocke_ll_emission_profile_t ROCKE_LL_PROFILE_LLVM22
 static const ckc::rocke_ll_emission_profile_t ROCKE_LL_PROFILE_LLVM23
     = {ckc::ROCKE_LL_DATALAYOUT_PROFILE_LLVM23,
        ckc::ROCKE_LL_DECLARATION_ABI_LLVM23,
-       ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS | ckc::ROCKE_LL_CAP_SCALED_MFMA_9_ARG};
+       ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS};
 
 static const struct
 {

@@ -186,7 +186,6 @@ class _LlvmEmissionCapability(enum.Enum):
     """Structural operations admitted by an emission profile."""
 
     LLVM23_TARGET_OPS = "llvm23_target_ops"
-    SCALED_MFMA_9_ARG = "scaled_mfma_9_arg"
 
 
 @dataclass(frozen=True)
@@ -216,12 +215,7 @@ _PROFILE_LLVM23 = _LlvmEmissionProfile(
     _DATALAYOUT_LLVM23,
     LlvmDatalayoutKind.P8_INDEXED,
     _LlvmDeclarationAbi.LLVM23,
-    frozenset(
-        {
-            _LlvmEmissionCapability.LLVM23_TARGET_OPS,
-            _LlvmEmissionCapability.SCALED_MFMA_9_ARG,
-        }
-    ),
+    frozenset({_LlvmEmissionCapability.LLVM23_TARGET_OPS}),
 )
 
 # LLVM 24 is a distinct qualified compiler lane with no structural IR delta

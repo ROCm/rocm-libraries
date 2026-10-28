@@ -122,8 +122,6 @@ int main(void)
     CHECK(llvm23 != NULL && llvm23 == llvm24, "llvm23 and llvm24 share one emission profile");
     CHECK(ckc::rocke_ll_profile_has(ROCKE_LLVM_FLAVOR_LLVM24, ckc::ROCKE_LL_CAP_LLVM23_TARGET_OPS),
           "llvm24 admits LLVM23-generation target operations");
-    CHECK(ckc::rocke_ll_profile_has(ROCKE_LLVM_FLAVOR_LLVM24, ckc::ROCKE_LL_CAP_SCALED_MFMA_9_ARG),
-          "llvm24 uses the nine-argument scaled-MFMA ABI");
     CHECK(ckc::rocke_ll_flavor_for_llvm_major(23) == ROCKE_LLVM_FLAVOR_LLVM23,
           "LLVM 23 resolves to llvm23");
     CHECK(ckc::rocke_ll_flavor_for_llvm_major(24) == ROCKE_LLVM_FLAVOR_LLVM24,
