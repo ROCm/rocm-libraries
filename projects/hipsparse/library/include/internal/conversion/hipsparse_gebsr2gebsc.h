@@ -123,7 +123,7 @@ hipsparseStatus_t hipsparseSgebsr2gebsc_bufferSize(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrRowPtr, \p bsrColInd,
 *              or \p pBufferSizeInBytes pointer is invalid.
-*  \retval     rocsparse_status_internal_error an internal error occurred.
+*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDgebsr2gebsc_bufferSize(hipsparseHandle_t handle,
@@ -176,7 +176,7 @@ hipsparseStatus_t hipsparseDgebsr2gebsc_bufferSize(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrRowPtr, \p bsrColInd,
 *              or \p pBufferSizeInBytes pointer is invalid.
-*  \retval     rocsparse_status_internal_error an internal error occurred.
+*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCgebsr2gebsc_bufferSize(hipsparseHandle_t handle,
@@ -229,7 +229,7 @@ hipsparseStatus_t hipsparseCgebsr2gebsc_bufferSize(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrRowPtr, \p bsrColInd,
 *              or \p pBufferSizeInBytes pointer is invalid.
-*  \retval     rocsparse_status_internal_error an internal error occurred.
+*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handle,

@@ -247,7 +247,7 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXpruneDense2csr_bufferSize computes the the size of the user-allocated temporary storage buffer
+*  \p hipsparseXpruneDense2csr_bufferSizeExt computes the the size of the user-allocated temporary storage buffer
 *  used when converting a dense matrix to a pruned CSR matrix.
 *
 *  \details
@@ -258,7 +258,7 @@ hipsparseStatus_t hipsparseSpruneDense2csr_bufferSizeExt(hipsparseHandle_t      
 *  \f]
 *
 *  The first step in this conversion is to determine the required user-allocated buffer size
-*  using \p hipsparseXpruneDense2csr_bufferSize() that will be passed to the subsequent steps of the conversion.
+*  using \p hipsparseXpruneDense2csr_bufferSizeExt() that will be passed to the subsequent steps of the conversion.
 *  After the buffer size has been determined, the user must allocate it. This user-allocated buffer is then passed
 *  to \ref hipsparseSpruneDense2csrNnz "hipsparseXpruneDense2csrNnz()" and \ref hipsparseSpruneDense2csr
 *  "hipsparseXpruneDense2csr()" to complete the conversion. The user is responsible for then freeing the buffer after
