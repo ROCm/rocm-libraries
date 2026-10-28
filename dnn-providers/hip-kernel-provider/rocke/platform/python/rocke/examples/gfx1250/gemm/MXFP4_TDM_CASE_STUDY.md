@@ -111,6 +111,7 @@ silicon bench harness (timings outside the repo).
 | `step6_6_mxfp4_gemm` | + `lds_pad` (+16 B A/B row stride) | `bad=0` |
 | `step6_7_mxfp4_gemm` | + `lds_segment_interleave` (parity→64KiB segment) | `bad=0` (YAML MacroTile rejected: slot >64KiB) |
 | `step6_8_mxfp4_gemm` | + `lds_segment_b_rotate` (odd-wave B N±8) | `bad=0` (same YAML gate as 6.7) |
+| `step6_9_mxfp4_gemm` | + `tdm_plus_lds_buf` (auto depth 3 when slot fits) | `bad=0` (smoke depth=3; YAML stays invalid under interleave) |
 
 ## Deferred controls
 

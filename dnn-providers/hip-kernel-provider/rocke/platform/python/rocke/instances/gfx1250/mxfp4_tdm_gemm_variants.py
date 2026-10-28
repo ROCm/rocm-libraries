@@ -88,6 +88,20 @@ MXFP4_GEMM_VARIANTS: list[tuple[str, dict[str, Any]]] = [
             "lds_segment_b_rotate": True,
         },
     ),
+    (
+        "step6_9_mxfp4_gemm",
+        {
+            "local_read_prefetch": True,
+            "prefetch_gl2": True,
+            "scale_double_buffer": True,
+            "wave_separated_tdm": True,
+            "scale_tdm": True,
+            "lds_pad": True,
+            "lds_segment_interleave": True,
+            "lds_segment_b_rotate": True,
+            "tdm_plus_lds_buf": True,
+        },
+    ),
 ]
 
 MXFP4_GEMM_BLOCKED_VARIANTS: list[tuple[str, str]] = []

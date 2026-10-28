@@ -106,17 +106,31 @@ class MxFp4TdmGemmSpec:
         return (self.tile_k // 32) * self.tile_n
 
     @property
-    def effective_prefetch_depth(self) -> int:
-        if self.tdm_plus_lds_buf and self.tdm_prefetch_depth < 3:
-            return 3
-        return self.tdm_prefetch_depth
-
-    @property
     def _bytes_per_prefetch_slot(self) -> int:
         total = self.a_tile_bytes + self.b_tile_bytes
         if self.scale_tdm:
             total += self.a_scale_tile_bytes + self.b_scale_tile_bytes
         return total
+
+    @property
+    def effective_prefetch_depth(self) -> int:
+        """Depth 2 by default; ``tdm_plus_lds_buf`` escalates to 3 when it fits.
+
+        Escalation requires ``3 * slot <= LDS cap``. With segment interleave,
+        each slot must also fit one 64 KiB segment. Otherwise depth stays 2
+        even when the flag is on (YAML MacroTile case).
+        """
+        if self.tdm_prefetch_depth == 3:
+            return 3
+        if not self.tdm_plus_lds_buf:
+            return self.tdm_prefetch_depth
+        slot = self._bytes_per_prefetch_slot
+        if self.lds_segment_interleave and slot > _LDS_SEGMENT_BYTES:
+            return 2
+        lds_cap = ArchTarget.from_gfx("gfx1250").lds_capacity_bytes
+        if 3 * slot <= lds_cap:
+            return 3
+        return 2
 
     @property
     def lds_bytes(self) -> int:
@@ -169,7 +183,6 @@ _LDS_SEGMENT_BYTES = 65536
 
 _UNIMPLEMENTED_STEP6_FLAGS = frozenset(
     {
-        "tdm_plus_lds_buf",
         "init_c_wmma",
         "cluster_dim",
     }
@@ -221,8 +234,6 @@ def is_valid_spec(spec: MxFp4TdmGemmSpec, arch: str = "gfx1250") -> tuple[bool, 
     if spec.lds_segment_b_rotate and not spec.lds_segment_interleave:
         return False, "lds_segment_b_rotate requires lds_segment_interleave"
     if spec.lds_segment_interleave:
-        if spec.effective_prefetch_depth > 2:
-            return False, "lds_segment_interleave currently supports depth 2 only"
         per_slot = spec._bytes_per_prefetch_slot
         if per_slot > _LDS_SEGMENT_BYTES:
             return False, (
@@ -748,7 +759,10 @@ def build_mxfp4_tdm_gemm(spec: MxFp4TdmGemmSpec, *, arch: str = "gfx1250") -> Ke
     )
     with loop as (k0, carried):
         parity = carried[0]
-        next_parity = b.sub(c1, parity)
+        if depth == 3:
+            next_parity = b.mod(b.add(parity, c1), b.const_i32(3))
+        else:
+            next_parity = b.sub(c1, parity)
         b.s_wait_tensorcnt(0)
         b.s_waitcnt(lgkmcnt=0)
         b.s_barrier_bare()

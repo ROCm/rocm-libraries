@@ -149,7 +149,7 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
                     M=128,
                     N=64,
                     K=256,
-                    tdm_plus_lds_buf=True,
+                    init_c_wmma=True,
                 ),
                 "not implemented yet",
             ),
@@ -395,6 +395,46 @@ class TestGfx1250MxFp4TdmGemm(unittest.TestCase):
         ok, reason = is_valid_spec(yaml7)
         self.assertFalse(ok)
         self.assertIn("64KiB segment", reason)
+
+    def test_step6_9_tdm_plus_lds_buf_depth(self):
+        self.assertIn("step6_9_mxfp4_gemm", variant_names())
+        # Cumulative flags include interleave; smoke slot fits → depth 3.
+        smoke = variant_spec("step6_9_mxfp4_gemm", 128, 64, 512, tile_k=512)
+        self.assertTrue(smoke.tdm_plus_lds_buf)
+        self.assertEqual(smoke.effective_prefetch_depth, 3)
+        self.assertEqual(is_valid_spec(smoke), (True, "ok"))
+        # Without interleave, depth 3 still requires LDS headroom.
+        depth3 = MxFp4TdmGemmSpec(
+            name="depth3",
+            M=128,
+            N=64,
+            K=512,
+            tile_k=512,
+            tdm_plus_lds_buf=True,
+        )
+        self.assertEqual(depth3.effective_prefetch_depth, 3)
+        self.assertEqual(is_valid_spec(depth3), (True, "ok"))
+        # YAML MacroTile: slot too large for depth 3 / interleave → stays 2 / invalid.
+        yaml = variant_spec(
+            "step6_9_mxfp4_gemm",
+            256,
+            256,
+            512,
+            tile_m=256,
+            tile_n=256,
+            tile_k=512,
+        )
+        self.assertEqual(yaml.effective_prefetch_depth, 2)
+        ok, reason = is_valid_spec(yaml)
+        self.assertFalse(ok)
+        self.assertIn("64KiB segment", reason)
+        llvm = _lower_kernel_to_llvm_python(
+            build_mxfp4_tdm_gemm(smoke, arch="gfx1250"),
+            arch="gfx1250",
+            llvm_flavor="llvm23",
+        )
+        self.assertIn("db3", smoke.kernel_name())
+        self.assertIn("llvm.amdgcn.tensor.load.to.lds", llvm)
 
     def test_llvm_contains_double_buffered_tdm_lds_wmma_and_fp8_epilogue(self):
         spec = MxFp4TdmGemmSpec(name="llvm", M=128, N=64, K=256)
