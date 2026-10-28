@@ -4,15 +4,20 @@
 # hipdnn_gpu_ref_tests Test Categories Configuration.
 #
 # Same tier shape as test_categories.yaml, plus one rule for this binary only:
-# the quick tier is an fp32 smoke run. Reduced-precision, fp8, int8, TF32 and
-# mixed-type cases run in the standard tier. Datatype only enters through
-# per-element load/store conversion (docs/gpu-ref-test-coverage.md, P1), and every
-# extra datatype is a separate HipRTC compile (~0.45 s each), so these cases were
-# most of the quick-tier time.
+# the quick tier holds the fp32 comparison cases. Reduced-precision, fp8, int8,
+# TF32 and mixed-type comparison cases run in the standard tier. Datatype only
+# enters through per-element load/store conversion (docs/gpu-ref-test-coverage.md,
+# P1), and every extra datatype is a separate HipRTC compile (~0.45 s each), so
+# these cases were most of the quick-tier time. Quick still holds the cheap typed
+# validator suites (TestGpuFpValidation, TestGpuIntValidation,
+# TestGpuFpReferenceRmsValidation) and the two bf16 TestGpuSdpaFwdProviderContract
+# tests.
 #
 # Parameterized suites carry the tier in their instantiation prefix (Standard*).
 # The patterns below cover plain TESTs, typed tests and suites whose prefix cannot
-# change: TestGpuSdpaFwdPlain/1 and /2 are the half and bfloat16 typed instances.
+# change: TestGpuSdpaFwdPlain/1 and /2 are the half and bfloat16 typed instances
+# (order of SdpaFwdTypes in TestGpuFpReferenceSdpa.cpp). The same pattern list
+# appears twice below (quick exclude, standard test_patterns): change both.
 # GTest filters are case-sensitive.
 #
 # Comprehensive*/Full* PascalCase cases (large shapes, fp32 only) run in the
@@ -21,7 +26,7 @@
 # lowercase golden-data names.
 test_categories:
   quick:
-    description: "fp32 smoke GPU reference cases and validation tests (catch-all minus Standard/Comprehensive/Full and reduced-precision/mixed-type cases)"
+    description: "fp32 GPU reference comparison cases, validators and validation tests (catch-all minus Standard/Comprehensive/Full and reduced-precision/mixed-type cases)"
     test_patterns:
       - "*"
     exclude: &gpu_ref_quick_exclude
@@ -81,7 +86,7 @@ test_categories:
       - "ffm-full"
 
   comprehensive:
-    description: "Comprehensive-tier GPU reference cases: large edge-case shapes, fp32 only"
+    description: "Comprehensive-tier GPU reference cases: large edge-case shapes in fp32, plus the batchnorm bwd ComprehensiveDouble cases"
     test_patterns:
       - "Comprehensive*"
     exclude:

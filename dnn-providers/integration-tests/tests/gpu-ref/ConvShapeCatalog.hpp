@@ -196,7 +196,7 @@ inline std::vector<ConvShapeCase> getMedium3dConvCases()
 
 // ============================================================================
 // Large shapes — split into edge cases (Comprehensive / nightly) and
-// stress tests (Full / weekly) for tiered CI execution.
+// stress tests (Full / prerelease) for tiered CI execution.
 //
 // Edge cases: odd channels, tiny output, prime K, asymmetric filters — shapes
 //             that exercise corner cases at larger-than-medium scale.

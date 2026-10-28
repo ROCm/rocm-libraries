@@ -352,11 +352,11 @@ tests and `hipdnn_golden_data_tests`) and `test_categories_gpu_ref.yaml` (for
 `hipdnn_gpu_ref_tests`) write their quick tier as an exclusion: `*` minus
 `Standard*`, `Comprehensive*` and `Full*`. Therefore any test without a tier
 prefix goes into quick. If the quick tier starts to time out, look for a large
-shape that has no prefix. `test_categories_gpu_ref.yaml` also moves every
-reduced-precision and mixed-type case to standard by name pattern (`*Fp16.*`,
-`*MixedType.*` and others), so its quick tier is an fp32 smoke run. In GTest
-filter syntax, only the first `-` starts the negative list. A `:-` between
-patterns does not negate.
+shape that has no prefix. `test_categories_gpu_ref.yaml` also moves the
+reduced-precision and mixed-type comparison cases to standard by name pattern
+(the list is in that file), so its quick tier holds the fp32 comparison cases.
+In GTest filter syntax, only the first `-` starts the negative list. A `:-`
+between patterns does not negate.
 
 ## What decides whether a test runs
 

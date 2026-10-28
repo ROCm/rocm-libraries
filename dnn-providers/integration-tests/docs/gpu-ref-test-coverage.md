@@ -4,7 +4,8 @@
 against the CPU reference (`hipdnn_test_sdk` `CpuFpReference*`). Each case fills
 random inputs, runs both references and compares. This page explains which
 cases add coverage, which ones only add run time, and why the suite was cut
-from 8066 to 3446 cases in the quick and standard tiers.
+from 8066 to 3470 cases in the quick and standard tiers (3446 after the cut, plus
+24 grouped conv cases with K != C added afterwards).
 
 ## What a case costs
 
@@ -82,8 +83,9 @@ Applied:
   representatives.
 
 P2 does not apply to batchnorm, which has `IS_CHANNEL_LAST_LAYOUT` and a
-channel-last launch geometry, or to layernorm, whose channel-last cases compile
-different `STRIDE`/`INNER_SIZE` defines. Both keep both layouts.
+channel-last launch geometry, to RMSNorm, whose launcher branches on the layout,
+or to layernorm, whose channel-last cases change the `STRIDE`, `INNER_SIZE` and
+`OUTER_SIZE` defines. All three keep both layouts.
 
 ### P3: the same compiled code and the same CPU path
 
@@ -91,7 +93,7 @@ different `STRIDE`/`INNER_SIZE` defines. Both keep both layouts.
 |---|---|
 | Resample `AVGPOOL_*` x `NEG_INF_PAD` (`makeResampleTestCases`) | `PADDING_MODE` is read only for `MAXPOOL` (`GpuRefResampleFwd.cpp:114`; CPU `CpuFpReferenceResampleFwd.hpp:81-84`; the bwd kernel and the bwd CPU reference never read it). It is still a `-D` define, so the average-pool, negative-infinity case compiled a byte-identical second kernel. `MAXPOOL` keeps both modes, and backward keeps both modes for the index-generating forward pass. |
 | Resample `OptionalArgs.AverageExcludePadding` / `AvgPoolIncludePadding` (fwd and bwd) | Same mode, padding and dtype as parameterized cases. The parameterized shapes already include asymmetric padding. |
-| Layernorm `getLayernormMedium5DTestCases`: 11 shapes cut to 3 | The kernel's only shape-dependent code is `for(i = lid; i < INNER_SIZE; i += LOCAL_SIZE)`, with `LOCAL_SIZE=1024`. The 11 MIOpen shapes fall into three classes: inner size below 1024 (the quick tier covers it), an exact multiple of 1024, or above 1024 and not a multiple. The kept shapes are `{32,32,6,4,12}` (9216, a multiple), `{32,32,6,6,6}` (6912) and `{32,1,14,14,14}` (C=1, where NDHWC is memory-identical to NCDHW). Each of the 8 dropped shapes was 6 to 12 compiles. |
+| Layernorm `getLayernormMedium5DTestCases`: 11 shapes cut to 3 | These 5D cases normalize only the last dimension, so `INNER_SIZE` is that dimension (at most 32 here) and the loop `for(i = lid; i < INNER_SIZE; i += LOCAL_SIZE)` (`LOCAL_SIZE=1024`) runs once for every shape; the shapes differ only in `OUTER_SIZE` and, for channel-last with C > 1, `STRIDE = C`. Every distinct shape is a separate compile. Kept: `{32,1,14,14,14}` (C=1, where channel-last is memory-identical to channel-first) and `{32,32,6,6,6}` and `{32,32,6,4,12}` (C=32, channel-last `STRIDE` 32). Each of the 8 dropped shapes was 6 to 12 compiles. |
 | Conv medium catalogs | Group count, depthwise, pointwise kernels, kernel size and padding are runtime loop bounds and index math (`cPerGroup = C/groups`, `kPerGroup = K/groups`). The small (smoke) shapes cover G>1 with K == C and with K != C (`GroupedChanMult1d`, `GroupedChanMult2d`, `Grouped2x3d`), depthwise, 1x1 and padding. K != C matters: a kernel that mixes up K and C in the per-group index passes every K == C case. The kept medium shapes are multi-block with stride+pad (`ResNetStem7x7`), dilation+pad (`Dilation2MedScale`), non-cube 3D and the 1D stride, dilation and depthwise cases. |
 | SDPA `LargerShape` [2,8,512,128] x 3 dtypes | About 6 s of CPU reference. Its multi-block launch is covered by `RealisticHeadDim`, which has 65536 outputs (256 blocks), and its long softmax reduction by `LongSequence` (Skv=256). The kernel has no branch on Skv or on the grid size. |
 | SDPA `MaskDtype` float-mask instances | A float mask is the `Plain` additive-mask test again. `MatchesFloatMaskBitwise<float>` compared a run against itself. The fp16 and bf16 masks, which take a separate `MASK_TYPE` cast, stay. |
@@ -105,7 +107,7 @@ binary.
 | Tier | Contents |
 |---|---|
 | quick | fp32 smoke: every op and kernel variant (mode, rank, direction) on small shapes in fp32, plus validation, channel-last, optional-argument and broadcast tests. Layernorm 5D fp32 small shapes are in standard (prefix `StandardSmall`) |
-| standard | fp32 medium shapes, plus every reduced-precision and mixed-type case on small shapes: instantiation prefix `Standard*`, and by name pattern the `*Fp16.*`, `*Bfp16.*`, `*Fp8.*`, `*Int8.*`, `*Tf32.*`, `*MixedType(s).*`, `*MixedPrecision.*` tests and the half/bfloat16 SDPA typed instances |
+| standard | fp32 medium shapes, plus every reduced-precision and mixed-type case on small shapes: instantiation prefix `Standard*`, plus the name patterns in `test_categories_gpu_ref.yaml` (the single list of them). Quick still holds the typed validator suites (`TestGpuFpValidation`, `TestGpuIntValidation`, `TestGpuFpReferenceRmsValidation`, which are cheap) and the two bf16 `TestGpuSdpaFwdProviderContract` tests |
 | comprehensive | `Comprehensive*` instantiations: large edge-case shapes, fp32 only (plus batchnorm bwd `ComprehensiveDouble`). Nightly runs `ctest -L comprehensive` |
 | full | `Full*` instantiations: large stress shapes, fp32 only. Prerelease runs `ctest -L full` |
 
@@ -143,7 +145,7 @@ rules cut them down:
 |---|---|
 | Every fp16, bf16, mixed and upcast instantiation in both tiers | P1. The quick/standard small-shape runs cover each datatype's conversion; large shapes add nothing datatype-specific. This was about two thirds of the nightly time. |
 | `Full` blocks of layernorm, RMSNorm and pointwise | Each was a lambda that concatenated the small, medium and large catalogs, so it re-ran every quick, standard and comprehensive case. |
-| `getLayernormLarge5DTestCases`: 18 shapes cut to 3 | Same three `INNER_SIZE` classes as the medium catalog (P3), each a separate compile. Kept: `{32,2,32,57,125}` (non-multiple of 1024), `{1,3,16,240,320}` (multiple of 1024), `{256,1,32,32,32}` (C=1). |
+| `getLayernormLarge5DTestCases`: 18 shapes cut to 3 | As in the medium catalog, only the last dimension is normalized, so every shape is the same single-iteration loop and differs only in `OUTER_SIZE` and `STRIDE` (P3); each is a separate compile. Kept: `{32,2,32,57,125}`, `{1,3,16,240,320}` and `{256,1,32,32,32}` (C=1). |
 
 Remaining candidates, not cut yet: the matmul large catalog (8 entries; only
 K=1, non-multiple multi-tile and rank-5-with-tails look distinct) and the
@@ -191,6 +193,10 @@ removed in the first cut:
 |---|---|---|
 | before | 4224 | 17 min 29 s |
 | after | 762 | 3 min 25 s |
+
+These tables predate the `GroupedChanMult1d` and `GroupedChanMult2d` cases (12 quick,
+12 standard). At the current head on gfx90a: quick 1342 (89.7 s), standard 2128
+(230.0 s), comprehensive 570 (152.6 s), full 192 (55.3 s).
 
 All runs passed. The cut saves time mostly in standard, because most of the
 remaining time is distinct compiles. The reduction and resample layout cuts

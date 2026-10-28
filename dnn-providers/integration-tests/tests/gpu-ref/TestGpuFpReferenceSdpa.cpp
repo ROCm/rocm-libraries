@@ -286,6 +286,9 @@ class TestGpuSdpaFwdPlain : public ::testing::Test
 {
 };
 
+// The order is part of the tier selection: test_categories_gpu_ref.yaml puts
+// TestGpuSdpaFwdPlain/1 and /2 (half, bfloat16) in standard and /0 (float) in quick.
+// Update both patterns there if this list changes.
 using SdpaFwdTypes = ::testing::Types<float, HalfType, BFloat16Type>;
 TYPED_TEST_SUITE(TestGpuSdpaFwdPlain, SdpaFwdTypes, );
 

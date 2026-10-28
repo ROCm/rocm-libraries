@@ -31,7 +31,7 @@
 # `ctest -L full` selects everything.
 test_categories:
   quick:
-    description: "Smoke/quick GPU reference cases plus all framework unit tests (catch-all: everything not Standard/Comprehensive/Full)"
+    description: "Quick-tier golden-data bundles plus all framework unit tests (catch-all: everything not Standard/Comprehensive/Full)"
     test_patterns:
       - "*"
     exclude:
@@ -49,7 +49,7 @@ test_categories:
       - "full"
 
   standard:
-    description: "Standard-tier GPU reference cases"
+    description: "Standard-tier cases (Standard* tests and standard_* golden-data bundles)"
     test_patterns:
       - "Standard*"
       - "standard_*"

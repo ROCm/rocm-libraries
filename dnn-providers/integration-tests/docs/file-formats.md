@@ -25,7 +25,8 @@ dnn-providers/integration-tests/
         support.json                        #   support-claim sidecar    (required)
         golden/{CaseId}/tensors.dvc         #   golden-data pointer      (optional, per case)
         golden/{CaseId}/tensor<uid>.bin     #   golden tensors, via DVC  (not in git)
-  test_categories.yaml                      # CTest tiers for this project's own binaries
+  test_categories.yaml                      # CTest tiers for the harness unit tests and golden-data binaries
+  test_categories_gpu_ref.yaml              # CTest tiers for hipdnn_gpu_ref_tests
   test_categories_external.yaml             # CTest tiers for pre-registered, non-GTest tests
 
 dnn-providers/<provider>/

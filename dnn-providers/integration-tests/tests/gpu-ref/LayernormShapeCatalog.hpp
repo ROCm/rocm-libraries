@@ -61,8 +61,8 @@ inline std::vector<LayernormTestCase> getLayernormSmall5DTestCases()
 }
 
 // P1 (dtype orthogonality): the datatype only enters through per-element load/store conversion,
-// so reduced-precision Quick runs need only one case per layout/optional-tensor state. Every
-// distinct shape/layout is a separate ~0.45 s HipRTC compile (~0.95 s for bwd).
+// so reduced-precision (Standard tier) runs need only one case per layout/optional-tensor state.
+// Every distinct shape/layout is a separate ~0.45 s HipRTC compile (~0.95 s for bwd).
 inline std::vector<LayernormTestCase> getLayernormSmall4DDtypeTestCases()
 {
     return {
@@ -92,12 +92,12 @@ inline std::vector<LayernormTestCase> getLayernormMedium4DTestCases()
 
 inline std::vector<LayernormTestCase> getLayernormMedium5DTestCases()
 {
-    // Imported from MIOpen, culled to one shape per kernel-code class (P3: shapes only change
-    // INNER_SIZE; each distinct shape is a separate ~0.45 s HipRTC compile).
-    // INNER_SIZE < LOCAL_SIZE is covered by the Quick tier.
-    //   {32,1,14,14,14}: C=1 (NDHWC memory-identical to NCDHW), inner 2744 > 1024, non-multiple
-    //   {32,32,6,6,6}:   C>1, inner 6912 > 1024, non-multiple
-    //   {32,32,6,4,12}:  C>1, inner 9216, exact multiple of 1024
+    // Imported from MIOpen, culled (P3). These cases normalize only the last dimension, so
+    // INNER_SIZE is that dimension (< LOCAL_SIZE) and the kernel loop runs once for every shape;
+    // shapes differ only in OUTER_SIZE and, for NDHWC with C > 1, STRIDE = C. Each distinct
+    // shape is a separate ~0.45 s HipRTC compile.
+    //   {32,1,14,14,14}: C=1 (NDHWC memory-identical to NCDHW)
+    //   {32,32,6,6,6} and {32,32,6,4,12}: C=32 (NDHWC STRIDE 32)
     return {
         {{32, 1, 14, 14, 14}, 4, false, TensorLayout::NCDHW},
         {{32, 32, 6, 6, 6}, 4, false, TensorLayout::NCDHW},
@@ -127,12 +127,11 @@ inline std::vector<LayernormTestCase> getLayernormLarge4DTestCases()
 
 inline std::vector<LayernormTestCase> getLayernormLarge5DTestCases()
 {
-    // Imported from MIOpen, culled to one shape per kernel-code class (P3: shapes only change
-    // INNER_SIZE/OUTER_SIZE; the kernel strides `for(i = lid; i < INNER_SIZE; i += LOCAL_SIZE)`
-    // with one block per group; each distinct shape is a separate HipRTC compile).
-    //   {32,2,32,57,125}:  C>1, inner 456000, non-multiple of LOCAL_SIZE=1024, odd dims
-    //   {1,3,16,240,320}:  C>1, inner 3686400, exact multiple of 1024
-    //   {256,1,32,32,32}:  C=1 (NDHWC memory-identical to NCDHW), inner 32768
+    // Imported from MIOpen, culled (P3). As for the medium catalog, only the last dimension is
+    // normalized, so each shape runs the same single-iteration loop and differs only in
+    // OUTER_SIZE and STRIDE; each distinct shape is a separate HipRTC compile.
+    //   {32,2,32,57,125} and {1,3,16,240,320}: C>1 (NDHWC STRIDE = C)
+    //   {256,1,32,32,32}: C=1 (NDHWC memory-identical to NCDHW)
     return {
         {{32, 2, 32, 57, 125}, 4, false, TensorLayout::NCDHW},
         {{1, 3, 16, 240, 320}, 4, false, TensorLayout::NCDHW},
