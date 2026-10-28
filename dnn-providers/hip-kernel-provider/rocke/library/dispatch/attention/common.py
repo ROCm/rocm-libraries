@@ -1128,10 +1128,10 @@ class AttentionTuningSpec:
         kernel_spec = self.kernel_spec
         if self.path == "3d" and self.arch in ("gfx942", "gfx950"):
             validate_attention_3d_spec_types(kernel_spec)
-        for name in ("block_size", "num_kv_heads", "head_size"):
-            require_attention_int(getattr(kernel_spec, name), f"kernel_spec.{name}")
         if not hasattr(kernel_spec, "use_i64_kv_addr"):
             return replace(self, num_kv_blocks=count)
+        for name in ("block_size", "num_kv_heads", "head_size"):
+            require_attention_int(getattr(kernel_spec, name), f"kernel_spec.{name}")
         elem_bytes = 1 if kernel_spec.kv_storage_dtype == "fp8e4m3" else 2
         block_stride = (
             int(kernel_spec.block_size)

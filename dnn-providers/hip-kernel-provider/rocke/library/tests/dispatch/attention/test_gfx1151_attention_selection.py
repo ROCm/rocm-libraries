@@ -675,6 +675,22 @@ class TestRdnaWmmaTunedCandidates(unittest.TestCase):
                     self.assertEqual(tuned.spec.kernel_spec, auto.spec)
                     self.assertEqual(tuned.request.tuning_id, tuned.spec.tuning_id)
 
+    def test_kv_block_count_preserves_wmma_specs_and_tuning_identity(self):
+        for arch in RDNA_WMMA_ARCHES:
+            for kind, seqlen_q in (("prefill", 32), ("decode", 1)):
+                with self.subTest(arch=arch, kind=kind):
+                    request = _request(
+                        arch=arch, seqlen_q=seqlen_q, layout="paged", kv_block_size=16
+                    )
+                    spec = dispatch_attention(_pinned(request, kind)).spec
+                    original_count = spec.num_kv_blocks
+                    bound = spec.with_num_kv_blocks(12)
+                    self.assertEqual(bound.num_kv_blocks, 12)
+                    self.assertEqual(bound.kernel_spec, spec.kernel_spec)
+                    self.assertEqual(bound.tuning_id, spec.tuning_id)
+                    self.assertEqual(bound.config_key, spec.config_key)
+                    self.assertEqual(spec.num_kv_blocks, original_count)
+
     def test_axes_cover_each_kernels_knobs(self):
         for arch in RDNA_WMMA_ARCHES:
             with self.subTest(arch=arch):

@@ -43,6 +43,8 @@ def test_bounded_lse_failure_empty_window_and_recovery(
     gpu, monkeypatch, page, route, dim, ratio, dtype_name, mode
 ):
     torch, arch = gpu
+    if arch not in ("gfx942", "gfx950"):
+        pytest.skip("bounded decode LSE targets gfx942/gfx950")
     from dispatch.attention import AttentionRequest, dispatch_attention
     from dispatch.attention.common import _problem
     from kernels.common import attention_unified as au
