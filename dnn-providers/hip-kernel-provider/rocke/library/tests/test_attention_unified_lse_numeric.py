@@ -214,6 +214,39 @@ def test_split_kv_output_and_lse(dtype, d, q_lens, kv_lens):
 
 @requires_cdna3_or_4
 @pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_split_kv_lse_nan_query_row_stays_nan(dtype):
+    """The split-KV reduce follows the tiled 2D rule: a NaN query row gives
+    NaN O and NaN LSE for that (token, head) only, never the keyless -inf.
+    Its merged sum is NaN, and !(l == 0) keeps row_has_mass true."""
+    q_lens, kv_lens = [1, 1, 1, 1], [4096, 777, 1500, 2049]
+    nan_token, nan_head = 1, 5
+    problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, dtype=dtype)
+    q[nan_token, nan_head] = float("nan")
+    lse = torch.full(
+        (problem.total_q, problem.num_query_heads, 1), float("inf"), device="cuda"
+    )
+    out = _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=0.0)
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(q.shape[-1]), 0.0
+    )
+    assert not torch.isposinf(lse).any(), "an LSE row was left unwritten"
+    assert torch.isnan(lse[nan_token, nan_head]).all(), "NaN row got a non-NaN LSE"
+    assert torch.isnan(out[nan_token, nan_head]).all(), "NaN row was hidden in O"
+    rest = torch.ones(
+        problem.total_q, problem.num_query_heads, dtype=torch.bool, device="cuda"
+    )
+    rest[nan_token, nan_head] = False
+    assert torch.isfinite(lse.squeeze(-1)[rest]).all(), "NaN leaked into another LSE"
+    assert torch.isfinite(out[rest]).all(), "NaN leaked into another (row, head)"
+    assert (out[rest].float() - o_ref[rest]).abs().max().item() < _tolerance(dtype)
+    torch.testing.assert_close(
+        lse.squeeze(-1)[rest], lse_ref.squeeze(-1)[rest], atol=_LSE_ATOL, rtol=_LSE_RTOL
+    )
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
 def test_split_kv_lse_with_softcap():
     q_lens, kv_lens = [1, 1], [2048, 900]
     problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, softcap=30.0)

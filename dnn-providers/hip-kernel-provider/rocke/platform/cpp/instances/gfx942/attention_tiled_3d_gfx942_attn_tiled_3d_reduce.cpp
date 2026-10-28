@@ -526,7 +526,8 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
 
     /* emit_lse: every lane holds the same butterfly-reduced overall_max/expsum,
      * so lane 0 writes. overall_max is in log2 units; lse_store converts to
-     * natural log and writes -inf for a row with no mass. One builder call per
+     * natural log and writes -inf for a row with no mass (sum 0); a NaN sum
+     * keeps NaN, as O does (!(l == 0), never l > 0). One builder call per
      * statement, in Python order. */
     if(ctx->reduce_spec != NULL && ctx->reduce_spec->emit_lse)
     {
@@ -538,7 +539,7 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
             rocke_value_t* nqh = rocke_b_const_i32(b, cfg->NUM_QH);
             rocke_value_t* row = rocke_b_mul(b, ctx->q_token, nqh);
             rocke_value_t* lse_index = rocke_b_add(b, row, ctx->q_head);
-            rocke_value_t* has_mass = rocke_b_fcmp(b, "ogt", ctx->overall_expsum, ctx->zero_f);
+            rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->overall_expsum);
             rocke_lse_store(
                 b, ctx->red_lse, lse_index, ctx->overall_max, ctx->overall_expsum, has_mass);
         }
