@@ -376,3 +376,115 @@ TEST_CASE("a stored helper relocatable is reused and linked", "[jit-cpu]")
                  && std::find(names.begin(), names.end(), helperKernel) != names.end()));
     }
 }
+
+// A generator that rejects one layout of a problem must not stop the same
+// process from generating for a layout it supports. Only the leading dimension
+// of A differs between the two queries.
+TEST_CASE("a rejected layout does not suppress a supported one", "[jit-gpu]")
+{
+    int device = 0;
+    {
+        INFO(("Cannot select the current HIP device"));
+        REQUIRE((hipGetDevice(&device) == hipSuccess));
+    }
+    hipDeviceProp_t properties{};
+    {
+        INFO(("Cannot query the current HIP device"));
+        REQUIRE((hipGetDeviceProperties(&properties, device) == hipSuccess));
+    }
+    hj::DeviceTarget target{hipblaslt_jit_test::deviceTarget(properties)};
+    target.device        = device;
+    target.properties    = properties;
+    target.wavefrontSize = properties.warpSize;
+    target.cuCount       = properties.multiProcessorCount;
+    target.hardware      = TensileLite::hip::GetDevice(properties, device);
+    REQUIRE((target.hardware != nullptr));
+
+    const auto scratch = fs::u8path(HIPBLASLT_JIT_LAUNCH_SCRATCH) / "layout-attempts";
+    fs::remove_all(scratch);
+    fs::create_directories(scratch);
+    const auto prepared
+        = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA), target, scratch);
+    const auto& plain = prepared.front();
+    REQUIRE((plain.name == "plain" && plain.ks.size() == 1));
+
+    hj::BackendInfo backend;
+    backend.id      = "layout-attempts";
+    backend.version = 1;
+    const auto key  = hj::CacheKey::make(target, backend, hj::jitCodeObjectVersion);
+    hj::Artifact executable;
+    auto         built
+        = hj::makeComgrBuilder()->build(plain.source, hj::BuildKind::Executable, executable);
+    hj::keepBuildLog(built, scratch);
+    {
+        INFO(("The build for " + target.targetId() + " failed: " + built.message));
+        REQUIRE((built.ok()));
+    }
+
+    const size_t   K         = plain.ks.front();
+    constexpr auto workspace = hipblaslt_jit_test::workspaceLimit;
+    // Same type, sizes and every other stride; the padded layout is the rejected one.
+    const auto rejected  = hipblaslt_jit_test::fp16Gemm(false, K, 512);
+    const auto supported = hipblaslt_jit_test::fp16Gemm(false, K);
+
+    hj::JitLibrary library(scratch / "library");
+    int            rejectedCalls  = 0;
+    int            supportedCalls = 0;
+    const auto     queryRejected  = [&] {
+        library.beginQuery(
+            true,
+            target,
+            backend,
+            workspace,
+            {},
+            [&](size_t,
+                const std::vector<std::string>&,
+                std::vector<int32_t>&,
+                hj::Status& failure) {
+                ++rejectedCalls;
+                failure
+                    = {hj::Status::Code::Failed, hj::Stage::Generate, "layout is not supported"};
+            });
+        auto found = library.findTopSolutions(rejected, *target.hardware, 1);
+        library.endQuery();
+        return found;
+    };
+
+    {
+        INFO(("The rejected layout returned a solution"));
+        REQUIRE((queryRejected().empty() && rejectedCalls == 1));
+    }
+    {
+        INFO(("A rejected layout was generated again; calls: " + std::to_string(rejectedCalls)));
+        REQUIRE((queryRejected().empty() && rejectedCalls == 1));
+    }
+
+    library.beginQuery(
+        true,
+        target,
+        backend,
+        workspace,
+        {},
+        [&](size_t,
+            const std::vector<std::string>&,
+            std::vector<int32_t>& produced,
+            hj::Status&           failure) {
+            ++supportedCalls;
+            const auto solutions = hj::supportingSolutions(
+                plain.source.solutions, supported, *target.hardware, workspace);
+            failure = library.publish(key, device, supported, executable, solutions, produced);
+        });
+    const auto found  = library.findTopSolutions(supported, *target.hardware, 1);
+    const auto status = library.queryStatus();
+    library.endQuery();
+    {
+        INFO(("A supported layout that follows a rejected one was not generated; calls: "
+              + std::to_string(supportedCalls)));
+        REQUIRE((supportedCalls == 1));
+    }
+    {
+        INFO(("The supported layout produced no solution: " + status.message));
+        REQUIRE((status.ok() && found.size() == 1 && found.front()
+                 && found.front()->KernelName() == plain.source.solutions.front()->kernelName));
+    }
+}

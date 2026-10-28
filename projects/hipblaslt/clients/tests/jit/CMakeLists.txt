@@ -181,9 +181,9 @@ target_compile_definitions(hipblaslt-jit-library-test PRIVATE
     "HIPBLASLT_JIT_DATA=\"${hipblaslt_jit_data}\"")
 target_link_libraries(hipblaslt-jit-library-test PRIVATE
     roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} amd_comgr
-    hip::device Threads::Threads)
-hipblaslt_jit_catch_test(jit-library jit-gpu hipblaslt-jit-library-test "[library-checks]")
-hipblaslt_jit_catch_test(jit-library-concurrency jit-gpu hipblaslt-jit-library-test
+    hip::device Threads::Threads Catch2::Catch2)
+hipblaslt_jit_executable(jit-library jit-gpu hipblaslt-jit-library-test "[library-checks]")
+hipblaslt_jit_executable(jit-library-concurrency jit-gpu hipblaslt-jit-library-test
     "[library-concurrency]")
 
 add_executable(hipblaslt-jit-end-to-end-test
