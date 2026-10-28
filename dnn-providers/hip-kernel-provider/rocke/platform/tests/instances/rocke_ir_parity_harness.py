@@ -3348,6 +3348,37 @@ def cases():
             emit_lse=True,
         ),
     )
+    # Tiled 2D with LSE output, one case per epilogue branch (each branch has
+    # its own LSE store site).
+    for _branch, _branch_kw in (
+        (
+            "transposed32",
+            dict(
+                use_mfma_32x32=True,
+                block_m_per_warp=32,
+                use_transposed_qk_32x32=True,
+                use_transposed_scalar_state=True,
+            ),
+        ),
+        ("mfma32", dict(use_mfma_32x32=True, block_m_per_warp=32)),
+        ("striped16", {}),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/2d_lse_{_branch}_bf16_d128",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_2d_lse_{_branch}_bf16",
+                "gfx950",
+                head_size=128,
+                block_size=64,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                emit_lse=True,
+                **_branch_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/2d_fp16_d128_b64",
