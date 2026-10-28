@@ -380,6 +380,11 @@ jobs:
           # starts with an empty pool), one job at a time on this host.
           LARGE=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow*'
             '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
+          # One process per group; the two stress groups apart (together they keep ~1.4x
+          # the larger one's memory).
+          LARGE_GROUPS=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow_hpa*'
+            '*stress_matmul_size_t_index_overflow_*-*stress_matmul_size_t_index_overflow_hpa*'
+            '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
           FILTER=() RUN_LARGE=0
           if [ -n "$GTEST_FILTER_ARG" ]; then
             FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
@@ -411,8 +416,8 @@ jobs:
             exec 9>/ci-locks/gfx1250-hipblaslt-large-tests.lock
             echo "Waiting for the host's large-test lock"
             if flock -x -w 3000 9; then
-              for k in "${!LARGE[@]}"; do
-                run_tests "hipblaslt_test_shard_large$k.log" --gtest_filter="${LARGE[$k]}" || rc=1
+              for k in "${!LARGE_GROUPS[@]}"; do
+                run_tests "hipblaslt_test_shard_large$k.log" --gtest_filter="${LARGE_GROUPS[$k]}" || rc=1
               done
               flock -u 9
             else
