@@ -4385,21 +4385,26 @@ class IRBuilder:
         raise ValueError(f"warp_shuffle_xor: unsupported type {v.type.name}")
 
     def vop2_f32_dpp_xor(self, v: Value, xor_mask: int, mnemonic: str) -> Value:
-        """One **fused** VALU reduce step: ``<mnemonic>_dpp d, v, v
-        row_xmask:mask`` — the cross-lane XOR shuffle *and* the f32 combine in
-        a single instruction (``v_max_f32_dpp`` / ``v_add_f32_dpp``).
+        """One softmax row-reduce stage, ``d = mnemonic(shuffle(v), v)``: the
+        in-row XOR shuffle of :meth:`warp_shuffle_xor_dpp` (``row_xmask:mask``
+        on targets that have it) followed by ``fmax`` (``v_max_f32``) or
+        ``fadd`` (``v_add_f32``).
 
-        This is the fused form of a softmax row-reduce stage. LLVM's
-        GCNDPPCombine pass refuses to fold a ``row_xmask`` ``v_mov_b32_dpp``
-        into the consuming ``v_max``/``v_add`` (verified on gfx1250: the mov
-        survives), so we emit the fused op directly via inline asm — halving
-        the VALU op count of the reduction vs the unfused
-        :meth:`warp_shuffle_xor_dpp` + ``fmax``/``fadd``.
+        LLVM's GCNDPPCombine pass folds the shuffle's ``v_mov_b32_dpp`` into the
+        consumer, giving the fused ``v_add_f32_dpp`` / ``v_max_num_f32_dpp``
+        (gfx1250), when both sit in the same block under the same EXEC. Some
+        compilers first quiet the shuffled value for ``llvm.maxnum`` with a
+        separate ``v_max_num_f32 v, v, v``, so the max stage stays a
+        ``v_mov_b32_dpp`` + ``v_max_num_f32`` pair; upstream LLVM fuses it.
 
-        The DPP modifier applies to the first source, so ``d = mnemonic(
-        shuffle(v), v)`` — correct for the commutative max/add reduction.
-        ``convergent`` (reads other lanes), ``bound_ctrl:1`` (partner always
-        in-row for mask 1..15). Operand + result are f32."""
+        This used to be inline asm (``<mnemonic>_dpp $0, $1, $1 row_xmask:..``).
+        LLVM's hazard recognizer does not look inside inline asm, so on gfx1250
+        the asm could overwrite a WMMA source operand before the required VALU
+        gap without LLVM adding the wait states; as real instructions the DPP
+        ops are covered by the WMMA co-execution hazard check.
+
+        The DPP modifier applies to the first source, so the shuffle is the
+        first operand; max and add are commutative. Operand + result are f32."""
         if v.type.name != "f32":
             raise ValueError("vop2_f32_dpp_xor requires f32 data")
         if not (1 <= xor_mask <= 15):
@@ -4409,19 +4414,10 @@ class IRBuilder:
                 f"vop2_f32_dpp_xor mnemonic must be v_max_f32/v_add_f32, "
                 f"got {mnemonic!r}"
             )
-        tmpl = (
-            f"{mnemonic}_dpp $0, $1, $1 "
-            f"row_xmask:{xor_mask} row_mask:0xf bank_mask:0xf bound_ctrl:1"
-        )
-        return self.inline_asm(
-            tmpl,
-            "=v,v",
-            [v],
-            result_type=F32,
-            sideeffect=False,
-            convergent=True,
-            result_name_hint="dppr",
-        )
+        shuffled = self.warp_shuffle_xor_dpp(v, xor_mask)
+        if mnemonic == "v_max_f32":
+            return self.fmax(shuffled, v)
+        return self.fadd(shuffled, v)
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
         """VALU XOR shuffle: lane ``l`` gets ``v`` from lane ``l ^ lane_xor``
