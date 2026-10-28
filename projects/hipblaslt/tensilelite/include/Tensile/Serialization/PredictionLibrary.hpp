@@ -222,9 +222,14 @@ namespace TensileLite
 #endif
                     // Not while a library manifest is collected (OrigamiBoost::libraryManifest).
                     if(OrigamiBoost::enabled() && !Library::deserializeObserver)
+                    {
                         lib.nn_models.boost
                             = OrigamiBoost::loadForLogic(logic_stem_from_path(ctx->filename),
                                                          directory_from_path(ctx->filename));
+                        if(lib.nn_models.boost >= 0)
+                            lib.solution_name_ids
+                                = OrigamiBoost::solutionNameIds(lib.solution_list);
+                    }
                 }
             }
             const static bool flow = false;

@@ -66,6 +66,10 @@ namespace TensileLite
 
         origami::nn::library_models_t nn_models;
 
+        /// With a Boost model: per solution_list entry, the position of the first entry with
+        /// the same solutionName (the re-rank skips repeated kernels by name; set with the model).
+        std::vector<std::uint32_t> solution_name_ids;
+
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
         /// When set, called with each prediction row as it is deserialized on this thread
@@ -238,7 +242,12 @@ namespace TensileLite
                                        MySolution,
                                        decltype(matches),
                                        decltype(chargeStreamKClusters)>
-                rerankSource(problem, hardware, solution_list, matches, chargeStreamKClusters);
+                rerankSource(problem,
+                             hardware,
+                             solution_list,
+                             solution_name_ids,
+                             matches,
+                             chargeStreamKClusters);
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 const int known = rerankSource.verdict(solution.get());
