@@ -73,6 +73,28 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp"
                rocke_moe_fused_mega_spec_guards)
 endif()
 
+# gfx942 tiled-attention spec guards: same acceptance-divergence blind spot as
+# above, for the 2D/3D __post_init__ ports and supports_tiled_2d.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_tiled_2d_gfx942_spec_guards.cpp")
+  add_executable(rocke_attention_tiled_2d_gfx942_spec_guards
+                 instances/attention_tiled_2d_gfx942_spec_guards.cpp)
+  target_link_libraries(rocke_attention_tiled_2d_gfx942_spec_guards PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_tiled_2d_gfx942_spec_guards PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_tiled_2d_gfx942_spec_guards
+           COMMAND rocke_attention_tiled_2d_gfx942_spec_guards)
+  set_tests_properties(rocke_attention_tiled_2d_gfx942_spec_guards
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_tiled_2d_gfx942_spec_guards)
+  set_target_properties(rocke_attention_tiled_2d_gfx942_spec_guards
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_tiled_2d_gfx942_spec_guards
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_tiled_2d_gfx942_spec_guards)
+endif()
+
 # Host-side stream-K partition math: the launch grid it sizes is invisible to
 # the byte-identity gate, so the C port is pinned to the Python reference
 # vectors here (mirrors tests/instances/test_streamk_iter_partition.py).

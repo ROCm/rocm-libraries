@@ -547,6 +547,45 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
+    /* The grouped_kv2 arm of the Python check is unreachable here: grouped_kv2 is
+     * rejected up front on gfx942. */
+    if(s->use_transposed_mask_limit)
+    {
+        if(!((s->use_mfma_32x32 || s->use_mfma_32x32x8) && s->use_transposed_qk_32x32
+             && s->use_transposed_scalar_state && s->use_transposed_mask_once))
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "transposed softmax VALU opts require the R4_s1mask path");
+            return false;
+        }
+        if(s->sliding_window > 0)
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "transposed softmax VALU opts require no sliding window");
+            return false;
+        }
+        if(s->has_softcap || s->use_alibi || s->use_qq_bias)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "transposed softmax VALU opts do not support softcap, ALiBi, "
+                                 "or QQ bias");
+            return false;
+        }
+    }
+
+    if(s->use_fast_paged_kv_desc
+       && !(rocke_streq(s->dtype, "bf16") && s->kv_storage_dtype == NULL && s->head_size == 64
+            && s->block_size == 32 && t_eff == 64 && s->num_query_heads == 64
+            && s->num_kv_heads == 8 && s->num_warps == 4))
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "use_fast_paged_kv_desc is restricted to bf16 h64kv8 "
+                             "HD=64 BS=32 T=64 num_warps=4");
+        return false;
+    }
+
     /* use_agpr_alloc_zero detailed pairing guard (mirrors Python
      * attention_tiled_2d.py line 765). On gfx942 the R4_s1mask_hlpv family is
      * gfx950-only (use_mfma_32x32 / use_transposed_half_local_pv are rejected
@@ -566,6 +605,41 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                                  "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
             return false;
         }
+    }
+
+    /* The use_mfma_32x32 and fp8 K/V arms of the Python check are unreachable
+     * here: both are rejected up front on gfx942. */
+    if(s->use_register_pv)
+    {
+        if(!rocke_streq(s->dtype, "bf16"))
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_register_pv v1 is restricted to dtype='bf16'");
+            return false;
+        }
+        if(s->sliding_window > 0 || s->has_softcap)
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_register_pv v1 requires no sliding window and no softcap");
+            return false;
+        }
+        if(s->use_alibi || s->use_qq_bias)
+        {
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_register_pv v1 does not support ALiBi or QQ bias");
+            return false;
+        }
+    }
+
+    if(s->has_tile_size && (s->tile_size <= 0 || s->tile_size % s->block_size != 0))
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "tile_size must be a positive multiple of block_size "
+                             "(got tile_size=%d, block_size=%d)",
+                             s->tile_size,
+                             s->block_size);
+        return false;
     }
 
     return true;
