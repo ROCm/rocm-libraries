@@ -562,7 +562,9 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
 
-    /* softmax-derived state forwarded to the PV bucket. */
+    /* softmax-derived state forwarded to the PV bucket (alpha, new_l, and
+     * m_carry = the raw running max). m_new_out is the MFMA-32 branch's
+     * clamped exponent reference for P and alpha; it is not forwarded. */
     rocke_value_t* alpha_regs[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* m_new_out[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
@@ -902,7 +904,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else if(ctx->USE_MFMA_32X32)
@@ -1279,7 +1280,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
 

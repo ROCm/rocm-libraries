@@ -9,6 +9,12 @@ can see a fully masked first tile. The running max must not be pinned at 0 by
 that tile: with every visible score negative, exp2(s - 0) rounds P to 0 (fp16
 at about -17, bf16 at about -103 natural) and O collapses although the row sees
 keys. Each epilogue branch is pinned so all three clamp sites are covered.
+
+Blind spots: gfx942 D128 sliding-window shapes normally route to the 4-warp
+GQA kernel (finite -1e30 sentinel, not affected), so these cases pin tuning
+variants of the default builder via ``tuning_spec``. Not covered here: the
+scalar kernels (see test_attention_unified_scalar_masked_tile_numeric.py),
+D64/D256, and multi-sequence batches.
 """
 
 import math

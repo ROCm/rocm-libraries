@@ -245,8 +245,9 @@ rocke_value_t* rocke_gfx950_attn2d_apply_transposed_pv_regs(rocke_gfx950_attn2d_
  *  rocke_gfx950_attn2d_emit_pv_bucket   (Python lines 3174-3572)
  *
  *  The PV back half of _emit_kv_body. Consumes the softmax-derived state from
- *  ``in`` (alpha_regs, new_l_vals, m_new, PT32 register groups, register-P
- *  groups, GROUPED_KV2 re-issue inputs), computes acc *= alpha; acc += P @ V,
+ *  ``in`` (alpha_regs, new_l_vals, m_carry = the raw running max, PT32
+ *  register groups, register-P groups, GROUPED_KV2 re-issue inputs), computes
+ *  acc *= alpha; acc += P @ V,
  *  and emits the scf_yield carry.
  * ============================================================ */
 void rocke_gfx950_attn2d_emit_pv_bucket(rocke_gfx950_attn2d_build_ctx_t* ctx,

@@ -417,7 +417,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
     (void)safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket (filled by the narrow
-     * path below; alpha/new_l/m_new per softmax state slot). */
+     * path below; alpha/new_l/m_carry per softmax state slot, where m_carry is
+     * the raw running max). */
     rocke_value_t* alpha_regs[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* m_carry_out[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
@@ -1241,8 +1242,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
      *
      *  Hand the softmax results to the peer PV bucket, which runs acc *= alpha;
      *  acc += P @ V and emits the scf_yield carry. The narrow (non-register-PV)
-     *  path reads P from P_lds; alpha/new_l/m_new and the buffer carry come from
-     *  the front half here.
+     *  path reads P from P_lds; alpha/new_l/m_carry (the raw running max) and
+     *  the buffer carry come from the front half here.
      * ============================================================ */
     {
         rocke_gfx942_attn2d_pv_inputs_t pv_in;
