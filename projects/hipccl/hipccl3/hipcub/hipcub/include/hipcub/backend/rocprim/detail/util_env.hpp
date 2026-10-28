@@ -106,6 +106,18 @@ static hipError_t env_invoke(EnvT env, FuntionT&& func)
 
     return deallocate_error;
 }
+
+template<typename EnvT, typename FuntionT>
+HIPCUB_RUNTIME_FUNCTION
+static hipError_t legacy_invoke(EnvT env, FuntionT&& func)
+{
+    // Query properties from the environment/stream
+    auto stream = _HIPCUB_STD_EXEC::__query_or(env,
+                                               _HIPCUB_LIBCXX::get_stream,
+                                               _HIPCUB_LIBCXX::stream_ref{hipStream_t{}});
+    // Run
+    return func(stream.get());
+}
 } // namespace detail
 END_HIPCUB_NAMESPACE
 
