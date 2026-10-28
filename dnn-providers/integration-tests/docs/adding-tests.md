@@ -630,6 +630,11 @@ existing files use `Quick` instead of `Smoke` for the first tier. Match the file
 that you extend. The other files directly under `tests/` are the unit tests of
 the harness (`hipdnn_integration_tests_unit_tests`).
 
+Before you add a case, check that it reaches code that no existing case
+reaches. The Standard tier is fp32-only, and channel-last and padding-mode
+variants are limited. The rules and the measured cost of each case are in
+[GPU reference test coverage rules](gpu-ref-test-coverage.md).
+
 ## Before you open the PR
 
 - [ ] New graph coverage is a bundle, not a C++ test.

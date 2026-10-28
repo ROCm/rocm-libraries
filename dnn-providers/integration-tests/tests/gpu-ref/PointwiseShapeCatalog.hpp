@@ -238,8 +238,7 @@ inline std::vector<PointwiseTestCase> getMedium5dBinaryPointwiseCases()
 }
 
 // ============================================================================
-// Large shapes — split into edge cases (Comprehensive / nightly) and
-// stress tests (Full / weekly) for tiered CI execution.
+// Large shapes — Comprehensive / nightly tier (fp32 only).
 
 inline std::vector<std::vector<int64_t>> get4dLargeShapes()
 {

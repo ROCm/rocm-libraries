@@ -4,8 +4,9 @@
 # hipdnn-integration-tests Test Categories Configuration.
 #
 # GTest-filter categories applied to the component's own GTest binaries
-# (hipdnn_integration_tests_unit_tests, hipdnn_gpu_ref_tests and
-# hipdnn_golden_data_tests) via apply_test_category_labels(). Each category
+# (hipdnn_integration_tests_unit_tests and hipdnn_golden_data_tests) via
+# apply_test_category_labels(). hipdnn_gpu_ref_tests uses
+# test_categories_gpu_ref.yaml instead (fp32-only quick tier). Each category
 # becomes one CTest suite whose --gtest_filter is built from test_patterns/exclude;
 # labels are cumulative so `ctest -L standard` runs quick + standard, etc.
 #

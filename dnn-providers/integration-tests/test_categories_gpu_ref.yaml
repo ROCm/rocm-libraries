@@ -1,0 +1,87 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipdnn_gpu_ref_tests Test Categories Configuration.
+#
+# Same tier shape as test_categories.yaml, plus one rule for this binary only:
+# the quick tier is an fp32 smoke run. Reduced-precision, fp8, int8, TF32 and
+# mixed-type cases run in the standard tier. Datatype only enters through
+# per-element load/store conversion (docs/gpu-ref-test-coverage.md, P1), and every
+# extra datatype is a separate HipRTC compile (~0.45 s each), so these cases were
+# most of the quick-tier time.
+#
+# Parameterized suites carry the tier in their instantiation prefix (Standard*).
+# The patterns below cover plain TESTs, typed tests and suites whose prefix cannot
+# change: TestGpuSdpaFwdPlain/1 and /2 are the half and bfloat16 typed instances.
+# GTest filters are case-sensitive.
+#
+# Comprehensive*/Full* PascalCase cases stay out of every category (see the
+# header of test_categories.yaml).
+test_categories:
+  quick:
+    description: "fp32 smoke GPU reference cases and validation tests (catch-all minus Standard/Comprehensive/Full and reduced-precision/mixed-type cases)"
+    test_patterns:
+      - "*"
+    exclude: &gpu_ref_quick_exclude
+      - "*DISABLED*"
+      - "Standard*"
+      - "Comprehensive*"
+      - "Full*"
+      - "*Fp16.*"
+      - "*Bfp16.*"
+      - "*Fp8.*"
+      - "*Int8.*"
+      - "*Tf32.*"
+      - "*MixedType.*"
+      - "*MixedTypes.*"
+      - "*MixedPrecision.*"
+      - "TestGpuSdpaFwdPlain/1.*"
+      - "TestGpuSdpaFwdPlain/2.*"
+      - "TestGpuSdpaFwdMaskDtype/*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+  standard:
+    description: "Standard-tier GPU reference cases: fp32 medium shapes plus all reduced-precision and mixed-type cases"
+    test_patterns:
+      - "Standard*"
+      - "*Fp16.*"
+      - "*Bfp16.*"
+      - "*Fp8.*"
+      - "*Int8.*"
+      - "*Tf32.*"
+      - "*MixedType.*"
+      - "*MixedTypes.*"
+      - "*MixedPrecision.*"
+      - "TestGpuSdpaFwdPlain/1.*"
+      - "TestGpuSdpaFwdPlain/2.*"
+      - "TestGpuSdpaFwdMaskDtype/*"
+    exclude:
+      - "*DISABLED*"
+      - "Comprehensive*"
+      - "Full*"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "slow"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier"
+    test_patterns:
+      - "*"
+    exclude: *gpu_ref_quick_exclude
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 600
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    ffm-quick: 7200

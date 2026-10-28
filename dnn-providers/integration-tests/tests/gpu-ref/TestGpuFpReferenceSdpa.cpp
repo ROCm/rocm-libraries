@@ -685,7 +685,11 @@ class TestGpuSdpaFwdMaskDtype : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(TestGpuSdpaFwdMaskDtype, SdpaFwdTypes, );
+// P3 (identical compiled code): a float mask is identical to the Plain additive-mask tests
+// (and MatchesFloatMaskBitwise would compare a float run against itself), so only the
+// half/bfloat16 mask types, which take a distinct MASK_TYPE cast path, are instantiated.
+using SdpaMaskTypes = ::testing::Types<HalfType, BFloat16Type>;
+TYPED_TEST_SUITE(TestGpuSdpaFwdMaskDtype, SdpaMaskTypes, );
 
 TYPED_TEST(TestGpuSdpaFwdMaskDtype, AdditiveMaskRank4)
 {
@@ -907,7 +911,8 @@ TYPED_TEST(TestGpuSdpaFwdPlain, FullyMaskedRowYieldsZeroNotNan)
 // actually stress (a) the GPU/CPU float-accumulation match behind the fp32
 // tolerance (2e-5, see gpuRefFwdTolerance) and (b) the subtract-max softmax stability (larger D ->
 // larger pre-softmax magnitudes). One HipRTC compile per dtype is reused across
-// all shapes, so this only costs kernel runtime, not a recompile.
+// all shapes, so this only costs kernel runtime, not a recompile. Its 65536 outputs
+// (256 blocks of 256) also cover the multi-block launch path.
 // ============================================================================
 
 TYPED_TEST(TestGpuSdpaFwdPlain, RealisticHeadDim)
@@ -970,31 +975,6 @@ TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdLayout)
     Tensor<T> v({2, 4, 8, 16}, TensorLayout::BSHD);
     Tensor<T> oCpu({2, 4, 8, 16}, TensorLayout::BSHD);
     Tensor<T> oGpu({2, 4, 8, 16}, TensorLayout::BSHD);
-
-    compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>());
-}
-
-// ============================================================================
-// Larger, production-representative single-attention-layer shape: batch x heads
-// = 16, a 512-token context, and a 128 head dim. Pushes the reduction lengths
-// (Skv=512, D=128) and grid size further than RealisticHeadDim/LongSequence to
-// confirm the fp32 tolerance and softmax stability still hold at scale and the
-// launch/bounds handling is correct for a large output grid. (The reference
-// kernel recomputes QK^T per output element, so this is intentionally the
-// largest case kept in the fast suite.)
-// ============================================================================
-
-TYPED_TEST(TestGpuSdpaFwdPlain, LargerShape)
-{
-    SKIP_IF_NO_DEVICES();
-    using T = TypeParam;
-
-    // [B=2, H=8, Sq=512, Skv=512, D=128, Dv=128]
-    Tensor<T> q({2, 8, 512, 128});
-    Tensor<T> k({2, 8, 512, 128});
-    Tensor<T> v({2, 8, 512, 128});
-    Tensor<T> oCpu({2, 8, 512, 128});
-    Tensor<T> oGpu({2, 8, 512, 128});
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>());
 }
@@ -1475,30 +1455,6 @@ TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdGqa)
 
 // --- Explicit (non-default) scale combined with other modes ---
 
-TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitScaleCausal)
-{
-    SKIP_IF_NO_DEVICES();
-    using T = TypeParam;
-
-    Tensor<T> q({1, 2, 8, 16});
-    Tensor<T> k({1, 2, 8, 16});
-    Tensor<T> v({1, 2, 8, 16});
-    Tensor<T> oCpu({1, 2, 8, 16});
-    Tensor<T> oGpu({1, 2, 8, 16});
-
-    compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
-                                       k,
-                                       v,
-                                       oCpu,
-                                       oGpu,
-                                       gpuRefFwdTolerance<T>(),
-                                       /*attnScaleValue=*/0.25f,
-                                       /*attnMask=*/nullptr,
-                                       /*leftBound=*/-1,
-                                       /*rightBound=*/0,
-                                       /*topLeftAlignment=*/true);
-}
-
 TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitScaleAdditiveMask)
 {
     SKIP_IF_NO_DEVICES();
@@ -1623,29 +1579,6 @@ TYPED_TEST(TestGpuSdpaFwdPlain, CrossAttentionAdditiveMask)
 
 // --- Mixed precision (16-bit in, float out) combined with modes ---
 
-TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputCausal)
-{
-    SKIP_IF_NO_DEVICES();
-
-    Tensor<HalfType> q({1, 2, 8, 16});
-    Tensor<HalfType> k({1, 2, 8, 16});
-    Tensor<HalfType> v({1, 2, 8, 16});
-    Tensor<float> oCpu({1, 2, 8, 16});
-    Tensor<float> oGpu({1, 2, 8, 16});
-
-    compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(q,
-                                                                k,
-                                                                v,
-                                                                oCpu,
-                                                                oGpu,
-                                                                gpuRefFwdTolerance<float>(),
-                                                                std::nullopt,
-                                                                /*attnMask=*/nullptr,
-                                                                /*leftBound=*/-1,
-                                                                /*rightBound=*/0,
-                                                                /*topLeftAlignment=*/true);
-}
-
 TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutputAdditiveMask)
 {
     SKIP_IF_NO_DEVICES();
@@ -1664,18 +1597,4 @@ TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutputAdditiveMask)
 
     compareGpuVsCpuSdpaFwd<BFloat16Type, BFloat16Type, BFloat16Type, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
-}
-
-TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputGqa)
-{
-    SKIP_IF_NO_DEVICES();
-
-    Tensor<HalfType> q({1, 8, 8, 16});
-    Tensor<HalfType> k({1, 2, 8, 16});
-    Tensor<HalfType> v({1, 2, 8, 16});
-    Tensor<float> oCpu({1, 8, 8, 16});
-    Tensor<float> oGpu({1, 8, 8, 16});
-
-    compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(
-        q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
