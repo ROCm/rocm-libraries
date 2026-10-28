@@ -100,11 +100,6 @@ typedef struct rocke_attn_unified_build_ctx
     rocke_ir_builder_t* b; /* the IRBuilder (Python `b`)   */
     rocke_attn_unified_kind_t kind; /* which build_* is running      */
     const rocke_unified_attention_problem_t* p; /* Python `p = spec.problem`     */
-    /* Mirror of `p` in the selector-helper struct shape, so the ported
-     * emit / physical-block-and-token / descriptor helpers (which take
-     * rocke_unified_attn_problem_t*) can be called without re-deriving it. The
-     * glue driver fills this from `p` once. */
-    rocke_unified_attn_problem_t sel_p;
     const rocke_type_t* dtype; /* spec.dtype_ir (F16 / BF16)    */
     int num_segments; /* 3D/reduce; 0 for 2D           */
     int num_queries_per_kv; /* p->num_query_heads / kv       */
@@ -208,9 +203,9 @@ typedef struct rocke_attn_unified_build_ctx
  * Shared prologue + ABI phase functions (used by all 3 builders)
  * ============================================================ */
 
-/* Zero-init the ctx and copy in the problem/spec slice (b, kind, p, sel_p,
- * dtype, num_segments) + derive num_queries_per_kv. On a non-divisible head
- * ratio or unsupported dtype, sets b's sticky error and returns false. */
+/* Zero-init the ctx and copy in the problem/spec slice (b, kind, p, dtype,
+ * num_segments) + derive num_queries_per_kv. On a non-divisible head ratio or
+ * unsupported dtype, sets b's sticky error and returns false. */
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
                                  rocke_attn_unified_kind_t kind,
@@ -284,6 +279,30 @@ void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t*
 /* The reduce guarded epilogue: result = acc * rcp(den); cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under active. */
 void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx);
+
+/* ============================================================ *
+ * Coverage-gate reject helpers (attention_unified_gates.cpp)
+ * ============================================================ *
+ *
+ * Each returns true when the problem is rejected and writes the Python reason
+ * into ``reason`` (capacity ``reason_cap``); false leaves ``reason`` untouched.
+ * ``arch`` must already be canonical. */
+
+/* _mask_label(problem), e.g. "top-left/right_bound=5". */
+void rocke_attn_unified_mask_label(const rocke_unified_attention_problem_t* p,
+                                   char* out,
+                                   size_t out_cap);
+
+/* _reject_mask_semantics(problem). */
+bool rocke_attn_unified_reject_mask_semantics(const rocke_unified_attention_problem_t* p,
+                                              char* reason,
+                                              size_t reason_cap);
+
+/* _reject_fp8_format_arch_mismatch(problem, arch). */
+bool rocke_attn_unified_reject_fp8_format_arch_mismatch(const rocke_unified_attention_problem_t* p,
+                                                        const char* arch,
+                                                        char* reason,
+                                                        size_t reason_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

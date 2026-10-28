@@ -51,6 +51,7 @@
 #include <stddef.h>
 
 #include "rocke/arena.h" /* rocke_arena_t (signature storage)                    */
+#include "rocke/helper_rocke.helpers.attention.h" /* routing config structs       */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_sig_entry_t, name join     */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_kernel_def_t, status         */
 
@@ -85,12 +86,17 @@ typedef struct rocke_unified_attention_problem
     bool use_sinks; /* default false                                      */
     bool use_alibi; /* default false                                      */
     bool use_qq_bias; /* default false                                      */
+    bool use_additive_bias; /* default false                               */
     bool use_fp8; /* default false                                      */
+    bool fp8_fnuz; /* default false                                      */
     int num_cus; /* default 120 (selector only; unused by scalar)      */
-    int waves_per_eu; /* Optional[int]; <0 == None                          */
-    bool waves_per_eu_set;
+    int target_ctas; /* default 0 ("auto": num_cus * 4)                    */
+    int waves_per_eu; /* Optional[int]; read only when waves_per_eu_set     */
+    bool waves_per_eu_set; /* false == Python None                             */
     const char* compile_backend; /* Optional[str]; NULL == None               */
     int num_kv_blocks; /* default 0                                  */
+    bool causal_top_left; /* default false (bottom-right diagonal)       */
+    int right_bound; /* default 0 (causal); -1 = unbounded           */
 } rocke_unified_attention_problem_t;
 
 /* Default-constructed problem (Python field defaults). The required positional
@@ -103,6 +109,34 @@ int rocke_unified_attention_problem_num_queries_per_kv(const rocke_unified_atten
 
 /* @property all_decode = (max_seqlen_q == 1). */
 bool rocke_unified_attention_problem_all_decode(const rocke_unified_attention_problem_t* p);
+
+/* @property causal = (right_bound == 0). */
+bool rocke_unified_attention_problem_causal(const rocke_unified_attention_problem_t* p);
+
+/* @property default_mask -- the bottom-right causal body every kernel family
+ * implements: not causal_top_left and right_bound == 0. */
+bool rocke_unified_attention_problem_default_mask(const rocke_unified_attention_problem_t* p);
+
+/* @property total_num_q_blocks_upper_bound (au.py:182-190). */
+int rocke_unified_attention_problem_total_num_q_blocks_upper_bound(
+    const rocke_unified_attention_problem_t* p);
+
+/* @property _effective_target_ctas (au.py:192-199): target_ctas when > 0,
+ * else num_cus * 4. */
+int rocke_unified_attention_problem_effective_target_ctas(
+    const rocke_unified_attention_problem_t* p);
+
+/* select_path(): "2d" or "3d". NULL when num_queries_per_kv is invalid. */
+const char* rocke_unified_attention_problem_select_path(const rocke_unified_attention_problem_t* p);
+
+/* select_2d() / select_3d(). Return false (outputs untouched) when
+ * num_queries_per_kv is invalid or the underlying config helper rejects the
+ * inputs. */
+bool rocke_unified_attention_problem_select_2d(const rocke_unified_attention_problem_t* p,
+                                               rocke_attention_2d_config_t* out);
+bool rocke_unified_attention_problem_select_3d(const rocke_unified_attention_problem_t* p,
+                                               rocke_attention_3d_config_t* attn,
+                                               rocke_attention_3d_config_t* reduce);
 
 /* ------------------------------------------------------------- 2D scalar */
 

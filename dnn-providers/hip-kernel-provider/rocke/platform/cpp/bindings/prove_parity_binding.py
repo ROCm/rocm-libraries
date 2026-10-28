@@ -1617,8 +1617,8 @@ def problems_gfx950_attention_tiled_2d():
     Each entry is a dict of UnifiedAttentionProblem fields.  The matrix is designed to:
       - cover the dimensions that feed _enable_combo_2d / _enable_single_batch_combo
         / _enable_transposed_qk_32x32 and all related selector gates;
-      - include the concrete cohort that PR #9220 exposed (biased combo geometry:
-        gfx950 + bf16 + d64/b32 + GQA-8 + max_seqlen_q > 256 + use_qq_bias=True);
+      - include the biased combo cohort, which PR #9220 admitted to combo_2d
+        (gfx950 + bf16 + d64/b32 + GQA-8 + max_seqlen_q > 256 + a bias flag);
       - sweep bias flags (use_alibi, use_qq_bias, softcap > 0) x geometry cohorts.
     """
 
@@ -1667,10 +1667,8 @@ def problems_gfx950_attention_tiled_2d():
         # ---- combo_2d cohort (gfx950 bf16 d64 b32 GQA-8 seqlen_q > 256) ----
         p(512, 2, 64, 8, 64, 32, 512, 4096),  # vanilla combo_2d
         p(1024, 4, 64, 8, 64, 32, 512, 4096),  # more seqs
-        # ---- #9220 motivating cases: combo_2d cohort + bias flags ----
-        p(
-            512, 2, 64, 8, 64, 32, 512, 4096, use_qq_bias=True
-        ),  # biased combo (was the bug)
+        # ---- combo_2d cohort + bias flags (admitted since PR #9220) ----
+        p(512, 2, 64, 8, 64, 32, 512, 4096, use_qq_bias=True),  # biased combo
         p(512, 2, 64, 8, 64, 32, 512, 4096, use_alibi=True),  # alibi combo
         p(512, 2, 64, 8, 64, 32, 512, 4096, softcap=50.0),  # softcap combo
         # ---- combo_2d boundary: seqlen_q <= 256 should NOT route combo ----
@@ -1868,42 +1866,12 @@ def _selector_parity_row(problem_dict, arch):
     )
 
 
-def _is_biased_combo_2d(problem_dict):
-    """Check if problem hits the #9220 bug (biased combo_2d divergence).
-
-    Returns True for problems with combo_2d geometry (gfx950, bf16, d64, b32 or 64, GQA-8, and
-    seqlen_q>256) and any bias flag (use_qq_bias, use_alibi, softcap!=0).
-    """
-    is_combo_geom = (
-        problem_dict.get("head_size") == 64
-        and problem_dict.get("block_size") in [32, 64]
-        and problem_dict.get("dtype", "bf16") == "bf16"
-        and problem_dict.get("num_query_heads", 0)
-        // problem_dict.get("num_kv_heads", 1)
-        == 8
-        and problem_dict.get("max_seqlen_q", 0) > 256
-    )
-
-    # Bias flags that trigger the bug (from skipped tests)
-    has_bias = (
-        problem_dict.get("use_qq_bias", False)
-        or problem_dict.get("use_alibi", False)
-        or problem_dict.get("softcap", 0.0) != 0.0
-    )
-
-    return is_combo_geom and has_bias  # Both must be true = #9220 bug
-
-
 def run_selector_parity(arch, problems):
-    """Run problem-driven selector parity for all problems, excluding combo_2d with bias cases due to a bias bug introduced in PR #9220 (we will lift this limitation when the bug is fixed). Returns (n_match, n_mismatch, details)."""
+    """Run problem-driven selector parity for all problems. Returns (n_match, n_mismatch, details)."""
 
-    n_match = n_mismatch = n_skipped = 0
+    n_match = n_mismatch = 0
     details = []
     for idx, prob in enumerate(problems):
-        # Due to bias bug introduced in PR #9220, skip combo_2d cases for now
-        if _is_biased_combo_2d(prob):
-            n_skipped += 1
-            continue
         row = _selector_parity_row(prob, arch)
         if row["spec_match"]:
             n_match += 1
@@ -1911,7 +1879,7 @@ def run_selector_parity(arch, problems):
             n_mismatch += 1
             details.append(f"  problem[{idx}] {row['diff']}")
             details.append(f"    problem: {prob}")
-    return n_match, n_mismatch, n_skipped, details
+    return n_match, n_mismatch, details
 
 
 def cfgs_gfx942_attention_tiled_3d():
@@ -2219,14 +2187,13 @@ def main():
         )
         selector_failed = False
     else:
-        sel_match, sel_mismatch, sel_skipped, sel_details = run_selector_parity(
+        sel_match, sel_mismatch, sel_details = run_selector_parity(
             "gfx950", problems_gfx950_attention_tiled_2d()
         )
         selector_failed = sel_mismatch > 0
         print(
-            f"problems checked: {sel_match + sel_mismatch + sel_skipped}  "
+            f"problems checked: {sel_match + sel_mismatch}  "
             f"match: {sel_match}  mismatch: {sel_mismatch}  "
-            f"skipped: {sel_skipped}  "
             f"{'SELECTOR PARITY FAILED' if selector_failed else 'SELECTOR PARITY OK'}"
         )
         for line in sel_details:

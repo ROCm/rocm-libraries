@@ -42,10 +42,9 @@
  *  plus deriving num_queries_per_kv (= p.num_query_heads // num_kv_heads, which
  *  raises on a non-divisible ratio).
  *
- *  Zero-inits the ctx, copies the problem/spec slice into it, mirrors `p` into
- *  the selector-helper problem shape (ctx->sel_p) so the ported emit/descriptor
- *  helpers can be called, then validates. On a non-divisible head ratio or an
- *  unsupported dtype, sets b's sticky error and returns false.
+ *  Zero-inits the ctx, copies the problem/spec slice into it, then validates.
+ *  On a non-divisible head ratio or an unsupported dtype, sets b's sticky
+ *  error and returns false.
  * ===================================================================== */
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
@@ -66,33 +65,6 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
     ctx->dtype = dtype;
     ctx->num_segments = num_segments;
     ctx->kernel = rocke_ir_builder_kernel(b);
-
-    /* Mirror `p` into the selector-helper problem shape so the ported emit /
-     * physical-block-and-token / descriptor helpers (which take a
-     * rocke_unified_attn_problem_t*) can be called without re-deriving it. Only
-     * the fields those helpers read are semantically required, but we carry the
-     * full overlap for parity. */
-    {
-        rocke_unified_attn_problem_t* sp = &ctx->sel_p;
-        sp->total_q = p->total_q;
-        sp->num_seqs = p->num_seqs;
-        sp->num_query_heads = p->num_query_heads;
-        sp->num_kv_heads = p->num_kv_heads;
-        sp->head_size = p->head_size;
-        sp->block_size = p->block_size;
-        sp->max_seqlen_q = p->max_seqlen_q;
-        sp->max_seqlen_k = p->max_seqlen_k;
-        sp->dtype = p->dtype;
-        sp->q_dtype = p->q_dtype;
-        sp->sliding_window = p->sliding_window;
-        sp->softcap = p->softcap;
-        sp->use_sinks = p->use_sinks;
-        sp->use_alibi = p->use_alibi;
-        sp->use_qq_bias = p->use_qq_bias;
-        sp->use_fp8 = p->use_fp8;
-        sp->num_cus = p->num_cus;
-        sp->num_kv_blocks = p->num_kv_blocks;
-    }
 
     /* Python (2D only): if p.dtype not in ("fp16", "bf16"): raise ValueError.
      * The 3D/reduce builders take dtype = spec.dtype_ir directly (F16/BF16) and
@@ -115,7 +87,7 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
     /* num_queries_per_kv = num_query_heads // num_kv_heads (Python @property
      * raises ValueError on a non-divisible ratio). The selector helper sets the
      * builder's sticky error and returns 0 in that case. */
-    ctx->num_queries_per_kv = rocke_unified_attn_num_queries_per_kv(b, &ctx->sel_p);
+    ctx->num_queries_per_kv = rocke_unified_attn_num_queries_per_kv(b, ctx->p);
     if(!rocke_ir_builder_ok(b))
     {
         return false;
@@ -405,12 +377,12 @@ void rocke_attn_unified_emit_prologue(rocke_attn_unified_build_ctx_t* ctx)
      * The 2D body builds q_desc + kv_desc here and the 3D body its segm
      * descriptors, so phase functions only read ctx fields. Reduce never runs
      * this prologue; its builder fills ml_desc, out_desc and q_desc itself. */
-    ctx->q_desc = rocke_unified_attn_q_descriptor(b, &ctx->sel_p);
-    ctx->kv_desc = rocke_unified_attn_paged_kv_descriptor(&ctx->sel_p);
+    ctx->q_desc = rocke_unified_attn_q_descriptor(b, ctx->p);
+    ctx->kv_desc = rocke_unified_attn_paged_kv_descriptor(ctx->p);
     if(ctx->kind == ROCKE_ATTN_UNIFIED_3D)
     {
         if(!rocke_unified_attn_segm_descriptors(
-               b, &ctx->sel_p, ctx->num_segments, &ctx->ml_desc, &ctx->out_desc))
+               b, ctx->p, ctx->num_segments, &ctx->ml_desc, &ctx->out_desc))
         {
             return;
         }

@@ -10,6 +10,8 @@
  *       rocke_unified_attention_problem_default
  *       rocke_unified_attention_problem_num_queries_per_kv  (num_queries_per_kv)
  *       rocke_unified_attention_problem_all_decode          (all_decode)
+ *   - select_path / select_2d / select_3d
+ *       rocke_unified_attention_problem_select_{path,2d,3d}
  *   - the coverage gate
  *       rocke_unified_attention_supports_scalar  (supports_native_unified_attention)
  *   - the three kernel_name fns (via rocke_kernel_name_join)
@@ -30,11 +32,13 @@
  * implemented in the sibling phase translation units; this file calls them via
  * the internal header.
  */
+#include "rocke/helper_rocke.helpers.attention.h" /* rocke_attention_next_power_of_2 */
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_attention_unified_internal.h"
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -98,12 +102,17 @@ rocke_unified_attention_problem_t rocke_unified_attention_problem_default(void)
     p.use_sinks = false;
     p.use_alibi = false;
     p.use_qq_bias = false;
+    p.use_additive_bias = false;
     p.use_fp8 = false;
+    p.fp8_fnuz = false;
     p.num_cus = 120;
+    p.target_ctas = 0;
     p.waves_per_eu = 0;
     p.waves_per_eu_set = false;
     p.compile_backend = NULL;
     p.num_kv_blocks = 0;
+    p.causal_top_left = false;
+    p.right_bound = 0;
     return p;
 }
 
@@ -125,59 +134,179 @@ bool rocke_unified_attention_problem_all_decode(const rocke_unified_attention_pr
     return p != NULL && p->max_seqlen_q == 1;
 }
 
-/* ===================================================================== *
- *  supports_native_unified_attention(problem) -- coverage gate
- * ===================================================================== */
+/* @property causal = (right_bound == 0). */
+bool rocke_unified_attention_problem_causal(const rocke_unified_attention_problem_t* p)
+{
+    return p != NULL && p->right_bound == 0;
+}
 
-bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_problem_t* p,
-                                             const char** out_reason)
+/* @property default_mask -- the bottom-right causal body every kernel family
+ * implements: not causal_top_left and right_bound == 0. */
+bool rocke_unified_attention_problem_default_mask(const rocke_unified_attention_problem_t* p)
+{
+    return p != NULL && !p->causal_top_left && p->right_bound == 0;
+}
+
+/* @property total_num_q_blocks_upper_bound (au.py:182-190):
+ *   block_m = 16 if num_queries_per_kv<=16 else _next_power_of_2(num_queries_per_kv)
+ *   block_q = block_m // num_queries_per_kv
+ *   return total_q // block_q + num_seqs */
+int rocke_unified_attention_problem_total_num_q_blocks_upper_bound(
+    const rocke_unified_attention_problem_t* p)
+{
+    int num_queries_per_kv;
+    int block_m;
+    int block_q;
+    if(p == NULL)
+        return -1;
+    num_queries_per_kv = rocke_unified_attention_problem_num_queries_per_kv(p);
+    if(num_queries_per_kv <= 0)
+        return -1;
+    block_m = (num_queries_per_kv <= 16) ? 16 : rocke_attention_next_power_of_2(num_queries_per_kv);
+    block_q = block_m / num_queries_per_kv;
+    return p->total_q / block_q + p->num_seqs;
+}
+
+/* @property _effective_target_ctas (au.py:192-199): target_ctas when > 0,
+ * else num_cus * 4. */
+int rocke_unified_attention_problem_effective_target_ctas(
+    const rocke_unified_attention_problem_t* p)
 {
     if(p == NULL)
-    {
-        if(out_reason != NULL)
-            *out_reason = "null problem";
+        return 0;
+    return (p->target_ctas > 0) ? p->target_ctas : p->num_cus * 4;
+}
+
+/* select_path / select_2d / select_3d (au.py:201-241). num_2d_prgms is
+ * total_num_q_blocks_upper_bound * num_kv_heads on all three. */
+const char* rocke_unified_attention_problem_select_path(const rocke_unified_attention_problem_t* p)
+{
+    if(rocke_unified_attention_problem_num_queries_per_kv(p) <= 0)
+        return NULL;
+    int num_2d
+        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    bool use_2d
+        = rocke_attention_use_2d_kernel(p->head_size,
+                                        p->sliding_window,
+                                        rocke_unified_attention_problem_all_decode(p),
+                                        p->max_seqlen_q,
+                                        p->max_seqlen_k,
+                                        rocke_unified_attention_problem_effective_target_ctas(p),
+                                        num_2d);
+    return use_2d ? "2d" : "3d";
+}
+
+bool rocke_unified_attention_problem_select_2d(const rocke_unified_attention_problem_t* p,
+                                               rocke_attention_2d_config_t* out)
+{
+    int nqpk = rocke_unified_attention_problem_num_queries_per_kv(p);
+    if(nqpk <= 0)
         return false;
+    int num_2d
+        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    return rocke_attention_select_2d_config(p->block_size,
+                                            p->head_size,
+                                            p->sliding_window,
+                                            rocke_unified_attention_problem_all_decode(p),
+                                            p->max_seqlen_q,
+                                            p->max_seqlen_k,
+                                            nqpk,
+                                            num_2d,
+                                            out);
+}
+
+bool rocke_unified_attention_problem_select_3d(const rocke_unified_attention_problem_t* p,
+                                               rocke_attention_3d_config_t* attn,
+                                               rocke_attention_3d_config_t* reduce)
+{
+    if(rocke_unified_attention_problem_num_queries_per_kv(p) <= 0)
+        return false;
+    bool half
+        = p->dtype != NULL && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0);
+    int num_2d
+        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    return rocke_attention_select_3d_config(
+        p->head_size,
+        p->block_size,
+        half ? 2 : 1,
+        p->max_seqlen_k,
+        rocke_unified_attention_problem_effective_target_ctas(p),
+        num_2d,
+        attn,
+        reduce);
+}
+
+/* ===================================================================== *
+ *  supports_native_unified_attention(problem, arch) -- coverage gate
+ * ===================================================================== */
+
+static bool scalar_gate_fail(char* reason, size_t reason_cap, const char* fmt, ...)
+{
+    if(reason != NULL && reason_cap > 0)
+    {
+        va_list ap;
+        va_start(ap, fmt);
+        (void)vsnprintf(reason, reason_cap, fmt, ap);
+        va_end(ap);
     }
+    return false;
+}
+
+static bool is_half_dtype(const char* dtype)
+{
+    return dtype != NULL && (strcmp(dtype, "fp16") == 0 || strcmp(dtype, "bf16") == 0);
+}
+
+bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_problem_t* p,
+                                             const char* arch_in,
+                                             char* reason,
+                                             size_t reason_cap)
+{
+    char arch[64];
+    if(p == NULL)
+        return scalar_gate_fail(reason, reason_cap, "null problem");
+    rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
     if(p->head_size != 64 && p->head_size != 128 && p->head_size != 256)
-    {
-        if(out_reason != NULL)
-            *out_reason = "unsupported head_size";
-        return false;
-    }
+        return scalar_gate_fail(reason, reason_cap, "unsupported head_size %d", p->head_size);
     if(p->block_size != 16 && p->block_size != 32 && p->block_size != 64)
+        return scalar_gate_fail(reason, reason_cap, "unsupported block_size %d", p->block_size);
+    if(!is_half_dtype(p->dtype))
+        return scalar_gate_fail(
+            reason, reason_cap, "unsupported dtype %s", p->dtype != NULL ? p->dtype : "None");
+    if(p->use_fp8)
     {
-        if(out_reason != NULL)
-            *out_reason = "unsupported block_size";
-        return false;
+        if(rocke_attn_unified_reject_fp8_format_arch_mismatch(p, arch, reason, reason_cap))
+            return false;
+        if(p->q_dtype != NULL && !is_half_dtype(p->q_dtype))
+            return scalar_gate_fail(
+                reason, reason_cap, "scalar 2D kernel: unsupported q_dtype '%s'", p->q_dtype);
     }
-    if(!(p->dtype && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)))
-    {
-        if(out_reason != NULL)
-            *out_reason = "unsupported dtype";
-        return false;
-    }
-    /* FP8 K/V cache: scalar 2D backend does not implement the FP8 dequant
-     * path yet (only the tiled 2D/3D backends do). */
-    if(p->use_fp8 || p->q_dtype != NULL)
-    {
-        if(out_reason != NULL)
-            *out_reason = "FP8 unified attention is not enabled in the scalar 2D path yet";
-        return false;
-    }
+    else if(p->q_dtype != NULL)
+        return scalar_gate_fail(
+            reason, reason_cap, "scalar 2D q_dtype override requires use_fp8=True");
     if(p->use_alibi)
-    {
-        if(out_reason != NULL)
-            *out_reason = "ALiBi slopes are not enabled in CK DSL attention yet";
-        return false;
-    }
+        return scalar_gate_fail(
+            reason, reason_cap, "ALiBi slopes are not enabled in CK DSL attention yet");
     if(p->use_qq_bias)
-    {
-        if(out_reason != NULL)
-            *out_reason = "QQ bias is not enabled in CK DSL attention yet";
+        return scalar_gate_fail(
+            reason, reason_cap, "QQ bias is not enabled in CK DSL attention yet");
+    if(p->use_additive_bias)
+        return scalar_gate_fail(
+            reason, reason_cap, "Additive bias is not enabled in CK DSL attention yet");
+    if(rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap))
         return false;
+
+    /* Python admits these; the C++ scalar kernels do not implement them. */
+    if(p->use_fp8)
+        return scalar_gate_fail(reason, reason_cap, "scalar fp8 K/V is not ported to C++ yet");
+    if(!rocke_unified_attention_problem_default_mask(p))
+    {
+        char label[64];
+        rocke_attn_unified_mask_label(p, label, sizeof(label));
+        return scalar_gate_fail(
+            reason, reason_cap, "scalar %s masks are not ported to C++ yet", label);
     }
-    if(out_reason != NULL)
-        *out_reason = "supported by scalar CK DSL 2D attention backend";
+    scalar_gate_fail(reason, reason_cap, "supported by scalar CK DSL 2D attention backend");
     return true;
 }
 
@@ -503,9 +632,9 @@ rocke_kernel_def_t*
      * never run for reduce, so without this every loop below reads a NULL
      * ml_desc. */
     if(!rocke_unified_attn_segm_descriptors(
-           b, &ctx.sel_p, ctx.num_segments, &ctx.ml_desc, &ctx.out_desc))
+           b, ctx.p, ctx.num_segments, &ctx.ml_desc, &ctx.out_desc))
         return NULL;
-    ctx.q_desc = rocke_unified_attn_q_descriptor(b, &ctx.sel_p);
+    ctx.q_desc = rocke_unified_attn_q_descriptor(b, ctx.p);
 
     rocke_attn_unified_emit_reduce_max_loop(&ctx);
     rocke_attn_unified_emit_reduce_combine_loop(&ctx);

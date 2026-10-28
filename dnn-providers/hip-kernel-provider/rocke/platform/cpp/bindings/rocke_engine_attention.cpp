@@ -1434,8 +1434,8 @@ void reg3(py::module_& m,
 
 /* ===================== spec_from_problem ===================== */
 
-/* UnifiedAttentionProblem fields the selector problem struct has no slot for;
- * each one steers selection in Python. */
+/* UnifiedAttentionProblem fields the C++ selectors do not read yet; each one
+ * steers selection in Python, so accepting them would silently diverge. */
 static const unported_field k_problem_unported[] = {
     {"use_additive_bias", false, 0},
     {"fp8_fnuz", false, 0},
@@ -1446,14 +1446,11 @@ static const unported_field k_problem_unported[] = {
     {"right_bound", false, 0},
 };
 
-/* Convert a Python UnifiedAttentionProblem dict to the C struct. */
-static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& st)
+/* Convert every field of a Python UnifiedAttentionProblem dict to the C
+ * struct. */
+static rocke_unified_attention_problem_t problem_fields_from_dict(const py::dict& d, Store& st)
 {
-    reject_unported(d,
-                    "attn_tiled_spec_from_problem",
-                    k_problem_unported,
-                    sizeof(k_problem_unported) / sizeof(k_problem_unported[0]));
-    rocke_unified_attn_problem_t p{};
+    rocke_unified_attention_problem_t p{};
     p.total_q = a_int(d, "total_q", 0);
     p.num_seqs = a_int(d, "num_seqs", 0);
     p.num_query_heads = a_int(d, "num_query_heads", 0);
@@ -1467,9 +1464,16 @@ static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& 
     p.use_sinks = a_bool(d, "use_sinks", false);
     p.use_alibi = a_bool(d, "use_alibi", false);
     p.use_qq_bias = a_bool(d, "use_qq_bias", false);
+    p.use_additive_bias = a_bool(d, "use_additive_bias", false);
     p.use_fp8 = a_bool(d, "use_fp8", false);
+    p.fp8_fnuz = a_bool(d, "fp8_fnuz", false);
     p.num_cus = a_int(d, "num_cus", 120);
+    p.target_ctas = a_int(d, "target_ctas", 0);
+    p.waves_per_eu_set = d.contains("waves_per_eu") && !d["waves_per_eu"].is_none();
+    p.waves_per_eu = a_int(d, "waves_per_eu", 0);
     p.num_kv_blocks = a_int(d, "num_kv_blocks", 0);
+    p.causal_top_left = a_bool(d, "causal_top_left", false);
+    p.right_bound = a_int(d, "right_bound", 0);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
@@ -1477,7 +1481,20 @@ static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& 
         p.dtype = "bf16";
     if(a_str(d, "q_dtype", v))
         p.q_dtype = st.keep(v);
+    if(a_str(d, "compile_backend", v))
+        p.compile_backend = st.keep(v);
     return p;
+}
+
+/* As problem_fields_from_dict, for the tiled spec selector: rejects the
+ * fields it does not read yet. */
+static rocke_unified_attention_problem_t problem_dict_to_c(const py::dict& d, Store& st)
+{
+    reject_unported(d,
+                    "attn_tiled_spec_from_problem",
+                    k_problem_unported,
+                    sizeof(k_problem_unported) / sizeof(k_problem_unported[0]));
+    return problem_fields_from_dict(d, st);
 }
 
 /* Convert a rocke_attention_tiled_2d_spec_t back to a Python dict so the
@@ -1559,16 +1576,49 @@ py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch
                               "gfx950 (got "
                               + arch + ")");
     Store st;
-    rocke_unified_attn_problem_t p = problem_dict_to_c(d, st);
+    rocke_unified_attention_problem_t p = problem_dict_to_c(d, st);
     const char* a = arch.c_str();
     rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
     /* Run the LDS-budget resolver (mirrors the Python _resolve_lds_budget call
      * that attention_unified._tiled_spec_from_problem makes after building the spec). */
     char reason[256] = {};
-    rocke_unified_attn_set_resolved_arch(a);
-    rocke_unified_attn_resolve_lds_budget(&spec, reason, sizeof(reason));
-    rocke_unified_attn_set_resolved_arch(NULL);
+    rocke_unified_attn_resolve_lds_budget(&spec, a, reason, sizeof(reason));
     return spec_to_dict(spec);
+}
+
+static py::dict config_2d_to_dict(const rocke_attention_2d_config_t& c)
+{
+    py::dict d;
+    d["BLOCK_M"] = c.block_m;
+    d["BLOCK_Q"] = c.block_q;
+    d["TILE_SIZE"] = c.tile_size;
+    d["num_warps"] = c.num_warps;
+    d["num_stages"] = c.num_stages;
+    d["waves_per_eu"] = c.waves_per_eu;
+    return d;
+}
+
+static py::dict config_3d_to_dict(const rocke_attention_3d_config_t& c)
+{
+    py::dict d;
+    d["TILE_SIZE"] = c.tile_size;
+    d["NUM_SEGMENTS_PER_SEQ"] = c.num_segments_per_seq;
+    d["num_warps"] = c.num_warps;
+    d["num_stages"] = c.num_stages;
+    d["waves_per_eu"] = c.waves_per_eu;
+    return d;
+}
+
+[[noreturn]] static void raise_bad_problem(const char* fn)
+{
+    throw py::value_error(std::string(fn)
+                          + ": invalid problem (num_query_heads must be divisible by "
+                            "num_kv_heads, and the 2D program count must be positive)");
+}
+
+static py::tuple supports_result(bool ok, const char* reason)
+{
+    return py::make_tuple(ok, std::string(reason));
 }
 
 void register_attention(py::module_& m)
@@ -1596,4 +1646,81 @@ void register_attention(py::module_& m)
         "Run the gfx950 tiled-2D selector on a UnifiedAttentionProblem dict "
         "and return the assembled spec as a dict (mirrors "
         "attention_spec_builder._tiled_spec_from_problem).");
+
+    m.def(
+        "unified_attention_select_path",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            const char* path = rocke_unified_attention_problem_select_path(&p);
+            if(path == NULL)
+                raise_bad_problem("unified_attention_select_path");
+            return std::string(path);
+        },
+        py::arg("problem"),
+        "UnifiedAttentionProblem.select_path() on a problem dict: '2d' or '3d'.");
+    m.def(
+        "unified_attention_select_2d",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            rocke_attention_2d_config_t c{};
+            if(!rocke_unified_attention_problem_select_2d(&p, &c))
+                raise_bad_problem("unified_attention_select_2d");
+            return config_2d_to_dict(c);
+        },
+        py::arg("problem"),
+        "UnifiedAttentionProblem.select_2d() as an Attention2DConfig field dict.");
+    m.def(
+        "unified_attention_select_3d",
+        [](const py::dict& d) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            rocke_attention_3d_config_t attn{};
+            rocke_attention_3d_config_t reduce{};
+            if(!rocke_unified_attention_problem_select_3d(&p, &attn, &reduce))
+                raise_bad_problem("unified_attention_select_3d");
+            return py::make_tuple(config_3d_to_dict(attn), config_3d_to_dict(reduce));
+        },
+        py::arg("problem"),
+        "UnifiedAttentionProblem.select_3d() as two Attention3DConfig field dicts.");
+    m.def(
+        "unified_attention_supports_scalar",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            char reason[1024] = {};
+            bool ok
+                = rocke_unified_attention_supports_scalar(&p, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "supports_native_unified_attention(problem, arch) -> (ok, reason).");
+    m.def(
+        "unified_attention_supports_tiled_2d",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_unified_attention_supports_tiled_2d(
+                &p, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "supports_native_unified_attention_tiled(problem, arch) -> (ok, reason).");
+    m.def(
+        "unified_attention_supports_tiled_3d",
+        [](const py::dict& d, const std::string& arch) {
+            Store st;
+            rocke_unified_attention_problem_t p = problem_fields_from_dict(d, st);
+            char reason[1024] = {};
+            bool ok = rocke_unified_attention_supports_tiled_3d(
+                &p, arch.c_str(), reason, sizeof(reason));
+            return supports_result(ok, reason);
+        },
+        py::arg("problem"),
+        py::arg("arch"),
+        "supports_native_unified_attention_3d_tiled(problem, arch) -> (ok, reason).");
 }

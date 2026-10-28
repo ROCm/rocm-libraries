@@ -147,7 +147,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     acc_val = loop.iter_vars ? loop.iter_vars[2] : NULL;
 
     score = rocke_unified_attn_emit_qk_score(b,
-                                             &ctx->sel_p,
+                                             ctx->p,
                                              ctx->dtype,
                                              ctx->abi_query,
                                              ctx->abi_key,
@@ -171,7 +171,7 @@ void rocke_attn_unified_emit_3d_segment_loop(rocke_attn_unified_build_ctx_t* ctx
     new_l = rocke_b_fadd(b, rocke_b_fmul(b, l_val, alpha), prob);
 
     vv = rocke_unified_attn_emit_v_load(b,
-                                        &ctx->sel_p,
+                                        ctx->p,
                                         ctx->dtype,
                                         ctx->abi_value,
                                         ctx->abi_block_tables,
