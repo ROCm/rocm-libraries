@@ -258,6 +258,16 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
     del debug
 
 
+def initMany(archs: Any, assemblerPath: str = "", debug: bool = False) -> None:
+    """Mirror of ``rocisa::rocIsa::initMany`` (base.hpp).
+
+    Same result as calling ``init`` for each arch. The C++ version probes
+    the ISAs concurrently; here they are initialised one after another.
+    """
+    for arch in archs:
+        init(arch, assemblerPath, debug)
+
+
 def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
                           key: "tuple") -> None:
     """Query ISA caps from native rocisa via a subprocess.

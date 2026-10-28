@@ -21,6 +21,7 @@ import os
 import pickle
 import sys
 import unittest
+from unittest import mock
 
 from _adaptor_testcase import AdaptorTestCase
 
@@ -186,6 +187,22 @@ class TestRocIsaForwarding(_StateSaveRestore):
         self.assertTrue(_base.isInit())
         self.assertIn((12, 5, 0), live_data)
         self.assertEqual(_base._assembler_path, "/fake/path")
+
+    def test_initmany_forwards(self):
+        with mock.patch.object(_base, "initMany") as initMany:
+            rocIsa.getInstance().initMany([(12, 5, 0)], "/fake/path", False)
+        initMany.assert_called_once_with([(12, 5, 0)], "/fake/path", False)
+
+    def test_initmany_inits_each_arch(self):
+        with mock.patch.object(_base, "init") as init:
+            _base.initMany([(9, 4, 2), (12, 5, 0)], "/fake/path", False)
+        self.assertEqual(
+            init.call_args_list,
+            [
+                mock.call((9, 4, 2), "/fake/path", False),
+                mock.call((12, 5, 0), "/fake/path", False),
+            ],
+        )
 
     def test_isinit_forwards(self):
         _base._is_init = True
