@@ -97,6 +97,8 @@ struct IntegrationTestBundle
         return tensors;
     }
 
+    // Reads only the input blobs, as loadTensors() does. Under --benchmark-reference
+    // the golden outputs are read separately, inside the reference timing.
     TensorMap loadInputs() const
     {
         TensorMap tensors;
@@ -107,6 +109,9 @@ struct IntegrationTestBundle
         return tensors;
     }
 
+    // Adds the golden output blobs to `tensors`, which must already hold the inputs:
+    // a ragged output takes its offset tensor from them. Does nothing for a graph-only
+    // bundle. Throws as loadTensors() does.
     void loadGoldenOutputs(TensorMap& tensors) const
     {
         if(blobs.has_value())
@@ -116,13 +121,9 @@ struct IntegrationTestBundle
     }
 
 private:
+    // Callers check that the bundle has blobs.
     void loadTensorUids(TensorMap& tensors, const std::vector<int64_t>& uids) const
     {
-        if(!blobs.has_value())
-        {
-            return;
-        }
-
         const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuffer.data());
         std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
             attrByUid;

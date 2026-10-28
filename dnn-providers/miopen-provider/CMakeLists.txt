@@ -422,6 +422,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            # Five small batchnorm inference bundles: a few seconds on one GPU.
+            BENCHMARK_REFERENCE_SMOKE_FILTER "quick_BatchnormFwdInference_Inference.*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
@@ -450,6 +452,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             apply_ctest_category_labels(
                 "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+                               ${PROJECT_NAME}-external-integration-check-benchmark-reference-smoke
             )
         endif()
     else()

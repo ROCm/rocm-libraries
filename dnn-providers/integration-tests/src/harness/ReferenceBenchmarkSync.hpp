@@ -1,3 +1,6 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <string>
@@ -9,14 +12,28 @@
 namespace hipdnn_integration_tests
 {
 
-inline void synchronizeReferenceBenchmark()
+/// Turns a failed synchronize into a ReferenceBenchmarkError, which fails the test
+/// rather than letting a fallback reference run.
+inline void throwIfReferenceSyncFailed(hipError_t status)
 {
-    const auto status = hipDeviceSynchronize();
     if(status != hipSuccess)
     {
         throw ReferenceBenchmarkError(std::string("reference benchmark synchronization failed: ")
                                       + hipGetErrorString(status));
     }
+}
+
+inline void synchronizeReferenceBenchmark()
+{
+    throwIfReferenceSyncFailed(hipDeviceSynchronize());
+}
+
+/// The timer --benchmark-reference uses in production: a real device synchronize
+/// around each phase, so a GPU reference's timing covers its kernels and not only
+/// their launch.
+inline ReferenceBenchmarkTimer productionReferenceTimer()
+{
+    return ReferenceBenchmarkTimer(synchronizeReferenceBenchmark);
 }
 
 } // namespace hipdnn_integration_tests

@@ -195,9 +195,10 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--benchmark-reference")
             .default_value(false)
             .implicit_value(true)
-            .help("Measure reference preparation, CPU/GPU compute or golden-output loading, "
-                  "and expected-output transfers, excluding engine execution and comparison. "
-                  "Print per-test wall times and reference_benchmark_* properties.");
+            .help("Measure each bundle test's reference preparation, CPU/GPU compute or "
+                  "golden-output loading, and expected-output transfers, excluding engine "
+                  "execution and comparison (both still run). Print per-test wall times and "
+                  "reference_benchmark_* properties.");
         parser.add_argument("--benchmark")
             .default_value(false)
             .implicit_value(true)

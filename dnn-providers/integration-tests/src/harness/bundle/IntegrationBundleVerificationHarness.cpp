@@ -429,6 +429,8 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
     }
     catch(const ReferenceBenchmarkError&)
     {
+        // A failed synchronize is the harness's fault, not this reference's: let it
+        // fail the test rather than reach the catch below and fall back to the next.
         throw;
     }
     catch(const std::exception& e)
@@ -442,9 +444,11 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
         error.append(" ").append(detail);
         referenceErrored(chain, std::move(entry), std::move(error));
     }
-    if(_deps.policy.benchmarkReference && _referenceBenchmarks.back().status == "pending")
+    // Still pending means neither catch above settled it, so it was not applicable.
+    if(_deps.policy.benchmarkReference
+       && _referenceBenchmarks.back().status == ReferenceBenchmarkStatus::PENDING)
     {
-        _referenceBenchmarks.back().status = "declined";
+        _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::DECLINED;
     }
     return std::nullopt;
 }
@@ -455,7 +459,7 @@ void IntegrationBundleVerificationHarness::referenceErrored(OracleChain& chain,
 {
     if(_deps.policy.benchmarkReference)
     {
-        _referenceBenchmarks.back().status = "error";
+        _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
     }
     recordRefError(error);
     chain.tried.push_back({std::move(entry), std::move(error)});
@@ -580,7 +584,7 @@ VerificationOutcome
         case RefStatus::CAPABILITY_MISS:
             if(_deps.policy.benchmarkReference)
             {
-                _referenceBenchmarks.back().status = "declined";
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::DECLINED;
             }
             chain.declined(label + " (cannot run this op: " + result.message + ")");
             break;
@@ -588,7 +592,7 @@ VerificationOutcome
         {
             if(_deps.policy.benchmarkReference)
             {
-                _referenceBenchmarks.back().status = "error";
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
             }
             // "the next reference", not a name: the next candidate has not been probed
             // yet and may turn out not to be applicable.
@@ -615,7 +619,7 @@ VerificationOutcome
         case RefStatus::HARNESS_ERROR:
             if(_deps.policy.benchmarkReference)
             {
-                _referenceBenchmarks.back().status = "error";
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
             }
             // Not the reference's fault, so it neither falls through to the next one nor
             // goes in the reference-error report.
@@ -712,7 +716,9 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
 
     // Read here, not at registration, so a golden bundle holds its tensors only while
     // its own test runs. A blob that is unreadable or the wrong size fails this test
-    // instead of quietly dropping it from the run.
+    // instead of quietly dropping it from the run. Under --benchmark-reference the
+    // golden outputs are read later, inside the reference timing; see
+    // compareAgainstGolden().
     try
     {
         _inputs = _deps.policy.benchmarkReference ? _bundle->loadInputs() : _bundle->loadTensors();
@@ -920,6 +926,8 @@ IntegrationBundleVerificationHarness::RefRunResult
     }
     catch(const ReferenceBenchmarkError& e)
     {
+        // A failed synchronize: HARNESS_ERROR fails the test without a fallback,
+        // where the RUNTIME_ERROR the catch below gives would try the next reference.
         return {RefStatus::HARNESS_ERROR, e.what()};
     }
     catch(const detail::DeviceOutputError& e)
@@ -974,8 +982,29 @@ VerificationOutcome
         ReferenceBenchmarkResult result;
         result.reference = "golden";
         _referenceBenchmarks.push_back(std::move(result));
-        measureReference(&ReferenceBenchmarkResult::executeMs,
-                         [&] { _bundle->loadGoldenOutputs(_inputs); });
+        // prepareInputs() left the golden outputs unread, so reading them is the
+        // golden reference's execute phase.
+        std::optional<std::string> loadError;
+        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
+            try
+            {
+                _bundle->loadGoldenOutputs(_inputs);
+            }
+            catch(const std::exception& e)
+            {
+                loadError = e.what();
+            }
+        });
+        if(loadError.has_value())
+        {
+            // The same failure prepareInputs() reports for this blob without the flag,
+            // so the flag does not change the verdict.
+            _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "tensor data failed to load: " + *loadError + " ("
+                                                   + _bundlePath.string() + ")");
+        }
     }
     return compareAgainst(
         engineOutputs,
@@ -1006,6 +1035,8 @@ VerificationOutcome
     {
         _referenceBenchmarks.back().validator
             = validationSite == ValidationSite::DEVICE ? "gpu" : "cpu";
+        // The comparison below would make these copies anyway. Doing them here moves
+        // the transfer into the reference's timing and out of the comparison's.
         measureReference(&ReferenceBenchmarkResult::materializeMs, [&] {
             for(const auto uid : _bundle->outputTensorUids)
             {
@@ -1048,7 +1079,9 @@ VerificationOutcome
 
     if(_deps.policy.benchmarkReference)
     {
-        _referenceBenchmarks.back().status = mismatches.empty() ? "verified" : "mismatch";
+        _referenceBenchmarks.back().status = mismatches.empty()
+                                                 ? ReferenceBenchmarkStatus::VERIFIED
+                                                 : ReferenceBenchmarkStatus::MISMATCH;
     }
     return comparisonOutcome(mismatches.empty(), verifier);
 }

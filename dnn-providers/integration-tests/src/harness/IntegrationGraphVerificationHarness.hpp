@@ -33,7 +33,6 @@
 #include "harness/GraphDescription.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/PlanWorkspace.hpp"
-#include "harness/ReferenceBenchmarkSync.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -144,21 +143,6 @@ protected:
     /// Built in validateOutputs(), once the reference executor says where its output
     /// lives: that — or --validator, when set — is where each comparison runs.
     std::vector<std::function<void(ValidationSite)>> _deferredValidators;
-    std::optional<ReferenceBenchmarkResult> _referenceBenchmark;
-    ReferenceBenchmarkTimer _referenceTimer{synchronizeReferenceBenchmark};
-
-    void measureReference(double ReferenceBenchmarkResult::*phase,
-                          const std::function<void()>& work)
-    {
-        if(_referenceBenchmark.has_value())
-        {
-            _referenceTimer.measure(*_referenceBenchmark.*phase, work);
-        }
-        else
-        {
-            work();
-        }
-    }
 
     void SetUp() override
     {
@@ -259,14 +243,6 @@ protected:
 
         ASSERT_NO_FATAL_FAILURE(buildExecutionPlans(graph));
 
-        if(TestConfig::get().benchmarkReference())
-        {
-            _referenceBenchmark.emplace();
-            _referenceBenchmark->reference
-                = TestConfig::get().getReferenceExecutorType() == ReferenceExecutorType::GPU
-                      ? "gpu"
-                      : "cpu";
-        }
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
         generateBundles(graph, refBundle, gpuBundle);
 
@@ -275,8 +251,7 @@ protected:
         {
             GTEST_SKIP() << initResult.reason;
         }
-        measureReference(&ReferenceBenchmarkResult::prepareMs,
-                         [&] { initResult = initializeBundle(graph, refBundle); });
+        initResult = initializeBundle(graph, refBundle);
         if(!initResult.filled)
         {
             GTEST_SKIP() << initResult.reason;
@@ -286,11 +261,6 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
         ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
-        if(_referenceBenchmark.has_value())
-        {
-            _referenceBenchmark->status = ::testing::Test::HasFailure() ? "mismatch" : "verified";
-            reportReferenceBenchmark(*_referenceBenchmark);
-        }
 
         // Only a verified graph is timed.
         const auto& benchmark = TestConfig::get().benchmarkSettings();
@@ -444,7 +414,7 @@ protected:
 
             gpuTensor->markDeviceModified();
 
-            if(referenceUsesDevice && !_referenceBenchmark.has_value())
+            if(referenceUsesDevice)
             {
                 refTensor->markDeviceModified();
             }
@@ -599,48 +569,16 @@ public:
     void executeReferenceGraph(hipdnn_frontend::graph::Graph& graph,
                                hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        std::vector<uint8_t> serializedGraph;
-        VariantPack variantPack;
-        IReferenceGraphExecutor* executor = nullptr;
-        bool usesDevice = false;
-        ASSERT_NO_FATAL_FAILURE(measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
-            auto [serialized, serErr] = graph.to_binary();
-            ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-            serializedGraph = std::move(serialized);
-            executor = &getReferenceExecutor();
-            usesDevice = executor->requiresDeviceMemory();
-            variantPack = usesDevice ? bundle.toDeviceVariantPack() : bundle.toHostVariantPack();
-        }));
+        auto [serializedGraph, serErr] = graph.to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        auto& executor = getReferenceExecutor();
+        const bool usesDevice = executor.requiresDeviceMemory();
         HIPDNN_PLUGIN_LOG_TRACE("executeReferenceGraph: using " << (usesDevice ? "device" : "host")
                                                                 << " variant pack");
-        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
-            executor->execute(serializedGraph.data(), serializedGraph.size(), variantPack);
-        });
-        if(_referenceBenchmark.has_value())
-        {
-            const auto site
-                = resolveValidationSite(TestConfig::get().getValidatorDevice(),
-                                        usesDevice ? ValidationSite::DEVICE : ValidationSite::HOST);
-            _referenceBenchmark->validator = site == ValidationSite::DEVICE ? "gpu" : "cpu";
-            measureReference(&ReferenceBenchmarkResult::materializeMs, [&] {
-                for(const auto uid : bundle.outputTensorIds)
-                {
-                    auto& tensor = *bundle.tensors.at(uid);
-                    if(usesDevice)
-                    {
-                        tensor.markDeviceModified();
-                    }
-                    if(site == ValidationSite::DEVICE)
-                    {
-                        static_cast<void>(tensor.rawDeviceData());
-                    }
-                    else
-                    {
-                        static_cast<void>(tensor.rawHostData());
-                    }
-                }
-            });
-        }
+        auto variantPack = usesDevice ? bundle.toDeviceVariantPack() : bundle.toHostVariantPack();
+
+        executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
     static IReferenceGraphExecutor& getReferenceExecutor()
@@ -682,11 +620,9 @@ public:
         // as two 4-bit values per byte) so the buffer can be consumed directly by
         // the kernel. Both are filled from the same seed, so they hold identical
         // logical values.
-        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
-            refBundle.addTensor(*tensorAttr,
-                                hipdnn_test_sdk::utilities::createTensorFromAttribute(
-                                    *tensorAttr, /*packSubByteElements=*/false));
-        });
+        refBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/false));
         gpuBundle.addTensor(*tensorAttr,
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(
                                 *tensorAttr, /*packSubByteElements=*/true));
