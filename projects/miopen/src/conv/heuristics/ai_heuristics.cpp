@@ -1758,6 +1758,10 @@ struct ConfigEmbeddingTable
     std::uint32_t key_dim = 0;
     std::uint32_t emb_dim = 0;
     std::unordered_map<std::string, std::vector<float>> rows;
+    // v3 only: ordered (kernel_id, embedding) vocabulary, in table row order. Lets the selection
+    // path rank the whole vocab and check applicability lazily (IsArgsSupported) without
+    // FillValidKernels. Empty for v1/v2 tables and for sentinel rows (kernel_id == "").
+    std::vector<std::pair<std::string, std::vector<float>>> vocab;
 };
 
 // Build the byte key for an encoded-param vector (exact match, collision-free).
@@ -1802,12 +1806,12 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         // ignored (fail closed to the fdeep path) rather than dotting embeddings from a different
         // training run. v1 (no hash) is still accepted for backward compatibility.
         std::string table_enc_md5;
-        if(version == 2)
+        if(version == 2 || version == 3)
         {
             table_enc_md5.resize(32);
             is.read(table_enc_md5.data(), 32);
         }
-        const std::uint32_t header_bytes = (version == 2) ? 60u : 28u;
+        const std::uint32_t header_bytes = (version == 2 || version == 3) ? 60u : 28u;
         // Only the format this build understands: fp32 keys and fp32 embeddings. Validate the
         // header against the actual file size before trusting num_rows, so a corrupt count cannot
         // drive a huge reserve/allocation.
@@ -1816,13 +1820,17 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         is.seekg(0, std::ios::end);
         const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
         is.seekg(header_bytes, std::ios::beg);
-        bool header_ok =
-            is.good() && std::memcmp(magic, "MICE", 4) == 0 && (version == 1 || version == 2) &&
-            key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
-            file_size == header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        // v3 appends a variable-length kernel-id block after the rows, so its total size is only
+        // bounded below by the row region; v1/v2 must match exactly.
+        const std::uint64_t rows_end =
+            header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 &&
+                         (version == 1 || version == 2 || version == 3) && key_dtype == 0 &&
+                         emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
+                         (version == 3 ? file_size >= rows_end : file_size == rows_end);
         // Fail closed when a v2 table was built from a different config encoder than the one
         // installed (model retrained but the table not regenerated).
-        if(header_ok && version == 2)
+        if(header_ok && (version == 2 || version == 3))
         {
             const auto enc_path =
                 (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model"))
@@ -1847,9 +1855,13 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         }
         if(header_ok)
         {
-            table.key_dim = key_dim;
-            table.emb_dim = emb_dim;
+            table.key_dim        = key_dim;
+            table.emb_dim        = emb_dim;
+            const bool has_vocab = (version == 3);
             table.rows.reserve(num_rows);
+            std::vector<std::vector<float>> ordered_emb; // row-order embeddings, for the v3 vocab
+            if(has_vocab)
+                ordered_emb.reserve(num_rows);
             std::vector<float> key(key_dim);
             std::vector<float> emb(emb_dim);
             std::uint32_t read_rows = 0;
@@ -1864,8 +1876,46 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                 if(!table.rows.emplace(EmbeddingKey(key), emb).second)
                     MIOPEN_LOG_W("Duplicate key in config embedding table "
                                  << path << "; keeping first row");
+                if(has_vocab)
+                    ordered_emb.push_back(emb);
             }
             table.present = (read_rows == num_rows);
+            // v3: read the trailing kernel-id block (num_rows length-prefixed strings) and pair each
+            // non-empty kernel_id with its row embedding. A truncated/corrupt block only disables the
+            // lazy-applicability vocab; the rows map (fdeep fast path) stays usable.
+            if(table.present && has_vocab)
+            {
+                table.vocab.reserve(num_rows);
+                bool vocab_ok = true;
+                for(std::uint32_t r = 0; r < num_rows; ++r)
+                {
+                    std::uint32_t len = 0;
+                    is.read(reinterpret_cast<char*>(&len), sizeof(len));
+                    if(!is.good() || len > (1u << 20))
+                    {
+                        vocab_ok = false;
+                        break;
+                    }
+                    std::string kid(len, '\0');
+                    if(len > 0)
+                        is.read(kid.data(), static_cast<std::streamsize>(len));
+                    if(!is.good())
+                    {
+                        vocab_ok = false;
+                        break;
+                    }
+                    if(!kid.empty()) // skip sentinel rows (no kernel_id)
+                        table.vocab.emplace_back(std::move(kid), ordered_emb[r]);
+                }
+                if(!vocab_ok)
+                {
+                    MIOPEN_LOG_W("Config embedding table "
+                                 << path
+                                 << " has a truncated kernel-id block; disabling lazy-applicability "
+                                    "vocab (fdeep fast path still available)");
+                    table.vocab.clear();
+                }
+            }
             if(!table.present)
             {
                 MIOPEN_LOG_W("Config embedding table at " << path << " is truncated/corrupt; "
@@ -1874,12 +1924,23 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
             }
             else
             {
-                MIOPEN_LOG_I2("Loaded config embedding table " << path << " (" << table.rows.size()
-                                                               << " rows)");
+                MIOPEN_LOG_I2("Loaded config embedding table "
+                              << path << " (" << table.rows.size() << " rows"
+                              << (has_vocab ? ", " + std::to_string(table.vocab.size()) + " vocab"
+                                            : std::string())
+                              << ")");
             }
         }
     }
     return tables.emplace(cache_key, std::move(table)).first->second;
+}
+
+// Ordered (kernel_id, embedding) vocabulary for the rank-then-lazy-applicability selection path.
+// Empty unless a v3 table with a kernel-id block is installed for (arch, solver).
+MIOPEN_INTERNALS_EXPORT const std::vector<std::pair<std::string, std::vector<float>>>&
+GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver)
+{
+    return GetConfigEmbeddingTable(arch, solver).vocab;
 }
 
 MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
