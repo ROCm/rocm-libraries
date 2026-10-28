@@ -29,6 +29,7 @@
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -45,6 +46,7 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
@@ -57,18 +59,22 @@
  * The backward pass is three launches, one per slot, in this order: `prep` (Delta = sum of
  * O * dO and LSE', the statistics with -inf turned into +inf, both into the shared
  * workspace region), `dkdv` (dK and dV) and `dq` (dQ and, on a bias graph, dBias; a broadcast
- * dBias lands in the dq slot's scratch and is summed by the dBias reduce kernel, a second
- * symbol of the same code object that the row's `reduce_symbol` names). The seed and offset
- * of a dropout graph reach the dkdv and dq kernels as pointers: 64-bit device tensors are
- * read in place, every other form is written into the shared region by the prep slot.
+ * dBias lands in the dq slot's scratch and is summed by the dBias reduce kernel: a second
+ * symbol of the same code object that the row's `reduce_symbol` names, or, on a row served
+ * by the `dq_reduce` dispatch, the `dbias_reduce` launch of the row's `sources`). The seed
+ * and offset of a dropout graph reach the dkdv and dq kernels as pointers: 64-bit device
+ * tensors are read in place, every other form is written into the shared region by the prep
+ * slot.
  *
  * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp) with FLOAT
  * accepted, padded varlen included: the graph's `seq_len_q` and `seq_len_kv` tensors are the
  * kernels' per-batch lengths. The engine adds what only it knows: a workspace whose regions
- * cannot be proven to fit is declined (SP-WS). Which slot rows serve a
- * graph is the kernel match of each slot, over the fields the slot's KMD carries. The graph
- * match publishes the shared workspace as bound tokens (`ws.*`); the handlers read them at
- * prepare() and check them against the layout they recompute.
+ * cannot be proven to fit is declined (SP-WS). Which slot rows serve a graph is the kernel
+ * match of each slot, over the fields the slot's KMD carries: the launch grid follows the
+ * row's `grid`, and a 16-bit bias outside the LDS staging contract (BI-8) declines the dq
+ * rows that stage the bias. The graph match publishes the shared workspace as bound tokens
+ * (`ws.*`); the handlers read them at prepare() and check them against the layout they
+ * recompute.
  *
  * Launch arguments are a pure function of the plan prepare() resolves and the execute-time
  * buffers (launchArguments()), so one description of each kernel's argument list feeds the
@@ -102,6 +108,14 @@ constexpr std::string_view DQ_KERNEL_MATCHER_SYMBOL
 constexpr std::string_view PREP_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch";
 constexpr std::string_view DKDV_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch";
 constexpr std::string_view DQ_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch";
+/// The dq slot's multi-launch dispatch: the rows that carry the dQ kernel and the dBias reduce
+/// kernel as separate launches (`sources`).
+constexpr std::string_view DQ_REDUCE_DISPATCH_SYMBOL
+    = "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch";
+
+/// The launch names of a `dq_reduce` row's `sources`.
+constexpr std::string_view DQ_LAUNCH = "dq";
+constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
 
 // Kernel metadata fields, declared by each slot's KMD. Every slot carries the first group; the
 // rest belong to the slot that names them.
@@ -133,6 +147,18 @@ constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
 constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
+/// How the object's launch grid maps the problem onto x, y and z; see gridOf.
+constexpr std::string_view GRID_FIELD = "grid";
+/// dq: "none" loads the bias directly; any other value stages the 16-bit bias through LDS
+/// (see native::stagesBias).
+constexpr std::string_view BIAS_STAGE_FIELD = "bias_stage";
+constexpr std::string_view BIAS_STAGE_NONE = "none";
+
+/// The `grid` values, one launch order per spelling: x, y, z, with the batch always on z.
+constexpr std::string_view GRID_PREP = "qblocks_by_heads_by_seqs";
+constexpr std::string_view GRID_DKDV_HEADS_FIRST = "kheads_by_kvblocks_by_seqs";
+constexpr std::string_view GRID_DKDV_BLOCKS_FIRST = "kvblocks_by_kheads_by_seqs";
+constexpr std::string_view GRID_DQ = "qheads_by_qblocks_by_seqs";
 
 // What graph_match binds for kernel_match.
 constexpr std::string_view CLASS_TOKEN = "flydsl_sdpa_bwd_split.class";
@@ -141,6 +167,9 @@ constexpr std::string_view HEAD_DIM_QK_TOKEN = "flydsl_sdpa_bwd_split.head_dim_q
 constexpr std::string_view HEAD_DIM_V_TOKEN = "flydsl_sdpa_bwd_split.head_dim_v";
 constexpr std::string_view DROPOUT_TOKEN = "flydsl_sdpa_bwd_split.dropout";
 constexpr std::string_view DBIAS_TOKEN = "flydsl_sdpa_bwd_split.dbias";
+/// 1 for a 16-bit bias graph outside the LDS staging contract (BI-8): no row that stages the
+/// bias serves it.
+constexpr std::string_view BIAS_UNSTAGED_TOKEN = "flydsl_sdpa_bwd_split.bias_unstaged";
 constexpr std::string_view GQA_PACK_TOKEN = "flydsl_sdpa_bwd_split.gqa_pack";
 constexpr std::string_view BATCH_TOKEN = "flydsl_sdpa_bwd_split.batch";
 constexpr std::string_view HEADS_TOKEN = "flydsl_sdpa_bwd_split.heads";
@@ -408,15 +437,17 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
         logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
-    // BI-8: the 16-bit bias dQ objects stage the bias through LDS (one dropout row loads it
-    // directly; it serves staged layouts as an alternative). fp32 dQ objects load it directly.
-    if(problem.biasUid != bwd::NO_UID && problem.elementBytes == 2 && !native::stagesBias(problem))
+    // BI-8: a 16-bit dQ object that stages the bias through LDS needs the layout the staging
+    // contract describes; kernel_match declines those rows (`bias_stage` other than "none")
+    // for a graph outside it. fp32 dQ objects load the bias directly.
+    const bool biasUnstaged = problem.biasUid != bwd::NO_UID && problem.elementBytes == 2
+                              && !native::stagesBias(problem);
+    if(biasUnstaged)
     {
-        logDecline("bias",
-                   "the bias layout is outside the LDS staging contract the 16-bit dQ objects "
-                   "need (16-byte base, strides multiples of 16 bytes, last row padded to a "
-                   "whole 16-byte chunk)");
-        return std::nullopt;
+        logDecline("BI-8",
+                   "the bias layout is outside the LDS staging contract (16-byte base, strides "
+                   "multiples of 16 bytes, last row padded to a whole 16-byte chunk): dq rows "
+                   "that stage the bias are declined");
     }
 
     // SP-WS: every region of the shared workspace and the dBias scratch is sized by checked
@@ -446,6 +477,7 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     bound[std::string(HEAD_DIM_V_TOKEN)] = problem.headDimV;
     bound[std::string(DROPOUT_TOKEN)] = int64_t{problem.dropoutP > 0.0F ? 1 : 0};
     bound[std::string(DBIAS_TOKEN)] = int64_t{problem.dbiasUid != bwd::NO_UID ? 1 : 0};
+    bound[std::string(BIAS_UNSTAGED_TOKEN)] = int64_t{biasUnstaged ? 1 : 0};
     // The matcher guarantees Hq % Hk == 0, so more query heads than key heads is a group; a
     // pack object also needs every packed span inside the 32-bit buffer descriptor, else the
     // graph is served by the non-pack objects, which rebase per head.
@@ -493,6 +525,8 @@ struct Row
     int64_t blockThreads = 0;
     int64_t blockKv = 0;
     int64_t blockM = 0;
+    std::string grid;
+    std::string biasStage;
 };
 
 /// The floor of an object: `g1` is 0, `tail` the rung below the tile, anything else the
@@ -541,9 +575,15 @@ std::optional<Row> readRow(const KernelDefinition& kernel, Slot slot)
     {
         return std::nullopt;
     }
+    const auto grid = stringMetadata(kernel, GRID_FIELD);
+    if(!grid)
+    {
+        return std::nullopt;
+    }
     row.dtype = *dtype;
     row.tile = *tile;
     row.padded = *padded;
+    row.grid = *grid;
     const auto floor = floorOf(kernel, row.tile, row.dtype);
     if(!floor)
     {
@@ -594,11 +634,13 @@ std::optional<Row> readRow(const KernelDefinition& kernel, Slot slot)
 
     const auto storeDb = integerMetadata(kernel, STORE_DB_FIELD);
     const auto blockM = integerMetadata(kernel, BLOCK_M_FIELD);
-    if(!storeDb || !blockM)
+    const auto biasStage = stringMetadata(kernel, BIAS_STAGE_FIELD);
+    if(!storeDb || !blockM || !biasStage)
     {
         return std::nullopt;
     }
     row.storeDb = *storeDb;
+    row.biasStage = *biasStage;
     row.blockM = *blockM;
     // Read where the graph reduces; an object without a broadcast dBias never names one.
     row.reduceSymbol = stringMetadata(kernel, REDUCE_SYMBOL_FIELD).value_or(std::string());
@@ -632,6 +674,7 @@ struct GraphFacts
     int64_t headDimV = 0;
     bool dropout = false;
     bool dbias = false;
+    bool biasUnstaged = false;
     bool gqaPack = false;
     int64_t batch = 0;
     int64_t numHeads = 0;
@@ -653,6 +696,7 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto headDimV = tryGetBoundInt(bound, HEAD_DIM_V_TOKEN);
     const auto dropout = tryGetBoundInt(bound, DROPOUT_TOKEN);
     const auto dbias = tryGetBoundInt(bound, DBIAS_TOKEN);
+    const auto biasUnstaged = tryGetBoundInt(bound, BIAS_UNSTAGED_TOKEN);
     const auto gqaPack = tryGetBoundInt(bound, GQA_PACK_TOKEN);
     const auto batch = tryGetBoundInt(bound, BATCH_TOKEN);
     const auto numHeads = tryGetBoundInt(bound, HEADS_TOKEN);
@@ -660,8 +704,8 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto seqLenQ = tryGetBoundInt(bound, SEQ_Q_TOKEN);
     const auto seqLenKv = tryGetBoundInt(bound, SEQ_KV_TOKEN);
     const auto planes = tryGetBoundInt(bound, REDUCE_PLANES_TOKEN);
-    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !gqaPack || !batch
-       || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
+    if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !biasUnstaged || !gqaPack
+       || !batch || !numHeads || !numKvHeads || !seqLenQ || !seqLenKv || !planes)
     {
         return std::nullopt;
     }
@@ -671,6 +715,7 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *headDimV,
                       *dropout != 0,
                       *dbias != 0,
+                      *biasUnstaged != 0,
                       *gqaPack != 0,
                       *batch,
                       *numHeads,
@@ -703,9 +748,12 @@ int64_t blockThreadsOf(Slot slot, const Row& row)
     return slot == Slot::PREP ? PREP_BLOCK_THREADS : row.blockThreads;
 }
 
-/// The launch grid of @p slot (`_GRID_RULE` in `_sdpa_bwd_cdna_build.py`): prep (query row
-/// blocks, query heads, batch), dkdv (key heads, key blocks, batch), dq (query heads, query
-/// blocks, batch); nullopt past the limits of an axis or for a record without geometry.
+/// The launch grid of @p slot, laid out as the row's `grid` field names (`_GRID_RULE` in
+/// `_sdpa_bwd_cdna_build.py` and the gfx11 builders): x, y and z, the batch always last. prep
+/// is (query row blocks, query heads, batch) and dq (query heads, query blocks, batch);
+/// dkdv is (key heads, key blocks, batch) or (key blocks, key heads, batch). nullopt for a
+/// `grid` the slot does not know, past the limits of an axis, or for a record without
+/// geometry.
 std::optional<Grid> gridOf(Slot slot, const GraphFacts& facts, const Row& row)
 {
     if(blockThreadsOf(slot, row) <= 0)
@@ -723,16 +771,37 @@ std::optional<Grid> gridOf(Slot slot, const GraphFacts& facts, const Row& row)
     std::optional<int64_t> y;
     if(slot == Slot::PREP)
     {
+        if(row.grid != GRID_PREP)
+        {
+            return std::nullopt;
+        }
         x = blocks(facts.seqLenQ, prepRowsPerBlock(row.tile, row.dtype));
         y = facts.numHeads;
     }
     else if(slot == Slot::DKDV)
     {
-        x = facts.numKvHeads;
-        y = blocks(facts.seqLenKv, row.blockKv);
+        const auto keyBlocks = blocks(facts.seqLenKv, row.blockKv);
+        if(row.grid == GRID_DKDV_HEADS_FIRST)
+        {
+            x = facts.numKvHeads;
+            y = keyBlocks;
+        }
+        else if(row.grid == GRID_DKDV_BLOCKS_FIRST)
+        {
+            x = keyBlocks;
+            y = facts.numKvHeads;
+        }
+        else
+        {
+            return std::nullopt;
+        }
     }
     else
     {
+        if(row.grid != GRID_DQ)
+        {
+            return std::nullopt;
+        }
         x = facts.numHeads;
         y = blocks(facts.seqLenQ, row.blockM);
     }
@@ -803,6 +872,11 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
     }
     if constexpr(SLOT == Slot::DQ)
     {
+        // A row that stages the bias (BI-8) cannot serve a layout outside the staging contract.
+        if(facts->biasUnstaged && row->biasStage != BIAS_STAGE_NONE)
+        {
+            return false;
+        }
         // store_db 0 builds the dQ role without its dB store.
         if(facts->dbias && row->storeDb == 0)
         {
@@ -1452,9 +1526,15 @@ private:
  *        the slot's kernel; prep first uploads the seed, dq follows its kernel with the reduce
  *        kernel when the graph's dBias is broadcast.
  *
+ * With @p SOURCES (dq only) the dispatch is multi-launch: every row carries the dQ kernel
+ * and the dBias reduce kernel as the launches `dq` and `dbias_reduce` of its `sources`, and
+ * each is built from its own entry. Otherwise the reduce kernel is a second symbol of the
+ * row's one code object, the symbol its `reduce_symbol` names. Arguments, workspace and
+ * scratch are the same either way.
+ *
  * Split handlers do not save plans: supportsSaving() is the SDK default, false.
  */
-template <Slot SLOT>
+template <Slot SLOT, bool SOURCES = false>
 class FlydslSdpaBwdSplitDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1463,6 +1543,16 @@ public:
         : _kernelCompiler(kernelCompiler)
         , _kpackLoader(kpackLoader)
     {
+        static_assert(!SOURCES || SLOT == Slot::DQ, "only dq launches the reduce kernel");
+    }
+
+    std::set<std::string> launchNames() const override
+    {
+        if constexpr(SOURCES)
+        {
+            return {std::string(DQ_LAUNCH), std::string(REDUCE_LAUNCH)};
+        }
+        return {};
     }
 
     /// The scratch of this slot only; the shared region is the graph match's `ws.bytes`.
@@ -1485,25 +1575,47 @@ public:
     {
         auto plan = planFor(SLOT, context, bound, kernel);
 
+        // Every launch's definition is resolved, and the reduce launch's argument list
+        // checked, before any code object loads, so a row that lacks a launch or disagrees on
+        // the reduce ABI fails on the host whatever the state of the archive.
+        const bool reduces = !plan.reduceSymbol.empty();
+        KernelDefinition slotKernel = kernel;
+        std::optional<KernelDefinition> reduceKernel;
+        if constexpr(SOURCES)
+        {
+            slotKernel = launchKernelDefinition(kernel, std::string(DQ_LAUNCH));
+            if(reduces)
+            {
+                reduceKernel = launchKernelDefinition(kernel, std::string(REDUCE_LAUNCH));
+                requireSignatureMatch(reduceKernel->source.signature,
+                                      native::reduceSignature(),
+                                      reduceKernel->source.symbol,
+                                      describeDescriptor("kernel", kernel.name, kernel.kernelId));
+            }
+        }
+        else if(reduces)
+        {
+            // The reduce kernel is the same code object under another symbol: the same
+            // archive entry, with that symbol and its own argument list.
+            reduceKernel = kernel;
+            reduceKernel->source.symbol = plan.reduceSymbol;
+            reduceKernel->source.signature = native::reduceSignature();
+        }
+
         // Built from the arch alone; see FlydslRmsNormNative.cpp's prepare().
         const compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         auto code = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, signatureOfSlot(SLOT));
+            _kernelCompiler, _kpackLoader, context, slotKernel, options, signatureOfSlot(SLOT));
         code.setBlockSize(plan.blockThreads, 1, 1);
         code.setGridSize(plan.grid.x, plan.grid.y, plan.grid.z);
 
-        // The reduce kernel is the same code object under another symbol: the same archive
-        // entry, with that symbol and its own argument list.
         std::optional<IngestorKernelCode> reduceCode;
-        if(!plan.reduceSymbol.empty())
+        if(reduceKernel.has_value())
         {
-            KernelDefinition reduceKernel = kernel;
-            reduceKernel.source.symbol = plan.reduceSymbol;
-            reduceKernel.source.signature = native::reduceSignature();
             reduceCode.emplace(buildIngestorKernelCode(_kernelCompiler,
                                                        _kpackLoader,
                                                        context,
-                                                       reduceKernel,
+                                                       *reduceKernel,
                                                        options,
                                                        native::reduceSignature()));
             reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
@@ -1561,15 +1673,15 @@ compilation::KpackModuleCache& flydslSdpaBwdSplitKpackModuleCache()
     return s_moduleCache;
 }
 
-/// Process-lifetime: the registry holds non-owning pointers to the three handlers, which share
+/// Process-lifetime: the registry holds non-owning pointers to the four handlers, which share
 /// one compiler, one loader and the pack's module cache.
-template <Slot SLOT>
-const FlydslSdpaBwdSplitDispatchHandler<SLOT>& flydslSdpaBwdSplitDispatchHandler()
+template <Slot SLOT, bool SOURCES = false>
+const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES>& flydslSdpaBwdSplitDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(flydslSdpaBwdSplitKpackModuleCache());
-    static const FlydslSdpaBwdSplitDispatchHandler<SLOT> s_dispatchHandler(s_kernelCompiler,
-                                                                           s_kpackLoader);
+    static const FlydslSdpaBwdSplitDispatchHandler<SLOT, SOURCES> s_dispatchHandler(
+        s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 
@@ -1591,6 +1703,8 @@ void registerFlydslSdpaBwdSplitSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(PREP_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::PREP>());
     scope.add(std::string(DKDV_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::DKDV>());
     scope.add(std::string(DQ_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::DQ>());
+    scope.add(std::string(DQ_REDUCE_DISPATCH_SYMBOL),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DQ, true>());
 }
 
 FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
