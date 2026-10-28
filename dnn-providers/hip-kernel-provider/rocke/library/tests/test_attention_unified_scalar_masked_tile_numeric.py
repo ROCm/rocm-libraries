@@ -152,7 +152,7 @@ def _run_scalar_2d(problem, data):
 def _run_scalar_3d(problem, data, between=None):
     """Scalar split-3D segment kernel then the scalar reduce, launched directly.
 
-    ``between(segm_max, segm_sum)``, if given, runs after the segment launch and
+    ``between(segm_sum)``, if given, runs after the segment launch and
     before the reduce launch, so a test can edit the per-segment workspace.
     """
     from rocke.helpers.compile import compile_kernel
@@ -246,7 +246,7 @@ def _run_scalar_3d(problem, data, between=None):
     )
     if between is not None:
         torch.cuda.synchronize()
-        between(segm_max, segm_sum)
+        between(segm_sum)
     red(
         {
             "output_ptr": out,
@@ -332,6 +332,15 @@ def test_scalar_2d_propagates_nan_query_row(case, dtype):
     The NaN scores make the row's sum l NaN. The epilogue stores 0 only for an
     exact-zero sum (``fcmp oeq``); a guard of the form ``l > 0`` (``fcmp ogt``)
     is false for NaN and would turn the corrupt row into a finite 0.
+
+    What each case pins:
+
+    * ``top_left`` (non-default mask): fails under the former ``l > 0`` guard,
+      which the scalar 2D epilogue applied to non-default masks only.
+    * ``bottom_right`` (the default mask): the keyless guard now runs under
+      every mask, and this case checks it does not hide NaN there. It also
+      passes against the kernel before that change, which applied no guard
+      under the default mask (NaN * rcp(NaN) is NaN anyway).
     """
     q_len, kv_len, top_left = _CASES[case]
     row, head = 100, 3
@@ -387,7 +396,7 @@ def test_scalar_3d_reduce_propagates_nan_segment_sum(dtype):
     row, head = 100, 3
     picked = {}
 
-    def poison(segm_max, segm_sum):
+    def poison(segm_sum):
         sums = segm_sum[row, head]
         with_keys = (sums > 0).nonzero().flatten()
         assert with_keys.numel() > 0, f"row {row} head {head}: no segment has keys"

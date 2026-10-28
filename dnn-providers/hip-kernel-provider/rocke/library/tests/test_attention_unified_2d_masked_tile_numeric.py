@@ -20,6 +20,10 @@ GQA kernel (finite -1e30 sentinel, not affected), so these cases pin tuning
 variants of the default builder via ``tuning_spec``. Not covered here: the
 scalar kernels (see test_attention_unified_scalar_masked_tile_numeric.py) and
 multi-sequence batches.
+
+The epilogue stores 0 only for a row whose softmax sum is exactly 0 (no visible
+key); ``test_nan_query_row_reaches_output`` pins that a NaN sum still reaches O
+in every branch.
 """
 
 import math
@@ -251,3 +255,65 @@ def test_masked_leading_tile_auto_route_d64_bf16():
     assert _gfx942_4warp_route(problem, arch) is None
     assert _tiled_spec_from_problem(problem, arch).num_warps > 1
     _run_and_check("bf16", -200.0, 16, 64, lambda p: None)
+
+
+_NAN_ROW, _NAN_HEAD = 100, 5
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "branch", ["transposed32", "transposed32_s1", "mfma32", "striped16"]
+)
+def test_nan_query_row_reaches_output(branch, dtype):
+    """A NaN in one query row must give NaN O for that (row, head) only.
+
+    The NaN scores make the row's softmax sum ``l`` NaN. The epilogue's keyless
+    guard must treat only ``l == 0`` as "no key": the former ``l > 0`` guard
+    stored 0 for this row in every branch below (``NaN > 0`` is false).
+    """
+    bs, head_size = 16, 128
+    q_len = kv_len = 256
+    tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
+    g = torch.Generator(device="cuda").manual_seed(0)
+    max_blocks = (kv_len + bs - 1) // bs
+    num_blocks = max_blocks + 3
+    scale = 1.0 / math.sqrt(head_size)
+    shape = (num_blocks, bs, _HKV, head_size)
+    q = torch.randn(q_len, _HQ, head_size, device="cuda", dtype=tdt, generator=g)
+    q[_NAN_ROW, _NAN_HEAD] = float("nan")
+    k_cache = torch.randn(shape, device="cuda", dtype=tdt, generator=g)
+    v_cache = torch.randn(shape, device="cuda", dtype=tdt, generator=g)
+    perm = torch.randperm(num_blocks, device="cuda", generator=g)[:max_blocks]
+    block_table = perm.view(1, max_blocks).to(torch.int32).contiguous()
+    cu = torch.tensor([0, q_len], dtype=torch.int32, device="cuda")
+    seqused = torch.tensor([kv_len], dtype=torch.int32, device="cuda")
+
+    problem = _problem(dtype, q_len, kv_len, num_blocks, bs, head_size)
+    spec = _branch_spec(problem, branch, bs)
+    out = torch.empty_like(q)
+    run_unified_attention_torch(
+        problem=problem,
+        q=q,
+        k=k_cache,
+        v=v_cache,
+        out=out,
+        cu_seqlens_q=cu,
+        seqused_k=seqused,
+        softmax_scale=scale,
+        block_table=block_table,
+        softcap=0.0,
+        backend="tiled",
+        tuning_spec=spec,
+    )
+    torch.cuda.synchronize()
+    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
+
+    assert torch.isnan(out[_NAN_ROW, _NAN_HEAD]).all(), "NaN row was hidden"
+    nan_slot = torch.zeros(q_len, _HQ, dtype=torch.bool, device="cuda")
+    nan_slot[_NAN_ROW, _NAN_HEAD] = True
+    rest, rest_ref = out[~nan_slot].float(), o_ref[~nan_slot]
+    assert torch.isfinite(rest).all(), "NaN leaked into another (row, head)"
+    tol = 2e-2 if dtype == "fp16" else 4e-2
+    assert (rest - rest_ref).abs().max().item() < tol
