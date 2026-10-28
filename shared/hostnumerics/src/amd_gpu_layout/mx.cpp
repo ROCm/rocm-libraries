@@ -6,7 +6,6 @@
 #include "detail/checked_arithmetic.hpp"
 #include "detail/gfx1250_mx_layout.hpp"
 #include "detail/gfx950_mx_layout.hpp"
-#include "detail/pre_swizzle.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout {
 MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view architectureName) {

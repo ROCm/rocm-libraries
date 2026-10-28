@@ -9,6 +9,7 @@
 #include <limits>
 #include <numeric>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
 #include <stdexcept>
 #include <vector>
 
@@ -106,10 +107,10 @@ class MultiIndex {
 };
 
 inline void FillSwizzle(std::vector<float>& scales, size_t k, size_t mn,
-                        std::vector<size_t> const& preSwizzleSize) {
-    auto tileMN = preSwizzleSize[0];
-    auto tileK = preSwizzleSize[1];
-    auto subTileK = preSwizzleSize[2];
+                        const OperandSwizzle& swizzle) {
+    auto tileMN = swizzle.tileMN;
+    auto tileK = swizzle.tileK;
+    auto subTileK = swizzle.subTileK;
 
     size_t nLanesPerSIMD = 16;
     size_t nSIMDsPerWave = 4;
@@ -138,10 +139,10 @@ inline void FillSwizzle(std::vector<float>& scales, size_t k, size_t mn,
 }
 
 inline void FillPreSwizzle(std::vector<float>& scales, size_t k, size_t mn,
-                           std::vector<size_t> const& preSwizzleSize) {
-    auto tileMN = preSwizzleSize[0];
-    auto tileK = preSwizzleSize[1];
-    auto subTileK = preSwizzleSize[2];
+                           const OperandSwizzle& swizzle) {
+    auto tileMN = swizzle.tileMN;
+    auto tileK = swizzle.tileK;
+    auto subTileK = swizzle.subTileK;
 
     size_t nLanesPerSIMD = 16;
     size_t nSIMDsPerWave = 4;
@@ -183,14 +184,13 @@ inline void FillPreSwizzle(std::vector<float>& scales, size_t k, size_t mn,
 }
 
 inline void FillSwizzleAndTile(std::vector<float>& scales, size_t k, size_t mn,
-                               std::vector<size_t> const& preSwizzleSize,
-                               std::vector<size_t> const& preTileSize) {
-    auto tileMN = preSwizzleSize[0];
-    auto tileK = preSwizzleSize[1];
-    auto subTileK = preSwizzleSize[2];
+                               const OperandSwizzle& swizzle, const OperandTile& tile) {
+    auto tileMN = swizzle.tileMN;
+    auto tileK = swizzle.tileK;
+    auto subTileK = swizzle.subTileK;
 
-    size_t ptTileSizeK = preTileSize[0];
-    size_t ptTileSizeMN = preTileSize[1];
+    size_t ptTileSizeK = tile.k;
+    size_t ptTileSizeMN = tile.mn;
 
     size_t nLanesPerSIMD = 16;
     size_t nSIMDsPerWave = 4;
@@ -217,14 +217,13 @@ inline void FillSwizzleAndTile(std::vector<float>& scales, size_t k, size_t mn,
 }
 
 inline void FillPreSwizzleAndTile(std::vector<float>& scales, size_t k, size_t mn,
-                                  std::vector<size_t> const& preSwizzleSize,
-                                  std::vector<size_t> const& preTileSize) {
-    auto tileMN = preSwizzleSize[0];
-    auto tileK = preSwizzleSize[1];
-    auto subTileK = preSwizzleSize[2];
+                                  const OperandSwizzle& swizzle, const OperandTile& tile) {
+    auto tileMN = swizzle.tileMN;
+    auto tileK = swizzle.tileK;
+    auto subTileK = swizzle.subTileK;
 
-    size_t ptTileSizeK = preTileSize[0];
-    size_t ptTileSizeMN = preTileSize[1];
+    size_t ptTileSizeK = tile.k;
+    size_t ptTileSizeMN = tile.mn;
 
     size_t nLanesPerSIMD = 16;
     size_t nSIMDsPerWave = 4;

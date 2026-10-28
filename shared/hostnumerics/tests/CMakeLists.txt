@@ -236,7 +236,7 @@ add_executable(
     amd_gpu_gfx1250_layout_test.cpp
     amd_gpu_gfx950_layout_test.cpp
     amd_gpu_layout_dispatch_test.cpp
-    amd_gpu_pre_swizzle_test.cpp
+    amd_gpu_operand_layout_test.cpp
 )
 target_link_libraries(
     hostnumerics-amd-gpu-layout-tests

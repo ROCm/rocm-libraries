@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,6 +40,7 @@
 #include "client/StreamKGEMMSolution.hpp"
 
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -272,8 +274,13 @@ namespace rocRoller::Client::GEMMClient
                 sizes[0] /= packing;
                 preTileSize[0] /= packing;
             }
-            hostBForKernel
-                = roc::hostnumerics::amd_gpu_layout::preSwizzle(hostB, sizes, {}, preTileSize);
+            // B is K x N with K contiguous.
+            hostBForKernel = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                hostB,
+                {.k = sizes[0], .mn = sizes[1]},
+                std::nullopt,
+                roc::hostnumerics::amd_gpu_layout::OperandTile{.k  = preTileSize[0],
+                                                               .mn = preTileSize[1]});
         }
 
         // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
@@ -300,11 +307,13 @@ namespace rocRoller::Client::GEMMClient
                 preTileSize[1] /= packing;
             }
 
-            // The preSwizzle helper assumes column-major; so we swap sizes here.
-            std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
-            std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-            hostAForKernel                         = roc::hostnumerics::amd_gpu_layout::preSwizzle(
-                hostA, swappedSizes, {}, swappedPreTileSize);
+            // A is M x K with K contiguous.
+            hostAForKernel = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                hostA,
+                {.k = sizes[1], .mn = sizes[0]},
+                std::nullopt,
+                roc::hostnumerics::amd_gpu_layout::OperandTile{.k  = preTileSize[1],
+                                                               .mn = preTileSize[0]});
         }
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
@@ -348,14 +357,18 @@ namespace rocRoller::Client::GEMMClient
                     descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(sizes));
                 }
 
-                std::vector<size_t> preSwizzleSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandSwizzle> scaleSwizzle;
                 if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
-                    AssertFatal(problemParams.types.scaleShuffleTileA.size() == 3);
-                    preSwizzleSize = problemParams.types.scaleShuffleTileA;
+                    auto const& shuffleTile = problemParams.types.scaleShuffleTileA;
+                    AssertFatal(shuffleTile.size() == 3);
+                    scaleSwizzle = roc::hostnumerics::amd_gpu_layout::OperandSwizzle{
+                        .tileK    = shuffleTile[1],
+                        .tileMN   = shuffleTile[0],
+                        .subTileK = shuffleTile[2]};
                 }
 
-                std::vector<size_t> preTileSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandTile> scaleTile;
                 if(not problemParams.types.scalePretileA.empty())
                 {
                     AssertFatal(problemParams.types.transA == TransposeType::T,
@@ -366,8 +379,9 @@ namespace rocRoller::Client::GEMMClient
                     // Because we used "withNormalizedDimensions"
                     // above and A is T, the K dimension becomes the
                     // leftmost dimension
-                    preTileSize = {problemParams.types.scalePretileA[1],
-                                   problemParams.types.scalePretileA[0]};
+                    scaleTile = roc::hostnumerics::amd_gpu_layout::OperandTile{
+                        .k  = problemParams.types.scalePretileA[1],
+                        .mn = problemParams.types.scalePretileA[0]};
                 }
 
                 if(problemParams.types.scaleSkipPermlane
@@ -386,8 +400,12 @@ namespace rocRoller::Client::GEMMClient
                 }
                 else
                 {
-                    const auto tmpScaleA = roc::hostnumerics::amd_gpu_layout::preSwizzle(
-                        hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                    const auto tmpScaleA
+                        = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                            hostScaleA,
+                            {.k = descScaleA.sizes()[0], .mn = descScaleA.sizes()[1]},
+                            scaleSwizzle,
+                            scaleTile);
                     deviceScaleA = copyToDevice(tmpScaleA);
                 }
             }
@@ -408,14 +426,18 @@ namespace rocRoller::Client::GEMMClient
                     descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(sizes));
                 }
 
-                std::vector<size_t> preSwizzleSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandSwizzle> scaleSwizzle;
                 if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
-                    AssertFatal(problemParams.types.scaleShuffleTileB.size() == 3);
-                    preSwizzleSize = problemParams.types.scaleShuffleTileB;
+                    auto const& shuffleTile = problemParams.types.scaleShuffleTileB;
+                    AssertFatal(shuffleTile.size() == 3);
+                    scaleSwizzle = roc::hostnumerics::amd_gpu_layout::OperandSwizzle{
+                        .tileK    = shuffleTile[1],
+                        .tileMN   = shuffleTile[0],
+                        .subTileK = shuffleTile[2]};
                 }
 
-                std::vector<size_t> preTileSize;
+                std::optional<roc::hostnumerics::amd_gpu_layout::OperandTile> scaleTile;
                 if(not problemParams.types.scalePretileB.empty())
                 {
                     // Note scalePretileB is K x N (usually something like 8 x 256)
@@ -426,8 +448,9 @@ namespace rocRoller::Client::GEMMClient
                     AssertFatal(problemParams.types.transB == TransposeType::N,
                                 "Can only pre-tile B if it is TransposeType::N");
 
-                    preTileSize = {problemParams.types.scalePretileB[0],
-                                   problemParams.types.scalePretileB[1]};
+                    scaleTile = roc::hostnumerics::amd_gpu_layout::OperandTile{
+                        .k  = problemParams.types.scalePretileB[0],
+                        .mn = problemParams.types.scalePretileB[1]};
                 };
 
                 if(problemParams.types.scaleSkipPermlane
@@ -446,8 +469,12 @@ namespace rocRoller::Client::GEMMClient
                 }
                 else
                 {
-                    const auto tmpScaleB = roc::hostnumerics::amd_gpu_layout::preSwizzle(
-                        hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                    const auto tmpScaleB
+                        = roc::hostnumerics::amd_gpu_layout::copyOperandToPhysicalLayout(
+                            hostScaleB,
+                            {.k = descScaleB.sizes()[0], .mn = descScaleB.sizes()[1]},
+                            scaleSwizzle,
+                            scaleTile);
                     deviceScaleB = copyToDevice(tmpScaleB);
                 }
             }
