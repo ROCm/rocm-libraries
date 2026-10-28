@@ -3,6 +3,7 @@
 
 #include "origami/nn/detail/recommender.hpp"
 
+#include "origami/nn/boost/rank.hpp"
 #include "origami/nn/detail/model_store.hpp"
 #include "origami/nn/nn.hpp"
 #include "origami/nn/twrec/rank.hpp"
@@ -23,6 +24,7 @@ model_handle_t first_valid(model_handle_t a, model_handle_t b, model_handle_t c)
   return c;
 }
 
+#if ORIGAMI_ENABLE_NN
 bool any_scored(const std::vector<prediction_result_t>& results) {
   for (const auto& r : results) {
     if (std::isfinite(r.latency)) return true;
@@ -66,6 +68,33 @@ class TilewrightRecommender final : public IRecommender {
  private:
   model_handle_t handle_;
 };
+#endif
+
+class BoostReranker final : public IReranker {
+ public:
+  BoostReranker(model_handle_t handle, const boost::booster_t& booster)
+      : handle_(handle), booster_(booster) {}
+
+  model_info_t info() const override {
+    if (const model_info_t* registered = nn::model_info(handle_)) {
+      return *registered;
+    }
+    model_info_t fallback;
+    fallback.backend = backend_id_t::boost_v1;
+    return fallback;
+  }
+
+  bool rerank(const problem_t& problem,
+              const hardware_t& hardware,
+              std::vector<prediction_result_t>& results,
+              const inference_options_t& options) override {
+    return boost::rerank_configs(booster_, problem, hardware, results, options.rerank_source);
+  }
+
+ private:
+  model_handle_t handle_;
+  const boost::booster_t& booster_;
+};
 
 }  // namespace
 
@@ -75,6 +104,7 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
     const hardware_t& hardware,
     const std::vector<config_t>& configs,
     const inference_options_t& options) {
+#if ORIGAMI_ENABLE_NN
   if (handle < 0) return std::nullopt;
 
   const model_info_t* info = nn::model_info(handle);
@@ -86,6 +116,39 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
   auto results = recommender.rank(problem, hardware, configs, options);
   if (!any_scored(results)) return std::nullopt;
   return results;
+#else
+  (void)handle;
+  (void)problem;
+  (void)hardware;
+  (void)configs;
+  (void)options;
+  return std::nullopt;
+#endif
+}
+
+bool try_rerank_with_model(model_handle_t handle,
+                           const problem_t& problem,
+                           const hardware_t& hardware,
+                           std::vector<prediction_result_t>& results,
+                           const inference_options_t& options) {
+  if (options.rerank_source) options.rerank_source->prepare(results);
+  if (handle < 0) return false;
+
+  const boost::booster_t* booster = boost_payload(handle);
+  if (booster == nullptr) return false;
+
+  BoostReranker reranker(handle, *booster);
+  return reranker.rerank(problem, hardware, results, options);
+}
+
+model_handle_t resolve_rerank_handle(const rank_options_t& options) {
+  // boost_v1 is the re-rank backend, so auto_select resolves to it.
+  if (options.nn_backend != nn_backend_t::auto_select && options.nn_backend != nn_backend_t::boost)
+    return invalid_handle;
+  if (options.nn_model >= 0) return options.nn_model;
+  if (options.library_models && options.library_models->boost >= 0)
+    return options.library_models->boost;
+  return nn::default_model(backend_id_t::boost_v1);
 }
 
 model_handle_t resolve_model_handle(const rank_options_t& options) {
@@ -100,6 +163,8 @@ model_handle_t resolve_model_handle(const rank_options_t& options) {
                          options.library_models ? options.library_models->embedding_similarity
                                                 : invalid_handle,
                          nn::default_model(backend_id_t::embedding_similarity_v1));
+    case nn_backend_t::boost:
+      return resolve_rerank_handle(options);
     case nn_backend_t::auto_select:
       if (options.nn_model >= 0) return options.nn_model;
       if (options.library_models) {

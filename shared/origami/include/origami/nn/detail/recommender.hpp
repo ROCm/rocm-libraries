@@ -45,6 +45,18 @@ class IRecommender {
                                                 const inference_options_t& options) = 0;
 };
 
+/// A backend that re-orders the analytical ranking (inference_mode_t::analytical_rerank).
+class IReranker {
+ public:
+  virtual ~IReranker() = default;
+  virtual model_info_t info() const = 0;
+  /// Re-order @p results in place; false leaves them unchanged.
+  virtual bool rerank(const problem_t& problem,
+                      const hardware_t& hardware,
+                      std::vector<prediction_result_t>& results,
+                      const inference_options_t& options) = 0;
+};
+
 std::optional<std::vector<prediction_result_t>> try_rank_with_model(
     model_handle_t handle,
     const problem_t& problem,
@@ -52,7 +64,17 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
     const std::vector<config_t>& configs,
     const inference_options_t& options);
 
+/// Hands @p results to options.rerank_source->prepare(), then re-ranks them with @p handle's model.
+bool try_rerank_with_model(model_handle_t handle,
+                           const problem_t& problem,
+                           const hardware_t& hardware,
+                           std::vector<prediction_result_t>& results,
+                           const inference_options_t& options);
+
 model_handle_t resolve_model_handle(const rank_options_t& options);
+
+/// The analytical_rerank handle: nn_model, else library_models->boost, else the session default.
+model_handle_t resolve_rerank_handle(const rank_options_t& options);
 
 rank_options_t resolve_rank_options(rank_options_t options);
 

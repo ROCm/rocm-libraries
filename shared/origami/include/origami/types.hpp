@@ -797,6 +797,7 @@ enum class inference_mode_t : std::uint8_t {
   analytical,   ///< Roofline latency model (default)
   nn,           ///< ML only; error if no model resolved
   nn_fallback,  ///< ML if model available; else analytical
+  analytical_rerank,  ///< Analytical, then a re-rank backend re-orders its top candidates
 };
 
 /**
@@ -806,6 +807,7 @@ enum class nn_backend_t : std::uint8_t {
   auto_select,          ///< Resolve from handle, library_models, session default, env
   tilewright,           ///< Force tilewright_v1
   embedding_similarity, ///< Force embedding_similarity_v1
+  boost,                ///< Force boost_v1 (re-rank backend, inference == analytical_rerank)
 };
 
 /**

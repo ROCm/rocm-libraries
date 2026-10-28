@@ -42,11 +42,32 @@ enum class status_t : int {
   too_few_candidates,  ///< fewer than two usable candidates
 };
 
+ORIGAMI_EXPORT const char* to_string(status_t status);
+
 /// The feature schema the extractor was written against: ordered column names and their hash.
 struct feature_schema_t {
   std::string              id;
   std::string              hash;
   std::vector<std::string> columns;
+};
+
+/// What this build of Origami is. A model must carry the same stamps.
+struct build_identity_t {
+  std::string origami_commit;       ///< last commit touching the model sources (logged, not checked)
+  std::string origami_source_hash;  ///< sha256 over the model sources (configure time)
+  std::string feature_schema_id;
+  std::string feature_schema_hash;
+};
+
+struct manifest_entry_t;
+
+/// Where the model is used. Supplied by the caller (e.g. hipBLASLt when it loads a library).
+struct deployment_t {
+  std::string arch;   ///< e.g. "gfx950"
+  std::string dtype;  ///< problem class: "bf16" or "tf32"
+  /// Canonical manifest of the library's PredictionMatching rows for this dtype class
+  /// (@see canonical_manifest()).
+  const std::vector<manifest_entry_t>* library_kernels = nullptr;
 };
 
 /**
@@ -111,6 +132,48 @@ struct candidate_t {
   const config_t* config          = nullptr;
   double          origami_latency = 0.0;  ///< rank_configs latency (cycles)
   kernel_fields_t fields{};
+};
+
+/// Per-call outcome. On any status but ok, order is 0..n-1 (Origami's order).
+struct boost_result_t {
+  status_t            status = status_t::ok;
+  std::string         detail;
+  std::vector<size_t> order;      ///< candidate indices, best first
+  std::vector<double> yhat;       ///< per candidate (input order), empty on fallback
+  std::vector<double> corrected;  ///< origami_latency * exp(yhat), input order
+};
+
+/**
+ * @brief The caller's side of a re-rank (inference_mode_t::analytical_rerank), passed in
+ * rank_options_t::nn.rerank_source.
+ *
+ * rank_configs hands the analytical results to prepare() first, once per call, whatever the re-rank
+ * then decides. The backend walks the results best first and offers each config until the model's
+ * top_n are accepted; the accepted ones are its candidates. On success they move to the front of
+ * the results in the model's order and every other result keeps its position relative to the
+ * rest; on any refusal the results stay as prepare() left them.
+ */
+class rerank_source_t {
+ public:
+  virtual ~rerank_source_t() = default;
+
+  /// The caller's own adjustment of the analytical order, made before the re-rank sees it
+  /// (hipBLASLt: the Stream-K cluster footprint). Default: none.
+  virtual void prepare(std::vector<prediction_result_t>& results) { (void)results; }
+
+  /// False skips @p config (the caller would not use it). True makes it a candidate, with the
+  /// kernel fields config_t does not carry in @p fields.
+  virtual bool candidate(const config_t& config, kernel_fields_t& fields) = 0;
+
+  /// The call's outcome. With ok, @p order lists the accepted candidates best first (indices in
+  /// acceptance order); otherwise it is empty and @p detail says why.
+  virtual void outcome(status_t                   status,
+                       const std::string&         detail,
+                       const std::vector<size_t>& order) {
+    (void)status;
+    (void)detail;
+    (void)order;
+  }
 };
 
 }  // namespace origami::nn::boost
