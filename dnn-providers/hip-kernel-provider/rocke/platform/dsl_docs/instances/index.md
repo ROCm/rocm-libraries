@@ -42,7 +42,7 @@ implementation.
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` | `instances/convolution.md` |
 | `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `instances/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
-| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec` | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
+| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode) | `instances/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `instances/convolution.md` |
 | `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `instances/convolution.md` |
 | `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |

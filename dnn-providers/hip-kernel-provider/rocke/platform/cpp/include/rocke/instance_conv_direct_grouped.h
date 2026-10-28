@@ -83,6 +83,8 @@ struct rocke_arena; /* fwd (rocke/arena.h)                      */
  *      N, H, W, groups, cpg, kpg          # required
  *      KH=3, KW=3, PAD=1, stride=1
  *      dtype="fp16"                        # "fp16" or "bf16"
+ *      dil_h=1, dil_w=1
+ *      pad_w=-1                            # column padding; -1: PAD
  *
  *  Layouts:
  *    A: NHWC, [N, H, W, groups*cpg]
@@ -109,12 +111,20 @@ typedef struct rocke_direct_conv_problem
                         * drop a bf16 request. */
     int dil_h; /* default 1; filter dilation, honoured by the non-grouped */
     int dil_w; /* forward kernel only (every other variant rejects it)   */
+    int pad_w; /* default -1 (= PAD); column padding where it differs from
+                * PAD. Only the rotated-filter depthwise dgrad
+                * (rocke_direct_depthwise_tiled_spec_t.dgrad) takes such a
+                * problem; the forward tiled spec rejects one. Values below
+                * -1 are no padding: the depthwise dgrad specs reject them. */
 } rocke_direct_conv_problem_t;
 
 /* DirectConvProblem with dataclass defaults (KH=KW=3, PAD=1, stride=1) and the
  * six required dims zeroed.  dtype is initialised to "fp16".
  * Caller fills N,H,W,groups,cpg,kpg; override dtype for bf16. */
 rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void);
+
+/* @property PAD_W -> PAD if pad_w < 0 else pad_w. Every Wo below uses it. */
+int rocke_direct_conv_problem_pad_w(const rocke_direct_conv_problem_t* p);
 
 /* @property total_c -> groups * cpg. */
 int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p);
@@ -483,11 +493,19 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
  *      block_waves: int = 1
  *      unroll_rows: bool = False
  *      wave_size: int = 64
+ *      dgrad: bool = False
  *
  *  A block owns a block_h x block_w output tile of block_ch channels; a
  *  runtime loop walks the filter rows with one weight row and a sliding
  *  window of input rows in registers.
  *  Grid: (ceil(Wo / block_w), ceil(C / block_ch), N * ceil(Ho / block_h)).
+ *
+ *  dgrad = true: a stride-1 depthwise dgrad as the forward correlation of dY
+ *  with the filter rotated by 180 degrees at padding KH-1-PAD / KW-1-PAD_W.
+ *  The kernel takes the dgrad kernarg block, reads dY (Ho x Wo) and writes dX
+ *  (H x W); the grid tiles H x W instead. Filters up to
+ *  ROCKE_DCONV_DW_TILED_DGRAD_MAX_K on a side and per-axis padding (pad_w)
+ *  are accepted in this mode only.
  * ===================================================================== */
 typedef struct rocke_direct_depthwise_tiled_spec
 {
@@ -498,12 +516,15 @@ typedef struct rocke_direct_depthwise_tiled_spec
     int block_waves; /* default 1  */
     bool unroll_rows; /* default false */
     int wave_size; /* default 64 */
+    bool dgrad; /* default false */
 } rocke_direct_depthwise_tiled_spec_t;
 
 /* Register budget and unrolled-FMA cap (Python: _DW_TILED_REG_BUDGET /
  * _DW_TILED_UNROLL_MAX_FMAS). */
 #define ROCKE_DCONV_DW_TILED_REG_BUDGET 256
 #define ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS 6144
+/* Largest filter extent the dgrad mode takes (Python: _DW_TILED_DGRAD_MAX_K). */
+#define ROCKE_DCONV_DW_TILED_DGRAD_MAX_K 64
 
 rocke_direct_depthwise_tiled_spec_t rocke_direct_depthwise_tiled_spec_default(void);
 int rocke_direct_depthwise_tiled_threads_per_block(const rocke_direct_depthwise_tiled_spec_t* spec);
@@ -514,6 +535,14 @@ int rocke_direct_depthwise_tiled_n_cols(const rocke_direct_depthwise_tiled_spec_
 int rocke_direct_depthwise_tiled_live_regs(const rocke_direct_depthwise_tiled_spec_t* spec);
 /* @property unrolled_fmas -> KH * block_h * block_w * KW */
 int rocke_direct_depthwise_tiled_unrolled_fmas(const rocke_direct_depthwise_tiled_spec_t* spec);
+/* @property out_hw -> (H, W) if dgrad else (Ho, Wo): the written tensor. */
+void rocke_direct_depthwise_tiled_out_hw(const rocke_direct_depthwise_tiled_spec_t* spec,
+                                         int* out_h,
+                                         int* out_w);
+/* kernel_name_join(name, p.short(), f"f{KH}x{KW}",
+ *                  f"p{PAD}x{PAD_W}" if PAD_W != PAD else "", f"bw{block_w}",
+ *                  f"bh{block_h}", f"bw{block_waves}wv",
+ *                  flags={"ur", "dg", "bf16"}) */
 rocke_status_t rocke_direct_depthwise_tiled_kernel_name(
     const rocke_direct_depthwise_tiled_spec_t* spec, char* out, size_t out_cap);
 rocke_status_t rocke_direct_depthwise_tiled_validate(

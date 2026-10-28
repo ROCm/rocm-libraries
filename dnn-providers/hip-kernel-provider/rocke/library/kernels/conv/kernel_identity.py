@@ -536,7 +536,8 @@ def identity_supports_problem(
         ("dilation_h", ("dilation", "dH", "dil_h")),
         ("dilation_w", ("dilation", "dW", "dil_w")),
         ("pad_h", ("PAD", "pH")),
-        ("pad_w", ("PAD", "pW")),
+        # A direct problem's column padding is PAD_W (PAD unless it differs).
+        ("pad_w", ("PAD_W", "PAD", "pW")),
     ):
         baked = getattr(identity, name)
         if not baked and not identity.is_direct:

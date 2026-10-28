@@ -251,7 +251,10 @@ def parse_miopen_cmd_direct(cmd: str):
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
-    if miopen_args.pH != miopen_args.pW:
+    # A stride-1 depthwise dgrad is the one problem a direct kernel (the
+    # rotated-filter tiled kernel) computes with per-axis padding.
+    pad_w_ok = miopen_args.forw == 2 and cpg == 1 and kpg == 1 and miopen_args.sH == 1
+    if miopen_args.pH != miopen_args.pW and not pad_w_ok:
         raise ValueError(
             f"direct conv takes one padding for both axes "
             f"(got -p {miopen_args.pH} -q {miopen_args.pW})"
@@ -269,6 +272,7 @@ def parse_miopen_cmd_direct(cmd: str):
         KH=miopen_args.Y,
         KW=miopen_args.X,
         PAD=miopen_args.pH,
+        pad_w=-1 if miopen_args.pW == miopen_args.pH else miopen_args.pW,
         stride=sH,
         dtype=dtype if dtype in ("fp16", "bf16") else "fp16",
         dil_h=miopen_args.dH,
@@ -432,7 +436,7 @@ class _DirectConvProblemAdapter:
         self.sH = p.stride
         self.sW = p.stride
         self.pH = p.PAD
-        self.pW = p.PAD
+        self.pW = p.PAD_W
         self.dH = p.dil_h
         self.dW = p.dil_w
         self.groups = p.groups
@@ -2768,6 +2772,20 @@ def main() -> int:
 
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)
+
+    # A per-axis padding runs only from the cache, on the rotated-filter dgrad
+    # kernel: the sweeps below build kernels with one padding for both axes.
+    for prob, _, direction in cases:
+        if prob.PAD_W != prob.PAD:
+            print(
+                f"[skip] {prob.short()} dir={direction}: per-axis padding "
+                f"(PAD={prob.PAD}x{prob.PAD_W}) runs only with --run-from-cache",
+                file=sys.stderr,
+            )
+    cases = [c for c in cases if c[0].PAD_W == c[0].PAD]
+    if not cases:
+        print("error: no case left to sweep", file=sys.stderr)
+        return 2
 
     import ctypes
 

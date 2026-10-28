@@ -1278,6 +1278,39 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_depthwise_dgrad_stream(
+    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="fp16", **spec_kw
+):
+    """Row-streaming depthwise dgrad (DirectDepthwiseDgradStreamSpec);
+    ``spec_kw`` overrides its fields (block_w, block_waves, wave_size, cpl).
+    Mirrors parity/conv_direct_grouped_emit.* (indices 171+)."""
+
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradStreamSpec,
+            build_direct_depthwise_dgrad_streaming,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KH,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+        spec = DirectDepthwiseDgradStreamSpec(problem=p, name=name, **spec_kw)
+        return build_direct_depthwise_dgrad_streaming(spec, arch=arch)
+
+    return _build
+
+
 def build_direct_depthwise_dgrad_win(
     name, arch, N, H, W, groups, KH, PAD, dtype, **knobs
 ):
@@ -1409,11 +1442,24 @@ def build_direct_wgrad(name, arch, kind, problem, **spec_kw):
 
 
 def build_direct_depthwise_tiled(
-    name, arch, N, H, W, groups, KH, PAD, stride=1, dtype="bf16", **spec_kw
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH,
+    PAD,
+    stride=1,
+    dtype="bf16",
+    KW=None,
+    pad_w=-1,
+    **spec_kw,
 ):
     """Output-stationary depthwise direct conv; ``spec_kw`` overrides
     DirectDepthwiseTiledSpec fields. Configs mirror parity/conv_direct_grouped_emit.*
-    (indices 57+)."""
+    (indices 57+). ``KW`` defaults to ``KH``; ``pad_w`` (-1: ``PAD``) is the
+    column padding of the rotated-filter dgrad mode (``dgrad=True``)."""
 
     def _build():
         from kernels.common.conv_direct_grouped import (
@@ -1430,10 +1476,11 @@ def build_direct_depthwise_tiled(
             cpg=1,
             kpg=1,
             KH=KH,
-            KW=KH,
+            KW=KH if KW is None else KW,
             PAD=PAD,
             stride=stride,
             dtype=dtype,
+            pad_w=pad_w,
         )
         spec = DirectDepthwiseTiledSpec(problem=p, name=name, **spec_kw)
         return build_direct_depthwise_tiled(spec, arch=arch)
@@ -5041,6 +5088,58 @@ def cases():
             wave_size=32,
         ),
     )
+    # Depthwise dgrad on the wave32 gfx1250: the row-streaming kernel, scalar
+    # and channel-packed (cpl 2 / 8), and the rotated-filter tiled kernel on a
+    # large and a non-square filter with per-axis padding. Mirrors
+    # library/tests/parity/conv_direct_grouped_emit.* (indices 171+).
+    for _tag, _shape, _over in (
+        ("k3", dict(KH=3, PAD=1), dict(block_w=8, block_waves=2)),
+        ("k3_cpl2", dict(KH=3, PAD=1), dict(block_w=8, block_waves=2, cpl=2)),
+        (
+            "k5_s2_bf16_cpl8",
+            dict(KH=5, PAD=2, stride=2, dtype="bf16", groups=256),
+            dict(block_w=4, block_waves=1, cpl=8),
+        ),
+    ):
+        add(
+            "conv_direct",
+            f"conv_direct/gfx1250/dw_dgrad_stream_{_tag}_w32",
+            "gfx1250",
+            build_direct_depthwise_dgrad_stream(
+                f"irhash_dw_dgrad_stream_1250_{_tag}",
+                "gfx1250",
+                **{"N": 2, "H": 14, "W": 14, "groups": 64, **_shape},
+                wave_size=32,
+                **_over,
+            ),
+        )
+    for _tag, _shape, _over in (
+        (
+            "bf16_k31",
+            dict(H=16, W=16, groups=32, KH=31, PAD=15),
+            dict(block_w=4, block_h=1),
+        ),
+        (
+            "fp16_k51x5",
+            dict(H=24, W=24, groups=64, KH=51, KW=5, PAD=25, pad_w=2, dtype="fp16"),
+            dict(block_w=8, block_h=2),
+        ),
+    ):
+        add(
+            "conv_direct_depthwise_tiled",
+            f"conv_direct_depthwise_tiled/gfx1250/dgrad_{_tag}_w32",
+            "gfx1250",
+            build_direct_depthwise_tiled(
+                f"irhash_direct_dw_tiled_dgrad_1250_{_tag}",
+                "gfx1250",
+                N=2,
+                **_shape,
+                block_waves=1,
+                wave_size=32,
+                dgrad=True,
+                **_over,
+            ),
+        )
 
     # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
     # the D256 case above because that one early-returns into the lean D256 kernel
